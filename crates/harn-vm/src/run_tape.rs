@@ -305,6 +305,50 @@ fn surface_digest(surface: &serde_json::Map<String, serde_json::Value>) -> Strin
     )))
 }
 
+fn redact_tape_json(value: &mut serde_json::Value) {
+    let original = value.clone();
+    crate::redact::current_policy().redact_json_in_place(value);
+    if *value != original {
+        record_payload_redaction();
+    }
+}
+
+fn record_payload_redaction() {
+    if let Some(tape) = process_tape() {
+        tape.recorder.record(TapeRecordKind::PayloadRedaction);
+    }
+}
+
+pub(super) fn redacted_tape_json_bytes(value: &impl Serialize) -> Vec<u8> {
+    let mut value = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
+    redact_tape_json(&mut value);
+    crate::canonical_json::to_vec(&value)
+}
+
+pub(super) fn redacted_tape_text(value: &str) -> String {
+    let redacted = crate::redact::current_policy().redact_string(value);
+    if redacted != value {
+        record_payload_redaction();
+    }
+    redacted.into_owned()
+}
+
+fn redact_transcript_changes(changes: &mut [TranscriptChange]) {
+    for change in changes {
+        for value in change.fields.values_mut() {
+            match value {
+                crate::testbench::tape::FieldChange::Set(value) => redact_tape_json(value),
+                crate::testbench::tape::FieldChange::Append(values) => {
+                    for value in values {
+                        redact_tape_json(value);
+                    }
+                }
+                crate::testbench::tape::FieldChange::Remove => {}
+            }
+        }
+    }
+}
+
 /// Record one completed model call on the active tape, if any.
 pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     // A metadata tape is not an axis recorder, so look it up directly.
@@ -324,24 +368,34 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
     let request_digest = surface_digest(&surface);
     // A testbench tape is always full, so a digest mismatch can name its field.
     let full = level == RecordingLevel::Full;
+    let recording_surface = if full {
+        let mut value = serde_json::Value::Object(surface.clone());
+        redact_tape_json(&mut value);
+        match value {
+            serde_json::Value::Object(surface) => surface,
+            _ => unreachable!("redacting an object preserves its outer shape"),
+        }
+    } else {
+        surface.clone()
+    };
     let attribution = match (&tape, call_index) {
         (Some(tape), Some(index)) if full => Some(
             tape.prompts
                 .lock()
                 .expect("prompt ledger poisoned")
-                .attribute(&surface, index),
+                .attribute(&recording_surface, index),
         ),
         _ => None,
     };
     let (request_payload, messages) = if full {
-        let mut whole = surface;
+        let mut whole = recording_surface;
         let messages = match whole.remove("messages") {
             Some(serde_json::Value::Array(messages)) => messages
                 .iter()
                 .map(|message| {
                     // A run tape shares repeated prefixes through its store; a
                     // testbench tape keeps small messages inline.
-                    let bytes = crate::canonical_json::to_vec(message);
+                    let bytes = redacted_tape_json_bytes(message);
                     if tape.is_some() {
                         recorder.payload_cas(bytes)
                     } else {
@@ -351,9 +405,8 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
                 .collect(),
             _ => Vec::new(),
         };
-        let request = recorder.payload_from_bytes(crate::canonical_json::to_vec(
-            &serde_json::Value::Object(whole),
-        ));
+        let request = recorder
+            .payload_from_bytes(redacted_tape_json_bytes(&serde_json::Value::Object(whole)));
         (Some(request), messages)
     } else {
         (None, Vec::new())
@@ -365,10 +418,10 @@ pub(crate) fn record_llm_call(request: &LlmRequestPayload, result: &LlmResult) {
             "output_tokens": result.output_tokens,
             "stop_reason": result.stop_reason,
         }))
+        .unwrap_or_default()
     } else {
-        serde_json::to_vec(result)
-    }
-    .unwrap_or_default();
+        redacted_tape_json_bytes(result)
+    };
     let response = recorder.payload_from_bytes(response_bytes);
     recorder.record(TapeRecordKind::LlmCall {
         request_digest,
@@ -504,6 +557,14 @@ pub(crate) fn finish_tool_call(
                 unservable = Some("the file-effect scan was incomplete".to_string());
             }
             for (path, content) in scan.changes {
+                if content.as_ref().is_some_and(|bytes| {
+                    let text = String::from_utf8_lossy(bytes);
+                    crate::redact::current_policy().redact_string(&text) != text
+                }) {
+                    record_payload_redaction();
+                    unservable = Some("a file effect contains redacted data".to_string());
+                    continue;
+                }
                 effects.push(FileEffect {
                     path,
                     content: content.map(|bytes| recorder.payload_cas(bytes)),
@@ -523,7 +584,7 @@ pub(crate) fn finish_tool_call(
         });
     }
     let outcome_bytes = match &outcome {
-        Ok(outcome) if full => serde_json::to_vec(outcome).unwrap_or_default(),
+        Ok(outcome) if full => redacted_tape_json_bytes(outcome),
         Ok(_) => Vec::new(),
         // A metadata tape keeps no tool text, error text included.
         Err(reason) if full => {
@@ -536,6 +597,15 @@ pub(crate) fn finish_tool_call(
         }
     };
     let outcome = recorder.payload_from_bytes(outcome_bytes);
+    let mut transcript_changes = transcript_changes;
+    if full {
+        redact_transcript_changes(&mut transcript_changes);
+    }
+    let unservable = unservable.map(|reason| {
+        crate::redact::current_policy()
+            .redact_string(&reason)
+            .into_owned()
+    });
     recorder.record(TapeRecordKind::ToolCall {
         call_id,
         tool,
@@ -720,6 +790,15 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         return Err("a branch must serve at least one recorded call".to_string());
     }
     let tape = plan.tape;
+    if tape
+        .records
+        .iter()
+        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction))
+    {
+        return Err(
+            "this tape contains redacted payloads and cannot reproduce an exact prefix".to_string(),
+        );
+    }
     let k = plan.live_after_calls;
     if tape.header.run.is_some()
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
@@ -861,7 +940,14 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             plan.live_after_calls
         ));
     }
-    let protected = recording_trees(&tape, &plan.workspace_root);
+    let workspace_root = plan
+        .workspace_root
+        .canonicalize()
+        .map_err(|error| format!("branch workspace must exist: {error}"))?;
+    if !workspace_root.is_dir() {
+        return Err("branch workspace must be a directory".to_string());
+    }
+    let protected = recording_trees(&tape, &workspace_root);
     let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
@@ -871,7 +957,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         recorded_keys,
         store_seeds,
         live: false,
-        workspace_root: plan.workspace_root,
+        workspace_root,
         report: BranchReport {
             live_after_calls: plan.live_after_calls,
             ..BranchReport::default()
@@ -1139,7 +1225,7 @@ fn recorded_lookup(
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         let payload = value.as_ref().map(|value| {
             tape.recorder
-                .payload_from_bytes(crate::canonical_json::to_vec(value))
+                .payload_from_bytes(redacted_tape_json_bytes(value))
         });
         tape.recorder.record(TapeRecordKind::CacheLookup {
             namespace: namespace.to_string(),
@@ -1253,21 +1339,8 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
         return Err(format!("refusing effect outside the workspace: {path}"));
     }
     let target = root.join(relative);
-    match content {
-        Some(bytes) => {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|err| format!("mkdir {}: {err}", parent.display()))?;
-            }
-            std::fs::write(&target, bytes)
-                .map_err(|err| format!("write {}: {err}", target.display()))
-        }
-        None => match std::fs::remove_file(&target) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(format!("delete {}: {err}", target.display())),
-        },
-    }
+    crate::stdlib::sandbox::apply_workspace_effect(root, relative, content)
+        .map_err(|err| format!("apply {}: {err}", target.display()))
 }
 
 #[path = "run_tape_prompts.rs"]

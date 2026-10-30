@@ -235,6 +235,8 @@ pub enum TapeRecordKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<CallAttribution>,
     },
+    /// Sanitized evidence remains inspectable but cannot reproduce an exact prefix.
+    PayloadRedaction,
     /// One persistent LLM-cache lookup. The cache outlives runs, so a branch
     /// replays these instead of reading a cache that has since changed.
     CacheLookup {
@@ -357,6 +359,7 @@ impl TapeRecordKind {
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
+            Self::PayloadRedaction => "payload_redaction",
             Self::ToolCall { .. } => "tool_call",
             Self::PromptRender { .. } => "prompt_render",
             Self::CacheLookup { .. } => "cache_lookup",
@@ -732,6 +735,7 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
         | TapeRecordKind::FileRead { .. }
         | TapeRecordKind::FileWrite { .. }
         | TapeRecordKind::FileDelete { .. }
+        | TapeRecordKind::PayloadRedaction
         | TapeRecordKind::Unknown => {}
     }
 }

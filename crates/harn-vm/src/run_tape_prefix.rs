@@ -279,7 +279,7 @@ fn record_read_on_tape(
         after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         value: Some(
             tape.recorder
-                .payload_from_bytes(crate::canonical_json::to_vec(&json)),
+                .payload_from_bytes(super::redacted_tape_json_bytes(&json)),
         ),
     });
 }
@@ -389,7 +389,7 @@ pub(crate) fn store_seed(
             after_calls: tape.next_llm_call.load(Ordering::SeqCst),
             value: contents.as_ref().map(|value| {
                 tape.recorder
-                    .payload_from_bytes(crate::canonical_json::to_vec(value))
+                    .payload_from_bytes(super::redacted_tape_json_bytes(value))
             }),
         });
     }
