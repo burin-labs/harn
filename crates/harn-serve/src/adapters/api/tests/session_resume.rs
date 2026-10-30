@@ -415,7 +415,14 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
         "the retained turn has replayable messages"
     );
     assert!(messages_after < messages_before);
-    let replay_after_json = serde_json::to_string(&replay_after.events).unwrap();
+    let replay_after_json = serde_json::to_string(
+        &replay_after
+            .events
+            .iter()
+            .map(|event| &event.event)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
     assert!(replay_after_json.contains("initial-transcript-canary"));
     assert!(!replay_after_json.contains("restored-transcript-canary"));
     assert_eq!(
