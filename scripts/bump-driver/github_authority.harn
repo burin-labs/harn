@@ -20,7 +20,8 @@ pub fn bump_refresh_admission(state: GithubBumpRefreshState) -> {allowed: bool, 
         "incomplete admission census: labels ${len(state.labels.names)}/${state.labels.total_count} more=${state.labels.has_next_page}, writer reviews ${len(state.reviews.nodes)}/${state.reviews.total_count} more=${state.reviews.has_next_page}",
     }
   }
-  if state.auto_merge_armed || state.queued || state.labels.names.contains("ship") {
+  if state.auto_merge_armed || state.queued
+    || state.labels.names.any({ name -> lowercase(name) == "ship" }) {
     return {allowed: false, reason: "delivery is armed"}
   }
   if state.reviews.nodes.any({ review -> review.state == "APPROVED" && review.head_oid == nil }) {

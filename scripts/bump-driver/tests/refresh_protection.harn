@@ -91,6 +91,7 @@ pipeline test_refresh_refuses_graphql_errors_beside_complete_data(harness: Harne
 pipeline test_refresh_preserves_armed_or_reviewed_exact_head(harness: Harness) {
   for mutation in [
     {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "ship"}]}},
+    {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "Ship"}]}},
     {autoMergeRequest: {enabledAt: "2026-10-30T00:00:00Z"}},
     {isInMergeQueue: true},
     {
