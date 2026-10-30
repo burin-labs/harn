@@ -25,6 +25,9 @@ mod host_roots;
 #[path = "run_tape_branch_vm/first_call.rs"]
 mod first_call;
 
+#[path = "run_tape_branch_vm/workspace.rs"]
+mod workspace;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;
@@ -76,8 +79,23 @@ fn leave_run() {
 
 /// Run `source` inside `branch`, when there is one.
 fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result<String, String> {
+    run_at(
+        source,
+        workspace,
+        branch,
+        workspace.parent().expect("workspace has a parent"),
+    )
+}
+
+fn run_at(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    root: &Path,
+) -> Result<String, String> {
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
+    let root = root.to_path_buf();
     harn_vm::on_vm_stack(move || {
         harn_vm::reset_thread_local_state();
         let chunk = harn_vm::compile_source(&source)?;
@@ -88,8 +106,7 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
-            let root = workspace.parent().expect("workspace has a parent");
-            enter_run(root);
+            enter_run(&root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);

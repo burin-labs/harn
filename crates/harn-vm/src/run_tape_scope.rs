@@ -33,6 +33,8 @@ pub(crate) struct BranchHandle {
     /// Recording-owned trees, longest first, with where each lands under
     /// `state_root`.
     protected: Vec<(PathBuf, PathBuf)>,
+    recorded_workspace: Option<PathBuf>,
+    workspace: PathBuf,
     event_log: OnceLock<Option<Arc<AnyEventLog>>>,
 }
 
@@ -49,11 +51,14 @@ impl BranchHandle {
         state: BranchState,
         state_root: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
+        recorded_workspace: Option<PathBuf>,
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
         ARMED.fetch_add(1, Ordering::AcqRel);
         HELD.fetch_add(1, Ordering::AcqRel);
         Arc::new(Self {
+            workspace: state.workspace_root.clone(),
+            recorded_workspace,
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
             ended: AtomicBool::new(false),
@@ -148,6 +153,63 @@ pub(crate) fn state_branch() -> Option<Arc<BranchHandle>> {
         return None;
     }
     crate::persistent_state::current_branch()
+}
+
+/// Resolve a recorded workspace path before the normal filesystem permission
+/// check. Do not rewrite text or canonicalize against the original file tree:
+/// a symlink there may have changed since recording.
+pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
+    let Some(branch) = state_branch() else {
+        return Ok(path);
+    };
+    let Some(recorded) = &branch.recorded_workspace else {
+        return Ok(path);
+    };
+    if recorded == &branch.workspace {
+        return Ok(path);
+    }
+    let relative = if let Ok(relative) = path.strip_prefix(recorded) {
+        relative
+    } else {
+        // Resolve aliases of the workspace root, not descendants in the
+        // original tree. On macOS a host can name /var while the tape stores
+        // /private/var. Descendant symlinks must resolve in the branch instead.
+        let Some(alias) = path.ancestors().find(|ancestor| {
+            ancestor
+                .canonicalize()
+                .is_ok_and(|canonical| canonical == *recorded)
+        }) else {
+            return Ok(path);
+        };
+        path.strip_prefix(alias).expect("ancestor is a path prefix")
+    };
+    let mapped = branch.workspace.join(relative);
+    let resolved = crate::workspace_path::canonicalize_existing_ancestor(&mapped)
+        .map_err(|error| VmError::Runtime(format!("branch workspace path: {error}")))?;
+    if !resolved.starts_with(&branch.workspace) {
+        return Err(VmError::Runtime(format!(
+            "recorded workspace path {} escapes the isolated workspace",
+            path.display()
+        )));
+    }
+    Ok(mapped)
+}
+
+/// A shell's path literals do not pass through the VM filesystem resolver.
+/// Until a host supplies a filesystem namespace, do not execute them against
+/// a moved workspace where recorded absolute paths could reach the original.
+pub(crate) fn check_live_command_workspace() -> Result<(), VmError> {
+    if state_branch().is_some_and(|branch| {
+        branch
+            .recorded_workspace
+            .as_ref()
+            .is_some_and(|root| root != &branch.workspace)
+    }) {
+        return Err(VmError::Runtime(
+            "live commands in a relocated replay workspace require a filesystem namespace; recorded command paths cannot be safely rewritten".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The scope a host enters around the execution that branches. It is `Send`,

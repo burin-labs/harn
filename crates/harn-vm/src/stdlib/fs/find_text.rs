@@ -600,7 +600,7 @@ fn find_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             "find_text: pattern is required",
         )));
     }
-    let resolved = resolve_fs_path(&root);
+    let resolved = resolve_fs_path(&root)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "find_text",
         &resolved,

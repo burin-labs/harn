@@ -42,8 +42,19 @@ not run again. Changing a command's arguments makes the prefix diverge. A host
 must read `BranchGuard::finish` and treat divergence or an unfinished prefix as
 failure.
 
+Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
+prefix. Filesystem builtins resolve absolute paths under the recorded workspace
+into the restored workspace before applying normal permission checks. A mapped
+path that escapes through a parent component or symlink is refused. This mapping
+does not rewrite prompt text, host arguments, or command strings.
+
 ## Refusals and limits
 
+- Live commands in a relocated workspace are refused: their embedded paths
+  require a host filesystem namespace. Workspace path mapping is not a sandbox
+  for arbitrary host tools or external processes.
+  A baseline recorded in an isolated workspace can replay at that same path;
+  the host restores its initial contents between runs.
 - Background commands cannot be served because their process handles do not
   exist in the branch. A dispatch that starts one is marked unservable.
 - Overlapping dispatches cannot be served because their workspace scans and

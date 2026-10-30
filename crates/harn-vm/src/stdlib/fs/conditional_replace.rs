@@ -107,7 +107,7 @@ fn receipt_value(
 
 fn replace_value(builtin: &str, args: &[VmValue], bytes: &[u8]) -> Result<VmValue, VmValue> {
     let path = args.first().map(VmValue::display).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path).map_err(|error| option_error(error.to_string()))?;
     crate::stdlib::sandbox::enforce_fs_path(
         builtin,
         &resolved,

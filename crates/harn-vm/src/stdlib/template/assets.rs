@@ -92,6 +92,7 @@ impl TemplateAsset {
     }
 
     pub(crate) fn filesystem(path: PathBuf, read_prefix: &str) -> Result<Self, String> {
+        let path = crate::run_tape::workspace_path(path).map_err(|error| error.to_string())?;
         crate::stdlib::sandbox::enforce_fs_path(
             "template.render",
             &path,

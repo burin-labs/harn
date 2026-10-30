@@ -655,7 +655,7 @@ pub struct BranchReport {
     pub served_calls: u64,
     pub served_tool_calls: u64,
     pub applied_file_effects: u64,
-    /// Clock, random and env reads answered from the recording.
+    /// Clock, random, env and workspace-location reads answered from the recording.
     pub served_reads: u64,
     pub live_calls: u64,
     /// Prefix cache reads of keys the recording never read, answered live.
@@ -973,7 +973,15 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         },
     };
     Ok(BranchGuard {
-        handle: BranchHandle::arm(state, state_root, protected),
+        handle: BranchHandle::arm(
+            state,
+            state_root,
+            protected,
+            tape.header
+                .run
+                .as_ref()
+                .and_then(|run| run.workspace_root.clone()),
+        ),
     })
 }
 
@@ -1368,8 +1376,8 @@ pub(crate) use transcript::{apply as apply_transcript_change, note_transcript_ch
 mod scope;
 pub use scope::BranchScope;
 pub(crate) use scope::{
-    branch_event_log, branch_path, current_branch, durable_path, scoped_state_root, state_branch,
-    BranchHandle,
+    branch_event_log, branch_path, check_live_command_workspace, current_branch, durable_path,
+    scoped_state_root, state_branch, workspace_path, BranchHandle,
 };
 
 #[path = "run_tape_prefix.rs"]

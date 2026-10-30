@@ -646,12 +646,14 @@ fn parse_request(
 ) -> Result<(Vec<LabeledRoot>, Vec<LabeledPattern>, EvidenceOptions), VmError> {
     let roots = required_labeled_values(args.first(), "roots", "path")?
         .into_iter()
-        .map(|(id, path)| LabeledRoot {
-            id,
-            path: resolve_fs_path(&path),
-            denied: false,
+        .map(|(id, path)| {
+            Ok(LabeledRoot {
+                id,
+                path: resolve_fs_path(&path)?,
+                denied: false,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, VmError>>()?;
     let patterns = required_labeled_values(args.get(1), "patterns", "text")?
         .into_iter()
         .map(|(id, text)| LabeledPattern { id, text })

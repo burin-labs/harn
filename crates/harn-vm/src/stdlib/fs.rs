@@ -92,8 +92,8 @@ struct AppendLockBuiltinOptions {
 
 const APPEND_FILE_LOCKED_DEFAULT_TIMEOUT_MS: u64 = 10_000;
 
-fn resolve_fs_path(path: &str) -> PathBuf {
-    crate::stdlib::process::resolve_source_relative_path(path)
+fn resolve_fs_path(path: &str) -> Result<PathBuf, VmError> {
+    crate::run_tape::workspace_path(crate::stdlib::process::resolve_source_relative_path(path))
 }
 
 fn result_ok(value: VmValue) -> VmValue {
@@ -469,7 +469,7 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
         return Err(VmError::Thrown(unknown_prompt_asset_error_value(&path)));
     }
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "read_file",
         &resolved,
@@ -505,7 +505,7 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     if crate::stdlib::asset_paths::stdlib_prompt_asset_path(&path).is_some() {
         return Ok(result_err(unknown_prompt_asset_error_value(&path)));
     }
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
@@ -539,7 +539,7 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "read_file_bytes",
         &resolved,
@@ -564,7 +564,7 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     if args.len() >= 2 {
         let path = args[0].display();
         let content = args[1].display();
-        let resolved = resolve_fs_path(&path);
+        let resolved = resolve_fs_path(&path)?;
         crate::stdlib::sandbox::enforce_fs_path(
             "write_file",
             &resolved,
@@ -592,7 +592,7 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let path = args[0].display();
-        let resolved = resolve_fs_path(&path);
+        let resolved = resolve_fs_path(&path)?;
         let content = match &args[1] {
             VmValue::Bytes(bytes) => bytes.as_slice(),
             other => {
@@ -651,7 +651,7 @@ fn edited_byte_count(bytes: u64) -> usize {
 )]
 fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     // A presence probe for a path outside the sandbox reads as "absent",
     // matching how OS sandboxes behave (paths outside the jail appear
     // non-existent) rather than crashing the pipeline with a violation. Only
@@ -825,7 +825,7 @@ fn stat_error_path_status(
 fn path_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let access = parse_path_status_access(args)?;
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(&resolved, access) {
         return Ok(scope_denied_path_status(path, &resolved, access, violation));
     }
@@ -846,7 +846,7 @@ fn path_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "delete_file",
         &resolved,
@@ -889,7 +889,7 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     if args.len() >= 2 {
         let path = args[0].display();
         let content = args[1].display();
-        let resolved = resolve_fs_path(&path);
+        let resolved = resolve_fs_path(&path)?;
         crate::stdlib::sandbox::enforce_fs_path(
             "append_file",
             &resolved,
@@ -920,7 +920,7 @@ fn append_file_locked_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     if args.len() >= 2 {
         let path = args[0].display();
         let content = args[1].display();
-        let resolved = resolve_fs_path(&path);
+        let resolved = resolve_fs_path(&path)?;
         crate::stdlib::sandbox::enforce_fs_path(
             "append_file_locked",
             &resolved,
@@ -966,7 +966,7 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .first()
         .map(|a| a.display())
         .unwrap_or_else(|| ".".to_string());
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "list_dir",
         &resolved,
@@ -1000,7 +1000,7 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let mkdir = Args::thrown("mkdir", args);
     let path = mkdir.string(0, "path")?.to_string();
     let recursive = mkdir.bool_or(1, "recursive", true)?;
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     if recursive {
         // Recursive mkdir is an idempotent read when the overlay-visible target
         // is already a directory. Resolve that case before asking for mutation
@@ -1054,8 +1054,8 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     if args.len() >= 2 {
         let src = args[0].display();
         let dst = args[1].display();
-        let resolved_src = resolve_fs_path(&src);
-        let resolved_dst = resolve_fs_path(&dst);
+        let resolved_src = resolve_fs_path(&src)?;
+        let resolved_dst = resolve_fs_path(&dst)?;
         crate::stdlib::sandbox::enforce_fs_path(
             "copy_file",
             &resolved_src,
@@ -1182,7 +1182,7 @@ pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
             }
         }
     }
-    let path = resolve_fs_path(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME);
+    let path = resolve_fs_path(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "workspace_temp_dir",
         &path,
@@ -1229,8 +1229,8 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             "move_file: src and dst are required",
         )));
     }
-    let src = resolve_fs_path(&args[0].display());
-    let dst = resolve_fs_path(&args[1].display());
+    let src = resolve_fs_path(&args[0].display())?;
+    let dst = resolve_fs_path(&args[1].display())?;
     crate::stdlib::sandbox::enforce_fs_path(
         "move_file",
         &src,
@@ -1278,7 +1278,7 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 )]
 fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = resolve_fs_path(&path);
+    let resolved = resolve_fs_path(&path)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "read_lines",
         &resolved,
@@ -1303,7 +1303,7 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "walk_dir: root path is required",
         )));
     }
-    let resolved = resolve_fs_path(&root);
+    let resolved = resolve_fs_path(&root)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "walk_dir",
         &resolved,
@@ -1347,7 +1347,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         )));
     }
     let options = parse_glob_options(args)?;
-    let base = resolve_fs_path(&options.base);
+    let base = resolve_fs_path(&options.base)?;
     crate::stdlib::sandbox::enforce_fs_path("glob", &base, crate::stdlib::sandbox::FsAccess::Read)?;
     let policy = options.ignore_policy;
     if options.background {

@@ -69,9 +69,11 @@ pub async fn taped_command_run(
     if background {
         crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
         let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
+        crate::run_tape::check_live_command_workspace()?;
         return live.await;
     }
     if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
+        crate::run_tape::check_live_command_workspace()?;
         return live.await;
     }
     let tool = format!("process:{name}");
@@ -82,7 +84,13 @@ pub async fn taped_command_run(
     );
     match begin_with("", &tool, &args, false) {
         Taped::Served(result) => result,
-        Taped::Live(recording) => run_recorded(recording, live).await,
+        Taped::Live(recording) => {
+            run_recorded(recording, async {
+                crate::run_tape::check_live_command_workspace()?;
+                live.await
+            })
+            .await
+        }
     }
 }
 

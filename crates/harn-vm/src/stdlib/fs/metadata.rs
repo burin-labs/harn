@@ -25,7 +25,7 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let mut options = reader.options(1, "options")?;
     let follow_symlinks = options.bool_or("follow_symlinks", true)?;
     options.finish(&[])?;
-    let resolved = resolve_fs_path(path);
+    let resolved = resolve_fs_path(path)?;
     let authorize = if follow_symlinks {
         crate::stdlib::sandbox::enforce_fs_path
     } else {

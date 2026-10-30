@@ -1,7 +1,7 @@
 //! What a branch prefix may do besides model and tool calls.
 //!
 //! While a branch replays its prefix, every builtin and capability call is
-//! checked against its registry effect contract. Clock, random and env reads
+//! checked against its registry effect contract. Clock, random, env and workspace-location reads
 //! are served from the recording. The runtime store opens with what the
 //! recorded run opened. Durable state writes land in the branch's own state
 //! root (see `scope`). Reads of the restored workspace, state, host facts and
@@ -20,7 +20,7 @@ use crate::value::{VmError, VmValue};
 
 /// Tape namespace for each runtime store's opening contents.
 pub(super) const STORE_SEED_NAMESPACE: &str = "harn.runtime.store";
-/// Tape namespace for clock, random and env reads.
+/// Tape namespace for clock, random, env and workspace-location reads.
 const READ_NAMESPACE: &str = "harn.read";
 
 /// The capability method a call belongs to, when it has one.
@@ -33,6 +33,9 @@ enum Verdict {
 }
 
 fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
+    if matches!(owner, Some((CapabilityId::Fs, "cwd" | "source_dir"))) {
+        return Verdict::Serve;
+    }
     let mut serve = false;
     for effect in effects {
         let reads = matches!(effect.access, EffectAccess::Read | EffectAccess::Observe);
@@ -264,7 +267,7 @@ fn serve_read_in_prefix(
     }
 }
 
-/// Record a clock, random or env read the program just made, if a full tape
+/// Record a clock, random, env or workspace-location read, if a full tape
 /// is recording. A failed read is not recorded, so a branch reaching it
 /// diverges instead of inventing an answer.
 #[inline]
