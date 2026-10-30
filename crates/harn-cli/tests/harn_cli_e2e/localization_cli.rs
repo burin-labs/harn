@@ -233,11 +233,11 @@ priority = "high"
         let queue = run_local(&[
             "orchestrator",
             "queue",
-            "ls",
             "--config",
             "harn.toml",
             "--state-dir",
             "state",
+            "ls",
         ]);
         assert!(queue.status.success(), "{locale}: {queue:?}");
         let queue_text = String::from_utf8(queue.stdout).unwrap();
@@ -252,5 +252,12 @@ priority = "high"
         in_flight
             .parse::<u64>()
             .expect("field retains its numeric value");
+        let literal = "literal{0}{not_a_field}%@100%";
+        let matched = run_local(&["skill", "match", literal]);
+        assert!(matched.status.success(), "{locale}: {matched:?}");
+        assert!(
+            String::from_utf8_lossy(&matched.stdout).contains(literal),
+            "argument braces and percent sequences must remain literal: {matched:?}"
+        );
     }
 }
