@@ -366,15 +366,7 @@ export function observerPublicationWitness(context) {
 export function qualifyObserverPublisher(context, jobs) {
   const observer = observerContext(context);
   const name = observerPublicationWitness(observer);
-  let matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
-  // The immutable 182 producer is already in flight without the witness step.
-  const frozen182 = observer.parent_run_id === '41016965350'
-    && observer.parent_run_attempt === 3
-    && observer.parent_head_sha === 'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'
-    && observer.source_revision === observer.parent_head_sha;
-  if (matches.length === 0 && frozen182) {
-    matches = jobs.flatMap(job => job.steps.filter(step => step.name === observerDeclarationStep).map(step => ({job, step})));
-  }
+  const matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
   if (matches.length !== 1) refuse('observer_job_identity_unproven');
   const {job, step} = matches[0];
   const publication = job.steps.filter(item => item.name === observerDeclarationStep);
