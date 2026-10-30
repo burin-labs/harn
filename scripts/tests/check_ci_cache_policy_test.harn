@@ -1727,6 +1727,24 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
       "macos-nightly.yml:nextest must invalidate workspace units after restore and before rebuilding on main",
     ),
   )
+  const late_invalidation = {
+    ...without_invalidation,
+    jobs: {
+      nextest: {
+        ...without_invalidation.jobs.nextest,
+        steps: without_invalidation.jobs.nextest.steps
+          + producer.jobs.nextest.steps.filter(
+            { step -> return contains(step?.run ?? "", "cargo clean --workspace") },
+          )
+            .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, late_invalidation, ci).contains(
+      "macos-nightly.yml:nextest must invalidate workspace units after restore and before rebuilding on main",
+    ),
+  )
   for condition in [gha_expression("github.event_name == 'pull_request'"), gha_expression("true")] {
     const wrong_restore = {
       ...producer,
