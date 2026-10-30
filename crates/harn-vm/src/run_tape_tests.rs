@@ -73,6 +73,7 @@ impl std::ops::Deref for TestBranch {
 }
 
 fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
+    std::fs::create_dir_all(workspace).unwrap();
     let state = tempfile::tempdir().unwrap();
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
@@ -153,6 +154,147 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
         (1, 1, 1)
     );
     assert_eq!(report.divergence, None);
+}
+
+#[test]
+fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let tape_dir = tmp.path().join("tape");
+    std::fs::create_dir_all(&tape_dir).unwrap();
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+    let text = format!("Bearer {secret}");
+    struct SecretEffectObserver;
+    impl ToolEffectObserver for SecretEffectObserver {
+        fn begin(&self, _root: &Path, _call_id: &str) {}
+        fn end(&self, _root: &Path, _call_id: &str) -> EffectScan {
+            EffectScan {
+                changes: vec![(
+                    "secret.txt".to_string(),
+                    Some(b"Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD".to_vec()),
+                )],
+                incomplete: false,
+            }
+        }
+    }
+    let guard = start_recording(
+        &tape_dir,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: tape_dir.clone(),
+            observer: Box::new(SecretEffectObserver),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+
+    record_prompt_render("prompt://fixture", &text, &[]);
+    record_llm_call(&request(&text), &result(&text, None));
+    let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
+        .expect("active tape recording");
+    recording.transcript_changes.push(TranscriptChange {
+        session_id: "session-1".to_string(),
+        fields: BTreeMap::from([(
+            "messages".to_string(),
+            crate::testbench::tape::FieldChange::Set(serde_json::json!(text.clone())),
+        )]),
+    });
+    finish_tool_call(
+        recording,
+        Ok(ok(serde_json::json!({"output": text.clone()}))),
+    );
+    cache_lookup("prompt-cache", "request-1", || {
+        Ok(Some(serde_json::json!({"result": text.clone()})))
+    })
+    .unwrap();
+    assert_eq!(guard.error(), None);
+    drop(guard);
+
+    let tape_text = std::fs::read_to_string(tape_dir.join(TAPE_FILE_NAME)).unwrap();
+    assert!(
+        !tape_text.contains(secret),
+        "secret leaked into tape: {tape_text}"
+    );
+    assert!(
+        tape_text.contains("<redacted:"),
+        "expected redaction in tape"
+    );
+    let cas_dir = tape_dir.join(format!("{TAPE_FILE_NAME}.cas"));
+    for entry in std::fs::read_dir(cas_dir).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        let payload = String::from_utf8_lossy(&bytes);
+        assert!(
+            !payload.contains(secret),
+            "secret leaked into CAS: {payload}"
+        );
+    }
+    let tape = EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap();
+    assert!(tape
+        .records
+        .iter()
+        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction)));
+    let result = start_branch(BranchPlan {
+        tape,
+        live_after_calls: 1,
+        workspace_root: tmp.path().join("branch"),
+        state_root: tmp.path().join("branch-state"),
+    });
+    assert!(result
+        .err()
+        .is_some_and(|error| error.contains("redacted payloads")));
+}
+
+#[cfg(unix)]
+#[test]
+fn branch_file_effects_do_not_follow_symlinked_paths() {
+    use std::os::unix::fs::symlink;
+
+    let branch = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim.txt");
+    std::fs::write(&victim, b"outside sentinel").unwrap();
+
+    symlink(outside.path(), branch.path().join("parent-link")).unwrap();
+    assert!(apply_effect(
+        branch.path(),
+        "parent-link/victim.txt",
+        Some(b"must not escape"),
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&victim).unwrap(), b"outside sentinel");
+    assert!(apply_effect(branch.path(), "parent-link/victim.txt", None).is_err());
+    assert_eq!(std::fs::read(&victim).unwrap(), b"outside sentinel");
+
+    symlink(&victim, branch.path().join("leaf-link")).unwrap();
+    apply_effect(branch.path(), "leaf-link", Some(b"branch file")).unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"outside sentinel");
+    assert_eq!(
+        std::fs::read(branch.path().join("leaf-link")).unwrap(),
+        b"branch file"
+    );
+
+    symlink(&victim, branch.path().join("deleted-link")).unwrap();
+    apply_effect(branch.path(), "deleted-link", None).unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"outside sentinel");
+    assert!(!branch.path().join("deleted-link").exists());
+}
+
+#[test]
+fn a_branch_requires_an_existing_workspace_copy() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    record_run(tmp.path());
+    let missing = tmp.path().join("missing-workspace");
+    let result = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: missing.clone(),
+        state_root: tmp.path().join("branch-state"),
+    });
+    assert!(result
+        .err()
+        .is_some_and(|error| error.contains("branch workspace must exist")));
+    assert!(!missing.exists());
 }
 
 #[test]
