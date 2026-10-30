@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 publish_script="$repo_root/scripts/publish.sh"
+real_harn="$($repo_root/scripts/harn_bin.sh --print)"
 
 "$repo_root/scripts/harn_bin.sh" -- check "$repo_root/scripts/publish.harn"
 
@@ -82,5 +83,29 @@ if [[ "$(cat "$release_gate_record")" != "$expected_release" ]]; then
     "$(cat "$release_gate_record")" >&2
   exit 1
 fi
+
+mkdir -p "$tmp_root/bin"
+cat > "$tmp_root/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf 'cargo reached\n' >> "$FAKE_CARGO_RECORD"
+exit 99
+SH
+chmod +x "$tmp_root/bin/cargo"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$publish_script" > "$tmp_root/local-publish-output" 2>&1; then
+  echo "error: bare live publisher was admitted" >&2
+  exit 1
+fi
+grep -q 'requires_hosted_publisher' "$tmp_root/local-publish-output"
+test ! -e "$tmp_root/cargo-record"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$repo_root/scripts/release_gate.sh" full > "$tmp_root/local-full-output" 2>&1; then
+  echo "error: bare live full release was admitted" >&2
+  exit 1
+fi
+grep -q 'full is a local dry-run command' "$tmp_root/local-full-output"
+test ! -e "$tmp_root/cargo-record"
 
 echo "publish_script_test: ok"

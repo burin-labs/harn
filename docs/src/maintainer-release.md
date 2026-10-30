@@ -393,3 +393,9 @@ For an offline audit or dry run, use:
 ./scripts/release_gate.sh audit
 ./scripts/release_gate.sh full --bump patch --dry-run
 ```
+
+These local checks do not certify dependency security or authorize publication.
+Live crate publication requires the hosted publisher and a fresh, signed proof
+from the canonical dependency scanner for the exact published source. Recovery
+at an existing tag runs that scanner again. A frozen tag workflow reads the
+same verified promotion proof through its current staged release helpers.

@@ -412,7 +412,7 @@ export function qualifyObserverPublisher(context, jobs, completedPublication) {
   return {job, publication:publication[0], witness:step};
 }
 
-function artifactJsonFromZip(bytes, filename) {
+function artifactFileFromZip(bytes, filename) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-declaration-'));
   try {
     const archive = path.join(scratch, 'declaration.zip');
@@ -424,10 +424,14 @@ function artifactJsonFromZip(bytes, filename) {
     if (execFileSync('unzip', ['-Z1', archive], options).trim() !== filename) {
       refuse('dispatch_declaration_archive_invalid');
     }
-    return JSON.parse(execFileSync('unzip', ['-p', archive, filename], options));
+    return execFileSync('unzip', ['-p', archive, filename], {...options, encoding:undefined});
   } finally {
     fs.rmSync(scratch, { recursive: true });
   }
+}
+
+function artifactJsonFromZip(bytes, filename) {
+  return JSON.parse(artifactFileFromZip(bytes, filename).toString('utf8'));
 }
 
 /** Authenticate the declaration to the exact parent run before claiming custody.
@@ -553,9 +557,10 @@ async function githubCensus(token, url, field, fetchRecord) {
 export async function githubWorkflowRuns(token, repository, workflow, selection, fetchRecord = fetch) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
     || !/^[A-Za-z0-9_.-]+\.ya?ml$/.test(workflow)
-    || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha'].includes(key))
+    || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha', 'created'].includes(key))
     || (selection.event !== undefined && !['pull_request', 'workflow_dispatch'].includes(selection.event))
     || (selection.status !== undefined && !liveStates.has(selection.status))
+    || (selection.created !== undefined && !/^>=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/.test(selection.created))
     || (selection.head_sha !== undefined && !sha.test(selection.head_sha))) {
     refuse('workflow_discovery_identity_invalid');
   }
@@ -748,11 +753,11 @@ export async function githubArchiveProducer(token, request, fetchRecord=fetch, e
 
 /** One authenticated, bounded archive reader for public declarations and
  * private child receipts. Transport never prints a repository or artifact. */
-export async function githubArtifactJson(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+async function githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract) {
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest)\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
@@ -773,6 +778,15 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
     refuse('dispatch_declaration_digest_mismatch');
   }
   return extract(bytes, expected.filename);
+}
+
+export async function githubArtifactJson(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  return githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract);
+}
+
+/** Preserve the exact authenticated bytes when a consumer verifies a signature. */
+export async function githubArtifactFile(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactFileFromZip) {
+  return githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract);
 }
 
 /** Response validation belongs here so empty API responses remain unknown. */

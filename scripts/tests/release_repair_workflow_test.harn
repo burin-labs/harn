@@ -8,7 +8,7 @@ pipeline test_candidate_security_owns_exact_source_admission_before_builds(harne
   const flow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
   const security = flow.jobs["source-security"]
-  assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert(security.uses.contains("/.github/workflows/dependency-security-proof.yml@"))
   assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
   assert_eq(security.needs, "setup")
   assert_eq(security["if"], "needs.setup.outputs.build_mode == 'candidate'")
@@ -33,7 +33,7 @@ pipeline test_publication_refreshes_security_after_all_other_authority(harness: 
   const flow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
   const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
   const security = flow.jobs["publication-security"]
-  assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert(security.uses.contains("/.github/workflows/dependency-security-proof.yml@"))
   assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
   assert_eq(security.needs, ["plan", "authorize"])
   assert_eq(security.with["source-revision"], expression("needs.plan.outputs.source_sha"))
@@ -43,6 +43,28 @@ pipeline test_publication_refreshes_security_after_all_other_authority(harness: 
   assert(security["if"].contains("needs.authorize.outputs.ready == 'true'"))
   assert(flow.jobs.promote.needs.contains("publication-security"))
   assert(flow.jobs.promote["if"].contains("needs.publication-security.result == 'success'"))
+}
+
+pipeline test_existing_tag_recovery_uses_the_same_source_bound_security_owner(harness: Harness) {
+  const flow = read_yaml(harness.fs, "../../.github/workflows/publish-release.yml", nil)
+  const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
+  const policy = json_parse(harness.fs.read_text("../lib/dependency-security-policy.json"))
+  const security = flow.jobs["publication-security"]
+  assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
+  assert_eq(security.uses, policy.signerWorkflow + "@" + policy.signerRevision)
+  assert_eq(security.with["source-revision"], expression("needs.detect-drift.outputs.source_sha"))
+  assert_eq(security.with.policy, false)
+  assert(flow.jobs.publish.needs.contains("publication-security"))
+  assert(flow.jobs.publish["if"].contains("needs.publication-security.result == 'success'"))
+  assert_eq(
+    flow.jobs["detect-drift"].outputs.source_sha,
+    expression("steps.publication-source.outputs.source_sha"),
+  )
+  for config in [flow, supply] {
+    const job = config.jobs[config == flow ? "publication-security" : "cargo-deny"]
+    assert_eq(job.permissions["id-token"], "write")
+    assert_eq(job.permissions.attestations, "write")
+  }
 }
 
 pipeline test_recovery_requires_exact_source_ci_and_native_before_the_consumer(harness: Harness) {

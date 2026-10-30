@@ -495,7 +495,9 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@3fd396a4769e3e6e53cbd883ff46fa6985734afd
+      id-token: write
+      attestations: write
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@e6f9a67577bdaba1c41819af8b5ef4dfcd457e41
     with:
       source-revision: ${{ needs.setup.outputs.candidate_source_sha }}
       policy: false

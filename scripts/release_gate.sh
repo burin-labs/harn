@@ -327,7 +327,7 @@ Usage:
   ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
-  ./scripts/release_gate.sh full --bump patch [--dry-run]
+  ./scripts/release_gate.sh full --bump patch --dry-run
 
 Commands:
   audit    Run the full audit, source-only lanes, or the residual lanes (receipt-authorized,
@@ -336,9 +336,9 @@ Commands:
            sibling CI job that runs `make check-docs` on the same commit instead of
            repeating it.
   prepare  Bump the workspace version locally and print next tag/release steps.
-  publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
+  publish  Publish through scripts/publish.sh in the hosted publisher, or use --dry-run locally.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
-  full     Run audit, prepare, and publish in sequence.
+  full     Run audit, prepare, and a publish dry run locally; requires --dry-run.
 EOF
 }
 
@@ -1399,6 +1399,10 @@ cmd_full() {
         ;;
     esac
   done
+  if [[ -z "$dry_run" ]]; then
+    echo "error: full is a local dry-run command; use the maintainer release workflow for live publication" >&2
+    return 1
+  fi
   PRESERVE_AUDIT_TMP=1
   trap cleanup_preserved_audit_tmp EXIT
   cmd_audit
