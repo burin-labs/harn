@@ -61,7 +61,11 @@ impl AcpServer {
         };
         let prepared = PreparedWorkspaceRoots::prepare(&cwd, &directories)?;
         if let Some(session) = live {
-            if prepared.anchor().primary != session.store_scope.workspace() {
+            let live_cwd = session
+                .cwd
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if prepared.anchor().primary != live_cwd {
                 return Err("session cwd cannot change during load or resume".into());
             }
         }

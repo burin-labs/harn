@@ -16,11 +16,6 @@ pub async fn install_workspace_roots(
     if !agent_sessions::exists(session_id) {
         return Err(VmError::Runtime(format!("unknown session '{session_id}'")));
     }
-    if anchor.primary != scope.workspace() {
-        return Err(VmError::Runtime(
-            "workspace root replacement cannot move the session cwd".into(),
-        ));
-    }
     if let Some(previous) = agent_sessions::workspace_anchor(session_id) {
         let previous_primary = previous.primary.canonicalize().map_err(|error| {
             VmError::Runtime(format!("session workspace cannot be resolved: {error}"))
@@ -40,6 +35,10 @@ pub async fn install_workspace_roots(
                 root.mounted_at = prior.mounted_at.clone();
             }
         }
+    } else if anchor.primary != scope.workspace() {
+        return Err(VmError::Runtime(
+            "workspace root replacement cannot move the session cwd".into(),
+        ));
     }
     let directories = anchor.additional_directories().map_err(VmError::Runtime)?;
     persist_directory_projection(session_id, scope, session_type, directories).await?;
@@ -57,7 +56,6 @@ pub(crate) async fn add_workspace_root_verified_persisted(
     if agent_sessions::workspace_anchor(id).is_none() {
         return Err("workspace root mutation requires a live workspace anchor".into());
     }
-    let pending = agent_sessions::prepare_workspace_mount_verified(id, root, mount_mode, verify)?;
     let standalone = if agent_sessions::has_journal(id) {
         super::flush(id).await.map_err(|error| error.to_string())?;
         None
@@ -70,6 +68,9 @@ pub(crate) async fn add_workspace_root_verified_persisted(
             .await
             .map_err(|error| error.to_string())?
     };
+    // Flush only accepted roots. The pending mount changes the live anchor until
+    // its guard commits or rolls back, so preparation must follow that flush.
+    let pending = agent_sessions::prepare_workspace_mount_verified(id, root, mount_mode, verify)?;
     let event = pending.audit_event(reason);
     let payload = super::SessionEventPayload::Transcript(super::TranscriptRecord::new(
         crate::llm::helpers::vm_value_to_json(&event),

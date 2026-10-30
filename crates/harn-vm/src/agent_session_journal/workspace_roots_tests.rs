@@ -101,6 +101,53 @@ async fn mounted_root_audit_is_durable_once_with_or_without_a_live_journal() {
         )
         .unwrap();
         let expected_prompt = crate::agent_sessions::prompt_state_json(&session);
+        let store = scope
+            .run(async { crate::open_canonical_store(scope.workspace()) })
+            .await
+            .unwrap();
+        let fault = rusqlite::Connection::open(store.path()).unwrap();
+        fault
+            .execute_batch(
+                "CREATE TRIGGER reject_root_audit BEFORE INSERT ON session_events
+             WHEN NEW.custom_kind = 'RootMounted'
+             BEGIN SELECT RAISE(ABORT, 'root audit fault'); END;",
+            )
+            .unwrap();
+        let rejected = super::add_workspace_root_verified_persisted(
+            &session,
+            extra.path().to_str().unwrap(),
+            None,
+            None,
+            &scope,
+            |_| Ok(()),
+        )
+        .await;
+        assert!(rejected.unwrap_err().contains("root audit fault"));
+        assert!(crate::agent_sessions::workspace_anchor(&session)
+            .unwrap()
+            .additional_directories()
+            .unwrap()
+            .is_empty());
+        assert!(
+            store
+                .describe(&session)
+                .await
+                .unwrap()
+                .additional_directories()
+                .unwrap()
+                .is_empty(),
+            "live={live}: rejected mount must not survive in session metadata"
+        );
+        assert!(store
+            .read_all(&session)
+            .await
+            .unwrap()
+            .iter()
+            .all(|event| event.payload.pointer("/transcript_event/kind")
+                != Some(&serde_json::json!("RootMounted"))));
+        fault
+            .execute_batch("DROP TRIGGER reject_root_audit")
+            .unwrap();
         super::add_workspace_root_verified_persisted(
             &session,
             extra.path().to_str().unwrap(),

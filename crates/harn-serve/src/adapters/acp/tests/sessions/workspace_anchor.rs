@@ -268,6 +268,14 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
             serde_json::json!(canonical_target.display().to_string())
         );
 
+        request_tx.send(serde_json::json!({
+            "jsonrpc": "2.0", "id": 7, "method": "session/resume",
+            "params": {"sessionId": session_id,
+                "additionalDirectories": [target_root.display().to_string()]},
+        })).expect("resume reanchored live session without cwd");
+        let resumed = recv_response_with_id(&mut response_rx, 7).await;
+        assert!(resumed.get("error").is_none(), "reanchored resume: {resumed}");
+
         drop(request_tx);
         server.await.expect("ACP channel server task");
     })
