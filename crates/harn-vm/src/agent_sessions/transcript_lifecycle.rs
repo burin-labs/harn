@@ -1,6 +1,18 @@
 use super::*;
 use crate::value::VmDictExt;
 
+/// Snapshot a replay target only when the canonical writer can mutate it.
+pub(crate) fn replay_transcript_snapshot(id: &str) -> Result<VmValue, String> {
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions
+            .get(id)
+            .ok_or_else(|| format!("recorded transcript target session `{id}` is not open"))?;
+        state.ensure_run_accepts_mutation("replace_transcript")?;
+        Ok(state.transcript.clone())
+    })
+}
+
 /// Apply a served dispatch's change through the transcript writer. A missing
 /// live session refuses; closed ephemeral transcripts are validated separately.
 pub(crate) fn replay_transcript_change(

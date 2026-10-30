@@ -176,7 +176,48 @@ pub(super) fn validate_lifetimes(changes: &[TranscriptChange]) -> Result<(), Str
     Ok(())
 }
 
-/// Apply changes whose local lifetimes were validated before file effects.
+/// Check all targets and deltas before any recorded file or transcript mutation.
+/// Session state is thread-local and no await separates this from replay.
+pub(super) fn preflight(changes: &[TranscriptChange]) -> Result<(), String> {
+    validate_lifetimes(changes)?;
+    let mut previews = BTreeMap::new();
+    for change in changes {
+        match change {
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Opened { transcript },
+            } => {
+                if crate::agent_sessions::exists(session_id) {
+                    return Err(format!(
+                        "recorded new transcript target `{session_id}` already exists"
+                    ));
+                }
+                previews.insert(
+                    session_id.clone(),
+                    crate::schema::json_to_vm_value(transcript),
+                );
+            }
+            TranscriptChange::Fields { session_id, fields } => {
+                let transcript = match previews.entry(session_id.clone()) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
+                        crate::agent_sessions::replay_transcript_snapshot(session_id)?,
+                    ),
+                };
+                *transcript = apply(transcript, fields)?;
+            }
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Closed,
+            } => {
+                previews.remove(session_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Apply changes validated against the live session table before file effects.
 pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptChange>, String> {
     let mut ephemeral = BTreeMap::new();
     for change in &changes {
