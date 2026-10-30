@@ -3,7 +3,8 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {activePromotions,successfulCandidate,ghRead} from '../lib/release-candidate-state.mjs';
 import {admitChild,archiveProducerBinding,qualifyArchiveProducer,observerRunName,
@@ -58,6 +59,7 @@ function fixture(changes={}){
   const declaration=metadata(500,observerDeclarationName(context),900,policy,changes.context??context);
   const ownership=metadata(501,`consumer-observer-${context.dispatch_nonce}`,73,head,changes.receipt??receipt);
   const calls=[];
+  let parentReads=0;
   const read=async(url)=>{
     const endpoint=new URL(url),route=endpoint.pathname;
     calls.push(route+endpoint.search);
@@ -84,7 +86,10 @@ function fixture(changes={}){
       created_at:new Date(1000*1000).toISOString(),started_at:new Date(1010*1000).toISOString(),
       completed_at:null,runner_id:1,runner_name:'fixture',steps:[{status:'in_progress',conclusion:null,
         started_at:new Date(1010*1000).toISOString()}]}]};
-    else if(/\/runs\/900(?:\/attempts\/1)?$/.test(route))value=changes.parent??parent;
+    else if(/\/runs\/900(?:\/attempts\/1)?$/.test(route)){
+      parentReads++;
+      value=changes.finalParent&&parentReads>1?changes.finalParent:changes.parent??parent;
+    }
     else if(/\/runs\/42(?:\/attempts\/1)?$/.test(route))value=changes.producer??producer;
     else if(route.endsWith('/runs/73'))value=changes.child??child;
     else throw Error(`Unexpected fixture route ${route}`);
@@ -130,6 +135,15 @@ test('known successful producer retains ordinary promotion path without private 
     assert.deepEqual(result.recoveries,[]);
     assert.ok(!data.calls.some(call=>call.includes('widget-host')));
   }finally{data.close();}
+});
+test('unknown and partial fresh parent states refuse on initial and final reads',async()=>{
+  for(const state of [{status:''},{status:'unreported'},{status:'in_progress',conclusion:undefined},
+    {status:'completed',conclusion:undefined}]){
+    await assert.rejects(recovery({parent:{...parent,...state}}),/promotion_state_unmeasured/);
+    await assert.rejects(recovery({producers:[{...producer,conclusion:'success'}],
+      finalParent:{...parent,...state}}),/promotion_state_unmeasured/);
+  }
+  await assert.rejects(recovery({finalParent:{...parent,status:'unreported'}}),/CONSUMER_OBSERVER/);
 });
 test('missing, foreign and replayed publisher witnesses never suppress a candidate',async()=>{
   await assert.rejects(recovery({missingWitness:true}),/declaration_unmeasured/);
@@ -179,4 +193,38 @@ test('gh read transport preserves ZIP bytes and refuses mutation',async()=>{
     assert.deepEqual(Buffer.from(await response.arrayBuffer()),Buffer.from([0,255,128,65]));
     await assert.rejects(ghRead('https://api.github.com/repos/acme/test',{method:'POST'}),/read_endpoint_invalid/);
   }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
+});
+test('actual source reuse reaches a complete successful candidate on page two and refuses partial inventory',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-source-reuse-'));
+  try{
+    const runs=[...Array.from({length:100},(_,index)=>({...producer,id:1000+index})),
+      {...producer,conclusion:'success'}];
+    const record=path.join(scratch,'fixture.json'),calls=path.join(scratch,'calls');
+    const available=['harn-a','harn-b',`candidate-manifest-${source}`,'harn-release-files']
+      .map(name=>({name,expired:false,size_in_bytes:1}));
+    fs.writeFileSync(record,JSON.stringify({runs,available,partial:false}));
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+import fs from 'node:fs';
+const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+const data=JSON.parse(fs.readFileSync(process.env.FIXTURE,'utf8'));
+fs.appendFileSync(process.env.CALLS,endpoint.search+'\\n');
+if(endpoint.pathname.includes('/workflows/')){
+  const page=Number(endpoint.searchParams.get('page'));
+  console.log(JSON.stringify({total_count:data.runs.length+(data.partial?1:0),workflow_runs:data.runs.slice((page-1)*100,page*100)}));
+}else console.log(JSON.stringify({total_count:data.available.length,artifacts:data.available}));
+`,{mode:0o700});
+    const entry=path.join(scratch,'reuse.sh');
+    fs.writeFileSync(entry,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_candidate_run.sh',import.meta.url))}'\nsource_candidate_live_run_id burin-labs/harn '${source}' '[{"target":"a"},{"target":"b"}]'\n`);
+    const options={encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,
+      FIXTURE:record,CALLS:calls,GH_TOKEN:'fixture-read'}};
+    const admitted=spawnSync('bash',[entry],options);
+    assert.equal(admitted.status,0,admitted.stderr);
+    assert.equal(admitted.stdout.trim(),'42');
+    assert.match(fs.readFileSync(calls,'utf8'),/page=2/);
+    fs.writeFileSync(record,JSON.stringify({runs,available,partial:true}));
+    const partial=spawnSync('bash',[entry],options);
+    assert.equal(partial.status,1);
+    assert.equal(partial.stdout,'');
+    assert.match(partial.stderr,/census_unmeasured/);
+  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });

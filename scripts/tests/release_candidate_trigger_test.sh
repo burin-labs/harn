@@ -26,6 +26,9 @@ cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_r
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
   "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release-candidate-state.mjs" "$root/scripts/lib/consumer-observer.mjs" \
+  "$root/scripts/lib/consumer-observation-budget.mjs" "$repo/scripts/lib/"
+cp "$root/scripts/ci/consumer_observation_budget.json" "$repo/scripts/ci/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
@@ -52,7 +55,11 @@ case "$2" in
   */releases\?per_page=50)
     [[ "${FAKE_RELEASES_FAIL:-0}" != 1 ]] || exit 1
     jq -n --argjson tags "${FAKE_RELEASES:-[]}" '[$tags[] | {tag_name: ., draft: false}]' | jq -r "$4" ;;
-  */build-release-binaries.yml/runs\?*) [[ -z "${FAKE_SOURCE_RUN:-}" ]] || printf '%s\n' "$FAKE_SOURCE_RUN" ;;
+  */build-release-binaries.yml/runs\?*)
+    sha="${2#*head_sha=}"; sha="${sha%%&*}"
+    if [[ -n "${FAKE_SOURCE_RUN:-}" ]]; then
+      jq -n --argjson id "$FAKE_SOURCE_RUN" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$id,run_attempt:1,event:"workflow_dispatch",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+    else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
   */artifacts\?per_page=100) printf '%s\n' "${FAKE_SOURCE_ARTIFACTS:?source artifact fixture required}" ;;
   *) exit 2 ;;
 esac

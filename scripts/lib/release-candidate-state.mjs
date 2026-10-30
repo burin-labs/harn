@@ -12,8 +12,19 @@ import {
 const shaPattern=/^[0-9a-f]{40}$/;
 const cliAuthority='gh-cli-authenticated-read';
 function refuse(reason){throw new Error(`CONSUMER_OBSERVER reason=${reason}`);}
+function livePromotion(parent,repository,runId,expected){
+  if(String(parent.id)!==runId||parent.path!==observerParentWorkflows.promotion||parent.head_branch!=='main'
+    ||!shaPattern.test(parent.head_sha)||parent.repository?.full_name!==repository
+    ||parent.head_repository?.full_name!==repository
+    ||expected&&(parent.run_attempt!==expected.run_attempt||parent.head_sha!==expected.head_sha)){
+    refuse('promotion_identity_unmeasured');
+  }
+  if(parent.status==='completed'&&observerConclusionIsKnown(parent.conclusion))return false;
+  if(observerRunIsLive(parent.status)&&parent.conclusion===null)return true;
+  refuse('promotion_state_unmeasured');
+}
 function reportJobs(result,jobs){
-  if(jobs.some(job=>!(observerRunIsLive(job.status)&&job.conclusion===null
+  if(jobs.some(job=>typeof job.name!=='string'||!job.name||!(observerRunIsLive(job.status)&&job.conclusion===null
     ||job.status==='completed'&&observerConclusionIsKnown(job.conclusion))))refuse('promotion_job_state_unmeasured');
   result.pending_jobs.push(...jobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name));
   result.bad_jobs.push(...jobs.filter(job=>job.status==='completed'
@@ -47,10 +58,13 @@ async function manifest(token,repository,run,source,fetchRecord){
 }
 
 /** The general selector remains success-only; all pages must be measured. */
+export async function successfulCandidateRuns(token,repository,source,fetchRecord=fetch){
+  return (await candidates(token,repository,source,fetchRecord))
+    .filter(run=>run.status==='completed'&&run.conclusion==='success');
+}
 export async function successfulCandidate(token,repository,source,fetchRecord=fetch){
-  for(const run of await candidates(token,repository,source,fetchRecord)){
-    if(run.status==='completed'&&run.conclusion==='success'
-      &&await manifest(token,repository,run,source,fetchRecord))return String(run.id);
+  for(const run of await successfulCandidateRuns(token,repository,source,fetchRecord)){
+    if(await manifest(token,repository,run,source,fetchRecord))return String(run.id);
   }
   return '';
 }
@@ -73,18 +87,12 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
     if(!selected)refuse('promotion_source_unmeasured');
     const source=selected[1];
     const parent=await githubRecord(token,repository,runId,fetchRecord);
-    if(!observerRunIsLive(parent.status))continue;
-    if(parent.conclusion!==null||parent.path!==observerParentWorkflows.promotion||parent.head_branch!=='main'
-      ||!shaPattern.test(parent.head_sha)||parent.repository?.full_name!==repository
-      ||parent.head_repository?.full_name!==repository){
-      refuse('promotion_identity_unmeasured');
-    }
+    if(!livePromotion(parent,repository,runId))continue;
     const parentJobs=await githubRunJobs(token,repository,runId,parent.run_attempt,fetchRecord);
     reportJobs(result,parentJobs);
     if(await successfulCandidate(token,repository,source,fetchRecord)){
       const finalParent=await githubRecord(token,repository,runId,fetchRecord);
-      if(observerRunIsLive(finalParent.status)&&finalParent.run_attempt===parent.run_attempt
-        &&finalParent.head_sha===parent.head_sha)result.promoting.push(runId);
+      if(livePromotion(finalParent,repository,runId,parent))result.promoting.push(runId);
       continue;
     }
     if(repository!==observerParentRepository)continue;
@@ -142,8 +150,7 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
     }
     if(recovery){
       const finalParent=await githubRecord(token,repository,runId,fetchRecord);
-      if(!observerRunIsLive(finalParent.status)||finalParent.run_attempt!==parent.run_attempt
-        ||finalParent.head_sha!==parent.head_sha)continue;
+      if(!livePromotion(finalParent,repository,runId,parent))continue;
       result.promoting.push(runId);result.recoveries.push(recovery);
     }
   }
@@ -171,6 +178,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
     const [operation,repository,sourceOrSelf]=process.argv.slice(2);
     const token=process.env.GH_TOKEN??process.env.GITHUB_TOKEN??cliAuthority;
     if(operation==='successful')console.log(await successfulCandidate(token,repository,sourceOrSelf,ghRead));
+    else if(operation==='successful-main-runs')console.log((await successfulCandidateRuns(token,repository,
+      sourceOrSelf,ghRead)).filter(run=>run.head_branch==='main').map(run=>String(run.id)).join('\n'));
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
       process.env.RELEASE_RECOVERY_READ_TOKEN,repository,sourceOrSelf,{repository:process.env.CANARY_REPOSITORY,
         workflow:`.github/workflows/${process.env.CANARY_WORKFLOW}`},ghRead)));

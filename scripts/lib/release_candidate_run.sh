@@ -70,14 +70,13 @@ source_candidate_live_run_id() {
   local repository="${1:?repository required}"
   local sha="${2:?commit required}"
   local matrix="${3:?build matrix required}"
-  local runs run_id artifacts expected
+  local runs run_id artifacts expected reader
   expected="$(jq -cer --arg sha "$sha" '
     if type == "array" and length > 0 and all(.[]; .target | type == "string" and length > 0)
     then [.[].target | "harn-" + .] + ["candidate-manifest-" + $sha, "harn-release-files"]
     else error("empty or invalid candidate matrix") end' <<< "$matrix")" || return 1
-  runs="$(gh api \
-    "repos/${repository}/actions/workflows/build-release-binaries.yml/runs?head_sha=${sha}&status=success&per_page=30" \
-    --jq ".workflow_runs[] | select(.head_sha == \"${sha}\" and .head_branch == \"main\") | .id")" || return 1
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-candidate-state.mjs"
+  runs="$(node "$reader" successful-main-runs "$repository" "$sha")" || return 1
   for run_id in $runs; do
     artifacts="$(gh api "repos/${repository}/actions/runs/${run_id}/artifacts?per_page=100")" || return 1
     if release_candidate_artifacts_complete "$artifacts" "$expected"; then
