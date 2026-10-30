@@ -6,9 +6,11 @@ set -euo pipefail
 : "${GITHUB_RUN_ATTEMPT:?attempt required}"
 [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=scripts/lib/github_read_retry.sh
+source "$root/scripts/lib/github_read_retry.sh"
 legs=$(bash "$root/scripts/ci/run_rust_lint_lane.sh" --list-legs)
-jobs=$(gh api --paginate --slurp \
-  "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100")
+jobs=$(read_api_json \
+  "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" paginated)
 expected=$(printf '%s\n' "$legs" | jq -Rsc 'split("\n") | map(select(length > 0))')
 jq -er --argjson expected "$expected" '
   if type != "array" or length == 0 or any(.[]; (.jobs | type) != "array")
