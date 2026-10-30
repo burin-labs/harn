@@ -217,8 +217,11 @@ jobs:
         shell: bash
         run: rm -f "${CARGO_TARGET_DIR:-target}/cargo-timings/cargo-timing.html"
       - name: Prove workspace artifact reuse and changed-source invalidation
+        # Qualification may select an older main ancestor without this target.
+        if: ${{ github.event_name != 'workflow_dispatch' }}
         run: make test-workspace-reuse-cargo
       - name: Run workspace nextest
+        id: workspace-nextest
         shell: bash
         env:
           # A skipped budget step yields an empty output, which Cargo rejects,
@@ -244,7 +247,7 @@ jobs:
         # exercise.
         run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
       - name: Upload workspace compile timings
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && (steps.workspace-nextest.outcome == 'success' || steps.workspace-nextest.outcome == 'failure') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-workspace-test-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
