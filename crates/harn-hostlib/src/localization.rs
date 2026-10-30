@@ -76,11 +76,30 @@ pub fn resolve_locale(value: &str) -> Option<Locale> {
         "it" => Some(Locale::Italian),
         "ja" => Some(Locale::Japanese),
         "ko" => Some(Locale::Korean),
-        "zh" if !normalized
-            .split('-')
-            .any(|part| matches!(part, "hant" | "tw" | "hk" | "mo")) =>
-        {
-            Some(Locale::SimplifiedChinese)
+        "zh" => {
+            let mut parts = normalized.split('-').skip(1).peekable();
+            for _ in 0..3 {
+                if parts.peek().is_some_and(|part| {
+                    part.len() == 3 && part.bytes().all(|byte| byte.is_ascii_alphabetic())
+                }) {
+                    let _ = parts.next();
+                } else {
+                    break;
+                }
+            }
+            let script = parts.next_if(|part| {
+                part.len() == 4 && part.bytes().all(|byte| byte.is_ascii_alphabetic())
+            });
+            let region = parts.next_if(|part| {
+                (part.len() == 2 && part.bytes().all(|byte| byte.is_ascii_alphabetic()))
+                    || (part.len() == 3 && part.bytes().all(|byte| byte.is_ascii_digit()))
+            });
+            match script {
+                Some("hans") => Some(Locale::SimplifiedChinese),
+                Some(_) => None,
+                None if region.is_some_and(|region| matches!(region, "tw" | "hk" | "mo")) => None,
+                None => Some(Locale::SimplifiedChinese),
+            }
         }
         _ => None,
     }
@@ -222,6 +241,36 @@ mod tests {
         assert_eq!(resolve_locale("pt_PT"), Some(Locale::BrazilianPortuguese));
         assert_eq!(resolve_locale("zh_Hant_TW"), None);
         assert_eq!(resolve_locale("C.UTF-8"), Some(Locale::English));
+    }
+
+    #[test]
+    fn chinese_script_precedes_region_and_extensions_are_not_locale_fields() {
+        for tag in [
+            "zh-Hans-TW",
+            "zh-Hans-HK",
+            "zh-Hans-MO",
+            "zh_Hans_TW.UTF-8",
+            "zh-CN-x-hant",
+            "zh-x-tw",
+            "zh-u-rg-twzzzz",
+            "zh-Hans-TW-x-hant",
+        ] {
+            assert_eq!(
+                resolve_locale(tag),
+                Some(Locale::SimplifiedChinese),
+                "{tag}"
+            );
+        }
+        for tag in [
+            "zh-Hant-CN",
+            "zh-Hant",
+            "zh-TW-x-hans",
+            "zh-HK",
+            "zh-MO",
+            "zh-Latn-CN",
+        ] {
+            assert_eq!(resolve_locale(tag), None, "{tag}");
+        }
     }
 
     #[test]

@@ -176,6 +176,14 @@ fn posix_locale_precedence_and_unsupported_scripts_reach_the_cli() {
         (Some(""), Some("de"), "ja", "Verwendung"),
         (None, None, "ja_JP.UTF-8", "使い方"),
         (Some("zh_Hant_TW.UTF-8"), Some("fr"), "ja", "Usage"),
+        (Some("zh-Hans-TW"), Some("fr"), "ja", "用法"),
+        (Some("zh-Hans-HK"), Some("fr"), "ja", "用法"),
+        (Some("zh-Hans-MO"), Some("fr"), "ja", "用法"),
+        (Some("zh-Hant-CN"), Some("fr"), "ja", "Usage"),
+        (Some("zh-CN-x-hant"), Some("fr"), "ja", "用法"),
+        (Some("zh-TW-x-hans"), Some("fr"), "ja", "Usage"),
+        (Some("zh-x-tw"), Some("fr"), "ja", "用法"),
+        (Some("zh-u-rg-twzzzz"), Some("fr"), "ja", "用法"),
         (Some("C.UTF-8"), Some("fr"), "ja", "Usage"),
     ] {
         let mut command = harn_e2e_command();
