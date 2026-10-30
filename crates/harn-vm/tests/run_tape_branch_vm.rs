@@ -22,6 +22,9 @@ static SERIAL: Mutex<()> = Mutex::new(());
 #[path = "run_tape_branch_vm/host_roots.rs"]
 mod host_roots;
 
+#[path = "run_tape_branch_vm/first_call.rs"]
+mod first_call;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;

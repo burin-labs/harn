@@ -27,6 +27,11 @@ workspace, and a fresh durable-state root. Enter its `BranchScope` around the
 execution. The host must supply the workspace state from before the recording;
 the tape does not reconstruct that initial state.
 
+Set `live_after_calls` to zero to change the first model request. The tape must
+contain a recorded model call. Reads and tool operations before that call still
+replay and must be consumed before live inference starts. A zero-prefix branch
+that never reaches inference finishes with an `under-run branch` divergence.
+
 Set `BranchPlan.host_state_roots` to the host's durable roots for the new execution,
 including a fresh per-run home. Both recorded and current host roots remap into
 the branch state directory; undeclared external roots remain refused in the prefix.

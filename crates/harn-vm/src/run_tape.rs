@@ -625,6 +625,7 @@ pub struct BranchPlan {
     /// needs only these bytes, never the place that recorded them.
     pub tape: EventTape,
     /// Model calls served from the recording before the branch goes live.
+    /// Zero verifies the pre-inference operations, then runs the first call live.
     pub live_after_calls: u64,
     /// The branch's workspace, a copy of the recorded run's starting tree.
     /// Served tool calls re-apply their file effects here.
@@ -731,6 +732,16 @@ impl BranchGuard {
         if state.report.divergence.is_none() {
             state.report.divergence = under_run(&state);
         }
+        if state.report.divergence.is_none()
+            && state.report.live_after_calls == 0
+            && state.report.live_calls == 0
+        {
+            state.report.divergence = Some(BranchDivergence {
+                call: 1,
+                what: "under-run branch".to_string(),
+                detail: "the run ended before its first live model call".to_string(),
+            });
+        }
         state.report.clone()
     }
 }
@@ -784,9 +795,6 @@ pub fn branch_report() -> Option<BranchReport> {
 
 /// Load a tape and arm branch replay for this process.
 pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
-    if plan.live_after_calls == 0 {
-        return Err("a branch must serve at least one recorded call".to_string());
-    }
     let tape = plan.tape;
     if tape
         .records
@@ -930,6 +938,9 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             }
             _ => {}
         }
+    }
+    if calls.is_empty() {
+        return Err("a branch needs a recorded model call as its baseline".to_string());
     }
     if usize::try_from(plan.live_after_calls).map_or(true, |k| k > calls.len()) {
         return Err(format!(
