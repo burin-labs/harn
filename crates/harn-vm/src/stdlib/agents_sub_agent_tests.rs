@@ -226,7 +226,7 @@ fn parse_sub_agent_request_inherits_parent_anchor_as_execution_cwd() {
     crate::agent_sessions::set_workspace_anchor(
         &parent_id,
         Some(crate::workspace_anchor::WorkspaceAnchor {
-            primary: project.clone(),
+            primary: project,
             additional_roots: Vec::new(),
             anchored_at: "2026-05-24T00:00:00Z".to_string(),
         }),
