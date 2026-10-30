@@ -784,7 +784,6 @@ test-pr-gate-scripts:
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
 	./scripts/tests/prepare_development_version_test.sh
-	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" node --test scripts/tests/development_runtime_workflow_test.mjs
 	./scripts/tests/development_bump_cutover_test.sh
 	./scripts/tests/development_cutover_monitor_test.sh
 	./scripts/tests/development_cutover_repair_test.sh
@@ -887,6 +886,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	$(MAKE) test-sccache-rustc-wrapper
 	$(MAKE) test-cargo-wrapper-refresh-native
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" node --test scripts/tests/development_runtime_workflow_test.mjs
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
 	HARN_BIN="$(HARN_BIN)" bash ./scripts/tests/test_case_performance_evidence_test.sh
