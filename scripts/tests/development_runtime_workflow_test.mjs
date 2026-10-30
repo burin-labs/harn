@@ -17,6 +17,12 @@ test('actual interpreter qualifier selects compatible published tools, source fa
     fs.writeFileSync(extract,`import { read_yaml } from "std/fs"
 fn main(harness: Harness) {
   const flow = read_yaml(harness.fs, argv[0], nil)
+  const caller = read_yaml(harness.fs, argv[1], nil).jobs["open-development-bump"]
+  assert_eq(flow.permissions.actions, "read")
+  assert_eq(flow.permissions.attestations, "read")
+  for name in flow.permissions.keys() {
+    assert_eq(caller.permissions[name], flow.permissions[name])
+  }
   let matches = 0
   for step in flow.jobs["open-development-bump"].steps {
     if step.env != nil && step.env.RUNTIME_RECEIPT != nil {
@@ -28,7 +34,8 @@ fn main(harness: Harness) {
 }
 `);
     const body=execFileSync(binary,['run','--no-sandbox',extract,'--',
-      path.join(source,'.github/workflows/open-development-bump.yml')],{encoding:'utf8'});
+      path.join(source,'.github/workflows/open-development-bump.yml'),
+      path.join(source,'.github/workflows/promote-release.yml')],{encoding:'utf8'});
     const qualifier=path.join(scratch,'qualify.sh');
     fs.writeFileSync(qualifier,body);
     const root=path.join(scratch,'workspace'),bin=path.join(scratch,'bin');

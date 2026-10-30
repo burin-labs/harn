@@ -661,6 +661,8 @@ jobs:
     needs: [plan, promote]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     permissions:
+      actions: read
+      attestations: read
       contents: read
       pull-requests: read
     uses: ./.github/workflows/open-development-bump.yml
