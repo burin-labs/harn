@@ -50,7 +50,7 @@ pub(crate) async fn connector_http_get_uses_read_authority_and_preserves_retry()
     let child_marker = root.path().join(".harn-tmp/http-child-launched");
     std::fs::create_dir_all(child_marker.parent().unwrap()).unwrap();
     #[cfg(target_os = "macos")]
-    let child_refusal = harn_cli::tests::common::sandbox_host::unavailable_worktree_sandbox();
+    let child_refusal = crate::test_util::sandbox_host::unavailable_worktree_sandbox();
     #[cfg(not(target_os = "macos"))]
     let child_refusal: Option<harn_vm::process_sandbox::SandboxMechanismUnavailable> = None;
     let expected_child_refusal = child_refusal

@@ -1,0 +1,54 @@
+name: macOS packaged CLI install proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed main ancestor whose test-module gate is applied to the immutable 0.10.182 package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-packaged-cli-install-proof
+  cancel-in-progress: false
+
+jobs:
+  install:
+    if: github.repository == 'burin-labs/harn' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select reviewed source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          git checkout --detach "$SOURCE_SHA"
+      - uses: ./.github/actions/rust-toolchain
+      - name: Prove the packaged installation before and after the source gate
+        env:
+          PACKAGE_PROOF_SOURCE_SHA: ${{ inputs.source_sha }}
+          PACKAGE_PROOF_OUTPUT: ${{ runner.temp }}/macos-packaged-cli-install-proof
+          CARGO_BUILD_JOBS: "2"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_INCREMENTAL: "0"
+          HARN_LLM_CALLS_DISABLED: "1"
+          HARN_SECRET_PROVIDERS: env
+        run: bash scripts/verify_macos_packaged_cli_install.sh
+      - name: Upload the source-bound installation receipt and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-packaged-cli-install-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/macos-packaged-cli-install-proof
+          if-no-files-found: error
