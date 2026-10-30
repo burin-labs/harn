@@ -132,9 +132,12 @@ impl LifetimeFixture {
         let suite = root.path().join("conformance");
         std::fs::create_dir(&suite).expect("create fixture conformance directory");
         let fifo_path = root.path().join("helper.fifo");
-        let fifo_cstr =
-            std::ffi::CString::new(fifo_path.as_os_str().as_bytes()).expect("encode fixture FIFO");
-        assert_eq!(unsafe { libc::mkfifo(fifo_cstr.as_ptr(), 0o600) }, 0);
+        let startup_path = root.path().join("startup.fifo");
+        for path in [&fifo_path, &startup_path] {
+            let fifo_cstr =
+                std::ffi::CString::new(path.as_os_str().as_bytes()).expect("encode fixture FIFO");
+            assert_eq!(unsafe { libc::mkfifo(fifo_cstr.as_ptr(), 0o600) }, 0);
+        }
         let mut report_pipe = [0_i32; 2];
         assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
         let report_read = report_pipe[0];
@@ -150,17 +153,29 @@ impl LifetimeFixture {
         } else {
             report_pipe[1]
         };
-        let background = if block { "" } else { " &" };
-        let fifo_shell = fifo_path
-            .to_str()
-            .filter(|path| !path.bytes().any(|byte| byte.is_ascii_whitespace()))
-            .expect("fixture FIFO path is shell-safe");
+        let [fifo_shell, startup_shell] = [&fifo_path, &startup_path].map(|path| {
+            path.to_str()
+                .filter(|path| !path.bytes().any(|byte| byte.is_ascii_whitespace()))
+                .expect("fixture FIFO path is shell-safe")
+        });
+        let report = format!("echo $$ $HARN_INTERNAL_PROCESS_OWNER_TOKEN > /dev/fd/{report_write}");
+        let (run, finish) = if block {
+            (format!("{report} && exec cat {fifo_shell}"), String::new())
+        } else {
+            (
+                format!(
+                    "if {report}; then echo ready > {startup_shell} && exec cat {fifo_shell}; \
+                     else echo failed > {startup_shell}; exit 1; fi"
+                ),
+                format!(" & read -r ready < {startup_shell} && test \"$ready\" = ready"),
+            )
+        };
+        let command = format!("sh -c '{run}' >/dev/null 2>&1{finish}");
+        let command = serde_json::to_string(&command).expect("encode fixture shell command");
         let source = format!(
             "import {{ process_shell }} from \"std/runtime\"\n\
              pipeline test(harness: Harness, task: unknown) {{\n\
-               const start = process_shell(harness.process, \"sh -c 'echo $$ \
-                 $HARN_INTERNAL_PROCESS_OWNER_TOKEN > /dev/fd/{report_write} && exec cat \
-                 {fifo_shell}' >/dev/null 2>&1{background}\")\n\
+               const start = process_shell(harness.process, {command})\n\
                require start?.success, \"helper started\"\n\
                harness.stdio.println(true)\n\
              }}\n"
