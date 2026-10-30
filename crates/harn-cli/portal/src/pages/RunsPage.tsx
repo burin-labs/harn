@@ -1,36 +1,78 @@
+import { portalText } from "../i18n/portalText"
 import { defineMessages, useIntl } from "react-intl"
 import { useNavigate, useSearchParams } from "react-router"
 
 import { formatDuration, formatNumber, statusClass } from "../lib/format"
-import { type RunSortOrder, type RunStatusFilter, useRunsData } from "../hooks/useRunsData"
+import {
+  type RunSortOrder,
+  type RunStatusFilter,
+  useRunsData,
+} from "../hooks/useRunsData"
 
 const messages = defineMessages({
   eyebrow: { id: "portal.runsPage.eyebrow", defaultMessage: "Run library" },
   title: { id: "portal.runsPage.title", defaultMessage: "Persisted runs" },
   copy: {
     id: "portal.runsPage.copy",
-    defaultMessage: "Search, filter, and page through saved runs without loading the whole dataset into the sidebar.",
+    defaultMessage:
+      "Search, filter, and page through saved runs without loading the whole dataset into the sidebar.",
   },
   refreshNow: { id: "portal.runsPage.refreshNow", defaultMessage: "Refresh" },
-  filterRuns: { id: "portal.runsPage.filterRuns", defaultMessage: "Filter runs" },
-  statusFilter: { id: "portal.runsPage.statusFilter", defaultMessage: "Status" },
+  filterRuns: {
+    id: "portal.runsPage.filterRuns",
+    defaultMessage: "Filter runs",
+  },
+  statusFilter: {
+    id: "portal.runsPage.statusFilter",
+    defaultMessage: "Status",
+  },
   sortBy: { id: "portal.runsPage.sortBy", defaultMessage: "Sort by" },
   pageSize: { id: "portal.runsPage.pageSize", defaultMessage: "Rows" },
-  filterPlaceholder: { id: "portal.runsPage.filterPlaceholder", defaultMessage: "workflow, model, status..." },
+  filterPlaceholder: {
+    id: "portal.runsPage.filterPlaceholder",
+    defaultMessage: "workflow, model, status...",
+  },
   skillFilter: { id: "portal.runsPage.skillFilter", defaultMessage: "Skill" },
   skillPlaceholder: {
     id: "portal.runsPage.skillPlaceholder",
     defaultMessage: "e.g. deploy",
   },
-  allStatuses: { id: "portal.runsPage.allStatuses", defaultMessage: "All statuses" },
-  activeOnly: { id: "portal.runsPage.activeOnly", defaultMessage: "Active only" },
-  completedOnly: { id: "portal.runsPage.completedOnly", defaultMessage: "Completed only" },
-  failedOnly: { id: "portal.runsPage.failedOnly", defaultMessage: "Failed only" },
-  newestFirst: { id: "portal.runsPage.newestFirst", defaultMessage: "Newest first" },
-  oldestFirst: { id: "portal.runsPage.oldestFirst", defaultMessage: "Oldest first" },
-  longestDuration: { id: "portal.runsPage.longestDuration", defaultMessage: "Longest duration" },
-  results: { id: "portal.runsPage.results", defaultMessage: "{shown} of {total} matching runs" },
-  lastRefresh: { id: "portal.runsPage.lastRefresh", defaultMessage: "Last refresh {time}" },
+  allStatuses: {
+    id: "portal.runsPage.allStatuses",
+    defaultMessage: "All statuses",
+  },
+  activeOnly: {
+    id: "portal.runsPage.activeOnly",
+    defaultMessage: "Active only",
+  },
+  completedOnly: {
+    id: "portal.runsPage.completedOnly",
+    defaultMessage: "Completed only",
+  },
+  failedOnly: {
+    id: "portal.runsPage.failedOnly",
+    defaultMessage: "Failed only",
+  },
+  newestFirst: {
+    id: "portal.runsPage.newestFirst",
+    defaultMessage: "Newest first",
+  },
+  oldestFirst: {
+    id: "portal.runsPage.oldestFirst",
+    defaultMessage: "Oldest first",
+  },
+  longestDuration: {
+    id: "portal.runsPage.longestDuration",
+    defaultMessage: "Longest duration",
+  },
+  results: {
+    id: "portal.runsPage.results",
+    defaultMessage: "{shown} of {total} matching runs",
+  },
+  lastRefresh: {
+    id: "portal.runsPage.lastRefresh",
+    defaultMessage: "Last refresh {time}",
+  },
   path: { id: "portal.runsPage.path", defaultMessage: "Path" },
   workflow: { id: "portal.runsPage.workflow", defaultMessage: "Workflow" },
   status: { id: "portal.runsPage.status", defaultMessage: "Status" },
@@ -39,18 +81,39 @@ const messages = defineMessages({
   usage: { id: "portal.runsPage.usage", defaultMessage: "Usage" },
   actions: { id: "portal.runsPage.actions", defaultMessage: "Actions" },
   inspect: { id: "portal.runsPage.inspect", defaultMessage: "Inspect" },
-  empty: { id: "portal.runsPage.empty", defaultMessage: "No runs match the current query." },
+  empty: {
+    id: "portal.runsPage.empty",
+    defaultMessage: "No runs match the current query.",
+  },
   previous: { id: "portal.runsPage.previous", defaultMessage: "Previous" },
   next: { id: "portal.runsPage.next", defaultMessage: "Next" },
-  pageSummary: { id: "portal.runsPage.pageSummary", defaultMessage: "Page {page} of {total}" },
+  pageSummary: {
+    id: "portal.runsPage.pageSummary",
+    defaultMessage: "Page {page} of {total}",
+  },
 })
 
-const RUN_STATUS_FILTERS = ["all", "active", "completed", "failed"] as const satisfies readonly RunStatusFilter[]
-const RUN_SORT_ORDERS = ["newest", "oldest", "duration"] as const satisfies readonly RunSortOrder[]
+const RUN_STATUS_FILTERS = [
+  "all",
+  "active",
+  "completed",
+  "failed",
+] as const satisfies readonly RunStatusFilter[]
+const RUN_SORT_ORDERS = [
+  "newest",
+  "oldest",
+  "duration",
+] as const satisfies readonly RunSortOrder[]
 const RUN_PAGE_SIZES = [25, 50, 100] as const
 
-function readChoice<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
-  return value && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
+function readChoice<T extends string>(
+  value: string | null,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  return value && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
 }
 
 function readPositiveInteger(value: string | null, fallback: number) {
@@ -75,12 +138,24 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const q = searchParams.get("q") ?? ""
-  const status = readChoice(searchParams.get("status"), RUN_STATUS_FILTERS, "all")
+  const status = readChoice(
+    searchParams.get("status"),
+    RUN_STATUS_FILTERS,
+    "all",
+  )
   const sort = readChoice(searchParams.get("sort"), RUN_SORT_ORDERS, "newest")
   const page = readPositiveInteger(searchParams.get("page"), 1)
   const pageSize = readPageSize(searchParams.get("page_size"))
   const skill = searchParams.get("skill") ?? ""
-  const { runs, filteredCount, pagination, loading, lastError, lastRefreshAt, loadRuns } = useRunsData({
+  const {
+    runs,
+    filteredCount,
+    pagination,
+    loading,
+    lastError,
+    lastRefreshAt,
+    loadRuns,
+  } = useRunsData({
     q,
     status,
     sort,
@@ -93,7 +168,12 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
   function updateParams(next: Record<string, string | number | null>) {
     const updated = new URLSearchParams(searchParams)
     for (const [key, value] of Object.entries(next)) {
-      if (value == null || value === "" || value === "all" || (key === "sort" && value === "newest")) {
+      if (
+        value == null ||
+        value === "" ||
+        value === "all" ||
+        (key === "sort" && value === "newest")
+      ) {
         updated.delete(key)
       } else {
         updated.set(key, String(value))
@@ -118,7 +198,9 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
               type="search"
               value={q}
               placeholder={intl.formatMessage(messages.filterPlaceholder)}
-              onChange={(event) => updateParams({ q: event.target.value, page: 1 })}
+              onChange={(event) =>
+                updateParams({ q: event.target.value, page: 1 })
+              }
             />
           </label>
           <label className="search">
@@ -126,12 +208,22 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
             <select
               className="compare-select"
               value={status}
-              onChange={(event) => updateParams({ status: event.target.value, page: 1 })}
+              onChange={(event) =>
+                updateParams({ status: event.target.value, page: 1 })
+              }
             >
-              <option value="all">{intl.formatMessage(messages.allStatuses)}</option>
-              <option value="active">{intl.formatMessage(messages.activeOnly)}</option>
-              <option value="completed">{intl.formatMessage(messages.completedOnly)}</option>
-              <option value="failed">{intl.formatMessage(messages.failedOnly)}</option>
+              <option value="all">
+                {intl.formatMessage(messages.allStatuses)}
+              </option>
+              <option value="active">
+                {intl.formatMessage(messages.activeOnly)}
+              </option>
+              <option value="completed">
+                {intl.formatMessage(messages.completedOnly)}
+              </option>
+              <option value="failed">
+                {intl.formatMessage(messages.failedOnly)}
+              </option>
             </select>
           </label>
           <label className="search">
@@ -139,11 +231,19 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
             <select
               className="compare-select"
               value={sort}
-              onChange={(event) => updateParams({ sort: event.target.value, page: 1 })}
+              onChange={(event) =>
+                updateParams({ sort: event.target.value, page: 1 })
+              }
             >
-              <option value="newest">{intl.formatMessage(messages.newestFirst)}</option>
-              <option value="oldest">{intl.formatMessage(messages.oldestFirst)}</option>
-              <option value="duration">{intl.formatMessage(messages.longestDuration)}</option>
+              <option value="newest">
+                {intl.formatMessage(messages.newestFirst)}
+              </option>
+              <option value="oldest">
+                {intl.formatMessage(messages.oldestFirst)}
+              </option>
+              <option value="duration">
+                {intl.formatMessage(messages.longestDuration)}
+              </option>
             </select>
           </label>
           <label className="search">
@@ -152,7 +252,9 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
               type="search"
               value={skill}
               placeholder={intl.formatMessage(messages.skillPlaceholder)}
-              onChange={(event) => updateParams({ skill: event.target.value, page: 1 })}
+              onChange={(event) =>
+                updateParams({ skill: event.target.value, page: 1 })
+              }
             />
           </label>
           <label className="search">
@@ -160,7 +262,9 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
             <select
               className="compare-select"
               value={String(pageSize)}
-              onChange={(event) => updateParams({ page_size: event.target.value, page: 1 })}
+              onChange={(event) =>
+                updateParams({ page_size: event.target.value, page: 1 })
+              }
             >
               {[25, 50, 100].map((size) => (
                 <option key={size} value={size}>
@@ -169,17 +273,30 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
               ))}
             </select>
           </label>
-          <button className="action-button" disabled={loading} onClick={() => void loadRuns()} type="button">
+          <button
+            className="action-button"
+            disabled={loading}
+            onClick={() => void loadRuns()}
+            type="button"
+          >
             {intl.formatMessage(messages.refreshNow)}
           </button>
         </div>
 
         <div className="runs-meta">
-          <span>{intl.formatMessage(messages.results, { shown: runs.length, total: filteredCount })}</span>
+          <span>
+            {intl.formatMessage(messages.results, {
+              shown: runs.length,
+              total: filteredCount,
+            })}
+          </span>
           {lastRefreshAt ? (
             <span>
               {intl.formatMessage(messages.lastRefresh, {
-                time: new Date(lastRefreshAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+                time: new Date(lastRefreshAt).toLocaleTimeString(intl.locale, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
               })}
             </span>
           ) : null}
@@ -209,24 +326,38 @@ export function RunsPage({ poll = true }: RunsPageProps = {}) {
                   <tr key={run.path}>
                     <td>
                       <div className="table-primary">{run.workflow_name}</div>
-                      {run.failure_summary ? <div className="meta">{run.failure_summary}</div> : null}
+                      {run.failure_summary ? (
+                        <div className="meta">{run.failure_summary}</div>
+                      ) : null}
                     </td>
                     <td className="mono table-path">{run.path}</td>
                     <td>
-                      <span className={`pill ${statusClass(run.status)}`}>{run.status}</span>
+                      <span className={`pill ${statusClass(run.status)}`}>
+                        {run.status}
+                      </span>
                     </td>
                     <td>{run.started_at}</td>
                     <td>{formatDuration(run.duration_ms)}</td>
                     <td>
-                      {formatNumber(run.call_count)} calls
+                      {formatNumber(run.call_count)}
+                      {portalText(" calls")}
                       <div className="meta">
-                        {formatNumber(run.input_tokens + run.output_tokens)} tokens • {run.stage_count} stages
+                        {portalText("{value0} tokens • {value1} stages", {
+                          value0: formatNumber(
+                            run.input_tokens + run.output_tokens,
+                          ),
+                          value1: run.stage_count,
+                        })}
                       </div>
                     </td>
                     <td>
                       <button
                         className="action-button action-button-inline"
-                        onClick={() => navigate(`/runs/detail?path=${encodeURIComponent(run.path)}`)}
+                        onClick={() =>
+                          navigate(
+                            `/runs/detail?path=${encodeURIComponent(run.path)}`,
+                          )
+                        }
                         type="button"
                       >
                         {intl.formatMessage(messages.inspect)}

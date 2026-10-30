@@ -1,8 +1,14 @@
+import { portalText } from "../i18n/portalText"
 import { NavLink } from "react-router"
 import { defineMessages, useIntl } from "react-intl"
 
 import { formatDuration } from "../lib/format"
 import type { PortalStats } from "../types"
+import {
+  languages,
+  setLocale,
+  type Locale,
+} from "../../../../../ui/localization"
 
 const messages = defineMessages({
   title: {
@@ -11,7 +17,8 @@ const messages = defineMessages({
   },
   intro: {
     id: "portal.sidebar.intro",
-    defaultMessage: "Local observability and launch control for persisted Harn workflows.",
+    defaultMessage:
+      "Local observability and launch control for persisted Harn workflows.",
   },
   launch: {
     id: "portal.sidebar.launch",
@@ -64,7 +71,13 @@ type SidebarProps = {
   onRefresh: () => void
 }
 
-export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }: SidebarProps) {
+export function Sidebar({
+  stats,
+  loading,
+  lastRefreshAt,
+  lastError,
+  onRefresh,
+}: SidebarProps) {
   const intl = useIntl()
 
   const statCards = stats
@@ -73,7 +86,10 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
         [intl.formatMessage(messages.complete), stats.completed_runs],
         [intl.formatMessage(messages.active), stats.active_runs],
         [intl.formatMessage(messages.failed), stats.failed_runs],
-        [intl.formatMessage(messages.avgRun), formatDuration(stats.avg_duration_ms)],
+        [
+          intl.formatMessage(messages.avgRun),
+          formatDuration(stats.avg_duration_ms),
+        ],
       ]
     : []
 
@@ -81,7 +97,7 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
     ? intl.formatMessage(messages.refreshing)
     : lastRefreshAt
       ? intl.formatMessage(messages.lastRefresh, {
-          time: new Date(lastRefreshAt).toLocaleTimeString([], {
+          time: new Date(lastRefreshAt).toLocaleTimeString(intl.locale, {
             hour: "numeric",
             minute: "2-digit",
           }),
@@ -91,22 +107,34 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <div className="eyebrow">Harn</div>
+        <div className="eyebrow">{portalText("Harn")}</div>
         <h1>{intl.formatMessage(messages.title)}</h1>
         <p>{intl.formatMessage(messages.intro)}</p>
       </div>
 
-      <nav className="sidebar-nav" aria-label="Portal navigation">
-        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/launch">
+      <nav className="sidebar-nav" aria-label={portalText("Portal navigation")}>
+        <NavLink
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          to="/launch"
+        >
           {intl.formatMessage(messages.launch)}
         </NavLink>
-        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/runs">
+        <NavLink
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          to="/runs"
+        >
           {intl.formatMessage(messages.runs)}
         </NavLink>
-        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/dlq">
+        <NavLink
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          to="/dlq"
+        >
           {intl.formatMessage(messages.dlq)}
         </NavLink>
-        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/costs">
+        <NavLink
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+          to="/costs"
+        >
           {intl.formatMessage(messages.costs)}
         </NavLink>
       </nav>
@@ -121,11 +149,36 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
       </div>
 
       <div className="sidebar-tools">
-        <button className="action-button" disabled={loading} onClick={onRefresh} type="button">
+        <label>
+          {intl.formatMessage({
+            id: "portal.language",
+            defaultMessage: "Language",
+          })}
+          <select
+            value={intl.locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+          >
+            {Object.entries(languages).map(([locale, label]) => (
+              <option key={locale} value={locale}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="action-button"
+          disabled={loading}
+          onClick={onRefresh}
+          type="button"
+        >
           {intl.formatMessage(messages.refreshNow)}
         </button>
         <div className="muted">{statusCopy}</div>
-        {lastError ? <div className="muted">{intl.formatMessage(messages.error, { message: lastError })}</div> : null}
+        {lastError ? (
+          <div className="muted">
+            {intl.formatMessage(messages.error, { message: lastError })}
+          </div>
+        ) : null}
       </div>
     </aside>
   )

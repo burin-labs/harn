@@ -59,16 +59,64 @@ release_commit="$(cd "$source_directory" && release_recovery_transition "$main_s
 }
 
 builds="repos/$repository/actions/workflows/build-release-binaries.yml/runs"
+census_rows() {
+  local pages="$1" mode="$2"
+  jq -r --arg mode "$mode" --arg release "$release_commit" --arg main "$main_sha" '
+    def valid_run:
+      (.id | type) == "number" and .id > 0 and .id == (.id | floor) and
+      (.event | type) == "string" and (.event | length) > 0 and
+      (.status | IN("queued", "in_progress", "waiting", "requested", "pending", "completed")) and
+      (.head_branch | type) == "string" and (.head_branch | length) > 0 and
+      (.head_sha | type) == "string" and (.head_sha | test("^[0-9a-f]{40}$")) and
+      (.display_title == null or (.display_title | type) == "string");
+    if type != "array" or length == 0 or
+       (all(.[]; (.workflow_runs | type) == "array") | not) or
+       (.[0].total_count | type) != "number" or
+       ([.[].workflow_runs | length] | add) != .[0].total_count or
+       (all(.[] .workflow_runs[]; valid_run) | not)
+    then error("incomplete workflow run census")
+    else [.[] .workflow_runs[] |
+      select(.head_branch == "main") |
+      select(if $mode == "in_flight" then
+        .status != "completed" and
+        (.event == "schedule" or .event == "workflow_dispatch" or
+          (.event == "push" and .head_sha == $release))
+      else .head_sha == $main and (.event == "schedule" or .event == "workflow_dispatch") end) |
+      [.id, .event, (.display_title // "")] | @tsv] | join("\n") end
+  ' <<< "$pages"
+}
 # A candidate build in flight: any main source candidate, or the version
 # commit's own push.
-in_flight="$(gh api "$builds?branch=main&per_page=100" --jq "[.workflow_runs[]
-  | select(.status != \"completed\" and .head_branch == \"main\")
-  | select(.event == \"schedule\" or .event == \"workflow_dispatch\"
-      or (.event == \"push\" and .head_sha == \"$release_commit\"))
-  | .id] | map(tostring) | join(\",\")")" || {
-  echo "::error::Cannot read candidate builds on main; refusing to treat $tag as idle." >&2
-  exit 1
+build_rows=""
+for state in queued in_progress waiting requested pending; do
+  build_pages="$(gh api "$builds?branch=main&status=$state&per_page=100" --paginate --slurp)" || {
+    echo "::error::Cannot read $state candidate builds on main; refusing to treat $tag as idle." >&2
+    exit 1
+  }
+  rows="$(census_rows "$build_pages" in_flight)" || {
+    echo "::error::Invalid $state candidate build census; refusing to treat $tag as idle." >&2
+    exit 1
+  }
+  [[ -z "$rows" ]] || build_rows="${build_rows:+$build_rows$'\n'}$rows"
+done
+candidate_ids() {
+  local rows="$1" run event title result ids=""
+  while IFS=$'\t' read -r run event title; do
+    [[ -n "$run" ]] || continue
+    if [[ "$event" == workflow_dispatch ]]; then
+      result=0
+      release_dispatch_is_candidate "$repository" "$run" "$title" || result=$?
+      case "$result" in
+        0) ;;
+        1) continue ;;
+        *) echo "::error::Cannot establish the purpose of dispatch $run; refusing to treat $tag as idle." >&2; return 1 ;;
+      esac
+    fi
+    ids="${ids:+$ids,}$run"
+  done <<< "$rows"
+  printf '%s\n' "$ids"
 }
+in_flight="$(candidate_ids "$build_rows")" || exit 1
 # A candidate's promotion in flight: another promotion run whose source holds
 # a successful candidate. Promotion names each run after its source.
 promoting=""
@@ -96,13 +144,15 @@ fi
 
 # One source candidate per main commit. A failed one needs a new commit (or a
 # rerun of its failed jobs), never an automatic loop over the same source.
-attempted="$(gh api "$builds?head_sha=$main_sha&per_page=30" --jq "[.workflow_runs[]
-  | select(.head_sha == \"$main_sha\" and .head_branch == \"main\")
-  | select(.event == \"schedule\" or .event == \"workflow_dispatch\") | .id]
-  | map(tostring) | join(\",\")")" || {
+attempt_pages="$(gh api "$builds?head_sha=$main_sha&per_page=100" --paginate --slurp)" || {
   echo "::error::Cannot read candidate attempts at $main_sha." >&2
   exit 1
 }
+attempt_rows="$(census_rows "$attempt_pages" attempted)" || {
+  echo "::error::Cannot read candidate attempts at $main_sha." >&2
+  exit 1
+}
+attempted="$(candidate_ids "$attempt_rows")" || exit 1
 if [[ -z "$attempted" ]]; then
   gh workflow run build-release-binaries.yml --repo "$repository" --ref main -f source_candidate=true
   echo "::notice::$summary; no candidate in flight, so a source candidate of main ($main_sha or newer) was requested."

@@ -50,8 +50,8 @@ same_as_upstream! {
     "sql" => sql, tree_sitter_sequel::LANGUAGE, "SELECT a, count(*) FROM t WHERE b IN (1, 2) GROUP BY a ORDER BY 2 DESC;\n";
     "swift" => swift, tree_sitter_swift::LANGUAGE, "func f<T: Equatable>(_ x: T?) async throws -> [T] { guard let x else { return [] }; return [x] }\n";
     "toml" => toml, tree_sitter_toml_ng::LANGUAGE, "[a.b]\nc = { d = [1, 2], e = 1979-05-27T07:32:00Z }\n";
-    "typescript" => typescript, tree_sitter_typescript::LANGUAGE_TYPESCRIPT, "type A<T> = { [K in keyof T]?: T[K] extends string ? K : never };\n";
-    "typescript" => tsx, tree_sitter_typescript::LANGUAGE_TSX, "const C = <T,>(p: { x: T }) => <A x={p.x as any}>{p.x}</A>;\n";
+    "typescript" => typescript, super::typescript::LANGUAGE_TYPESCRIPT, "type A<T> = { [K in keyof T]?: T[K] extends string ? K : never };\n";
+    "typescript" => tsx, super::typescript::LANGUAGE_TSX, "const C = <T,>(p: { x: T }) => <A x={p.x as any}>{p.x}</A>;\n";
     "yaml" => yaml, tree_sitter_yaml::LANGUAGE, "a: &x\n  - b: |\n      text\n  - *x\n";
     "zig" => zig, tree_sitter_zig::LANGUAGE, "pub fn f(comptime T: type, x: ?T) !T { return x orelse error.None; }\n";
 }

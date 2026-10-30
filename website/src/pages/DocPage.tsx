@@ -118,6 +118,7 @@ export function DocPage({ slug }: { slug: string }) {
             {page ? (
               <div
                 ref={contentRef}
+                lang="en"
                 className="prose max-w-none"
                 onClick={onContentClick}
                 dangerouslySetInnerHTML={{ __html: page.html }}

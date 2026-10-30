@@ -1,21 +1,29 @@
 {
   "name": "harn-lang",
-  "displayName": "Harn Language",
-  "description": "Language support for Harn — the pipeline-oriented language for AI agents",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.1.0",
   "publisher": "burin-labs",
   "repository": {
     "type": "git",
     "url": "https://github.com/burin-labs/harn"
   },
-  "categories": ["Programming Languages", "Snippets"],
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
   "license": "MIT OR Apache-2.0",
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#0b1413",
     "theme": "dark"
   },
-  "keywords": ["harn", "agents", "pipeline", "lsp"],
+  "keywords": [
+    "harn",
+    "agents",
+    "pipeline",
+    "lsp"
+  ],
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -30,14 +38,25 @@
     "languages": [
       {
         "id": "harn",
-        "aliases": ["Harn", "harn"],
-        "extensions": [".harn"],
+        "aliases": [
+          "Harn",
+          "harn"
+        ],
+        "extensions": [
+          ".harn"
+        ],
         "configuration": "./language-configuration.json"
       },
       {
         "id": "harn-prompt",
-        "aliases": ["Harn Prompt", "harn-prompt"],
-        "extensions": [".harn.prompt", ".prompt"],
+        "aliases": [
+          "Harn Prompt",
+          "harn-prompt"
+        ],
+        "extensions": [
+          ".harn.prompt",
+          ".prompt"
+        ],
         "configuration": "./language-configuration-prompt.json"
       }
     ],
@@ -62,15 +81,15 @@
     "commands": [
       {
         "command": "harn.runPipeline",
-        "title": "Harn: Run Pipeline"
+        "title": "%harn.runPipeline%"
       },
       {
         "command": "harn.formatFile",
-        "title": "Harn: Format File"
+        "title": "%harn.formatFile%"
       },
       {
         "command": "harn.applyAllAutofixes",
-        "title": "Harn: Apply All Autofixes"
+        "title": "%harn.applyAllAutofixes%"
       }
     ],
     "configurationDefaults": {
@@ -85,19 +104,23 @@
       {
         "type": "harn",
         "label": "Harn",
-        "languages": ["harn"],
+        "languages": [
+          "harn"
+        ],
         "configurationAttributes": {
           "launch": {
-            "required": ["program"],
+            "required": [
+              "program"
+            ],
             "properties": {
               "program": {
                 "type": "string",
-                "description": "Path to the .harn file to debug",
+                "description": "%debug.program%",
                 "default": "${file}"
               },
               "cwd": {
                 "type": "string",
-                "description": "Working directory for the debug session",
+                "description": "%debug.cwd%",
                 "default": "${workspaceFolder}"
               }
             }
@@ -107,7 +130,7 @@
           {
             "type": "harn",
             "request": "launch",
-            "name": "Debug Current Harn File",
+            "name": "%debug.name%",
             "program": "${file}",
             "cwd": "${workspaceFolder}"
           }
@@ -120,44 +143,54 @@
         "harn.path": {
           "type": "string",
           "default": "harn",
-          "description": "Path to the harn binary"
+          "description": "%harn.path%"
         },
         "harn.lspPath": {
           "type": "string",
           "default": "harn-lsp",
-          "description": "Path to the harn-lsp language server binary"
+          "description": "%harn.lspPath%"
         },
         "harn.dapPath": {
           "type": "string",
           "default": "harn-dap",
-          "description": "Path to the harn-dap debug adapter binary"
+          "description": "%harn.dapPath%"
         }
       }
     },
     "taskDefinitions": [
       {
         "type": "harn",
-        "required": ["command"],
+        "required": [
+          "command"
+        ],
         "properties": {
           "command": {
             "type": "string",
-            "enum": ["run", "check", "fmt", "lint", "test"],
-            "description": "The harn subcommand to invoke."
+            "enum": [
+              "run",
+              "check",
+              "fmt",
+              "lint",
+              "test"
+            ],
+            "description": "%task.command%"
           },
           "file": {
             "type": "string",
-            "description": "Path to a .harn script. Defaults to the current file when omitted.",
+            "description": "%task.file%",
             "default": "${file}"
           },
           "args": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "Extra arguments appended after the file path.",
+            "items": {
+              "type": "string"
+            },
+            "description": "%task.args%",
             "default": []
           },
           "cwd": {
             "type": "string",
-            "description": "Working directory for the spawned process.",
+            "description": "%task.cwd%",
             "default": "${workspaceFolder}"
           }
         }
@@ -168,7 +201,10 @@
         "name": "harn",
         "owner": "harn",
         "source": "harn",
-        "fileLocation": ["relative", "${workspaceFolder}"],
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
         "pattern": {
           "regexp": "^(?:error|warning|note)?\\s*([^:]+):(\\d+):(\\d+):?\\s+(error|warning|note):?\\s+(.*)$",
           "file": 1,
@@ -182,7 +218,10 @@
         "name": "harn-lint",
         "owner": "harn",
         "source": "harn-lint",
-        "fileLocation": ["relative", "${workspaceFolder}"],
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
         "pattern": {
           "regexp": "^([^:]+):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)$",
           "file": 1,
@@ -213,5 +252,6 @@
     "@azure/identity": {
       "@azure/msal-node": "7.1.0"
     }
-  }
+  },
+  "l10n": "./l10n"
 }

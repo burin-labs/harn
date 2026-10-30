@@ -1,3 +1,4 @@
+import { portalText } from "../i18n/portalText"
 import type {
   PortalHighlightKeywords,
   PortalCostReport,
@@ -26,7 +27,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function responseErrorMessage(response: Response): Promise<string> {
-  let message = `Request failed: ${response.status}`
+  let message = portalText("Request failed: {status}", { status: response.status })
   try {
     const payload = (await response.json()) as { error?: string }
     if (payload.error) {

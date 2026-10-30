@@ -1,0 +1,6 @@
+FAIL  test_post_edit_syntax_check_reads_the_changed_file
+
+0 passed, 1 failed, 0 skipped, 1 total
+
+assert_eq failed: expected 0, actual 1
+assert_eq(len(valid.errors), 0)

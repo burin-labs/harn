@@ -21,6 +21,7 @@ pub(super) struct Seed<'a> {
     pub state: &'a IndexState,
     pub node: &'a SymbolNode,
     pub name: &'a str,
+    pub go_package: Option<&'a super::rename_go::PackageProof>,
 }
 
 pub(super) fn check(
@@ -35,6 +36,7 @@ pub(super) fn check(
         state,
         node: seed_node,
         name,
+        go_package,
     } = seed;
     let seed_path = seed_node.path.as_ref();
     let seed_line = seed_node.line;
@@ -71,7 +73,9 @@ pub(super) fn check(
     let mut lang = Family::of(language).map(|family| Lang::new(family, state, &[]));
     let module = lang.as_mut().and_then(|lang| lang.module_of(seed_path));
     let model = lang.as_mut().map(|lang| lang.model(path, tree, source));
-    let mut bound = path == seed_path;
+    let mut bound = path == seed_path
+        || (language == Language::Go
+            && go_package.is_some_and(|package| package.proves_binding(path)));
     if let Some(model) = &model {
         for binding in &model.bindings {
             if binding.shape == Shape::Glob {

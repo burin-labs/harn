@@ -1,0 +1,232 @@
+{
+  "common": {
+    "siteName": "Harn",
+    "github": "GitHub",
+    "language": "言語"
+  },
+  "keywords": {
+    "pipeline": "パイプラインを宣言します。これは、エージェント作業のトップレベルで再実行可能な単位です。",
+    "fn": "関数を定義します。",
+    "let": "ローカル値を束縛します。",
+    "parallel": "反復を並行して実行し、その結果を結合します。",
+    "for": "コレクションを順番に反復します。",
+    "in": "ループが参照するコレクションを指定します。",
+    "retry": "失敗時にブロックを、指定回数まで再実行します。",
+    "spawn": "後で待機できる並行タスクを開始します。",
+    "llm_call": "モデルを呼び出します。最初の引数はプロンプト、2番目はシステムプロンプトです。",
+    "log": "値を実行ログに書き込みます。",
+    "read_file": "ハーネス経由でファイルを読み取ります。これは実行前に確認される機能です。",
+    "tool_select": "モデルが次に呼び出すべきツールを選択します。",
+    "if": "条件が成り立つときにブロックを実行します。",
+    "else": "対応する if 条件が false のときに実行します。",
+    "while": "条件が成り立つ間、ブロックを繰り返します。",
+    "return": "関数またはパイプラインから値を返します。",
+    "break": "最も内側のループを抜けます。",
+    "continue": "次のループ反復へスキップします。"
+  },
+  "banner": {
+    "label": "リリース前",
+    "prerelease": "Harn は 1.0 未満です — 言語、標準ライブラリ、CLI はリリース間で変更される場合があります。",
+    "changelogLink": "リリースノートを見る"
+  },
+  "nav": {
+    "mainNavAria": "メイン",
+    "brandHomeAria": "Harn のホーム",
+    "docs": "ドキュメント",
+    "reference": "リファレンス",
+    "search": "検索",
+    "searchAria": "ドキュメントを検索",
+    "cmdK": "⌘K",
+    "githubAria": "GitHub 上の Harn"
+  },
+  "theme": {
+    "toLight": "ライトモードに切り替える",
+    "toDark": "ダークモードに切り替える"
+  },
+  "search": {
+    "placeholder": "ドキュメントを検索…",
+    "esc": "esc",
+    "loading": "読み込み中…",
+    "noResults": "結果はありません。"
+  },
+  "footer": {
+    "tagline": "AI エージェントを構築・運用するためのパイプライン指向の言語。",
+    "docsTitle": "ドキュメント",
+    "projectTitle": "プロジェクト",
+    "communityTitle": "コミュニティ",
+    "introduction": "はじめに",
+    "gettingStarted": "始め方",
+    "languageReference": "言語リファレンス",
+    "cookbook": "クックブック",
+    "llmsTxt": "llms.txt",
+    "github": "GitHub",
+    "releases": "リリース",
+    "playground": "プレイグラウンド",
+    "issues": "Issue",
+    "discussions": "ディスカッション",
+    "contributing": "貢献する",
+    "copyright": "© {year} Burin Labs. Harn はオープンソースです。"
+  },
+  "notFound": {
+    "code": "404",
+    "title": "ページが見つかりません",
+    "body": "そのページは存在しません。移動した可能性があるため、検索するかドキュメントに戻ってください。",
+    "toDocs": "ドキュメントへ",
+    "toHome": "ホーム"
+  },
+  "docs": {
+    "previous": "前へ",
+    "next": "次へ",
+    "pagerAria": "前後のページ",
+    "onThisPage": "このページ内",
+    "editOnGitHub": "このページを GitHub で編集",
+    "sectionsAria": "ドキュメントのセクション",
+    "sidebarAria": "ドキュメントのページ",
+    "breadcrumbAria": "パンくずリスト",
+    "onThisPageAria": "このページ内",
+    "skipToContent": "コンテンツへスキップ"
+  },
+  "diagram": {
+    "expand": "図を展開",
+    "overlayAria": "図のビューア",
+    "zoomIn": "ズームイン",
+    "zoomOut": "ズームアウト",
+    "resetZoom": "図を画面に合わせる",
+    "resetZoomLabel": "フィット",
+    "close": "図のビューアを閉じる"
+  },
+  "mockup": {
+    "aria": "ライブエージェントとして実行される Harn パイプライン定義",
+    "fileLabel": "review.harn",
+    "runLabel": "harn run",
+    "thought": "crates/harn-vm の diff を読み取り中…",
+    "toolCall": "llm_call · claude-opus-4-8 · 2 tools",
+    "findingPrefix": "3 件の問題を検出: でガードされていない unwrap が ",
+    "findingSymbol": "call_closure",
+    "findingSuffix": " にあり、境界チェックの欠如が 1 件、古いドキュメントの断片が 1 件あります。",
+    "spawn": "エージェントを起動 · 期限 30 秒",
+    "replay": "決定論的リプレイ: オン",
+    "findings": "3 件の指摘"
+  },
+  "landing": {
+    "hero": {
+      "headline": "1つの言語で AI エージェントを構築・運用する。",
+      "subhead": "Harn は AI エージェント向けのパイプライン指向言語です。LLM 呼び出し、ツール、能力チェック、永続的なステップ、決定論的リプレイは、あなたが自分で組み合わせる SDK ではなく、言語と標準ライブラリの機能です。",
+      "getStarted": "始める",
+      "forAgents": "エージェント向け",
+      "readDocs": "ドキュメントを読む",
+      "github": "GitHub",
+      "facts": [
+        "オープンソース、Rust で記述",
+        "決定論的リプレイ",
+        "デフォルトで機能安全",
+        "MCP、ACP、A2A に対応"
+      ]
+    },
+    "examples": {
+      "sectionTitle": "断片ではなく、完全なプログラム",
+      "sectionBody": "主題ではなく形に注目して読んでください。各例では、決定論的な作業は通常のコードであり、プログラムがどの時点でステップをモデル呼び出しに値するものと判断するかを決めます。これらは CLI デモバンドルに含まれ、記録済みフィクスチャに対してオフラインで実行されます。",
+      "tablistAria": "実行可能な Harn の例",
+      "filesAria": "シナリオファイル",
+      "multiFileNote": "このシナリオには複数のファイルが含まれています。プロンプトは兄弟の .harn.prompt テンプレートにあり、実際の Harn プロジェクトの構成どおり render_prompt で読み込まれます。",
+      "copy": "コピー",
+      "copied": "コピーしました",
+      "copyAria": "ファイルソースをコピー",
+      "viewSource": "ソースを表示",
+      "readDocs": "ドキュメントを読む",
+      "extendLabel": "自分らしく拡張する",
+      "scenarios": {
+        "review-captain": {
+          "tab": "コードレビューエージェント",
+          "title": "モデルを判断が必要な部分だけに使う。",
+          "outcome": "差分の収集、変更行数の集計、領収書の組み立ては、すべて普通のコードです。判断が必要なのは2つの手順だけなので、モデル呼び出しになるのもその2つだけです。プロンプトは別々のテンプレートファイルに置かれています。",
+          "extend": "ハードコードされた差分を forge への呼び出しに置き換えれば、実際の pull request をレビューできます。プログラムに触れずにプロンプトを編集したり、判定が否定的に戻ってきたときにマージをブロックする第3段階を追加したりできます。"
+        },
+        "merge-captain": {
+          "tab": "PRトリアージ",
+          "title": "キューを、実行可能な判断に変える。",
+          "outcome": "各 pull request は merge、handoff、block のいずれかに分類され、文章ではなく構造化データとして返ってくるので、次のステップは別のプロンプトではなくコードになります。",
+          "extend": "実際のキューを対象にして、判定の種類を広げてください。すべての判断に型が付いているので、それに応じて振り分けられます。安全なものは自動マージし、残りはエスカレーションできます。"
+        },
+        "mcp-host": {
+          "tab": "MCPサーバー",
+          "title": "ツールサーバーをプログラムの一部として監督する。",
+          "outcome": "登録、ステータスのスナップショット、シャットダウンは、すべて通常の文です。ツールサーバーのライフサイクルは、デプロイが担うものではなく、プログラムが所有するものです。",
+          "extend": "独自のサーバーを登録し、機能ポリシーの背後に配置してください。そうすれば、自律ループが渡していないツールに到達できなくなります。"
+        },
+        "stdlib-toolkit": {
+          "tab": "プロンプトツールキット",
+          "title": "コンテキストを決定論的に構築し、それから一度だけ尋ねる。",
+          "outcome": "clone、merge、dedupe、XML のラウンドトリップ、wrap、indent はライブラリ呼び出しです。プロンプトの高コスト部分は、たいていそれを組み立てることですが、その組み立てにモデルは不要です。",
+          "extend": "独自のソースを投入し、組み立てはコードの中に保ってください。モデルに再構成させるコンテキストが少ないほど、実行は安く、より再現可能になります。"
+        }
+      }
+    },
+    "features": {
+      "sectionTitle": "言語に組み込まれたエージェントランタイム",
+      "sectionBody": "オーケストレーション、安全性、可観測性は Harn とその標準ライブラリのプリミティブなので、互いに競合するのではなく組み合わせられます。",
+      "pipelines": {
+        "title": "パイプラインは第一級",
+        "description": "|> 演算子で作業を合成します。データと制御フローは上から下へ読みやすく、コンパイラが各ステージの形状を追跡します。"
+      },
+      "llms": {
+        "title": "LLM とツールが組み込み済み",
+        "description": "llm_call、agent_loop、tool vaults、MCP、reranking、ensembles は言語プリミティブであり、手作業で組み立てる後付けの SDK ではありません。"
+      },
+      "capabilities": {
+        "title": "コンパイル時の機能安全性",
+        "description": "ファイルシステム、ネットワーク、プロセスへのアクセスは、1行も実行される前に検査される capability です。自律ループの中で予期しない副作用は起こりません。"
+      },
+      "replay": {
+        "title": "決定論的リプレイ",
+        "description": "すべての実行は記録され、再生できます。エージェントの判断を一段ずつたどり、2つの実行を比較し、システムから非決定性を取り除いてデバッグできます。"
+      },
+      "durable": {
+        "title": "永続的なステップとトリガー",
+        "description": "長時間実行の作業をチェックポイントに保存し、クラッシュ後に再開できます。cron、webhook、GitHub、Slack などからパイプラインを起動できます。"
+      },
+      "protocols": {
+        "title": "プロトコルをネイティブに",
+        "description": "MCP、ACP、A2A をすぐに話せます。Harn を Rust に埋め込むことも、harn serve でサーバーとして実行することもできます。"
+      }
+    },
+    "paths": {
+      "sectionTitle": "あなたの道を見つける",
+      "sectionBody": "ドキュメントは、あなたがやりたいことを中心に整理されています。",
+      "explore": "見る",
+      "tutorials": {
+        "kicker": "チュートリアル",
+        "title": "作りながら学ぶ",
+        "description": "ゼロから始めて、動くエージェント、MCP サーバー、または eval パイプラインを段階的に構築します。"
+      },
+      "guides": {
+        "kicker": "ハウツーガイド",
+        "title": "タスクを完了する",
+        "description": "hooks、channels、pools、リファクタリングなど、実際に必要なもののためのレシピです。"
+      },
+      "reference": {
+        "kicker": "リファレンス",
+        "title": "詳細を調べる",
+        "description": "言語、ランタイム、標準ライブラリ、プロトコル、CLI の完全なリファレンスです。"
+      },
+      "explanation": {
+        "kicker": "内部構造",
+        "title": "設計を理解する",
+        "description": "ホスト境界、サンドボックス化、そして Harn のアーキテクチャ上の設計判断の背後にある考え方です。"
+      }
+    },
+    "cta": {
+      "title": "最初のパイプラインを書く",
+      "body": "CLI をインストールし、Harn を数行書いて、数分で実際のエージェントを実行します。",
+      "getStarted": "始める",
+      "browseCookbook": "クックブックを参照"
+    }
+  },
+  "meta": {
+    "landingTitle": "Harn: AI エージェントのオーケストレーションのためのパイプライン指向言語",
+    "landingDescription": "Harn は、AI エージェントを構築、オーケストレーション、運用するためのパイプライン指向言語です。チュートリアル、ガイド、そして完全な言語およびランタイム リファレンスを提供します。",
+    "notFoundTitle": "ページが見つかりません | {siteName}",
+    "notFoundDescription": "要求された Harn ドキュメントページが見つかりませんでした。",
+    "docTitle": "{title} | {siteName}"
+  }
+}

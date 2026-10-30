@@ -222,7 +222,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             "must start with a letter or underscore and consist of identifier characters",
         ));
     }
-
     // Constructors are type-renaming seeds, not independent method renames.
     let java_constructor = if seed_node.language == "java"
         && seed_node.kind == NodeKind::Function
@@ -275,7 +274,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         ));
     }
 
-    let in_scope_files = files_in_scope(
+    let mut in_scope_files = files_in_scope(
         state,
         scope,
         &symbol_name,
@@ -324,6 +323,81 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
     env.backend.syntax_tree = true;
+
+    if is_rename && seed_node.language == "go" && matches!(new_name.as_str(), "_" | "init") {
+        return Ok(invalid_identifier_response(
+            &env,
+            "Go's blank identifier and init cannot be used as rename targets",
+        ));
+    }
+
+    let check_go_package = is_rename
+        && seed_node.language == "go"
+        && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
+    let go_proof = if check_go_package {
+        match super::rename_go::inspect(
+            &state.root,
+            &seed_path,
+            &new_name,
+            session_id.as_deref(),
+            Some(&call),
+        ) {
+            Ok((package_shadows, _)) if !package_shadows.is_empty() => {
+                return Ok(conflict_response(&env, &package_shadows));
+            }
+            Ok((_, mut proof)) => {
+                if scope != Scope::Workspace {
+                    if let Err(detail) = proof.cover_scope(&in_scope_files, &symbol_name, &call) {
+                        if let Some(interrupt) = call.interrupted() {
+                            return Ok(interrupted_response(&env, interrupt, false));
+                        }
+                        return Ok(ambiguous_response_with_details(
+                            &env,
+                            &format!("rename aborted without writes: {detail}"),
+                        ));
+                    }
+                }
+                if let Err(detail) = proof.cover_workspace(
+                    &state.root,
+                    &symbol_name,
+                    &new_name,
+                    session_id.as_deref(),
+                    &call,
+                ) {
+                    if let Some(interrupt) = call.interrupted() {
+                        return Ok(interrupted_response(&env, interrupt, false));
+                    }
+                    return Ok(ambiguous_response_with_details(
+                        &env,
+                        &format!("rename aborted without writes: {detail}"),
+                    ));
+                }
+                Some(proof)
+            }
+            Err(detail) => {
+                if let Some(interrupt) = call.interrupted() {
+                    return Ok(interrupted_response(&env, interrupt, false));
+                }
+                return Ok(emit_response(
+                    &env,
+                    "refused",
+                    ResponseExtras {
+                        details: format!("Go package could not be inspected; rename aborted without writes: {detail}"),
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    if scope == Scope::Workspace {
+        if let Some(proof) = &go_proof {
+            in_scope_files.extend(proof.members().cloned());
+            in_scope_files.sort();
+            in_scope_files.dedup();
+        }
+    }
 
     // The identifier rewrite below would otherwise silently rename both
     // definitions and their unrelated uses.
@@ -426,6 +500,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         }
 
+        if language == Language::Go
+            && go_proof.is_some()
+            && targets.is_empty()
+            && path != &seed_path
+        {
+            continue;
+        }
+
         if !local_shadows.is_empty() {
             shadows.extend(local_shadows);
             continue;
@@ -458,6 +540,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                     state,
                     node: seed_node,
                     name: &symbol_name,
+                    go_package: go_proof.as_ref(),
                 },
                 path,
                 language,
@@ -501,30 +584,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     if plans.is_empty() {
         return Ok(no_match_response(&env));
     }
-
-    let check_go_package = is_rename
-        && seed_node.language == "go"
-        && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
-    let go_proof = if check_go_package {
-        match super::rename_go::inspect(&state.root, &seed_path, &new_name, session_id.as_deref()) {
-            Ok((package_shadows, _)) if !package_shadows.is_empty() => {
-                return Ok(conflict_response(&env, &package_shadows));
-            }
-            Ok((_, proof)) => Some(proof),
-            Err(detail) => {
-                return Ok(emit_response(
-                    &env,
-                    "refused",
-                    ResponseExtras {
-                        details: format!("Go package could not be inspected; rename aborted without writes: {detail}"),
-                        ..Default::default()
-                    },
-                ));
-            }
-        }
-    } else {
-        None
-    };
 
     // Pre-flight done. With `dry_run` we stop here without persisting.
     let failed = if dry_run {

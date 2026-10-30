@@ -1,3 +1,4 @@
+import { portalText } from "../i18n/portalText"
 import { useState } from "react"
 import { defineMessages, useIntl } from "react-intl"
 
@@ -61,7 +62,11 @@ function maxIteration(
 ): number {
   let max = 0
   for (const entry of timeline) {
-    max = Math.max(max, entry.activated_iteration, entry.deactivated_iteration ?? 0)
+    max = Math.max(
+      max,
+      entry.activated_iteration,
+      entry.deactivated_iteration ?? 0,
+    )
   }
   for (const match of matches) {
     max = Math.max(max, match.iteration)
@@ -92,7 +97,9 @@ export function SkillObservability(props: Props) {
             <h3>{intl.formatMessage(messages.timelineTitle)}</h3>
             <p>{intl.formatMessage(messages.timelineCopy)}</p>
           </div>
-          <span className="turn-chip">{timeline.length} skills</span>
+          <span className="turn-chip">
+            {portalText("{value0} skills", { value0: timeline.length })}
+          </span>
         </div>
         {timeline.length === 0 ? (
           <div className="muted">{intl.formatMessage(messages.noTimeline)}</div>
@@ -106,7 +113,10 @@ export function SkillObservability(props: Props) {
                 pctOf(end - entry.activated_iteration + 1, horizon + 1),
               )
               return (
-                <div className="skill-timeline-row" key={`${entry.name}-${idx}`}>
+                <div
+                  className="skill-timeline-row"
+                  key={`${entry.name}-${idx}`}
+                >
                   <div className="skill-timeline-label">
                     <strong>{entry.name}</strong>
                     <div className="muted">{entry.description || "—"}</div>
@@ -118,22 +128,29 @@ export function SkillObservability(props: Props) {
                         entry.deactivated_iteration != null
                           ? `–${entry.deactivated_iteration}`
                           : "+"
-                      }${entry.score != null ? ` • score ${entry.score.toFixed(2)}` : ""}${
+                      }${entry.score != null ? portalText(" • score {value0}", { value0: entry.score.toFixed(2) }) : ""}${
                         entry.reason ? ` • ${entry.reason}` : ""
                       }`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                     >
-                      iter {entry.activated_iteration}
-                      {entry.deactivated_iteration != null
-                        ? `–${entry.deactivated_iteration}`
-                        : "+"}
+                      {portalText("iter {value0}{value1}", {
+                        value0: entry.activated_iteration,
+                        value1:
+                          entry.deactivated_iteration != null
+                            ? `–${entry.deactivated_iteration}`
+                            : "+",
+                      })}
                     </div>
                   </div>
                   <div className="skill-timeline-meta">
                     {entry.allowed_tools.length ? (
-                      <span className="turn-chip">{entry.allowed_tools.length} tools</span>
+                      <span className="turn-chip">
+                        {portalText("{value0} tools", {
+                          value0: entry.allowed_tools.length,
+                        })}
+                      </span>
                     ) : (
-                      <span className="muted">any tools</span>
+                      <span className="muted">{portalText("any tools")}</span>
                     )}
                   </div>
                 </div>
@@ -149,16 +166,23 @@ export function SkillObservability(props: Props) {
             <h3>{intl.formatMessage(messages.waterfallTitle)}</h3>
             <p>{intl.formatMessage(messages.waterfallCopy)}</p>
           </div>
-          <span className="turn-chip">{toolLoads.length} queries</span>
+          <span className="turn-chip">
+            {portalText("{value0} queries", { value0: toolLoads.length })}
+          </span>
         </div>
         {toolLoads.length === 0 ? (
-          <div className="muted">{intl.formatMessage(messages.noWaterfall)}</div>
+          <div className="muted">
+            {intl.formatMessage(messages.noWaterfall)}
+          </div>
         ) : (
           <div className="tool-waterfall">
             {toolLoads.map((entry, idx) => (
-              <div className="tool-waterfall-row" key={entry.tool_use_id ?? idx}>
+              <div
+                className="tool-waterfall-row"
+                key={entry.tool_use_id ?? idx}
+              >
                 <div className="row">
-                  <strong>{entry.query || "(no query)"}</strong>
+                  <strong>{entry.query || portalText("(no query)")}</strong>
                   <span className="turn-chip">
                     {entry.strategy || "?"}
                     {entry.mode ? ` • ${entry.mode}` : ""}
@@ -166,13 +190,19 @@ export function SkillObservability(props: Props) {
                 </div>
                 <div className="meta">
                   {entry.promoted.length
-                    ? `promoted ${entry.promoted.join(", ")}`
+                    ? portalText("promoted {value0}", {
+                        value0: entry.promoted.join(", "),
+                      })
                     : entry.references.length
-                      ? `already loaded ${entry.references.join(", ")}`
-                      : "no tools matched"}
+                      ? portalText("already loaded {value0}", {
+                          value0: entry.references.join(", "),
+                        })
+                      : portalText("no tools matched")}
                 </div>
                 {entry.scope !== "run" ? (
-                  <div className="meta">scope {entry.scope}</div>
+                  <div className="meta">
+                    {portalText("scope {value0}", { value0: entry.scope })}
+                  </div>
                 ) : null}
               </div>
             ))}
@@ -187,7 +217,9 @@ export function SkillObservability(props: Props) {
               <h3>{intl.formatMessage(messages.matcherTitle)}</h3>
               <p>{intl.formatMessage(messages.matcherCopy)}</p>
             </div>
-            <span className="turn-chip">{matches.length} events</span>
+            <span className="turn-chip">
+              {portalText("{value0} events", { value0: matches.length })}
+            </span>
           </div>
           <div className="table-like">
             {matches.map((match, idx) => {
@@ -201,12 +233,19 @@ export function SkillObservability(props: Props) {
                   >
                     <div className="row">
                       <strong>
-                        iter {match.iteration}
-                        {match.reassess ? " • reassess" : ""}
+                        {portalText("iter {value0}{value1}", {
+                          value0: match.iteration,
+                          value1: match.reassess
+                            ? portalText(" • reassess")
+                            : "",
+                        })}
                       </strong>
                       <span>
-                        {match.strategy || "metadata"} • {match.candidates.length}{" "}
-                        candidates
+                        {portalText("{value0} • {value1}{value2}candidates", {
+                          value0: match.strategy || portalText("metadata"),
+                          value1: match.candidates.length,
+                          value2: " ",
+                        })}
                       </span>
                     </div>
                   </button>
@@ -214,7 +253,9 @@ export function SkillObservability(props: Props) {
                     <div className="match-detail">
                       {match.working_files.length ? (
                         <div className="meta">
-                          working files {match.working_files.join(", ")}
+                          {portalText("working files {value0}", {
+                            value0: match.working_files.join(", "),
+                          })}
                         </div>
                       ) : null}
                       {match.candidates.length ? (
@@ -222,13 +263,19 @@ export function SkillObservability(props: Props) {
                           {match.candidates.map((cand, ci) => (
                             <li key={`${cand.name}-${ci}`}>
                               <strong>{cand.name}</strong>
-                              <span className="turn-chip">{cand.score.toFixed(2)}</span>
-                              <span className="muted">{cand.reason || "—"}</span>
+                              <span className="turn-chip">
+                                {cand.score.toFixed(2)}
+                              </span>
+                              <span className="muted">
+                                {cand.reason || "—"}
+                              </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="muted">No candidates considered.</div>
+                        <div className="muted">
+                          {portalText("No candidates considered.")}
+                        </div>
                       )}
                     </div>
                   ) : null}

@@ -2,6 +2,7 @@ import { Link } from "react-router"
 import { Logo } from "./Logo"
 import { ThemeToggle } from "./ThemeToggle"
 import { useMessages } from "../i18n"
+import { getLocale, languages, setLocale, type Locale } from "../../../ui/localization"
 
 const GITHUB = "https://github.com/burin-labs/harn"
 
@@ -65,6 +66,14 @@ export function Navbar({ onOpenSearch }: { onOpenSearch: () => void }) {
             </svg>
           </a>
 
+          <select
+            aria-label={t.common.language}
+            value={getLocale()}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+            className="max-w-32 rounded-lg border border-input-border bg-input-bg px-2 py-1.5 text-sm text-foreground"
+          >
+            {Object.entries(languages).map(([locale, label]) => <option key={locale} value={locale}>{label}</option>)}
+          </select>
           <ThemeToggle />
         </div>
       </div>
