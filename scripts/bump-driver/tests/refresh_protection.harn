@@ -43,11 +43,13 @@ fn read_only_calls(testing: HarnessTesting, expected: int) {
 pipeline test_refresh_accepts_measured_unarmed_head_and_prior_head_approval(harness: Harness) {
   for snapshot in [
     refresh_snapshot(HEAD),
-    refresh_snapshot(HEAD) + {labels: {totalCount: 1, nodes: [{name: "dependencies"}]}},
+    refresh_snapshot(HEAD)
+      + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "dependencies"}]}},
     refresh_snapshot(HEAD)
       + {
         latestOpinionatedReviews: {
           totalCount: 1,
+          pageInfo: {hasNextPage: false},
           nodes: [{state: "APPROVED", commit: {oid: "cccccccccccccccccccccccccccccccccccccccc"}}],
         },
       },
@@ -88,10 +90,16 @@ pipeline test_refresh_refuses_graphql_errors_beside_complete_data(harness: Harne
 
 pipeline test_refresh_preserves_armed_or_reviewed_exact_head(harness: Harness) {
   for mutation in [
-    {labels: {totalCount: 1, nodes: [{name: "ship"}]}},
+    {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "ship"}]}},
     {autoMergeRequest: {enabledAt: "2026-10-30T00:00:00Z"}},
     {isInMergeQueue: true},
-    {latestOpinionatedReviews: {totalCount: 1, nodes: [{state: "APPROVED", commit: {oid: HEAD}}]}},
+    {
+      latestOpinionatedReviews: {
+        totalCount: 1,
+        pageInfo: {hasNextPage: false},
+        nodes: [{state: "APPROVED", commit: {oid: HEAD}}],
+      },
+    },
   ] {
     harness.testing.http_mock_clear()
     mock_open_bump(harness.testing, HEAD)
@@ -111,8 +119,20 @@ pipeline test_refresh_refuses_partial_missing_and_moved_admission_snapshot(harne
   for snapshot in [
     refresh_snapshot(HEAD) + {labels: {totalCount: 1, nodes: []}},
     refresh_snapshot(HEAD) + {latestOpinionatedReviews: {totalCount: 1, nodes: []}},
+    refresh_snapshot(HEAD) + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: []}},
     refresh_snapshot(HEAD)
-      + {latestOpinionatedReviews: {totalCount: 1, nodes: [{state: "APPROVED", commit: nil}]}},
+      + {latestOpinionatedReviews: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: []}},
+    refresh_snapshot(HEAD) + {labels: {totalCount: 0, pageInfo: {hasNextPage: true}, nodes: []}},
+    refresh_snapshot(HEAD)
+      + {latestOpinionatedReviews: {totalCount: 0, pageInfo: {hasNextPage: true}, nodes: []}},
+    refresh_snapshot(HEAD)
+      + {
+        latestOpinionatedReviews: {
+          totalCount: 1,
+          pageInfo: {hasNextPage: false},
+          nodes: [{state: "APPROVED", commit: nil}],
+        },
+      },
     refresh_snapshot("cccccccccccccccccccccccccccccccccccccccc"),
     refresh_snapshot(HEAD) + {state: "CLOSED"},
     refresh_snapshot(HEAD) + {state: "MERGED"},
@@ -139,7 +159,8 @@ pipeline test_publication_rechecks_delivery_armed_during_long_refresh(harness: H
     harness.testing,
     [
       refresh_snapshot(HEAD),
-      refresh_snapshot(HEAD) + {labels: {totalCount: 1, nodes: [{name: "ship"}]}},
+      refresh_snapshot(HEAD)
+        + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "ship"}]}},
     ],
   )
   const driver = remote(harness)

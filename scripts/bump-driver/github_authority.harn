@@ -5,18 +5,19 @@ pub type GithubBumpRefreshState = {
   head_oid: string,
   auto_merge_armed: bool,
   queued: bool,
-  labels: {total_count: int, names: list<string>},
-  reviews: {total_count: int, nodes: list<{state: string, head_oid: string?}>},
+  labels: {total_count: int, has_next_page: bool, names: list<string>},
+  reviews: {total_count: int, has_next_page: bool, nodes: list<{state: string, head_oid: string?}>},
 }
 
 /** Delivery and review own an admitted head until their controls are withdrawn. */
 pub fn bump_refresh_admission(state: GithubBumpRefreshState) -> {allowed: bool, reason: string} {
-  if state.labels.total_count != len(state.labels.names)
+  if state.labels.has_next_page || state.reviews.has_next_page
+    || state.labels.total_count != len(state.labels.names)
     || state.reviews.total_count != len(state.reviews.nodes) {
     return {
       allowed: false,
       reason:
-        "incomplete admission census: labels ${len(state.labels.names)}/${state.labels.total_count}, writer reviews ${len(state.reviews.nodes)}/${state.reviews.total_count}",
+        "incomplete admission census: labels ${len(state.labels.names)}/${state.labels.total_count} more=${state.labels.has_next_page}, writer reviews ${len(state.reviews.nodes)}/${state.reviews.total_count} more=${state.reviews.has_next_page}",
     }
   }
   if state.auto_merge_armed || state.queued || state.labels.names.contains("ship") {

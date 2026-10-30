@@ -61,8 +61,12 @@ type RefreshProtectionPull = {
   headRefOid: string,
   autoMergeRequest: {enabledAt: string}?,
   isInMergeQueue: bool,
-  labels: {totalCount: int, nodes: list<{name: string}>},
-  latestOpinionatedReviews: {totalCount: int, nodes: list<{state: string, commit: {oid: string}?}>},
+  labels: {totalCount: int, pageInfo: {hasNextPage: bool}, nodes: list<{name: string}>},
+  latestOpinionatedReviews: {
+    totalCount: int,
+    pageInfo: {hasNextPage: bool},
+    nodes: list<{state: string, commit: {oid: string}?}>,
+  },
 }
 
 type RefreshProtectionResponse = {
@@ -87,7 +91,7 @@ fn __require_refresh_mutable(
           method: "POST",
           body: {
             query:
-              "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state headRefOid autoMergeRequest{enabledAt} isInMergeQueue labels(first:100){totalCount nodes{name}} latestOpinionatedReviews(first:100,writersOnly:true){totalCount nodes{state commit{oid}}}}}}",
+              "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state headRefOid autoMergeRequest{enabledAt} isInMergeQueue labels(first:100){totalCount pageInfo{hasNextPage} nodes{name}} latestOpinionatedReviews(first:100,writersOnly:true){totalCount pageInfo{hasNextPage} nodes{state commit{oid}}}}}}",
             variables: {owner: repo.owner, repo: repo.name, number: number},
           },
           options: options,
@@ -108,10 +112,12 @@ fn __require_refresh_mutable(
       queued: pull.isInMergeQueue,
       labels: {
         total_count: pull.labels.totalCount,
+        has_next_page: pull.labels.pageInfo.hasNextPage,
         names: pull.labels.nodes.map({ label -> label.name }),
       },
       reviews: {
         total_count: pull.latestOpinionatedReviews.totalCount,
+        has_next_page: pull.latestOpinionatedReviews.pageInfo.hasNextPage,
         nodes: pull.latestOpinionatedReviews.nodes.map(
           { review -> {state: review.state, head_oid: review.commit?.oid} },
         ),

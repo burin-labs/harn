@@ -7,8 +7,8 @@ pub fn refresh_snapshot(head: string) -> dict {
     headRefOid: head,
     autoMergeRequest: nil,
     isInMergeQueue: false,
-    labels: {totalCount: 0, nodes: []},
-    latestOpinionatedReviews: {totalCount: 0, nodes: []},
+    labels: {totalCount: 0, pageInfo: {hasNextPage: false}, nodes: []},
+    latestOpinionatedReviews: {totalCount: 0, pageInfo: {hasNextPage: false}, nodes: []},
   }
 }
 
