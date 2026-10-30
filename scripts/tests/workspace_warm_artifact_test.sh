@@ -59,10 +59,15 @@ chmod +x "$tmpdir/bin/cargo"
 cat > "$tmpdir/bin/git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "$*" == "rev-parse --verify HEAD" ]]; then
-  printf '%s\n' "${FAKE_COMMIT:?}"
-  exit 0
-fi
+case "$*" in
+  'rev-parse --verify HEAD'|'rev-parse --verify HEAD^{commit}')
+    printf '%s\n' "${FAKE_COMMIT:?}"; exit 0 ;;
+  'rev-parse --show-toplevel') pwd; exit 0 ;;
+  'diff --quiet HEAD --'|'diff --cached --quiet HEAD --')
+    [[ "${FAKE_WORKTREE_DIRTY:-false}" != true ]]; exit $? ;;
+  'ls-files --others --exclude-standard -- Cargo.lock Cargo.toml crates spec tree-sitter-harn')
+    exit 0 ;;
+esac
 echo "unexpected git invocation: $*" >&2
 exit 2
 SH
@@ -145,7 +150,16 @@ run_restore() {
   )
 }
 
-echo "pack strips workspace members and incremental output"
+if [[ "$platform" == macos ]]; then
+  echo "pack refuses workspace reuse from a modified checkout"
+  if FAKE_WORKTREE_DIRTY=true run_pack >"$tmpdir/dirty.out" 2>&1; then
+    echo "expected a dirty workspace producer to refuse" >&2
+    exit 1
+  fi
+  grep -Fq 'changed or unmeasured source tree' "$tmpdir/dirty.out"
+  test -f "$tmpdir/target/debug/deps/libharn_vm-def456.rlib"
+fi
+echo "pack follows the platform workspace policy and strips incremental output"
 run_pack
 test -f "$tmpdir/out/staging/manifest"
 test -f "$tmpdir/out/staging/target.tar.gz"

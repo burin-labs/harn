@@ -54,6 +54,12 @@ on:
       - ".config/native-qualification.json"
       - ".github/workflows/windows-nightly.yml"
       - ".github/workflows/macos-nightly.yml"
+      - ".github/cache-policy.json"
+      - "Makefile"
+      - "scripts/ci/reuse_workspace_crates.sh"
+      - "scripts/ci/workspace_warm_artifact.sh"
+      - "scripts/ci/run_rust_test_lane.sh"
+      - "scripts/tests/workspace_reuse_cargo_test.sh"
 
 permissions:
   contents: read
@@ -220,6 +226,11 @@ jobs:
         # Qualification may select an older main ancestor without this target.
         if: ${{ github.event_name != 'workflow_dispatch' }}
         run: make test-workspace-reuse-cargo
+      - name: Invalidate workspace units before publishing a new warm generation
+        # A producer must not attest unused units left over from an older build.
+        # Consumers retain their validated workspace units; this is writer-only.
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
+        run: cargo clean --workspace
       - name: Run workspace nextest
         id: workspace-nextest
         shell: bash
@@ -228,6 +239,8 @@ jobs:
           # so non-hosted runs name Cargo's own default explicitly.
           CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
           RUST_TEST_JOB_LIMIT_MINUTES: 75
+          # Routine feedback gets an early signal, separate from the cold-build fuse.
+          RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native

@@ -275,6 +275,10 @@ pack() {
   fi
 
   if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    if ! "$SCRIPT_DIR/reuse_workspace_crates.sh" current HEAD "$producer_commit"; then
+      echo "error: refusing to retain workspace outputs from a changed or unmeasured source tree" >&2
+      exit 1
+    fi
     # Only the successful main nightly publishes this generation. It builds
     # the complete native test graph after a dependency-only restore. Preserve
     # those units with the producer identity, then let the existing source
