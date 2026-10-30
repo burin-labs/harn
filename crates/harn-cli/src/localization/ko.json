@@ -1860,7 +1860,7 @@
   "Remove locally stored OAuth material for a provider": "제공자에 대해 로컬에 저장된 OAuth 자료를 제거합니다",
   "Removed `{}`.": "`{0}`를 제거했습니다.",
   "Removed stored OAuth token for {} ({})": "{0} ({1})에 저장된 OAuth 토큰을 제거했습니다",
-  "Render API key for API-backed secret synchronization": "API 기반 비밀 동기화를 위한 API 키를 렌더링합니다",
+  "Render API key for API-backed secret synchronization": "API를 통한 비밀 정보 동기화에 사용할 Render API 키",
   "Render Markdown API reference docs for a Harn file or project's `pub` symbols (functions, consts, types, enums, structs), drawn from their HarnDoc comments: signature, description, parameters, `@effects`, `@errors`, and return type. Prints to stdout by default; pass `--output <file>` to write a file (e.g. `docs/api.md`)": "Harn 파일 또는 프로젝트의 `pub` 기호(함수, const, type, enum, struct)에 대한 Markdown API 참조 문서를 렌더링합니다. HarnDoc 주석에서 가져옵니다: 서명, 설명, 매개변수, `@effects`, `@errors`, 반환 타입. 기본적으로 stdout에 출력합니다. 파일에 쓰려면 `--output <file>`를 전달하세요(예: `docs/api.md`)",
   "Render a .harn file as a Mermaid workflow graph": ".harn 파일을 Mermaid 워크플로 그래프로 렌더링합니다",
   "Render and optionally run a `.harn.prompt` across a fleet of models": "모델 전반에 걸쳐 `.harn.prompt`를 렌더링하고 선택적으로 실행합니다",

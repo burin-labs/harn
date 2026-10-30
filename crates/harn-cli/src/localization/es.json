@@ -1860,7 +1860,7 @@
   "Remove locally stored OAuth material for a provider": "Elimina el material OAuth almacenado localmente para un proveedor",
   "Removed `{}`.": "Eliminado `{0}`.",
   "Removed stored OAuth token for {} ({})": "Token OAuth almacenado eliminado para {0} ({1})",
-  "Render API key for API-backed secret synchronization": "Renderiza la clave API para la sincronización de secretos respaldada por API",
+  "Render API key for API-backed secret synchronization": "Clave de API de Render para sincronizar secretos mediante la API",
   "Render Markdown API reference docs for a Harn file or project's `pub` symbols (functions, consts, types, enums, structs), drawn from their HarnDoc comments: signature, description, parameters, `@effects`, `@errors`, and return type. Prints to stdout by default; pass `--output <file>` to write a file (e.g. `docs/api.md`)": "Renderiza documentación de referencia Markdown API para un archivo Harn o los símbolos `pub` de un proyecto (funciones, consts, tipos, enums, structs), a partir de sus comentarios HarnDoc: firma, descripción, parámetros, `@effects`, `@errors` y tipo de retorno. Por defecto imprime en stdout; pasa `--output <file>` para escribir un archivo (p. ej., `docs/api.md`)",
   "Render a .harn file as a Mermaid workflow graph": "Renderiza un archivo .harn como un grafo de flujo Mermaid",
   "Render and optionally run a `.harn.prompt` across a fleet of models": "Renderiza y, opcionalmente, ejecuta un `.harn.prompt` en una flota de modelos",

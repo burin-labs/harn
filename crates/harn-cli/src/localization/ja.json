@@ -1860,7 +1860,7 @@
   "Remove locally stored OAuth material for a provider": "provider の local に保存された OAuth material を削除する",
   "Removed `{}`.": "`{0}` を削除しました。",
   "Removed stored OAuth token for {} ({})": "{0}（{1}）の保存済み OAuth トークンを削除しました",
-  "Render API key for API-backed secret synchronization": "API で支えられた secret synchronization のための API key をレンダリングする",
+  "Render API key for API-backed secret synchronization": "API 経由のシークレット同期に使用する Render API キー",
   "Render Markdown API reference docs for a Harn file or project's `pub` symbols (functions, consts, types, enums, structs), drawn from their HarnDoc comments: signature, description, parameters, `@effects`, `@errors`, and return type. Prints to stdout by default; pass `--output <file>` to write a file (e.g. `docs/api.md`)": "Harn ファイルまたはプロジェクトの公開 `pub` シンボル（関数、定数、型、列挙型、構造体）から Markdown API リファレンスを生成します。HarnDoc コメントのシグネチャ、説明、パラメーター、`@effects`、`@errors`、戻り値の型を使用します。既定では標準出力に表示します。ファイルに保存するには `--output <file>` を指定します（例: `docs/api.md`）",
   "Render a .harn file as a Mermaid workflow graph": ".harn file を Mermaid workflow graph としてレンダリングする",
   "Render and optionally run a `.harn.prompt` across a fleet of models": "モデルの fleet 全体に対して `.harn.prompt` をレンダリングし、必要に応じて実行する",
