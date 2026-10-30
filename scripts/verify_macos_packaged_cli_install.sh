@@ -48,25 +48,18 @@ cargo install --path "$package" --debug --locked --root "$scratch/installed" \
   'fn main(harness: Harness) { harness.stdio.println("packaged-install-reached") }' \
   > "$output/smoke.txt"
 grep -Fx packaged-install-reached "$output/smoke.txt"
-PACKAGE_PROOF_CRATE_SHA="$package_sha" PACKAGE_PROOF_BASELINE_EXIT="$before" \
-PACKAGE_PROOF_ADAPTED_SOURCE_SHA="$adapted_source_sha" python3 - "$output/receipt.json" <<'PY'
-import json
-import os
-import pathlib
-import sys
-
-receipt = {
-    "schema_version": "harn.macos_packaged_install.v1",
-    "source_sha": os.environ["PACKAGE_PROOF_SOURCE_SHA"],
-    "published_fixture_version": "0.10.182",
-    "published_fixture_sha256": os.environ["PACKAGE_PROOF_CRATE_SHA"],
-    "adaptation": "Only src/tests/common/mod.rs copied from the reviewed source; all dependencies use the published 0.10.182 locked graph.",
-    "adapted_source_sha256": os.environ["PACKAGE_PROOF_ADAPTED_SOURCE_SHA"],
-    "baseline_exit_code": int(os.environ["PACKAGE_PROOF_BASELINE_EXIT"]),
-    "baseline_missing_sibling_include_observed": True,
-    "adapted_install_exit_code": 0,
-    "installed_script_smoke": "packaged-install-reached",
-}
-pathlib.Path(sys.argv[1]).write_text(json.dumps(receipt, indent=2) + "\n")
-PY
+jq -n --arg source_sha "$source_sha" --arg package_sha "$package_sha" \
+  --arg adapted_source_sha "$adapted_source_sha" --argjson before "$before" \
+  '{
+    schema_version: "harn.macos_packaged_install.v1",
+    source_sha: $source_sha,
+    published_fixture_version: "0.10.182",
+    published_fixture_sha256: $package_sha,
+    adaptation: "Only src/tests/common/mod.rs copied from the reviewed source; all dependencies use the published 0.10.182 locked graph.",
+    adapted_source_sha256: $adapted_source_sha,
+    baseline_exit_code: $before,
+    baseline_missing_sibling_include_observed: true,
+    adapted_install_exit_code: 0,
+    installed_script_smoke: "packaged-install-reached"
+  }' > "$output/receipt.json"
 cat "$output/receipt.json"
