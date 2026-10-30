@@ -7,7 +7,7 @@ cd "$root"
 
 harn_bin="${HARN_BIN:-}"
 if [[ -z "$harn_bin" || ! -x "$harn_bin" ]]; then
-  echo "error: HARN_BIN must name the already-built release-source Harn executable" >&2
+  echo "error: HARN_BIN must name the qualified development paperwork interpreter" >&2
   exit 1
 fi
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then

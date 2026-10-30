@@ -12,7 +12,7 @@ if [[ -z "$expected_version" ]]; then
   exit 1
 fi
 if [[ -z "$harn_bin" || ! -x "$harn_bin" ]]; then
-  echo "error: HARN_BIN must name the already-built release-source Harn executable" >&2
+  echo "error: HARN_BIN must name the qualified development paperwork interpreter" >&2
   exit 1
 fi
 if [[ -z "${GH_TOKEN:-}" ]]; then
