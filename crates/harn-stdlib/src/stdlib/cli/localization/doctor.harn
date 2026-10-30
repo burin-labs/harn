@@ -36,6 +36,11 @@ import {
 } from "std/cli/localization/doctor/part_4"
 import { message_25, message_26 } from "std/cli/localization/doctor/part_5"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "--- Providers ---\n" {
     return message_0(locale, values)

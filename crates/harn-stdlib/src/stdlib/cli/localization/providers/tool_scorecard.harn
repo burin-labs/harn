@@ -12,6 +12,11 @@ import {
   message_7,
 } from "std/cli/localization/providers/tool_scorecard/part_1"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source
     == "provider tool-call scorecard plan: routes={0} unscorecardable_providers={1} cases={2} required={3} executable={4} live_tool_probes={5} offline_request_checks={6} not_applicable={7} batch_manifest_requests={8} readiness_commands={9}\n" {

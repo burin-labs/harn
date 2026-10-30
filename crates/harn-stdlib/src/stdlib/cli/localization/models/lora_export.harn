@@ -43,6 +43,11 @@ import {
 } from "std/cli/localization/models/lora_export/part_5"
 import { message_30 } from "std/cli/localization/models/lora_export/part_6"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  LoRA module format: {0}" {
     return message_0(locale, values)

@@ -29,6 +29,11 @@ import {
 } from "std/cli/localization/models/batch_plan/part_3"
 import { message_20, message_21 } from "std/cli/localization/models/batch_plan/part_4"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  groups: {0}" {
     return message_0(locale, values)

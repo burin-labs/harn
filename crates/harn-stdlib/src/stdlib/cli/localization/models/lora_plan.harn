@@ -98,6 +98,11 @@ import {
   message_49,
 } from "std/cli/localization/models/lora_plan/part_9"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  LoRA hparams: rank={0} alpha={1} dropout={2}" {
     return message_0(locale, values)

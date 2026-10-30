@@ -15,6 +15,11 @@ import {
 } from "std/cli/localization/models/batch_status/part_1"
 import { message_10, message_11 } from "std/cli/localization/models/batch_status/part_2"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  completed: {0}" {
     return message_0(locale, values)

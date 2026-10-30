@@ -7,6 +7,11 @@ import {
   message_4,
 } from "std/cli/localization/providers/recommend/part_0"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "local provider recommendations\n" {
     return message_0(locale, values)

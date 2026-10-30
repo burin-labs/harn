@@ -34,6 +34,11 @@ import {
   message_23,
 } from "std/cli/localization/models/lora_render/part_4"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  embedding save policy: {0}" {
     return message_0(locale, values)

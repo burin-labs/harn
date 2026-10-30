@@ -47,6 +47,11 @@ import {
   message_32,
 } from "std/cli/localization/models/lora_preflight/part_6"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "    - {0} line={1} approx_tokens={2} {3}/{4}" {
     return message_0(locale, values)

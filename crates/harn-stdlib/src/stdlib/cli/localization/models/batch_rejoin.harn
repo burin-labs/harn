@@ -8,6 +8,11 @@ import {
 } from "std/cli/localization/models/batch_rejoin/part_0"
 import { message_5, message_6 } from "std/cli/localization/models/batch_rejoin/part_1"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  consumable: {0}" {
     return message_0(locale, values)

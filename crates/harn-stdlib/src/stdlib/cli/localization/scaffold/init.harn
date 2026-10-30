@@ -22,6 +22,11 @@ import {
 } from "std/cli/localization/scaffold/init/part_2"
 import { message_15 } from "std/cli/localization/scaffold/init/part_3"
 
+/**
+ * Select a registered CLI template without interpreting argument text.
+ * @effects: []
+ * @errors: ["Unregistered CLI localization message", "CLI localization argument count does not match its registered template"]
+ */
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  create  {0}" {
     return message_0(locale, values)
