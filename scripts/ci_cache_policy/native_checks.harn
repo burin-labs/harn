@@ -647,14 +647,50 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
   if aggregate?.name != "Rust on macOS (deny-warnings build + lint)"
     || job_needs(aggregate) != ["changes", "macos-lint"]
     || len(aggregate_steps) != 1
-    || aggregate?.permissions?.actions != "read"
-    || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}" {
+    || aggregate?.permissions != {contents: "read"}
+    || aggregate?.["timeout-minutes"] != 5
+    || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}"
+    || aggregate_steps[0]?.env?.LINT_PROOFS != "$" + "{{ toJSON(needs.macos-lint.outputs) }}" {
     errors = errors
       + [
-        "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+        "ci.yml:macos must retain the required aggregate and verify complete matrix-output receipts",
       ]
   }
-  return errors
+  return errors + macos_lint_receipt_errors(lint_job ?? {}, lint_steps)
+}
+
+fn macos_lint_receipt_errors(job: dict, lint_steps: list) -> list<string> {
+  let expected_outputs: dict = {}
+  for leg in RUST_LINT_LEGS {
+    expected_outputs[leg] = "$" + "{{ steps.lint-proof.outputs['${leg}'] }}"
+  }
+  const publication = matching_run_steps(job, "./scripts/ci/require_macos_lint.sh record")
+  const parity = matching_named_steps(job, "Verify canonical package hash parity")
+  const steps = job?.steps ?? []
+  const last = if len(steps) > 0 {
+    steps[len(steps) - 1] ?? {}
+  } else {
+    {}
+  }
+  const parity_command =
+    "scripts/ci/run_rust_test_lane.sh cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent"
+  if job?.outputs != expected_outputs || len(publication) != 1
+    || publication[0]?.id != "lint-proof"
+    || publication[0]?.if != "$" + "{{ success() }}"
+    || publication[0]?.env?.LINT_LEG != "$" + "{{ matrix.kind }}"
+    || publication[0]?.env?.LINT_OUTCOME != "$" + "{{ steps.strict-lint.outcome }}"
+    || last != publication[0]
+    || lint_steps[0]?.id != "strict-lint"
+    || lint_steps[0]?.["continue-on-error"] == true
+    || len(parity) != 1
+    || parity[0]?.if != "matrix.kind == 'workspace'"
+    || trim(parity[0]?.run ?? "") != parity_command
+    || parity[0]?.["continue-on-error"] == true {
+    return [
+      "ci.yml:macos-lint must publish distinct role receipts only after successful strict lint and parity",
+    ]
+  }
+  return []
 }
 // The warm-artifact restore is a consumer-only step and is not a cache-key
 // input. Exempting it by id keeps the parity check meaningful instead of

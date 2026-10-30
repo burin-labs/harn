@@ -1,0 +1,54 @@
+name: Disposable matrix output transport probe
+on:
+  push:
+    branches: [ksinder/macos-lint-output-probe]
+permissions:
+  contents: read
+jobs:
+  macos-lint:
+    name: Transport fixture (${{ matrix.kind }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: workspace
+          - kind: lean-lsp
+          - kind: freshness-checker
+    outputs:
+      workspace: ${{ steps.lint-proof.outputs['workspace'] }}
+      lean-lsp: ${{ steps.lint-proof.outputs['lean-lsp'] }}
+      freshness-checker: ${{ steps.lint-proof.outputs['freshness-checker'] }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Transport fixture only, no compiler
+        id: strict-lint
+        run: echo 'Fixture signal, not lint coverage'
+      - name: Publish strict lint receipt
+        id: lint-proof
+        if: ${{ success() }}
+        env:
+          LINT_LEG: ${{ matrix.kind }}
+          LINT_OUTCOME: ${{ steps.strict-lint.outcome }}
+        run: ./scripts/ci/require_macos_lint.sh record
+  macos:
+    name: Verify inherited matrix output transport
+    needs: [macos-lint]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Require every macOS lint leg
+        env:
+          MATRIX_RESULT: ${{ needs.macos-lint.result }}
+          LINT_PROOFS: ${{ toJSON(needs.macos-lint.outputs) }}
+        run: ./scripts/ci/require_macos_lint.sh
+      - name: Fail the first measured consumer for one failed-only rerun
+        if: ${{ github.run_attempt == 1 }}
+        run: exit 42

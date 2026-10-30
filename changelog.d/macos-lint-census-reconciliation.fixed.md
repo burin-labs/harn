@@ -1,2 +1,2 @@
-The macOS lint aggregate waits for delayed inherited job metadata on failed-only reruns while still requiring every
-lint leg to succeed.
+The macOS lint aggregate reads distinct success receipts from the matrix engine instead of its delayed job index.
+Failed-only reruns retain each successful producer's original attempt while validating the current consumer.
