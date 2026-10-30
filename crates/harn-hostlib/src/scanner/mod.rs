@@ -34,6 +34,7 @@ mod fingerprint;
 mod folders;
 mod git;
 mod imports;
+mod layout;
 mod manifest;
 mod result;
 mod scoring;
@@ -54,6 +55,7 @@ pub(crate) fn strip_ambient_git_env(cmd: &mut Command) {
 }
 
 pub use git::GitCapabilities;
+pub use layout::{TestLayoutDiscovery, TestLayoutProfile};
 pub use result::{
     DependencyEdge, FileRecord, FolderRecord, LanguageStat, ProjectMetadata, ScanDelta, ScanResult,
     SubProject, SymbolKind, SymbolRecord, TestCommandDiscovery,
@@ -109,6 +111,8 @@ pub struct ScanProjectOptions {
     pub include_git_history: bool,
     /// Approximate token budget for the text repo map.
     pub repo_map_token_budget: usize,
+    /// Product-supplied test filename conventions; an empty list is unconfigured.
+    pub layout_profiles: Vec<TestLayoutProfile>,
 }
 
 impl Default for ScanProjectOptions {
@@ -119,6 +123,7 @@ impl Default for ScanProjectOptions {
             max_files: 0,
             include_git_history: true,
             repo_map_token_budget: 1200,
+            layout_profiles: Vec::new(),
         }
     }
 }
@@ -128,6 +133,7 @@ pub fn discover_test_commands(
     root: &Path,
     include_hidden: bool,
     ignore_policy: IgnorePolicy,
+    layout_profiles: &[TestLayoutProfile],
 ) -> TestCommandDiscovery {
     let canonical = canonicalize(root);
     let options = discover::DiscoverOptions {
@@ -137,7 +143,7 @@ pub fn discover_test_commands(
     // The command search walks the filesystem itself. Add only the tracked
     // files Git can see through ignore rules, without doing a second walk.
     let files = discover::git_ls_files(&canonical, &git::CliGitCapabilities).unwrap_or_default();
-    commands::detect_test_commands(&canonical, options, &files)
+    commands::detect_test_commands(&canonical, options, &files, layout_profiles)
 }
 
 /// Run a full scan of `root`, persist a snapshot, and return the result.
@@ -161,7 +167,12 @@ pub fn scan_project_with_git(
         ignore_policy: opts.ignore_policy,
     };
     let mut discovered = discover::discover_files(&canonical, discover_opts, git);
-    let test_commands = commands::detect_test_commands(&canonical, discover_opts, &discovered);
+    let test_commands = commands::detect_test_commands(
+        &canonical,
+        discover_opts,
+        &discovered,
+        &opts.layout_profiles,
+    );
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
         discovered.truncate(opts.max_files);
         true
@@ -265,7 +276,8 @@ pub fn scan_incremental_with_git(
         ignore_policy: opts.ignore_policy,
     };
     let mut current = discover::discover_files(&canonical, discover_opts, git);
-    let test_commands = commands::detect_test_commands(&canonical, discover_opts, &current);
+    let test_commands =
+        commands::detect_test_commands(&canonical, discover_opts, &current, &opts.layout_profiles);
     if opts.max_files > 0 && current.len() > opts.max_files {
         current.truncate(opts.max_files);
     }
@@ -665,10 +677,12 @@ fn discover_test_commands_handler(args: &[VmValue]) -> Result<VmValue, HostlibEr
         false,
     )?;
     let ignore_policy = ignore_policy_arg(DISCOVER_TEST_COMMANDS_BUILTIN, dict)?;
+    let profiles = parse_layout_profiles(DISCOVER_TEST_COMMANDS_BUILTIN, dict)?;
     Ok(test_discovery_to_value(&discover_test_commands(
         Path::new(&root),
         include_hidden,
         ignore_policy,
+        &profiles,
     )))
 }
 
@@ -701,6 +715,7 @@ fn parse_options(
         include_git_history_default,
     )?;
     let repo_map_token_budget = optional_int(builtin, dict, "repo_map_token_budget", 1200)?;
+    let layout_profiles = parse_layout_profiles(builtin, dict)?;
     if max_files < 0 {
         return Err(HostlibError::InvalidParameter {
             builtin,
@@ -721,7 +736,48 @@ fn parse_options(
         max_files: max_files as usize,
         include_git_history,
         repo_map_token_budget: repo_map_token_budget as usize,
+        layout_profiles,
     })
+}
+
+fn parse_layout_profiles(
+    builtin: &'static str,
+    dict: &harn_vm::value::DictMap,
+) -> Result<Vec<TestLayoutProfile>, HostlibError> {
+    let Some(value) = dict.get("layout_profiles") else {
+        return Ok(Vec::new());
+    };
+    let invalid = |message: String| HostlibError::InvalidParameter {
+        builtin,
+        param: "layout_profiles",
+        message,
+    };
+    let profiles: Vec<TestLayoutProfile> =
+        serde_json::from_value(crate::json::vm_value_to_json(value))
+            .map_err(|error| invalid(error.to_string()))?;
+    if profiles.len() > 256 {
+        return Err(invalid("at most 256 profiles are allowed".to_owned()));
+    }
+    let mut languages = std::collections::BTreeSet::new();
+    for profile in &profiles {
+        if profile.language.trim().is_empty()
+            || profile.language != profile.language.trim().to_lowercase()
+            || !languages.insert(&profile.language)
+            || profile.extensions.is_empty()
+            || profile.patterns.is_empty()
+            || profile
+                .extensions
+                .iter()
+                .chain(&profile.patterns)
+                .any(|item| item.trim().is_empty())
+        {
+            return Err(invalid(
+                "profiles need unique lowercase languages and nonempty extensions and patterns"
+                    .to_owned(),
+            ));
+        }
+    }
+    Ok(profiles)
 }
 
 fn parse_changed_paths(
@@ -796,6 +852,7 @@ fn test_discovery_to_value(discovery: &TestCommandDiscovery) -> VmValue {
         TestCommandDiscovery::Complete {
             commands,
             preferred,
+            layout,
         } => build_dict([
             ("state", str_value("complete")),
             (
@@ -810,10 +867,33 @@ fn test_discovery_to_value(discovery: &TestCommandDiscovery) -> VmValue {
                 "preferred",
                 preferred.as_deref().map(str_value).unwrap_or(VmValue::Nil),
             ),
+            ("layout", test_layout_to_value(layout)),
         ]),
         TestCommandDiscovery::Unavailable { detail } => build_dict([
             ("state", str_value("unavailable")),
             ("detail", str_value(detail)),
+        ]),
+    }
+}
+
+fn test_layout_to_value(layout: &TestLayoutDiscovery) -> VmValue {
+    match layout {
+        TestLayoutDiscovery::Unconfigured => build_dict([("state", str_value("unconfigured"))]),
+        TestLayoutDiscovery::Empty => build_dict([("state", str_value("empty"))]),
+        TestLayoutDiscovery::Single { language, files } => build_dict([
+            ("state", str_value("single")),
+            ("language", str_value(language)),
+            (
+                "files",
+                VmValue::list(files.iter().map(str_value).collect()),
+            ),
+        ]),
+        TestLayoutDiscovery::Ambiguous { languages } => build_dict([
+            ("state", str_value("ambiguous")),
+            (
+                "languages",
+                VmValue::list(languages.iter().map(str_value).collect()),
+            ),
         ]),
     }
 }

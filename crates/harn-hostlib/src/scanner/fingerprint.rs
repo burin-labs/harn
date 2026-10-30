@@ -391,6 +391,7 @@ fn append_test_commands(output: &mut String, project: &ProjectMetadata) {
     let TestCommandDiscovery::Complete {
         commands,
         preferred,
+        ..
     } = &project.test_command_discovery
     else {
         if let TestCommandDiscovery::Unavailable { detail } = &project.test_command_discovery {
@@ -605,6 +606,7 @@ mod tests {
             test_command_discovery: TestCommandDiscovery::Complete {
                 commands: BTreeMap::from([("pnpm test".into(), "package script".into())]),
                 preferred: Some("pnpm test".into()),
+                layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
             },
             code_patterns: vec!["Express routes".into()],
             total_files: 2,

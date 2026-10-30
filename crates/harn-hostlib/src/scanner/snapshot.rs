@@ -87,6 +87,7 @@ mod tests {
                 test_command_discovery: TestCommandDiscovery::Complete {
                     commands: BTreeMap::new(),
                     preferred: None,
+                    layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
                 },
                 code_patterns: Vec::new(),
                 total_files: 0,

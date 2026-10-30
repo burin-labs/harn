@@ -306,6 +306,54 @@ fn scanner_discovery_schema_matches_the_full_scan_projection() {
         full["$defs"]["TestCommandDiscovery"]["oneOf"],
         discovery["oneOf"]
     );
+    assert_eq!(
+        full["$defs"]["TestLayoutDiscovery"],
+        discovery["$defs"]["TestLayoutDiscovery"]
+    );
+    let request_defs: Vec<serde_json::Value> =
+        ["scan_project", "scan_incremental", "discover_test_commands"]
+            .iter()
+            .map(|method| {
+                let schema: serde_json::Value = serde_json::from_str(
+                    schemas::lookup("scanner", method, schemas::SchemaKind::Request).unwrap(),
+                )
+                .unwrap();
+                schema["$defs"]["TestLayoutProfiles"].clone()
+            })
+            .collect();
+    assert!(request_defs
+        .iter()
+        .all(|definition| definition == &request_defs[0] && !definition.is_null()));
+}
+
+#[test]
+fn scanner_layout_profiles_are_validated_at_the_capability_boundary() {
+    let registry = collect_into_registry(ScannerCapability);
+    let scanner = registry
+        .find("hostlib_scanner_discover_test_commands")
+        .unwrap();
+    let root = TempDir::new().unwrap();
+    let shell =
+        serde_json::json!({"language": "shell", "extensions": ["bats"], "patterns": [".bats"]});
+    for profiles in [
+        serde_json::json!([shell.clone(), shell.clone()]),
+        serde_json::json!([{"language": "shell", "extensions": [], "patterns": [".bats"]}]),
+        serde_json::json!([{"language": "shell", "extensions": ["bats"], "patterns": [".bats"], "extra": true}]),
+    ] {
+        let request =
+            serde_json::json!({"root": root.path().to_str().unwrap(), "layout_profiles": profiles});
+        assert!(matches!(
+            (scanner.handler)(&[harn_vm::json_to_vm_value(&request)]),
+            Err(HostlibError::InvalidParameter {
+                param: "layout_profiles",
+                ..
+            })
+        ));
+    }
+    let request =
+        serde_json::json!({"root": root.path().to_str().unwrap(), "layout_profiles": [shell]});
+    let response = (scanner.handler)(&[harn_vm::json_to_vm_value(&request)]).unwrap();
+    assert_response_schema("scanner", "discover_test_commands", &response);
 }
 
 #[test]

@@ -178,6 +178,8 @@ pub enum TestCommandDiscovery {
         /// Preferred candidate, when there is one.
         #[serde(deserialize_with = "required_nullable")]
         preferred: Option<String>,
+        /// Catalog-shaped bare test layouts, or why no layout was selected.
+        layout: super::layout::TestLayoutDiscovery,
     },
     /// Discovery could not establish a complete result.
     Unavailable {

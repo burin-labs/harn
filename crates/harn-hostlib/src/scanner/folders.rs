@@ -268,6 +268,7 @@ mod tests {
             TestCommandDiscovery::Complete {
                 commands: BTreeMap::new(),
                 preferred: None,
+                layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
             },
             Vec::new(),
             "2026-01-01T00:00:00Z".to_string(),

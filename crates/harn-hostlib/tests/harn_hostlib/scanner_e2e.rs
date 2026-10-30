@@ -19,7 +19,7 @@ use std::path::Path;
 use harn_hostlib::scanner::{
     discover_test_commands, scan_incremental, scan_project, scan_project_with_git, FileRecord,
     GitCapabilities, ProjectMetadata, ScanProjectOptions, ScanResult, SymbolKind,
-    TestCommandDiscovery,
+    TestCommandDiscovery, TestLayoutDiscovery, TestLayoutProfile,
 };
 use harn_vm::ignore_policy::IgnorePolicy;
 use tempfile::tempdir;
@@ -172,6 +172,116 @@ fn scan_without_git_history(root: &Path) -> ScanResult {
 }
 
 #[test]
+fn catalog_layout_discovery_distinguishes_source_tests_and_ambiguity() {
+    let tmp = tempdir().unwrap();
+    let profiles = vec![
+        TestLayoutProfile {
+            language: "shell".into(),
+            extensions: vec!["sh".into(), "bats".into()],
+            patterns: vec![".bats".into(), "_test.sh".into()],
+        },
+        TestLayoutProfile {
+            language: "python".into(),
+            extensions: vec!["py".into()],
+            patterns: vec!["test_".into(), "_test.py".into()],
+        },
+    ];
+    write(tmp.path(), "app.sh", "echo source-only\n");
+    write(tmp.path(), "test_helper.py", "def helper(): pass\n");
+    let unconfigured = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
+    assert!(matches!(
+        unconfigured,
+        TestCommandDiscovery::Complete {
+            layout: TestLayoutDiscovery::Unconfigured,
+            ..
+        }
+    ));
+    let empty = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(
+        empty,
+        TestCommandDiscovery::Complete {
+            layout: TestLayoutDiscovery::Empty,
+            ..
+        }
+    ));
+
+    write(tmp.path(), "example.bats", "@test works { true; }\n");
+    write(tmp.path(), "tests/nested/second_test.sh", "true\n");
+    let discovered = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(&discovered, TestCommandDiscovery::Complete {
+        layout: TestLayoutDiscovery::Single { language, files }, ..
+    } if language == "shell" && files.iter().map(String::as_str).collect::<Vec<_>>() == vec!["example.bats", "tests/nested/second_test.sh"]));
+    let opts = ScanProjectOptions {
+        include_git_history: false,
+        layout_profiles: profiles.clone(),
+        ..ScanProjectOptions::default()
+    };
+    let full = scan_project(tmp.path(), opts.clone());
+    assert_eq!(discovered, full.project.test_command_discovery);
+    let incremental = scan_incremental(&full.snapshot_token, None, opts);
+    assert_eq!(
+        discovered,
+        incremental.result.project.test_command_discovery
+    );
+
+    write(
+        tmp.path(),
+        "tests/test_value.py",
+        "def test_value(): pass\n",
+    );
+    let ambiguous = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(
+        matches!(ambiguous, TestCommandDiscovery::Unavailable { detail } if detail.contains("Multiple test layouts"))
+    );
+    write(tmp.path(), "Makefile", "test:\n\t@echo passed\n");
+    let declared = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(declared, TestCommandDiscovery::Complete {
+        commands, layout: TestLayoutDiscovery::Ambiguous { languages }, ..
+    } if commands.len() == 1 && commands.contains_key("make test") && languages.iter().map(String::as_str).collect::<Vec<_>>() == vec!["python", "shell"]));
+    fs::remove_file(tmp.path().join("Makefile")).unwrap();
+    write(
+        tmp.path(),
+        "apps/child/package.json",
+        r#"{"scripts":{"test":"echo child-only"}}"#,
+    );
+    let child_only = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(
+        child_only,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    write(
+        tmp.path(),
+        "package.json",
+        r#"{"scripts":{"lint":"echo lint"}}"#,
+    );
+    let lint_only = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(
+        lint_only,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    write(
+        tmp.path(),
+        "package.json",
+        r#"{"scripts":{"test:unit":"echo unit"}}"#,
+    );
+    let partial_only = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(
+        partial_only,
+        TestCommandDiscovery::Unavailable { .. }
+    ));
+    write(
+        tmp.path(),
+        "package.json",
+        r#"{"scripts":{"lint":"echo lint","test":"echo test"}}"#,
+    );
+    let package_test = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(
+        matches!(package_test, TestCommandDiscovery::Complete { commands, .. }
+        if commands.len() == 1 && commands.contains_key("npm test"))
+    );
+}
+
+#[test]
 fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
     let tmp = tempdir().unwrap();
     write(
@@ -179,7 +289,7 @@ fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
         "test_app.py",
         "def test_value():\n    assert True\n",
     );
-    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project);
+    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
     assert!(
         matches!(&discovery, TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest"))
     );
@@ -191,7 +301,7 @@ fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
     assert_eq!(discovery, full.project.test_command_discovery);
     fs::remove_file(tmp.path().join("test_app.py")).unwrap();
     assert!(matches!(
-        discover_test_commands(tmp.path(), false, IgnorePolicy::Project),
+        discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]),
         TestCommandDiscovery::Complete { commands, .. } if commands.is_empty()
     ));
 }
@@ -223,7 +333,7 @@ fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
         .status()
         .unwrap()
         .success());
-    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project);
+    let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
     assert!(matches!(
         discovery,
         TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest")

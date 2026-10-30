@@ -75,9 +75,10 @@
           "properties": {
             "state": { "const": "complete" },
             "commands": { "type": "object", "additionalProperties": { "type": "string" } },
-            "preferred": { "type": ["string", "null"] }
+            "preferred": { "type": ["string", "null"] },
+            "layout": { "$ref": "#/$defs/TestLayoutDiscovery" }
           },
-          "required": ["state", "commands", "preferred"],
+          "required": ["state", "commands", "preferred", "layout"],
           "additionalProperties": false
         },
         {
@@ -89,6 +90,14 @@
           "required": ["state", "detail"],
           "additionalProperties": false
         }
+      ]
+    },
+    "TestLayoutDiscovery": {
+      "oneOf": [
+        { "type": "object", "properties": { "state": { "const": "unconfigured" } }, "required": ["state"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "empty" } }, "required": ["state"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "single" }, "language": { "type": "string", "minLength": 1 }, "files": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }, "required": ["state", "language", "files"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "ambiguous" }, "languages": { "type": "array", "minItems": 2, "items": { "type": "string", "minLength": 1 } } }, "required": ["state", "languages"], "additionalProperties": false }
       ]
     },
     "LanguageStat": {

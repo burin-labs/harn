@@ -73,8 +73,16 @@ not evidence that a command ran or passed. Variable-generated targets and
 pattern rules are not resolved by this static parser.
 
 The scanner's `test_command_discovery` is a tagged result. `complete` carries
-the discovered `commands` and nullable `preferred` command; an empty map means
-the search completed without candidates. `unavailable` carries a short `detail`
+the discovered `commands`, nullable `preferred` command, and `layout`; an empty
+map means the search completed without command candidates. Hosts may pass
+`layout_profiles` containing language identifiers, extensions, and test-file
+patterns to the full, incremental, or fresh scan. The layout result distinguishes
+unconfigured conventions, no matching files, one language with its relative
+paths, and multiple matching languages. It reports file facts, not a runnable
+command or evidence that tests passed. For multiple languages, discovery keeps
+only the root package script or Make target named `test`; if
+none are declared, it returns `unavailable` rather than inferring a partial
+suite. `unavailable` carries a short `detail`
 instead of a command map when the search could not inspect a relevant path.
 Candidates describe possible commands, not proof that a command ran or passed.
 Use `harness.scanner.discover_test_commands({root: path})` when only this

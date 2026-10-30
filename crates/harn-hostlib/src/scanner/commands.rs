@@ -10,6 +10,7 @@ use std::path::Path;
 use crate::scanner::discover::DiscoverOptions;
 use crate::scanner::discover::DiscoveredFile;
 use crate::scanner::extensions::{is_excluded_dir, should_include};
+use crate::scanner::layout::{LayoutCollector, TestLayoutDiscovery, TestLayoutProfile};
 use crate::scanner::result::{FileRecord, SymbolKind, TestCommandDiscovery};
 
 /// Walk the project root looking for test/build manifest files and return a
@@ -18,13 +19,15 @@ pub fn detect_test_commands(
     root: &Path,
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
+    profiles: &[TestLayoutProfile],
 ) -> TestCommandDiscovery {
-    match collect_test_commands(root, options, discovered) {
-        Ok(commands) => {
+    match collect_test_commands(root, options, discovered, profiles) {
+        Ok((commands, layout)) => {
             let preferred = select_preferred_test_command(&commands);
             TestCommandDiscovery::Complete {
                 commands,
                 preferred,
+                layout,
             }
         }
         Err(detail) => TestCommandDiscovery::Unavailable { detail },
@@ -35,15 +38,29 @@ fn collect_test_commands(
     root: &Path,
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
-) -> Result<BTreeMap<String, String>, String> {
+    profiles: &[TestLayoutProfile],
+) -> Result<(BTreeMap<String, String>, TestLayoutDiscovery), String> {
     let mut commands: BTreeMap<String, String> = BTreeMap::new();
+    let mut declared_tests: BTreeMap<String, String> = BTreeMap::new();
+    let mut layouts = LayoutCollector::new(profiles);
 
-    scan_package_json(root, root, None, &mut commands)?;
+    scan_package_json(root, root, None, &mut commands, &mut declared_tests)?;
     scan_monorepo_packages(root, &mut commands)?;
-    detect_language_test_commands(root, options, discovered, &mut commands)?;
-    detect_makefile_targets(root, &mut commands)?;
+    detect_language_test_commands(root, options, discovered, &mut commands, &mut layouts)?;
+    let mut make_tests = BTreeMap::new();
+    detect_makefile_targets(root, &mut make_tests, &mut declared_tests)?;
+    commands.extend(make_tests);
 
-    Ok(commands)
+    let layout = layouts.finish();
+    if matches!(layout, TestLayoutDiscovery::Ambiguous { .. }) {
+        if declared_tests.is_empty() {
+            return Err("Multiple test layouts need an explicitly declared test command.".into());
+        }
+        // A file-derived runner may cover only one language. Keep the commands
+        // explicitly declared by the project and do not invent a partial suite.
+        commands = declared_tests;
+    }
+    Ok((commands, layout))
 }
 
 fn scan_monorepo_packages(
@@ -65,7 +82,13 @@ fn scan_monorepo_packages(
                 Err(_) => return Err(unavailable("read a name in", &dir)),
             };
             if path.is_dir() {
-                scan_package_json(root, &path, Some(format!("{subdir}/{name}")), commands)?;
+                scan_package_json(
+                    root,
+                    &path,
+                    Some(format!("{subdir}/{name}")),
+                    commands,
+                    &mut BTreeMap::new(),
+                )?;
             }
         }
     }
@@ -77,6 +100,7 @@ fn detect_language_test_commands(
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
     commands: &mut BTreeMap<String, String>,
+    layouts: &mut LayoutCollector<'_>,
 ) -> Result<(), String> {
     const MARKERS: &[(&str, &str, &str)] = &[
         ("Cargo.toml", "cargo test", "Rust test runner"),
@@ -112,7 +136,7 @@ fn detect_language_test_commands(
             commands.insert((*command).to_string(), (*label).to_string());
         }
     }
-    detect_python_test_command(root, options, discovered, commands)?;
+    detect_file_test_commands(root, options, discovered, commands, layouts)?;
     detect_dart_test_command(root, commands)?;
     detect_dotnet_test_command(root, commands)?;
     detect_ruby_test_command(root, commands)?;
@@ -120,11 +144,12 @@ fn detect_language_test_commands(
     Ok(())
 }
 
-fn detect_python_test_command(
+fn detect_file_test_commands(
     root: &Path,
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
     commands: &mut BTreeMap<String, String>,
+    layouts: &mut LayoutCollector<'_>,
 ) -> Result<(), String> {
     let pyproject = root.join("pyproject.toml");
     let uv_lock = root.join("uv.lock");
@@ -179,14 +204,19 @@ fn detect_python_test_command(
         if is_verifier_manifest(file_name) {
             std::fs::File::open(entry.path()).map_err(|_| unavailable("read", entry.path()))?;
         }
-        inspect_python_candidate(
+        if layouts.record(&candidate) {
+            fs::File::open(entry.path()).map_err(|_| unavailable("read", entry.path()))?;
+        }
+        if inspect_python_candidate(
             entry.path(),
             &candidate,
             has_pyproject,
             preferred_command,
             preferred_label,
             commands,
-        )?;
+        )? {
+            layouts.record_python(&candidate);
+        }
     }
     // Git includes tracked files even when a project ignore rule matches them.
     // Keep those files in the same candidate set as the scanner's source index.
@@ -197,14 +227,20 @@ fn detect_python_test_command(
         if !try_exists(&file.absolute_path)? {
             continue;
         }
-        inspect_python_candidate(
+        if layouts.record(&file.relative_path) {
+            fs::File::open(&file.absolute_path)
+                .map_err(|_| unavailable("read", &file.absolute_path))?;
+        }
+        if inspect_python_candidate(
             &file.absolute_path,
             &file.relative_path,
             has_pyproject,
             preferred_command,
             preferred_label,
             commands,
-        )?;
+        )? {
+            layouts.record_python(&file.relative_path);
+        }
     }
     Ok(())
 }
@@ -216,9 +252,9 @@ fn inspect_python_candidate(
     preferred_command: &str,
     preferred_label: &str,
     commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if !should_include(candidate) || !candidate.ends_with(".py") {
-        return Ok(());
+        return Ok(false);
     }
     let lower = candidate.to_ascii_lowercase();
     let root_test = if cfg!(windows) {
@@ -233,12 +269,12 @@ fn inspect_python_candidate(
         || lower.ends_with("_test.py")
         || lower.contains("conftest.py"))
     {
-        return Ok(());
+        return Ok(false);
     }
     let content = fs::read_to_string(path).map_err(|_| unavailable("read", path))?;
     if has_pyproject {
         commands.insert(preferred_command.to_string(), preferred_label.to_string());
-        return Ok(());
+        return Ok(true);
     }
     let file_name = if cfg!(windows) {
         lower.rsplit('/').next().unwrap_or_default()
@@ -260,12 +296,13 @@ fn inspect_python_candidate(
         })
     {
         commands.insert(preferred_command.to_string(), preferred_label.to_string());
-        return Ok(());
+        return Ok(true);
     }
     if content.contains("import pytest") || content.contains("from pytest") {
         commands.insert(preferred_command.to_string(), preferred_label.to_string());
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 fn is_verifier_manifest(name: &str) -> bool {
@@ -411,6 +448,7 @@ fn detect_php_test_command(
 fn detect_makefile_targets(
     root: &Path,
     commands: &mut BTreeMap<String, String>,
+    declared_tests: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     let Some((filename, content)) =
         harn_makefile::read_default(root).map_err(|_| unavailable("read a makefile in", root))?
@@ -419,7 +457,11 @@ fn detect_makefile_targets(
     };
     for target in harn_makefile::parse(&content) {
         if target.name.starts_with("test") {
-            commands.insert(target.command, format!("{filename} target"));
+            let label = format!("{filename} target");
+            if target.name == "test" {
+                declared_tests.insert(target.command.clone(), label.clone());
+            }
+            commands.insert(target.command, label);
         }
     }
     Ok(())
@@ -430,6 +472,7 @@ fn scan_package_json(
     dir: &Path,
     prefix: Option<String>,
     commands: &mut BTreeMap<String, String>,
+    declared_tests: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
     use harn_vm::package_scripts::{Discovery, SelectionError};
     let package = match harn_vm::package_scripts::discover(root, dir) {
@@ -469,7 +512,11 @@ fn scan_package_json(
             None => command,
         };
         let cmd_text = value.body;
-        commands.insert(runner, format!("{cmd_text}{label_suffix}"));
+        let label = format!("{cmd_text}{label_suffix}");
+        if name == "test" {
+            declared_tests.insert(runner.clone(), label.clone());
+        }
+        commands.insert(runner, label);
     }
     Ok(())
 }
@@ -742,7 +789,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
         let TestCommandDiscovery::Complete { commands: cmds, .. } =
-            detect_test_commands(tmp.path(), DiscoverOptions::default(), &[])
+            detect_test_commands(tmp.path(), DiscoverOptions::default(), &[], &[])
         else {
             panic!("test discovery should complete");
         };
@@ -778,7 +825,14 @@ mod tests {
         )
         .unwrap();
         let mut cmds = BTreeMap::new();
-        scan_package_json(tmp.path(), tmp.path(), None, &mut cmds).unwrap();
+        scan_package_json(
+            tmp.path(),
+            tmp.path(),
+            None,
+            &mut cmds,
+            &mut BTreeMap::new(),
+        )
+        .unwrap();
         assert!(cmds.contains_key("npm test"));
         assert!(cmds.contains_key("npm run lint"));
         assert!(!cmds.contains_key("npm run build"));

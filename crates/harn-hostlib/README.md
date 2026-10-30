@@ -253,16 +253,21 @@ defaults to `builtin`, because a recursive watch over dependency and build
 trees exhausts the OS watch budget while a gitignored file is still a file
 whose changes a subscriber may need.
 
-- `hostlib_scanner_scan_project({ root, include_hidden?, ignore_policy?,
+- `hostlib_scanner_scan_project({ root, include_hidden?, ignore_policy?, layout_profiles?,
   max_files?, include_git_history?, repo_map_token_budget? })` — full scan.
   Persists a snapshot to `<root>/.harn/hostlib/scanner-snapshot.json` so
   follow-up incremental scans can diff against it.
 - `hostlib_scanner_scan_incremental({ snapshot_token, changed_paths?, … })`
   — refresh the snapshot. Falls back to a full rescan when the snapshot is
   missing or the diff exceeds ~30% of the workspace.
-- `hostlib_scanner_discover_test_commands({ root, include_hidden?, ignore_policy? })`
+- `hostlib_scanner_discover_test_commands({ root, include_hidden?, ignore_policy?, layout_profiles? })`
   — return the same tagged test-command discovery without indexing source files,
   collecting Git history, or writing a scanner snapshot.
+
+An optional `layout_profiles` list supplies the host's language identifiers,
+file extensions, and test-file patterns. The tagged `layout` observation
+distinguishes unconfigured profiles, no matches, one language with relative
+paths, and multiple languages. A layout is not evidence that tests ran.
 
 The Rust scanner API routes Git-backed file discovery and churn scoring through
 `GitCapabilities`. The default hostlib builtin uses the Git CLI only when the
