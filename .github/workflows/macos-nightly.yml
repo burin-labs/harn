@@ -384,6 +384,9 @@ jobs:
           report="$RUNNER_TEMP/report.log"
           {
             echo "sample=$SAMPLE source=$GITHUB_SHA"
+            echo "cores=$(sysctl -n hw.ncpu) memory_bytes=$(sysctl -n hw.memsize)"
+            echo "runner_image=${ImageOS:-unreported} version=${ImageVersion:-unreported}"
+            sw_vers
             (cd calibration-cli && shasum -a 256 -c harn.sha256)
             cat calibration-cli/identity.txt
             shasum -a 256 "$HARN_BIN"
