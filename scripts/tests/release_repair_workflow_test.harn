@@ -4,6 +4,43 @@ fn expression(value: string) -> string {
   return "$" + "{{ " + value + " }}"
 }
 
+pipeline test_candidate_security_owns_exact_source_admission_before_builds(harness: Harness) {
+  const flow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
+  const security = flow.jobs["source-security"]
+  assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert_eq(security.needs, "setup")
+  assert_eq(security["if"], "needs.setup.outputs.build_mode == 'candidate'")
+  assert_eq(
+    security.with["source-revision"],
+    expression("needs.setup.outputs.candidate_source_sha"),
+  )
+  assert_eq(security.with.policy, false)
+  assert_eq(security["continue-on-error"], nil)
+  const admission = flow.jobs["source-ci"]
+  assert_eq(admission.needs, ["setup", "source-security"])
+  assert(
+    admission["if"].contains("!cancelled()"),
+    "a skipped security job must not skip warm builds",
+  )
+  assert(admission["if"].contains("needs.setup.outputs.build_mode != 'candidate'"))
+  assert(admission["if"].contains("needs.source-security.result == 'success'"))
+  assert(flow.jobs["candidate-verdict"].needs.contains("source-security"))
+}
+
+pipeline test_publication_refreshes_security_after_all_other_authority(harness: Harness) {
+  const flow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const security = flow.jobs["publication-security"]
+  assert(security.uses.contains("/.github/workflows/cargo-deny.yml@"))
+  assert_eq(security.needs, ["plan", "authorize"])
+  assert_eq(security.with["source-revision"], expression("needs.plan.outputs.source_sha"))
+  assert_eq(security.with.policy, false)
+  assert_eq(security["continue-on-error"], nil)
+  assert(security["if"].contains("needs.authorize.result == 'success'"))
+  assert(security["if"].contains("needs.authorize.outputs.ready == 'true'"))
+  assert(flow.jobs.promote.needs.contains("publication-security"))
+  assert(flow.jobs.promote["if"].contains("needs.publication-security.result == 'success'"))
+}
+
 pipeline test_recovery_requires_exact_source_ci_and_native_before_the_consumer(harness: Harness) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
   assert_eq(workflow.jobs["consumer-rehearsal"].needs, "plan")

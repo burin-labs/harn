@@ -504,13 +504,6 @@ run_grammar_audit() {
   time_phase "verify_language_spec" harn_cmd run scripts/verify_language_spec.harn
 }
 
-run_security_audit() {
-  echo "=== Security/trust boundary audit ==="
-  time_phase "boundary-keyword grep" \
-    rg -n "OAuth|oauth|MCP|trust boundary|mutation session|worker_update|tool/pre_use|tool/post_use" \
-      README.md docs/src crates/harn-vm crates/harn-cli .github CLAUDE.md >/dev/null
-}
-
 release_rust_test() {
   # Blacksmith's Ubuntu image does not expose Landlock. Harn CI therefore runs
   # every environment-neutral workspace test there and owns the host-bound
@@ -585,9 +578,6 @@ release_gate_preflight_audit_tools() {
         ;;
       docs-audit | grammar-audit)
         required+=(npm)
-        ;;
-      security-audit)
-        required+=(rg)
         ;;
     esac
   done
@@ -917,7 +907,7 @@ cmd_audit() {
   elif [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt $(( ${#SELECTED_AUDIT_STEPS[@]} * 2 )) ]]; then
     # Rust, Harn conformance, and package verification each own an internal
     # worker/compiler pool. Serialize only those resource-heavy lanes while
-    # allowing single-process docs/generated/grammar/security/smoke work to
+    # allowing single-process docs/generated/grammar/smoke work to
     # overlap. This avoids both hosted-runner starvation and the old eight-lane
     # serial tail on ordinary 12-core build servers.
     serialize_heavy_lanes=1

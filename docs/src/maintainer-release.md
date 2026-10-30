@@ -168,6 +168,9 @@ Follow the runs for that commit in
    stable version with no published release, every source candidate, scheduled
    or requested, is a release candidate of that version: it runs the consumer
    rehearsal and native qualification, and promotion can publish it.
+   Candidate admission also requires the canonical dependency advisory scan at
+   that exact source before expensive builds start. It checks both enabled
+   features and the whole lockfile; a failed or missing scan refuses admission.
 2. The candidate run builds, signs, notarizes, and attests the five platform
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
@@ -187,7 +190,10 @@ Follow the runs for that commit in
    no-op. It also requires successful full-suite main-push
    CI at the release commit, including every deferred test family. It waits
    for an active run; missing or failed proof blocks publication. It creates
-   the tag and GitHub release using those files. Promotion doesn't rebuild them.
+   the tag and GitHub release using those files. After qualification and before
+   publication, the same canonical advisory scanner checks the certified source
+   again against a freshly fetched database. A new advisory can therefore refuse
+   an older, previously green candidate. Promotion doesn't rebuild its files.
 4. The tag starts `publish-release.yml`, which checks the same full-suite proof
    before publishing crates from the tag.
    Promotion also packages the published Linux archives into the container

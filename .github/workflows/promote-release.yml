@@ -490,12 +490,27 @@ jobs:
         id: standalone
         run: echo 'ready=true' >> "$GITHUB_OUTPUT"
 
-  promote:
-    name: Promote
+  publication-security:
+    name: Fresh publication dependency security
     needs: [plan, authorize]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       needs.authorize.result == 'success' && needs.authorize.outputs.ready == 'true'
+    permissions:
+      contents: read
+      issues: write
+    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@fa7ac62e70ddbc3efa655f881734df1a5ec2e8ab
+    with:
+      source-revision: ${{ needs.plan.outputs.source_sha }}
+      policy: false
+
+  promote:
+    name: Promote
+    needs: [plan, authorize, publication-security]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.authorize.result == 'success' && needs.authorize.outputs.ready == 'true' &&
+      needs.publication-security.result == 'success'
     permissions:
       contents: read
       actions: read
