@@ -5,7 +5,7 @@
 //! alike. A served dispatch runs none of them; it replays the changes through
 //! the same writer instead.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use crate::testbench::tape::{FieldChange, TranscriptChange, TranscriptLifecycle};
@@ -138,6 +138,45 @@ pub(crate) fn apply(
 /// Closed ephemeral transcripts are reconstructed off-table. They never become
 /// live sessions or run lifecycle hooks a second time. Surviving new sessions
 /// need more than a transcript and therefore refuse instead of being fabricated.
+pub(super) fn validate_lifetimes(changes: &[TranscriptChange]) -> Result<(), String> {
+    let mut opened = BTreeSet::new();
+    for change in changes {
+        match change {
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Opened { transcript },
+            } => {
+                if !crate::llm::helpers::is_session_transcript_snapshot(transcript, session_id) {
+                    return Err(format!("invalid initial transcript for recorded session `{session_id}`: expected a versioned transcript with matching identity and message, event and asset lists"));
+                }
+                if !opened.insert(session_id.as_str()) {
+                    return Err(format!(
+                        "recorded transcript `{session_id}` was opened twice without closing"
+                    ));
+                }
+            }
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Closed,
+            } => {
+                if !opened.remove(session_id.as_str()) {
+                    return Err(format!("recorded close of `{session_id}` has no dispatch-local opening; replay does not retire pre-existing sessions"));
+                }
+            }
+            TranscriptChange::Fields { .. } => {}
+        }
+    }
+    if !opened.is_empty() {
+        return Err(format!(
+            "{} recorded new session(s) remain open after the dispatch: {}",
+            opened.len(),
+            opened.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// Apply changes whose local lifetimes were validated before file effects.
 pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptChange>, String> {
     let mut ephemeral = BTreeMap::new();
     for change in &changes {
@@ -146,7 +185,7 @@ pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptCha
                 session_id,
                 lifecycle: TranscriptLifecycle::Opened { transcript },
             } => {
-                if crate::agent_sessions::exists(session_id) || ephemeral.contains_key(session_id) {
+                if crate::agent_sessions::exists(session_id) {
                     return Err(format!(
                         "recorded new transcript target `{session_id}` already exists"
                     ));
@@ -167,20 +206,11 @@ pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptCha
                 session_id,
                 lifecycle: TranscriptLifecycle::Closed,
             } => {
-                if ephemeral.remove(session_id).is_none() {
-                    return Err(format!(
-                        "recorded close of `{session_id}` has no ephemeral transcript to retire"
-                    ));
-                }
+                ephemeral
+                    .remove(session_id)
+                    .expect("validated local lifetime closes an opened transcript");
             }
         }
-    }
-    if !ephemeral.is_empty() {
-        return Err(format!(
-            "{} recorded new session(s) remain open after the dispatch: {}",
-            ephemeral.len(),
-            ephemeral.keys().cloned().collect::<Vec<_>>().join(", ")
-        ));
     }
     Ok(changes)
 }
