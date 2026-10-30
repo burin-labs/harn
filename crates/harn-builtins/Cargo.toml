@@ -30,13 +30,13 @@ croner = "4.0.0"
 csv = "1"
 flate2 = { version = "1.1.9", optional = true }
 futures = "0.3"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.182-dev" }
-harn-clock = { path = "../harn-clock", version = "=0.10.182-dev" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.182-dev" }
-harn-languages = { path = "../harn-languages", version = "=0.10.182-dev" }
-harn-makefile = { path = "../harn-makefile", version = "=0.10.182-dev" }
-harn-vm = { path = "../harn-vm", version = "=0.10.182-dev", default-features = false }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182-dev" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.182" }
+harn-clock = { path = "../harn-clock", version = "=0.10.182" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.182" }
+harn-languages = { path = "../harn-languages", version = "=0.10.182" }
+harn-makefile = { path = "../harn-makefile", version = "=0.10.182" }
+harn-vm = { path = "../harn-vm", version = "=0.10.182", default-features = false }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182" }
 hex = "0.4"
 hkdf = "0.13"
 ignore = "0.4"
@@ -60,7 +60,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "t
 toml = "1.1"
 tracing = "0.1"
 tree-sitter = "0.27"
-harn-grammars = { path = "../harn-grammars", version = "=0.10.182-dev", default-features = false, features = ["typescript"], optional = true }
+harn-grammars = { path = "../harn-grammars", version = "=0.10.182", default-features = false, features = ["typescript"], optional = true }
 unicode-width = "0.2"
 url = "2"
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
@@ -68,12 +68,12 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"], 
 zstd = "0.14.0"
 
 [dev-dependencies]
-harn-clock = { path = "../harn-clock", version = "=0.10.182-dev", features = ["test-support"] }
-harn-vm = { path = "../harn-vm", version = "=0.10.182-dev", default-features = false, features = ["vm-test-support"] }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.182-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.182-dev", features = ["bundled-stdlib"] }
-harn-parser = { path = "../harn-parser", version = "=0.10.182-dev" }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182-dev", features = ["vm-test-support"] }
+harn-clock = { path = "../harn-clock", version = "=0.10.182", features = ["test-support"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.182", default-features = false, features = ["vm-test-support"] }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.182" }
+harn-modules = { path = "../harn-modules", version = "=0.10.182", features = ["bundled-stdlib"] }
+harn-parser = { path = "../harn-parser", version = "=0.10.182" }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182", features = ["vm-test-support"] }
 tempfile = "3"
 
 [lints]
