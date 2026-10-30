@@ -158,69 +158,96 @@ pub(super) async fn run(args: OrchestratorStatsArgs) -> Result<(), OrchestratorE
         return print_json(&payload);
     }
 
-    println!("Orchestrator stats:");
-    println!("- window={}", format_duration(args.window));
+    println!("{}", crate::localization::formatted!("Orchestrator stats:"));
+    println!(
+        "{}",
+        crate::localization::formatted!("- window={}", format_duration(args.window))
+    );
     if let Some(tenant) = args.tenant.as_deref() {
-        println!("- tenant={tenant}");
+        println!(
+            "{}",
+            crate::localization::formatted!("- tenant={tenant}", tenant = tenant)
+        );
     }
-    println!("- fire_count={}", payload.totals.fire_count);
     println!(
-        "- predicates={} misses={} miss_rate={:.2}%",
-        payload.totals.predicate_evaluations,
-        payload.totals.predicate_misses,
-        payload.totals.predicate_miss_rate * 100.0
+        "{}",
+        crate::localization::formatted!("- fire_count={}", payload.totals.fire_count)
     );
     println!(
-        "- dispatches succeeded:{} failed:{} skipped:{} dlq:{}",
-        payload.totals.dispatch_successes,
-        payload.totals.dispatch_failures,
-        payload.totals.dispatch_skipped,
-        payload.totals.dlq_count
+        "{}",
+        crate::localization::formatted!(
+            "- predicates={} misses={} miss_rate={:.2}%",
+            payload.totals.predicate_evaluations,
+            payload.totals.predicate_misses,
+            payload.totals.predicate_miss_rate * 100.0
+        )
     );
     println!(
-        "- llm_calls={} input_tokens={} output_tokens={} cost=${:.6}",
-        payload.totals.llm_call_count,
-        payload.totals.input_tokens,
-        payload.totals.output_tokens,
-        payload.totals.cost_usd
+        "{}",
+        crate::localization::formatted!(
+            "- dispatches succeeded:{} failed:{} skipped:{} dlq:{}",
+            payload.totals.dispatch_successes,
+            payload.totals.dispatch_failures,
+            payload.totals.dispatch_skipped,
+            payload.totals.dlq_count
+        )
     );
     println!(
-        "- persisted_snapshot={}",
-        payload.persisted_event_id.unwrap_or_default()
+        "{}",
+        crate::localization::formatted!(
+            "- llm_calls={} input_tokens={} output_tokens={} cost=${:.6}",
+            payload.totals.llm_call_count,
+            payload.totals.input_tokens,
+            payload.totals.output_tokens,
+            payload.totals.cost_usd
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- persisted_snapshot={}",
+            payload.persisted_event_id.unwrap_or_default()
+        )
     );
 
     println!();
-    println!("Hot triggers:");
+    println!("{}", crate::localization::formatted!("Hot triggers:"));
     if payload.triggers.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for trigger in &payload.triggers {
             println!(
-                "- {} fires={} miss_rate={:.2}% dlq_rate={:.2}% median={} p99={} cost=${:.6}",
-                trigger.trigger_id,
-                trigger.fire_count,
-                trigger.predicate_miss_rate * 100.0,
-                trigger.dlq_rate * 100.0,
-                format_optional_ms(trigger.median_handler_duration_ms),
-                format_optional_ms(trigger.p99_handler_duration_ms),
-                trigger.cost_usd
+                "{}",
+                crate::localization::formatted!(
+                    "- {} fires={} miss_rate={:.2}% dlq_rate={:.2}% median={} p99={} cost=${:.6}",
+                    trigger.trigger_id,
+                    trigger.fire_count,
+                    trigger.predicate_miss_rate * 100.0,
+                    trigger.dlq_rate * 100.0,
+                    format_optional_ms(trigger.median_handler_duration_ms),
+                    format_optional_ms(trigger.p99_handler_duration_ms),
+                    trigger.cost_usd
+                )
             );
         }
     }
 
     println!();
-    println!("Providers:");
+    println!("{}", crate::localization::formatted!("Providers:"));
     if payload.providers.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
     } else {
         for provider in &payload.providers {
             println!(
-                "- {} calls={} input_tokens={} output_tokens={} cost=${:.6}",
-                provider.provider,
-                provider.call_count,
-                provider.input_tokens,
-                provider.output_tokens,
-                provider.cost_usd
+                "{}",
+                crate::localization::formatted!(
+                    "- {} calls={} input_tokens={} output_tokens={} cost=${:.6}",
+                    provider.provider,
+                    provider.call_count,
+                    provider.input_tokens,
+                    provider.output_tokens,
+                    provider.cost_usd
+                )
             );
         }
     }

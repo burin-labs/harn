@@ -42,17 +42,23 @@ fn run_promote_from_eval(args: &ProviderCapabilitiesPromoteFromEvalArgs) -> Resu
     let updated = apply_overlay_to_catalog(&current, &overlay)?;
     if updated == current {
         println!(
-            "provider capability catalog already matches {}",
-            args.overlay_path.display()
+            "{}",
+            crate::localization::formatted!(
+                "provider capability catalog already matches {}",
+                args.overlay_path.display()
+            )
         );
         return Ok(());
     }
     fs::write(&args.catalog, updated)
         .map_err(|error| format!("failed to write {}: {error}", args.catalog.display()))?;
     println!(
-        "updated {} from {}",
-        args.catalog.display(),
-        args.overlay_path.display()
+        "{}",
+        crate::localization::formatted!(
+            "updated {} from {}",
+            args.catalog.display(),
+            args.overlay_path.display()
+        )
     );
     Ok(())
 }

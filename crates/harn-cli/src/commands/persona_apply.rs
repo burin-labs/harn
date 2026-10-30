@@ -95,7 +95,13 @@ pub(crate) async fn run(
             .as_ref()
             .map(|verification| verification.persona_id.as_str())
             .ok_or_else(|| "successful persona apply has no verification receipt".to_string())?;
-        println!("activated persona {persona_id}");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "activated persona {persona_id}",
+                persona_id = persona_id
+            )
+        );
     }
     if receipt.ok {
         Ok(())

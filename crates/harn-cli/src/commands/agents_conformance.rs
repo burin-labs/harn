@@ -145,8 +145,11 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
 
     if !config.json {
         println!(
-            "Running Harn Agents Protocol conformance against {}",
-            client.base_url().as_str().trim_end_matches('/')
+            "{}",
+            crate::localization::formatted!(
+                "Running Harn Agents Protocol conformance against {}",
+                client.base_url().as_str().trim_end_matches('/')
+            )
         );
         println!();
     }
@@ -182,7 +185,10 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
             process::exit(1);
         });
         if !config.json {
-            println!("JSON report written to {path}");
+            println!(
+                "{}",
+                crate::localization::formatted!("JSON report written to {path}", path = path)
+            );
         }
     }
 
@@ -1244,8 +1250,16 @@ fn print_category_report(report: &CategoryReport, verbose: bool) {
         ProbeStatus::Skipped => "\x1b[33mSKIP\x1b[0m",
     };
     println!(
-        "{label} {:<16} {} passed, {} failed, {} skipped ({} ms)",
-        report.name, report.passed, report.failed, report.skipped, report.duration_ms
+        "{}",
+        crate::localization::formatted!(
+            "{label} {:<16} {} passed, {} failed, {} skipped ({} ms)",
+            report.name,
+            report.passed,
+            report.failed,
+            report.skipped,
+            report.duration_ms,
+            label = label
+        )
     );
     for test in &report.tests {
         match test.status {
@@ -1280,19 +1294,26 @@ fn print_summary(report: &LeaderboardReport) {
         ProbeStatus::Skipped => "\x1b[33mSKIP\x1b[0m",
     };
     println!(
-        "{label} agents conformance: {} passed, {} failed, {} skipped, score {:.1}% ({} ms)",
-        report.summary.passed,
-        report.summary.failed,
-        report.summary.skipped,
-        report.summary.score * 100.0,
-        report.summary.duration_ms
+        "{}",
+        crate::localization::formatted!(
+            "{label} agents conformance: {} passed, {} failed, {} skipped, score {:.1}% ({} ms)",
+            report.summary.passed,
+            report.summary.failed,
+            report.summary.skipped,
+            report.summary.score * 100.0,
+            report.summary.duration_ms,
+            label = label
+        )
     );
     println!(
-        "Per-test: avg={} ms  p50={} ms  p95={} ms  p99={} ms",
-        report.percentiles_ms.avg,
-        report.percentiles_ms.p50,
-        report.percentiles_ms.p95,
-        report.percentiles_ms.p99
+        "{}",
+        crate::localization::formatted!(
+            "Per-test: avg={} ms  p50={} ms  p95={} ms  p99={} ms",
+            report.percentiles_ms.avg,
+            report.percentiles_ms.p50,
+            report.percentiles_ms.p95,
+            report.percentiles_ms.p99
+        )
     );
 }
 

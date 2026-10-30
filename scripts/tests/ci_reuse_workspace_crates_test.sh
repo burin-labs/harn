@@ -75,8 +75,8 @@ echo "ci_reuse_workspace_crates_test: source attestation controls passed"
 
 probe="$root/probe"
 touch "$probe"
-if ! touch -h -d @946684800 "$probe" 2>/dev/null \
-  || [[ "$(stat -c %Y "$probe" 2>/dev/null)" != 946684800 ]]; then
+if ! TZ=UTC touch -h -t 200001010000.00 "$probe" 2>/dev/null \
+  || [[ "$(stat -c %Y "$probe" 2>/dev/null || stat -f %m "$probe" 2>/dev/null)" != 946684800 ]]; then
   rm -f "$probe"
   # The producer runners are Linux. Elsewhere the script refuses by name, so
   # check that refusal instead of the stamps it cannot set.
@@ -98,7 +98,7 @@ mkdir -p crates/c/src && echo new > crates/c/src/new.rs
 git add -A && git commit -q -m two
 
 build_time=1577836800 # 2020-01-01T00:00:00Z
-stamp() { stat -c %Y "$1"; }
+stamp() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 out=$("$script" restore)
 [[ "$out" == *"3 path(s) changed"* ]]
 [[ ! -e "$record" ]]

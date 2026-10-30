@@ -25,12 +25,19 @@ impl AcpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
-        let mut sessions: Vec<serde_json::Value> = self
+        let sessions = self
             .sessions
             .iter()
             .filter(|(sid, session)| self.session_matches_list_filters(sid, session, params))
-            .filter_map(|(sid, _)| self.session_item_json(sid, "live", None))
-            .collect();
+            .map(|(sid, _)| self.session_item_json(sid, "live", None))
+            .collect::<Result<Vec<_>, _>>();
+        let mut sessions = match sessions {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                self.send_error(id, -32000, &format!("session/list: {error}"));
+                return;
+            }
+        };
         let mut roots = self
             .sessions
             .values()
@@ -73,7 +80,17 @@ impl AcpServer {
                     if session.cwd.as_deref() != Some(root.workspace().to_string_lossy().as_ref()) {
                         continue;
                     }
-                    sessions.push(acp_persisted_session_item(session));
+                    match super::sessions::try_acp_persisted_session_item(session) {
+                        Ok(item) => sessions.push(item),
+                        Err(error) => {
+                            self.send_error(
+                                id,
+                                -32000,
+                                &format!("session/list canonical store: {error}"),
+                            );
+                            return;
+                        }
+                    }
                 }
             }
         }

@@ -123,10 +123,13 @@ pub fn run(args: PackArgs) {
                     cli_diagnostic!("warning[{}]: {}", warning.code, warning.message);
                 }
                 println!(
-                    "wrote {} ({} bytes, bundle_hash {})",
-                    outcome.output_path.display(),
-                    outcome.size_bytes,
-                    outcome.bundle_hash
+                    "{}",
+                    crate::localization::formatted!(
+                        "wrote {} ({} bytes, bundle_hash {})",
+                        outcome.output_path.display(),
+                        outcome.size_bytes,
+                        outcome.bundle_hash
+                    )
                 );
             }
         }

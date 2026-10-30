@@ -18,6 +18,8 @@ mod build_revision;
 mod cli_aot_manifest;
 #[path = "build_support/embedded_assets.rs"]
 mod embedded_assets;
+#[path = "build_support/localization_formats.rs"]
+mod localization_formats;
 
 const CLI_AOT_MANIFEST: &str = "generated/cli-bytecode-manifest.json";
 const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -33,6 +35,7 @@ fn main() {
 
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    localization_formats::generate(&manifest_dir);
     let portal_dist = manifest_dir.join("portal-dist");
     let index = portal_dist.join("index.html");
 

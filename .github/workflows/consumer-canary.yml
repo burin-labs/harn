@@ -210,6 +210,13 @@ jobs:
         with:
           source-revision: ${{ needs.decide.outputs.source_revision }}
           token: ${{ github.token }}
+      - name: Confirm consumer observer declaration ${{ fromJSON(steps.observer.outputs.context || '{}').dispatch_nonce }}
+        if: inputs.rehearsal_promotion_run_id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
+          SOURCE_REVISION: ${{ needs.decide.outputs.source_revision }}
+        run: node scripts/ci/consumer-observer-declare.mjs --witness
       - name: Dispatch the consumer update once
         id: canary
         env:

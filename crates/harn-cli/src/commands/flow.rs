@@ -1216,8 +1216,13 @@ fn print_human_report(
     created_at_by_slice: &std::collections::BTreeMap<harn_flow::SliceId, String>,
 ) {
     println!(
-        "Audited {} shipped derived slice(s) since {since}; {} slice(s) have advisory drift.",
-        report.audited_slices, report.drifted_slices
+        "{}",
+        crate::localization::formatted!(
+            "Audited {} shipped derived slice(s) since {since}; {} slice(s) have advisory drift.",
+            report.audited_slices,
+            report.drifted_slices,
+            since = since
+        )
     );
     if report.slices.is_empty() {
         return;
@@ -1227,15 +1232,30 @@ fn print_human_report(
             .get(&slice.slice_id)
             .map(String::as_str)
             .unwrap_or("unknown");
-        println!("slice {} created_at={created_at}", slice.slice_id);
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "slice {} created_at={created_at}",
+                slice.slice_id,
+                created_at = created_at
+            )
+        );
         if !slice.advisory_drift.is_empty() {
-            println!("  current @retroactive predicates not pinned:");
+            println!(
+                "{}",
+                crate::localization::formatted!("  current @retroactive predicates not pinned:")
+            );
             for predicate in &slice.advisory_drift {
                 println!("    - {} {}", predicate.name, predicate.hash.as_str());
             }
         }
         if !slice.historical_only_predicates.is_empty() {
-            println!("  historical predicate hashes no longer in current set:");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  historical predicate hashes no longer in current set:"
+                )
+            );
             for hash in &slice.historical_only_predicates {
                 println!("    - {}", hash.as_str());
             }

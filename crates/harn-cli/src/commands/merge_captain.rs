@@ -344,24 +344,30 @@ fn write_text(path: &Path, value: &str, label: &str) -> Result<(), String> {
 
 fn print_ladder_report(report: &PersonaEvalLadderReport) {
     println!(
-        "{} ladder={} persona={} first_correct={}/{} artifacts={}",
-        if report.pass { "PASS" } else { "FAIL" },
-        report.id,
-        report.persona,
-        report.first_correct_route.as_deref().unwrap_or("<none>"),
-        report.first_correct_tier.as_deref().unwrap_or("<none>"),
-        report.artifact_root
+        "{}",
+        crate::localization::formatted!(
+            "{} ladder={} persona={} first_correct={}/{} artifacts={}",
+            if report.pass { "PASS" } else { "FAIL" },
+            report.id,
+            report.persona,
+            report.first_correct_route.as_deref().unwrap_or("<none>"),
+            report.first_correct_tier.as_deref().unwrap_or("<none>"),
+            report.artifact_root
+        )
     );
     for tier in &report.tiers {
         println!(
-            "- {} [{}] {} tools={} models={} latency={}ms cost=${:.6}",
-            tier.timeout_tier,
-            tier.route_id,
-            tier.outcome,
-            tier.tool_calls,
-            tier.model_calls,
-            tier.latency_ms,
-            tier.cost_usd
+            "{}",
+            crate::localization::formatted!(
+                "- {} [{}] {} tools={} models={} latency={}ms cost=${:.6}",
+                tier.timeout_tier,
+                tier.route_id,
+                tier.outcome,
+                tier.tool_calls,
+                tier.model_calls,
+                tier.latency_ms,
+                tier.cost_usd
+            )
         );
         if !tier.degradation_reasons.is_empty() {
             for reason in &tier.degradation_reasons {
@@ -369,10 +375,16 @@ fn print_ladder_report(report: &PersonaEvalLadderReport) {
             }
         }
         println!(
-            "  transcript: {}",
-            tier.transcript_path.as_deref().unwrap_or("-")
+            "{}",
+            crate::localization::formatted!(
+                "  transcript: {}",
+                tier.transcript_path.as_deref().unwrap_or("-")
+            )
         );
-        println!("  receipt: {}", tier.receipt_path);
+        println!(
+            "{}",
+            crate::localization::formatted!("  receipt: {}", tier.receipt_path)
+        );
     }
 }
 

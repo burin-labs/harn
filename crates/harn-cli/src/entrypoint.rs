@@ -23,7 +23,10 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         raw_args.insert(1, "run".to_string());
     }
 
-    let cli = match Cli::try_parse_from(&raw_args) {
+    let parsed = localization::command()
+        .try_get_matches_from(&raw_args)
+        .and_then(|matches| Cli::from_arg_matches(&matches));
+    let cli = match parsed {
         Ok(cli) => cli,
         Err(error) => {
             if matches!(
@@ -59,7 +62,7 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         // `arg_required_else_help` already shows help when no args are
         // supplied. We only land here if a top-level flag (e.g. a
         // future `--version` long flag) parsed without a subcommand.
-        let mut cmd = Cli::command();
+        let mut cmd = localization::command();
         cmd.print_help().ok();
         return;
     };

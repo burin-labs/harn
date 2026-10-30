@@ -96,6 +96,33 @@ pub(crate) fn record_persisted_journal_events(id: &str, event_ids: &[u64]) {
     });
 }
 
+pub(crate) fn pending_workspace_directories(id: &str) -> Result<Option<Vec<String>>, VmError> {
+    super::SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let Some(state) = sessions.get(id) else {
+            return Ok(None);
+        };
+        let (Some(anchor), Some(journal)) = (&state.workspace_anchor, &state.transcript_journal)
+        else {
+            return Ok(None);
+        };
+        let directories = anchor.additional_directories().map_err(VmError::Runtime)?;
+        Ok((directories.as_slice() != journal.persisted_directories()).then_some(directories))
+    })
+}
+
+pub(crate) fn record_persisted_workspace_directories(id: &str, directories: Vec<String>) {
+    super::SESSIONS.with(|sessions| {
+        if let Some(journal) = sessions
+            .borrow_mut()
+            .get_mut(id)
+            .and_then(|state| state.transcript_journal.as_mut())
+        {
+            journal.record_persisted_directories(directories);
+        }
+    });
+}
+
 pub(crate) fn clear_journal(id: &str) {
     super::SESSIONS.with(|sessions| {
         if let Some(state) = sessions.borrow_mut().get_mut(id) {

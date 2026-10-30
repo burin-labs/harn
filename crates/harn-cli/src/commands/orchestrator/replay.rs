@@ -10,26 +10,50 @@ pub(super) async fn run(args: OrchestratorReplayArgs) -> Result<(), Orchestrator
         return print_json(&handle);
     }
 
-    println!("Replay result:");
-    println!("- binding_id={}", handle.binding_id);
-    println!("- binding_version={}", handle.binding_version);
-    println!("- event_id={}", handle.event_id);
-    println!("- status={}", handle.status);
+    println!("{}", crate::localization::formatted!("Replay result:"));
     println!(
-        "- replay_of_event_id={}",
-        handle.replay_of_event_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("- binding_id={}", handle.binding_id)
     );
     println!(
-        "- dlq_entry_id={}",
-        handle.dlq_entry_id.as_deref().unwrap_or("-")
+        "{}",
+        crate::localization::formatted!("- binding_version={}", handle.binding_version)
     );
-    println!("- error={}", handle.error.as_deref().unwrap_or("-"));
     println!(
-        "- result={}",
-        handle
-            .result
-            .map(|result| result.to_string())
-            .unwrap_or_else(|| "-".to_string())
+        "{}",
+        crate::localization::formatted!("- event_id={}", handle.event_id)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- status={}", handle.status)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- replay_of_event_id={}",
+            handle.replay_of_event_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- dlq_entry_id={}",
+            handle.dlq_entry_id.as_deref().unwrap_or("-")
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- error={}", handle.error.as_deref().unwrap_or("-"))
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- result={}",
+            handle
+                .result
+                .map(|result| result.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
     );
     Ok(())
 }

@@ -12,6 +12,30 @@ machine-readable side of `--json` modes, see the
 to include source excerpts and runtime stack details. The structured `--json`
 error event retains its detailed diagnostic.
 
+## Interface language
+
+Command help, command status and result headings, setup prompts, and OAuth browser result pages follow the first nonempty
+`LC_ALL`, `LC_MESSAGES`, or `LANG` value, in that order. Supported languages are
+English (`en`), Spanish (`es`), French (`fr`), German (`de`), Brazilian Portuguese
+(`pt-BR`), Italian (`it`), Japanese (`ja`), Korean (`ko`), and Simplified Chinese
+(`zh-Hans`). Regional locale names such as `fr_CA.UTF-8` are accepted. Unsupported
+languages and Traditional Chinese variants fall back to English.
+
+```sh
+LC_ALL=fr_FR.UTF-8 harn run --help
+```
+
+Command names, flags, argument values, JSON contracts, compiler and runtime
+diagnostics, and authored or scaffolded source files retain their canonical
+spelling. The English help catalog is generated from the live command parser by
+`make gen-cli-surface`; the existing surface check and catalog coverage tests
+detect missing translations when the parser changes.
+
+Complete command-result templates share the same catalogs. The build projects
+their translations into Rust formatting branches so argument types and formatting
+specifications are checked for every supported language. JSON and CSV output keep
+their existing keys, columns, and values.
+
 ## Durable provider allowance
 
 `--spend-policy PATH` applies a TOML policy to provider calls in the invocation's

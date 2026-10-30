@@ -99,13 +99,68 @@ pipeline test_generic_import_query_keeps_call_tree(harness: Harness) {
 
 pipeline test_typeof_import_comparison_remains_valid(harness: Harness) {
   for language in ["typescript", "tsx"] {
-    const comparison = "const result = a < typeof import(\"x\") > b;"
-    const parsed = harness.ast.parse_errors({content: comparison, language: language})
-    assert_eq(len(parsed.errors), 0)
-    const binary = ast_search(
+    for comparison in [
+      "const result = a < typeof import(\"x\") > b;",
+      "const result = a < import(\"x\").Foo > b;",
+    ] {
+      const parsed = harness.ast.parse_errors({content: comparison, language: language})
+      assert_eq(len(parsed.errors), 0)
+      const binary = ast_search(
+        harness.ast,
+        {source: comparison, language: language, query: "(binary_expression) @comparison"},
+      )
+      assert(binary.ok && binary.match_count > 0)
+      const generic = ast_search(
+        harness.ast,
+        {
+          source: comparison,
+          language: language,
+          query: "(call_expression function: (identifier) type_arguments: (type_arguments)) @call",
+        },
+      )
+      assert(generic.ok && generic.match_count == 0)
+    }
+  }
+}
+
+pipeline test_import_type_member_in_generic_call(harness: Harness) {
+  for extension in ["ts", "tsx"] {
+    const source = "const value = f<import(\"x\").Foo>();\n"
+    const result = checked_edit(harness, extension, source)
+    assert_eq(result.result, "applied")
+    assert_eq(len(result.validation.errors), 0)
+    const invalid = checked_edit(harness, extension, "const value = f<import(\"x\").Foo>(;\n")
+    assert(!invalid.applied && len(invalid.validation.errors) > 0)
+  }
+  for language in ["typescript", "tsx"] {
+    for source in [
+      "f<import(\"x\")>()",
+      "f<import(\"x\").Foo>()",
+      "f<import(\"x\").Foo.Bar>()",
+      "f<Promise<import(\"x\").Foo>>()",
+      "f<import(\"x\").Foo, import(\"y\").Bar>(1)",
+    ] {
+      const call = ast_search(
+        harness.ast,
+        {
+          source: source,
+          language: language,
+          query: "(call_expression function: (identifier) type_arguments: (type_arguments)) @call",
+        },
+      )
+      assert(call.ok && call.match_count == 1)
+      assert_eq(call.matches[0].text, source)
+    }
+    const parenthesized = "a < typeof import(\"x\") > (b)"
+    const call = ast_search(
       harness.ast,
-      {source: comparison, language: language, query: "(binary_expression) @comparison"},
+      {
+        source: parenthesized,
+        language: language,
+        query: "(call_expression function: (identifier) type_arguments: (type_arguments)) @call",
+      },
     )
-    assert(binary.ok && binary.match_count > 0)
+    assert(call.ok && call.match_count == 1)
+    assert_eq(call.matches[0].text, parenthesized)
   }
 }

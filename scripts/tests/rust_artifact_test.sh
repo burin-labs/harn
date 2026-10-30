@@ -21,6 +21,11 @@ case "$1" in
       "build --locked --profile ci-cli -p harn-cli -p harn-cli-aot-gen --bin harn --bin harn-cli-aot-gen") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
       *) exit 2 ;;
     esac
+    if [[ "${FAKE_HEAD_CLI:-0}" == 1 ]]; then
+      printf '#!/usr/bin/env bash\nprintf '\''{"data":{"source_revision":"%s"}}\\n'\''\n' \
+        "${FAKE_EMBEDDED_REVISION:-${HARN_BUILD_REVISION:?}}" > "${FAKE_TARGET:?}/ci-cli/harn"
+      chmod +x "${FAKE_TARGET:?}/ci-cli/harn"
+    fi
     ;;
   metadata)
     if [[ "$*" == "metadata --locked --format-version 1" ]]; then
@@ -94,6 +99,13 @@ if [[ "$*" == "rev-parse --verify HEAD" ]]; then
   printf '%s\n' "${FAKE_COMMIT:?}"
   exit 0
 fi
+case "$*" in
+  "cat-file -e "*"^{commit}"|"diff --quiet HEAD --"|"ls-files --others --exclude-standard")
+    [[ "$1" != diff || "${FAKE_DIRTY_SOURCE:-0}" == 0 ]] || exit 1
+    exit 0 ;;
+  "rev-parse --verify HEAD^{tree}") printf '%s\n' same-tree; exit 0 ;;
+  "rev-parse --verify "*"^{tree}") printf '%s\n' "${FAKE_SOURCE_TREE:-same-tree}"; exit 0 ;;
+esac
 echo "unexpected git invocation: $*" >&2
 exit 2
 SH
@@ -153,6 +165,21 @@ run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build-ci-cli"
 test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
+head_commit=fedcba9876543210fedcba9876543210fedcba98
+FAKE_HEAD_CLI=1 run_artifact build-head-cli "$tmpdir/out/head-cli.tar.zst" "$head_commit"
+mkdir "$tmpdir/head-cli"
+tar --zstd -xf "$tmpdir/out/head-cli.tar.zst" -C "$tmpdir/head-cli"
+grep -Fxq "commit=$head_commit" "$tmpdir/head-cli/manifest"
+test "$("$tmpdir/head-cli/harn" version --json | jq -er '.data.source_revision')" = "$head_commit"
+FAKE_HEAD_CLI=1 FAKE_SOURCE_TREE=different-tree \
+  expect_failure "exact-head CLI accepted a different source tree" \
+  run_artifact build-head-cli "$tmpdir/out/wrong-head-tree.tar.zst" "$head_commit"
+FAKE_HEAD_CLI=1 FAKE_DIRTY_SOURCE=1 \
+  expect_failure "exact-head CLI accepted dirty source" \
+  run_artifact build-head-cli "$tmpdir/out/dirty-head-tree.tar.zst" "$head_commit"
+FAKE_HEAD_CLI=1 FAKE_EMBEDDED_REVISION="$commit" \
+  expect_failure "exact-head CLI accepted a stale embedded source revision" \
+  run_artifact build-head-cli "$tmpdir/out/stale-head-cli.tar.zst" "$head_commit"
 run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
 

@@ -251,6 +251,32 @@ pub async fn query_session_timeline(
     Ok(builder.finish())
 }
 
+/// Prefer an acknowledged journal; metadata-only rows retain live chronology.
+pub async fn query_workspace_session_timeline(
+    project_root: &Path,
+    log: Option<&AnyEventLog>,
+    query: SessionTimelineQuery,
+) -> Result<SessionTimelineSnapshot, SessionTimelineError> {
+    if let Some(session_id) = query.session_id.as_deref() {
+        if let Some(store) =
+            crate::stdlib::session_store::open_existing_canonical_store(project_root)
+                .map_err(|error| SessionTimelineError::SessionStore(error.to_string()))?
+        {
+            let has_journal = match store.describe(session_id).await {
+                Ok(meta) => meta.has_canonical_journal(),
+                Err(harn_session_store::StoreError::NotFound(_)) => false,
+                Err(error) => return Err(SessionTimelineError::SessionStore(error.to_string())),
+            };
+            if has_journal {
+                if let Some(snapshot) = query_session_store_timeline(&store, query.clone()).await? {
+                    return Ok(snapshot);
+                }
+            }
+        }
+    }
+    query_session_timeline(log, None, query).await
+}
+
 /// Project durable canonical transcript rows into the same timeline contract
 /// used by live observability. Returns `None` when the project has no canonical
 /// store or the requested session does not exist.

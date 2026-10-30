@@ -1059,6 +1059,44 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      - name: Select an exact release head CLI
+        id: head-cli
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          source scripts/lib/release_version.sh
+          version="$(release_workspace_version < Cargo.toml)"
+          if ! release_version_is_canonical "$version" || release_version_is_prerelease "$version"; then
+            echo 'selected=false' >> "$GITHUB_OUTPUT"
+          else
+            git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$SOURCE_HEAD"
+            source_tree="$(git rev-parse --verify "$SOURCE_HEAD^{tree}")"
+            checkout_tree="$(git rev-parse --verify 'HEAD^{tree}')"
+            if [[ -n "$source_tree" && "$source_tree" == "$checkout_tree" ]]; then
+              echo 'selected=true' >> "$GITHUB_OUTPUT"
+            else
+              echo '::notice::Release head differs from the tested merge tree; no exact-head CLI is available.'
+              echo 'selected=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Relink the exact release head CLI
+        if: steps.head-cli.outputs.selected == 'true'
+        timeout-minutes: 10
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+        run: ./scripts/ci/rust_artifact.sh build-head-cli "$RUNNER_TEMP/harn-head-cli.tar.zst" "$SOURCE_HEAD"
+      - name: Upload the exact release head CLI
+        if: steps.head-cli.outputs.selected == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: harn-head-cli.tar.zst
+          path: ${{ runner.temp }}/harn-head-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source

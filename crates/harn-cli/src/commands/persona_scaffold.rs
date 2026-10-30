@@ -164,9 +164,15 @@ pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
             .ok_or_else(|| "manual persona scaffolding requires a name".to_string())?;
         (scaffold_persona(args).await?, normalize_name(name)?)
     };
-    println!("created persona package {}", result.root.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("created persona package {}", result.root.display())
+    );
     for file in &result.files {
-        println!("  create {}", file.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("  create {}", file.display())
+        );
     }
     println!();
     println!("  harn persona doctor {name}");
@@ -175,9 +181,15 @@ pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
 
 pub(crate) async fn run_materialize(args: &PersonaMaterializeArgs) -> Result<(), String> {
     let result = materialize_persona(args).await?;
-    println!("materialized persona package {}", result.root.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("materialized persona package {}", result.root.display())
+    );
     for file in &result.files {
-        println!("  create {}", file.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("  create {}", file.display())
+        );
     }
     Ok(())
 }

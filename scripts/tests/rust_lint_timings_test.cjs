@@ -158,7 +158,41 @@ hostCommand(program,args,limit,'sample_command',timeout).result.then(
   assert.throws(() => sampling.symbolStacks(symbols.split('Total number')[0], sampledTarget), /unmeasured/);
   assert.throws(() => sampling.symbolStacks(symbols.split('Total number')[0], sampledTarget), error => error.stage === 'sample_parse' && error.cause === 'incomplete_graph');
   assert.throws(() => sampling.symbolStacks(symbols.replace('rustc_hir_typeck', 'sleep'), sampledTarget), /unmeasured/);
-  assert.throws(() => sampling.symbolStacks(symbols.replace('  20', 'x'.repeat(131073)), sampledTarget), /unmeasured/);
+  assert.throws(() => sampling.symbolStacks(symbols.replace('  20', 'x'.repeat(3 * 1024 * 1024)), sampledTarget), /unmeasured/);
+  const reportProbe = path.join(root, 'report-probe.cjs');
+  fs.writeFileSync(reportProbe, `const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {compilerSymbols}=require(${JSON.stringify(path.resolve(__dirname, '../ci/macos_compiler_sample.cjs'))});
+const mode=process.argv[2];let report;
+const command=async(program,args,limit,stage,timeout,allowEmpty)=>{
+ assert.equal(program,'/usr/bin/sample');assert.deepEqual(args.slice(0,4),['321','2','10','-file']);
+ assert.equal(stage,'sample_command');assert.equal(timeout,30000);assert.equal(allowEmpty,true);
+ report=args[4];
+ if(mode==='missing') return '';
+ if(mode==='symlink') {fs.symlinkSync(__filename,report);return '';}
+ if(mode==='fifo') {assert.equal(require('node:child_process').spawnSync('mkfifo',[report]).status,0);return '';}
+ if(mode==='oversized') {fs.writeFileSync(report,'');fs.truncateSync(report,16*1024*1024+1);return '';}
+ const graph='  20 rustc_hir_typeck::check_body\\n'.repeat(mode==='large-graph'?12000:1);
+ const text='PRIVATE HOST HEADER\\nProcess: clippy-driver ['+(mode==='wrong-identity'?'322':'321')+']\\nCall graph:\\n'+graph+
+  (mode==='incomplete'?'':'\\nTotal number in stack: 20\\n')+'PRIVATE BINARY PATH'.repeat(20000);
+ fs.writeFileSync(report,mode==='empty'?'':text);return '';
+};
+compilerSymbols({pid:321,executable:'clippy-driver'},command).then(
+ symbols=>({status:'MEASURED',bytes:Buffer.byteLength(symbols),hasCompiler:symbols.includes('rustc_hir_typeck')}),
+ error=>({status:'UNMEASURED',stage:error.stage,cause:error.cause}),
+).then(result=>console.log(JSON.stringify({...result,rawRetained:fs.existsSync(report),scratchRetained:fs.existsSync(path.dirname(report))})));
+`);
+  for (const mode of ['positive', 'large-graph', 'missing', 'empty', 'symlink', 'fifo', 'oversized', 'wrong-identity', 'incomplete']) {
+    const probe = spawnSync(process.execPath, [reportProbe, mode], {encoding:'utf8', timeout:10000, maxBuffer:32768});
+    assert.equal(probe.status, 0, probe.stderr);
+    const result = JSON.parse(probe.stdout);
+    assert.equal(result.status, ['positive','large-graph'].includes(mode) ? 'MEASURED' : 'UNMEASURED');
+    if (result.status === 'MEASURED') assert.equal(result.hasCompiler, true);
+    else assert(result.stage && result.cause, 'refusal must retain its stage and cause');
+    assert.equal(result.rawRetained, false);
+    assert.equal(result.scratchRetained, false);
+    assert(!probe.stdout.includes('PRIVATE'), 'raw host data must never enter the diagnostic');
+    console.log(`rust_lint_timings_test: private report ${mode} reached`);
+  }
   // A real process census reaches a known live owned child, without inspecting
   // process argv or environment. The diagnostic classifier must not call an
   // ordinary child a compiler or admit a fabricated/missing owner PID.

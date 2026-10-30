@@ -9091,30 +9091,22 @@
           "name": "infer_type"
         },
         {
-          "type": "PREC",
-          "value": -1,
+          "type": "ALIAS",
           "content": {
-            "type": "ALIAS",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_type_query_member_expression_in_type_annotation"
-            },
-            "named": true,
-            "value": "member_expression"
-          }
+            "type": "SYMBOL",
+            "name": "_type_query_member_expression_in_type_annotation"
+          },
+          "named": true,
+          "value": "member_expression"
         },
         {
-          "type": "PREC",
-          "value": -1,
+          "type": "ALIAS",
           "content": {
-            "type": "ALIAS",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_type_query_call_expression_in_type_annotation"
-            },
-            "named": true,
-            "value": "call_expression"
-          }
+            "type": "SYMBOL",
+            "name": "_type_query_call_expression_in_type_annotation"
+          },
+          "named": true,
+          "value": "call_expression"
         }
       ]
     },
@@ -11163,6 +11155,22 @@
       "_property_name"
     ],
     [
+      "member_expression",
+      "_type_query_member_expression_in_type_annotation"
+    ],
+    [
+      "call_expression",
+      "_type_query_call_expression_in_type_annotation"
+    ],
+    [
+      "_type_query_call_expression_in_type_annotation",
+      "type"
+    ],
+    [
+      "_type_query_member_expression_in_type_annotation",
+      "type"
+    ],
+    [
       "call_expression",
       "_type_query_call_expression"
     ],
@@ -11754,16 +11762,6 @@
     [
       {
         "type": "SYMBOL",
-        "name": "member_expression"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "_type_query_member_expression_in_type_annotation"
-      }
-    ],
-    [
-      {
-        "type": "SYMBOL",
         "name": "_type_query_member_expression"
       },
       {
@@ -11859,16 +11857,6 @@
       {
         "type": "SYMBOL",
         "name": "pattern"
-      }
-    ],
-    [
-      {
-        "type": "SYMBOL",
-        "name": "call_expression"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "_type_query_call_expression_in_type_annotation"
       }
     ],
     [

@@ -27,6 +27,7 @@ case "$2" in
   'repos/burin-labs/harn/actions/runs/4242/artifacts?per_page=100') cat "$FIXTURE/artifacts.json" ;;
   repos/burin-labs/harn/contents/Cargo.toml\?ref=*) cat "$FIXTURE/Cargo.toml" ;;
   repos/burin-labs/harn/compare/*...main) cat "$FIXTURE/compare.json" ;;
+  repos/burin-labs/harn/compare/*) cat "$FIXTURE/lineage.json" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -152,4 +153,17 @@ if STANDALONE_HARN=true FIXTURE_ARCHIVE_REFUSE=true resolve; then
   fail 'unqualified archives authorized standalone publication'
 fi
 [[ ! -s "$tmp/output" ]] || fail 'failed archive reader emitted source'
+policy=cccccccccccccccccccccccccccccccccccccccc
+jq --arg policy "$policy" '.event="workflow_dispatch" | .head_branch="main" |
+  .run_attempt=1 | .head_sha=$policy' "$tmp/good-run.json" > "$tmp/run.json"
+cp "$tmp/good-compare.json" "$tmp/lineage.json"
+jq --arg policy "$policy" '.artifacts[].workflow_run.head_sha=$policy' \
+  "$tmp/good-artifacts.json" > "$tmp/artifacts.json"
+RECOVERY=true CONSUMER_PULL_REQUEST=7 resolve || fail 'authenticated historical repair refused'
+grep -Fxq "source_sha=$sha" "$tmp/output" || fail 'historical repair exported policy as source'
+refuse 'historical producer without repair'
+STANDALONE_HARN=true refuse 'historical standalone producer'
+CONSUMER_PULL_REQUEST=7 FIXTURE_ARCHIVE_REFUSE=true refuse 'unqualified historical archives'
+printf '{"status":"diverged","merge_base_commit":{"sha":"%s"}}\n' "$sha" > "$tmp/lineage.json"
+CONSUMER_PULL_REQUEST=7 refuse 'unrelated historical policy'
 echo 'release_promotion_source_test: ok'

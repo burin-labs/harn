@@ -265,7 +265,10 @@ fn render_changed_lint(outcome: &LintJsonCommandOutcome) {
                 diagnostic.severity, diagnostic.message
             );
             if let Some(help) = &diagnostic.help {
-                eprintln!("  help: {help}");
+                eprintln!(
+                    "{}",
+                    crate::localization::formatted!("  help: {help}", help = help)
+                );
             }
         }
     }

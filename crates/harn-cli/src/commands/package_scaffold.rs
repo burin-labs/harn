@@ -88,9 +88,12 @@ async fn scaffold_openapi_package(args: &PackageScaffoldOpenapiArgs) -> Result<(
     generate_package_docs_impl(Some(&dest), None, false)?;
 
     println!(
-        "Scaffolded OpenAPI SDK package '{}' at {}",
-        args.name,
-        dest.display()
+        "{}",
+        crate::localization::formatted!(
+            "Scaffolded OpenAPI SDK package '{}' at {}",
+            args.name,
+            dest.display()
+        )
     );
     println!("  cd {}", dest.display());
     println!("  harn install");

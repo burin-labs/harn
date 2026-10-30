@@ -117,7 +117,10 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
             };
             println!("{}", json_envelope::to_string_pretty(&envelope));
         } else if let Ok(receipt) = &result {
-            println!("Installed {}", receipt.binary_path.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("Installed {}", receipt.binary_path.display())
+            );
         }
         return result.map(|_| ());
     }
@@ -295,8 +298,14 @@ fn upgrade(
         hook_runtime: None,
     });
     if !args.json && args.check {
-        println!("Installed: v{current}");
-        println!("Target:    {target}");
+        println!(
+            "{}",
+            crate::localization::formatted!("Installed: v{current}", current = current)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("Target:    {target}", target = target)
+        );
     } else if !args.json {
         progress(format!("Installed: v{current}"));
         progress(format!("Target:    {target}"));
@@ -306,7 +315,10 @@ fn upgrade(
     }
     if !args.force && !report.needs_upgrade {
         if !args.json {
-            println!("Already on the latest release.");
+            println!(
+                "{}",
+                crate::localization::formatted!("Already on the latest release.")
+            );
         }
         return Ok(());
     }
@@ -379,7 +391,13 @@ fn upgrade(
     print_hook_runtime_outcome(&hook_report);
     report.hook_runtime = Some(hook_report);
     if !args.json {
-        println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Upgraded harn to {target}. Re-run your last command to use the new binary.",
+                target = target
+            )
+        );
     }
     Ok(())
 }

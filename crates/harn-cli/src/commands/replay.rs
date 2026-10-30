@@ -400,11 +400,20 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         }
     };
     if let ReplaySource::Session { at: Some(at), .. } = &source {
-        println!("Time-travelled to event {at}: replaying the session as it stood at that point.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Time-travelled to event {at}: replaying the session as it stood at that point.",
+                at = at
+            )
+        );
     }
     for (index, execution) in executions.iter().enumerate() {
         if runs > 1 {
-            println!("Replay run {}:", index + 1);
+            println!(
+                "{}",
+                crate::localization::formatted!("Replay run {}:", index + 1)
+            );
         }
         print_report_human(&execution.report);
     }
@@ -417,9 +426,12 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
             .iter()
             .any(|execution| !execution.report.fixture.pass);
         println!(
-            "Determinism: {} (compared {} run(s))",
-            if determinism.pass { "PASS" } else { "FAIL" },
-            determinism.compared_runs
+            "{}",
+            crate::localization::formatted!(
+                "Determinism: {} (compared {} run(s))",
+                if determinism.pass { "PASS" } else { "FAIL" },
+                determinism.compared_runs
+            )
         );
         for failure in determinism.failures {
             println!("  {failure}");
@@ -720,48 +732,81 @@ fn envelope_for_report(payload: ReplayReport) -> JsonEnvelope<ReplayReport> {
 }
 
 fn print_report_human(report: &ReplayReport) {
-    println!("Replay: {}", report.run_id);
+    println!(
+        "{}",
+        crate::localization::formatted!("Replay: {}", report.run_id)
+    );
     if let Some(execution_id) = &report.execution_id {
-        println!("Execution: {execution_id}");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Execution: {execution_id}",
+                execution_id = execution_id
+            )
+        );
     }
     for stage in &report.stages {
         println!(
-            "[{}] status={} outcome={} branch={}",
-            stage.node_id,
-            stage.status,
-            stage.outcome,
-            stage.branch.clone().unwrap_or_else(|| "-".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "[{}] status={} outcome={} branch={}",
+                stage.node_id,
+                stage.status,
+                stage.outcome,
+                stage.branch.clone().unwrap_or_else(|| "-".to_string())
+            )
         );
         if let Some(text) = &stage.visible_text {
-            println!("  visible: {text}");
+            println!(
+                "{}",
+                crate::localization::formatted!("  visible: {text}", text = text)
+            );
         }
         if let Some(verification) = &stage.verification {
-            println!("  verification: {verification}");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  verification: {verification}",
+                    verification = verification
+                )
+            );
         }
     }
     println!(
-        "Transcript events persisted: {}",
-        report.transcript_event_count
+        "{}",
+        crate::localization::formatted!(
+            "Transcript events persisted: {}",
+            report.transcript_event_count
+        )
     );
     println!(
-        "Embedded replay fixture: {}",
-        if report.fixture.pass { "PASS" } else { "FAIL" }
+        "{}",
+        crate::localization::formatted!(
+            "Embedded replay fixture: {}",
+            if report.fixture.pass { "PASS" } else { "FAIL" }
+        )
     );
     for failure in &report.fixture.failures {
-        println!("  failure: {failure}");
+        println!(
+            "{}",
+            crate::localization::formatted!("  failure: {failure}", failure = failure)
+        );
     }
     for transition in &report.transitions {
         println!(
-            "transition {} -> {} ({})",
-            transition
-                .from_node_id
-                .clone()
-                .unwrap_or_else(|| "start".to_string()),
-            transition.to_node_id,
-            transition
-                .branch
-                .clone()
-                .unwrap_or_else(|| "default".to_string())
+            "{}",
+            crate::localization::formatted!(
+                "transition {} -> {} ({})",
+                transition
+                    .from_node_id
+                    .clone()
+                    .unwrap_or_else(|| "start".to_string()),
+                transition.to_node_id,
+                transition
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| "default".to_string())
+            )
         );
     }
 }

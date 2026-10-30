@@ -47,7 +47,10 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
             cli_diagnostic!("error: {error}");
         }
         if validation.errors.is_empty() && validation.schema_errors.is_empty() {
-            println!("provider catalog validation OK");
+            println!(
+                "{}",
+                crate::localization::formatted!("provider catalog validation OK")
+            );
         }
     }
 
@@ -71,7 +74,10 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
     if args.check {
         let drift = artifact_drift_from(&args.output_dir, &artifacts)?;
         if drift.is_empty() {
-            println!("provider catalog artifacts are up to date");
+            println!(
+                "{}",
+                crate::localization::formatted!("provider catalog artifacts are up to date")
+            );
             return Ok(());
         }
         for path in drift {
@@ -90,7 +96,10 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
         let path = args.output_dir.join(artifact.relative_path);
         fs::write(&path, artifact.body)
             .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-        println!("wrote {}", path.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("wrote {}", path.display())
+        );
     }
     Ok(())
 }

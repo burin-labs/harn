@@ -10,6 +10,10 @@ large=$(report_duration_budget 3601 75 14336)
 owned=$(report_duration_budget 2161 45 24576)
 missing=$(report_duration_budget 3601 75 unmeasured)
 invalid=$(report_duration_budget -1 75 7168)
+feedback_boundary=$(report_duration_budget 1200 75 7168 1200)
+feedback_slow=$(report_duration_budget 1201 75 7168 1200)
+invalid_feedback=$(report_duration_budget 1 75 7168 0)
+unreachable_feedback=$(report_duration_budget 1 75 7168 4501)
 
 [[ "$normal" != *'::warning::'* && "$boundary" != *'::warning::'* ]]
 [[ "$slow" == *'::warning::'* && "$slow" == *'3601s of 4500s'* ]]
@@ -17,6 +21,10 @@ invalid=$(report_duration_budget -1 75 7168)
 [[ "$large" == *'14336 MiB'* && "$owned" == *'2161s of 2700s'* ]]
 [[ "$missing" == *'RUST_TEST_DURATION_UNMEASURED'* ]]
 [[ "$invalid" == *'RUST_TEST_DURATION_UNMEASURED'* ]]
+[[ "$feedback_boundary" != *'::warning::'* ]]
+[[ "$feedback_slow" == *'::warning::'* && "$feedback_slow" == *'feedback budget 1200s'* ]]
+[[ "$invalid_feedback" == *'RUST_TEST_DURATION_UNMEASURED'* ]]
+[[ "$unreachable_feedback" == *'RUST_TEST_DURATION_UNMEASURED'* ]]
 
 # The reporter's budget is a checked projection of the actual job fuse.
 workflow="$root/.github/workflows/macos-nightly.yml"

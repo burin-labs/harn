@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
+use crate::localization;
 use url::Url;
 
 use super::OAUTH_CALLBACK_TIMEOUT;
@@ -26,10 +27,23 @@ pub(super) enum OAuthCallbackError {
 impl std::fmt::Display for OAuthCallbackError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TimedOut => formatter.write_str("OAuth callback timed out after 5 minutes"),
-            Self::UserDenied => formatter.write_str("OAuth authorization was denied"),
-            Self::StateMismatch => formatter.write_str("OAuth callback state did not match"),
+            Self::TimedOut => formatter.write_str(localization::OAUTH_CALLBACK_TIMEOUT),
+            Self::UserDenied => formatter.write_str(localization::OAUTH_DENIED),
+            Self::StateMismatch => formatter.write_str(localization::OAUTH_CALLBACK_STATE_MISMATCH),
             Self::Invalid(detail) => formatter.write_str(detail),
+        }
+    }
+}
+
+impl OAuthCallbackError {
+    fn browser_message(&self) -> String {
+        match self {
+            Self::TimedOut => localization::translate(localization::OAUTH_CALLBACK_TIMEOUT),
+            Self::UserDenied => localization::translate(localization::OAUTH_DENIED),
+            Self::StateMismatch => {
+                localization::translate(localization::OAUTH_CALLBACK_STATE_MISMATCH)
+            }
+            Self::Invalid(detail) => detail.clone(),
         }
     }
 }
@@ -143,13 +157,13 @@ fn wait_for_callback_query_inner(
                     Ok(query) => {
                         response = html_response(
                             200,
-                            "Authorization complete. You can close this window.",
+                            &localization::translate(localization::OAUTH_SUCCESS_MESSAGE),
                         );
                         let _ = stream.write_all(response.as_bytes());
                         return Ok(query);
                     }
                     Err(error) => {
-                        response = html_response(400, &error.to_string());
+                        response = html_response(400, &error.browser_message());
                         let _ = stream.write_all(response.as_bytes());
                         // A matching `access_denied` response is an authenticated
                         // terminal user choice. A mismatched state is not: any
@@ -306,19 +320,33 @@ pub(super) fn loopback_origin(url: &Url) -> Result<String, String> {
 }
 
 pub(super) fn html_response(status: u16, message: &str) -> String {
+    html_response_in(
+        status,
+        message,
+        harn_hostlib::localization::process_locale(),
+    )
+}
+
+fn html_response_in(
+    status: u16,
+    message: &str,
+    locale: harn_hostlib::localization::Locale,
+) -> String {
     let status_line = match status {
         200 => "HTTP/1.1 200 OK",
         400 => "HTTP/1.1 400 Bad Request",
         _ => "HTTP/1.1 404 Not Found",
     };
     let title = if status == 200 {
-        "Authorization Complete"
+        localization::OAUTH_COMPLETE_TITLE
     } else {
-        "Authorization Failed"
+        localization::OAUTH_FAILED_TITLE
     };
+    let title = crate::format::escape_html(&localization::translate_for(locale, title));
+    let locale = locale.id();
     let escaped_message = crate::format::escape_html(message);
     format!(
-        "{status_line}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title></head><body><h1>{title}</h1><p>{escaped_message}</p></body></html>"
+        "{status_line}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Language: {locale}\r\nConnection: close\r\n\r\n<!doctype html><html lang=\"{locale}\"><head><meta charset=\"utf-8\"><title>{title}</title></head><body><h1>{title}</h1><p>{escaped_message}</p></body></html>"
     )
 }
 
@@ -327,6 +355,29 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::net::TcpStream;
+
+    #[test]
+    fn callback_page_uses_selected_locale_without_rewriting_external_details() {
+        use harn_hostlib::localization::Locale;
+        for locale in Locale::ALL {
+            let body = localization::translate_for(locale, localization::OAUTH_SUCCESS_MESSAGE);
+            let response = html_response_in(200, &body, locale);
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            assert!(response.contains(&format!("Content-Language: {}", locale.id())));
+            assert!(response.contains(&format!("<html lang=\"{}\">", locale.id())));
+            assert!(response.contains(&crate::format::escape_html(&body)));
+            if locale != Locale::English {
+                assert!(!response.contains("<title>Authorization Complete</title>"));
+            }
+        }
+        let french = html_response_in(400, "Authorization Complete <script>", Locale::French);
+        assert!(french.contains("<title>Échec de l’autorisation</title>"));
+        assert!(french.contains("<p>Authorization Complete &lt;script&gt;</p>"));
+        assert_eq!(
+            OAuthCallbackError::UserDenied.to_string(),
+            "OAuth authorization was denied"
+        );
+    }
 
     #[test]
     fn matching_user_denial_is_terminal_without_waiting_for_timeout() {

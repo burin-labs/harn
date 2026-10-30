@@ -17,10 +17,25 @@ pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), S
         None => {
             let install_url = github_install_url(args, &state)?;
             let (listener, redirect_uri) = bind_loopback_listener(&args.redirect_uri)?;
-            println!("Opening browser for GitHub App installation...");
-            println!("Callback listener: {redirect_uri}");
+            println!(
+                "{}",
+                crate::localization::formatted!("Opening browser for GitHub App installation...")
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "Callback listener: {redirect_uri}",
+                    redirect_uri = redirect_uri
+                )
+            );
             if args.no_open || webbrowser::open(install_url.as_str()).is_err() {
-                println!("Open this URL manually:\n{install_url}");
+                println!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "Open this URL manually:\n{install_url}",
+                        install_url = install_url
+                    )
+                );
             }
             wait_for_github_installation(listener, &redirect_uri, Some(&state))?
         }
@@ -113,8 +128,17 @@ pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), S
             .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else {
-        println!("Connected GitHub App installation {installation_id}.");
-        println!("Stored: {}", stored.join(", "));
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Connected GitHub App installation {installation_id}.",
+                installation_id = installation_id
+            )
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("Stored: {}", stored.join(", "))
+        );
     }
 
     Ok(())

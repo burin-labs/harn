@@ -250,12 +250,15 @@ fn choose_interactive(
         requested_choice(choices, provider)?
     } else {
         println!();
-        println!("Choose a provider:");
+        println!("{}", crate::localization::formatted!("Choose a provider:"));
         for (idx, choice) in choices.iter().enumerate() {
             println!("  {}) {}", idx + 1, format_choice(choice, ollama));
         }
         let default = preferred_choice_index(choices, ollama).unwrap_or(0);
-        let answer = read_line(&format!("provider [{}]", default + 1))?;
+        let answer = read_line(&crate::localization::formatted!(
+            "provider [{}]",
+            default + 1
+        ))?;
         let selected = if answer.trim().is_empty() {
             default
         } else {
@@ -274,7 +277,10 @@ fn choose_interactive(
     if choice.name == "ollama" && args.model.is_none() && !ollama.available_models.is_empty() {
         let ollama_models = ordered_ollama_models(&ollama.available_models);
         println!();
-        println!("Choose an Ollama model:");
+        println!(
+            "{}",
+            crate::localization::formatted!("Choose an Ollama model:")
+        );
         for (idx, model) in ollama_models.iter().enumerate() {
             let selector = ollama_selector_for_model(model);
             if selector == *model {
@@ -283,7 +289,7 @@ fn choose_interactive(
                 println!("  {}) {model} ({selector})", idx + 1);
             }
         }
-        let answer = read_line("model [1]")?;
+        let answer = read_line(&crate::localization::formatted!("model [1]"))?;
         if !answer.trim().is_empty() {
             let selected = answer
                 .trim()
@@ -297,7 +303,7 @@ fn choose_interactive(
             model = ollama_selector_for_model(&ollama_models[0]);
         }
     } else if args.model.is_none() {
-        let answer = read_line(&format!("model [{}]", choice.model))?;
+        let answer = read_line(&crate::localization::formatted!("model [{}]", choice.model))?;
         if !answer.trim().is_empty() {
             model = answer.trim().to_string();
         }
@@ -307,8 +313,14 @@ fn choose_interactive(
     if choice.needs_key() {
         if let Some(env_name) = choice.primary_auth_env() {
             println!();
-            println!("{env_name} is not set.");
-            let prompt = format!("Enter {env_name} for .env, or leave blank for a placeholder: ");
+            println!(
+                "{}",
+                crate::localization::formatted!("{env_name} is not set.", env_name = env_name)
+            );
+            let prompt = crate::localization::formatted!(
+                "Enter {env_name} for .env, or leave blank for a placeholder: ",
+                env_name = env_name
+            );
             let entered = rpassword::prompt_password(prompt)
                 .map_err(|error| format!("failed to read API key: {error}"))?;
             if !entered.trim().is_empty() {
@@ -635,17 +647,23 @@ fn print_probe_report(
     disk: &DiskProbe,
     gpu: &GpuProbe,
 ) {
-    println!("Harn quickstart");
+    println!("{}", crate::localization::formatted!("Harn quickstart"));
     println!();
-    println!("Detected:");
+    println!("{}", crate::localization::formatted!("Detected:"));
     println!("  providers.toml  {}", paths.providers_toml.display());
     println!("  harn.toml       {}", paths.harn_toml.display());
     println!("  .env            {}", paths.env_file.display());
     println!("  ollama          {}", ollama.message);
-    println!("  disk            {}", disk.detail);
-    println!("  gpu             {}", gpu.detail);
+    println!(
+        "{}",
+        crate::localization::formatted!("  disk            {}", disk.detail)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("  gpu             {}", gpu.detail)
+    );
     println!();
-    println!("Credentials:");
+    println!("{}", crate::localization::formatted!("Credentials:"));
     for choice in choices.iter().filter(|choice| !choice.auth_envs.is_empty()) {
         let status = if choice.auth_available {
             "set"
@@ -655,7 +673,7 @@ fn print_probe_report(
         println!(
             "  {:<12} {:<8} {}",
             choice.name,
-            status,
+            crate::localization::translate(status),
             choice.auth_envs.join(", ")
         );
     }
@@ -664,48 +682,58 @@ fn print_probe_report(
 fn print_completion(selection: &ProviderSelection, actions: &[FileAction]) {
     println!();
     println!(
-        "Configured provider={} model={}",
-        selection.provider, selection.model
+        "{}",
+        crate::localization::formatted!(
+            "Configured provider={} model={}",
+            selection.provider,
+            selection.model
+        )
     );
     for action in actions {
         println!(
             "  {:<6} {:<52} {}",
-            action.status,
+            crate::localization::translate(action.status),
             action.path.display(),
-            action.detail
+            crate::localization::translate(&action.detail)
         );
     }
     println!();
-    println!("Next:");
+    println!("{}", crate::localization::formatted!("Next:"));
     println!("  source .env");
     println!("  harn doctor --no-network");
 }
 
 fn format_choice(choice: &ProviderChoice, ollama: &OllamaProbe) -> String {
     let auth = if choice.auth_envs.is_empty() {
-        "no API key required".to_string()
+        crate::localization::formatted!("no API key required")
     } else if choice.auth_available {
-        format!("{} set", choice.auth_envs.join("/"))
+        crate::localization::formatted!("{} set", choice.auth_envs.join("/"))
     } else {
-        format!("{} missing", choice.auth_envs.join("/"))
+        crate::localization::formatted!("{} missing", choice.auth_envs.join("/"))
     };
     let extra = if choice.name == "ollama" {
         if ollama.reachable {
-            ", daemon reachable"
+            crate::localization::translate(", daemon reachable")
         } else {
-            ", daemon not reachable"
+            crate::localization::translate(", daemon not reachable")
         }
     } else {
-        ""
+        String::new()
     };
-    format!("{} (model {}, {auth}{extra})", choice.name, choice.model)
+    crate::localization::formatted!(
+        "{} (model {}, {auth}{extra})",
+        choice.name,
+        choice.model,
+        auth = auth,
+        extra = extra
+    )
 }
 
 fn detect_disk_space(path: &Path) -> DiskProbe {
     match hardware::detect_disk(path).free_bytes {
         Some(free_bytes) => DiskProbe {
             free_bytes: Some(free_bytes),
-            detail: format!(
+            detail: crate::localization::formatted!(
                 "{:.1} GiB available at {}",
                 hardware::bytes_to_gib_f64(free_bytes),
                 path.display()
@@ -713,7 +741,10 @@ fn detect_disk_space(path: &Path) -> DiskProbe {
         },
         None => DiskProbe {
             free_bytes: None,
-            detail: format!("could not determine free space at {}", path.display()),
+            detail: crate::localization::formatted!(
+                "could not determine free space at {}",
+                path.display()
+            ),
         },
     }
 }
@@ -736,7 +767,7 @@ fn detect_gpu() -> GpuProbe {
     match hardware::detect_gpu().kind {
         GpuKind::None => GpuProbe {
             detected: false,
-            detail: "no local GPU detected".to_string(),
+            detail: crate::localization::formatted!("no local GPU detected"),
         },
         kind => GpuProbe {
             detected: true,

@@ -467,6 +467,10 @@ fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
     let primary = tempdir().expect("primary tempdir");
     let mounted = tempdir().expect("mounted tempdir");
     let primary_path = primary.path().display().to_string();
+    let canonical_primary_path = std::fs::canonicalize(primary.path())
+        .expect("canonical primary tempdir")
+        .display()
+        .to_string();
     let mounted_path = std::fs::canonicalize(mounted.path())
         .expect("canonical mounted tempdir")
         .display()
@@ -514,7 +518,7 @@ pipeline main(harness: Harness, task: unknown) {{
         vec![
             "true".to_string(),
             "true".to_string(),
-            primary_path,
+            canonical_primary_path,
             "1".to_string(),
             "extend".to_string(),
             "1".to_string(),

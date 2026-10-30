@@ -93,6 +93,14 @@ pub struct SessionMeta {
     pub attributes: BTreeMap<String, serde_json::Value>,
 }
 
+impl SessionMeta {
+    /// Metadata alone is not a transcript. An acknowledged empty fork retains
+    /// its chain receipt and remains authoritative over live state.
+    pub fn has_canonical_journal(&self) -> bool {
+        self.event_count > 0 || self.last_event_id.is_some() || self.chain_root_hash.is_some()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateSession {
     #[serde(default)]

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[tokio::test]
-async fn gemini_confirmation_requires_billing_and_contributor_sharing_off() {
+pub(crate) async fn gemini_confirmation_requires_billing_and_contributor_sharing_off() {
     let temp = tempfile::tempdir().unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
@@ -195,7 +195,7 @@ sources = ["https://example.invalid/project-model-claim"]
 }
 
 #[tokio::test]
-async fn script_server_applies_confirmations_before_provider_transport() {
+pub(crate) async fn script_server_applies_confirmations_before_provider_transport() {
     let temp = tempfile::tempdir().unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
@@ -282,7 +282,7 @@ fn main(harness: Harness) {
 
 #[cfg(unix)]
 #[test]
-fn account_confirmation_is_not_exposed_to_scripts_or_child_processes() {
+pub(crate) fn account_confirmation_is_not_exposed_to_scripts_or_child_processes() {
     let temp = tempfile::tempdir().unwrap();
     let source = r#"
 fn main(harness: Harness) {

@@ -102,22 +102,43 @@ pub(crate) fn run(args: LocalProfileArgs) -> Result<(), String> {
         );
     } else {
         println!(
-            "{} via {}: {}",
-            report.model_id,
-            report.provider,
-            report.selected_status.as_str()
+            "{}",
+            crate::localization::formatted!(
+                "{} via {}: {}",
+                report.model_id,
+                report.provider,
+                report.selected_status.as_str()
+            )
         );
         if !report.selected.requires.is_empty() {
-            println!("  required probes: {}", report.selected.requires.join(", "));
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  required probes: {}",
+                    report.selected.requires.join(", ")
+                )
+            );
         }
         if let Some(ctx) = report.selected.recommended_num_ctx {
-            println!("  recommended ctx: {ctx}");
+            println!(
+                "{}",
+                crate::localization::formatted!("  recommended ctx: {ctx}", ctx = ctx)
+            );
         }
         for risk in &report.selected.known_risks {
-            println!("  risk: {risk}");
+            println!(
+                "{}",
+                crate::localization::formatted!("  risk: {risk}", risk = risk)
+            );
         }
         for workaround in &report.selected.workarounds {
-            println!("  workaround: {workaround}");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  workaround: {workaround}",
+                    workaround = workaround
+                )
+            );
         }
     }
     Ok(())

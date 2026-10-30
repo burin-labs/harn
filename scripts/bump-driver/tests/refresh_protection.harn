@@ -1,0 +1,184 @@
+import "std/schema"
+import { github_bump_remote } from "../github_remote"
+import {
+  mock_open_bump,
+  mock_refresh_snapshot,
+  refresh_snapshot,
+} from "../testdata/refresh_protection"
+
+const HEAD = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+type GraphqlRead = {query: string}
+
+fn remote(harness: Harness) {
+  return github_bump_remote(
+    harness,
+    {
+      repo: "octo-org/octo-repo",
+      release_repo: "burin-labs/harn",
+      token: "synthetic-installation-token",
+      branch: "automation/bump-harn-runtime",
+      base: "main",
+    },
+  )
+}
+
+fn read_only_calls(testing: HarnessTesting, expected: int) {
+  const calls = testing.http_mock_calls()
+  assert_eq(len(calls), expected, "the protection census must actually run")
+  for call in calls {
+    const graphql_read = if call.method == "POST" && call.url == "https://api.github.com/graphql" {
+      const body = schema_expect<GraphqlRead>(json_parse(call.body), schema_of(GraphqlRead))
+      starts_with(body.query, "query(")
+    } else {
+      false
+    }
+    assert(
+      call.method == "GET" || graphql_read,
+      "no branch, label, approval or auto-merge mutation is allowed",
+    )
+  }
+}
+
+pipeline test_refresh_accepts_measured_unarmed_head_and_prior_head_approval(harness: Harness) {
+  for snapshot in [
+    refresh_snapshot(HEAD),
+    refresh_snapshot(HEAD)
+      + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "dependencies"}]}},
+    refresh_snapshot(HEAD)
+      + {
+        latestOpinionatedReviews: {
+          totalCount: 1,
+          pageInfo: {hasNextPage: false},
+          nodes: [{state: "APPROVED", commit: {oid: "cccccccccccccccccccccccccccccccccccccccc"}}],
+        },
+      },
+  ] {
+    harness.testing.http_mock_clear()
+    mock_open_bump(harness.testing, HEAD)
+    mock_refresh_snapshot(harness.testing, [snapshot])
+    assert_eq(remote(harness).find_bump_pr().head_oid, HEAD)
+    read_only_calls(harness.testing, 2)
+  }
+}
+
+pipeline test_refresh_refuses_graphql_errors_beside_complete_data(harness: Harness) {
+  harness.testing.http_mock_clear()
+  mock_open_bump(harness.testing, HEAD)
+  harness.testing.http_mock(
+    "POST",
+    "https://api.github.com/graphql",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          data: {repository: {pullRequest: refresh_snapshot(HEAD)}},
+          errors: [{message: "snapshot is incomplete"}],
+        },
+      ),
+    },
+  )
+  let reason = ""
+  try {
+    remote(harness).find_bump_pr()
+  } catch (error) {
+    reason = to_string(error)
+  }
+  assert(contains(reason, "refresh protection query reported errors"), reason)
+  read_only_calls(harness.testing, 2)
+}
+
+pipeline test_refresh_preserves_armed_or_reviewed_exact_head(harness: Harness) {
+  for mutation in [
+    {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "ship"}]}},
+    {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "Ship"}]}},
+    {autoMergeRequest: {enabledAt: "2026-10-30T00:00:00Z"}},
+    {isInMergeQueue: true},
+    {
+      latestOpinionatedReviews: {
+        totalCount: 1,
+        pageInfo: {hasNextPage: false},
+        nodes: [{state: "APPROVED", commit: {oid: HEAD}}],
+      },
+    },
+  ] {
+    harness.testing.http_mock_clear()
+    mock_open_bump(harness.testing, HEAD)
+    mock_refresh_snapshot(harness.testing, [refresh_snapshot(HEAD) + mutation])
+    let reason = ""
+    try {
+      remote(harness).find_bump_pr()
+    } catch (error) {
+      reason = to_string(error)
+    }
+    assert(contains(reason, "preserving #42 at ${HEAD}"), reason)
+    read_only_calls(harness.testing, 2)
+  }
+}
+
+pipeline test_refresh_refuses_partial_missing_and_moved_admission_snapshot(harness: Harness) {
+  for snapshot in [
+    refresh_snapshot(HEAD) + {labels: {totalCount: 1, nodes: []}},
+    refresh_snapshot(HEAD) + {latestOpinionatedReviews: {totalCount: 1, nodes: []}},
+    refresh_snapshot(HEAD) + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: []}},
+    refresh_snapshot(HEAD)
+      + {latestOpinionatedReviews: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: []}},
+    refresh_snapshot(HEAD) + {labels: {totalCount: 0, pageInfo: {hasNextPage: true}, nodes: []}},
+    refresh_snapshot(HEAD)
+      + {latestOpinionatedReviews: {totalCount: 0, pageInfo: {hasNextPage: true}, nodes: []}},
+    refresh_snapshot(HEAD)
+      + {
+        latestOpinionatedReviews: {
+          totalCount: 1,
+          pageInfo: {hasNextPage: false},
+          nodes: [{state: "APPROVED", commit: nil}],
+        },
+      },
+    refresh_snapshot("cccccccccccccccccccccccccccccccccccccccc"),
+    refresh_snapshot(HEAD) + {state: "CLOSED"},
+    refresh_snapshot(HEAD) + {state: "MERGED"},
+    {headRefOid: HEAD},
+  ] {
+    harness.testing.http_mock_clear()
+    mock_open_bump(harness.testing, HEAD)
+    mock_refresh_snapshot(harness.testing, [snapshot])
+    let refused = false
+    try {
+      remote(harness).find_bump_pr()
+    } catch (error) {
+      refused = true
+    }
+    assert(refused, json_stringify(snapshot))
+    read_only_calls(harness.testing, 2)
+  }
+}
+
+pipeline test_publication_rechecks_delivery_armed_during_long_refresh(harness: Harness) {
+  harness.testing.http_mock_clear()
+  mock_open_bump(harness.testing, HEAD)
+  mock_refresh_snapshot(
+    harness.testing,
+    [
+      refresh_snapshot(HEAD),
+      refresh_snapshot(HEAD)
+        + {labels: {totalCount: 1, pageInfo: {hasNextPage: false}, nodes: [{name: "ship"}]}},
+    ],
+  )
+  const driver = remote(harness)
+  assert_eq(driver.find_bump_pr().head_oid, HEAD, "refresh starts from a measured unarmed head")
+  let reason = ""
+  try {
+    driver.publish_commit(
+      {
+        branch: "automation/bump-harn-runtime",
+        headline: "chore: bump Harn runtime to v0.10.181",
+        base_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        expected_branch_oid: HEAD,
+      },
+    )
+  } catch (error) {
+    reason = to_string(error)
+  }
+  assert(contains(reason, "delivery is armed"), reason)
+  read_only_calls(harness.testing, 4)
+}

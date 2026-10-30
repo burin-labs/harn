@@ -85,6 +85,7 @@ spec/protocol-artifacts/schemas/run-session-view-v1.schema.json -merge
 crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
 crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
 spec/cli-surface.txt -merge
+crates/harn-cli/src/localization/en.json -merge
 docs/src/builtins.md -merge
 spec/openapi.snapshot -merge
 spec/schemas/session-bundle.v1.schema.json -merge

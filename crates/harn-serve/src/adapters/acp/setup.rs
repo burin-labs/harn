@@ -40,40 +40,24 @@ impl AcpServer {
                 return;
             }
         };
-        if let Some(project_root) = query
+        let log = harn_vm::event_log::active_event_log();
+        let snapshot = if let Some(project_root) = query
             .session_id
             .as_deref()
             .and_then(|session_id| self.sessions.get(session_id))
             .map(|session| session.store_scope.clone())
         {
-            match project_root
-                .run(harn_vm::session_timeline::query_persisted_session_timeline(
+            project_root
+                .run(harn_vm::session_timeline::query_workspace_session_timeline(
                     project_root.workspace(),
-                    query.clone(),
+                    log.as_deref(),
+                    query,
                 ))
                 .await
-            {
-                Ok(Some(snapshot)) => {
-                    self.send_response(
-                        id,
-                        serde_json::to_value(snapshot)
-                            .expect("persisted session timeline snapshot serializes"),
-                    );
-                    return;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    self.send_error(
-                        id,
-                        -32000,
-                        &format!("persisted session timeline query: {error}"),
-                    );
-                    return;
-                }
-            }
-        }
-        let log = harn_vm::event_log::active_event_log();
-        match harn_vm::session_timeline::query_session_timeline(log.as_deref(), None, query).await {
+        } else {
+            harn_vm::session_timeline::query_session_timeline(log.as_deref(), None, query).await
+        };
+        match snapshot {
             Ok(snapshot) => self.send_response(
                 id,
                 serde_json::to_value(snapshot).expect("session timeline snapshot serializes"),
@@ -502,7 +486,7 @@ impl AcpServer {
                     reason: format!("session storage workspace: {error}"),
                 },
             )?;
-        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+        let (_, retention) = harn_vm::agent_sessions::open_retained_with_actor_chain(
             Some(session_id.clone()),
             self.actor_chain(),
         )?;
@@ -515,6 +499,7 @@ impl AcpServer {
         self.sessions.insert(
             session_id.clone(),
             Session {
+                _retention: retention,
                 cwd,
                 project_root,
                 store_scope,

@@ -22,6 +22,26 @@ pub fn add_workspace_root(
     })
 }
 
+/// Persist a host's standalone mutation before acknowledging the grant.
+pub async fn add_workspace_root_persisted(
+    id: &str,
+    root: &str,
+    mount_mode: Option<crate::workspace_anchor::MountMode>,
+    reason: Option<String>,
+    policy: Option<&crate::orchestration::CapabilityPolicy>,
+    scope: &crate::SessionStoreScope,
+) -> Result<String, String> {
+    crate::agent_session_journal::add_workspace_root_verified_persisted(
+        id,
+        root,
+        mount_mode,
+        reason,
+        scope,
+        |mounted| refuse_unenforceable_read_only(id, mounted, policy),
+    )
+    .await
+}
+
 /// Refuse a `read_only` mount when the active
 /// policy's confined child would still be able to write it.
 ///

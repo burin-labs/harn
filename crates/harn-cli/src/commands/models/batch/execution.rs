@@ -1228,24 +1228,39 @@ fn report(state: &ExecutionState, json_mode: bool) {
             .expect("execution report serializes")
         );
     } else {
-        println!("Batch execution {}", state.execution_id);
-        println!("  phase: {}", state.phase);
-        println!("  revision: {}", state.revision);
         println!(
-            "  directory: {}",
-            state
-                .paths
-                .manifest
-                .parent()
-                .unwrap_or(Path::new("."))
-                .display()
+            "{}",
+            crate::localization::formatted!("Batch execution {}", state.execution_id)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("  phase: {}", state.phase)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("  revision: {}", state.revision)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "  directory: {}",
+                state
+                    .paths
+                    .manifest
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .display()
+            )
         );
         if state
             .operation
             .as_ref()
             .is_some_and(|operation| operation.status == "dispatching")
         {
-            println!("  reconciliation required: true");
+            println!(
+                "{}",
+                crate::localization::formatted!("  reconciliation required: true")
+            );
         }
     }
 }

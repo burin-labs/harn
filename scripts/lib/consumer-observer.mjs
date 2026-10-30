@@ -358,6 +358,62 @@ export function observerDeclarationName(context) {
   return `consumer-observer-${observer.parent_run_attempt}-${observer.dispatch_nonce}`;
 }
 
+export function observerPublicationWitness(context) {
+  return `Confirm consumer observer declaration ${observerContext(context).dispatch_nonce}`;
+}
+
+/** Immutable in-flight publications that predate the nonce witness.
+ * @type {readonly {context:Partial<ObserverContext>, retirement?:{jobId:number,artifactId:number,digest:string}}[]} */
+const historicalPublications = Object.freeze([
+  {context:{parent_run_id:'41016965350',parent_run_attempt:3,
+    parent_head_sha:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc',source_revision:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'}},
+  {context:{schema:'harn.consumer_observer.v2',parent_repository:parentRepository,
+    parent_run_id:'41065732964',parent_run_attempt:1,parent_head_sha:'f45a4d4bf3477fff82ea5e05d897d0d6810e98ef',
+    source_revision:'ffb247e184337284fddfbab84da80f490edef57d',
+    dispatch_nonce:'54863eea-c067-4d70-8ba3-22a3a74cba5a',started_at:1793368397},
+    retirement:{jobId:124100749916,artifactId:12983720319,
+      digest:'sha256:e52d3b772efb81949002111273b6fc1ef12304c7c0f50646c6b36ab36641ddb7'}},
+]);
+
+/** A nonce-bound successful step pairs the authenticated declaration to one job.
+ * @param {ObserverContext} context @param {object[]} jobs
+ * @param {{parent:object,artifact:{id:number,digest:string}}} [completedPublication]
+ * Authenticated completed-parent publication, never supplied by live admission. */
+export function qualifyObserverPublisher(context, jobs, completedPublication) {
+  const observer = observerContext(context);
+  const name = observerPublicationWitness(observer);
+  let matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
+  const historical = historicalPublications.find(binding => Object.entries(binding.context).every(([key,value])=>observer[key]===value));
+  const retirement = historical?.retirement;
+  const parent = completedPublication?.parent;
+  const frozen = historical && (!retirement || (parent?.status === 'completed'
+    && String(parent.id) === observer.parent_run_id && parent.run_attempt === observer.parent_run_attempt
+    && parent.head_sha === observer.parent_head_sha && parent.head_repository?.full_name === parentRepository
+    && parentWorkflows.has(parent.path) && completedConclusions.has(parent.conclusion)
+    && completedPublication.artifact?.id === retirement.artifactId
+    && completedPublication.artifact?.digest === retirement.digest));
+  if (matches.length === 0 && frozen) {
+    matches = jobs.flatMap(job => job.steps.filter(step => step.name === observerDeclarationStep).map(step => ({job, step})));
+  }
+  if (matches.length !== 1) refuse('observer_job_identity_unproven');
+  const {job, step} = matches[0];
+  const publication = job.steps.filter(item => item.name === observerDeclarationStep);
+  if (!Number.isSafeInteger(job.id) || job.id < 1
+    || String(job.run_id) !== observer.parent_run_id || job.run_attempt !== observer.parent_run_attempt
+    || job.head_sha !== observer.parent_head_sha || publication.length !== 1
+    || publication[0].status !== 'completed' || publication[0].conclusion !== 'success'
+    || !Number.isSafeInteger(publication[0].number)
+    || step.status !== 'completed' || step.conclusion !== 'success' || !Number.isSafeInteger(step.number)
+    || (step !== publication[0] && step.number <= publication[0].number)) refuse('observer_job_identity_unproven');
+  if (retirement) {
+    const dispatch = job.steps.filter(item => item.name === observerDispatchStep);
+    if (job.id !== retirement.jobId || dispatch.length !== 1 || dispatch[0].status !== 'completed'
+      || dispatch[0].conclusion !== 'success' || !Number.isSafeInteger(dispatch[0].number)
+      || dispatch[0].number <= publication[0].number) refuse('observer_job_identity_unproven');
+  }
+  return {job, publication:publication[0], witness:step};
+}
+
 function artifactJsonFromZip(bytes, filename) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-declaration-'));
   try {
@@ -551,9 +607,9 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
   const prefix = `consumer-observer-${attempt}-`;
   const declarations = artifacts.filter(artifact => artifact.name?.startsWith(prefix));
   const publication = jobs.flatMap(job => job.steps).filter(step => step.name === observerDeclarationStep);
-  // One context can own multiple dispatched children. Multiple publishers
-  // cannot be paired to artifacts by count alone, so their custody is unknown.
-  if (publication.length > 1) refuse('declaration_publication_ambiguous');
+  if (jobs.some(job => job.steps.filter(step => step.name === observerDeclarationStep).length > 1)) {
+    refuse('declaration_publication_ambiguous');
+  }
   if (publication.some(step => step.status !== 'completed' || !completedConclusions.has(step.conclusion))) {
     refuse('declaration_step_census_unmeasured');
   }
@@ -565,12 +621,16 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
   // caller reached the successful publication boundary or dispatched it.
   if (declarations.length !== published) refuse('declaration_publication_unmeasured');
   const contexts = [];
+  const publishers = new Set();
   for (const artifact of declarations) {
     const context = observerContext(await githubArtifactJson(token, parentRepository, artifact, {
       runId, headSha: parent.head_sha, name: artifact.name, filename: 'consumer-observer.json',
     }, fetchRecord, extract));
     qualifyObserverParent(context, parent);
     if (artifact.name !== observerDeclarationName(context)) refuse('dispatch_declaration_mismatch');
+    const {job} = qualifyObserverPublisher(context, jobs, {parent,artifact});
+    if (publishers.has(job.id)) refuse('declaration_publication_ambiguous');
+    publishers.add(job.id);
     contexts.push(context);
   }
   if (new Set(contexts.map(context => context.dispatch_nonce)).size !== contexts.length) {
@@ -601,10 +661,13 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
 
 /** Build evidence belongs to its producing attempt. A new live promotion can
  * measure a repaired consumer without rerunning those immutable archives. */
-export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
+export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historical = null) {
   const {sourceRevision, runId, attempt} = request;
+  const policyRevision = run?.head_sha;
+  const distinctSource = policyRevision !== sourceRevision;
   if (!sha.test(sourceRevision) || !id.test(runId) || !Number.isSafeInteger(attempt) || attempt < 1
-    || String(run?.id) !== runId || run.run_attempt !== attempt || run.head_sha !== sourceRevision
+    || !sha.test(policyRevision)
+    || String(run?.id) !== runId || run.run_attempt !== attempt
     || run.head_repository?.full_name !== parentRepository || run.repository?.full_name !== parentRepository
     || run.path !== observerParentWorkflows.candidate || run.head_branch !== 'main'
     || !['push','workflow_dispatch'].includes(run.event)
@@ -614,6 +677,14 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
     || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
     || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
+  if (distinctSource && (run.event !== 'workflow_dispatch'
+    || historical?.lineage?.status !== 'ahead'
+    || historical.lineage.merge_base_commit?.sha !== sourceRevision
+    || historical?.manifest?.schemaVersion !== 'burin-labs.candidate_manifest.v1'
+    || historical.manifest.repository !== parentRepository
+    || historical.manifest.sourceCommit !== sourceRevision
+    || historical.manifest.runId !== runId
+    || historical.manifest.runAttempt !== String(attempt))) refuse('archive_producer_identity_unproven');
   // Only a child of this live candidate can proceed while its audit runs. Recovery and
   // standalone promotion require a completed, successful audit before using the archives.
   const audit=jobs.find(job=>job.name==='Release residual audit');
@@ -630,7 +701,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
-      || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
+      || job.run_attempt!==attempt || job.head_sha!==policyRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
@@ -645,7 +716,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
       || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
       || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
-      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==sourceRevision;
+      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==policyRevision;
   })) refuse('archive_producer_artifacts_unproven');
   return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
@@ -655,14 +726,26 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     failed_jobs:[],next_action:'measure-consumer-repair'};
 }
 
-export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
+export async function githubArchiveProducer(token, request, fetchRecord=fetch, extract=artifactJsonFromZip) {
   const run=await githubRecord(token,parentRepository,request.runId,fetchRecord,request.attempt);
   const jobs=await githubRunJobs(token,parentRepository,request.runId,request.attempt,fetchRecord);
   const artifacts=await githubArtifactCensus(token,parentRepository,request.runId,fetchRecord);
   // The shell contract owns the target list for writers and readers alike.
   const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('./candidate_archive_contract.sh',import.meta.url)),'--targets-json'],
     {encoding:'utf8',timeout:10_000,maxBuffer:16_384}));
-  return qualifyArchiveProducer(run,jobs,artifacts,request,targets);
+  let historical = null;
+  if (run.head_sha !== request.sourceRevision) {
+    if (!sha.test(request.sourceRevision) || !sha.test(run.head_sha)) refuse('archive_producer_identity_unproven');
+    const response = await githubRead(token,
+      `https://api.github.com/repos/${parentRepository}/compare/${request.sourceRevision}...${run.head_sha}`, fetchRecord);
+    if (!response.ok) refuse('archive_producer_lineage_read_refused', refusalDiagnostic(response));
+    const manifests = artifacts.filter(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
+    if (manifests.length !== 1) refuse('archive_producer_artifacts_unproven');
+    historical = {lineage:await response.json(),manifest:await githubArtifactJson(token,parentRepository,manifests[0],{
+      runId:request.runId,headSha:run.head_sha,name:manifests[0].name,filename:'candidate-manifest.json',
+    },fetchRecord,extract)};
+  }
+  return qualifyArchiveProducer(run,jobs,artifacts,request,targets,historical);
 }
 
 /** One authenticated, bounded archive reader for public declarations and
@@ -671,7 +754,7 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^consumer-observer(?:-[0-9a-f-]+)?\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
@@ -1113,17 +1196,10 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
   let observerEnded = parent.status === 'completed';
   if (!observerEnded && retireFailedObservation) {
     const jobs = await githubParentJobs(token, observer.parent_run_id, observer.parent_run_attempt, fetchRecord);
-    const publishers = jobs.filter(job => job.steps.some(step => step.name === observerDeclarationStep));
-    if (publishers.length !== 1) refuse('observer_job_identity_unproven');
-    const job = publishers[0];
-    const declarations = job.steps.filter(step => step.name === observerDeclarationStep);
-    if (String(job.run_id) !== observer.parent_run_id || job.run_attempt !== observer.parent_run_attempt
-      || job.head_sha !== observer.parent_head_sha || declarations.length !== 1
-      || declarations[0].status !== 'completed' || declarations[0].conclusion !== 'success'
-      || !Number.isSafeInteger(declarations[0].number)) refuse('observer_job_identity_unproven');
+    const {job, witness} = qualifyObserverPublisher(observer, jobs);
     observerEnded = job.steps.some(step => observerStopSteps.has(step.name)
       && step.status === 'completed' && ['failure', 'cancelled'].includes(step.conclusion)
-      && Number.isSafeInteger(step.number) && step.number > declarations[0].number);
+      && Number.isSafeInteger(step.number) && step.number > witness.number);
   }
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);

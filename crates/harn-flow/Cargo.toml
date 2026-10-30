@@ -9,13 +9,13 @@ homepage.workspace = true
 description = "Harn Flow shipping substrate: atoms, intents, slices, and invariant predicates"
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.182-dev", default-features = false }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182-dev" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.182-dev" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.182-dev" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.182-dev" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.182-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.182-dev" }
+harn-vm = { path = "../harn-vm", version = "=0.10.182", default-features = false }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.182" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.182" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.182" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.182" }
+harn-parser = { path = "../harn-parser", version = "=0.10.182" }
 async-trait = "0.1"
 base64 = "0.23"
 ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }
@@ -29,8 +29,8 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182-dev", features = ["vm-test-support"] }
-harn-modules = { path = "../harn-modules", version = "=0.10.182-dev", features = ["bundled-stdlib"] }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182", features = ["vm-test-support"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.182", features = ["bundled-stdlib"] }
 criterion = "0.8"
 proptest = "1"
 tempfile = "3"

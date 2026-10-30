@@ -483,7 +483,10 @@ fn run_replay_bench(args: BenchReplayArgs) -> Result<(), String> {
     } else {
         print!("{}", render_replay_benchmark_report(&report));
         if let Some(output_path) = args.output.as_ref() {
-            println!("Report JSON: {}", output_path.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("Report JSON: {}", output_path.display())
+            );
         }
     }
 

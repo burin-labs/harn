@@ -25,18 +25,39 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                 print_json(&report)?;
             } else if report.valid {
                 println!(
-                    "valid workflow bundle {} ({})",
-                    report.bundle_id, report.graph_digest
+                    "{}",
+                    crate::localization::formatted!(
+                        "valid workflow bundle {} ({})",
+                        report.bundle_id,
+                        report.graph_digest
+                    )
                 );
             } else {
-                println!("invalid workflow bundle {}", report.bundle_id);
+                println!(
+                    "{}",
+                    crate::localization::formatted!("invalid workflow bundle {}", report.bundle_id)
+                );
                 for diagnostic in &report.errors {
-                    println!("error {}: {}", diagnostic.path, diagnostic.message);
+                    println!(
+                        "{}",
+                        crate::localization::formatted!(
+                            "error {}: {}",
+                            diagnostic.path,
+                            diagnostic.message
+                        )
+                    );
                 }
             }
             if !args.json {
                 for diagnostic in &report.warnings {
-                    println!("warning {}: {}", diagnostic.path, diagnostic.message);
+                    println!(
+                        "{}",
+                        crate::localization::formatted!(
+                            "warning {}: {}",
+                            diagnostic.path,
+                            diagnostic.message
+                        )
+                    );
                 }
             }
             Ok(i32::from(!report.valid))
@@ -51,13 +72,29 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                 println!("{}", preview.mermaid);
             } else {
                 println!(
-                    "workflow bundle {} graph {}",
-                    preview.bundle_id, preview.graph_digest
+                    "{}",
+                    crate::localization::formatted!(
+                        "workflow bundle {} graph {}",
+                        preview.bundle_id,
+                        preview.graph_digest
+                    )
                 );
-                println!("nodes: {}", preview.nodes.len());
-                println!("edges: {}", preview.edges.len());
-                println!("triggers: {}", preview.triggers.len());
-                println!("connectors: {}", preview.connectors.len());
+                println!(
+                    "{}",
+                    crate::localization::formatted!("nodes: {}", preview.nodes.len())
+                );
+                println!(
+                    "{}",
+                    crate::localization::formatted!("edges: {}", preview.edges.len())
+                );
+                println!(
+                    "{}",
+                    crate::localization::formatted!("triggers: {}", preview.triggers.len())
+                );
+                println!(
+                    "{}",
+                    crate::localization::formatted!("connectors: {}", preview.connectors.len())
+                );
             }
             Ok(i32::from(!preview.validation.valid))
         }
@@ -82,11 +119,21 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                 print_json(&receipt)?;
             } else {
                 println!(
-                    "completed workflow bundle {} run {}",
-                    receipt.bundle_id, receipt.run_id
+                    "{}",
+                    crate::localization::formatted!(
+                        "completed workflow bundle {} run {}",
+                        receipt.bundle_id,
+                        receipt.run_id
+                    )
                 );
-                println!("graph: {}", receipt.graph_digest);
-                println!("nodes: {}", receipt.executed_nodes.len());
+                println!(
+                    "{}",
+                    crate::localization::formatted!("graph: {}", receipt.graph_digest)
+                );
+                println!(
+                    "{}",
+                    crate::localization::formatted!("nodes: {}", receipt.executed_nodes.len())
+                );
             }
             Ok(0)
         }
@@ -168,8 +215,13 @@ fn handle_patch_apply(args: WorkflowPatchApplyArgs) -> Result<i32, String> {
         print_json(&report)?;
     } else {
         println!(
-            "wrote patched workflow bundle {} → {} ({})",
-            patched.id, args.out, report.bundle_validation.graph_digest
+            "{}",
+            crate::localization::formatted!(
+                "wrote patched workflow bundle {} → {} ({})",
+                patched.id,
+                args.out,
+                report.bundle_validation.graph_digest
+            )
         );
         print_patch_report(&report);
     }
@@ -224,13 +276,19 @@ fn handle_nested_ceiling(args: WorkflowNestedCeilingArgs) -> Result<i32, String>
         print_json(&report)?;
     } else if report.allowed() {
         println!(
-            "nested invocation allowed: bundle {} fits inside parent ceiling",
-            report.target_label
+            "{}",
+            crate::localization::formatted!(
+                "nested invocation allowed: bundle {} fits inside parent ceiling",
+                report.target_label
+            )
         );
     } else {
         println!(
-            "nested invocation rejected: bundle {} widens parent ceiling",
-            report.target_label
+            "{}",
+            crate::localization::formatted!(
+                "nested invocation rejected: bundle {} widens parent ceiling",
+                report.target_label
+            )
         );
         for violation in &report.violations {
             println!("  [{}] {}", violation.kind, violation.detail);
@@ -254,13 +312,22 @@ fn load_capability_policy(path: &str) -> Result<harn_vm::orchestration::Capabili
 fn print_patch_report(report: &harn_vm::orchestration::WorkflowPatchValidationReport) {
     if report.valid {
         println!(
-            "patch {} applies cleanly to bundle {} ({})",
-            report.patch_id, report.bundle_id, report.bundle_validation.graph_digest
+            "{}",
+            crate::localization::formatted!(
+                "patch {} applies cleanly to bundle {} ({})",
+                report.patch_id,
+                report.bundle_id,
+                report.bundle_validation.graph_digest
+            )
         );
     } else {
         println!(
-            "patch {} cannot apply to bundle {}",
-            report.patch_id, report.bundle_id
+            "{}",
+            crate::localization::formatted!(
+                "patch {} cannot apply to bundle {}",
+                report.patch_id,
+                report.bundle_id
+            )
         );
     }
     for diagnostic in &report.apply_errors {
@@ -270,27 +337,46 @@ fn print_patch_report(report: &harn_vm::orchestration::WorkflowPatchValidationRe
             _ => String::new(),
         };
         println!(
-            "  apply error {op_label}{}: {}",
-            diagnostic.path, diagnostic.message
+            "{}",
+            crate::localization::formatted!(
+                "  apply error {op_label}{}: {}",
+                diagnostic.path,
+                diagnostic.message,
+                op_label = op_label
+            )
         );
     }
     for diagnostic in &report.bundle_validation.errors {
-        println!("  bundle error {}: {}", diagnostic.path, diagnostic.message);
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "  bundle error {}: {}",
+                diagnostic.path,
+                diagnostic.message
+            )
+        );
     }
     for diagnostic in &report.bundle_validation.warnings {
         println!(
-            "  bundle warning {}: {}",
-            diagnostic.path, diagnostic.message
+            "{}",
+            crate::localization::formatted!(
+                "  bundle warning {}: {}",
+                diagnostic.path,
+                diagnostic.message
+            )
         );
     }
     if !report.graph_diff.added_nodes.is_empty() {
         println!(
-            "  added nodes: {}",
-            report.graph_diff.added_nodes.join(", ")
+            "{}",
+            crate::localization::formatted!(
+                "  added nodes: {}",
+                report.graph_diff.added_nodes.join(", ")
+            )
         );
     }
     if !report.graph_diff.added_edges.is_empty() {
-        println!("  added edges:");
+        println!("{}", crate::localization::formatted!("  added edges:"));
         for edge in &report.graph_diff.added_edges {
             let branch = edge
                 .branch
@@ -302,26 +388,39 @@ fn print_patch_report(report: &harn_vm::orchestration::WorkflowPatchValidationRe
     }
     if !report.graph_diff.updated_nodes.is_empty() {
         println!(
-            "  updated nodes: {}",
-            report.graph_diff.updated_nodes.join(", ")
+            "{}",
+            crate::localization::formatted!(
+                "  updated nodes: {}",
+                report.graph_diff.updated_nodes.join(", ")
+            )
         );
     }
     if !report.graph_diff.updated_capsules.is_empty() {
         println!(
-            "  updated prompt capsules: {}",
-            report.graph_diff.updated_capsules.join(", ")
+            "{}",
+            crate::localization::formatted!(
+                "  updated prompt capsules: {}",
+                report.graph_diff.updated_capsules.join(", ")
+            )
         );
     }
     if !report.graph_diff.policy_fields_changed.is_empty() {
         println!(
-            "  policy fields changed: {}",
-            report.graph_diff.policy_fields_changed.join(", ")
+            "{}",
+            crate::localization::formatted!(
+                "  policy fields changed: {}",
+                report.graph_diff.policy_fields_changed.join(", ")
+            )
         );
     }
     for violation in &report.capability_delta.widening {
         println!(
-            "  ceiling widening [{}]: {}",
-            violation.kind, violation.detail
+            "{}",
+            crate::localization::formatted!(
+                "  ceiling widening [{}]: {}",
+                violation.kind,
+                violation.detail
+            )
         );
     }
 }

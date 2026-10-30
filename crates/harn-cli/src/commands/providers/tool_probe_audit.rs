@@ -25,13 +25,11 @@ pub(crate) fn run(args: ProviderToolProbeAuditArgs) {
             }
         }
     } else {
-        println!(
-            "provider tool-probe audit: {}/{} request validations passed across {} catalog routes ({} not applicable)",
+        println!("{}", crate::localization::formatted!("provider tool-probe audit: {}/{} request validations passed across {} catalog routes ({} not applicable)",
             report.validation_pass_count,
             report.request_count,
             report.route_count,
-            report.not_applicable_count
-        );
+            report.not_applicable_count));
         if report.validation_fail_count > 0 {
             for failure in report.failures.iter().take(10) {
                 println!(

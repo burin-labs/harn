@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[test]
-fn admission_requires_account_evidence_for_conditional_provider_terms() {
+pub(crate) fn admission_requires_account_evidence_for_conditional_provider_terms() {
     let temp = tempfile::tempdir().unwrap();
     for (provider, model, expected) in [
         ("gemini", "gemini-4-argon", "unknown"),
@@ -54,7 +54,7 @@ fn admission_requires_account_evidence_for_conditional_provider_terms() {
 }
 
 #[tokio::test]
-async fn unknown_gemini_account_is_refused_before_transport() {
+pub(crate) async fn unknown_gemini_account_is_refused_before_transport() {
     let temp = tempfile::tempdir().unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();

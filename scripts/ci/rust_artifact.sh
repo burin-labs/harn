@@ -32,6 +32,7 @@ usage() {
 usage:
   scripts/ci/rust_artifact.sh build-tests <bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh build-cli <cli-bundle.tar.zst> <commit-sha>
+  scripts/ci/rust_artifact.sh build-head-cli <cli-bundle.tar.zst> <head-sha>
   scripts/ci/rust_artifact.sh build-security <security-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh restore-tests <bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
@@ -284,6 +285,7 @@ prepare_harn_cli() {
   # local content receipts without pretending the producer's absolute Cargo
   # dep-info paths can survive artifact transfer.
   export HARN_BUILD_FRESHNESS_ID="$commit"
+  export HARN_BUILD_REVISION="$commit"
   if [[ "$profile" == "$SHARED_CLI_PROFILE" ]]; then
     cargo build --locked "${profile_args[@]}" -p harn-cli -p harn-cli-aot-gen \
       --bin harn --bin harn-cli-aot-gen
@@ -445,11 +447,25 @@ restore_test_bundle() {
 build_cli_bundle() {
   local cli_output=$1
   local commit=$2
-  local cli_output_dir target_dir staging started bytes
+  local identity=${3:-checkout}
+  local cli_output_dir target_dir staging started bytes source_tree checkout_tree
   started=$SECONDS
 
   validate_commit "$commit"
-  require_source_commit "$commit"
+  if [[ "$identity" == same-tree ]]; then
+    git cat-file -e "${commit}^{commit}" 2>/dev/null \
+      || git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$commit"
+    source_tree="$(git rev-parse --verify "${commit}^{tree}")" || return 1
+    checkout_tree="$(git rev-parse --verify 'HEAD^{tree}')" || return 1
+    if [[ -z "$source_tree" || "$source_tree" != "$checkout_tree" ]] \
+      || ! git diff --quiet HEAD -- \
+      || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+      echo "error: exact-head CLI requires a clean checkout of the same source tree as ${commit}" >&2
+      exit 1
+    fi
+  else
+    require_source_commit "$commit"
+  fi
   require_build_contract
   mkdir -p "$(dirname "$cli_output")"
   cli_output_dir="$(cd "$(dirname "$cli_output")" && pwd -P)"
@@ -459,6 +475,11 @@ build_cli_bundle() {
   cleanup_dir="$staging"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir" "$SHARED_CLI_PROFILE"
+  if [[ "$identity" == same-tree ]] \
+    && [[ "$("$staging/harn" version --json | jq -er '.data.source_revision')" != "$commit" ]]; then
+    echo "error: exact-head CLI does not embed the requested source revision ${commit}" >&2
+    exit 1
+  fi
   pack_cli_bundle "$staging" "$cli_output"
   bytes="$(wc -c < "$cli_output" | tr -d ' ')"
   report_timing build "$((SECONDS - started))" "$bytes"
@@ -637,6 +658,10 @@ case "$command" in
   build-cli)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     build_cli_bundle "$@"
+    ;;
+  build-head-cli)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    build_cli_bundle "$@" same-tree
     ;;
   build-security)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }

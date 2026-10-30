@@ -43,6 +43,11 @@ into what they need:
 - `native-secret-store` — links the operating system credential-store adapter
   used by the secret-store contract. `full` enables it; lean embedders can
   omit it and retain the portable file backend.
+- `cli-localization` provides typed locale resolution, standard process locale
+  precedence, live Clap help extraction, and translated help projection.
+  Products supply their own English-keyed message catalogs. This feature is
+  opt-in and is not part of `full`; command names, values, and parser behavior
+  retain their original contract.
 
 See `docs/src/embedding-rust.md` for how `harn-serve` exposes these to
 embedders (`hostlib`, `hostlib-full`, `full`).

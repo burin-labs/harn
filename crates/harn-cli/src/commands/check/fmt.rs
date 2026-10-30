@@ -268,8 +268,11 @@ fn print_text_report(report: &FmtReport) {
         .collect();
     if !declared_invalid.is_empty() {
         eprintln!(
-            "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
-            declared_invalid.len()
+            "{}",
+            crate::localization::formatted!(
+                "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
+                declared_invalid.len()
+            )
         );
         for file in declared_invalid {
             eprintln!("  {}", file.path);
@@ -291,9 +294,7 @@ fn print_text_report(report: &FmtReport) {
         })
         .count();
     if reformattable > 0 {
-        eprintln!(
-            "\n{reformattable} file(s) would be reformatted — run `harn fmt` (without `--check`) to apply formatting."
-        );
+        eprintln!("{}", crate::localization::formatted!("\n{reformattable} file(s) would be reformatted — run `harn fmt` (without `--check`) to apply formatting.", reformattable = reformattable));
     }
 }
 

@@ -951,6 +951,7 @@ async fn acp_session_fork_inherits_parent_current_mode() {
         }))
         .await;
     let created = recv_json(&mut rx).await;
+    assert!(created["result"]["sessionId"].is_string(), "{created}");
     let parent_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -987,7 +988,10 @@ async fn acp_session_fork_inherits_parent_current_mode() {
         }
     }
     let fork_response = fork_response.expect("fork response");
-    assert_eq!(fork_response["result"]["state"], "forked");
+    assert_eq!(
+        fork_response["result"]["state"], "forked",
+        "{fork_response}"
+    );
     assert_eq!(
         fork_response["result"]["modes"]["currentModeId"],
         "architect"

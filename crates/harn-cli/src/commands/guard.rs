@@ -57,9 +57,17 @@ pub(crate) fn run_list(args: &GuardListArgs) {
     let mut installed = store.installed(ModelPurpose::InjectionClassification);
     installed.extend(store.installed(ModelPurpose::Embedding));
     installed.sort_by(|a, b| a.name.cmp(&b.name));
-    println!("Installed models ({}):", installed.len());
+    println!(
+        "{}",
+        crate::localization::formatted!("Installed models ({}):", installed.len())
+    );
     if installed.is_empty() {
-        println!("  (none) — run `harn guard install` to add the recommended model");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "  (none) — run `harn guard install` to add the recommended model"
+            )
+        );
     }
     for manifest in &installed {
         println!(
@@ -69,7 +77,10 @@ pub(crate) fn run_list(args: &GuardListArgs) {
     }
 
     if args.catalog {
-        println!("\nAvailable to install:");
+        println!(
+            "{}",
+            crate::localization::formatted!("\nAvailable to install:")
+        );
         for model in catalog::all() {
             let gated = if model.gated {
                 "  (gated — needs HF_TOKEN)"
@@ -102,7 +113,10 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
         }
     };
     if names.is_empty() {
-        println!("No models installed.");
+        println!(
+            "{}",
+            crate::localization::formatted!("No models installed.")
+        );
         return;
     }
     for name in names {
@@ -117,17 +131,29 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
                     "{} — {} [{}]",
                     manifest.name, manifest.display_name, manifest.license_id
                 );
-                println!("  integrity: {integrity}");
+                println!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "  integrity: {integrity}",
+                        integrity = integrity
+                    )
+                );
                 for file in &manifest.files {
                     println!(
-                        "  {:20} {:>12} bytes  sha256:{}",
-                        file.name,
-                        file.size,
-                        short_sha(&file.sha256)
+                        "{}",
+                        crate::localization::formatted!(
+                            "  {:20} {:>12} bytes  sha256:{}",
+                            file.name,
+                            file.size,
+                            short_sha(&file.sha256)
+                        )
                     );
                 }
             }
-            Err(_) => println!("{name} — not installed"),
+            Err(_) => println!(
+                "{}",
+                crate::localization::formatted!("{name} — not installed", name = name)
+            ),
         }
     }
 }
@@ -135,8 +161,14 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
 pub(crate) fn run_remove(args: &GuardRemoveArgs) {
     let store = store();
     match store.remove(&args.model) {
-        Ok(true) => println!("Removed `{}`.", args.model),
-        Ok(false) => println!("`{}` is not installed.", args.model),
+        Ok(true) => println!(
+            "{}",
+            crate::localization::formatted!("Removed `{}`.", args.model)
+        ),
+        Ok(false) => println!(
+            "{}",
+            crate::localization::formatted!("`{}` is not installed.", args.model)
+        ),
         Err(error) => crate::command_error(&format!("failed to remove `{}`: {error}", args.model)),
     }
 }
@@ -156,17 +188,30 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
     // Explicit, reviewable license acceptance — nothing downloads without it.
     if !args.accept_license {
         println!(
-            "`{}` is licensed under {} — review the terms at {}",
-            model.name, model.license_id, model.license_url
+            "{}",
+            crate::localization::formatted!(
+                "`{}` is licensed under {} — review the terms at {}",
+                model.name,
+                model.license_id,
+                model.license_url
+            )
         );
-        println!("Re-run with --accept-license to download and install.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Re-run with --accept-license to download and install."
+            )
+        );
         return;
     }
 
     if store.is_installed(model.name, model.purpose) && !args.force {
         println!(
-            "`{}` is already installed (use --force to re-download).",
-            model.name
+            "{}",
+            crate::localization::formatted!(
+                "`{}` is already installed (use --force to re-download).",
+                model.name
+            )
         );
         return;
     }
@@ -185,10 +230,13 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
 
     if let Some(total) = model.total_size() {
         println!(
-            "Downloading `{}` (~{} MB) from {}",
-            model.name,
-            total / 1_000_000,
-            model.repo
+            "{}",
+            crate::localization::formatted!(
+                "Downloading `{}` (~{} MB) from {}",
+                model.name,
+                total / 1_000_000,
+                model.repo
+            )
         );
     }
 
@@ -196,7 +244,10 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
         .unwrap_or_else(|error| crate::command_error(&error));
     let mut payload: Vec<(String, Vec<u8>)> = Vec::with_capacity(model.files.len());
     for file in model.files {
-        println!("  fetching {}", file.dest);
+        println!(
+            "{}",
+            crate::localization::formatted!("  fetching {}", file.dest)
+        );
         let url = model.url_for(file);
         let bytes = match fetch_file(&client, &url, token.as_deref(), file.dest).await {
             Ok(bytes) => bytes,
@@ -207,10 +258,13 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
 
     match store.install(model, &payload, true) {
         Ok(manifest) => println!(
-            "Installed `{}` ({} files) to {}",
-            manifest.name,
-            manifest.files.len(),
-            store.model_dir(&manifest.name).display()
+            "{}",
+            crate::localization::formatted!(
+                "Installed `{}` ({} files) to {}",
+                manifest.name,
+                manifest.files.len(),
+                store.model_dir(&manifest.name).display()
+            )
         ),
         Err(error) => crate::command_error(&format!("install failed: {error}")),
     }
