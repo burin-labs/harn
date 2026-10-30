@@ -1,3 +1,4 @@
+import { cli_message } from "std/cli/localization/models/batch_submit"
 import { __batch_artifact_read } from "std/cli/models/batch_artifacts"
 import {
   __batch_receipt_lifecycle,
@@ -656,23 +657,65 @@ fn __submission_status(jobs: list, errors: list, dry_run: bool) -> string {
   return "submitted"
 }
 
-fn __render_submit_human(stdio: HarnessStdio, report: dict) {
+fn __render_submit_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    stdio.eprintln("Batch submit failed")
+    stdio.eprintln(cli_message(__cli_locale, "Batch submit failed", []))
   } else if safe_bool(report["dry_run"], false) {
-    stdio.println("Batch submit dry run written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch submit dry run written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   } else {
-    stdio.println("Batch submission receipt written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch submission receipt written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   }
-  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  stdio.println("  submitted: " + safe_int_string(report["submitted_count"], "0"))
-  stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
-  stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  jobs: {0}",
+      [to_string(safe_int_string(report["job_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  submitted: {0}",
+      [to_string(safe_int_string(report["submitted_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  ready: {0}",
+      [to_string(safe_int_string(report["ready_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  failed: {0}",
+      [to_string(safe_int_string(report["failed_count"], "0"))],
+    ),
+  )
   if safe_string(report["receipt_sha256"], "") != "" {
-    stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  receipt sha256: {0}",
+        [to_string(safe_string(report["receipt_sha256"], ""))],
+      ),
+    )
   }
-  print_list(stdio, "errors", safe_list(report["errors"]))
-  print_list(stdio, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, cli_message(__cli_locale, "errors", []), safe_list(report["errors"]))
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), safe_list(report["warnings"]))
 }
 
 fn __render_submit_json(report: dict) -> string {
@@ -702,7 +745,7 @@ fn __render_submit_json(report: dict) -> string {
  * @effects: [env.read, fs.read, fs.write, network, stdio.write]
  * @errors: [runtime]
  */
-pub fn __run_submit(harness: Harness) -> int {
+pub fn __run_submit(__cli_locale: string, harness: Harness) -> int {
   const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_RECEIPT", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMIT_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
@@ -770,7 +813,7 @@ pub fn __run_submit(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_submit_json(report))
   } else {
-    __render_submit_human(harness.stdio, report)
+    __render_submit_human(__cli_locale, harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0

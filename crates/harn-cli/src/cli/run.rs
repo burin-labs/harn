@@ -7,7 +7,7 @@ use super::{ProfileArgs, SandboxArgs};
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
     /// Print the LLM trace summary after execution.
-    #[arg(
+    #[arg(hide_env_values = true,
         long,
         env = "HARN_TRACE",
         action = clap::ArgAction::SetTrue,
@@ -16,7 +16,7 @@ pub(crate) struct RunArgs {
     pub trace: bool,
     /// Record the exact source-level VM code path to a bounded local file.
     /// Values, arguments, and results are never included.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "flight-recorder",
         env = "HARN_FLIGHT_RECORDER",
         action = clap::ArgAction::SetTrue,

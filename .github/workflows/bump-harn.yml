@@ -56,6 +56,16 @@ on:
         required: false
         type: string
         default: ""
+      pr-title:
+        description: "Full repository-owned bump PR title. Empty uses the driver's maintenance title."
+        required: false
+        type: string
+        default: ""
+      test-inventory-mode:
+        description: "package (default), or repository-validation for a non-package root with a declared validator."
+        required: false
+        type: string
+        default: "package"
       branch:
         description: "Bump branch name."
         required: false
@@ -263,18 +273,16 @@ jobs:
         env:
           HARN_SECRET_PROVIDERS: env
           RECEIPT_PATH: ${{ runner.temp }}/harn-package-test-discovery.json
+          BUMP_INVENTORY_MODE: ${{ inputs.test-inventory-mode }}
+          BUMP_INVENTORY_ROOT: ${{ github.workspace }}/package
+          BUMP_INVENTORY_VALIDATOR: ${{ inputs.validate-command }}
         shell: bash
         run: |
           set -euo pipefail
           status=0
-          if harn package test-inventory --help >/dev/null 2>&1; then
-            harn package test-inventory . --json --receipt-out "$RECEIPT_PATH" >/dev/null \
-              || status=$?
-          else
-            printf '%s\n' '{"schemaVersion":1,"ok":false,"error":{"code":"package_test_inventory_unsupported","message":"target Harn runtime predates package test inventory"}}' \
-              > "$RECEIPT_PATH"
-            status=2
-          fi
+          : > "$RECEIPT_PATH"
+          harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/inventory_package_tests.harn \
+            || status=$?
           if [[ ! -s "$RECEIPT_PATH" ]]; then
             echo "package test inventory returned without a receipt" >&2
             exit 1
@@ -301,6 +309,7 @@ jobs:
           BUMP_DRIVER_APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
           HARN_EXT_BUMP_BOT_LOGIN: ${{ steps.app-token.outputs.app-slug }}[bot]
           HARN_EXT_BUMP_LABELS: ${{ inputs.labels }}
+          BUMP_DRIVER_PR_TITLE: ${{ inputs.pr-title }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
           HARN_BUMP_SOURCE_REVISION: ${{ inputs.source-revision }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}

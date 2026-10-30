@@ -110,6 +110,7 @@ jobs:
       cargo_version: ${{ steps.check.outputs.cargo_version }}
       latest_tag: ${{ steps.check.outputs.latest_tag }}
       publish_ref: ${{ steps.check.outputs.publish_ref }}
+      source_sha: ${{ steps.publication-source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -370,15 +371,44 @@ jobs:
             echo "publish_ref=$PUBLISH_REF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve immutable publication source
+        id: publication-source
+        if: github.event_name == 'workflow_dispatch' || steps.check.outputs.drift == 'true'
+        env:
+          PUBLISH_REF: ${{ steps.check.outputs.publish_ref }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PUBLISH_REF" ]] || { echo '::error::Publication source ref is missing'; exit 1; }
+          source_sha="$(git rev-parse --verify --end-of-options "${PUBLISH_REF}^{commit}")"
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+  publication-security:
+    name: Fresh crate publication dependency security
+    needs: detect-drift
+    if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+      attestations: write
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@502c1d9f2f110a9aa0d56ffd548cd06fe198608e
+    with:
+      source-revision: ${{ needs.detect-drift.outputs.source_sha }}
+      policy: false
+
   publish:
     name: Publish release
     permissions:
       contents: read
       actions: read
       attestations: read
-    needs: detect-drift
+    needs: [detect-drift, publication-security]
     runs-on: ubuntu-24.04
-    if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
+    if: >-
+      !cancelled() && needs.detect-drift.result == 'success' &&
+      needs.publication-security.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -477,16 +507,6 @@ jobs:
       - name: Install portal dependencies
         working-directory: crates/harn-cli/portal
         run: npm ci
-
-      - name: Install ripgrep
-        # security-audit lane (only runs under --reaudit) greps the
-        # repo via `rg` — install it explicitly so the runner matches
-        # the local dev expectation when reaudit is on.
-        if: inputs.reaudit
-        uses: ./.github/actions/apt-install
-        with:
-          packages: ripgrep
-          check-command: rg
 
       - name: Build tree-sitter grammar
         # Only needed when --reaudit re-runs the grammar-audit lane

@@ -2523,6 +2523,10 @@ jobs:
 
   macos-lint:
     name: Rust on macOS strict lint (${{ matrix.kind }})
+    outputs:
+      workspace: ${{ steps.lint-proof.outputs['workspace'] }}
+      lean-lsp: ${{ steps.lint-proof.outputs['lean-lsp'] }}
+      freshness-checker: ${{ steps.lint-proof.outputs['freshness-checker'] }}
     strategy:
       fail-fast: false
       matrix:
@@ -2610,6 +2614,7 @@ jobs:
             echo "No compatible macOS warm target; this lane builds cold (reason: ${{ steps.macos-warm-restore.outputs.macos_warm_restore_reason || 'none-reported' }})."
           fi
       - name: Clippy all targets (deny warnings)
+        id: strict-lint
         shell: bash
         env:
           HARN_LINT_TIMINGS_DIR: ${{ matrix.kind == 'workspace' && format('{0}/macos-workspace-timings', runner.temp) || '' }}
@@ -2636,6 +2641,13 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent
+      - name: Publish strict lint receipt
+        id: lint-proof
+        if: ${{ success() }}
+        env:
+          LINT_LEG: ${{ matrix.kind }}
+          LINT_OUTCOME: ${{ steps.strict-lint.outcome }}
+        run: ./scripts/ci/require_macos_lint.sh record
 
   # Swift toolchain only, no Rust build, so unlike macos-lint it also runs on
   # pull requests that touch the probe's inputs.
@@ -2660,14 +2672,12 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require every macOS lint leg
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           MATRIX_RESULT: ${{ needs.macos-lint.result }}
+          LINT_PROOFS: ${{ toJSON(needs.macos-lint.outputs) }}
         run: ./scripts/ci/require_macos_lint.sh
 
   portal:

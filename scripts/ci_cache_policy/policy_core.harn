@@ -551,6 +551,10 @@ pub const WINDOWS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh windows down
 
 pub const MACOS_WARM_PACK_MARKER = "workspace_warm_artifact.sh macos pack"
 
+pub const MACOS_WARM_PACK_STEP_ID = "macos-warm-pack"
+
+pub const MACOS_WARM_UPLOAD_NAME = "$" + "{{ steps.macos-warm-pack.outputs.artifact_name }}"
+
 pub const MACOS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh macos download-and-restore"
 
 pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"
@@ -559,9 +563,9 @@ pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}
 pub const MACOS_WARM_MAIN_GUARD = "$"
   + "{{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}"
 
-/** The macOS warm consumer guard on the nightly: pull requests only. */
-pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
-  + "{{ github.event_name == 'pull_request' }}"
+/** Hosted PR reuse and main's fallback when its exact Actions generation is absent. */
+pub const MACOS_WARM_HOSTED_RESTORE_GUARD = "$"
+  + "{{ github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.rust-cache.outputs.cache-hit != 'true') }}"
 
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"

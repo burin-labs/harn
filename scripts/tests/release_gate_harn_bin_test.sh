@@ -88,6 +88,10 @@ git -C "$release_root" commit -qm init
 # intentionally requires its shared Cargo helper relative to its own location.
 release_tools="$tmp_root/release-tools"
 "$repo_root/scripts/stage_release_tools.sh" "$release_tools"
+# Fixture scheduling is independent of the production advisory scanner.
+cat >> "$release_tools/lib/cargo_env.sh" <<'SH'
+run_fixture_audit() { rg -- fixture-audit README.md; }
+SH
 release_gate="$release_tools/release_gate.sh"
 
 fake_harn_dir="$tmp_root/fake bin"
@@ -512,14 +516,14 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     printf 'lane\tgenerated-audit\trun_generated_audit\n'
     printf 'lane\tdocs-audit\trun_docs_audit\n'
     printf 'lane\tgrammar-audit\trun_grammar_audit\n'
-    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsecurity-audit\trun_fixture_audit\n'
     printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   elif [[ " $* " == *" --residual-only "* ]]; then
     printf 'meta\tfalse\tresidual_only\n'
     printf 'lane\tgenerated-audit\trun_generated_audit\n'
     printf 'lane\tdocs-audit\trun_docs_audit\n'
     printf 'lane\tgrammar-audit\trun_grammar_audit\n'
-    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsecurity-audit\trun_fixture_audit\n'
     printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   elif [[ " $* " == *" --source-only "* ]]; then
     printf 'meta\tfalse\tsource_only\n'
@@ -533,7 +537,7 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     printf 'lane\tgenerated-audit\trun_generated_audit\n'
     printf 'lane\tdocs-audit\trun_docs_audit\n'
     printf 'lane\tgrammar-audit\trun_grammar_audit\n'
-    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsecurity-audit\trun_fixture_audit\n'
     printf 'lane\tpackage-audit\trun_package_audit\n'
     printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   fi
@@ -681,7 +685,7 @@ for expected in \
   "run scripts/verify_release_metadata.harn" \
   "run scripts/verify_tree_sitter_parse.harn -- --strict" \
   "markdownlint --config" \
-  "rg -n OAuth|oauth|MCP|trust boundary" \
+  "rg -- fixture-audit" \
   "make smoke-audit"
 do
   if ! grep -Fq "$expected" "$audit_record"; then
@@ -900,7 +904,7 @@ if ! grep -Fq 'injected root npm install failure' "$tmp_root/audit-docs-install.
   cat "$audit_record" >&2
   exit 1
 fi
-assert_residual_lane_failure security-lane "FAIL_FAKE_RG=1" "rg -n OAuth|oauth|MCP|trust boundary"
+assert_residual_lane_failure security-lane "FAIL_FAKE_RG=1" "rg -- fixture-audit"
 assert_residual_lane_failure smoke-lane "FAIL_FAKE_MAKE_TARGET=smoke-audit" "make smoke-audit"
 
 assert_arg_fails_before_work() {

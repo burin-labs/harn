@@ -1,6 +1,9 @@
 use super::{DoctorCheck, DoctorStatus};
 
-pub(super) fn next_step_suggestion(checks: &[DoctorCheck]) -> String {
+pub(super) fn next_step_suggestion(
+    checks: &[DoctorCheck],
+    locale: crate::localization::Locale,
+) -> String {
     let creds_ok = checks
         .iter()
         .any(|check| check.id == "creds:any" && check.status == DoctorStatus::Ok);
@@ -17,19 +20,18 @@ pub(super) fn next_step_suggestion(checks: &[DoctorCheck]) -> String {
     );
 
     if !creds_ok && no_ollama_models {
-        return "Run `harn models recommend` to pick a starter model for your machine.".to_string();
+        return crate::localization::translate_for(locale, crate::localization::DOCTOR_PICK_MODEL);
     }
     if ollama.is_some_and(|check| check.status == DoctorStatus::Warn) {
-        return "Run `harn models recommend` to pick a starter model for your machine.".to_string();
+        return crate::localization::translate_for(locale, crate::localization::DOCTOR_PICK_MODEL);
     }
     if creds_ok && !manifest_present {
-        return "Run `harn new my-agent --template agent` to scaffold a project.".to_string();
+        return crate::localization::translate_for(locale, crate::localization::DOCTOR_SCAFFOLD);
     }
     if !any_fail {
-        return "You're ready. Try `harn try \"summarize this README\"` or `harn demo` for a bundled scenario."
-            .to_string();
+        return crate::localization::translate_for(locale, crate::localization::DOCTOR_READY);
     }
-    "Address the failing checks above, then re-run `harn doctor`.".to_string()
+    crate::localization::translate_for(locale, crate::localization::DOCTOR_FIX_CHECKS)
 }
 
 #[cfg(test)]
@@ -73,7 +75,10 @@ mod tests {
         ];
 
         for (checks, expected) in cases {
-            assert_eq!(next_step_suggestion(&checks), expected);
+            assert_eq!(
+                next_step_suggestion(&checks, crate::localization::Locale::English),
+                expected
+            );
         }
     }
 }

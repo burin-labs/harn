@@ -1,0 +1,41 @@
+type HostedMacProfile = {cores: int, memory_bytes: int, profile: string}
+
+const HOSTED_MAC_PROFILES: list<HostedMacProfile> = [
+  {cores: 3, memory_bytes: 7516192768, profile: "macos_hosted_arm64"},
+  {cores: 5, memory_bytes: 15032385536, profile: "macos_hosted_5core_arm64"},
+]
+
+pub fn hosted_mac_profile(cores: int, memory_bytes: int) -> string? {
+  for host in HOSTED_MAC_PROFILES {
+    if host.cores == cores && host.memory_bytes == memory_bytes {
+      return host.profile
+    }
+  }
+  return nil
+}
+
+pub fn measured_hosted_mac_profile(process: HarnessProcess) -> string {
+  const measured = process.run(
+    {program: "sysctl", args: ["-n", "hw.logicalcpu", "hw.memsize", "hw.optional.arm64"]},
+  )
+  if !measured.success {
+    throw "hosted macOS performance hardware census failed"
+  }
+  const fields = measured.stdout.trim().split("\n")
+  if fields.count != 3 {
+    throw "hosted macOS performance hardware census is incomplete"
+  }
+  const cores = to_int(fields[0])
+  const memory = to_int(fields[1])
+  if fields[2] != "1" {
+    throw "uncalibrated hosted macOS performance architecture"
+  }
+  if cores == nil || memory == nil {
+    throw "hosted macOS performance hardware census is malformed"
+  }
+  const profile = hosted_mac_profile(cores, memory)
+  if profile == nil {
+    throw "uncalibrated hosted macOS performance hardware: cores=${cores} memory_bytes=${memory}"
+  }
+  return profile
+}

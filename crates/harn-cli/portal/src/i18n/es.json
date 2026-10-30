@@ -93,7 +93,7 @@
   "portal.launch.customOption": "Personalizado…",
   "portal.launch.envHelp": "Objeto JSON fusionado en el env del proceso hijo solo para este lanzamiento.",
   "Loading…": "Cargando…",
-  "No discovered models": "No se обнаружieron modelos",
+  "No discovered models": "No se han encontrado modelos",
   "Select a provider": "Selecciona un proveedor",
   "{value0} • started {value1}{value2}": "{value0} • iniciado {value1}{value2}",
   " • exit {value0}": " • salida {value0}",

@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/probe"
 import { safe_bool, safe_dict, safe_list, safe_string } from "std/cli/render"
 
 /**
@@ -53,11 +55,11 @@ fn __fmt_u64(value: any) -> string {
   return "-"
 }
 
-fn __render_loaded_lines(models: list) -> string {
+fn __render_loaded_lines(__cli_locale: string, models: list) -> string {
   if len(models) == 0 {
     return ""
   }
-  let out = "loaded:\n"
+  let out = cli_message(__cli_locale, "loaded:\n", [])
   for model in models {
     if type_of(model) != "dict" {
       continue
@@ -67,21 +69,24 @@ fn __render_loaded_lines(models: list) -> string {
     const vram = __fmt_bytes(model["size_vram_bytes"])
     const ctx = __fmt_u64(model["context_length"])
     const expires = safe_string(model["expires_at"], "-")
-    out = out + "  - " + name
-      + " (size="
-      + size
-      + " vram="
-      + vram
-      + " ctx="
-      + ctx
-      + " expires="
-      + expires
-      + ")\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  - {1} (size={2} vram={3} ctx={4} expires={5})\n",
+      [
+        to_string(out),
+        to_string(name),
+        to_string(size),
+        to_string(vram),
+        to_string(ctx),
+        to_string(expires),
+      ],
+    )
   }
   return out
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln(
@@ -127,7 +132,7 @@ fn main(harness: Harness) -> int {
   if ok {
     harness.stdio.println(message)
     const loaded = safe_list(payload["loaded_models"])
-    const lines = __render_loaded_lines(loaded)
+    const lines = __render_loaded_lines(__cli_locale, loaded)
     if lines != "" {
       // Strip the trailing newline `__render_loaded_lines` always
       // appends so `println` can add exactly one — matches Rust's

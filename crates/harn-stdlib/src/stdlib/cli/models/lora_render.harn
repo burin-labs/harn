@@ -1,3 +1,4 @@
+import { cli_message } from "std/cli/localization/models/lora_render"
 /** Shared render helpers for `harn models lora *` commands. */
 import {
   print_list,
@@ -14,18 +15,34 @@ import {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_peft_save_policy(stdio: HarnessStdio, policy: dict) {
+pub fn render_peft_save_policy(__cli_locale: string, stdio: HarnessStdio, policy: dict) {
   const modules_to_save = safe_list(policy["modules_to_save"])
   if len(modules_to_save) > 0 {
     stdio.println(
-      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+      cli_message(
+        __cli_locale,
+        "  modules to save: {0}",
+        [to_string(join(modules_to_save.map({ item -> safe_string(item, "") }), ", "))],
+      ),
     )
   } else {
-    stdio.println("  modules to save: none")
+    stdio.println(cli_message(__cli_locale, "  modules to save: none", []))
   }
-  stdio.println("  embedding save policy: " + safe_string(policy["save_embedding_layers"], ""))
-  stdio.println("  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""))
-  print_list(stdio, "PEFT save notes", safe_list(policy["notes"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  embedding save policy: {0}",
+      [to_string(safe_string(policy["save_embedding_layers"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  weight tying policy: {0}",
+      [to_string(safe_string(policy["tied_embedding_policy"], ""))],
+    ),
+  )
+  print_list(stdio, cli_message(__cli_locale, "PEFT save notes", []), safe_list(policy["notes"]))
 }
 
 /**
@@ -34,25 +51,51 @@ pub fn render_peft_save_policy(stdio: HarnessStdio, policy: dict) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_tool_catalog_contract(stdio: HarnessStdio, contract: dict) {
+pub fn render_tool_catalog_contract(__cli_locale: string, stdio: HarnessStdio, contract: dict) {
   const policy = safe_string(contract["policy"], "")
   if policy == "" {
     return
   }
-  stdio.println("  tool catalog policy: " + policy)
+  stdio.println(cli_message(__cli_locale, "  tool catalog policy: {0}", [to_string(policy)]))
   const catalog_id = safe_string(contract["catalog_id"], "")
   if catalog_id != "" {
-    stdio.println("  tool catalog id: " + catalog_id)
+    stdio.println(cli_message(__cli_locale, "  tool catalog id: {0}", [to_string(catalog_id)]))
   }
   const catalog_hash = safe_string(contract["catalog_hash"], "")
   if catalog_hash != "" {
-    stdio.println("  tool catalog hash: " + catalog_hash)
+    stdio.println(cli_message(__cli_locale, "  tool catalog hash: {0}", [to_string(catalog_hash)]))
   }
-  stdio.println("  training catalog: " + safe_string(contract["training_catalog"], ""))
-  stdio.println("  inference catalog: " + safe_string(contract["inference_catalog"], ""))
-  stdio.println("  prompt catalog: " + safe_string(contract["prompt_catalog_requirement"], ""))
-  print_list(stdio, "tool catalog notes", safe_list(contract["notes"]))
-  print_list(stdio, "tool catalog gates", safe_list(contract["promotion_gates"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  training catalog: {0}",
+      [to_string(safe_string(contract["training_catalog"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  inference catalog: {0}",
+      [to_string(safe_string(contract["inference_catalog"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  prompt catalog: {0}",
+      [to_string(safe_string(contract["prompt_catalog_requirement"], ""))],
+    ),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "tool catalog notes", []),
+    safe_list(contract["notes"]),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "tool catalog gates", []),
+    safe_list(contract["promotion_gates"]),
+  )
 }
 
 fn __trainer_identity_line(value: unknown) -> string {
@@ -71,7 +114,7 @@ fn __trainer_identity_line(value: unknown) -> string {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_trainer_identity_check(stdio: HarnessStdio, value: unknown) {
+pub fn render_trainer_identity_check(__cli_locale: string, stdio: HarnessStdio, value: unknown) {
   const check = safe_dict(value)
   const status = safe_string(check["status"], "")
   if status == "" {
@@ -82,16 +125,30 @@ pub fn render_trainer_identity_check(stdio: HarnessStdio, value: unknown) {
   } else {
     "no"
   }
-  stdio.println("  trainer identity: " + status + " promotable=" + promotable)
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  trainer identity: {0} promotable={1}",
+      [to_string(status), to_string(promotable)],
+    ),
+  )
   const expected = __trainer_identity_line(check["expected"])
   if expected != "" {
-    stdio.println("  expected trainer identity: " + expected)
+    stdio.println(
+      cli_message(__cli_locale, "  expected trainer identity: {0}", [to_string(expected)]),
+    )
   }
   const observed = __trainer_identity_line(check["observed"])
   if observed != "" {
-    stdio.println("  observed trainer identity: " + observed)
+    stdio.println(
+      cli_message(__cli_locale, "  observed trainer identity: {0}", [to_string(observed)]),
+    )
   }
-  print_list(stdio, "trainer identity errors", safe_list(check["errors"]))
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "trainer identity errors", []),
+    safe_list(check["errors"]),
+  )
 }
 
 /**
@@ -100,7 +157,11 @@ pub fn render_trainer_identity_check(stdio: HarnessStdio, value: unknown) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_trainer_environment_check(stdio: HarnessStdio, value: unknown) -> nil {
+pub fn render_trainer_environment_check(
+  __cli_locale: string,
+  stdio: HarnessStdio,
+  value: unknown,
+) -> nil {
   const check = safe_dict(value)
   const status = safe_string(check["status"], "")
   if status == "" {
@@ -111,13 +172,25 @@ pub fn render_trainer_environment_check(stdio: HarnessStdio, value: unknown) -> 
   } else {
     "no"
   }
-  stdio.println("  trainer environment: " + status + " promotable=" + promotable)
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  trainer environment: {0} promotable={1}",
+      [to_string(status), to_string(promotable)],
+    ),
+  )
   const attestation = safe_dict(check["attestation"])
   const digest = safe_string(attestation["digest"], "")
   if digest != "" {
-    stdio.println("  trainer environment attestation: " + digest)
+    stdio.println(
+      cli_message(__cli_locale, "  trainer environment attestation: {0}", [to_string(digest)]),
+    )
   }
-  print_list(stdio, "trainer environment errors", safe_list(check["errors"]))
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "trainer environment errors", []),
+    safe_list(check["errors"]),
+  )
 }
 
 fn __probe_case_line(value: unknown) -> string {
@@ -152,12 +225,12 @@ fn __probe_case_line(value: unknown) -> string {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_required_probe_cases(stdio: HarnessStdio, value: unknown) {
+pub fn render_required_probe_cases(__cli_locale: string, stdio: HarnessStdio, value: unknown) {
   const probe_cases = safe_list(value)
   if len(probe_cases) == 0 {
     return
   }
-  stdio.println("  required probe cases:")
+  stdio.println(cli_message(__cli_locale, "  required probe cases:", []))
   for item in probe_cases {
     const line = __probe_case_line(item)
     if line != "" {
@@ -172,12 +245,12 @@ pub fn render_required_probe_cases(stdio: HarnessStdio, value: unknown) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_probe_command_templates(stdio: HarnessStdio, value: unknown) {
+pub fn render_probe_command_templates(__cli_locale: string, stdio: HarnessStdio, value: unknown) {
   const command_templates = safe_list(value)
   if len(command_templates) == 0 {
     return
   }
-  stdio.println("  probe command templates:")
+  stdio.println(cli_message(__cli_locale, "  probe command templates:", []))
   for item in command_templates {
     const template = safe_dict(item)
     const case_id = safe_string(template["case_id"], "")
@@ -194,7 +267,15 @@ pub fn render_probe_command_templates(stdio: HarnessStdio, value: unknown) {
       line = line + " (" + summary_path + ")"
     }
     stdio.println("    - " + line)
-    render_command(stdio, "probe " + case_id, safe_list(template["command"]))
-    print_list(stdio, "probe " + case_id + " notes", safe_list(template["notes"]))
+    render_command(
+      stdio,
+      cli_message(__cli_locale, "probe {0}", [to_string(case_id)]),
+      safe_list(template["command"]),
+    )
+    print_list(
+      stdio,
+      cli_message(__cli_locale, "probe {0} notes", [to_string(case_id)]),
+      safe_list(template["notes"]),
+    )
   }
 }

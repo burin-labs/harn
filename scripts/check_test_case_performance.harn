@@ -1,6 +1,7 @@
 import { median } from "std/math"
 import { shell_quote } from "std/runtime"
 import "std/schema"
+import { measured_hosted_mac_profile } from "./ci/macos_performance_profile.harn"
 
 const BASELINES = "bench/test-case-performance/baselines.toml"
 
@@ -713,7 +714,12 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.eprintln("error: ${selected_profile.error}")
     return 1
   }
-  const baseline_profile = selected_profile.profile
+  const baseline_profile = if platform == "macos"
+    && selected_profile.profile == "macos_hosted_arm64" {
+    measured_hosted_mac_profile(harness.process)
+  } else {
+    selected_profile.profile
+  }
   const evidence_root = path_join(".harn-runs/test-case-performance", harness.random.uuid_v7())
   harness.fs.mkdir(evidence_root)
   harness.stdio.eprintln("test-case performance evidence: " + evidence_root)

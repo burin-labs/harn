@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/runs/export_training"
 /**
  * `harn runs export-training` renderer.
  *
@@ -37,12 +39,24 @@ fn __message_summary(item: unknown) -> string {
   return line + " (" + safe_int_string(len(safe_string(message["content"], "")), "0") + " chars)"
 }
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const ok = safe_bool(report["ok"], false)
-  stdio.println("Training example export from " + safe_string(report["run_record_path"], ""))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "Training example export from {0}",
+      [to_string(safe_string(report["run_record_path"], ""))],
+    ),
+  )
   if !ok {
     const error = safe_dict(report["error"])
-    stdio.eprintln("  refused: " + safe_string(error["kind"], "unknown"))
+    stdio.eprintln(
+      cli_message(
+        __cli_locale,
+        "  refused: {0}",
+        [to_string(safe_string(error["kind"], "unknown"))],
+      ),
+    )
     stdio.eprintln("  " + safe_string(error["message"], ""))
     const event_index = error["event_index"]
     if event_index != nil {
@@ -56,32 +70,61 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const usage = safe_dict(provenance["usage"])
   const messages = safe_list(example["messages"])
   const tools = safe_list(example["tools"])
-  stdio.println("  schema: " + safe_string(example["schema_version"], ""))
-  stdio.println("  run: " + safe_string(provenance["run_id"], ""))
-  stdio.println("  session: " + safe_string(provenance["session_id"], ""))
   stdio.println(
-    "  route: "
-      + safe_string(provenance["provider"], "")
-      + "/"
-      + safe_string(provenance["model"], "")
-      + " tool_format="
-      + safe_string(provenance["effective_tool_format"], ""),
-  )
-  stdio.println("  terminal status: " + safe_string(provenance["terminal_status"], ""))
-  stdio.println(
-    "  tool catalog: "
-      + safe_int_string(len(tools), "0")
-      + " schemas, hash "
-      + safe_string(provenance["tool_catalog_hash"], ""),
+    cli_message(
+      __cli_locale,
+      "  schema: {0}",
+      [to_string(safe_string(example["schema_version"], ""))],
+    ),
   )
   stdio.println(
-    "  usage: "
-      + safe_int_string(usage["provider_calls"], "0")
-      + " provider calls, "
-      + safe_int_string(usage["input_tokens"], "0")
-      + " in / "
-      + safe_int_string(usage["output_tokens"], "0")
-      + " out",
+    cli_message(__cli_locale, "  run: {0}", [to_string(safe_string(provenance["run_id"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  session: {0}",
+      [to_string(safe_string(provenance["session_id"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  route: {0}/{1} tool_format={2}",
+      [
+        to_string(safe_string(provenance["provider"], "")),
+        to_string(safe_string(provenance["model"], "")),
+        to_string(safe_string(provenance["effective_tool_format"], "")),
+      ],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  terminal status: {0}",
+      [to_string(safe_string(provenance["terminal_status"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  tool catalog: {0} schemas, hash {1}",
+      [
+        to_string(safe_int_string(len(tools), "0")),
+        to_string(safe_string(provenance["tool_catalog_hash"], "")),
+      ],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  usage: {0} provider calls, {1} in / {2} out",
+      [
+        to_string(safe_int_string(usage["provider_calls"], "0")),
+        to_string(safe_int_string(usage["input_tokens"], "0")),
+        to_string(safe_int_string(usage["output_tokens"], "0")),
+      ],
+    ),
   )
   stdio.println("  source transcript: " + safe_string(source["transcript_path"], ""))
   stdio.println("  source digest: " + safe_string(source["transcript_sha256"], ""))
@@ -93,13 +136,19 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
       + " of "
       + safe_int_string(source["event_count"], "0"),
   )
-  stdio.println("  messages (" + safe_int_string(len(messages), "0") + "):")
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  messages ({0}):",
+      [to_string(safe_int_string(len(messages), "0"))],
+    ),
+  )
   for item in messages {
     stdio.println(__message_summary(item))
   }
   const output_path = safe_string(report["output_path"], "")
   if output_path != "" {
-    stdio.println("  wrote: " + output_path)
+    stdio.println(cli_message(__cli_locale, "  wrote: {0}", [to_string(output_path)]))
   }
 }
 
@@ -125,6 +174,7 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_RUNS_EXPORT_TRAINING_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_RUNS_EXPORT_TRAINING_PAYLOAD_JSON not set")
@@ -142,7 +192,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if safe_bool(report["ok"], false) {
     return 0

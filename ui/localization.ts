@@ -17,15 +17,18 @@ let current: Locale = "en"
 let initialized = false
 
 export function resolveLocale(value: string): Locale | undefined {
-  const normalized = value.replaceAll("_", "-").toLowerCase()
-  const exact = Object.keys(languages).find(
-    (locale) => locale.toLowerCase() === normalized,
-  )
-  if (exact) return exact as Locale
-  if (/^zh-(?:hant|tw|hk|mo)(?:-|$)/.test(normalized)) return undefined
-  if (normalized === "zh" || normalized.startsWith("zh-")) return "zh-Hans"
-  if (normalized === "pt" || normalized.startsWith("pt-")) return "pt-BR"
-  const base = normalized.split("-")[0]
+  let parsed: Intl.Locale
+  try {
+    parsed = new Intl.Locale(value.replaceAll("_", "-"))
+  } catch {
+    return undefined
+  }
+  const base = parsed.language
+  if (base === "zh") {
+    if (parsed.script) return parsed.script === "Hans" ? "zh-Hans" : undefined
+    return ["TW", "HK", "MO"].includes(parsed.region ?? "") ? undefined : "zh-Hans"
+  }
+  if (base === "pt") return "pt-BR"
   return Object.hasOwn(languages, base) ? (base as Locale) : undefined
 }
 

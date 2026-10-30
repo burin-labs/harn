@@ -69,6 +69,8 @@
  *   HARN_EFFORT_PROBE_UNGATED "1" to suspend the declared-ladder check.
  */
 import { parse, parser } from "std/cli/argparse"
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/effort_probe"
 
 // The canonical rung order, ascending. This mirrors `EFFORT_LADDER` in
 // `crates/harn-vm/src/llm/reasoning_policy.rs`; `none` leads because it is the
@@ -670,6 +672,7 @@ fn __render_human(report: dict, suggest_fragment: bool) -> string {
 }
 
 fn main(harness: Harness) {
+  const __cli_locale = cli_locale(harness.env)
   const parsed = parse(
     parser(
       {
@@ -800,11 +803,11 @@ fn main(harness: Harness) {
     const unusable = __unusable_routes(routes)
     if unusable > 0 {
       harness.stdio.eprintln(
-        "effort-probe: "
-          + to_string(unusable)
-          + "/"
-          + to_string(len(routes))
-          + " routes could not be measured at all; no catalog conclusion is available",
+        cli_message(
+          __cli_locale,
+          "effort-probe: {0}/{1} routes could not be measured at all; no catalog conclusion is available",
+          [to_string(to_string(unusable)), to_string(to_string(len(routes)))],
+        ),
       )
       harness.runtime.exit(2)
     }

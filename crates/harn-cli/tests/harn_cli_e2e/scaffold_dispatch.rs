@@ -13,7 +13,7 @@ use std::process::{Command, Output};
 
 /// Snapshot of every file in a directory tree, keyed by path relative
 /// to the snapshot root. Used to compare two scaffolded layouts.
-type Snapshot = BTreeMap<String, Vec<u8>>;
+pub(super) type Snapshot = BTreeMap<String, Vec<u8>>;
 
 fn run_scaffold(args: &[&str], cwd: &Path) -> Output {
     let mut cmd = Command::new(crate::test_util::cli::binary_path());
@@ -21,7 +21,7 @@ fn run_scaffold(args: &[&str], cwd: &Path) -> Output {
     cmd.output().expect("spawn harn subcommand")
 }
 
-fn snapshot_tree(root: &Path) -> Snapshot {
+pub(super) fn snapshot_tree(root: &Path) -> Snapshot {
     let mut out = BTreeMap::new();
     fn walk(root: &Path, dir: &Path, out: &mut Snapshot) {
         let entries = match fs::read_dir(dir) {
@@ -51,7 +51,11 @@ fn snapshot_tree(root: &Path) -> Snapshot {
     out
 }
 
-fn assert_snapshots_match(label: &str, harn_snapshot: &Snapshot, repeat_snapshot: &Snapshot) {
+pub(super) fn assert_snapshots_match(
+    label: &str,
+    harn_snapshot: &Snapshot,
+    repeat_snapshot: &Snapshot,
+) {
     let harn_keys: Vec<&String> = harn_snapshot.keys().collect();
     let repeat_keys: Vec<&String> = repeat_snapshot.keys().collect();
     assert_eq!(

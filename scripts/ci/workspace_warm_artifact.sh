@@ -52,6 +52,20 @@ select_platform() {
 
 load_warm_policy() {
   ARTIFACT_NAME="$(harn_cache_policy_jq ".${POLICY_KEY}.artifact_name")"
+  WORKSPACE_COMPILER_SHA256=""
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    # Cargo fingerprints the workspace wrapper path. Its effective flags also
+    # belong to the archive identity, so different compiler settings can coexist.
+    source "${SCRIPT_DIR}/../lib/rustc_frontend.sh"
+    local flags="" identity
+    if [[ -n "${RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
+      flags="$(harn_rustc_frontend_flags)"
+    fi
+    identity="$(jq -nc --arg wrapper "${RUSTC_WORKSPACE_WRAPPER:-}" --arg flags "$flags" \
+      '{wrapper:$wrapper,flags:$flags}')"
+    WORKSPACE_COMPILER_SHA256="$(sha256_string "$identity")"
+    ARTIFACT_NAME="${ARTIFACT_NAME}-${WORKSPACE_COMPILER_SHA256}"
+  fi
   SCHEMA="$(harn_cache_policy_jq ".${POLICY_KEY}.manifest_schema")"
   WORKFLOW_FILE="$(harn_cache_policy_jq ".${POLICY_KEY}.workflow")"
   DEFAULT_MAX_BYTES="$(harn_cache_policy_jq ".${POLICY_KEY}.max_bytes")"
@@ -187,6 +201,9 @@ rustflags_sha256=$(sha256_string "${RUSTFLAGS:-}")
 cargo_incremental=${CARGO_INCREMENTAL:-}
 target_bytes=${target_bytes}
 EOF
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    printf 'workspace_compiler_sha256=%s\n' "$WORKSPACE_COMPILER_SHA256" >> "$destination/manifest"
+  fi
 }
 
 require_manifest_value() {
@@ -209,15 +226,16 @@ verify_compat_manifest() {
   require_manifest_value "$manifest" rustflags_sha256 "$(sha256_string "${RUSTFLAGS:-}")"
   require_manifest_value "$manifest" cargo_incremental "${CARGO_INCREMENTAL:-}"
   if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    require_manifest_value "$manifest" workspace_compiler_sha256 "$WORKSPACE_COMPILER_SHA256"
     require_manifest_value "$manifest" rustc_sha256 "$(rustc_identity_sha256)"
     require_manifest_value "$manifest" producer_ref "$PRODUCER_REF"
-    local producer
-    producer="$(sed -n 's/^producer_commit=//p' "$manifest")"
-    [[ "$producer" =~ ^[0-9a-f]{40}$ ]] || {
-      echo "error: warm artifact producer_commit must be a full commit SHA" >&2
-      exit 1
-    }
   fi
+  local producer
+  producer="$(sed -n 's/^producer_commit=//p' "$manifest")"
+  [[ "$producer" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "error: warm artifact producer_commit must be a full commit SHA" >&2
+    exit 1
+  }
   local target_bytes
   target_bytes="$(sed -n 's/^target_bytes=//p' "$manifest")"
   if [[ ! "$target_bytes" =~ ^[1-9][0-9]*$ ]]; then
@@ -296,7 +314,7 @@ pack() {
   # drive-letter staging paths (D:\a\_temp\...) as remote hosts.
   (
     cd "$staging"
-    tar -czf target.tar.gz -C "$target_dir" .
+    tar -cf - -C "$target_dir" . | gzip -1 > target.tar.gz
   )
   bytes="$(wc -c < "$archive" | tr -d ' ')"
   limit="$(max_bundle_bytes)"
@@ -307,6 +325,10 @@ pack() {
   printf "${KEY_PREFIX}_warm_artifact_bytes=%s\n" "$bytes"
   printf "${KEY_PREFIX}_warm_artifact_target_bytes=%s\n" "$target_bytes"
   printf "${KEY_PREFIX}_warm_artifact_producer_commit=%s\n" "$producer_commit"
+  printf "${KEY_PREFIX}_warm_artifact_name=%s\n" "$ARTIFACT_NAME"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'artifact_name=%s\n' "$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+  fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "### ${PLATFORM_LABEL} workspace warm artifact"
@@ -374,6 +396,9 @@ restore() {
   printf "${KEY_PREFIX}_warm_restore_available_after_replace_bytes=%s\n" "$available_after_replace_bytes"
   printf "${KEY_PREFIX}_warm_restore_producer_commit=%s\n" \
     "$(sed -n 's/^producer_commit=//p' "$manifest")"
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    printf "macos_warm_restore_workspace_compiler_sha256=%s\n" "$WORKSPACE_COMPILER_SHA256"
+  fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "### ${PLATFORM_LABEL} workspace warm restore"
@@ -384,7 +409,7 @@ restore() {
   fi
 }
 
-discover() {
+discover_source() {
   local repo=""
   while (($#)); do
     case "$1" in
@@ -400,23 +425,30 @@ discover() {
   fi
   require_repo "$repo"
 
-  local runs_json run_rows run_id artifacts_json
+  local runs_json run_rows run_id artifacts_json head_sha
   runs_json="$(gh api \
     "repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?branch=${PRODUCER_BRANCH}&status=completed&per_page=30")"
   # Finish decoding before an early successful return closes the reader.
   run_rows="$(jq -c '.workflow_runs[]?' <<<"$runs_json")"
   while IFS= read -r run_json; do
     [[ -n "$run_json" ]] || continue
-    if [[ "$(jq -r '.conclusion // empty' <<<"$run_json")" != "success" ]]; then
+    if ! jq -e --arg repo "$repo" --arg branch "$PRODUCER_BRANCH" --arg platform "$KEY_PREFIX" '
+      .status == "completed" and .conclusion == "success" and
+      .head_branch == $branch and .head_repository.full_name == $repo and
+      (.event == "push" or .event == "schedule" or
+       ($platform == "windows" and .event == "workflow_dispatch"))
+    ' <<<"$run_json" >/dev/null; then
       continue
     fi
     run_id="$(jq -r '.id // empty' <<<"$run_json")"
-    [[ -n "$run_id" ]] || continue
+    head_sha="$(jq -r '.head_sha // empty' <<<"$run_json")"
+    [[ "$run_id" =~ ^[1-9][0-9]*$ && "$head_sha" =~ ^[0-9a-f]{40}$ ]] || continue
     artifacts_json="$(gh api "repos/${repo}/actions/runs/${run_id}/artifacts")"
     if jq -e --arg name "$ARTIFACT_NAME" \
-      'any(.artifacts[]?; (.name == $name) and (.expired | not) and (.size_in_bytes > 0))' \
+      'any(.artifacts[]?; (.name == $name) and .expired == false and
+        (.size_in_bytes | type == "number" and . > 0))' \
       <<<"$artifacts_json" >/dev/null; then
-      printf '%s\n' "$run_id"
+      jq -nc --argjson id "$run_id" --arg sha "$head_sha" '{id:$id, head_sha:$sha}'
       return 0
     fi
   done <<<"$run_rows"
@@ -444,8 +476,10 @@ download_and_restore() {
   require_repo "$repo"
   target_dir="$(resolve_target_dir "$target_dir")"
 
-  local run_id staging
-  run_id="$(discover --repo "$repo")"
+  local run_id staging source_record expected_commit
+  source_record="$(discover_source --repo "$repo")"
+  run_id="$(jq -r '.id' <<<"$source_record")"
+  expected_commit="$(jq -r '.head_sha' <<<"$source_record")"
   staging="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/${ARTIFACT_NAME}.XXXXXX")"
   cleanup_dir="$staging"
   trap '[[ -z "${cleanup_dir:-}" ]] || rm -rf "$cleanup_dir"' EXIT
@@ -455,7 +489,12 @@ download_and_restore() {
   if [[ ! -f "$staging/manifest" && -f "$staging/$ARTIFACT_NAME/manifest" ]]; then
     staging="$staging/$ARTIFACT_NAME"
   fi
+  if [[ "$(sed -n 's/^producer_commit=//p' "$staging/manifest")" != "$expected_commit" ]]; then
+    echo "error: warm artifact producer commit does not match its GitHub run" >&2
+    return 1
+  fi
   printf "${KEY_PREFIX}_warm_restore_run_id=%s\n" "$run_id"
+  printf "${KEY_PREFIX}_warm_restore_source_contract=workflow_head\n"
   restore "$staging" "$target_dir"
 }
 
@@ -478,7 +517,7 @@ main() {
   case "$command" in
     pack) pack "$@" ;;
     restore) restore "$@" ;;
-    discover) discover "$@" ;;
+    discover) discover_source "$@" | jq -r '.id' ;;
     download-and-restore) download_and_restore "$@" ;;
     *) echo "error: unknown command: $command" >&2; usage >&2; exit 2 ;;
   esac

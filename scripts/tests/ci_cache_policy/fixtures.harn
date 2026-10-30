@@ -84,7 +84,7 @@ pub fn windows_warm_policy() {
 pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
   return {
     artifact_name: "workspace-macos-warm",
-    manifest_schema: "harn.macos_workspace_warm.v1",
+    manifest_schema: "harn.macos_workspace_warm.v3",
     workflow: "macos-nightly.yml",
     job: "nextest",
     retention_days: 3,
@@ -546,6 +546,7 @@ pub fn workflows() {
             {uses: "./.github/actions/rust-toolchain"},
             {
               uses: "./.github/actions/rust-cache",
+              id: "rust-cache",
               with: {
                 "shared-key": "workspace-macos",
                 "source-key": native_source_key(),
@@ -555,13 +556,24 @@ pub fn workflows() {
             {
               name: "Restore macOS workspace warm artifact",
               id: "macos-warm-restore",
-              if: gha_expression("github.event_name == 'pull_request'"),
+              if: gha_expression(
+                "github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.rust-cache.outputs.cache-hit != 'true')",
+              ),
               "continue-on-error": true,
               run:
                 "./scripts/ci/workspace_warm_artifact.sh macos download-and-restore --repo owner/repo",
             },
             {
+              name: "Invalidate workspace units before publishing a new warm generation",
+              if: gha_expression(
+                "github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'",
+              ),
+              run: "cargo clean --workspace",
+            },
+            {name: "Run workspace nextest", run: "cargo-nextest nextest run --workspace"},
+            {
               name: "Stage macOS workspace warm artifact",
+              id: "macos-warm-pack",
               if: gha_expression(
                 "github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'",
               ),
@@ -574,7 +586,7 @@ pub fn workflows() {
               ),
               uses: "actions/upload-artifact@exact-pin",
               with: {
-                name: "workspace-macos-warm",
+                name: gha_expression("steps.macos-warm-pack.outputs.artifact_name"),
                 "if-no-files-found": "error",
                 "retention-days": 3,
               },

@@ -1,3 +1,6 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/scaffold/tool_new"
+
 /**
  * `harn tool new` ported to .harn — see harn#2308 (W8).
  *
@@ -305,26 +308,39 @@ fn __render_harn_lock(harn_version: string) -> string {
     + "\"\n"
 }
 
-fn __write(harness: Harness, dest: string, rel: string, content: string) {
+fn __write(__cli_locale: string, harness: Harness, dest: string, rel: string, content: string) {
   const path = path_join(dest, rel)
   const parent = dirname(path)
   if parent != "" && !harness.fs.exists(parent) {
     try {
       harness.fs.mkdir(parent)
     } catch (e) {
-      harness.stdio.eprintln("failed to create " + parent + ": " + to_string(e))
+      harness.stdio.eprintln(
+        cli_message(
+          __cli_locale,
+          "failed to create {0}: {1}",
+          [to_string(parent), to_string(to_string(e))],
+        ),
+      )
       harness.runtime.exit(1)
     }
   }
   try {
     harness.fs.write_text(path, content)
   } catch (e) {
-    harness.stdio.eprintln("failed to write " + path + ": " + to_string(e))
+    harness.stdio.eprintln(
+      cli_message(
+        __cli_locale,
+        "failed to write {0}: {1}",
+        [to_string(path), to_string(to_string(e))],
+      ),
+    )
     harness.runtime.exit(1)
   }
 }
 
 fn main(harness: Harness) {
+  const __cli_locale = cli_locale(harness.env)
   const name = harness.env.get_or("HARN_TOOL_NAME", "")
   const dest = harness.env.get_or("HARN_TOOL_DEST", "")
   const ident = harness.env.get_or("HARN_TOOL_IDENT", "")
@@ -340,14 +356,26 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(2)
   }
-  __write(harness, dest, "harn.toml", __render_harn_toml(name, description, harn_range))
-  __write(harness, dest, "harn.lock", __render_harn_lock(harn_version))
-  __write(harness, dest, ".harn-version", harn_version + "\n")
-  __write(harness, dest, "lib/tools.harn", __render_tools_harn(name, handler, description))
-  __write(harness, dest, "main.harn", __render_main_harn(name))
-  __write(harness, dest, "server.harn", __render_server_harn())
-  __write(harness, dest, "tests/test_tool.harn", __render_test_harn(name, ident))
-  __write(harness, dest, "README.md", __render_readme(name, description))
-  __write(harness, dest, "LICENSE", "MIT OR Apache-2.0\n")
-  __write(harness, dest, ".github/workflows/ci.yml", __render_workflow_yaml())
+  __write(
+    __cli_locale,
+    harness,
+    dest,
+    "harn.toml",
+    __render_harn_toml(name, description, harn_range),
+  )
+  __write(__cli_locale, harness, dest, "harn.lock", __render_harn_lock(harn_version))
+  __write(__cli_locale, harness, dest, ".harn-version", harn_version + "\n")
+  __write(
+    __cli_locale,
+    harness,
+    dest,
+    "lib/tools.harn",
+    __render_tools_harn(name, handler, description),
+  )
+  __write(__cli_locale, harness, dest, "main.harn", __render_main_harn(name))
+  __write(__cli_locale, harness, dest, "server.harn", __render_server_harn())
+  __write(__cli_locale, harness, dest, "tests/test_tool.harn", __render_test_harn(name, ident))
+  __write(__cli_locale, harness, dest, "README.md", __render_readme(name, description))
+  __write(__cli_locale, harness, dest, "LICENSE", "MIT OR Apache-2.0\n")
+  __write(__cli_locale, harness, dest, ".github/workflows/ci.yml", __render_workflow_yaml())
 }
