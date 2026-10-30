@@ -365,6 +365,7 @@ use metadata::{
     branch_event_index, clone_transcript_with_id, clone_transcript_with_parent, empty_transcript,
     prepare_lineage_update, session_snapshot, transcript_with_session_metadata, update_lineage,
 };
+use retention::minted_session_id;
 pub use retention::{
     fork, open_or_create_with_actor_chain, open_retained_with_actor_chain, SessionRetention,
 };
@@ -774,12 +775,6 @@ pub fn open_or_create(id: Option<String>) -> Result<String, SessionOpenError> {
 #[cfg(test)]
 pub(crate) fn open_or_create_for_test(id: Option<String>) -> String {
     open_or_create(id).expect("open fixture session")
-}
-
-/// A fresh session id. Taped, so a branch prefix replays the recorded id and
-/// later calls naming the session still find it.
-fn minted_session_id() -> String {
-    crate::run_tape::taped_random("session_id", || uuid::Uuid::now_v7().to_string())
 }
 
 #[cfg(test)]
