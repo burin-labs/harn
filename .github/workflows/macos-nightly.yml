@@ -60,6 +60,9 @@ on:
       - "scripts/ci/workspace_warm_artifact.sh"
       - "scripts/ci/run_rust_test_lane.sh"
       - "scripts/tests/workspace_reuse_cargo_test.sh"
+      - "scripts/check_test_case_performance.harn"
+      - "scripts/ci/macos_performance_profile.harn"
+      - "bench/test-case-performance/**"
 
 permissions:
   contents: read

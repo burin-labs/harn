@@ -71,6 +71,7 @@ pipeline test_hosted_mac_baselines_follow_measured_hardware(harness: Harness) {
 }
 
 type PerformanceWorkflow = {
+  on: {pull_request: {paths: list<string>}},
   jobs: {
     nextest: {
       steps: list<{
@@ -98,6 +99,16 @@ pipeline test_macos_uploads_nonempty_evidence_after_failed_performance(
     yaml_parse(harness.fs.read_text("../../.github/workflows/macos-nightly.yml")),
     schema_of(PerformanceWorkflow),
   )
+  for path in [
+    "scripts/check_test_case_performance.harn",
+    "scripts/ci/macos_performance_profile.harn",
+    "bench/test-case-performance/**",
+  ] {
+    assert(
+      workflow.on.pull_request.paths.contains(path),
+      "native performance edits must exercise the hosted gate",
+    )
+  }
   const uploads = workflow.jobs.nextest.steps.filter(
     { step -> step.name == "Upload failed test-case performance evidence" },
   )
