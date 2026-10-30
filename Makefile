@@ -1153,6 +1153,7 @@ gen-cli-localization:
 
 check-cli-localization:
 	@$(HARN_BIN_ASSIGN); node scripts/generate_cli_localization.mjs --check --harn-bin "$$harn_bin"
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" node --test scripts/tests/cli_localization_generator_test.mjs
 
 check-cli-surface:
 	@echo "=== Checking spec/cli-surface.txt matches the CLI parser ==="

@@ -684,7 +684,7 @@ description = "Argument-safe Harn renderers projected from the CLI catalog and i
 gen = "gen-cli-localization"
 check = "check-cli-localization"
 outputs = ["crates/harn-stdlib/src/stdlib/cli/localization.harn", "crates/harn-stdlib/src/stdlib/cli/localization/", "crates/harn-stdlib/src/catalog_entries.rs"]
-sources = ["scripts/generate_cli_localization.mjs", "crates/harn-cli/src/localization_scripts.json", "crates/harn-cli/src/localization/", "crates/harn-stdlib/src/stdlib/cli/", "crates/harn-vm/src/environment_registry_names.txt"]
+sources = ["scripts/generate_cli_localization.mjs", "scripts/tests/cli_localization_generator_test.mjs", "crates/harn-cli/src/localization_scripts.json", "crates/harn-cli/src/localization/", "crates/harn-stdlib/src/stdlib/cli/", "crates/harn-vm/src/environment_registry_names.txt"]
 ci = true
 make_all = true
 

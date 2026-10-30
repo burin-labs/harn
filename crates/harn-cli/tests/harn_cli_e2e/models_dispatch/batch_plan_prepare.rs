@@ -18,7 +18,17 @@ fn models_batch_prepare_keeps_receipt_states_canonical_across_locales() {
         serde_json::json!({"max_tokens": 32, "messages": [{"role": "user", "content": "label this"}]}),
     );
     fs::write(&manifest_path, manifest.to_string()).expect("write manifest");
-    for locale in ["en_US.UTF-8", "es_ES.UTF-8"] {
+    for locale in [
+        "en_US.UTF-8",
+        "es_ES.UTF-8",
+        "fr_FR.UTF-8",
+        "de_DE.UTF-8",
+        "pt_BR.UTF-8",
+        "it_IT.UTF-8",
+        "ja_JP.UTF-8",
+        "ko_KR.UTF-8",
+        "zh_CN.UTF-8",
+    ] {
         for valid in [true, false] {
             let input = if valid {
                 manifest_path.clone()
