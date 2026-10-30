@@ -525,6 +525,7 @@ pipeline test_beta(task) {
     .expect("write beta");
 
     let output = Command::new(binary_path())
+        .env("LC_ALL", "C")
         .args([
             "test",
             suite.to_str().unwrap(),
@@ -543,7 +544,7 @@ pipeline test_beta(task) {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Running 2 tests from 2 files with 1 worker (sequential scheduling)"),
+        stdout.contains("Running tests: 2, files: 2, workers: 1 (sequential scheduling)"),
         "stdout did not include the suite banner:\n{stdout}"
     );
     assert!(stdout.contains("RUN   test_alpha"));

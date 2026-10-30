@@ -37,9 +37,11 @@ pub fn generate(manifest: &Path) {
     }
     let mut generated = String::from("macro_rules! formatted {\n");
     for key in source.keys() {
+        // Keep formatter temporaries outside the calling async state machine.
+        // Nine inline formatting arms otherwise inflate its stack allocation.
         writeln!(
             generated,
-            "({key:?} $(, $($args:tt)*)?) => {{{{ match $crate::localization::selected_locale() {{"
+            "({key:?} $(, $($args:tt)*)?) => {{{{ let __harn_cli_render = || match $crate::localization::selected_locale() {{"
         )
         .unwrap();
         writeln!(
@@ -55,7 +57,7 @@ pub fn generate(manifest: &Path) {
             )
             .unwrap();
         }
-        generated.push_str("} }};\n");
+        generated.push_str("}; __harn_cli_render() }};\n");
     }
     generated.push_str("}\npub(crate) use formatted;\n");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output"));
