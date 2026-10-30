@@ -14,6 +14,8 @@ import { reset_token_cache } from "harn-github-connector/default"
 
 const API = "https://api.github.com"
 
+type PullTitleMutation = {title: string}
+
 /** The headline std/bump/runtime gives every refresh publication. */
 const HEADLINE = "chore: bump Harn runtime to v0.10.114"
 
@@ -423,7 +425,12 @@ pipeline test_untracked_file_before_refresh_is_never_bump_output(harness: Harnes
   harness.fs.delete(fixture.dir)
 }
 
-fn remote(harness: Harness, repo_dir: string = ".", labels: list<string> = []) {
+fn remote(
+  harness: Harness,
+  repo_dir: string = ".",
+  labels: list<string> = [],
+  pr_title: string = "",
+) {
   return github_bump_remote(
     harness,
     {
@@ -434,6 +441,7 @@ fn remote(harness: Harness, repo_dir: string = ".", labels: list<string> = []) {
       base: "main",
       repo_dir: repo_dir,
       labels: labels,
+      pr_title: pr_title,
     },
   )
 }
@@ -687,7 +695,12 @@ pipeline test_label_input_normalizes_once_at_the_driver_boundary(task: unknown) 
 }
 
 /** Refresh the open bump PR through a remote that labels it, answering with `applied`. */
-fn upsert_with_labels(harness: Harness, labels: list<string>, applied: list<string>) {
+fn upsert_with_labels(
+  harness: Harness,
+  labels: list<string>,
+  applied: list<string>,
+  pr_title: string = "",
+) {
   harness.testing.http_mock_clear()
   const previous_head_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   const expected_head_oid = "cccccccccccccccccccccccccccccccccccccccc"
@@ -723,7 +736,7 @@ fn upsert_with_labels(harness: Harness, labels: list<string>, applied: list<stri
     state: "open",
   }
   return try {
-    remote(harness, ".", labels).upsert_pr(existing, expected_head_oid)
+    remote(harness, ".", labels, pr_title).upsert_pr(existing, expected_head_oid)
   }
 }
 
@@ -744,6 +757,27 @@ pipeline test_pull_upsert_applies_and_reads_back_requested_labels(harness: Harne
     "an empty label input must make no labeling request",
   )
   harness.testing.http_mock_clear()
+}
+
+pipeline test_pull_upsert_uses_the_callers_full_title(harness: Harness) {
+  for title in ["[Harn] Bump Harn runtime", "[core] Bump Harn runtime", ""] {
+    assert(is_ok(upsert_with_labels(harness, [], [], title)))
+    const patches = harness.testing.http_mock_calls().filter({ call -> call.method == "PATCH" })
+      .to_list()
+    assert_eq(len(patches), 1, "the actual pull request mutation must fire")
+    const mutation = json_decode(patches[0].body, schema_of(PullTitleMutation))?
+    assert_eq(
+      mutation.title,
+      if title == "" {
+        "[CI] Bump Harn runtime"
+      } else {
+        title
+      },
+    )
+  }
+  harness.testing.http_mock_clear()
+  assert_throws({ -> remote(harness, ".", [], "[Harn] Bump\nHarn runtime") })
+  assert_eq(harness.testing.http_mock_calls(), [], "invalid titles refuse before remote effects")
 }
 
 pipeline test_pull_upsert_waits_for_published_head_before_mutation(
