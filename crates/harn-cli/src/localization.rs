@@ -277,6 +277,23 @@ mod tests {
     }
 
     #[test]
+    fn changed_help_diagnostic_identifiers_are_rejected_by_the_catalog_owner() {
+        let source = BTreeMap::from([(
+            "message".into(),
+            "Preserve pre-HARN-TYP-028 behavior.".into(),
+        )]);
+        assert_eq!(
+            field_contract::diagnostic_identifiers(&source["message"]),
+            ["HARN-TYP-028"]
+        );
+        field_contract::validate_fields(&source, &source).unwrap();
+        let translated = BTreeMap::from([("message".into(), "pre-TYP-028 の HARN 動作".into())]);
+        let error = field_contract::validate_fields(&source, &translated)
+            .expect_err("a split diagnostic identifier must fail the same owning validator");
+        assert!(error.contains("changed CLI diagnostic identifiers"));
+    }
+
+    #[test]
     fn every_result_catalog_preserves_complete_rust_format_fields() {
         let source: Catalog =
             serde_json::from_str(include_str!("localization_formats.json")).unwrap();

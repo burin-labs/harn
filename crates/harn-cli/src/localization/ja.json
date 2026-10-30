@@ -1631,7 +1631,7 @@
   "Prepare provider-native request files from a model batch manifest": "モデルバッチマニフェストからプロバイダー固有のリクエストファイルを準備します",
   "Prepare receipt produced by `harn models batch prepare`": "`harn models batch prepare` によって生成された受領書を準備します",
   "Preserve local-only content instead of applying the default redaction policy": "既定の削除ポリシーを適用せず、ローカル専用コンテンツを保持します",
-  "Preserve pre-HARN-TYP-028 behavior by translating omitted declared parameter types to explicit `any`. Intended for unattended version migrations; ordinary authoring repair keeps inference/`unknown` under the surface-changing safety class": "省略された宣言済みパラメータ型を明示的なHARNに翻訳することで、pre-TYP-`any`-028 の挙動を保持します。これは無人のバージョン移行向けです。通常の作成修復では、表面変更の安全クラスの下で推論/`unknown`を維持します",
+  "Preserve pre-HARN-TYP-028 behavior by translating omitted declared parameter types to explicit `any`. Intended for unattended version migrations; ordinary authoring repair keeps inference/`unknown` under the surface-changing safety class": "宣言されたパラメーターで省略されている型を明示的な `any` に変換し、HARN-TYP-028 導入前の動作を維持します。無人のバージョン移行向けです。通常のコード修正では、推論や `unknown` を残す変更を、インターフェース変更を伴う安全性区分として扱います。",
   "Pretty-print JSON output": "JSON出力を整形して表示します",
   "Pretty-print JSON to stdout. Replaces the deprecated `--format=json`": "JSONを標準出力へ整形表示します。非推奨の`--format=json`を置き換えます",
   "Pretty-print the JSON catalog": "JSON カタログを整形して表示する",
