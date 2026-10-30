@@ -296,7 +296,7 @@ pack() {
   # drive-letter staging paths (D:\a\_temp\...) as remote hosts.
   (
     cd "$staging"
-    tar -czf target.tar.gz -C "$target_dir" .
+    tar -cf - -C "$target_dir" . | gzip -1 > target.tar.gz
   )
   bytes="$(wc -c < "$archive" | tr -d ' ')"
   limit="$(max_bundle_bytes)"
