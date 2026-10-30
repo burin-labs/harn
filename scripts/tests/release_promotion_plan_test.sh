@@ -36,6 +36,9 @@ cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_r
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
   "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
+cp "$root/scripts/lib/release-candidate-state.mjs" "$root/scripts/lib/consumer-observer.mjs" \
+  "$root/scripts/lib/consumer-observation-budget.mjs" "$repo/scripts/lib/"
+cp "$root/scripts/ci/consumer_observation_budget.json" "$repo/scripts/ci/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
@@ -80,8 +83,13 @@ case "$1 $2" in
   "api "*/build-release-binaries.yml/runs\?*)
     [[ "${FAKE_RUNS_FAIL:-0}" != 1 ]] || exit 1
     run="${FAKE_CANDIDATE_RUN-9001}"
-    [[ -z "$run" ]] || printf '%s\n' "$run" ;;
-  "api "*/artifacts\?name=candidate-manifest-*) printf '1\n' ;;
+    if [[ -n "$run" ]]; then
+      sha="${2#*head_sha=}"; sha="${sha%%&*}"
+      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+    else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
+  "api "*/artifacts\?name=candidate-manifest-*)
+    sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
+    jq -n --arg sha "$sha" --argjson run "${FAKE_CANDIDATE_RUN-9001}" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:$run,head_sha:$sha}}]}' ;;
   "api "*/actions/runs/*)
     printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
       "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
@@ -140,7 +148,7 @@ commit_version 0.10.142 "Bump the workspace version"
 head_sha="$(git -C "$repo" rev-parse HEAD)"
 plan candidate
 [[ "$(cat "$tmp/candidate.status")" == 0 && "$(output candidate promote)" == true ]] \
-  || fail "the version commit was not promoted: $(cat "$tmp/candidate.log")"
+  || fail "the version commit was not promoted: $(cat "$tmp/candidate.log") calls: $(cat "$tmp/candidate.calls")"
 [[ "$(output candidate tag)" == v0.10.142 && "$(output candidate version)" == 0.10.142 &&
    "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"

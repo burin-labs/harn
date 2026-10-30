@@ -34,6 +34,9 @@ export function observerRunIsLive(status) {
   return liveStates.has(status);
 }
 const completedConclusions = new Set(['success', 'failure', 'cancelled', 'timed_out', 'action_required', 'neutral', 'skipped', 'stale']);
+export function observerConclusionIsKnown(conclusion) {
+  return completedConclusions.has(conclusion);
+}
 // Refuse an unqualified large census rather than spend unbounded API calls.
 const censusLimit = 1000;
 // A cancellation request is asynchronous. Bound completion observation to six

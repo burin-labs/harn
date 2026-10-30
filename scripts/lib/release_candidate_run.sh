@@ -43,18 +43,9 @@ release_dispatch_is_candidate() {
 release_candidate_run_id() {
   local repository="${1:?repository required}"
   local sha="${2:?commit required}"
-  local runs run_id count
-  runs="$(gh api \
-    "repos/${repository}/actions/workflows/build-release-binaries.yml/runs?head_sha=${sha}&status=success&per_page=30" \
-    --jq ".workflow_runs[] | select(.head_sha == \"${sha}\") | .id")" || return 1
-  for run_id in $runs; do
-    count="$(gh api "repos/${repository}/actions/runs/${run_id}/artifacts?name=candidate-manifest-${sha}" \
-      --jq '.total_count')" || return 1
-    if [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
-      printf '%s\n' "$run_id"
-      return 0
-    fi
-  done
+  local reader
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-candidate-state.mjs"
+  node "$reader" successful "$repository" "$sha"
 }
 
 # Validate one measured artifact inventory before source reuse or recovery.
