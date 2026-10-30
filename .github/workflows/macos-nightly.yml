@@ -1,4 +1,5 @@
 name: macOS workspace tests
+# Temporary frozen-source cache qualification; this branch is never merged.
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Native qualification {0}', inputs.source_sha || github.sha) || github.workflow }}
 
 # Runs the full workspace nextest surface on macOS once per night, plus
