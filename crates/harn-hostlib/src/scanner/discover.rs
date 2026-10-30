@@ -9,7 +9,7 @@
 //! 2. Fall back to a `walkdir`/`ignore` walk when Git data is unavailable.
 //!    The fallback honors `.gitignore` and the
 //!    [`super::extensions::EXCLUDED_DIRS`] table.
-//! 3. Filter to source extensions and de-duplicate.
+//! 3. Sort and de-duplicate; callers filter the index after test discovery.
 
 use harn_vm::ignore_policy::{self, IgnorePolicy};
 use ignore::WalkBuilder;
@@ -31,7 +31,7 @@ pub struct DiscoveredFile {
 
 /// Run discovery against `root`. Returns deterministic, alphabetically
 /// sorted entries.
-pub fn discover_files(
+pub fn discover_candidates(
     root: &Path,
     opts: DiscoverOptions,
     git: &dyn GitCapabilities,
@@ -41,13 +41,18 @@ pub fn discover_files(
         Ok(None) => (walk_files(root, opts), None),
         Err(error) => (walk_files(root, opts), Some(error)),
     };
-    files.retain(|entry| should_include(&entry.relative_path));
     files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     files.dedup_by(|a, b| a.relative_path == b.relative_path);
     (files, git_error)
 }
 
-/// Tunable knobs for [`discover_files`].
+/// Keep only source files in the project index, after test discovery has seen
+/// every Git-tracked candidate, including files with unrecognized extensions.
+pub fn retain_source_files(files: &mut Vec<DiscoveredFile>) {
+    files.retain(|entry| should_include(&entry.relative_path));
+}
+
+/// Tunable knobs for [`discover_candidates`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DiscoverOptions {
     /// Include hidden (`.foo`) entries.
@@ -146,7 +151,8 @@ mod tests {
         fs::write(root.join("README.md"), "# hi").unwrap();
         fs::write(root.join("node_modules/foo/bar.js"), "x").unwrap();
 
-        let (files, error) = discover_files(root, DiscoverOptions::default(), &NoGit);
+        let (mut files, error) = discover_candidates(root, DiscoverOptions::default(), &NoGit);
+        retain_source_files(&mut files);
         assert!(error.is_none());
         let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert!(names.contains(&"src/main.rs"));
@@ -165,7 +171,8 @@ mod tests {
         let git = MockGit {
             files: vec!["src/tracked.rs".to_string()],
         };
-        let (files, error) = discover_files(root, DiscoverOptions::default(), &git);
+        let (mut files, error) = discover_candidates(root, DiscoverOptions::default(), &git);
+        retain_source_files(&mut files);
         assert!(error.is_none());
         let names: Vec<_> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert_eq!(names, vec!["src/tracked.rs"]);

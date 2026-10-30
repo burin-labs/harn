@@ -185,7 +185,7 @@ pub fn scan_project_with_git(
         include_hidden: opts.include_hidden,
         ignore_policy: opts.ignore_policy,
     };
-    let (mut discovered, git_error) = discover::discover_files(&canonical, discover_opts, git);
+    let (mut discovered, git_error) = discover::discover_candidates(&canonical, discover_opts, git);
     let test_commands = test_commands_with_git_status(
         &canonical,
         discover_opts,
@@ -193,6 +193,7 @@ pub fn scan_project_with_git(
         &opts.layout_profiles,
         git_error,
     );
+    discover::retain_source_files(&mut discovered);
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
         discovered.truncate(opts.max_files);
         true
@@ -295,7 +296,7 @@ pub fn scan_incremental_with_git(
         include_hidden: opts.include_hidden,
         ignore_policy: opts.ignore_policy,
     };
-    let (mut current, git_error) = discover::discover_files(&canonical, discover_opts, git);
+    let (mut current, git_error) = discover::discover_candidates(&canonical, discover_opts, git);
     let test_commands = test_commands_with_git_status(
         &canonical,
         discover_opts,
@@ -303,6 +304,7 @@ pub fn scan_incremental_with_git(
         &opts.layout_profiles,
         git_error,
     );
+    discover::retain_source_files(&mut current);
     if opts.max_files > 0 && current.len() > opts.max_files {
         current.truncate(opts.max_files);
     }

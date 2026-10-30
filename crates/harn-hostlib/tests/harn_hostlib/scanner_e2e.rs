@@ -400,6 +400,66 @@ fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
 }
 
 #[test]
+fn tracked_ignored_unindexed_test_has_the_same_layout_in_all_scans() {
+    let tmp = tempdir().unwrap();
+    write(tmp.path(), ".gitignore", "*.bats\n");
+    write(tmp.path(), "tracked.bats", "@test works { true; }\n");
+    write(tmp.path(), "ignored.bats", "@test ignored { true; }\n");
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("git")
+        .args(["add", "-f", "tracked.bats"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let profiles = vec![TestLayoutProfile {
+        language: "shell".into(),
+        extensions: vec!["bats".into()],
+        patterns: vec![".bats".into()],
+    }];
+    let fresh = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
+    assert!(matches!(&fresh, TestCommandDiscovery::Complete {
+        layout: TestLayoutDiscovery::Single { language, files }, ..
+    } if language == "shell" && files.iter().map(String::as_str).collect::<Vec<_>>() == vec!["tracked.bats"]));
+    let opts = ScanProjectOptions {
+        include_git_history: false,
+        layout_profiles: profiles,
+        ..ScanProjectOptions::default()
+    };
+    let full = scan_project(tmp.path(), opts.clone());
+    assert_eq!(fresh, full.project.test_command_discovery);
+    let incremental = scan_incremental(&full.snapshot_token, None, opts.clone());
+    assert_eq!(fresh, incremental.result.project.test_command_discovery);
+    assert!(std::process::Command::new("git")
+        .args(["rm", "--cached", "-q", "tracked.bats"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let removed = scan_incremental(&full.snapshot_token, None, opts.clone());
+    assert!(matches!(
+        removed.result.project.test_command_discovery,
+        TestCommandDiscovery::Complete {
+            layout: TestLayoutDiscovery::Empty,
+            ..
+        }
+    ));
+    assert!(std::process::Command::new("git")
+        .args(["add", "-f", "tracked.bats"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let restored = scan_incremental(&full.snapshot_token, None, opts);
+    assert_eq!(fresh, restored.result.project.test_command_discovery);
+}
+
+#[test]
 fn bare_root_pytest_with_import_has_a_discovered_test_command() {
     let tmp = tempdir().unwrap();
     write(
