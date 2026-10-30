@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 
+// Temporary cache qualification changes this crate without changing its tests.
+
 // The CLI requires hostlib. Without it the build fails with over a hundred
 // resolution errors, so this one comes first and names the cause (harn#7665).
 // Lean embedding is supported on `harn-serve` and `harn-vm` instead.
