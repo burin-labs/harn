@@ -67,9 +67,8 @@ impl PromptLedger {
         let mut candidates: Vec<(String, Arc<str>)> = self
             .texts
             .iter()
-            .filter_map(|(id, text)| {
-                (text.len() >= MIN_ATTRIBUTABLE_BYTES).then(|| (id.clone(), text.clone()))
-            })
+            .filter(|(_, text)| text.len() >= MIN_ATTRIBUTABLE_BYTES)
+            .map(|(id, text)| (id.clone(), text.clone()))
             .collect();
         candidates.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
 

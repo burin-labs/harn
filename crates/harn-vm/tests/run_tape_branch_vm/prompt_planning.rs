@@ -210,6 +210,49 @@ fn source_planning_refuses_missing_and_ambiguous_request_evidence() {
             assert!(plan_prompt_branch(&tape, &[])
                 .unwrap_err()
                 .contains("at least one prompt edit"));
+            let mut mid_run = edits[0].clone();
+            mid_run.activation = PromptEditActivation::AfterPrefix;
+            assert!(plan_prompt_branch(&tape, &[mid_run])
+                .unwrap_err()
+                .contains("requires origin activation"));
         }
     }
+}
+
+#[test]
+fn an_origin_edit_cannot_bypass_verification_with_a_later_boundary() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    fixtures(&dirs.workspace);
+    let source = program(&dirs.workspace, true, false, true, "baseline");
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let edit = origin_edit(&tape, FIRST, "Edited instruction must reach verification.");
+    assert_eq!(
+        plan_prompt_branch(&tape, std::slice::from_ref(&edit))
+            .unwrap()
+            .first_live_call,
+        2
+    );
+    let guard = start_branch(BranchPlan {
+        tape,
+        workspace_root: dirs.workspace.clone(),
+        state_root: dirs.markers.join("incorrect-later-boundary"),
+        live_after_calls: 2,
+        host_state_roots: Vec::new(),
+        prompt_edits: vec![edit],
+    })
+    .unwrap();
+    assert!(run_in(&source, &dirs.workspace, Some(guard.scope())).is_err());
+    let report = guard.finish();
+    assert_eq!((report.served_calls, report.live_calls), (1, 0));
+    let divergence = report
+        .divergence
+        .expect("changed request must refuse the recorded response");
+    assert_eq!(divergence.call, 2);
+    assert_eq!(divergence.what, "request");
+    assert_eq!(
+        std::fs::read_to_string(dirs.workspace.join("first.harn.prompt")).unwrap(),
+        FIRST
+    );
 }
