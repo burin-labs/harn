@@ -27,11 +27,12 @@ fn retained_session_roots_survive_capacity_pressure_until_release() {
     let (session, retention) =
         open_retained_with_actor_chain(Some("retained-root".into()), None).unwrap();
     let root = tempfile::tempdir().unwrap();
-    let anchor = WorkspaceAnchor {
+    let mut anchor = WorkspaceAnchor {
         primary: root.path().to_path_buf(),
         additional_roots: Vec::new(),
         anchored_at: "0".into(),
     };
+    anchor.canonicalize_roots().unwrap();
     crate::agent_sessions::set_workspace_anchor(&session, Some(anchor.clone())).unwrap();
     let error = open_or_create(Some("pressure".into())).unwrap_err();
     assert!(matches!(
