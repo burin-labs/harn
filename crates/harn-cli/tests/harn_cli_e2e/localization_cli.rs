@@ -82,6 +82,7 @@ const LOCALES: [(&str, &str); 9] = [
 #[test]
 fn localized_help_keeps_environment_names_without_exposing_their_values() {
     let sentinel = "harn-dummy-secret-{0}-%@-100%";
+    let cache = tempfile::tempdir().unwrap();
     for (locale, _) in LOCALES {
         for arguments in [
             vec!["orchestrator", "deploy", "--help"],
@@ -89,6 +90,7 @@ fn localized_help_keeps_environment_names_without_exposing_their_values() {
         ] {
             let output = harn_e2e_command()
                 .env_clear()
+                .env("HARN_CACHE_DIR", cache.path())
                 .env("LC_ALL", locale)
                 .env("RENDER_API_KEY", sentinel)
                 .env("FLY_API_TOKEN", sentinel)
