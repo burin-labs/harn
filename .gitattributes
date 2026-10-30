@@ -116,3 +116,4 @@ docs/src/connectors/parity-matrix.md -merge
 tree-sitter-harn/src/scanner.c merge
 crates/harn-stdlib/src/stdlib/cli/localization.harn -merge
 crates/harn-stdlib/src/stdlib/cli/localization/** -merge
+crates/harn-stdlib/src/catalog_entries.rs -merge
