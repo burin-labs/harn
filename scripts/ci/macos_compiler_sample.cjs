@@ -3,6 +3,7 @@
 const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { performance } = require('node:perf_hooks');
 
 class ObservationRefusal extends Error {
@@ -14,7 +15,7 @@ class ObservationRefusal extends Error {
 }
 
 // Publish closed diagnostic facts, never the host error's paths or output.
-function hostCommand(program, args, maxBuffer, stage, timeoutMs = 3000) {
+function hostCommand(program, args, maxBuffer, stage, timeoutMs = 3000, allowEmpty = false) {
   let child;
   const result = new Promise((resolve, reject) => {
     child = execFile(program, args, { encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer }, (error, stdout) => {
@@ -24,7 +25,7 @@ function hostCommand(program, args, maxBuffer, stage, timeoutMs = 3000) {
           : error.killed && error.signal === 'SIGKILL' ? 'timed_out'
           : 'command_failed';
         reject(new ObservationRefusal(stage, cause, 'unmeasured host observation'));
-      } else if (stdout.length === 0) {
+      } else if (stdout.length === 0 && !allowEmpty) {
         reject(new ObservationRefusal(stage, 'empty_output', 'unmeasured host observation'));
       } else resolve(stdout);
     });
@@ -69,9 +70,43 @@ function symbolStacks(text, target) {
   const end = text.indexOf('\nTotal number in stack', begin);
   if (begin < 0 || end < 0) throw new ObservationRefusal('sample_parse', 'incomplete_graph', 'unmeasured symbol sample');
   const graph = text.slice(begin, end);
-  if (graph.length > 131072) throw new ObservationRefusal('sample_parse', 'oversized_graph', 'unmeasured compiler symbols');
+  if (Buffer.byteLength(graph) > 2 * 1024 * 1024) throw new ObservationRefusal('sample_parse', 'oversized_graph', 'unmeasured compiler symbols');
   if (!/rustc[_:]/.test(graph)) throw new ObservationRefusal('sample_parse', 'missing_compiler_symbols', 'unmeasured compiler symbols');
   return graph;
+}
+
+async function compilerSymbols(target, command = (...args) => hostCommand(...args).result) {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-compiler-sample-'));
+  const report = path.join(scratch, 'sample.txt');
+  let descriptor;
+  try {
+    // sample's host headers and image inventory can exceed stdout's bound.
+    // Keep the raw report outside the published artifact and delete it here.
+    await command('/usr/bin/sample', [String(target.pid), '2', '10', '-file', report], 32768, 'sample_command', 30000, true);
+    descriptor = fs.openSync(report, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const maximum = 16 * 1024 * 1024;
+    const info = fs.fstatSync(descriptor);
+    if (!info.isFile() || info.size === 0 || info.size > maximum) {
+      throw new ObservationRefusal('sample_report', 'invalid_size_or_type', 'unmeasured compiler report');
+    }
+    const bytes = Buffer.alloc(maximum + 1);
+    let observed = 0;
+    while (observed < bytes.length) {
+      const count = fs.readSync(descriptor, bytes, observed, bytes.length - observed, null);
+      if (count === 0) break;
+      observed += count;
+    }
+    if (observed !== info.size || observed > maximum) {
+      throw new ObservationRefusal('sample_report', 'changed_or_oversized', 'unmeasured compiler report');
+    }
+    return symbolStacks(bytes.subarray(0, observed).toString('utf8'), target);
+  } catch (error) {
+    if (error instanceof ObservationRefusal) throw error;
+    throw new ObservationRefusal('sample_report', 'unreadable', 'unmeasured compiler report');
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    fs.rmSync(scratch, {recursive:true, force:true});
+  }
 }
 
 function sameProcess(left, right) {
@@ -90,8 +125,8 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
   let owner;
   let ready = false;
   process.on('SIGTERM', () => { stopped = true; child?.kill('SIGTERM'); });
-  const command = async (program, args, maxBuffer, stage, timeoutMs) => {
-    const pending = hostCommand(program, args, maxBuffer, stage, timeoutMs);
+  const command = async (program, args, maxBuffer, stage, timeoutMs, allowEmpty) => {
+    const pending = hostCommand(program, args, maxBuffer, stage, timeoutMs, allowEmpty);
     child = pending.child;
     try { return await pending.result; }
     finally { child = undefined; }
@@ -126,10 +161,7 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
         sampled.add(identity);
         const before = performance.now() - started;
         const beganAt = new Date().toISOString();
-        // Symbolication follows the two-second capture and can exceed the
-        // process-census budget even while the compiler remains responsive.
-        const raw = await command('/usr/bin/sample', [String(target.pid), '2', '10'], 262144, 'sample_command', 30000);
-        const stacks = symbolStacks(raw, target);
+        const stacks = await compilerSymbols(target, command);
         if (stopped || !sameProcess(target, (await read()).find(row => row.pid === target.pid))) {
           receipt.refusal = { stage: 'sample_identity', cause: 'changed_or_interrupted' };
           continue;
@@ -138,6 +170,7 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
         fs.writeFileSync(path.join(output, `compiler-symbols-${index}.txt`), stacks, { flag: 'wx' });
         receipt.samples.push({ ...target, beganAt, endedAt: new Date().toISOString(),
           beganMs: before, endedMs: performance.now() - started,
+          symbolBytes: Buffer.byteLength(stacks),
           symbols: `compiler-symbols-${index}.txt` });
         receipt.status = 'MEASURED';
         delete receipt.refusal;
@@ -160,7 +193,7 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
   }
 }
 
-module.exports = { census, sameProcess, symbolStacks, hostCommand };
+module.exports = { census, sameProcess, symbolStacks, hostCommand, compilerSymbols };
 if (require.main === module) {
   observe(Number(process.argv[2]), process.argv[3], process.argv[4] ?? '', process.argv[5] ?? '', process.argv[6] ?? '', process.argv[7] ?? '')
     .catch(() => { process.exitCode = 1; });
