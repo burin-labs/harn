@@ -76,6 +76,7 @@ fn a_tool_starting_a_background_command_is_unservable() {
         Some(TapeWorkspace {
             root: dir.path().to_path_buf(),
             observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
         }),
     )
     .unwrap()

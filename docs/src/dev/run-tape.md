@@ -11,6 +11,9 @@ Only a full recording with a workspace effect observer can be branched.
 Metadata recordings can be inspected but cannot reproduce a prefix. A process
 can hold one active recording.
 
+Hosts declare additional durable storage directories in `TapeWorkspace.state_roots`.
+The recording retains those roots so a branch can isolate writes to them.
+
 `taped_command_run` wraps a host command before its policy hooks and execution.
 It records the returned value and observed workspace changes. Commands inside
 an agent tool dispatch belong to that dispatch's recording and are not recorded
@@ -23,6 +26,10 @@ command policy cannot rewrite a request's background setting.
 workspace, and a fresh durable-state root. Enter its `BranchScope` around the
 execution. The host must supply the workspace state from before the recording;
 the tape does not reconstruct that initial state.
+
+Set `BranchPlan.host_state_roots` to the host's durable roots for the new execution,
+including a fresh per-run home. Both recorded and current host roots remap into
+the branch state directory; undeclared external roots remain refused in the prefix.
 
 During the prefix, supported foreground commands return their recorded results
 and apply their recorded workspace changes. Their policy hooks and processes do
