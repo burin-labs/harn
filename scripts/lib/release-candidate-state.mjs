@@ -1,4 +1,4 @@
-import {spawnSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {realpathSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {
@@ -109,7 +109,13 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
           attempt:producer.run_attempt},fetchRecord);
       }catch(error){
         if(['archive_producer_identity_unproven','archive_producer_builds_unproven',
-          'archive_producer_artifacts_unproven'].includes(observerRefusal(error).reason))continue;
+          'archive_producer_artifacts_unproven'].includes(observerRefusal(error).reason)){
+          const jobs=await githubRunJobs(token,repository,String(producer.id),producer.run_attempt,fetchRecord);
+          result.pending_jobs.push(...jobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name));
+          result.bad_jobs.push(...jobs.filter(job=>job.status==='completed'
+            &&!['success','skipped'].includes(job.conclusion)).map(job=>job.name));
+          continue;
+        }
         throw error;
       }
       try{
@@ -148,11 +154,12 @@ export async function ghRead(url,options={}){
   const token=options.headers?.Authorization?.replace(/^Bearer /,'');
   const env={...process.env};
   if(token&&token!==cliAuthority){env.GH_TOKEN=token;delete env.GITHUB_TOKEN;}
-  const response=spawnSync('gh',['api',endpoint.pathname.slice(1)+endpoint.search,'--hostname','github.com'],{
-    maxBuffer:16*1024*1024,env,
+  const bytes=await new Promise((resolve,reject)=>{
+    execFile('gh',['api',endpoint.pathname.slice(1)+endpoint.search,'--hostname','github.com'],{
+      maxBuffer:16*1024*1024,env,encoding:'buffer',signal:options.signal,
+    },(error,stdout)=>error?reject(new Error('CONSUMER_OBSERVER reason=github_read_unmeasured')):resolve(stdout));
   });
-  if(response.status!==0)refuse('github_read_unmeasured');
-  return new Response(response.stdout,{status:200,headers:{'content-type':endpoint.pathname.endsWith('/zip')
+  return new Response(bytes,{status:200,headers:{'content-type':endpoint.pathname.endsWith('/zip')
     ?'application/octet-stream':'application/json'}});
 }
 

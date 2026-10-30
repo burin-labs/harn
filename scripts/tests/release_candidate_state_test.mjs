@@ -115,6 +115,21 @@ test('ordinary selector remains success-only and measures complete source invent
   const data=fixture({producerTotal:{total_count:2}});
   try{await assert.rejects(successfulCandidate('public',repository,source,data.read),/census_unmeasured/);}
   finally{data.close();}
+  const late=fixture({producers:[...Array.from({length:100},(_,index)=>({...producer,id:index+1000})),
+    {...producer,conclusion:'success'}]});
+  try{
+    assert.equal(await successfulCandidate('public',repository,source,late.read),'42');
+    assert.ok(late.calls.some(call=>call.includes('page=2')));
+  }finally{late.close();}
+});
+test('known successful producer retains ordinary promotion path without private recovery authority',async()=>{
+  const data=fixture({producers:[{...producer,conclusion:'success'}],missingWitness:true});
+  try{
+    const result=await activePromotions('public',null,repository,'0',null,data.read,()=>1040);
+    assert.deepEqual(result.promoting,['900']);
+    assert.deepEqual(result.recoveries,[]);
+    assert.ok(!data.calls.some(call=>call.includes('widget-host')));
+  }finally{data.close();}
 });
 test('missing, foreign and replayed publisher witnesses never suppress a candidate',async()=>{
   await assert.rejects(recovery({missingWitness:true}),/declaration_unmeasured/);
@@ -124,9 +139,20 @@ test('missing, foreign and replayed publisher witnesses never suppress a candida
   await assert.rejects(recovery({parentJobs:parentJobs.map(job=>({...job,steps:job.steps.slice(0,1)}))}),/observer_job_identity_unproven/);
 });
 test('failed build, ended recovery and failed consumer do not count as active promotion',async()=>{
-  assert.deepEqual((await recovery({jobs:jobs.map(job=>job.name.startsWith('Build ')?{...job,conclusion:'failure'}:job)})).promoting,[]);
+  const failed=await recovery({jobs:jobs.map(job=>job.name.startsWith('Build ')?{...job,conclusion:'failure'}:job)});
+  assert.deepEqual(failed.promoting,[]);
+  assert.deepEqual(failed.bad_jobs,targets.map(target=>`Build ${target}`));
   assert.deepEqual((await recovery({parent:{...parent,status:'completed',conclusion:'failure'}})).promoting,[]);
   assert.deepEqual((await recovery({child:{...child,status:'completed',conclusion:'failure'}})).promoting,[]);
+});
+test('foreign archive binding cannot qualify an otherwise owned live consumer',async()=>{
+  const binding=archiveProducerBinding(qualifyArchiveProducer(producer,jobs,artifacts,
+    {sourceRevision:source,runId:'42',attempt:1},targets));
+  const receipt=admitChild(context,parent,{...consumer,runId:'73',attempt:1,headSha:head,
+    sourceRevision:source,producerBinding:binding},child,{inputs:{observer:JSON.stringify(context),
+      source_revision:source,release_producer_run_id:'42',release_producer_run_attempt:'1'}},context);
+  receipt.producer.producer_run='43';
+  assert.deepEqual((await recovery({receipt})).promoting,[]);
 });
 test('partial inventory and unknown titles fail closed; active promotion beyond first page is measured',async()=>{
   await assert.rejects(recovery({promotionTotal:{total_count:2}}),/census_unmeasured/);
