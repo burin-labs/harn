@@ -121,17 +121,15 @@ FINALIZE MODE
   Two checkout shapes are supported, picked automatically:
 
     a. Detached at vX.Y.Z (the canonical "tag is truth" path) — fired
-       by publish-release.yml on tag push, OR a local recovery run
-       after manually `git checkout v0.7.53`. Skips the main
+       by publish-release.yml on tag push or hosted existing-tag recovery.
+       Skips the main
        fast-forward and publishes the already-tagged commit, so
        crates.io content, release notes, and the tag stay aligned
        even if main has moved on.
 
-    b. On main with drift — legacy/recovery path. Fast-forwards local
-       main, tags HEAD as vX.Y.Z (must match Cargo.toml's workspace
-       version), pushes the tag, and publishes. Used when a release
-       was tagged by hand or the tag-push trigger failed and we're
-       recovering via push:main drift.
+    b. On main with drift — hosted recovery. Fast-forwards main and
+       requires its matching immutable tag to select that exact HEAD.
+       Finalization does not mint or move a release tag.
 
   --allow-unfolded-fragments is recovery for shape (a) only. Finalization
   publishes from the tag's own tree, so unfolded fragments inside that tree
@@ -148,8 +146,8 @@ FINALIZE MODE
 
   1. Builds the portal frontend (needed for the cargo-publish include).
   2. Runs the publish dry-run as a quick pre-publish sanity check.
-  3. Creates the tag vX.Y.Z at HEAD (no-op if it already exists at HEAD).
-  4. Pushes the tag (no-op if origin already has it).
+  3. Verifies the existing trusted tag at HEAD.
+  4. Requires the hosted publisher's fresh, signed dependency-security proof.
   5. Runs cargo publish to upload crates to crates.io.
   6. Renders changelog-backed release notes.
   7. Creates/updates a GitHub release with the rendered notes, unless
@@ -157,8 +155,8 @@ FINALIZE MODE
      release page and binary artifacts.
 
   Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
-  the full release-gate audit before finalizing — useful when running
-  --finalize locally after manual repo edits.
+  the full release-gate audit for hosted recovery diagnostics. It does not
+  replace the canonical dependency-security proof or authorize local publishing.
 
 ==============================================================================
 AUDIT RECEIPT

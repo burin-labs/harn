@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 publish_script="$repo_root/scripts/publish.sh"
+real_harn="$($repo_root/scripts/harn_bin.sh --print)"
 
 "$repo_root/scripts/harn_bin.sh" -- check "$repo_root/scripts/publish.harn"
 
@@ -82,5 +83,62 @@ if [[ "$(cat "$release_gate_record")" != "$expected_release" ]]; then
     "$(cat "$release_gate_record")" >&2
   exit 1
 fi
+
+mkdir -p "$tmp_root/bin"
+cat > "$tmp_root/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf 'cargo reached\n' >> "$FAKE_CARGO_RECORD"
+exit 99
+SH
+chmod +x "$tmp_root/bin/cargo"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$release_tools/publish.sh" > "$tmp_root/staged-publish-output" 2>&1; then
+  echo "error: staged bare live publisher was admitted" >&2
+  exit 1
+fi
+# Exercise the actual staged module closure. A missing policy dependency is
+# not the intended authority refusal and must fail this product-path control.
+grep -q 'requires_hosted_publisher' "$tmp_root/staged-publish-output"
+test ! -e "$tmp_root/cargo-record"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$publish_script" > "$tmp_root/local-publish-output" 2>&1; then
+  echo "error: bare live publisher was admitted" >&2
+  exit 1
+fi
+grep -q 'requires_hosted_publisher' "$tmp_root/local-publish-output"
+test ! -e "$tmp_root/cargo-record"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$repo_root/scripts/release_gate.sh" full > "$tmp_root/local-full-output" 2>&1; then
+  echo "error: bare live full release was admitted" >&2
+  exit 1
+fi
+grep -q 'full is a local dry-run command' "$tmp_root/local-full-output"
+test ! -e "$tmp_root/cargo-record"
+
+cat > "$tmp_root/bin/node" <<'SH'
+#!/usr/bin/env bash
+printf 'ci=%s\nrepository=%s\nrun=%s\nattempt=%s\nworkflow=%s\ntoken=%s\n' \
+  "${GITHUB_ACTIONS:-missing}" "${GITHUB_REPOSITORY:-missing}" "${GITHUB_RUN_ID:-missing}" \
+  "${GITHUB_RUN_ATTEMPT:-missing}" "${GITHUB_WORKFLOW_REF:-missing}" "${GH_TOKEN:+present}"
+exit 99
+SH
+chmod +x "$tmp_root/bin/node"
+status=0
+GITHUB_ACTIONS=true GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=100 GITHUB_RUN_ATTEMPT=1 \
+  GITHUB_WORKFLOW_REF=burin-labs/harn/.github/workflows/publish-release.yml@refs/heads/main \
+  GH_TOKEN=fixture HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$publish_script" > "$tmp_root/hosted-context-output" 2>&1 || status=$?
+test "$status" -eq 99
+grep -q '^ci=true$' "$tmp_root/hosted-context-output"
+grep -q '^repository=burin-labs/harn$' "$tmp_root/hosted-context-output"
+grep -q '^run=100$' "$tmp_root/hosted-context-output"
+grep -q '^attempt=1$' "$tmp_root/hosted-context-output"
+grep -q '^workflow=burin-labs/harn/.github/workflows/publish-release.yml@refs/heads/main$' "$tmp_root/hosted-context-output"
+grep -q '^token=present$' "$tmp_root/hosted-context-output"
+test ! -e "$tmp_root/cargo-record"
 
 echo "publish_script_test: ok"

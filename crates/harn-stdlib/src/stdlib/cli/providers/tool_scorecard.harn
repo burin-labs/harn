@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/tool_scorecard"
 import { safe_bool, safe_dict, safe_int, safe_list, safe_string } from "std/cli/render"
 
 /**
@@ -95,36 +97,36 @@ fn __join_dict_field(values: list, key: string, fallback: string) -> string {
   return out
 }
 
-fn __render_human(report: dict) -> string {
+fn __render_human(__cli_locale: string, report: dict) -> string {
   const summary = safe_dict(report["summary"])
   const fitness = safe_dict(report["fitness"])
-  let out = "provider tool-call scorecard: routes="
-    + to_string(safe_int(report["route_count"], 0))
-    + " pass="
-    + to_string(safe_int(summary["pass"], 0))
-    + " warn="
-    + to_string(safe_int(summary["warn"], 0))
-    + " fail="
-    + to_string(safe_int(summary["fail"], 0))
-    + " trusted="
-    + to_string(safe_int(summary["trusted"], 0))
-    + " needs_review="
-    + to_string(safe_int(summary["needs_review"], 0))
-    + " quarantined="
-    + to_string(safe_int(summary["quarantined"], 0))
-    + " format_recommendations="
-    + to_string(len(safe_list(fitness["recommendations"])))
-    + "\n"
+  let out = cli_message(
+    __cli_locale,
+    "provider tool-call scorecard: routes={0} pass={1} warn={2} fail={3} trusted={4} needs_review={5} quarantined={6} format_recommendations={7}\n",
+    [
+      to_string(to_string(safe_int(report["route_count"], 0))),
+      to_string(to_string(safe_int(summary["pass"], 0))),
+      to_string(to_string(safe_int(summary["warn"], 0))),
+      to_string(to_string(safe_int(summary["fail"], 0))),
+      to_string(to_string(safe_int(summary["trusted"], 0))),
+      to_string(to_string(safe_int(summary["needs_review"], 0))),
+      to_string(to_string(safe_int(summary["quarantined"], 0))),
+      to_string(to_string(len(safe_list(fitness["recommendations"])))),
+    ],
+  )
   const best = safe_dict(summary["best_route"])
   const best_provider = safe_string(best["provider"], "")
   if best_provider != "" {
-    out = out + "best="
-      + best_provider
-      + " "
-      + safe_string(best["model"], "")
-      + " score="
-      + to_string(safe_int(best["quality_score"], 0))
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}best={1} {2} score={3}\n",
+      [
+        to_string(out),
+        to_string(best_provider),
+        to_string(safe_string(best["model"], "")),
+        to_string(to_string(safe_int(best["quality_score"], 0))),
+      ],
+    )
   }
   const routes = safe_list(report["routes"])
   for route in routes {
@@ -134,35 +136,27 @@ fn __render_human(report: dict) -> string {
     const cases = safe_int(route["case_count"], 0)
     const passed = safe_int(route["successful_cases"], 0)
     const catalog_mismatches = safe_list(route["catalog_mismatches"])
-    out = out + "  "
-      + safe_string(route["provider"], "")
-      + " "
-      + safe_string(route["model"], "")
-      + " score="
-      + to_string(safe_int(route["quality_score"], 0))
-      + " status="
-      + safe_string(route["status"], "")
-      + " trust="
-      + safe_string(route["trust_status"], "")
-      + " mode="
-      + safe_string(route["recommended_tool_mode"], "")
-      + " pass="
-      + to_string(passed)
-      + "/"
-      + to_string(cases)
-      + " parseable="
-      + to_string(safe_int(route["parseable_tool_call_cases"], 0))
-      + "/"
-      + to_string(cases)
-      + " actionless="
-      + to_string(safe_int(route["actionless_cases"], 0))
-      + " issues="
-      + __join_strings(safe_list(route["issues"]), "-")
-      + " trust_reasons="
-      + __join_strings(safe_list(route["trust_reasons"]), "-")
-      + " catalog_mismatches="
-      + __join_dict_field(catalog_mismatches, "code", "-")
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  {1} {2} score={3} status={4} trust={5} mode={6} pass={7}/{8} parseable={9}/{10} actionless={11} issues={12} trust_reasons={13} catalog_mismatches={14}\n",
+      [
+        to_string(out),
+        to_string(safe_string(route["provider"], "")),
+        to_string(safe_string(route["model"], "")),
+        to_string(to_string(safe_int(route["quality_score"], 0))),
+        to_string(safe_string(route["status"], "")),
+        to_string(safe_string(route["trust_status"], "")),
+        to_string(safe_string(route["recommended_tool_mode"], "")),
+        to_string(to_string(passed)),
+        to_string(to_string(cases)),
+        to_string(to_string(safe_int(route["parseable_tool_call_cases"], 0))),
+        to_string(to_string(cases)),
+        to_string(to_string(safe_int(route["actionless_cases"], 0))),
+        to_string(__join_strings(safe_list(route["issues"]), "-")),
+        to_string(__join_strings(safe_list(route["trust_reasons"]), "-")),
+        to_string(__join_dict_field(catalog_mismatches, "code", "-")),
+      ],
+    )
   }
   return out
 }
@@ -232,34 +226,33 @@ fn __render_report_markdown(report: dict) -> string {
   return out
 }
 
-fn __render_plan_human(report: dict) -> string {
+fn __render_plan_human(__cli_locale: string, report: dict) -> string {
   const catalog = safe_dict(report["catalog"])
-  let out = "provider tool-call scorecard plan: routes="
-    + to_string(safe_int(report["route_count"], 0))
-    + " unscorecardable_providers="
-    + to_string(safe_int(report["unscorecardable_provider_count"], 0))
-    + " cases="
-    + to_string(safe_int(report["case_count"], 0))
-    + " required="
-    + to_string(safe_int(report["required_case_count"], 0))
-    + " executable="
-    + to_string(safe_int(report["executable_case_count"], 0))
-    + " live_tool_probes="
-    + to_string(safe_int(report["live_tool_probe_case_count"], 0))
-    + " offline_request_checks="
-    + to_string(safe_int(report["offline_request_case_count"], 0))
-    + " not_applicable="
-    + to_string(safe_int(report["not_applicable_case_count"], 0))
-    + " batch_manifest_requests="
-    + to_string(safe_int(report["batch_manifest_request_count"], 0))
-    + " readiness_commands="
-    + to_string(safe_int(report["readiness_command_count"], 0))
-    + "\n"
-  out = out + "catalog="
-    + safe_string(catalog["hash_blake3"], "-")
-    + " schema="
-    + to_string(safe_int(catalog["schema_version"], 0))
-    + "\n"
+  let out = cli_message(
+    __cli_locale,
+    "provider tool-call scorecard plan: routes={0} unscorecardable_providers={1} cases={2} required={3} executable={4} live_tool_probes={5} offline_request_checks={6} not_applicable={7} batch_manifest_requests={8} readiness_commands={9}\n",
+    [
+      to_string(to_string(safe_int(report["route_count"], 0))),
+      to_string(to_string(safe_int(report["unscorecardable_provider_count"], 0))),
+      to_string(to_string(safe_int(report["case_count"], 0))),
+      to_string(to_string(safe_int(report["required_case_count"], 0))),
+      to_string(to_string(safe_int(report["executable_case_count"], 0))),
+      to_string(to_string(safe_int(report["live_tool_probe_case_count"], 0))),
+      to_string(to_string(safe_int(report["offline_request_case_count"], 0))),
+      to_string(to_string(safe_int(report["not_applicable_case_count"], 0))),
+      to_string(to_string(safe_int(report["batch_manifest_request_count"], 0))),
+      to_string(to_string(safe_int(report["readiness_command_count"], 0))),
+    ],
+  )
+  out = cli_message(
+    __cli_locale,
+    "{0}catalog={1} schema={2}\n",
+    [
+      to_string(out),
+      to_string(safe_string(catalog["hash_blake3"], "-")),
+      to_string(to_string(safe_int(catalog["schema_version"], 0))),
+    ],
+  )
   const routes = safe_list(report["routes"])
   for route in routes {
     if type_of(route) != "dict" {
@@ -268,83 +261,70 @@ fn __render_plan_human(report: dict) -> string {
     const claim = safe_dict(route["catalog_claim"])
     const cases = safe_list(route["cases"])
     const readiness = safe_dict(route["readiness"])
-    out = out + "  "
-      + safe_string(route["provider"], "")
-      + " "
-      + safe_string(route["model"], "")
-      + " trust="
-      + safe_string(route["trust_status"], "")
-      + " trust_reasons="
-      + __join_strings(safe_list(route["trust_reasons"]), "-")
-      + " readiness="
-      + safe_string(readiness["status"], "")
-      + " preferred="
-      + safe_string(claim["preferred_tool_format"], "-")
-      + " parity="
-      + safe_string(claim["tool_mode_parity"], "-")
-      + " native="
-      + to_string(safe_bool(claim["native_tools"], false))
-      + " text="
-      + to_string(safe_bool(claim["text_tools"], false))
-      + " parallel="
-      + to_string(safe_bool(claim["supports_parallel_tool_calls"], false))
-      + " batch="
-      + to_string(safe_bool(claim["batch_api"], false))
-      + " executable="
-      + to_string(__case_execution_count(cases, "executable"))
-      + " missing_runner="
-      + to_string(__case_execution_count(cases, "missing_runner"))
-      + " cases="
-      + __join_case_ids(cases, "-")
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  {1} {2} trust={3} trust_reasons={4} readiness={5} preferred={6} parity={7} native={8} text={9} parallel={10} batch={11} executable={12} missing_runner={13} cases={14}\n",
+      [
+        to_string(out),
+        to_string(safe_string(route["provider"], "")),
+        to_string(safe_string(route["model"], "")),
+        to_string(safe_string(route["trust_status"], "")),
+        to_string(__join_strings(safe_list(route["trust_reasons"]), "-")),
+        to_string(safe_string(readiness["status"], "")),
+        to_string(safe_string(claim["preferred_tool_format"], "-")),
+        to_string(safe_string(claim["tool_mode_parity"], "-")),
+        to_string(to_string(safe_bool(claim["native_tools"], false))),
+        to_string(to_string(safe_bool(claim["text_tools"], false))),
+        to_string(to_string(safe_bool(claim["supports_parallel_tool_calls"], false))),
+        to_string(to_string(safe_bool(claim["batch_api"], false))),
+        to_string(to_string(__case_execution_count(cases, "executable"))),
+        to_string(to_string(__case_execution_count(cases, "missing_runner"))),
+        to_string(__join_case_ids(cases, "-")),
+      ],
+    )
   }
   const provider_summaries = safe_list(report["provider_summaries"])
   for provider in provider_summaries {
     if type_of(provider) != "dict" {
       continue
     }
-    out = out + "  provider-summary "
-      + safe_string(provider["provider"], "")
-      + " routes="
-      + to_string(safe_int(provider["route_count"], 0))
-      + " cases="
-      + to_string(safe_int(provider["case_count"], 0))
-      + " required="
-      + to_string(safe_int(provider["required_case_count"], 0))
-      + " executable="
-      + to_string(safe_int(provider["executable_case_count"], 0))
-      + " live_tool_probes="
-      + to_string(safe_int(provider["live_tool_probe_case_count"], 0))
-      + " offline_request_checks="
-      + to_string(safe_int(provider["offline_request_case_count"], 0))
-      + " readiness_commands="
-      + to_string(safe_int(provider["readiness_command_count"], 0))
-      + " batch_manifest_requests="
-      + to_string(safe_int(provider["batch_manifest_request_count"], 0))
-      + " not_applicable="
-      + to_string(safe_int(provider["not_applicable_case_count"], 0))
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  provider-summary {1} routes={2} cases={3} required={4} executable={5} live_tool_probes={6} offline_request_checks={7} readiness_commands={8} batch_manifest_requests={9} not_applicable={10}\n",
+      [
+        to_string(out),
+        to_string(safe_string(provider["provider"], "")),
+        to_string(to_string(safe_int(provider["route_count"], 0))),
+        to_string(to_string(safe_int(provider["case_count"], 0))),
+        to_string(to_string(safe_int(provider["required_case_count"], 0))),
+        to_string(to_string(safe_int(provider["executable_case_count"], 0))),
+        to_string(to_string(safe_int(provider["live_tool_probe_case_count"], 0))),
+        to_string(to_string(safe_int(provider["offline_request_case_count"], 0))),
+        to_string(to_string(safe_int(provider["readiness_command_count"], 0))),
+        to_string(to_string(safe_int(provider["batch_manifest_request_count"], 0))),
+        to_string(to_string(safe_int(provider["not_applicable_case_count"], 0))),
+      ],
+    )
   }
   const unscorecardable = safe_list(report["unscorecardable_providers"])
   for provider in unscorecardable {
     if type_of(provider) != "dict" {
       continue
     }
-    out = out + "  unscorecardable "
-      + safe_string(provider["provider"], "")
-      + " reason="
-      + safe_string(provider["reason"], "")
-      + " models="
-      + to_string(safe_int(provider["model_count"], 0))
-      + " active_models="
-      + to_string(safe_int(provider["active_model_count"], 0))
-      + " local_runtime="
-      + to_string(safe_bool(provider["local_runtime"], false))
-      + " auth_required="
-      + to_string(safe_bool(provider["auth_required"], false))
-      + " credential_env_names="
-      + __join_strings(safe_list(provider["credential_env_names"]), "-")
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  unscorecardable {1} reason={2} models={3} active_models={4} local_runtime={5} auth_required={6} credential_env_names={7}\n",
+      [
+        to_string(out),
+        to_string(safe_string(provider["provider"], "")),
+        to_string(safe_string(provider["reason"], "")),
+        to_string(to_string(safe_int(provider["model_count"], 0))),
+        to_string(to_string(safe_int(provider["active_model_count"], 0))),
+        to_string(to_string(safe_bool(provider["local_runtime"], false))),
+        to_string(to_string(safe_bool(provider["auth_required"], false))),
+        to_string(__join_strings(safe_list(provider["credential_env_names"]), "-")),
+      ],
+    )
   }
   return out
 }
@@ -489,6 +469,7 @@ fn __render_plan_markdown(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln(
@@ -516,9 +497,9 @@ fn main(harness: Harness) -> int {
     } else if markdown_mode {
       __render_report_markdown(report)
     } else if kind == "plan" {
-      __render_plan_human(report)
+      __render_plan_human(__cli_locale, report)
     } else {
-      __render_human(report)
+      __render_human(__cli_locale, report)
     }
     const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]

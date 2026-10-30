@@ -17,6 +17,10 @@ cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
 cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
   "$release_tools/cargo_with_worktree_build_dir.sh"
 cp -R "$repo_root/scripts/lib/." "$release_tools/lib/"
+# Fixture scheduling is independent of the production advisory scanner.
+cat >> "$release_tools/lib/cargo_env.sh" <<'SH'
+run_fixture_audit() { rg -- fixture-audit README.md; }
+SH
 chmod +x "$release_tools/cargo_with_worktree_build_dir.sh"
 
 cat > "$release_root/Cargo.toml" <<'EOF'
@@ -61,19 +65,19 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
       ;;
     parallel)
       printf 'lane\trust-audit\trun_rust_audit\n'
-      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      printf 'lane\tsecurity-audit\trun_fixture_audit\n'
       ;;
     constrained)
       printf 'lane\trust-audit\trun_rust_audit\n'
       printf 'lane\tharn-audit\trun_harn_audit\n'
-      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      printf 'lane\tsecurity-audit\trun_fixture_audit\n'
       printf 'lane\tpackage-audit\trun_package_audit\n'
       ;;
     package)
       printf 'lane\tpackage-audit\trun_package_audit\n'
       ;;
     *)
-      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      printf 'lane\tsecurity-audit\trun_fixture_audit\n'
       ;;
   esac
   exit 0

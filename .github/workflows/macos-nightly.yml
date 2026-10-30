@@ -28,6 +28,9 @@ on:
       - ".github/cache-policy.json"
       - "scripts/ci/workspace_warm_artifact.sh"
       - "scripts/ci/reuse_workspace_crates.sh"
+      - "scripts/lib/rustc_frontend.sh"
+      - "scripts/rustc_frontend_wrapper.sh"
+      - ".github/actions/rust-toolchain/**"
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
     # the Windows workspace tests so the two don't contend for cache lookups.
@@ -60,6 +63,12 @@ on:
       - "scripts/ci/workspace_warm_artifact.sh"
       - "scripts/ci/run_rust_test_lane.sh"
       - "scripts/tests/workspace_reuse_cargo_test.sh"
+      - "scripts/lib/rustc_frontend.sh"
+      - "scripts/rustc_frontend_wrapper.sh"
+      - ".github/actions/rust-toolchain/**"
+      - "scripts/check_test_case_performance.harn"
+      - "scripts/ci/macos_performance_profile.harn"
+      - "bench/test-case-performance/**"
 
 permissions:
   contents: read
@@ -104,6 +113,7 @@ jobs:
       # The hosted cache restores a whole target directory; on a self-hosted
       # runner that would replace the persistent one with a colder copy.
       - uses: ./.github/actions/rust-cache
+        id: rust-cache
         if: ${{ runner.environment != 'self-hosted' }}
         continue-on-error: true
         with:
@@ -153,13 +163,11 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: git checkout --detach "$SOURCE_SHA"
-      # A pull-request run reads the main-produced warm artifact. It runs after
-      # rust-cache so the artifact wins when both exist: the restore replaces
-      # the target directory wholesale, and a cache the namespace has already
-      # evicted has nothing to contribute anyway.
+      # PRs need the workspace units the Actions cache strips. A main producer
+      # also uses this fallback when its exact Actions generation is absent.
       - name: Restore macOS workspace warm artifact
         id: macos-warm-restore
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.rust-cache.outputs.cache-hit != 'true') }}
         continue-on-error: true
         shell: bash
         env:
@@ -180,9 +188,13 @@ jobs:
           fi
           exit "${status}"
       - name: Report macOS warm restore outcome
-        if: ${{ always() && github.event_name == 'pull_request' }}
+        if: ${{ always() && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch')) }}
         shell: bash
         run: |
+          if [[ "${{ github.event_name }}" != 'pull_request' && "${{ steps.rust-cache.outputs.cache-hit }}" == 'true' ]]; then
+            echo "macos_warm_restore=not-needed-exact-actions-hit"
+            exit 0
+          fi
           outcome="${{ steps.macos-warm-restore.outputs.macos_warm_restore }}"
           echo "macos_warm_restore=${outcome:-unreported}"
           if [[ "${outcome}" != "hit" ]]; then
@@ -320,6 +332,7 @@ jobs:
       # is always the least recently used one (harn#8016). Artifact storage is
       # not contended the same way.
       - name: Stage macOS workspace warm artifact
+        id: macos-warm-pack
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         shell: bash
         run: |
@@ -329,8 +342,8 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: workspace-macos-warm
+          name: ${{ steps.macos-warm-pack.outputs.artifact_name }}
           path: ${{ runner.temp }}/workspace-macos-warm/
           if-no-files-found: error
           retention-days: 3
-          compression-level: 6
+          compression-level: 0

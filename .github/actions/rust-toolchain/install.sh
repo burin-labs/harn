@@ -77,4 +77,6 @@ if [[ -n "$frontend_flags" ]]; then
   printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${wrapper}" \
     >> "${GITHUB_ENV:?the workspace wrapper reaches later steps only through GITHUB_ENV}"
   echo "rustc front end: ${frontend_flags} for workspace crates"
+else
+  echo "rustc front end: serial for workspace crates"
 fi

@@ -29,7 +29,11 @@ pub(crate) struct TestArgs {
     #[arg(long = "target", value_name = "URL")]
     pub agents_target: Option<String>,
     /// Bearer API key for `harn test agents-conformance`.
-    #[arg(long = "api-key", env = "HARN_AGENTS_CONFORMANCE_API_KEY")]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_AGENTS_CONFORMANCE_API_KEY"
+    )]
     pub agents_api_key: Option<String>,
     /// Restrict `harn test agents-conformance` to one category. Repeatable or comma-separated.
     #[arg(long = "category", value_name = "NAME")]
@@ -65,11 +69,17 @@ pub(crate) struct TestArgs {
     pub trusted_host_dispatch: bool,
     /// Fail a passing user test whose total wall-clock time exceeds this
     /// many milliseconds. Also honored via HARN_TEST_MAX_MS.
-    #[arg(long = "max-test-ms", value_name = "MS", env = "HARN_TEST_MAX_MS")]
+    #[arg(
+        hide_env_values = true,
+        long = "max-test-ms",
+        value_name = "MS",
+        env = "HARN_TEST_MAX_MS"
+    )]
     pub max_test_ms: Option<u64>,
     /// Fail a passing user test whose test-body execution phase exceeds this
     /// many milliseconds. Also honored via HARN_TEST_MAX_EXECUTE_MS.
     #[arg(
+        hide_env_values = true,
         long = "max-execute-ms",
         value_name = "MS",
         env = "HARN_TEST_MAX_EXECUTE_MS"

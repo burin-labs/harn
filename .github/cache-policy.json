@@ -19,7 +19,7 @@
   },
   "macos_workspace_warm": {
     "artifact_name": "workspace-macos-warm",
-    "manifest_schema": "harn.macos_workspace_warm.v2",
+    "manifest_schema": "harn.macos_workspace_warm.v3",
     "workflow": "macos-nightly.yml",
     "job": "nextest",
     "retention_days": 3,

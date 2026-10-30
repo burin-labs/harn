@@ -17,6 +17,7 @@ pub(crate) struct OrchestratorLocalArgs {
     /// Path to the root manifest to load. Container deployments often mount
     /// this as `/etc/harn/triggers.toml`.
     #[arg(
+        hide_env_values = true,
         long,
         visible_alias = "manifest",
         env = "HARN_ORCHESTRATOR_MANIFEST",
@@ -25,7 +26,7 @@ pub(crate) struct OrchestratorLocalArgs {
     )]
     pub config: PathBuf,
     /// Directory used for EventLog data and orchestrator state snapshots.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "state-dir",
         env = "HARN_ORCHESTRATOR_STATE_DIR",
         default_value = harn_vm::runtime_paths::DEFAULT_ORCHESTRATOR_PATH,
@@ -136,6 +137,7 @@ pub(crate) struct OrchestratorServeArgs {
     pub local: OrchestratorLocalArgs,
     /// Socket address the HTTP listener will bind to.
     #[arg(
+        hide_env_values = true,
         long,
         visible_alias = "listen",
         env = "HARN_ORCHESTRATOR_LISTEN",
@@ -144,10 +146,20 @@ pub(crate) struct OrchestratorServeArgs {
     )]
     pub bind: SocketAddr,
     /// PEM-encoded certificate chain for HTTPS termination.
-    #[arg(long, env = "HARN_ORCHESTRATOR_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_ORCHESTRATOR_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for HTTPS termination.
-    #[arg(long, env = "HARN_ORCHESTRATOR_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_ORCHESTRATOR_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Seconds to wait for connector and dispatcher drain before forcing shutdown.
     #[arg(long = "shutdown-timeout", default_value_t = 30, value_name = "SECS")]
@@ -160,6 +172,7 @@ pub(crate) struct OrchestratorServeArgs {
     pub drain_deadline: Option<u64>,
     /// Maximum outstanding items admitted by each topic pump.
     #[arg(
+        hide_env_values = true,
         long = "pump-max-outstanding",
         env = "HARN_ORCHESTRATOR_PUMP_MAX_OUTSTANDING",
         value_name = "COUNT"
@@ -175,7 +188,7 @@ pub(crate) struct OrchestratorServeArgs {
     #[arg(long)]
     pub watch: bool,
     /// Log output format for orchestrator process logs.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "log-format",
         env = "HARN_ORCHESTRATOR_LOG_FORMAT",
         value_enum,
@@ -185,7 +198,7 @@ pub(crate) struct OrchestratorServeArgs {
     /// Runtime role to boot. Multi-tenant isolates ingress, event-log topics,
     /// and secret namespaces per tenant, but shares one trigger/connector
     /// registry across tenants (harn#6792).
-    #[arg(
+    #[arg(hide_env_values = true,
         long,
         env = "HARN_ORCHESTRATOR_ROLE",
         value_enum,
@@ -197,7 +210,7 @@ pub(crate) struct OrchestratorServeArgs {
     /// `ListenerAuth` as ingestion so a public bind does not leak the
     /// route catalog, trigger names, and throughput counters that map
     /// the workflow topology to anyone who can reach the listener.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "public-metrics",
         env = "HARN_ORCHESTRATOR_PUBLIC_METRICS",
         default_value_t = false,
@@ -220,6 +233,7 @@ pub(crate) struct OrchestratorDeployArgs {
     pub provider: OrchestratorDeployProvider,
     /// Path to the root manifest to validate and deploy.
     #[arg(
+        hide_env_values = true,
         long,
         visible_alias = "config",
         env = "HARN_ORCHESTRATOR_MANIFEST",
@@ -266,19 +280,35 @@ pub(crate) struct OrchestratorDeployArgs {
     pub railway_environment: Option<String>,
     /// Railway project id for API-backed secret synchronization.
     #[arg(
+        hide_env_values = true,
         long = "railway-project",
         env = "RAILWAY_PROJECT_ID",
         value_name = "PROJECT_ID"
     )]
     pub railway_project: Option<String>,
     /// Render API key for API-backed secret synchronization.
-    #[arg(long = "render-api-key", env = "RENDER_API_KEY", value_name = "TOKEN")]
+    #[arg(
+        hide_env_values = true,
+        long = "render-api-key",
+        env = "RENDER_API_KEY",
+        value_name = "TOKEN"
+    )]
     pub render_api_key: Option<String>,
     /// Fly API token for API-backed secret synchronization.
-    #[arg(long = "fly-api-token", env = "FLY_API_TOKEN", value_name = "TOKEN")]
+    #[arg(
+        hide_env_values = true,
+        long = "fly-api-token",
+        env = "FLY_API_TOKEN",
+        value_name = "TOKEN"
+    )]
     pub fly_api_token: Option<String>,
     /// Railway API token for API-backed secret synchronization.
-    #[arg(long = "railway-token", env = "RAILWAY_TOKEN", value_name = "TOKEN")]
+    #[arg(
+        hide_env_values = true,
+        long = "railway-token",
+        env = "RAILWAY_TOKEN",
+        value_name = "TOKEN"
+    )]
     pub railway_token: Option<String>,
     /// Build and push the deploy image before running the provider deploy.
     #[arg(long)]

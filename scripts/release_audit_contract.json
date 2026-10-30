@@ -48,11 +48,6 @@
       "proof": "residual"
     },
     {
-      "name": "security-audit",
-      "runner": "run_security_audit",
-      "proof": "residual"
-    },
-    {
       "name": "package-audit",
       "runner": "run_package_audit",
       "proof": "merge_group"

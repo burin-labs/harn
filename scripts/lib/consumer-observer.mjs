@@ -362,11 +362,9 @@ export function observerPublicationWitness(context) {
   return `Confirm consumer observer declaration ${observerContext(context).dispatch_nonce}`;
 }
 
-/** Immutable in-flight publications that predate the nonce witness.
- * @type {readonly {context:Partial<ObserverContext>, retirement?:{jobId:number,artifactId:number,digest:string}}[]} */
+/** Exact completed-parent publications that predate the nonce witness.
+ * @type {readonly {context:Partial<ObserverContext>, retirement:{jobId:number,artifactId:number,digest:string}}[]} */
 const historicalPublications = Object.freeze([
-  {context:{parent_run_id:'41016965350',parent_run_attempt:3,
-    parent_head_sha:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc',source_revision:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'}},
   {context:{schema:'harn.consumer_observer.v2',parent_repository:parentRepository,
     parent_run_id:'41065732964',parent_run_attempt:1,parent_head_sha:'f45a4d4bf3477fff82ea5e05d897d0d6810e98ef',
     source_revision:'ffb247e184337284fddfbab84da80f490edef57d',
@@ -386,12 +384,12 @@ export function qualifyObserverPublisher(context, jobs, completedPublication) {
   const historical = historicalPublications.find(binding => Object.entries(binding.context).every(([key,value])=>observer[key]===value));
   const retirement = historical?.retirement;
   const parent = completedPublication?.parent;
-  const frozen = historical && (!retirement || (parent?.status === 'completed'
+  const frozen = historical && parent?.status === 'completed'
     && String(parent.id) === observer.parent_run_id && parent.run_attempt === observer.parent_run_attempt
     && parent.head_sha === observer.parent_head_sha && parent.head_repository?.full_name === parentRepository
     && parentWorkflows.has(parent.path) && completedConclusions.has(parent.conclusion)
     && completedPublication.artifact?.id === retirement.artifactId
-    && completedPublication.artifact?.digest === retirement.digest));
+    && completedPublication.artifact?.digest === retirement.digest;
   if (matches.length === 0 && frozen) {
     matches = jobs.flatMap(job => job.steps.filter(step => step.name === observerDeclarationStep).map(step => ({job, step})));
   }
@@ -414,7 +412,7 @@ export function qualifyObserverPublisher(context, jobs, completedPublication) {
   return {job, publication:publication[0], witness:step};
 }
 
-function artifactJsonFromZip(bytes, filename) {
+function artifactFileFromZip(bytes, filename) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-declaration-'));
   try {
     const archive = path.join(scratch, 'declaration.zip');
@@ -426,10 +424,14 @@ function artifactJsonFromZip(bytes, filename) {
     if (execFileSync('unzip', ['-Z1', archive], options).trim() !== filename) {
       refuse('dispatch_declaration_archive_invalid');
     }
-    return JSON.parse(execFileSync('unzip', ['-p', archive, filename], options));
+    return execFileSync('unzip', ['-p', archive, filename], {...options, encoding:undefined});
   } finally {
     fs.rmSync(scratch, { recursive: true });
   }
+}
+
+function artifactJsonFromZip(bytes, filename) {
+  return JSON.parse(artifactFileFromZip(bytes, filename).toString('utf8'));
 }
 
 /** Authenticate the declaration to the exact parent run before claiming custody.
@@ -555,9 +557,10 @@ async function githubCensus(token, url, field, fetchRecord) {
 export async function githubWorkflowRuns(token, repository, workflow, selection, fetchRecord = fetch) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
     || !/^[A-Za-z0-9_.-]+\.ya?ml$/.test(workflow)
-    || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha'].includes(key))
+    || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha', 'created'].includes(key))
     || (selection.event !== undefined && !['pull_request', 'workflow_dispatch'].includes(selection.event))
     || (selection.status !== undefined && !liveStates.has(selection.status))
+    || (selection.created !== undefined && !/^>=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/.test(selection.created))
     || (selection.head_sha !== undefined && !sha.test(selection.head_sha))) {
     refuse('workflow_discovery_identity_invalid');
   }
@@ -699,11 +702,25 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
     'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
+  const securityRoot='Candidate dependency security';
+  const securityFamilies=[
+    {tracking:`${securityRoot} / Advisory tracking issue`,required:[`${securityRoot} / cargo-deny`]},
+    {tracking:`${securityRoot} / scan / Advisory tracking issue`,required:[
+      `${securityRoot} / scan / cargo-deny`,`${securityRoot} / Dependency security proof`,
+    ]},
+  ].filter(family=>jobs.some(job=>job.name===family.tracking||family.required.includes(job.name)));
+  const successfulJobs=new Set(jobs.filter(job=>job.status==='completed'&&job.conclusion==='success').map(job=>job.name));
+  if(securityFamilies.some(family=>family.required.some(name=>!successfulJobs.has(name)))){
+    refuse('archive_producer_builds_unproven');
+  }
+  const securitySkips=new Set(securityFamilies.map(family=>family.tracking));
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
       || job.run_attempt!==attempt || job.head_sha!==policyRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || securitySkips.has(job.name)
+          && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
@@ -750,11 +767,11 @@ export async function githubArchiveProducer(token, request, fetchRecord=fetch, e
 
 /** One authenticated, bounded archive reader for public declarations and
  * private child receipts. Transport never prints a repository or artifact. */
-export async function githubArtifactJson(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+async function githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract) {
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest)\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
@@ -775,6 +792,15 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
     refuse('dispatch_declaration_digest_mismatch');
   }
   return extract(bytes, expected.filename);
+}
+
+export async function githubArtifactJson(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  return githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract);
+}
+
+/** Preserve the exact authenticated bytes when a consumer verifies a signature. */
+export async function githubArtifactFile(token, repository, artifact, expected, fetchRecord = fetch, extract = artifactFileFromZip) {
+  return githubArtifactPayload(token, repository, artifact, expected, fetchRecord, extract);
 }
 
 /** Response validation belongs here so empty API responses remain unknown. */

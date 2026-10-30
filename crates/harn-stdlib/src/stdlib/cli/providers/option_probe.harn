@@ -9,6 +9,8 @@
  * transport work. Every unrelated catalog guard remains active.
  */
 import { parse, parser } from "std/cli/argparse"
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/option_probe"
 pub import {
   ProviderOptionProbeAttempt,
   ProviderOptionProbeContext,
@@ -465,13 +467,19 @@ pub fn provider_option_probe_report(
   }
 }
 
-fn __render(report: ProviderOptionProbeReport) -> string {
-  return report.endpoint.provider + ":" + report.endpoint.model + " " + report.option + " claim="
-    + to_string(report.diff.claimed_supported)
-    + " observed="
-    + to_string(report.diff.observed_supported)
-    + " "
-    + report.diff.status
+fn __render(__cli_locale: string, report: ProviderOptionProbeReport) -> string {
+  return cli_message(
+    __cli_locale,
+    "{0}:{1} {2} claim={3} observed={4} {5}",
+    [
+      to_string(report.endpoint.provider),
+      to_string(report.endpoint.model),
+      to_string(report.option),
+      to_string(to_string(report.diff.claimed_supported)),
+      to_string(to_string(report.diff.observed_supported)),
+      to_string(report.diff.status),
+    ],
+  )
 }
 
 fn __measure(
@@ -495,6 +503,7 @@ fn __measure(
 }
 
 fn main(harness: Harness) {
+  const __cli_locale = cli_locale(harness.env)
   const parsed = parse(
     parser(
       {
@@ -569,7 +578,7 @@ fn main(harness: Harness) {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
-    harness.stdio.println(__render(report))
+    harness.stdio.println(__render(__cli_locale, report))
   }
   if args.fail_on_drift {
     if report.diff.status == "drift" {

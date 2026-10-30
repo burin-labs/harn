@@ -68,6 +68,7 @@ all: fmt
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-agent-gates || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" check-operator-precedence || exit 1; \
+	$(MAKE) HARN_BIN="$$harn_bin" check-cli-localization || exit 1; \
 	$(MAKE) test-release-notices || exit 1; \
 	$(MAKE) check-aws-config-vendor test-aws-config-vendor || exit 1; \
 	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-builtin-methods check-protocol-artifacts check-portal-types check-connector-schemas check-harness-migrations check-cli-surface check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
@@ -903,6 +904,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_candidate_trigger_test.sh
 	./scripts/tests/release_candidate_reconcile_test.sh
 	node --test scripts/tests/release_reconcile_wake_test.mjs
+	node --test scripts/tests/dependency_security_test.mjs
 	./scripts/tests/dispatch_native_qualification_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	$(MAKE) test-embedded-asset-rebuild
@@ -1149,6 +1151,14 @@ gen-trigger-quickref:
 # .github/scripts/breaking-surface-check.sh).
 gen-cli-surface:
 	$(HARN_CLI_CMD) dump-cli-surface --messages-output crates/harn-cli/src/localization/en.json
+
+.PHONY: gen-cli-localization check-cli-localization
+gen-cli-localization:
+	@$(HARN_BIN_ASSIGN); node scripts/generate_cli_localization.mjs --harn-bin "$$harn_bin"
+
+check-cli-localization:
+	@$(HARN_BIN_ASSIGN); node scripts/generate_cli_localization.mjs --check --harn-bin "$$harn_bin"
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" node --test scripts/tests/cli_localization_generator_test.mjs
 
 check-cli-surface:
 	@echo "=== Checking spec/cli-surface.txt matches the CLI parser ==="
@@ -1606,6 +1616,7 @@ SOURCE_REPOSITORY_POLICIES := \
 # Everything else: warm artifacts, generators, Node, or a network-shaped check.
 WARM_REPOSITORY_POLICIES := \
   lint-test-patterns \
+  check-cli-localization \
   check-cli-surface \
   check-app-host \
   check-optional-dep-feature-contracts \

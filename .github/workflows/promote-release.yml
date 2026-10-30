@@ -490,17 +490,34 @@ jobs:
         id: standalone
         run: echo 'ready=true' >> "$GITHUB_OUTPUT"
 
-  promote:
-    name: Promote
+  publication-security:
+    name: Fresh publication dependency security
     needs: [plan, authorize]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       needs.authorize.result == 'success' && needs.authorize.outputs.ready == 'true'
     permissions:
       contents: read
+      issues: write
+      id-token: write
+      attestations: write
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@502c1d9f2f110a9aa0d56ffd548cd06fe198608e
+    with:
+      source-revision: ${{ needs.plan.outputs.source_sha }}
+      policy: false
+
+  promote:
+    name: Promote
+    needs: [plan, authorize, publication-security]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.authorize.result == 'success' && needs.authorize.outputs.ready == 'true' &&
+      needs.publication-security.result == 'success'
+    permissions:
+      contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@8f93db1475d9ec6a0bf13e1bb332a46e45686de6
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@a3e59dbd5e24191ca1c52579a0b5b9806eda6380
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}

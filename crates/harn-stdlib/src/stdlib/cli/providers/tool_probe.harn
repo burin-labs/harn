@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/providers/tool_probe"
 import { safe_bool, safe_dict, safe_list, safe_string } from "std/cli/render"
 
 /**
@@ -79,7 +81,7 @@ fn __any_case_ok(report: dict) -> bool {
   return false
 }
 
-fn __render_human(report: dict) -> string {
+fn __render_human(__cli_locale: string, report: dict) -> string {
   const provider = safe_string(report["provider"], "")
   const model = safe_string(report["model"], "")
   const tool_format = safe_string(report["tool_format"], "native")
@@ -88,18 +90,19 @@ fn __render_human(report: dict) -> string {
   const native = safe_string(tc["native"], "")
   const text = safe_string(tc["text"], "")
   const streaming_native = safe_string(tc["streaming_native"], "")
-  let out = provider + " " + model
-    + " format="
-    + tool_format
-    + " fallback="
-    + fallback
-    + " native="
-    + native
-    + " text="
-    + text
-    + " streaming_native="
-    + streaming_native
-    + "\n"
+  let out = cli_message(
+    __cli_locale,
+    "{0} {1} format={2} fallback={3} native={4} text={5} streaming_native={6}\n",
+    [
+      to_string(provider),
+      to_string(model),
+      to_string(tool_format),
+      to_string(fallback),
+      to_string(native),
+      to_string(text),
+      to_string(streaming_native),
+    ],
+  )
   const cases = safe_list(report["cases"])
   for c in cases {
     if type_of(c) != "dict" {
@@ -109,17 +112,23 @@ fn __render_human(report: dict) -> string {
     const classification = __classification_debug(safe_string(c["classification"], ""))
     const ok = safe_bool(c["ok"], false)
     const reason = safe_string(c["failure_reason"], "-")
-    out = out + "  " + mode + ": " + classification
-      + " ok="
-      + to_string(ok)
-      + " reason="
-      + reason
-      + "\n"
+    out = cli_message(
+      __cli_locale,
+      "{0}  {1}: {2} ok={3} reason={4}\n",
+      [
+        to_string(out),
+        to_string(mode),
+        to_string(classification),
+        to_string(to_string(ok)),
+        to_string(reason),
+      ],
+    )
   }
   return out
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln(
@@ -143,7 +152,7 @@ fn main(harness: Harness) -> int {
       )
       return 70
     }
-    const text = __render_human(report)
+    const text = __render_human(__cli_locale, report)
     const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]
     } else {

@@ -437,7 +437,75 @@ pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggr
   const invalid = {...ci, jobs: {...ci.jobs, macos: {...ci.jobs.macos, steps: []}}}
   assert(
     macos_shared_cache_errors(invalid, nightly).contains(
-      "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+      "ci.yml:macos must retain the required aggregate and verify complete matrix-output receipts",
+    ),
+  )
+  const receipt_error =
+    "ci.yml:macos-lint must publish distinct role receipts only after successful strict lint and parity"
+  for mutation in [
+    {...lint, outputs: {}},
+    {...lint, outputs: {...lint.outputs, workspace: lint.outputs["lean-lsp"]}},
+    {...lint, steps: lint.steps.filter({ step -> step?.id != "lint-proof" }).to_list()},
+    {...lint, steps: lint.steps + [{run: "echo after-publication"}]},
+  ] {
+    assert(
+      macos_shared_cache_errors({...ci, jobs: {...ci.jobs, "macos-lint": mutation}}, nightly)
+        .contains(receipt_error),
+    )
+  }
+  for mutation in [
+    {if: "always()"},
+    {id: "other-proof"},
+    {env: {LINT_LEG: "workspace", LINT_OUTCOME: "$" + "{{ steps.strict-lint.outcome }}"}},
+    {env: {LINT_LEG: "$" + "{{ matrix.kind }}", LINT_OUTCOME: "success"}},
+  ] {
+    const steps = lint.steps.map(
+      { step ->
+        return if step?.id == "lint-proof" {
+          {...step, ...mutation}
+        } else {
+          step
+        }
+      },
+    )
+      .to_list()
+    assert(
+      macos_shared_cache_errors(
+        {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: steps}}},
+        nightly,
+      )
+        .contains(receipt_error),
+    )
+  }
+  const skipped_parity = lint.steps.map(
+    { step ->
+      return if step?.name == "Verify canonical package hash parity" {
+        {...step, run: "true"}
+      } else {
+        step
+      }
+    },
+  )
+    .to_list()
+  assert(
+    macos_shared_cache_errors(
+      {...ci, jobs: {...ci.jobs, "macos-lint": {...lint, steps: skipped_parity}}},
+      nightly,
+    )
+      .contains(receipt_error),
+  )
+  const lost_outputs = {
+    ...ci.jobs.macos,
+    steps: [
+      {
+        run: "./scripts/ci/require_macos_lint.sh",
+        env: {MATRIX_RESULT: "$" + "{{ needs.macos-lint.result }}"},
+      },
+    ],
+  }
+  assert(
+    macos_shared_cache_errors({...ci, jobs: {...ci.jobs, macos: lost_outputs}}, nightly).contains(
+      "ci.yml:macos must retain the required aggregate and verify complete matrix-output receipts",
     ),
   )
 }
@@ -1710,6 +1778,65 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   const ci = declared["ci.yml"]
   const declared_policy = policy()
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  const without_invalidation = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step -> return !contains(step?.run ?? "", "cargo clean --workspace") },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, without_invalidation, ci).contains(
+      "macos-nightly.yml:nextest must invalidate workspace units after restore and before rebuilding on main",
+    ),
+  )
+  const late_invalidation = {
+    ...without_invalidation,
+    jobs: {
+      nextest: {
+        ...without_invalidation.jobs.nextest,
+        steps: without_invalidation.jobs.nextest.steps
+          + producer.jobs.nextest.steps.filter(
+            { step -> return contains(step?.run ?? "", "cargo clean --workspace") },
+          )
+            .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, late_invalidation, ci).contains(
+      "macos-nightly.yml:nextest must invalidate workspace units after restore and before rebuilding on main",
+    ),
+  )
+  for condition in [gha_expression("github.event_name == 'pull_request'"), gha_expression("true")] {
+    const wrong_restore = {
+      ...producer,
+      jobs: {
+        nextest: {
+          ...producer.jobs.nextest,
+          steps: producer.jobs.nextest.steps.map(
+            { step ->
+              if step?.id == "macos-warm-restore" {
+                return {...step, if: condition}
+              }
+              return step
+            },
+          )
+            .to_list(),
+        },
+      },
+    }
+    assert(
+      macos_warm_errors(declared_policy, wrong_restore, ci).contains(
+        "macos-nightly.yml:nextest must restore the main warm artifact for PRs and missing exact hosted-main caches with cold fallback",
+      ),
+    )
+  }
   const without_pack = {
     ...producer,
     jobs: {

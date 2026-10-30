@@ -1,35 +1,75 @@
 #!/usr/bin/env bash
-# The historical required check certifies every strict lint graph in this attempt.
 set -euo pipefail
-: "${GH_REPO:?repository required}"
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+: "${GITHUB_REPOSITORY:?repository required}"
 : "${GITHUB_RUN_ID:?run required}"
 : "${GITHUB_RUN_ATTEMPT:?attempt required}"
-[[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-legs=$(bash "$root/scripts/ci/run_rust_lint_lane.sh" --list-legs)
-jobs=$(gh api --paginate --slurp \
-  "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100")
-expected=$(printf '%s\n' "$legs" | jq -Rsc 'split("\n") | map(select(length > 0))')
-jq -er --argjson expected "$expected" '
-  if type != "array" or length == 0 or any(.[]; (.jobs | type) != "array")
-  then error("unmeasured macOS job census")
-  elif ([.[].total_count] | unique | length) != 1 then error("inconsistent macOS job census")
-  else . as $pages | [.[].jobs[]]
-    | if length == $pages[0].total_count then . else error("partial macOS job census") end end
-  | . as $jobs
-  | $expected | map(. as $leg
-    | ("Rust on macOS strict lint (" + $leg + ")") as $name
-    | [$jobs[] | select(.name == $name)] as $matches
-    | if ($matches | length) != 1 then {name:$name,status:"missing-or-duplicate",conclusion:null,measured:false}
-      else $matches[0] | {name,status,conclusion,measured:true} end)
-  | . as $legs
-  | "macOS lint census: expected=\($legs | length) observed=\([$legs[] | select(.measured)] | length) pending=\([$legs[] | select(.status != "completed")] | length) bad=\([$legs[] | select(.status == "completed" and .conclusion != "success")] | length)",
-    ($legs[] | "\(.name): \(.status)/\(.conclusion // "unreported")"),
-    (if all($legs[]; .status == "completed" and .conclusion == "success")
-      then "All macOS strict lint legs succeeded"
-      else error("macOS lint proof incomplete or failed") end)
-' <<< "$jobs"
-[[ ${MATRIX_RESULT:-unreported} == success ]] || {
-  echo "error: macOS matrix result ${MATRIX_RESULT:-unreported} is not success" >&2
+: "${GITHUB_SHA:?source required}"
+: "${GITHUB_WORKFLOW_REF:?workflow required}"
+[[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || exit 1
+[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+[[ $(git -C "$root" rev-parse HEAD) == "$GITHUB_SHA" ]] || {
+  echo 'error: macOS lint evidence source differs from checkout' >&2
   exit 1
 }
+git -C "$root" diff --quiet HEAD -- || {
+  echo 'error: macOS lint evidence requires an unchanged checkout' >&2
+  exit 1
+}
+expected=$(bash "$root/scripts/ci/run_rust_lint_lane.sh" --list-legs | jq -Rsc 'split("\n") | map(select(length > 0))')
+jq -e 'length > 0 and (unique | length) == length' <<<"$expected" >/dev/null
+
+case ${1:-verify} in
+record)
+  : "${GITHUB_OUTPUT:?output channel required}"
+  : "${LINT_LEG:?lint role required}"
+  [[ ${LINT_OUTCOME:-unreported} == success && ${GITHUB_JOB:-} == macos-lint ]] || {
+    echo 'error: macOS lint receipt requires a reached successful lint step' >&2
+    exit 1
+  }
+  jq -e --arg leg "$LINT_LEG" 'index($leg) != null' <<<"$expected" >/dev/null
+  receipt=$(jq -cn --arg leg "$LINT_LEG" --arg source "$GITHUB_SHA" \
+    --arg repository "$GITHUB_REPOSITORY" --arg run "$GITHUB_RUN_ID" \
+    --arg workflow "$GITHUB_WORKFLOW_REF" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+    '{schema:"harn.macos-lint.v1",leg:$leg,source:$source,repository:$repository,
+        runId:$run,workflowRef:$workflow,producerAttempt:$attempt,producerJob:"macos-lint",conclusion:"success"}')
+  printf '%s=%s\n' "$LINT_LEG" "$receipt" >>"$GITHUB_OUTPUT"
+  printf 'macOS lint receipt: %s\n' "$receipt"
+  ;;
+verify)
+  proof=$(jq -cn --argjson expected "$expected" --arg raw "${LINT_PROOFS:-}" \
+    --arg matrix "${MATRIX_RESULT:-unreported}" --arg source "$GITHUB_SHA" \
+    --arg repository "$GITHUB_REPOSITORY" --arg run "$GITHUB_RUN_ID" \
+    --arg workflow "$GITHUB_WORKFLOW_REF" --argjson attempt "$GITHUB_RUN_ATTEMPT" '
+      (try ($raw | fromjson) catch null) as $outputs
+      | [ $expected[] | . as $leg
+          | (if ($outputs|type)=="object" then $outputs[$leg] else null end) as $encoded
+          | if ($encoded|type)!="string" or $encoded=="" then {leg:$leg,state:"missing"}
+            else (try ($encoded|fromjson) catch null) as $r
+            | if ($r|type)!="object" then {leg:$leg,state:"invalid"}
+              elif $r.schema!="harn.macos-lint.v1" or $r.leg!=$leg
+                or $r.source!=$source or $r.repository!=$repository or $r.runId!=$run
+                or $r.workflowRef!=$workflow or $r.producerJob!="macos-lint"
+                or ($r.producerAttempt|type)!="number" or $r.producerAttempt<1
+                or $r.producerAttempt> $attempt or $r.producerAttempt!=($r.producerAttempt|floor)
+              then {leg:$leg,state:"foreign"}
+              elif $r.conclusion!="success" then {leg:$leg,state:"failed"}
+              else {leg:$leg,state:"success",receipt:$r} end end
+        ] as $roles
+      | (if ($outputs|type)=="object" then ($outputs|keys)-$expected else ["unmeasured-output-map"] end) as $unexpected
+      | {expected:($expected|length),observed:([$roles[]|select(.state!="missing")]|length),
+          pending:([$roles[]|select(.state=="missing")]|length),
+          bad:(([$roles[]|select(.state!="success" and .state!="missing")]|length)+($unexpected|length)+(if $matrix=="success" then 0 else 1 end)),
+          matrixResult:$matrix,consumerAttempt:$attempt,unexpected:$unexpected,roles:$roles}
+      | .decision=(if .pending==0 and .bad==0 then "passed" else "refused" end)
+    ')
+  jq -r '"macOS lint census: expected=\(.expected) observed=\(.observed) pending=\(.pending) bad=\(.bad)",
+      (.roles[]|"\(.leg): \(.state) producerAttempt=\(.receipt.producerAttempt // "unreported")")' <<<"$proof"
+  printf '%s\n' "$proof"
+  jq -e '.decision=="passed"' <<<"$proof" >/dev/null
+  ;;
+*)
+  echo 'usage: require_macos_lint.sh [record|verify]' >&2
+  exit 2
+  ;;
+esac
