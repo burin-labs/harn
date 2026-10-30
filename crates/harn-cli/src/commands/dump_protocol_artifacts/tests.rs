@@ -743,6 +743,33 @@ fn generated_rust_permission_shapes_round_trip() {
 }
 
 #[test]
+fn generated_rust_agent_event_payloads_decode_every_emitted_event() {
+    use generated_rust_binding::HarnAgentEventPayload;
+
+    let events: Vec<serde_json::Value> = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../harn-serve/tests/fixtures/acp/agent_events.json"
+    )))
+    .expect("emitted agent-event fixture parses");
+    for params in &events {
+        let decoded: HarnAgentEventPayload =
+            serde_json::from_value(params.clone()).unwrap_or_else(|error| {
+                panic!("{} does not decode: {error}", params["kind"]);
+            });
+        if params["kind"] == "judge_decision" {
+            assert!(matches!(decoded, HarnAgentEventPayload::JudgeDecision(_)));
+        }
+    }
+    let mut judge = events
+        .iter()
+        .find(|params| params["kind"] == "judge_decision")
+        .expect("judge_decision fixture")
+        .clone();
+    judge["iteration"] = json!("three");
+    assert!(serde_json::from_value::<HarnAgentEventPayload>(judge).is_err());
+}
+
+#[test]
 fn generated_rust_agent_event_shapes_round_trip() {
     use generated_rust_binding::{
         HarnAgentEventKind, HarnAgentEventNotification, HarnAgentEventParams,

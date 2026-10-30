@@ -16,6 +16,7 @@ impl PreparedCommand {
                 numbers.extend(descriptors.iter().copied());
             }
             let mut reserved = request.cleanup_receipt_fd.into_iter().collect::<Vec<_>>();
+            reserved.extend(request.cancel_request_fd);
             if matches!(
                 &request.confinement,
                 Some(

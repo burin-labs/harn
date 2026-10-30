@@ -181,6 +181,9 @@ pub struct ProcessCleanupReport {
     pub children: Vec<ProcessCleanupChild>,
     pub census: ProcessCleanupCensus,
     pub omitted_children: usize,
+    /// Linux guardian observed ECHILD after reaping its entire descendant tree.
+    #[serde(default)]
+    pub guardian_custody_complete: bool,
 }
 
 /// A zero is measured only after the collector reads its own nonempty environment.
@@ -210,7 +213,10 @@ impl ProcessCleanupReport {
 
     pub fn survivor_count(&self) -> Option<usize> {
         let count = self.survivors().count();
-        (count > 0 || self.census_complete()).then_some(count)
+        (count > 0
+            || self.census_complete()
+            || (self.guardian_custody_complete && self.omitted_children == 0))
+            .then_some(count)
     }
 
     pub fn for_signal(root_pid: Option<u32>, signal: i32) -> Self {
@@ -220,6 +226,7 @@ impl ProcessCleanupReport {
             children: Vec::new(),
             census: ProcessCleanupCensus::default(),
             omitted_children: 0,
+            guardian_custody_complete: false,
         }
     }
 
@@ -228,6 +235,7 @@ impl ProcessCleanupReport {
             *self = other;
             return;
         }
+        self.guardian_custody_complete &= other.guardian_custody_complete;
         self.census.control_read &= other.census.control_read;
         self.census.scanned_processes = self
             .census
@@ -1202,6 +1210,32 @@ pub fn capture_output_interruptible_in_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_custody_proves_zero_only_for_complete_unmixed_cleanup() {
+        let mut report = ProcessCleanupReport {
+            census: ProcessCleanupCensus {
+                control_read: true,
+                scanned_processes: 100,
+                unreadable_processes: 20,
+            },
+            ..ProcessCleanupReport::default()
+        };
+        assert_eq!(report.survivor_count(), None);
+        report.guardian_custody_complete = true;
+        assert!(!report.census_complete());
+        assert_eq!(report.survivor_count(), Some(0));
+        report.omitted_children = 1;
+        assert_eq!(report.survivor_count(), None);
+        report.omitted_children = 0;
+        report
+            .children
+            .push(ProcessCleanupChild::new(42, None, 1, None));
+        assert_eq!(report.survivor_count(), Some(1));
+        report.children.clear();
+        report.merge(ProcessCleanupReport::for_signal(Some(43), 9));
+        assert_eq!(report.survivor_count(), None);
+    }
 
     #[test]
     fn active_cleanup_owner_scopes_are_disjoint() {

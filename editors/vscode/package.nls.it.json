@@ -1,0 +1,17 @@
+{
+  "displayName": "Lingua Harn",
+  "description": "Supporto linguistico per Harn — il linguaggio orientato alle pipeline per agenti AI",
+  "harn.runPipeline": "Harn: Esegui pipeline",
+  "harn.formatFile": "Harn: Formatta file",
+  "harn.applyAllAutofixes": "Harn: Applica tutte le correzioni automatiche",
+  "debug.program": "Percorso al file .harn da eseguire in debug",
+  "debug.cwd": "Cartella di lavoro per la sessione di debug",
+  "debug.name": "Esegui debug del file Harn corrente",
+  "harn.path": "Percorso al binario harn",
+  "harn.lspPath": "Percorso al binario del server linguistico harn-lsp",
+  "harn.dapPath": "Percorso al binario dell'adattatore di debug harn-dap",
+  "task.command": "Il sottocomando harn da invocare.",
+  "task.file": "Percorso a uno script .harn. Per impostazione predefinita usa il file corrente se omesso.",
+  "task.args": "Argomenti aggiuntivi aggiunti dopo il percorso del file.",
+  "task.cwd": "Cartella di lavoro per il processo avviato."
+}

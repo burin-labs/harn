@@ -26,7 +26,7 @@ class HarnDebugConfigurationProvider
     if (!config.type && !config.request && !config.name) {
       config.type = "harn";
       config.request = "launch";
-      config.name = "Debug Current Harn File";
+      config.name = vscode.l10n.t("Debug Current Harn File");
       config.program = "${file}";
       config.cwd = "${workspaceFolder}";
     }
@@ -34,7 +34,7 @@ class HarnDebugConfigurationProvider
     if (!config.program) {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "harn") {
-        vscode.window.showErrorMessage("Open a .harn file to debug");
+        vscode.window.showErrorMessage(vscode.l10n.t("Open a .harn file to debug"));
         return null;
       }
       config.program = editor.document.fileName;
@@ -176,7 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   client = new LanguageClient(
     "harn-lsp",
-    "Harn Language Server",
+    vscode.l10n.t("Harn Language Server"),
     serverOptions,
     clientOptions
   );
@@ -192,7 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
     async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "harn") {
-        vscode.window.showWarningMessage("Open a .harn file first");
+        vscode.window.showWarningMessage(vscode.l10n.t("Open a .harn file first"));
         return;
       }
 
@@ -226,7 +226,7 @@ export function activate(context: vscode.ExtensionContext) {
     async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.languageId !== "harn") {
-        vscode.window.showWarningMessage("Open a .harn file first");
+        vscode.window.showWarningMessage(vscode.l10n.t("Open a .harn file first"));
         return;
       }
       await vscode.commands.executeCommand(

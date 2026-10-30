@@ -1,0 +1,3192 @@
+{
+  "$defs": {
+    "AgentLoopStallWarning": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "AgentScratchpadReorganization": {
+      "properties": {
+        "details": true,
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "iteration",
+        "status",
+        "details"
+      ],
+      "type": "object"
+    },
+    "AnchorChanged": {
+      "properties": {
+        "carryTranscript": {
+          "type": "boolean"
+        },
+        "compacted": {
+          "type": "boolean"
+        },
+        "current": true,
+        "previous": true,
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "previous",
+        "current",
+        "carryTranscript",
+        "compacted",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "BoundaryFailure": {
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "droppedBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "droppedCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureKind": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "unreported": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "boundary",
+        "failureKind",
+        "owner",
+        "detail",
+        "droppedCount",
+        "droppedBytes",
+        "unreported"
+      ],
+      "type": "object"
+    },
+    "BudgetCircuitBreaker": {
+      "properties": {
+        "breakerKind": {
+          "type": "string"
+        },
+        "consecutiveCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pausedForMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "breakerKind",
+        "consecutiveCount",
+        "pausedForMs"
+      ],
+      "type": "object"
+    },
+    "BudgetExhausted": {
+      "properties": {
+        "budgetKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "costUsd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "headroomUsd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitValue": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maxIterations": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectedCostUsd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "projectedInputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "projectedOutputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "projectionBasis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionCostUsd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "wallClockMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "maxIterations"
+      ],
+      "type": "object"
+    },
+    "CacheHit": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "CacheMiss": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "CapabilityGap": {
+      "properties": {
+        "capability": {
+          "type": "string"
+        },
+        "fallbackToolFormat": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "requestedToolFormat": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "level",
+        "capability",
+        "provider",
+        "model",
+        "fallbackToolFormat",
+        "message"
+      ],
+      "type": "object"
+    },
+    "CodeLibrarianQueryNlFallback": {
+      "properties": {
+        "attemptedCypher": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mctsDepth": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mctsExpansions": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resultCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attemptedCypher",
+        "mctsDepth",
+        "mctsExpansions",
+        "resultCount",
+        "text"
+      ],
+      "type": "object"
+    },
+    "CompassRoutingDecision": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "originalTool": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "persona": {
+          "type": "string"
+        },
+        "routedTool": {
+          "type": "string"
+        },
+        "targetTool": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolCallId",
+        "mode",
+        "action",
+        "persona",
+        "originalTool",
+        "routedTool",
+        "targetTool"
+      ],
+      "type": "object"
+    },
+    "CompositionChildCall": {
+      "properties": {
+        "annotations": true,
+        "operationIndex": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policyContext": true,
+        "rawInput": true,
+        "requestedSideEffectLevel": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "toolCallId",
+        "toolName",
+        "operationIndex",
+        "annotations",
+        "requestedSideEffectLevel",
+        "policyContext",
+        "rawInput"
+      ],
+      "type": "object"
+    },
+    "CompositionChildResult": {
+      "properties": {
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorCategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "executionDurationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "executor": {
+          "description": "A bare executor name, or `{\"kind\": \"mcp_server\", \"serverName\": ...}`."
+        },
+        "operationIndex": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rawOutput": true,
+        "runId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "toolCallId",
+        "toolName",
+        "operationIndex",
+        "status",
+        "rawOutput",
+        "error",
+        "errorCategory",
+        "executor",
+        "durationMs",
+        "executionDurationMs"
+      ],
+      "type": "object"
+    },
+    "CompositionError": {
+      "description": "The run envelope shared by `composition_start`, `composition_finish`, and\n`composition_error`.",
+      "properties": {
+        "artifacts": {
+          "items": true,
+          "type": "array"
+        },
+        "bindingManifestHash": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureCategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "metadata": true,
+        "requestedSideEffectCeiling": {
+          "type": "string"
+        },
+        "result": true,
+        "runId": {
+          "type": "string"
+        },
+        "snippetHash": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "language",
+        "snippetHash",
+        "bindingManifestHash",
+        "requestedSideEffectCeiling",
+        "stdout",
+        "stderr",
+        "artifacts",
+        "result",
+        "failureCategory",
+        "error",
+        "durationMs",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "CompositionFinish": {
+      "description": "The run envelope shared by `composition_start`, `composition_finish`, and\n`composition_error`.",
+      "properties": {
+        "artifacts": {
+          "items": true,
+          "type": "array"
+        },
+        "bindingManifestHash": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureCategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "metadata": true,
+        "requestedSideEffectCeiling": {
+          "type": "string"
+        },
+        "result": true,
+        "runId": {
+          "type": "string"
+        },
+        "snippetHash": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "language",
+        "snippetHash",
+        "bindingManifestHash",
+        "requestedSideEffectCeiling",
+        "stdout",
+        "stderr",
+        "artifacts",
+        "result",
+        "failureCategory",
+        "error",
+        "durationMs",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "CompositionStart": {
+      "description": "The run envelope shared by `composition_start`, `composition_finish`, and\n`composition_error`.",
+      "properties": {
+        "artifacts": {
+          "items": true,
+          "type": "array"
+        },
+        "bindingManifestHash": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureCategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "metadata": true,
+        "requestedSideEffectCeiling": {
+          "type": "string"
+        },
+        "result": true,
+        "runId": {
+          "type": "string"
+        },
+        "snippetHash": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "language",
+        "snippetHash",
+        "bindingManifestHash",
+        "requestedSideEffectCeiling",
+        "stdout",
+        "stderr",
+        "artifacts",
+        "result",
+        "failureCategory",
+        "error",
+        "durationMs",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "ControlOutcome": {
+      "properties": {
+        "actor": true,
+        "controlId": {
+          "type": "string"
+        },
+        "metadata": true,
+        "method": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "target": true
+      },
+      "required": [
+        "controlId",
+        "method",
+        "outcome",
+        "status",
+        "actor",
+        "target"
+      ],
+      "type": "object"
+    },
+    "DaemonWatchdogTripped": {
+      "properties": {
+        "attempts": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elapsedMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts",
+        "elapsedMs"
+      ],
+      "type": "object"
+    },
+    "FeedbackInjected": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "delivered": {
+          "description": "`false` means the mechanism wrote a receipt and delivered nothing;\nonly an absent field means the question went unanswered.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "feedbackKind": {
+          "type": "string"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "streak": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnClaimedForRepair": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "feedbackKind",
+        "content"
+      ],
+      "type": "object"
+    },
+    "FinalWrapup": {
+      "properties": {
+        "finalStatus": {
+          "type": "string"
+        },
+        "hostDirective": {
+          "type": "boolean"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "terminalKind": {
+          "type": "string"
+        },
+        "unconsumedToolCall": {
+          "description": "Evidence that the tools-disabled final summary still contained a tool call.",
+          "properties": {
+            "diagnostics": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "evidenceLine": {
+              "type": "string"
+            },
+            "parseStatus": {
+              "type": "string"
+            },
+            "parsedCallCount": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "toolNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "parseStatus",
+            "parsedCallCount",
+            "toolNames",
+            "diagnostics",
+            "evidenceLine"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "finalStatus",
+        "stopReason",
+        "iteration",
+        "hostDirective",
+        "terminalKind",
+        "unconsumedToolCall"
+      ],
+      "type": "object"
+    },
+    "HostAttachment": {
+      "properties": {
+        "artifactPointer": {
+          "type": "string"
+        },
+        "deliveredAtSeam": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": true,
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "descriptionModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flavor": true,
+        "injectionId": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "provenance": true,
+        "rendered": true,
+        "sanitization": true,
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "injectionId",
+        "mediaType",
+        "flavor",
+        "artifactPointer",
+        "sha256",
+        "sizeBytes",
+        "rendered",
+        "description",
+        "descriptionModel",
+        "delivery",
+        "deliveredAtSeam",
+        "sequence",
+        "provenance",
+        "sanitization"
+      ],
+      "type": "object"
+    },
+    "HostToolResult": {
+      "properties": {
+        "deliveredAtSeam": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": true,
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "injectionId": {
+          "type": "string"
+        },
+        "provenance": true,
+        "rawInput": true,
+        "rawOutput": true,
+        "resultPointer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sanitization": true,
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolKind": true,
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "injectionId",
+        "toolCallId",
+        "toolName",
+        "toolKind",
+        "rawInput",
+        "status",
+        "rawOutput",
+        "resultPointer",
+        "error",
+        "durationMs",
+        "delivery",
+        "deliveredAtSeam",
+        "sequence",
+        "provenance",
+        "sanitization"
+      ],
+      "type": "object"
+    },
+    "InputGuardrailVerdict": {
+      "properties": {
+        "classifierKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "confidenceThreshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "tripwire": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "iteration",
+        "tripwire",
+        "reason",
+        "label",
+        "confidence",
+        "confidenceThreshold",
+        "classifierKind",
+        "model",
+        "error"
+      ],
+      "type": "object"
+    },
+    "IterationEnd": {
+      "description": "`iterationInfo` is the agent loop's script-authored iteration record.",
+      "properties": {
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iterationInfo": true
+      },
+      "required": [
+        "iteration",
+        "iterationInfo"
+      ],
+      "type": "object"
+    },
+    "IterationStart": {
+      "properties": {
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "iteration"
+      ],
+      "type": "object"
+    },
+    "JudgeDecision": {
+      "properties": {
+        "confirm": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "convertedFrom": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "escalationRecommended": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "escalationTarget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gapClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "judgeDurationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "judgeOutcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "judgeVerdict": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nextStep": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "override": true,
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "type": "string"
+        },
+        "requirementReport": true,
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalEvidencePreserved": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "trigger": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": {
+          "description": "The answer of record. `judgeVerdict` and `override` tell an override\napart from the judge's own word.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "iteration",
+        "verdict",
+        "reasoning",
+        "nextStep",
+        "judgeDurationMs",
+        "source",
+        "trigger",
+        "reason",
+        "confirm",
+        "convertedFrom",
+        "escalationRecommended",
+        "escalationTarget",
+        "judgeVerdict",
+        "override",
+        "gapClass",
+        "judgeOutcome",
+        "terminalEvidencePreserved",
+        "requirementReport"
+      ],
+      "type": "object"
+    },
+    "JudgeStarted": {
+      "properties": {
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trigger": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "iteration",
+        "trigger"
+      ],
+      "type": "object"
+    },
+    "LlmCallLog": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "LlmFallbackAttempt": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "LlmRoutingDecision": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "LlmShadowDiff": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "LoopCheckpoint": {
+      "properties": {
+        "checkpointKind": {
+          "type": "string"
+        },
+        "delivered": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dispatchSkipped": {
+          "type": "boolean"
+        },
+        "inboxDelivered": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "typedDelivered": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "iteration",
+        "checkpointKind",
+        "delivered"
+      ],
+      "type": "object"
+    },
+    "LoopControlDecision": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "newLimit": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "oldLimit": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "iteration",
+        "action",
+        "oldLimit",
+        "newLimit",
+        "reason",
+        "status"
+      ],
+      "type": "object"
+    },
+    "LoopStuck": {
+      "additionalProperties": true,
+      "description": "The loop's stuck detector, or a script-authored stuck signal whose record\nis forwarded under `signal` fields of its own.",
+      "properties": {
+        "lastIteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxNudges": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tailExcerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "McpAuthRequired": {
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "resource",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "McpCatalogChanged": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "server": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "server",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "McpNotification": {
+      "properties": {
+        "direction": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": true,
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "method",
+        "direction",
+        "params"
+      ],
+      "type": "object"
+    },
+    "MissingToolCallVerdict": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "classifierKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "confidenceThreshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "originalAction": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "iteration",
+        "action",
+        "originalAction",
+        "toolName",
+        "confidence",
+        "confidenceThreshold",
+        "evidence",
+        "language",
+        "classifierKind",
+        "model",
+        "error"
+      ],
+      "type": "object"
+    },
+    "ModelJob": {
+      "properties": {
+        "event": true
+      },
+      "required": [
+        "event"
+      ],
+      "type": "object"
+    },
+    "OrchestrationDecision": {
+      "properties": {
+        "decision": true
+      },
+      "required": [
+        "decision"
+      ],
+      "type": "object"
+    },
+    "PackThinkingStripped": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "requested",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ProgressReported": {
+      "description": "A progress report with neither plan entries nor a message; reports that\ncarry either ride ACP's own plan or narration updates instead.",
+      "properties": {
+        "entries": true,
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "replace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message",
+        "entries",
+        "replace",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "ProviderUsage": {
+      "description": "Provider-reported usage for one model call. Its keys are snake_case.",
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "run_usage": true
+      },
+      "required": [
+        "call_id",
+        "provider",
+        "model",
+        "run_usage"
+      ],
+      "type": "object"
+    },
+    "PurposeLabel": {
+      "properties": {
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "description": "`declared` by the agent, or `inferred` by a harness-side labeler.",
+          "type": "string"
+        },
+        "toolCallCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toolCallIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "source",
+        "iteration",
+        "toolCallIds",
+        "toolCallCount"
+      ],
+      "type": "object"
+    },
+    "RepairOutputContractApplied": {
+      "properties": {
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "toolCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "iteration",
+        "toolCount"
+      ],
+      "type": "object"
+    },
+    "RequireSuccessfulToolsViolation": {
+      "properties": {
+        "actor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "recurrenceHints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "redactedSummary": {
+          "type": "string"
+        },
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "violationKind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "violationKind",
+        "source",
+        "actor",
+        "runId",
+        "redactedSummary",
+        "recurrenceHints",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "ReservedTerminalVerify": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "ScopeClassifierVerdict": {
+      "properties": {
+        "classifierKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "confidenceThreshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "originalLabel": {
+          "type": "string"
+        },
+        "skipMainTurn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "iteration",
+        "label",
+        "originalLabel",
+        "confidence",
+        "confidenceThreshold",
+        "evidence",
+        "skipMainTurn",
+        "classifierKind",
+        "model",
+        "error"
+      ],
+      "type": "object"
+    },
+    "SelfConsistencyTie": {
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "distribution": true,
+        "total": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "answer",
+        "total",
+        "distribution"
+      ],
+      "type": "object"
+    },
+    "SemanticCacheHit": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "SemanticCacheMiss": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "SessionClosed": {
+      "properties": {
+        "metadata": true,
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "status",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "SessionHealth": {
+      "additionalProperties": true,
+      "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
+      "type": "object"
+    },
+    "StepJudgeDecision": {
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "costUsd": {
+          "format": "double",
+          "type": "number"
+        },
+        "critique": {
+          "type": "string"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "judgeDurationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "judgeError": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "onVeto": {
+          "type": "string"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "type": "string"
+        },
+        "skipped": {
+          "type": "boolean"
+        },
+        "unavailableCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "vetoed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "iteration",
+        "verdict",
+        "reasoning",
+        "critique",
+        "confidence",
+        "judgeDurationMs",
+        "vetoed",
+        "skipped",
+        "reason",
+        "judgeError",
+        "unavailableReason",
+        "unavailableCount",
+        "onVeto",
+        "inputTokens",
+        "outputTokens",
+        "costUsd",
+        "provider",
+        "model"
+      ],
+      "type": "object"
+    },
+    "StructuralValidatorDecision": {
+      "properties": {
+        "attempts": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diagnostic": {
+          "type": "string"
+        },
+        "iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxAttempts": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "onFailure": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recommendedAction": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "skipped": {
+          "type": "boolean"
+        },
+        "vetoed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "iteration",
+        "rule",
+        "diagnostic",
+        "recommendedAction",
+        "vetoed",
+        "skipped",
+        "reason",
+        "onFailure",
+        "attempts",
+        "maxAttempts"
+      ],
+      "type": "object"
+    },
+    "SubagentJoin": {
+      "properties": {
+        "childRunId": {
+          "type": "string"
+        },
+        "childSessionId": {
+          "type": "string"
+        },
+        "collectionLagMs": {
+          "description": "How long the finished child waited to be collected, not the parent's\nwait; `waitMs` is the parent's wait.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "completedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "joinedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "parentRunId": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "resultProcessingCompletedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resultProcessingMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resultProcessingStartedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "waitMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "waitStartedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "workerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "parentSessionId",
+        "parentRunId",
+        "childSessionId",
+        "childRunId",
+        "workerId",
+        "completedAtMs",
+        "joinedAtMs",
+        "collectionLagMs",
+        "waitStartedAtMs",
+        "waitMs",
+        "resultProcessingStartedAtMs",
+        "resultProcessingCompletedAtMs",
+        "resultProcessingMs"
+      ],
+      "type": "object"
+    },
+    "SubagentStop": {
+      "properties": {
+        "cancellation": true,
+        "childRunId": {
+          "type": "string"
+        },
+        "childSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "parentRunId": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "receiptRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resultRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminalClass": {
+          "type": "string"
+        },
+        "terminalStatus": {
+          "type": "string"
+        },
+        "timeout": true
+      },
+      "required": [
+        "parentRunId",
+        "childRunId",
+        "parentSessionId",
+        "childSessionId",
+        "terminalStatus",
+        "terminalClass",
+        "reason",
+        "resultRef",
+        "receiptRef",
+        "cancellation",
+        "timeout",
+        "completedAtMs"
+      ],
+      "type": "object"
+    },
+    "ToolBatchDisposition": {
+      "description": "`receipt` follows the published tool-batch disposition receipt.",
+      "properties": {
+        "receipt": true
+      },
+      "required": [
+        "receipt"
+      ],
+      "type": "object"
+    },
+    "ToolCallAudit": {
+      "description": "`audit` is the middleware's script-authored record; `receipt` follows the\npublished tool-call receipt schema.",
+      "properties": {
+        "audit": true,
+        "receipt": true,
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolCallId",
+        "toolName",
+        "audit"
+      ],
+      "type": "object"
+    },
+    "ToolFormatOverride": {
+      "properties": {
+        "appliedFormat": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "catalogParity": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "overrideReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "recommendedFormat": {
+          "type": "string"
+        },
+        "requestedFormat": {
+          "type": "string"
+        },
+        "steered": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "requestedFormat",
+        "recommendedFormat",
+        "catalogParity"
+      ],
+      "type": "object"
+    },
+    "TurnPhaseChanged": {
+      "description": "The producer-owned turn phase. `candidate_reply` accompanies `verifying`;\n`reply` and `outcome` accompany `terminal`.",
+      "properties": {
+        "candidate_reply": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": true,
+        "phase": {
+          "type": "string"
+        },
+        "reply": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "type": "object"
+    },
+    "TypedCheckpoint": {
+      "description": "`checkpoint` is a script-authored record discriminated by its `schema`.",
+      "properties": {
+        "checkpoint": true
+      },
+      "required": [
+        "checkpoint"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/agent-event.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "agent_loop_stall_warning"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/AgentLoopStallWarning"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "agent_scratchpad_reorganization"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/AgentScratchpadReorganization"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "anchor_changed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/AnchorChanged"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "boundary_failure"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/BoundaryFailure"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "budget_circuit_breaker"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/BudgetCircuitBreaker"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "budget_exhausted"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/BudgetExhausted"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "cache_hit"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CacheHit"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "cache_miss"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CacheMiss"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "capability_gap"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CapabilityGap"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "code_librarian_query_nl_fallback"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CodeLibrarianQueryNlFallback"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "compass_routing_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompassRoutingDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "composition_child_call"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompositionChildCall"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "composition_child_result"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompositionChildResult"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "composition_error"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompositionError"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "composition_finish"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompositionFinish"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "composition_start"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/CompositionStart"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "control_outcome"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ControlOutcome"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "daemon_watchdog_tripped"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/DaemonWatchdogTripped"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "feedback_injected"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/FeedbackInjected"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "final_wrapup"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/FinalWrapup"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "host_attachment"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/HostAttachment"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "host_tool_result"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/HostToolResult"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "input_guardrail_verdict"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/InputGuardrailVerdict"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "iteration_end"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/IterationEnd"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "iteration_start"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/IterationStart"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "judge_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/JudgeDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "judge_started"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/JudgeStarted"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "llm_call_log"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LlmCallLog"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "llm_fallback_attempt"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LlmFallbackAttempt"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "llm_routing_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LlmRoutingDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "llm_shadow_diff"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LlmShadowDiff"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "loop_checkpoint"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LoopCheckpoint"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "loop_control_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LoopControlDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "loop_stuck"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/LoopStuck"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "mcp_auth_required"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/McpAuthRequired"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "mcp_catalog_changed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/McpCatalogChanged"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "mcp_notification"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/McpNotification"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "missing_tool_call_verdict"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/MissingToolCallVerdict"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "model_job"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ModelJob"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "orchestration_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/OrchestrationDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "pack_thinking_stripped"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/PackThinkingStripped"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "progress_reported"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ProgressReported"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "provider_usage"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ProviderUsage"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "purpose_label"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/PurposeLabel"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "repair_output_contract_applied"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/RepairOutputContractApplied"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "require_successful_tools_violation"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/RequireSuccessfulToolsViolation"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "reserved_terminal_verify"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ReservedTerminalVerify"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "scope_classifier_verdict"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ScopeClassifierVerdict"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "self_consistency_tie"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SelfConsistencyTie"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "semantic_cache_hit"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SemanticCacheHit"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "semantic_cache_miss"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SemanticCacheMiss"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session_closed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SessionClosed"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "session_health"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SessionHealth"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "step_judge_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/StepJudgeDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "structural_validator_decision"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/StructuralValidatorDecision"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "subagent_join"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SubagentJoin"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "subagent_stop"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/SubagentStop"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool_batch_disposition"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ToolBatchDisposition"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool_call_audit"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ToolCallAudit"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool_format_override"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ToolFormatOverride"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "turn_phase_changed"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/TurnPhaseChanged"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "typed_checkpoint"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/TypedCheckpoint"
+      }
+    }
+  ],
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "kind"
+  ],
+  "title": "Harn agent event",
+  "type": "object",
+  "x-harn-kinds": {
+    "agent_loop_stall_warning": "AgentLoopStallWarning",
+    "agent_scratchpad_reorganization": "AgentScratchpadReorganization",
+    "anchor_changed": "AnchorChanged",
+    "boundary_failure": "BoundaryFailure",
+    "budget_circuit_breaker": "BudgetCircuitBreaker",
+    "budget_exhausted": "BudgetExhausted",
+    "cache_hit": "CacheHit",
+    "cache_miss": "CacheMiss",
+    "capability_gap": "CapabilityGap",
+    "code_librarian_query_nl_fallback": "CodeLibrarianQueryNlFallback",
+    "compass_routing_decision": "CompassRoutingDecision",
+    "composition_child_call": "CompositionChildCall",
+    "composition_child_result": "CompositionChildResult",
+    "composition_error": "CompositionError",
+    "composition_finish": "CompositionFinish",
+    "composition_start": "CompositionStart",
+    "control_outcome": "ControlOutcome",
+    "daemon_watchdog_tripped": "DaemonWatchdogTripped",
+    "feedback_injected": "FeedbackInjected",
+    "final_wrapup": "FinalWrapup",
+    "host_attachment": "HostAttachment",
+    "host_tool_result": "HostToolResult",
+    "input_guardrail_verdict": "InputGuardrailVerdict",
+    "iteration_end": "IterationEnd",
+    "iteration_start": "IterationStart",
+    "judge_decision": "JudgeDecision",
+    "judge_started": "JudgeStarted",
+    "llm_call_log": "LlmCallLog",
+    "llm_fallback_attempt": "LlmFallbackAttempt",
+    "llm_routing_decision": "LlmRoutingDecision",
+    "llm_shadow_diff": "LlmShadowDiff",
+    "loop_checkpoint": "LoopCheckpoint",
+    "loop_control_decision": "LoopControlDecision",
+    "loop_stuck": "LoopStuck",
+    "mcp_auth_required": "McpAuthRequired",
+    "mcp_catalog_changed": "McpCatalogChanged",
+    "mcp_notification": "McpNotification",
+    "missing_tool_call_verdict": "MissingToolCallVerdict",
+    "model_job": "ModelJob",
+    "orchestration_decision": "OrchestrationDecision",
+    "pack_thinking_stripped": "PackThinkingStripped",
+    "progress_reported": "ProgressReported",
+    "provider_usage": "ProviderUsage",
+    "purpose_label": "PurposeLabel",
+    "repair_output_contract_applied": "RepairOutputContractApplied",
+    "require_successful_tools_violation": "RequireSuccessfulToolsViolation",
+    "reserved_terminal_verify": "ReservedTerminalVerify",
+    "scope_classifier_verdict": "ScopeClassifierVerdict",
+    "self_consistency_tie": "SelfConsistencyTie",
+    "semantic_cache_hit": "SemanticCacheHit",
+    "semantic_cache_miss": "SemanticCacheMiss",
+    "session_closed": "SessionClosed",
+    "session_health": "SessionHealth",
+    "step_judge_decision": "StepJudgeDecision",
+    "structural_validator_decision": "StructuralValidatorDecision",
+    "subagent_join": "SubagentJoin",
+    "subagent_stop": "SubagentStop",
+    "tool_batch_disposition": "ToolBatchDisposition",
+    "tool_call_audit": "ToolCallAudit",
+    "tool_format_override": "ToolFormatOverride",
+    "turn_phase_changed": "TurnPhaseChanged",
+    "typed_checkpoint": "TypedCheckpoint"
+  }
+}

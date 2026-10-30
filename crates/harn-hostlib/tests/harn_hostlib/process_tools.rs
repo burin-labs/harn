@@ -54,6 +54,7 @@ fn cleanup_report_fixture(signal: i32) -> ProcessCleanupReport {
             unreadable_processes: 0,
         },
         omitted_children: 0,
+        guardian_custody_complete: false,
         children: vec![ProcessCleanupChild {
             pid: 100_001,
             parent_pid: Some(99_999),
@@ -250,6 +251,9 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
         "unavailable",
         "no_control",
         "partial",
+        "guardian_custody",
+        "guardian_omitted",
+        "guardian_unknown",
         "omitted",
         "merged_unavailable",
     ] {
@@ -259,6 +263,15 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
             "unavailable" => report = ProcessCleanupReport::default(),
             "no_control" => report.census.control_read = false,
             "partial" => report.census.unreadable_processes = 1,
+            "guardian_custody" | "guardian_omitted" | "guardian_unknown" => {
+                report.census.unreadable_processes = 1;
+                report.guardian_custody_complete = true;
+                if case == "guardian_omitted" {
+                    report.omitted_children = 1;
+                } else if case == "guardian_unknown" {
+                    report.children[0].alive_after_cleanup = None;
+                }
+            }
             "omitted" => report.omitted_children = 1,
             "merged_unavailable" => {
                 report.census = harn_vm::op_interrupt::ProcessCleanupCensus::default();
@@ -288,7 +301,11 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
         if case == "complete" {
             assert_eq!(require_int(&cleanup, "survivor_count"), 0);
             assert!(require_bool(&cleanup, "census_complete"));
-        } else if case == "unknown" {
+        } else if case == "guardian_custody" {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+            assert!(!require_bool(&cleanup, "census_complete"));
+            assert!(require_bool(&cleanup, "guardian_custody_complete"));
+        } else if case == "unknown" || case == "guardian_unknown" {
             assert_eq!(require_int(&cleanup, "survivor_count"), 1);
             assert_eq!(require_list(&cleanup, "surviving_children").len(), 1);
         } else {
@@ -298,7 +315,7 @@ fn run_command_cleanup_counts_unknown_liveness_and_refuses_unmeasured_zero() {
             );
             assert!(!require_bool(&cleanup, "census_complete"), "{case}");
         }
-        if case != "complete" {
+        if case != "complete" && case != "guardian_custody" {
             cleanup_json["survivor_count"] = 0.into();
             assert!(
                 !validator.is_valid(&cleanup_json),

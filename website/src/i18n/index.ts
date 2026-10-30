@@ -1,29 +1,29 @@
-// Tiny, dependency-free i18n layer for the site.
-//
-// Today there is one locale (English). The shape below is what makes adding more
-// cheap: write `fr.ts` mirroring `en.ts`, add it to `catalogs`, and resolve the
-// locale per request (or from a context) in `useMessages` / `getMessages`.
+import { useSyncExternalStore } from "react"
+import { getLocale, getServerLocale, subscribeLocale, type Locale } from "../../../ui/localization"
 import { en } from "./en"
+import es from "./es.json"
+import fr from "./fr.json"
+import de from "./de.json"
+import ptBR from "./pt-BR.json"
+import it from "./it.json"
+import ja from "./ja.json"
+import ko from "./ko.json"
+import zhHans from "./zh-Hans.json"
 
 export type Messages = typeof en
-export type Locale = "en"
+export type { Locale }
 
 export const DEFAULT_LOCALE: Locale = "en"
 
-const catalogs: Record<Locale, Messages> = { en }
+export const catalogs: Record<Locale, Messages> = { en, es, fr, de, "pt-BR": ptBR, it, ja, ko, "zh-Hans": zhHans }
 
 /** Resolve a catalog. Use from non-React modules (metadata, gallery data). */
-export function getMessages(locale: Locale = DEFAULT_LOCALE): Messages {
+export function getMessages(locale: Locale = getLocale()): Messages {
   return catalogs[locale] ?? catalogs[DEFAULT_LOCALE]
 }
 
-/**
- * React hook returning the active catalog. A future `LocaleProvider` can swap
- * the resolved locale here without touching call sites; it returns the default
- * locale on both server and client today, keeping SSR output stable.
- */
 export function useMessages(): Messages {
-  return getMessages()
+  return getMessages(useSyncExternalStore(subscribeLocale, getLocale, getServerLocale))
 }
 
 /** Fill `{name}` placeholders in a message template. */

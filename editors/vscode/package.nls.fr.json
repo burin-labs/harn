@@ -1,0 +1,17 @@
+{
+  "displayName": "Langue Harn",
+  "description": "Prise en charge de la langue Harn — le langage orienté pipeline pour les agents IA",
+  "harn.runPipeline": "Harn : Exécuter le pipeline",
+  "harn.formatFile": "Harn : Formater le fichier",
+  "harn.applyAllAutofixes": "Harn : Appliquer tous les correctifs automatiques",
+  "debug.program": "Chemin vers le fichier .harn à déboguer",
+  "debug.cwd": "Répertoire de travail pour la session de débogage",
+  "debug.name": "Déboguer le fichier Harn actuel",
+  "harn.path": "Chemin vers le binaire harn",
+  "harn.lspPath": "Chemin vers le binaire du serveur de langage harn-lsp",
+  "harn.dapPath": "Chemin vers le binaire de l’adaptateur de débogage harn-dap",
+  "task.command": "La sous-commande harn à invoquer.",
+  "task.file": "Chemin vers un script .harn. Par défaut, le fichier actuel lorsqu’il est omis.",
+  "task.args": "Arguments supplémentaires ajoutés après le chemin du fichier.",
+  "task.cwd": "Répertoire de travail pour le processus lancé."
+}

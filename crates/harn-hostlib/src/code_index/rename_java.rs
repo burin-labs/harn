@@ -12,6 +12,36 @@ pub(super) struct RenameSites {
     pub shadows: Vec<ShadowSite>,
 }
 
+pub(super) fn is_constructor(tree: &Tree, source: &str, seed: &Node) -> bool {
+    let positions = super::source_positions::LineIndex::new(source);
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+        if matches!(
+            node.kind(),
+            "constructor_declaration" | "compact_constructor_declaration"
+        ) {
+            if let Some(name) = node.child_by_field_name("name") {
+                let line = seed.line as usize;
+                if (node.start_position().row + 1 == line || name.start_position().row + 1 == line)
+                    && source.get(name.byte_range()) == Some(seed.name.as_str())
+                    && seed.col.is_some_and(|col| {
+                        positions
+                            .position(name.start_byte(), super::source_positions::Encoding::Utf16)
+                            .character
+                            + 1
+                            == col
+                    })
+                {
+                    return true;
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        pending.extend(node.named_children(&mut cursor));
+    }
+    false
+}
+
 pub(super) fn check_new_name(name: &str) -> Result<(), String> {
     if crate::ast::java::is_object_method(name) {
         Err("the proposed Java name may change an Object dispatch contract".into())
@@ -49,7 +79,9 @@ pub(super) fn sites(
     let mut selected = Vec::new();
     let positions = super::source_positions::LineIndex::new(source);
     for span in targets {
-        let occurrence = occurrence(&bindings, tree, path, &span)?;
+        let Some(occurrence) = occurrence(&bindings, tree, path, &span)? else {
+            continue;
+        };
         if occurrence.is_declaration
             && occurrence.owner.as_deref() == Some(owner)
             && (path != seed.path.as_ref()
@@ -87,7 +119,9 @@ pub(super) fn sites(
         let name = source
             .get(span.start_byte..span.end_byte)
             .ok_or("the Java shadow occurrence has no source text")?;
-        let occurrence = occurrence(&bindings, tree, path, &span)?;
+        let Some(occurrence) = occurrence(&bindings, tree, path, &span)? else {
+            continue;
+        };
         if matches_owner(state, owner, name, occurrence, path, &span)? {
             selected_shadows.push(shadow);
         }
@@ -109,7 +143,7 @@ fn occurrence(
     tree: &Tree,
     path: &str,
     span: &IdentifierSpan,
-) -> Result<Occurrence, String> {
+) -> Result<Option<Occurrence>, String> {
     let node = tree
         .root_node()
         .named_descendant_for_byte_range(span.start_byte, span.end_byte)
@@ -121,19 +155,26 @@ fn occurrence(
     {
         match parent.kind() {
             "method_declaration" => {
-                return Ok(Occurrence {
+                return Ok(Some(Occurrence {
                     owner: bindings.declaration_owner(parent),
                     is_declaration: true,
                     closed_dispatch: bindings.method_has_closed_dispatch(parent),
-                });
+                }));
             }
             "method_invocation" => {
-                return Ok(Occurrence {
+                return Ok(Some(Occurrence {
                     owner: bindings.receiver_owner(parent),
                     is_declaration: false,
                     closed_dispatch: false,
-                });
+                }));
             }
+            "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration"
+            | "constructor_declaration"
+            | "compact_constructor_declaration" => return Ok(None),
             _ => {}
         }
     }

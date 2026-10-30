@@ -11,11 +11,13 @@
 //!
 //! - `applied`     — the rename succeeded (or, with `dry_run`, would).
 //! - `conflict`    — `new_name` already exists as an identifier in at
-//!   least one file the rename would have touched.
+//!   least one file the rename would have touched, or in a Go sibling
+//!   whose package scope may be affected by the new declaration.
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
 //! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
 //!   or an occurrence cannot be proved to refer to the seed binding.
-//! - `unsupported_language` — at least one in-scope file uses a grammar
+//! - `unsupported_language` — the requested language-specific rename is unsupported,
+//!   or at least one in-scope file uses a grammar
 //!   that does not have an identifier table here yet.
 //! - `syntax_error` — a rewritten file failed re-parse with `validate=true`.
 //! - `invalid_identifier` — `new_name` is empty / shaped wrong for any
@@ -220,17 +222,59 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             "must start with a letter or underscore and consist of identifier characters",
         ));
     }
-
-    // Java type references and public-type file moves are not yet represented
-    // by the rename planner; changing only the declaration breaks callers.
-    if seed_node.language == "java" && seed_node.kind == NodeKind::Type {
-        return Ok(ambiguous_response_with_details(
+    // Constructors are type-renaming seeds, not independent method renames.
+    let java_constructor = if seed_node.language == "java"
+        && seed_node.kind == NodeKind::Function
+        && state.symbols.nodes_named(&seed_node.name).iter().any(|id| {
+            state
+                .symbols
+                .node(*id)
+                .is_some_and(|node| node.kind == NodeKind::Type && node.path == seed_node.path)
+        }) {
+        if seed_node.col.is_none() {
+            return Ok(emit_response(
+                &env,
+                "unsupported_language",
+                ResponseExtras {
+                    details: "Java type and constructor renames are not supported: the declaration position is unavailable; no files changed".into(),
+                    fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
+                    ..Default::default()
+                },
+            ));
+        }
+        let source = read_source(BUILTIN, &state.root, &seed_path, session_id.as_deref())?;
+        let tree = match ast_api::parse_tree(&source, Language::Java) {
+            Ok(tree) => tree,
+            Err(err) => {
+                return Ok(syntax_error_response(
+                    &env,
+                    format!("`{seed_path}` failed to parse: {err}"),
+                ))
+            }
+        };
+        if tree.root_node().has_error() {
+            return Ok(syntax_error_response(
+                &env,
+                format!("`{seed_path}` does not parse before the edit"),
+            ));
+        }
+        super::rename_java::is_constructor(&tree, &source, seed_node)
+    } else {
+        false
+    };
+    if seed_node.language == "java" && (seed_node.kind == NodeKind::Type || java_constructor) {
+        return Ok(emit_response(
             &env,
-            "rename aborted without writes: Java type references and public-type file moves cannot yet be proven by this rename path",
+            "unsupported_language",
+            ResponseExtras {
+                details: "Java type and constructor renames are not supported: references and public-type file moves cannot yet be proven; no files changed".into(),
+                fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
+                ..Default::default()
+            },
         ));
     }
 
-    let in_scope_files = files_in_scope(
+    let mut in_scope_files = files_in_scope(
         state,
         scope,
         &symbol_name,
@@ -279,6 +323,81 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
     env.backend.syntax_tree = true;
+
+    if is_rename && seed_node.language == "go" && matches!(new_name.as_str(), "_" | "init") {
+        return Ok(invalid_identifier_response(
+            &env,
+            "Go's blank identifier and init cannot be used as rename targets",
+        ));
+    }
+
+    let check_go_package = is_rename
+        && seed_node.language == "go"
+        && matches!(seed_node.kind, NodeKind::Function | NodeKind::Type);
+    let go_proof = if check_go_package {
+        match super::rename_go::inspect(
+            &state.root,
+            &seed_path,
+            &new_name,
+            session_id.as_deref(),
+            Some(&call),
+        ) {
+            Ok((package_shadows, _)) if !package_shadows.is_empty() => {
+                return Ok(conflict_response(&env, &package_shadows));
+            }
+            Ok((_, mut proof)) => {
+                if scope != Scope::Workspace {
+                    if let Err(detail) = proof.cover_scope(&in_scope_files, &symbol_name, &call) {
+                        if let Some(interrupt) = call.interrupted() {
+                            return Ok(interrupted_response(&env, interrupt, false));
+                        }
+                        return Ok(ambiguous_response_with_details(
+                            &env,
+                            &format!("rename aborted without writes: {detail}"),
+                        ));
+                    }
+                }
+                if let Err(detail) = proof.cover_workspace(
+                    &state.root,
+                    &symbol_name,
+                    &new_name,
+                    session_id.as_deref(),
+                    &call,
+                ) {
+                    if let Some(interrupt) = call.interrupted() {
+                        return Ok(interrupted_response(&env, interrupt, false));
+                    }
+                    return Ok(ambiguous_response_with_details(
+                        &env,
+                        &format!("rename aborted without writes: {detail}"),
+                    ));
+                }
+                Some(proof)
+            }
+            Err(detail) => {
+                if let Some(interrupt) = call.interrupted() {
+                    return Ok(interrupted_response(&env, interrupt, false));
+                }
+                return Ok(emit_response(
+                    &env,
+                    "refused",
+                    ResponseExtras {
+                        details: format!("Go package could not be inspected; rename aborted without writes: {detail}"),
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    if scope == Scope::Workspace {
+        if let Some(proof) = &go_proof {
+            in_scope_files.extend(proof.members().cloned());
+            in_scope_files.sort();
+            in_scope_files.dedup();
+        }
+    }
 
     // The identifier rewrite below would otherwise silently rename both
     // definitions and their unrelated uses.
@@ -381,6 +500,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         }
 
+        if language == Language::Go
+            && go_proof.is_some()
+            && targets.is_empty()
+            && path != &seed_path
+        {
+            continue;
+        }
+
         if !local_shadows.is_empty() {
             shadows.extend(local_shadows);
             continue;
@@ -413,6 +540,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                     state,
                     node: seed_node,
                     name: &symbol_name,
+                    go_package: go_proof.as_ref(),
                 },
                 path,
                 language,
@@ -461,7 +589,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let failed = if dry_run {
         Vec::new()
     } else {
-        match commit(&env, &call, &state.root, &plans, session_id.as_deref())? {
+        match commit(
+            &env,
+            &call,
+            &state.root,
+            &plans,
+            session_id.as_deref(),
+            go_proof.as_ref(),
+        )? {
             Ok(failed) => failed,
             Err(stopped) => return Ok(stopped),
         }
@@ -583,8 +718,19 @@ fn commit(
     root: &Path,
     plans: &[FilePlan],
     session_id: Option<&str>,
+    go_proof: Option<&super::rename_go::PackageProof>,
 ) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
     let committed = call.commit(BUILTIN, |writes| {
+        if go_proof.is_some_and(|proof| !proof.unchanged(root, session_id)) {
+            return Ok(Err(emit_response(
+                env,
+                "refused",
+                ResponseExtras {
+                    details: "rename stopped without writes: the Go package changed after the rename read it; run it again".into(),
+                    ..Default::default()
+                },
+            )));
+        }
         let changed =
             super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
         if changed.is_empty() {

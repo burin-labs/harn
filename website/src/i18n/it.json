@@ -1,0 +1,232 @@
+{
+  "common": {
+    "siteName": "Harn",
+    "github": "GitHub",
+    "language": "Lingua"
+  },
+  "keywords": {
+    "pipeline": "Dichiara una pipeline nominata: un'unità di lavoro dell'agente di primo livello e ripetibile.",
+    "fn": "Definisce una funzione.",
+    "let": "Associa un valore locale.",
+    "parallel": "Esegue le iterazioni in parallelo e ne unisce i risultati.",
+    "for": "Itera su una raccolta in ordine.",
+    "in": "Nomina la raccolta da cui un ciclo attinge.",
+    "retry": "Riesegue il blocco in caso di errore, fino al numero indicato di volte.",
+    "spawn": "Avvia un'attività concorrente che puoi attendere in seguito.",
+    "llm_call": "Chiama un modello. Il primo argomento è il prompt, il secondo è il prompt di sistema.",
+    "log": "Scrive un valore nel registro di esecuzione.",
+    "read_file": "Legge un file tramite l'harness, una capacità verificata prima dell'esecuzione.",
+    "tool_select": "Sceglie quale strumento il modello deve chiamare successivamente.",
+    "if": "Esegue il blocco quando la condizione è vera.",
+    "else": "Esegue quando la condizione if corrispondente è falsa.",
+    "while": "Ripete il blocco mentre la condizione è vera.",
+    "return": "Restituisce un valore dalla funzione o dalla pipeline.",
+    "break": "Esce dal ciclo più vicino.",
+    "continue": "Salta alla successiva iterazione del ciclo."
+  },
+  "banner": {
+    "label": "Anteprima",
+    "prerelease": "Harn è pre-1.0 — il linguaggio, la libreria standard e la CLI possono cambiare tra le release.",
+    "changelogLink": "Vedi le note di rilascio"
+  },
+  "nav": {
+    "mainNavAria": "Principale",
+    "brandHomeAria": "Home di Harn",
+    "docs": "Documentazione",
+    "reference": "Riferimento",
+    "search": "Cerca",
+    "searchAria": "Cerca nella documentazione",
+    "cmdK": "⌘K",
+    "githubAria": "Harn su GitHub"
+  },
+  "theme": {
+    "toLight": "Passa alla modalità chiara",
+    "toDark": "Passa alla modalità scura"
+  },
+  "search": {
+    "placeholder": "Cerca nella documentazione…",
+    "esc": "esc",
+    "loading": "Caricamento…",
+    "noResults": "Nessun risultato."
+  },
+  "footer": {
+    "tagline": "Il linguaggio orientato alle pipeline per costruire e gestire agenti AI.",
+    "docsTitle": "Documentazione",
+    "projectTitle": "Progetto",
+    "communityTitle": "Community",
+    "introduction": "Introduzione",
+    "gettingStarted": "Per iniziare",
+    "languageReference": "Riferimento del linguaggio",
+    "cookbook": "Cookbook",
+    "llmsTxt": "llms.txt",
+    "github": "GitHub",
+    "releases": "Release",
+    "playground": "Playground",
+    "issues": "Problemi",
+    "discussions": "Discussioni",
+    "contributing": "Contribuire",
+    "copyright": "© {year} Burin Labs. Harn è open source."
+  },
+  "notFound": {
+    "code": "404",
+    "title": "Pagina non trovata",
+    "body": "Questa pagina non esiste. Potrebbe essere stata spostata, quindi prova a cercare oppure torna alla documentazione.",
+    "toDocs": "Vai alla documentazione",
+    "toHome": "Home"
+  },
+  "docs": {
+    "previous": "Precedente",
+    "next": "Successivo",
+    "pagerAria": "Pagina precedente e successiva",
+    "onThisPage": "In questa pagina",
+    "editOnGitHub": "Modifica questa pagina su GitHub",
+    "sectionsAria": "Sezioni della documentazione",
+    "sidebarAria": "Pagine della documentazione",
+    "breadcrumbAria": "Percorso di navigazione",
+    "onThisPageAria": "In questa pagina",
+    "skipToContent": "Salta al contenuto"
+  },
+  "diagram": {
+    "expand": "Espandi diagramma",
+    "overlayAria": "Visualizzatore del diagramma",
+    "zoomIn": "Ingrandisci",
+    "zoomOut": "Riduci",
+    "resetZoom": "Adatta il diagramma allo schermo",
+    "resetZoomLabel": "Adatta",
+    "close": "Chiudi il visualizzatore del diagramma"
+  },
+  "mockup": {
+    "aria": "Una definizione di pipeline Harn in esecuzione come agente live",
+    "fileLabel": "review.harn",
+    "runLabel": "harn run",
+    "thought": "Lettura del diff per crates/harn-vm…",
+    "toolCall": "llm_call · claude-opus-4-8 · 2 tools",
+    "findingPrefix": "Segnalati 3 problemi: un unwrap non protetto in ",
+    "findingSymbol": "call_closure",
+    "findingSuffix": ", un controllo dei limiti mancante e uno snippet di documentazione obsoleto.",
+    "spawn": "spawn agent · deadline 30s",
+    "replay": "replay deterministico attivo",
+    "findings": "3 segnalazioni"
+  },
+  "landing": {
+    "hero": {
+      "headline": "Crea e gestisci agenti IA in un unico linguaggio.",
+      "subhead": "Harn è un linguaggio orientato alle pipeline per agenti IA. Chiamate LLM, strumenti, controlli delle capacità, passaggi durevoli e replay deterministico sono funzionalità del linguaggio e della libreria standard, non SDK da collegare manualmente.",
+      "getStarted": "Inizia",
+      "forAgents": "Per agenti",
+      "readDocs": "Leggi la documentazione",
+      "github": "GitHub",
+      "facts": [
+        "Open source, scritto in Rust",
+        "Replay deterministico",
+        "Sicuro per capacità per impostazione predefinita",
+        "Parla MCP, ACP e A2A"
+      ]
+    },
+    "examples": {
+      "sectionTitle": "Programmi completi, non frammenti",
+      "sectionBody": "Leggili per la struttura, non per l'argomento. In ciascuno il lavoro deterministico è codice ordinario e il programma decide quando un passaggio vale una chiamata al modello. Sono inclusi nel bundle di demo CLI e vengono eseguiti offline usando fixture registrate.",
+      "tablistAria": "Esempi Harn eseguibili",
+      "filesAria": "File di scenario",
+      "multiFileNote": "Questo scenario include più di un file. I prompt risiedono nei template .harn.prompt fratelli e vengono caricati con render_prompt, come è organizzato un vero progetto Harn.",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "copyAria": "Copia il sorgente del file",
+      "viewSource": "Visualizza sorgente",
+      "readDocs": "Leggi la documentazione",
+      "extendLabel": "Fallo tuo",
+      "scenarios": {
+        "review-captain": {
+          "tab": "Agente di code review",
+          "title": "Usa il modello solo per la decisione finale.",
+          "outcome": "Raccogliere il diff, contare le righe modificate e assemblare la ricevuta sono codice ordinario. Due passaggi richiedono un giudizio, quindi solo quelli diventano chiamate al modello. I prompt risiedono in file template separati.",
+          "extend": "Sostituisci il diff hard-coded con una chiamata alla tua forge e il sistema revisiona davvero le pull request. Modifica i prompt senza toccare il programma, oppure aggiungi una terza fase che blocca il merge quando il verdetto torna negativo."
+        },
+        "merge-captain": {
+          "tab": "Triage delle PR",
+          "title": "Trasforma una coda in decisioni su cui puoi agire.",
+          "outcome": "Ogni pull request viene classificata in merge, handoff o block, e torna come dati strutturati anziché come testo discorsivo, quindi il passaggio successivo è codice e non un altro prompt.",
+          "extend": "Puntalo alla tua coda reale e amplia l’insieme dei verdetti. Poiché ogni decisione è tipizzata, puoi instradarla: esegui il merge automatico di quelle sicure ed esala le altre."
+        },
+        "mcp-host": {
+          "tab": "Server MCP",
+          "title": "Supervisiona i server degli strumenti come parte del programma.",
+          "outcome": "Registrazione, snapshot di stato e arresto sono istruzioni ordinarie. Il ciclo di vita di un server di strumenti è qualcosa che appartiene al programma, non al deployment.",
+          "extend": "Registra i tuoi server e proteggili dietro una policy di capacità, così un ciclo autonomo non può raggiungere uno strumento che non gli hai consegnato."
+        },
+        "stdlib-toolkit": {
+          "tab": "Toolkit dei prompt",
+          "title": "Costruisci il contesto in modo deterministico, poi chiedi una sola volta.",
+          "outcome": "Clone, merge, deduplica, round-trip XML, wrap e indentazione sono chiamate di libreria. La parte costosa di un prompt è di solito assemblarlo, e per quell’assemblaggio non serve alcun modello.",
+          "extend": "Forniscigli le tue origini e mantieni l’assemblaggio nel codice. Meno contesto chiedi a un modello di ricostruire, più economica e ripetibile sarà l’esecuzione."
+        }
+      }
+    },
+    "features": {
+      "sectionTitle": "Il runtime degli agenti, integrato nel linguaggio",
+      "sectionBody": "Orchestrazione, sicurezza e osservabilità sono primitive in Harn e nella sua standard library, quindi si compongono invece di ostacolarsi a vicenda.",
+      "pipelines": {
+        "title": "Le pipeline sono di prima classe",
+        "description": "Componi il lavoro con l’operatore |> . Dati e flusso di controllo si leggono dall’alto verso il basso, e il compilatore traccia la forma di ogni fase."
+      },
+      "llms": {
+        "title": "LLM e strumenti, integrati",
+        "description": "llm_call, agent_loop, vault degli strumenti, MCP, reranking ed ensemble sono primitive del linguaggio, non un SDK aggiuntivo da assemblare a mano."
+      },
+      "capabilities": {
+        "title": "Sicurezza delle capacità a compile-time",
+        "description": "L’accesso al filesystem, alla rete e ai processi è soggetto a capacità verificate prima che venga eseguita una sola riga. Nessun effetto collaterale inatteso dentro un ciclo autonomo."
+      },
+      "replay": {
+        "title": "Replay deterministico",
+        "description": "Ogni esecuzione viene registrata e riprodotta. Torna indietro attraverso le decisioni di un agente, confronta due esecuzioni e rimuovi dal sistema il comportamento non deterministico."
+      },
+      "durable": {
+        "title": "Passi e trigger durevoli",
+        "description": "Metti in checkpoint il lavoro di lunga durata e riprendi dopo un crash. Avvia pipeline da cron, webhook, GitHub, Slack e altro ancora."
+      },
+      "protocols": {
+        "title": "Protocolli, nativi",
+        "description": "Parla MCP, ACP e A2A subito. Incorpora Harn in Rust, oppure eseguilo come server con harn serve."
+      }
+    },
+    "paths": {
+      "sectionTitle": "Trova il tuo percorso",
+      "sectionBody": "La documentazione è organizzata in base a ciò che stai cercando di fare.",
+      "explore": "Esplora",
+      "tutorials": {
+        "kicker": "Tutorial",
+        "title": "Impara costruendo",
+        "description": "Parti da zero e costruisci passo dopo passo un agente funzionante, un server MCP o una pipeline di valutazione."
+      },
+      "guides": {
+        "kicker": "Guide pratiche",
+        "title": "Porta a termine un compito",
+        "description": "Ricette per le cose di cui hai davvero bisogno: hook, canali, pool, refactor e altro."
+      },
+      "reference": {
+        "kicker": "Riferimento",
+        "title": "Consulta i dettagli",
+        "description": "Il riferimento completo di linguaggio, runtime, standard library, protocollo e CLI."
+      },
+      "explanation": {
+        "kicker": "Internals",
+        "title": "Comprendi il design",
+        "description": "Le ragioni dietro il confine dell’host, il sandboxing e le decisioni architetturali di Harn."
+      }
+    },
+    "cta": {
+      "title": "Scrivi la tua prima pipeline",
+      "body": "Installa la CLI, scrivi poche righe di Harn ed esegui un agente reale in pochi minuti.",
+      "getStarted": "Inizia",
+      "browseCookbook": "Sfoglia il cookbook"
+    }
+  },
+  "meta": {
+    "landingTitle": "Harn: il linguaggio orientato alle pipeline per l'orchestrazione di agenti AI",
+    "landingDescription": "Harn è un linguaggio orientato alle pipeline per costruire, orchestrare e gestire agenti AI. Tutorial, guide e un riferimento completo del linguaggio e del runtime.",
+    "notFoundTitle": "Pagina non trovata | {siteName}",
+    "notFoundDescription": "La pagina della documentazione Harn richiesta non è stata trovata.",
+    "docTitle": "{title} | {siteName}"
+  }
+}

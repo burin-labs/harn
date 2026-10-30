@@ -78,6 +78,8 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 struct StopOnHeartbeat {
     phases: Mutex<Vec<String>>,
     cancelled_at: Mutex<Option<Instant>>,
+    stop_detail: Option<&'static str>,
+    capture_handle: Option<Arc<Mutex<Option<harn_vm::tool_call_cancellations::Handle>>>>,
     /// When the loop reported the stopped call's terminal update.
     call_ended_at: Mutex<Option<Instant>>,
     /// Every terminal output of the call, so a failure says what it returned.
@@ -126,7 +128,15 @@ impl AgentEventSink for StopOnHeartbeat {
             .lock()
             .unwrap()
             .push(progress["phase"].as_str().unwrap_or_default().to_string());
-        let heartbeat = progress["elapsed_ms"].as_u64().unwrap_or_default() >= 1_000;
+        if progress["phase"].as_str() == Some("applying") {
+            if let Some(capture) = &self.capture_handle {
+                *capture.lock().unwrap() = harn_vm::tool_call_cancellations::lookup(SESSION, CALL);
+            }
+        }
+        let heartbeat = self.stop_detail.map_or_else(
+            || progress["elapsed_ms"].as_u64().unwrap_or_default() >= 1_000,
+            |detail| progress["detail"].as_str() == Some(detail),
+        );
         let mut cancelled_at = self.cancelled_at.lock().unwrap();
         if heartbeat && cancelled_at.is_none() {
             let outcome = harn_vm::tool_call_cancellations::cancel(
@@ -320,4 +330,196 @@ fn stopping_one_tool_call_stops_a_waiting_rename_without_writes() {
         before,
         "a stopped rename must leave every file byte-identical"
     );
+}
+
+#[test]
+fn stopping_a_go_workspace_census_leaves_the_package_unchanged() {
+    stop_go_census("checking Go workspace sources", false, false, "workspace");
+}
+
+#[test]
+fn stopping_a_go_package_census_leaves_the_package_unchanged() {
+    stop_go_census("checking Go package sources", false, false, "workspace");
+}
+
+#[test]
+fn stopping_a_go_scope_census_leaves_the_package_unchanged() {
+    stop_go_census("checking Go scope bindings", false, false, "file");
+}
+
+#[test]
+fn stopping_at_go_rename_commit_reports_the_write_and_stops_follow_on_work() {
+    stop_go_census("hostlib_code_index_rename_symbol", true, false, "workspace");
+}
+
+#[test]
+fn stopping_a_later_wait_after_go_rename_prevents_follow_on_work() {
+    stop_go_census("never-match", true, true, "workspace");
+}
+
+fn stop_go_census(
+    detail: &'static str,
+    expect_applied: bool,
+    stop_after_rename: bool,
+    scope: &str,
+) {
+    let workspace = tempfile::tempdir().unwrap();
+    fs::create_dir_all(workspace.path().join("src")).unwrap();
+    fs::write(
+        workspace.path().join("src/store.go"),
+        "package lab\ntype Reading struct{}\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.path().join("src/use.go"),
+        "package lab\nfunc Use(r *Reading) {}\n",
+    )
+    .unwrap();
+    std::env::set_current_dir(workspace.path()).unwrap();
+    let before = snapshot(workspace.path());
+    let root = workspace.path().to_string_lossy().replace('\\', "/");
+    let follow_on = format!("harness.fs.write_text(\"{root}/after-stop.txt\", \"unexpected\")");
+    let later_wait = if stop_after_rename {
+        "__test_wait_and_stop()"
+    } else {
+        ""
+    };
+    let captured_handle = Arc::new(Mutex::new(None::<harn_vm::tool_call_cancellations::Handle>));
+    let source = format!(
+        r#"import {{ agent_loop }} from "std/agent/loop"
+import {{ agent_tool_handler_result }} from "std/agent/tool_lifecycle"
+pipeline main(harness: Harness, _: unknown) {{
+  harness.code_index.rebuild({{root: "{root}"}})
+  harness.tools.clear_hooks()
+  const tools = tool_define(tool_registry(), "rename_tool", "Rename Reading.", {{
+    parameters: {{}},
+    handler: {{ _args ->
+      try {{
+        const renamed = harness.code_index.rename_symbol({{symbol_ref: {{name: "Reading", path: "src/store.go", kind: "Type"}}, new_name: "Measurement", scope: "{scope}", backend: "syntax_tree"}})
+        {later_wait}
+        {follow_on}
+        return agent_tool_handler_result(json_stringify(renamed), renamed)
+      }} catch (error) {{
+        {follow_on}
+        throw error
+      }}
+    }},
+  }})
+  const counter = harness.runtime.shared_cell({{scope: "task_group", key: "go-rename-stop", initial: 0}})
+  const mock_llm = {{ _call ->
+    const snap = harness.runtime.shared_snapshot(counter)
+    harness.runtime.shared_cas(counter, snap, snap.value + 1)
+    if snap.value == 0 {{
+      return {{ok: true, value: {{text: "", tool_calls: [{{id: "{CALL}", name: "rename_tool", arguments: {{}}}}], provider: "mock", model: "mock"}}}}
+    }}
+    return {{ok: true, value: {{text: "stopped ##DONE##", tool_calls: [], provider: "mock", model: "mock"}}}}
+  }}
+  const result = agent_loop(harness, "rename it", nil, {{
+    provider: "mock", tools: tools, tool_format: "native", max_iterations: 4,
+    loop_until_done: true, session_id: "{SESSION}", llm_caller: mock_llm,
+  }})
+  let cancelled = false
+  let applied = false
+  let changed_before_stop = false
+  for msg in transcript_messages(result.transcript) {{
+    if contains(to_string(msg?.content ?? ""), "cancelled call to rename_tool") {{ cancelled = true }}
+    if contains(to_string(msg?.content ?? ""), "Files changed before stopping:") && contains(to_string(msg?.content ?? ""), "store.go") && contains(to_string(msg?.content ?? ""), "use.go") {{ changed_before_stop = true }}
+    const data = msg?._harn?.data
+    if data != nil && data?.result == "cancelled" && data?.applied == false && data?.touched_files != nil && len(data.touched_files) == 0 {{ cancelled = true }}
+    if data != nil && data?.result == "applied" && data?.applied == true && data?.touched_files != nil && len(data.touched_files) == 2 {{ applied = true }}
+  }}
+  harness.stdio.log("cancelled=" + to_string(cancelled))
+  harness.stdio.log("applied=" + to_string(applied))
+  harness.stdio.log("changed_before_stop=" + to_string(changed_before_stop))
+}}
+"#
+    );
+    let chunk = harn_vm::compile_source(&source).expect("compile");
+    let sink = Arc::new(StopOnHeartbeat {
+        stop_detail: Some(detail),
+        capture_handle: stop_after_rename.then_some(Arc::clone(&captured_handle)),
+        ..Default::default()
+    });
+    harn_vm::agent_events::register_sink(SESSION, sink.clone());
+    let output = harn_vm::on_vm_stack(|| {
+        let rt = harn_clock::test_support::current_thread_runtime();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async {
+            harn_vm::llm::install_current_host_bridge(Arc::new(
+                harn_vm::bridge::HostBridge::from_parts(
+                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    Arc::new(Mutex::new(())),
+                    1,
+                ),
+            ));
+            harn_vm::stdlib::process::set_session_environment(Some(
+                harn_vm::security::SessionEnvironment::inherited(),
+            ));
+            harn_vm::orchestration::push_execution_policy(
+                harn_vm::orchestration::CapabilityPolicy {
+                    sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
+                    ..Default::default()
+                },
+            );
+            let mut vm = harn_vm::new_vm();
+            harn_runtime::register_vm_stdlib(&mut vm);
+            let _ = harn_hostlib::install_default(&mut vm);
+            vm.set_harness(harn_vm::Harness::real());
+            vm.register_async_builtin("__test_wait_and_stop", move |_ctx, _args| {
+                let captured_handle = Arc::clone(&captured_handle);
+                async move {
+                    let handle = captured_handle
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .expect("live call handle");
+                    assert!(handle.cancel("person stopped the later wait", false));
+                    std::future::pending::<Result<harn_vm::VmValue, harn_vm::VmError>>().await
+                }
+            });
+            let result =
+                harn_clock::test_support::within("stopped rename handler", vm.execute(&chunk))
+                    .await;
+            harn_vm::orchestration::pop_execution_policy();
+            harn_vm::stdlib::process::set_session_environment(None);
+            harn_vm::llm::clear_current_host_bridge();
+            result.expect("script runs");
+            vm.output().to_string()
+        }))
+    });
+    harn_vm::agent_events::clear_session_sinks(SESSION);
+    eprintln!(
+        "output {output}\nphases {:?}\ncall outputs {:?}",
+        sink.phases.lock().unwrap(),
+        sink.call_outputs.lock().unwrap()
+    );
+    if !stop_after_rename {
+        assert!(
+            sink.cancelled_at.lock().unwrap().is_some(),
+            "Go census progress was never reached"
+        );
+    }
+    assert!(
+        !workspace.path().join("after-stop.txt").exists(),
+        "the tool performed a second mutation after the stop"
+    );
+    if expect_applied {
+        assert!(output.contains("cancelled=true"), "{output}");
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("src/store.go")).unwrap(),
+            "package lab\ntype Measurement struct{}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("src/use.go")).unwrap(),
+            "package lab\nfunc Use(r *Measurement) {}\n"
+        );
+        assert!(output.contains("changed_before_stop=true"), "{output}");
+    } else {
+        assert!(output.contains("cancelled=true"), "{output}");
+        assert_eq!(
+            snapshot(workspace.path()),
+            before,
+            "stopped rename changed files"
+        );
+    }
 }

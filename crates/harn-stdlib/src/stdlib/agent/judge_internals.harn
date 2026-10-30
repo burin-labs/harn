@@ -783,6 +783,8 @@ pub fn __completion_gate_combine_verify(verify: any) {
 /** What a deterministic verifier oracle was observed to do, or that it did not run. */
 pub type CompletionVerificationObservation = "passed" | "failed" | "not_run"
 
+pub type CompletionVerificationDiscovery = {state: "unavailable", detail: string}
+
 /**
  * The deterministic completion gate's own reading of the verifier oracle for one
  * boundary. It is threaded onto the evidence snapshot so a model judge is SHOWN
@@ -798,6 +800,7 @@ pub type CompletionVerificationState = {
   command: string,
   observed: CompletionVerificationObservation,
   observed_at_evidence_index?: int?,
+  discovery?: CompletionVerificationDiscovery?,
 }
 
 /**
@@ -888,11 +891,25 @@ pub fn __completion_verification_state_read(value: unknown) -> CompletionVerific
   if observed == nil {
     return nil
   }
+  const command = to_string(value?.command ?? "")
+  const has_oracle = value?.oracle_expected == true || trim(command) != "" || observed != "not_run"
+  const discovery = if value?.discovery == nil || has_oracle {
+    nil
+  } else {
+    const reading = unwrap(
+      schema_parse(value.discovery, schema_of(CompletionVerificationDiscovery)),
+    )
+    if trim(reading.detail) == "" {
+      throw "verification discovery detail must name what could not be read"
+    }
+    reading
+  }
   return {
     oracle_expected: value?.oracle_expected == true,
-    command: to_string(value?.command ?? ""),
+    command: command,
     observed: observed,
     observed_at_evidence_index: nil,
+    discovery: discovery,
   }
 }
 

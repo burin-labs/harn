@@ -1,0 +1,17 @@
+{
+  "displayName": "Lenguaje Harn",
+  "description": "Compatibilidad de lenguaje para Harn — el lenguaje orientado a canalizaciones para agentes de IA",
+  "harn.runPipeline": "Harn: Ejecutar canalización",
+  "harn.formatFile": "Harn: Dar formato al archivo",
+  "harn.applyAllAutofixes": "Harn: Aplicar todas las correcciones automáticas",
+  "debug.program": "Ruta al archivo .harn para depurar",
+  "debug.cwd": "Directorio de trabajo para la sesión de depuración",
+  "debug.name": "Depurar el archivo Harn actual",
+  "harn.path": "Ruta al binario de harn",
+  "harn.lspPath": "Ruta al binario del servidor de lenguaje harn-lsp",
+  "harn.dapPath": "Ruta al binario del adaptador de depuración harn-dap",
+  "task.command": "El subcomando de harn a invocar.",
+  "task.file": "Ruta a un script .harn. De forma predeterminada, usa el archivo actual cuando se omite.",
+  "task.args": "Argumentos adicionales añadidos después de la ruta del archivo.",
+  "task.cwd": "Directorio de trabajo para el proceso generado."
+}

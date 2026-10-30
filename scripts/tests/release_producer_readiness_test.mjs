@@ -80,6 +80,44 @@ test('the owning reader uses the producing attempt and refuses partial authentic
     {ok:true,json:async()=>({total_count:jobs.length+1,jobs})}:read(url,options)),/census_unmeasured/);
 });
 
+test('historical source admission reads the exact manifest bytes under its main build policy',async()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-historical-producer-'));
+  try {
+    const policy='c'.repeat(40);
+    const historicalRun={...run,head_sha:policy,event:'workflow_dispatch'};
+    const historicalJobs=jobs.map(job=>({...job,head_sha:policy}));
+    const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository:'burin-labs/harn',
+      sourceCommit:source,runId:'42',runAttempt:'1',artifacts:[]};
+    fs.writeFileSync(path.join(scratch,'candidate-manifest.json'),JSON.stringify(manifest));
+    execFileSync('zip',['-j',path.join(scratch,'manifest.zip'),path.join(scratch,'candidate-manifest.json')]);
+    const bytes=fs.readFileSync(path.join(scratch,'manifest.zip'));
+    const historicalArtifacts=artifacts.map(item=>({...item,workflow_run:{id:42,head_sha:policy},
+      ...(item.name===`candidate-manifest-${source}`?{size_in_bytes:bytes.length,
+        digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}:{})}));
+    const read=async(url)=>{
+      if(url.endsWith('/zip')) return {ok:true,arrayBuffer:async()=>bytes};
+      const record=url.includes('/compare/')?{status:'ahead',merge_base_commit:{sha:source}}:
+        url.includes('/jobs')?{total_count:historicalJobs.length,jobs:historicalJobs}:
+        url.includes('/artifacts')?{total_count:historicalArtifacts.length,artifacts:historicalArtifacts}:historicalRun;
+      return {ok:true,json:async()=>record};
+    };
+    const proof=await githubArchiveProducer('fixture-read',request,read);
+    assert.equal(proof.verdict,'pass');
+    assert.equal(proof.source_sha,source);
+    for(const change of [{sourceCommit:policy},{runId:'43'},{runAttempt:'2'},
+      {repository:'foreign/harn'},{schemaVersion:'unknown'}]) {
+      await assert.rejects(githubArchiveProducer('fixture-read',request,read,()=>({...manifest,...change})),/identity_unproven/);
+    }
+    await assert.rejects(githubArchiveProducer('fixture-read',request,async(url)=>url.includes('/compare/')?
+      {ok:true,json:async()=>({status:'diverged',merge_base_commit:{sha:source}})}:read(url)),/identity_unproven/);
+    await assert.rejects(githubArchiveProducer('fixture-read',request,async(url)=>url.endsWith('/zip')?
+      {ok:true,arrayBuffer:async()=>Buffer.from('different artifact')}:read(url)),/digest_mismatch/);
+    assert.throws(()=>qualifyArchiveProducer(historicalRun,historicalJobs,historicalArtifacts,request,targets),/identity_unproven/);
+  } finally {
+    fs.rmSync(scratch,{recursive:true,force:true});
+  }
+});
+
 test('actual admission permits a pending audit only for its own live candidate',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-candidate-admission-'));
   try {

@@ -1,0 +1,17 @@
+{
+  "displayName": "Harn 语言",
+  "description": "为 Harn 提供语言支持 — 面向 AI 智能体的流水线式语言",
+  "harn.runPipeline": "Harn: 运行流水线",
+  "harn.formatFile": "Harn: 格式化文件",
+  "harn.applyAllAutofixes": "Harn: 应用所有自动修复",
+  "debug.program": "要调试的 .harn 文件路径",
+  "debug.cwd": "调试会话的工作目录",
+  "debug.name": "调试当前 Harn 文件",
+  "harn.path": "harn 二进制文件路径",
+  "harn.lspPath": "harn-lsp 语言服务器二进制文件路径",
+  "harn.dapPath": "harn-dap 调试适配器二进制文件路径",
+  "task.command": "要调用的 harn 子命令。",
+  "task.file": ".harn 脚本的路径。省略时默认为当前文件。",
+  "task.args": "在文件路径后追加的额外参数。",
+  "task.cwd": "所生成进程的工作目录。"
+}

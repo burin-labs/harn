@@ -64,6 +64,16 @@ test("the actual VSIX resolves runtime dependencies without packaging tools", as
   const manifest = JSON.parse(fs.readFileSync(path.join(packagedRoot, "package.json")));
   const entry = path.resolve(packagedRoot, manifest.main);
   assert.ok(fs.existsSync(entry), "the packaged activation entry exists");
+  const english = JSON.parse(fs.readFileSync(path.join(packagedRoot, "package.nls.json")));
+  const runtime = JSON.parse(fs.readFileSync(path.join(packagedRoot, "l10n/bundle.l10n.json")));
+  for (const locale of ["es", "fr", "de", "pt-br", "it", "ja", "ko", "zh-cn"]) {
+    const labels = JSON.parse(fs.readFileSync(path.join(packagedRoot, `package.nls.${locale}.json`)));
+    const messages = JSON.parse(fs.readFileSync(path.join(packagedRoot, `l10n/bundle.l10n.${locale}.json`)));
+    assert.deepEqual(Object.keys(labels).sort(), Object.keys(english).sort());
+    assert.deepEqual(Object.keys(messages).sort(), Object.keys(runtime).sort());
+    assert.notEqual(messages["Open a .harn file first"], runtime["Open a .harn file first"]);
+    assert.equal(manifest.l10n, "./l10n");
+  }
   const packagedRequire = createRequire(entry);
   assert.match(fs.readFileSync(entry, "utf8"), /require\("vscode-languageclient\/node"\)/);
   assert.ok(

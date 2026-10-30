@@ -61,6 +61,12 @@ editors/vscode/syntaxes/harn-prompt.tmLanguage.json -merge
 tree-sitter-harn/grammar/keywords.js -merge
 tree-sitter-harn/grammar/precedence.js -merge
 tree-sitter-harn/src/** -merge
+crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/** -merge
+crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/** -merge
+crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/parser.c linguist-generated=true
+crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/parser.c linguist-generated=true
+crates/harn-grammars/vendor/tree-sitter-typescript/typescript/src/*.json linguist-generated=true
+crates/harn-grammars/vendor/tree-sitter-typescript/tsx/src/*.json linguist-generated=true
 crates/harn-hostlib/data/grammar-fitness/receipt.v1.json -merge
 spec/protocol-artifacts/harn-protocol.rs -merge
 spec/protocol-artifacts/harn-protocol.ts -merge

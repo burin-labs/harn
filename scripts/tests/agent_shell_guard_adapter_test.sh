@@ -123,6 +123,78 @@ for heredoc_payload in \
   fi
 done
 
+# The verdict must not depend on the caller's directory. `git -C <repo>` with a
+# backslash in the command resolves `worktree` through the alias lookup, which
+# runs git inside the interpreter sandbox. That sandbox used to read only the
+# caller's directory tree, so from a subdirectory the lookup exited 128 and the
+# command was refused with the stash message.
+cwd_repo="$repo_root"
+cat >"$fixture_root/standalone-harn" <<'SH'
+#!/usr/bin/env bash
+exec "$STANDALONE_GUARD_RUNTIME" "$@"
+SH
+chmod +x "$fixture_root/standalone-harn"
+printf '%s\n' 'harn-run-standalone-v1' >"$fixture_root/standalone-harn.standalone-v1"
+cwd_guard() {
+  env -u HARN_BIN STANDALONE_GUARD_RUNTIME="$HARN_BIN" \
+    AGENT_SHELL_GUARD_HARN_BIN="$fixture_root/standalone-harn" \
+    "$fixture_root/scripts/agent-shell-guard.sh"
+}
+cwd_read='{"tool_name":"Bash","tool_input":{"command":"gh pr view 1; git -C '"$cwd_repo"' worktree list | grep -i \"a\\|b\""}}'
+cwd_stash='{"tool_name":"Bash","tool_input":{"command":"git stash push"}}'
+for cwd_caller in "$cwd_repo" "$cwd_repo/scripts/tests"; do
+  cwd_allowed="$(cd "$cwd_caller" && printf '%s' "$cwd_read" | cwd_guard)"
+  if [[ -n "$cwd_allowed" ]]; then
+    echo "adapter refused an ordinary read from $cwd_caller" >&2
+    printf '%s\n' "$cwd_allowed" >&2
+    exit 1
+  fi
+  # The other side: the real stash rule still fires from the same directory.
+  cwd_denied="$(cd "$cwd_caller" && printf '%s' "$cwd_stash" | cwd_guard)"
+  if [[ "$cwd_denied" != *'"permissionDecision":"deny"'* ]] \
+    || [[ "$cwd_denied" != *'is refused: the stash list'* ]]; then
+    echo "adapter did not refuse git stash from $cwd_caller" >&2
+    printf '%s\n' "$cwd_denied" >&2
+    exit 1
+  fi
+done
+# A lookup git cannot complete is a guard fault, never a stash refusal.
+cwd_fault="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git -C /nonexistent-guard-target s"}}' | cwd_guard)"
+if [[ "$cwd_fault" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$cwd_fault" != *'guard fault'* ]] \
+  || [[ "$cwd_fault" == *'is refused: the stash list'* ]]; then
+  echo "adapter reported an alias lookup fault as a stash refusal" >&2
+  printf '%s\n' "$cwd_fault" >&2
+  exit 1
+fi
+
+# A repository whose path holds spaces, reached from a directory outside it, and a
+# linked worktree whose `.git` pointer is relative, must both stay readable. Each
+# is built outside the caller's directory tree, so only a granted read root can
+# make the alias lookup succeed; a truncated path or a pointer resolved against
+# the caller's directory leaves it unreadable and the command is refused.
+spaced_base="$repo_root/guard path test $$"
+spaced_caller="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$fixture_root" "$order_root" "$spaced_base" "$spaced_caller"' EXIT
+mkdir -p "$spaced_base"
+git -C "$spaced_base" init -q -b main "main repo"
+git -C "$spaced_base/main repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+git -C "$spaced_base/main repo" worktree add -q --detach "$spaced_base/linked tree"
+printf 'gitdir: ../main repo/.git/worktrees/linked-tree\n' >"$spaced_base/linked tree/.git"
+for spaced_target in "$spaced_base/main repo" "$spaced_base/linked tree"; do
+  for quoting in "'$spaced_target'" "\"$spaced_target\""; do
+    spaced_command="git -C $quoting s | grep -i \"a\\|b\""
+    spaced_payload="$(jq -cn --arg command "$spaced_command" '{tool_name:"Bash",tool_input:{command:$command}}')"
+    spaced_allowed="$(cd "$spaced_caller" && printf '%s' "$spaced_payload" | cwd_guard)"
+    if [[ -n "$spaced_allowed" ]]; then
+      echo "adapter refused a read of $spaced_target" >&2
+      printf '%s\n' "$spaced_allowed" >&2
+      exit 1
+    fi
+  done
+done
+rm -rf "$spaced_base" "$spaced_caller"
+
 discarded_blocked="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \
@@ -135,103 +207,29 @@ if [[ "$discarded_blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
-# The worktree rule answers differently depending on whether the repository the
-# guard is vendored in owns an admission command. The wrapper measures its own
-# tree, so both directions need their own fixture root rather than a different
-# payload, and both are exercised end to end through the adapter.
-# The rule answers for the repository the command targets, so each direction
-# points `-C` at a root this test built and knows the answer for. A repository
-# marker is what the wrapper walks up to find, and both roots need one before
-# they can be measured at all.
-mkdir -p "$fixture_root/.git"
-
-admitted_root="$(cd "$(mktemp -d)" && pwd -P)"
-trap 'rm -rf "$admitted_root"' EXIT
-mkdir -p "$admitted_root/scripts" "$admitted_root/.git"
-cp "$repo_root/scripts/agent-shell-guard.sh" "$admitted_root/scripts/"
-cp "$repo_root/scripts/agent_shell_guard.harn" "$admitted_root/scripts/"
-cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$admitted_root/scripts/"
-printf '// admission\n' >"$admitted_root/scripts/fleet-worktree-admit.ts"
-worktree_blocked="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $admitted_root worktree add ../unowned origin/main'\"}}" \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$worktree_blocked" != *'fleet-worktree-admit'* ]]; then
-  echo "adapter did not route nested raw worktree creation to Fleet admission" >&2
-  printf '%s\n' "$worktree_blocked" >&2
-  exit 1
-fi
-
-# The same command where the guard's own repository owns no admission command
-# must be allowed. Naming a command the operator cannot run is the failure this
-# direction guards, and an empty verdict is how the adapter says "allowed".
-worktree_allowed="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -lc 'git -C $fixture_root worktree add ../unowned origin/main'\"}}" \
+# Raw worktree creation is plain Git, however it is spelled, and the guard stays
+# live beside it: the stash refusal is the negative control for the allows.
+for worktree_command in \
+  "git worktree add -b lane ../lane origin/main" \
+  "git -C $fixture_root worktree add ../lane origin/main" \
+  "bash -lc 'git worktree add ../lane origin/main'" \
+  "cd $fixture_root && git worktree add ../lane origin/main"; do
+  worktree_allowed="$(
+    printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$worktree_command\"}}" \
+      | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+  )"
+  if [[ -n "$worktree_allowed" ]]; then
+    echo "adapter refused plain worktree creation: $worktree_command" >&2
+    printf '%s\n' "$worktree_allowed" >&2
+    exit 1
+  fi
+done
+worktree_control="$(
+  printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git stash"}}' \
     | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
 )"
-if [[ -n "$worktree_allowed" ]]; then
-  echo "adapter refused raw worktree creation where the repository owns no admission command" >&2
-  printf '%s\n' "$worktree_allowed" >&2
-  exit 1
-fi
-
-# The pinned consumer runtime must also reach that decision after a real cd.
-cd_worktree_allowed="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd $fixture_root && git worktree add ../unowned origin/main\"}}" \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
-)"
-if [[ -n "$cd_worktree_allowed" ]]; then
-  echo "adapter falsely refused worktree creation after cd on the pinned runtime" >&2
-  printf '%s\n' "$cd_worktree_allowed" >&2
-  exit 1
-fi
-cd_untrusted_git="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"PATH=/untrusted; cd $fixture_root && git worktree add ../unowned origin/main\"}}" \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$cd_untrusted_git" != *'"permissionDecision":"deny"'* ]]; then
-  echo "adapter trusted Git after an unmeasured PATH change" >&2
-  exit 1
-fi
-
-# A target outside every measured root is not a target found to own nothing.
-# A path *inside* a measured repository is covered by that repository's row,
-# which is why this one points outside them all.
-# Without this arm the fix is a hole: the easy version of "answer for the
-# repository the command targets" allows anything it failed to resolve, which
-# is the whole absence-reads-as-success shape this rule exists to avoid.
-worktree_unmeasured="$(
-  printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git -C /no-such-repository-8447/lane worktree add ../unowned origin/main\"}}" \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$worktree_unmeasured" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$worktree_unmeasured" != *'could not tell'* ]]; then
-  echo "adapter treated an unmeasured target repository as one owning no admission command" >&2
-  printf '%s\n' "$worktree_unmeasured" >&2
-  exit 1
-fi
-
-wrapped_worktree_blocked="$(
-  printf '%s' \
-    '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../unowned origin/main"}}' \
-    | HARN_BIN="$HARN_BIN" "$admitted_root/scripts/agent-shell-guard.sh"
-)"
-if [[ "$wrapped_worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
-  || [[ "$wrapped_worktree_blocked" != *'fleet-worktree-admit'* ]]; then
-  echo "adapter allowed worktree creation through process launchers" >&2
-  printf '%s\n' "$wrapped_worktree_blocked" >&2
-  exit 1
-fi
-
-admission_allowed="$(
-  printf '%s' \
-    '{"tool_name":"Bash","tool_input":{"command":"./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"}}' \
-    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
-)"
-if [[ -n "$admission_allowed" ]]; then
-  echo "adapter denied the owning Fleet admission command" >&2
-  printf '%s\n' "$admission_allowed" >&2
+if [[ "$worktree_control" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter did not refuse git stash beside the allowed worktree add" >&2
   exit 1
 fi
 

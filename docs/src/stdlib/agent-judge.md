@@ -89,6 +89,14 @@ the pending and terminal readings still report `not_run`.
 after a source write the live gate ends unverified rather than asking for repairs
 to a check that measured nothing.
 
+When the host cannot read the workspace to discover a verifier, supply
+`verification_discovery: {state: "unavailable", detail: "..."}` with a nonempty
+explanation of what could not be read. If no verifier is declared or observed,
+the completed run is labeled `completion_unverified` and the explanation is
+preserved on its terminal outcome. This fact does not stop active work or ask
+for another check. A declared or observed verifier remains authoritative; a
+successfully read empty workspace is not discovery failure.
+
 ### Behavior-preserving work
 
 For an explicitly declared `behavior_preserving` task, a check that passed before

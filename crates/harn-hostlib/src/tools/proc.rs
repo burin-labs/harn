@@ -739,6 +739,10 @@ pub(crate) fn process_cleanup_to_dict(
     }
     dict.put("census_complete", VmValue::Bool(report.census_complete()));
     dict.put(
+        "guardian_custody_complete",
+        VmValue::Bool(report.guardian_custody_complete),
+    );
+    dict.put(
         "census_control_read",
         VmValue::Bool(report.census.control_read),
     );

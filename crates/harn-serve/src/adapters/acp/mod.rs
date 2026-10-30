@@ -10,6 +10,7 @@
 //! `auth` owns ACP credential normalization, and `bridge` owns outbound host
 //! calls and update/log/progress emission.
 
+pub mod agent_event_payloads;
 mod auth;
 mod bridge;
 mod builtins;

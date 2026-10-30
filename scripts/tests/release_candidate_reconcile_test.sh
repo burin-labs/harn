@@ -42,9 +42,16 @@ case "$1 $2" in
   "api repos/o/r/releases?per_page=50")
     unread releases
     jq -n --argjson tags "$FAKE_TAGS" '[$tags[] | {tag_name: ., draft: false}] + [{tag_name: "v9.9.9", draft: true}]' | jq -r "$4" ;;
-  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?branch=main&per_page=100")
+  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?branch=main&status="*"&per_page=100")
     unread builds
-    jq -n --argjson runs "${FAKE_BUILDS:-[]}" '{workflow_runs: $runs}' | jq -r "$4" ;;
+    state="${2#*status=}"; state="${state%%&*}"
+    if [[ "${FAKE_BAD_BUILD:-}" == 1 ]]; then
+      jq -n '[{total_count: 1, workflow_runs: [{id: null, event: "workflow_dispatch", status: "in_progress", head_branch: "main", head_sha: "123"}]}]'
+      exit 0
+    fi
+    pages="${FAKE_BUILD_PAGES:-}"
+    [[ -n "$pages" ]] || pages="[${FAKE_BUILDS:-[]}]"
+    jq -n --argjson pages "$pages" --arg state "$state" --arg override "${FAKE_BUILD_TOTAL:-}" '[ $pages[] | [.[] | select(.status == $state)] ] as $filtered | (if $override == "" then ($filtered | map(length) | add) else ($override | tonumber) end) as $total | [$filtered[] | {total_count: $total, workflow_runs: .}]' ;;
   "api repos/o/r/actions/workflows/promote-release.yml/runs?per_page=50")
     unread promotions
     jq -n --argjson runs "${FAKE_PROMOTIONS:-[]}" '{workflow_runs: $runs}' | jq -r "$4" ;;
@@ -52,9 +59,12 @@ case "$1 $2" in
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
     if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then echo 77; fi ;;
   "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*) echo 1 ;;
-  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=30")
+  "api repos/o/r/actions/runs/900/jobs?per_page=100")
+    unread jobs
+    jq -n --argjson jobs "${FAKE_JOBS:-[]}" --arg override "${FAKE_JOBS_TOTAL:-}" '[{total_count: (if $override == "" then ($jobs | length) else ($override | tonumber) end), jobs: $jobs}]' ;;
+  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=100")
     unread attempts
-    jq -n --argjson runs "${FAKE_ATTEMPTS:-[]}" '{workflow_runs: $runs}' | jq -r "$4" ;;
+    jq -n --argjson runs "${FAKE_ATTEMPTS:-[]}" '[{total_count: ($runs | length), workflow_runs: $runs}]' ;;
   "workflow run") ;;
   "issue list")
     jq -n --arg t "${FAKE_OPEN_ISSUE:-}" 'if $t == "" then [] else [{number: 7, title: $t}] end' | jq -r "${@: -1}" ;;
@@ -76,7 +86,7 @@ run() {
 dispatched() { grep -c '^workflow run build-release-binaries.yml --repo o/r --ref main -f source_candidate=true$' "$tmp/gh.log" || true; }
 young=$((2000000 + 3600))
 old=$((2000000 + 5 * 3600))
-build() { jq -nc --arg event "$1" --arg sha "$2" --arg status "$3" '{id: 900, event: $event, head_sha: $sha, head_branch: "main", status: $status}'; }
+build() { jq -nc --arg event "$1" --arg sha "$2" --arg status "$3" --arg title "${4:-Build release binaries [source-candidate]}" '{id: 900, event: $event, head_sha: $sha, head_branch: "main", status: $status, display_title: $title}'; }
 
 # Nothing owed: a development main, or a published version.
 run MAIN_SHA="$dev_sha"
@@ -99,6 +109,43 @@ done
 # A warm push in flight, or a completed source candidate, is not a candidate in flight.
 run "FAKE_BUILDS=[$(build push "$main_sha" in_progress),$(build workflow_dispatch "$dev_sha" completed)]"
 [[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a warm push or finished run blocked the request"
+run "FAKE_BUILD_PAGES=[[],[$(build workflow_dispatch "$main_sha" in_progress)]]"
+[[ $status == 0 && "$(dispatched)" == 0 ]] || fail "a candidate on a later page was missed: $(cat "$tmp/out")"
+run FAKE_BUILD_TOTAL=1
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "an incomplete build census was treated as idle: $(cat "$tmp/out")"
+run FAKE_BAD_BUILD=1
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "a build without an ID was treated as idle: $(cat "$tmp/out")"
+
+# A benchmark-only dispatch must not count as an in-flight or attempted candidate.
+benchmark="$(build workflow_dispatch "$main_sha" in_progress 'Build release binaries [benchmark]')"
+run "FAKE_BUILDS=[$benchmark]"
+[[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a benchmark blocked an untried candidate: $(cat "$tmp/out")"
+benchmark="$(build workflow_dispatch "$main_sha" completed 'Build release binaries [benchmark]')"
+run "FAKE_ATTEMPTS=[$benchmark]" NOW_EPOCH="$old"
+[[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a completed benchmark counted as an attempted candidate: $(cat "$tmp/out")"
+
+# Older dispatches expose their purpose through the setup job, or remain unknown.
+legacy="$(build workflow_dispatch "$main_sha" in_progress 'Build release binaries')"
+legacy_jobs='[{"name":"Resolve release context","steps":[{"name":"Run actions/checkout@v7","conclusion":"success"},{"name":"Install the source candidate decision runtime","conclusion":"skipped"}]}]'
+run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$legacy_jobs"
+[[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a legacy non-candidate blocked a request: $(cat "$tmp/out")"
+legacy_attempt="$(build workflow_dispatch "$main_sha" completed 'Build release binaries')"
+run "FAKE_ATTEMPTS=[$legacy_attempt]" "FAKE_JOBS=$legacy_jobs" NOW_EPOCH="$old"
+[[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a legacy benchmark counted as an attempt: $(cat "$tmp/out")"
+legacy_source='[{"name":"Resolve release context","steps":[{"name":"Run actions/checkout@v7","conclusion":"success"},{"name":"Install the source candidate decision runtime","conclusion":"success"}]}]'
+run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$legacy_source"
+[[ $status == 0 && "$(dispatched)" == 0 ]] || fail "a legacy source candidate did not block a duplicate: $(cat "$tmp/out")"
+run "FAKE_ATTEMPTS=[$legacy_attempt]" "FAKE_JOBS=$legacy_source" NOW_EPOCH="$old"
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "a legacy source attempt was retried automatically: $(cat "$tmp/out")"
+run "FAKE_BUILDS=[$legacy]"
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "unknown legacy dispatch was treated as idle or successful: $(cat "$tmp/out")"
+run "FAKE_ATTEMPTS=[$legacy_attempt]" FAKE_FAIL=jobs
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "an unread legacy dispatch was treated as an idle attempt: $(cat "$tmp/out")"
+run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$legacy_jobs" FAKE_JOBS_TOTAL=2
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "an incomplete job census was treated as a non-candidate: $(cat "$tmp/out")"
+failed_checkout='[{"name":"Resolve release context","steps":[{"name":"Run actions/checkout@v7","conclusion":"failure"},{"name":"Install the source candidate decision runtime","conclusion":"skipped"}]}]'
+run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$failed_checkout"
+[[ $status == 1 && "$(dispatched)" == 0 ]] || fail "a skipped step after failed checkout was treated as a non-candidate: $(cat "$tmp/out")"
 
 # A promotion in flight counts only when its source holds a candidate, and
 # this run never counts itself.

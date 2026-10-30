@@ -1,3 +1,4 @@
+import { portalText } from "../i18n/portalText"
 import { useEffect, useMemo, useState } from "react"
 import { useIntl } from "react-intl"
 
@@ -9,7 +10,6 @@ import { RunActivityItem } from "./RunActivityItem"
 import { SkillObservability } from "./SkillObservability"
 import { runDetailMessages as messages } from "./runDetailMessages"
 
-
 type RunDetailProps = {
   detail: PortalRunDetail | null
   runs: RunSummary[]
@@ -17,16 +17,32 @@ type RunDetailProps = {
 }
 
 function compareCandidates(current: RunSummary, runs: RunSummary[]) {
-  return runs.filter((run) => run.path !== current.path && run.workflow_name === current.workflow_name)
+  return runs.filter(
+    (run) =>
+      run.path !== current.path && run.workflow_name === current.workflow_name,
+  )
 }
 
 function findBaselineRun(current: RunSummary, runs: RunSummary[]) {
-  return compareCandidates(current, runs).find((run) => run.started_at <= current.started_at) ?? null
+  return (
+    compareCandidates(current, runs).find(
+      (run) => run.started_at <= current.started_at,
+    ) ?? null
+  )
 }
 
-
-function StageDetail({ label, value, open = false }: { label: string; value: string | null; open?: boolean }) {
-  if (!value) {return null}
+function StageDetail({
+  label,
+  value,
+  open = false,
+}: {
+  label: string
+  value: string | null
+  open?: boolean
+}) {
+  if (!value) {
+    return null
+  }
   return (
     <details open={open}>
       <summary>{label}</summary>
@@ -37,7 +53,9 @@ function StageDetail({ label, value, open = false }: { label: string; value: str
 
 export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
   const intl = useIntl()
-  const [compareBaselinePath, setCompareBaselinePath] = useState<string | null>(null)
+  const [compareBaselinePath, setCompareBaselinePath] = useState<string | null>(
+    null,
+  )
   const [compareResult, setCompareResult] = useState<{
     requestKey: string
     diff: PortalRunDiff | null
@@ -50,19 +68,35 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
   )
 
   const selectedBaselinePath = useMemo(() => {
-    if (!detail || compareOptions.length === 0) {return null}
-    if (compareBaselinePath && compareOptions.some((run) => run.path === compareBaselinePath)) {
+    if (!detail || compareOptions.length === 0) {
+      return null
+    }
+    if (
+      compareBaselinePath &&
+      compareOptions.some((run) => run.path === compareBaselinePath)
+    ) {
       return compareBaselinePath
     }
-    return findBaselineRun(detail.summary, runs)?.path ?? compareOptions[0]?.path ?? null
+    return (
+      findBaselineRun(detail.summary, runs)?.path ??
+      compareOptions[0]?.path ??
+      null
+    )
   }, [compareBaselinePath, compareOptions, detail, runs])
 
-  const compareRequestKey = detail && selectedBaselinePath ? `${selectedBaselinePath}::${detail.summary.path}` : null
-  const compareDiff = compareResult?.requestKey === compareRequestKey ? compareResult.diff : null
-  const compareError = compareResult?.requestKey === compareRequestKey ? compareResult.error : null
+  const compareRequestKey =
+    detail && selectedBaselinePath
+      ? `${selectedBaselinePath}::${detail.summary.path}`
+      : null
+  const compareDiff =
+    compareResult?.requestKey === compareRequestKey ? compareResult.diff : null
+  const compareError =
+    compareResult?.requestKey === compareRequestKey ? compareResult.error : null
 
   useEffect(() => {
-    if (!detail || !selectedBaselinePath || !compareRequestKey) {return}
+    if (!detail || !selectedBaselinePath || !compareRequestKey) {
+      return
+    }
     let cancelled = false
     const currentPath = detail.summary.path
     const baselinePath = selectedBaselinePath
@@ -120,7 +154,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
       top: number
     }>
   >((bars, stage, index) => {
-    const offset = detail.stages.slice(0, index).reduce((sum, item) => sum + (item.duration_ms ?? 0), 0)
+    const offset = detail.stages
+      .slice(0, index)
+      .reduce((sum, item) => sum + (item.duration_ms ?? 0), 0)
     bars.push({
       key: stage.id,
       label: stage.node_id,
@@ -136,7 +172,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
   const spanBars = detail.spans.map((span) => ({
     key: `${span.span_id}`,
     label: span.label,
-    kind: ["llm_call", "tool_call", "pipeline"].includes(span.kind) ? span.kind : "other",
+    kind: ["llm_call", "tool_call", "pipeline"].includes(span.kind)
+      ? span.kind
+      : "other",
     left: pct(span.start_ms, total),
     width: pct(span.duration_ms, total),
     subtitle: `${span.kind} • ${formatDuration(span.duration_ms)}`,
@@ -169,20 +207,36 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
         )),
         ...compareDiff.tool_diffs.map((item) => (
-          <div className="compare-row" key={`${item.tool_name}-${item.args_hash}`}>
+          <div
+            className="compare-row"
+            key={`${item.tool_name}-${item.args_hash}`}
+          >
             <div>
               <strong>{item.tool_name}</strong>
-              <div className="meta">tool result changed</div>
+              <div className="meta">{portalText("tool result changed")}</div>
             </div>
             <div className="meta">
-              <div>args {item.args_hash}</div>
-              <div>left {item.left_result ?? "none"}</div>
-              <div>right {item.right_result ?? "none"}</div>
+              <div>
+                {portalText("args {value0}", { value0: item.args_hash })}
+              </div>
+              <div>
+                {portalText("left {value0}", {
+                  value0: item.left_result ?? portalText("none"),
+                })}
+              </div>
+              <div>
+                {portalText("right {value0}", {
+                  value0: item.right_result ?? portalText("none"),
+                })}
+              </div>
             </div>
           </div>
         )),
         ...compareDiff.observability_diffs.map((item, index) => (
-          <div className="compare-row" key={`${item.section}-${item.label}-${index}`}>
+          <div
+            className="compare-row"
+            key={`${item.section}-${item.label}-${index}`}
+          >
             <div>
               <strong>{item.label}</strong>
               <div className="meta">{item.section}</div>
@@ -206,18 +260,28 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           <div className="eyebrow">{intl.formatMessage(messages.run)}</div>
           <h2>{detail.summary.workflow_name}</h2>
           <p className="muted">
-            {detail.summary.status} • {formatDuration(detail.summary.duration_ms)} • {detail.summary.stage_count} stages
+            {portalText("{value0} • {value1} • {value2} stages", {
+              value0: detail.summary.status,
+              value1: formatDuration(detail.summary.duration_ms),
+              value2: detail.summary.stage_count,
+            })}
           </p>
           <p className="mono muted">{detail.summary.path}</p>
         </div>
         <div className="hero-meta">
           {[
-            [intl.formatMessage(messages.modelCalls), formatNumber(detail.summary.call_count)],
+            [
+              intl.formatMessage(messages.modelCalls),
+              formatNumber(detail.summary.call_count),
+            ],
             [
               intl.formatMessage(messages.tokens),
-              `${formatNumber(detail.summary.input_tokens)} in / ${formatNumber(detail.summary.output_tokens)} out`,
+              portalText("{value0} in / {value1} out", { value0: formatNumber(detail.summary.input_tokens), value1: formatNumber(detail.summary.output_tokens) }),
             ],
-            [intl.formatMessage(messages.childRuns), String(detail.summary.child_run_count)],
+            [
+              intl.formatMessage(messages.childRuns),
+              String(detail.summary.child_run_count),
+            ],
             [intl.formatMessage(messages.started), detail.summary.started_at],
           ].map(([label, value]) => (
             <div className="card" key={label}>
@@ -231,46 +295,73 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h3>Execution evidence</h3>
-            <p>One Harn identity joins this run record, spans, and detailed artifacts.</p>
+            <h3>{portalText("Execution evidence")}</h3>
+            <p>
+              {portalText(
+                "One Harn identity joins this run record, spans, and detailed artifacts.",
+              )}
+            </p>
           </div>
-          <span className={`pill ${evidence.gaps.length ? "status-failed" : "status-completed"}`}>
-            {evidence.gaps.length ? `${evidence.gaps.length} gap${evidence.gaps.length === 1 ? "" : "s"}` : "complete"}
+          <span
+            className={`pill ${evidence.gaps.length ? "status-failed" : "status-completed"}`}
+          >
+            {evidence.gaps.length
+              ? portalText("{count, plural, one {# gap} other {# gaps}}", { count: evidence.gaps.length })
+              : portalText("complete")}
           </span>
         </div>
         <div className="policy-grid">
           <div className="policy-item">
-            <div className="eyebrow">Execution identity</div>
-            <div className="mono">{evidence.execution_id || "legacy record"}</div>
+            <div className="eyebrow">{portalText("Execution identity")}</div>
+            <div className="mono">
+              {evidence.execution_id || portalText("legacy record")}
+            </div>
           </div>
           <div className="policy-item">
             <div className="row">
-              <strong>Flight recording</strong>
-              <span className="turn-chip">{flight ? `${formatNumber(flight.retained_events)} events` : "off"}</span>
+              <strong>{portalText("Flight recording")}</strong>
+              <span className="turn-chip">
+                {flight
+                  ? portalText("{value0} events", { value0: formatNumber(flight.retained_events) })
+                  : portalText("off")}
+              </span>
             </div>
             {flight ? (
               <div className="policy-list">
-                {flight.path ? <div className="mono meta">{flight.path}</div> : null}
+                {flight.path ? (
+                  <div className="mono meta">{flight.path}</div>
+                ) : null}
                 <div className="meta">
-                  {formatNumber(flight.dropped_events)} dropped • values {flight.value_policy}
+                  {portalText("{value0} dropped • values {value1}", {
+                    value0: formatNumber(flight.dropped_events),
+                    value1: flight.value_policy,
+                  })}
                 </div>
                 <div className="mono meta">{flight.content_hash}</div>
               </div>
             ) : (
-              <div className="meta">No exact VM path was requested for this run.</div>
+              <div className="meta">
+                {portalText("No exact VM path was requested for this run.")}
+              </div>
             )}
           </div>
           <div className="policy-item">
             <div className="row">
-              <strong>Evidence gaps</strong>
+              <strong>{portalText("Evidence gaps")}</strong>
               <span className="turn-chip">{evidence.gaps.length}</span>
             </div>
             <div className="policy-list">
-              {evidence.gaps.length ? evidence.gaps.map((gap) => (
-                <div className="meta" key={`${gap.component}:${gap.code}`}>
-                  {gap.component} / {gap.code}: {gap.message}
+              {evidence.gaps.length ? (
+                evidence.gaps.map((gap) => (
+                  <div className="meta" key={`${gap.component}:${gap.code}`}>
+                    {gap.component} / {gap.code}: {gap.message}
+                  </div>
+                ))
+              ) : (
+                <div className="meta">
+                  {portalText("No requested evidence is missing.")}
                 </div>
-              )) : <div className="meta">No requested evidence is missing.</div>}
+              )}
             </div>
           </div>
         </div>
@@ -296,31 +387,44 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
         <div className="policy-grid">
           <div className="policy-item">
             <div className="row">
-              <strong>Tool and side-effect ceiling</strong>
+              <strong>{portalText("Tool and side-effect ceiling")}</strong>
               <span className="turn-chip">{validationBadge}</span>
             </div>
             <div className="policy-list">
               <div className="meta">
-                tools{" "}
-                {detail.policy_summary.tools.length
-                  ? detail.policy_summary.tools.join(", ")
-                  : intl.formatMessage(messages.unrestricted)}
+                {portalText("tools{value0}{value1}", {
+                  value0: " ",
+                  value1: detail.policy_summary.tools.length
+                    ? detail.policy_summary.tools.join(", ")
+                    : intl.formatMessage(messages.unrestricted),
+                })}
               </div>
               <div className="meta">
-                side effects {detail.policy_summary.side_effect_level ?? intl.formatMessage(messages.notDeclared)}
+                {portalText("side effects {value0}", {
+                  value0:
+                    detail.policy_summary.side_effect_level ??
+                    intl.formatMessage(messages.notDeclared),
+                })}
               </div>
               <div className="meta">
-                recursion{" "}
-                {detail.policy_summary.recursion_limit == null
-                  ? "default"
-                  : String(detail.policy_summary.recursion_limit)}
+                {portalText("recursion{value0}{value1}", {
+                  value0: " ",
+                  value1:
+                    detail.policy_summary.recursion_limit == null
+                      ? portalText("default")
+                      : String(detail.policy_summary.recursion_limit),
+                })}
               </div>
             </div>
           </div>
           <div className="policy-item">
             <div className="row">
-              <strong>Capabilities and roots</strong>
-              <span className="turn-chip">{detail.policy_summary.capabilities.length} ops</span>
+              <strong>{portalText("Capabilities and roots")}</strong>
+              <span className="turn-chip">
+                {portalText("{value0} ops", {
+                  value0: detail.policy_summary.capabilities.length,
+                })}
+              </span>
             </div>
             <div className="policy-list">
               <div className="meta">
@@ -330,20 +434,24 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               </div>
               <div className="meta">
                 {detail.policy_summary.workspace_roots.length
-                  ? `roots ${detail.policy_summary.workspace_roots.join(", ")}`
+                  ? portalText("roots {value}", { value: detail.policy_summary.workspace_roots.join(", ") })
                   : intl.formatMessage(messages.noWorkspaceRoots)}
               </div>
               <div className="meta">
                 {detail.policy_summary.tool_arg_constraints.length
-                  ? `arg constraints ${detail.policy_summary.tool_arg_constraints.join(" • ")}`
+                  ? portalText("arg constraints {value}", { value: detail.policy_summary.tool_arg_constraints.join(" • ") })
                   : intl.formatMessage(messages.noArgConstraints)}
               </div>
             </div>
           </div>
           <div className="policy-item">
             <div className="row">
-              <strong>Validation diagnostics</strong>
-              <span className="turn-chip">{detail.policy_summary.validation_errors.length} errors</span>
+              <strong>{portalText("Validation diagnostics")}</strong>
+              <span className="turn-chip">
+                {portalText("{value0} errors", {
+                  value0: detail.policy_summary.validation_errors.length,
+                })}
+              </span>
             </div>
             <div className="policy-list">
               <div className="meta">
@@ -358,7 +466,7 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               </div>
               <div className="meta">
                 {detail.policy_summary.reachable_nodes.length
-                  ? `reachable ${detail.policy_summary.reachable_nodes.join(", ")}`
+                  ? portalText("reachable {value}", { value: detail.policy_summary.reachable_nodes.join(", ") })
                   : intl.formatMessage(messages.noReachableNodes)}
               </div>
             </div>
@@ -382,48 +490,87 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
         </div>
         {!detail.replay_summary ? (
-          <div className="muted">{intl.formatMessage(messages.noReplayFixture)}</div>
+          <div className="muted">
+            {intl.formatMessage(messages.noReplayFixture)}
+          </div>
         ) : (
           <div className="policy-grid">
             <div className="policy-item">
               <div className="row">
-                <strong>Fixture identity</strong>
-                <span className="turn-chip">{detail.replay_summary.stage_assertions.length} stage checks</span>
+                <strong>{portalText("Fixture identity")}</strong>
+                <span className="turn-chip">
+                  {portalText("{value0} stage checks", {
+                    value0: detail.replay_summary.stage_assertions.length,
+                  })}
+                </span>
               </div>
               <div className="policy-list">
-                <div className="meta">fixture {detail.replay_summary.fixture_id}</div>
-                <div className="meta">source run {detail.replay_summary.source_run_id}</div>
-                <div className="meta">created {detail.replay_summary.created_at}</div>
-                <div className="meta">expected status {detail.replay_summary.expected_status}</div>
+                <div className="meta">
+                  {portalText("fixture {value0}", {
+                    value0: detail.replay_summary.fixture_id,
+                  })}
+                </div>
+                <div className="meta">
+                  {portalText("source run {value0}", {
+                    value0: detail.replay_summary.source_run_id,
+                  })}
+                </div>
+                <div className="meta">
+                  {portalText("created {value0}", {
+                    value0: detail.replay_summary.created_at,
+                  })}
+                </div>
+                <div className="meta">
+                  {portalText("expected status {value0}", {
+                    value0: detail.replay_summary.expected_status,
+                  })}
+                </div>
               </div>
             </div>
             <div className="policy-item">
               <div className="row">
-                <strong>Replay assertions</strong>
-                <span className="turn-chip">{detail.replay_summary.stage_assertions.length}</span>
+                <strong>{portalText("Replay assertions")}</strong>
+                <span className="turn-chip">
+                  {detail.replay_summary.stage_assertions.length}
+                </span>
               </div>
               <div className="policy-list">
                 {detail.replay_summary.stage_assertions.map((assertion) => (
                   <div className="meta" key={assertion.node_id}>
-                    {assertion.node_id} → {assertion.expected_status}/{assertion.expected_outcome}
-                    {assertion.expected_branch ? ` • branch ${assertion.expected_branch}` : ""}
-                    {assertion.required_artifact_kinds.length
-                      ? ` • artifacts ${assertion.required_artifact_kinds.join(", ")}`
+                    {assertion.node_id} → {assertion.expected_status}/
+                    {assertion.expected_outcome}
+                    {assertion.expected_branch
+                      ? portalText(" • branch {value0}", {
+                          value0: assertion.expected_branch,
+                        })
                       : ""}
-                    {assertion.visible_text_contains ? ` • text contains ${assertion.visible_text_contains}` : ""}
+                    {assertion.required_artifact_kinds.length
+                      ? portalText(" • artifacts {value0}", {
+                          value0: assertion.required_artifact_kinds.join(", "),
+                        })
+                      : ""}
+                    {assertion.visible_text_contains
+                      ? portalText(" • text contains {value0}", {
+                          value0: assertion.visible_text_contains,
+                        })
+                      : ""}
                   </div>
                 ))}
               </div>
             </div>
             <div className="policy-item">
               <div className="row">
-                <strong>CLI next steps</strong>
+                <strong>{portalText("CLI next steps")}</strong>
                 <span className="turn-chip">{detail.summary.path}</span>
               </div>
               <div className="policy-list">
-                <div className="meta">{intl.formatMessage(messages.replayCommand)}</div>
+                <div className="meta">
+                  {intl.formatMessage(messages.replayCommand)}
+                </div>
                 <pre>{`harn replay .harn-runs/${detail.summary.path}`}</pre>
-                <div className="meta">{intl.formatMessage(messages.evalCommand)}</div>
+                <div className="meta">
+                  {intl.formatMessage(messages.evalCommand)}
+                </div>
                 <pre>{`harn eval .harn-runs/${detail.summary.path}`}</pre>
               </div>
             </div>
@@ -442,25 +589,46 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           <div className="lineage-grid">
             <div className="lineage-item">
               <div className="row">
-                <strong>Run lineage</strong>
-                <span className={`pill ${statusClass(detail.summary.status)}`}>{detail.summary.status}</span>
+                <strong>{portalText("Run lineage")}</strong>
+                <span className={`pill ${statusClass(detail.summary.status)}`}>
+                  {detail.summary.status}
+                </span>
               </div>
-              <div className="meta">run {detail.summary.id}</div>
-              <div className="meta">root {detail.root_run_id ?? detail.summary.id}</div>
-              <div className="meta">parent {detail.parent_run_id ?? "none"}</div>
+              <div className="meta">
+                {portalText("run {value0}", { value0: detail.summary.id })}
+              </div>
+              <div className="meta">
+                {portalText("root {value0}", {
+                  value0: detail.root_run_id ?? detail.summary.id,
+                })}
+              </div>
+              <div className="meta">
+                {portalText("parent {value0}", {
+                  value0: detail.parent_run_id ?? portalText("none"),
+                })}
+              </div>
             </div>
             <div className="lineage-item">
               <div className="row">
-                <strong>Execution context</strong>
-                <span className="turn-chip">{detail.execution_summary?.adapter ?? "unknown adapter"}</span>
+                <strong>{portalText("Execution context")}</strong>
+                <span className="turn-chip">
+                  {detail.execution_summary?.adapter ??
+                    portalText("unknown adapter")}
+                </span>
               </div>
               <div className="meta">
                 {detail.execution_summary?.repo_path ??
                   detail.execution_summary?.worktree_path ??
                   detail.execution_summary?.cwd ??
-                  "No repo or cwd persisted"}
+                  portalText("No repo or cwd persisted")}
               </div>
-              <div className="meta">branch {detail.execution_summary?.branch ?? "not captured"}</div>
+              <div className="meta">
+                {portalText("branch {value0}", {
+                  value0:
+                    detail.execution_summary?.branch ??
+                    portalText("not captured"),
+                })}
+              </div>
             </div>
           </div>
         </section>
@@ -475,34 +643,60 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           <div className="flow-grid">
             <div className="flow-item">
               <div className="row">
-                <strong>Transitions</strong>
+                <strong>{portalText("Transitions")}</strong>
                 <span className="turn-chip">{detail.transitions.length}</span>
               </div>
               {detail.transitions.length ? (
                 detail.transitions.slice(0, 8).map((item, index) => (
                   <div className="meta" key={`${item.to_node_id}-${index}`}>
-                    {item.from_node_id ?? "start"} → {item.to_node_id}
-                    {item.branch ? ` • branch ${item.branch}` : ""} • {item.produced_count} produced
+                    {portalText(
+                      "{value0} → {value1}{value2} • {value3} produced",
+                      {
+                        value0: item.from_node_id ?? portalText("start"),
+                        value1: item.to_node_id,
+                        value2: item.branch
+                          ? portalText(" • branch {value0}", {
+                              value0: item.branch,
+                            })
+                          : "",
+                        value3: item.produced_count,
+                      },
+                    )}
                   </div>
                 ))
               ) : (
-                <div className="muted">{intl.formatMessage(messages.noTransitions)}</div>
+                <div className="muted">
+                  {intl.formatMessage(messages.noTransitions)}
+                </div>
               )}
             </div>
             <div className="flow-item">
               <div className="row">
-                <strong>Checkpoints</strong>
+                <strong>{portalText("Checkpoints")}</strong>
                 <span className="turn-chip">{detail.checkpoints.length}</span>
               </div>
               {detail.checkpoints.length ? (
                 detail.checkpoints.slice(0, 8).map((item, index) => (
                   <div className="meta" key={`${item.reason}-${index}`}>
-                    {item.reason} • {item.ready_count} ready • {item.completed_count} completed
-                    {item.last_stage_id ? ` • after ${item.last_stage_id}` : ""}
+                    {portalText(
+                      "{value0} • {value1} ready • {value2} completed{value3}",
+                      {
+                        value0: item.reason,
+                        value1: item.ready_count,
+                        value2: item.completed_count,
+                        value3: item.last_stage_id
+                          ? portalText(" • after {value0}", {
+                              value0: item.last_stage_id,
+                            })
+                          : "",
+                      },
+                    )}
                   </div>
                 ))
               ) : (
-                <div className="muted">{intl.formatMessage(messages.noCheckpoints)}</div>
+                <div className="muted">
+                  {intl.formatMessage(messages.noCheckpoints)}
+                </div>
               )}
             </div>
           </div>
@@ -517,7 +711,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
         </div>
         {compareOptions.length === 0 ? (
-          <div className="muted">{intl.formatMessage(messages.noCompareCandidates)}</div>
+          <div className="muted">
+            {intl.formatMessage(messages.noCompareCandidates)}
+          </div>
         ) : (
           <div className="compare-panel">
             <div className="compare-summary">
@@ -526,7 +722,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 <select
                   className="compare-select"
                   value={selectedBaselinePath ?? ""}
-                  onChange={(event) => setCompareBaselinePath(event.target.value)}
+                  onChange={(event) =>
+                    setCompareBaselinePath(event.target.value)
+                  }
                 >
                   {compareOptions.map((run) => (
                     <option key={run.path} value={run.path}>
@@ -536,28 +734,63 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 </select>
               </label>
               <div className="compare-badges">
-                <span className="turn-chip">current {detail.summary.path}</span>
-                {selectedBaselinePath ? <span className="turn-chip">baseline {selectedBaselinePath}</span> : null}
+                <span className="turn-chip">
+                  {portalText("current {value0}", {
+                    value0: detail.summary.path,
+                  })}
+                </span>
+                {selectedBaselinePath ? (
+                  <span className="turn-chip">
+                    {portalText("baseline {value0}", {
+                      value0: selectedBaselinePath,
+                    })}
+                  </span>
+                ) : null}
                 {compareDiff ? (
                   <>
-                    <span className="turn-chip">{compareDiff.identical ? "identical" : "changed"}</span>
+                    <span className="turn-chip">
+                      {compareDiff.identical
+                        ? portalText("identical")
+                        : portalText("changed")}
+                    </span>
                     <span className="turn-chip">
                       {compareDiff.left_status} → {compareDiff.right_status}
                     </span>
-                    <span className="turn-chip">{compareDiff.stage_diffs.length} stage diffs</span>
-                    <span className="turn-chip">{compareDiff.tool_diffs.length} tool diffs</span>
-                    <span className="turn-chip">{compareDiff.observability_diffs.length} observability diffs</span>
                     <span className="turn-chip">
-                      {compareDiff.transition_count_delta >= 0 ? "+" : ""}
-                      {compareDiff.transition_count_delta} transitions
+                      {portalText("{value0} stage diffs", {
+                        value0: compareDiff.stage_diffs.length,
+                      })}
                     </span>
                     <span className="turn-chip">
-                      {compareDiff.artifact_count_delta >= 0 ? "+" : ""}
-                      {compareDiff.artifact_count_delta} artifacts
+                      {portalText("{value0} tool diffs", {
+                        value0: compareDiff.tool_diffs.length,
+                      })}
                     </span>
                     <span className="turn-chip">
-                      {compareDiff.checkpoint_count_delta >= 0 ? "+" : ""}
-                      {compareDiff.checkpoint_count_delta} checkpoints
+                      {portalText("{value0} observability diffs", {
+                        value0: compareDiff.observability_diffs.length,
+                      })}
+                    </span>
+                    <span className="turn-chip">
+                      {portalText("{value0}{value1} transitions", {
+                        value0:
+                          compareDiff.transition_count_delta >= 0 ? "+" : "",
+                        value1: compareDiff.transition_count_delta,
+                      })}
+                    </span>
+                    <span className="turn-chip">
+                      {portalText("{value0}{value1} artifacts", {
+                        value0:
+                          compareDiff.artifact_count_delta >= 0 ? "+" : "",
+                        value1: compareDiff.artifact_count_delta,
+                      })}
+                    </span>
+                    <span className="turn-chip">
+                      {portalText("{value0}{value1} checkpoints", {
+                        value0:
+                          compareDiff.checkpoint_count_delta >= 0 ? "+" : "",
+                        value1: compareDiff.checkpoint_count_delta,
+                      })}
                     </span>
                   </>
                 ) : null}
@@ -565,13 +798,18 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
             </div>
             {compareError ? (
               <div className="muted">
-                {intl.formatMessage(messages.comparisonFailed, { message: compareError })}
+                {intl.formatMessage(messages.comparisonFailed, {
+                  message: compareError,
+                })}
               </div>
             ) : compareRows.length ? (
               compareRows
             ) : (
               <div className="muted">
-                {compareDiff && !compareDiff.stage_diffs.length && !compareDiff.tool_diffs.length && !compareDiff.observability_diffs.length
+                {compareDiff &&
+                !compareDiff.stage_diffs.length &&
+                !compareDiff.tool_diffs.length &&
+                !compareDiff.observability_diffs.length
                   ? intl.formatMessage(messages.noObservabilityDiffs)
                   : intl.formatMessage(messages.noStageDiffs)}
               </div>
@@ -599,7 +837,12 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               title: intl.formatMessage(messages.nestedSpans),
               copy: intl.formatMessage(messages.nestedSpansCopy),
               items: spanBars,
-              height: Math.max(56, (Math.max(0, ...detail.spans.map((span) => span.lane)) + 1) * 40 + 20),
+              height: Math.max(
+                56,
+                (Math.max(0, ...detail.spans.map((span) => span.lane)) + 1) *
+                  40 +
+                  20,
+              ),
             },
           ].map((lane) => (
             <div className="lane" key={lane.title}>
@@ -648,45 +891,125 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               <div className="stage-row" key={stage.id}>
                 <div className="row">
                   <strong>{stage.node_id}</strong>
-                  <span className={`pill ${statusClass(stage.outcome || stage.status)}`}>
+                  <span
+                    className={`pill ${statusClass(stage.outcome || stage.status)}`}
+                  >
                     {stage.outcome || stage.status}
                   </span>
                 </div>
                 <div className="meta">
-                  {stage.kind || "stage"}
-                  {stage.branch ? ` • branch ${stage.branch}` : ""} • {formatDuration(stage.duration_ms)} •{" "}
-                  {stage.attempt_count} attempts • {stage.artifact_count} artifacts
+                  {portalText(
+                    "{value0}{value1} • {value2} •{value3}{value4} attempts • {value5} artifacts",
+                    {
+                      value0: stage.kind || portalText("stage"),
+                      value1: stage.branch
+                        ? portalText(" • branch {value0}", {
+                            value0: stage.branch,
+                          })
+                        : "",
+                      value2: formatDuration(stage.duration_ms),
+                      value3: " ",
+                      value4: stage.attempt_count,
+                      value5: stage.artifact_count,
+                    },
+                  )}
                 </div>
                 <div className="meta">
-                  {formatNumber(stage.debug.call_count)} calls • {formatNumber(stage.debug.input_tokens)} in /{" "}
-                  {formatNumber(stage.debug.output_tokens)} out
+                  {portalText(
+                    "{value0} calls • {value1} in /{value2}{value3} out",
+                    {
+                      value0: formatNumber(stage.debug.call_count),
+                      value1: formatNumber(stage.debug.input_tokens),
+                      value2: " ",
+                      value3: formatNumber(stage.debug.output_tokens),
+                    },
+                  )}
                 </div>
-                {stage.verification_summary ? <div className="meta">{stage.verification_summary}</div> : null}
+                {stage.verification_summary ? (
+                  <div className="meta">{stage.verification_summary}</div>
+                ) : null}
                 <details>
-                  <summary>{intl.formatMessage(messages.stageInternals)}</summary>
+                  <summary>
+                    {intl.formatMessage(messages.stageInternals)}
+                  </summary>
                   <div className="stage-debug">
-                    {stage.debug.worker_id ? <div className="meta">worker {stage.debug.worker_id}</div> : null}
+                    {stage.debug.worker_id ? (
+                      <div className="meta">
+                        {portalText("worker {value0}", {
+                          value0: stage.debug.worker_id,
+                        })}
+                      </div>
+                    ) : null}
                     <div className="meta">
-                      consumed {stage.debug.consumed_artifact_ids.join(", ") || "none"}
+                      {portalText("consumed {value0}", {
+                        value0:
+                          stage.debug.consumed_artifact_ids.join(", ") ||
+                          portalText("none"),
+                      })}
                     </div>
                     <div className="meta">
-                      produced {stage.debug.produced_artifact_ids.join(", ") || "none"}
+                      {portalText("produced {value0}", {
+                        value0:
+                          stage.debug.produced_artifact_ids.join(", ") ||
+                          portalText("none"),
+                      })}
                     </div>
                     <div className="meta">
-                      selected {stage.debug.selected_artifact_ids.join(", ") || "none"}
+                      {portalText("selected {value0}", {
+                        value0:
+                          stage.debug.selected_artifact_ids.join(", ") ||
+                          portalText("none"),
+                      })}
                     </div>
-                    <StageDetail label="Capability policy" value={stage.debug.capability_policy} open />
-                    <StageDetail label="Input contract" value={stage.debug.input_contract} />
-                    <StageDetail label="Output contract" value={stage.debug.output_contract} />
-                    <StageDetail label="Model policy" value={stage.debug.model_policy} />
-                    <StageDetail label="Auto compact" value={stage.debug.auto_compact} />
-                    <StageDetail label="Output visibility" value={stage.debug.output_visibility} />
-                    <StageDetail label="Context policy" value={stage.debug.context_policy} />
-                    <StageDetail label="Retry policy" value={stage.debug.retry_policy} />
-                    <StageDetail label="Prompt" value={stage.debug.prompt} />
-                    <StageDetail label="System prompt" value={stage.debug.system_prompt} />
-                    <StageDetail label="Rendered context" value={stage.debug.rendered_context} />
-                    <StageDetail label="Saved error" value={stage.debug.error} />
+                    <StageDetail
+                      label={portalText("Capability policy")}
+                      value={stage.debug.capability_policy}
+                      open
+                    />
+                    <StageDetail
+                      label={portalText("Input contract")}
+                      value={stage.debug.input_contract}
+                    />
+                    <StageDetail
+                      label={portalText("Output contract")}
+                      value={stage.debug.output_contract}
+                    />
+                    <StageDetail
+                      label={portalText("Model policy")}
+                      value={stage.debug.model_policy}
+                    />
+                    <StageDetail
+                      label={portalText("Auto compact")}
+                      value={stage.debug.auto_compact}
+                    />
+                    <StageDetail
+                      label={portalText("Output visibility")}
+                      value={stage.debug.output_visibility}
+                    />
+                    <StageDetail
+                      label={portalText("Context policy")}
+                      value={stage.debug.context_policy}
+                    />
+                    <StageDetail
+                      label={portalText("Retry policy")}
+                      value={stage.debug.retry_policy}
+                    />
+                    <StageDetail
+                      label={portalText("Prompt")}
+                      value={stage.debug.prompt}
+                    />
+                    <StageDetail
+                      label={portalText("System prompt")}
+                      value={stage.debug.system_prompt}
+                    />
+                    <StageDetail
+                      label={portalText("Rendered context")}
+                      value={stage.debug.rendered_context}
+                    />
+                    <StageDetail
+                      label={portalText("Saved error")}
+                      value={stage.debug.error}
+                    />
                   </div>
                 </details>
               </div>
@@ -713,7 +1036,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 )
               })
             ) : (
-              <div className="muted">{intl.formatMessage(messages.noActivity)}</div>
+              <div className="muted">
+                {intl.formatMessage(messages.noActivity)}
+              </div>
             )}
           </div>
         </section>
@@ -735,21 +1060,36 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                   <span className="turn-chip">{artifact.kind}</span>
                 </div>
                 <div className="meta">
-                  {artifact.source || artifact.stage || "unknown source"} •{" "}
-                  {artifact.estimated_tokens != null
-                    ? `${formatNumber(artifact.estimated_tokens)} tokens est.`
-                    : "no token estimate"}{" "}
-                  • lineage {artifact.lineage_count}
+                  {portalText(
+                    "{value0} •{value1}{value2}{value3}• lineage {value4}",
+                    {
+                      value0:
+                        artifact.source ||
+                        artifact.stage ||
+                        portalText("unknown source"),
+                      value1: " ",
+                      value2:
+                        artifact.estimated_tokens != null
+                          ? portalText("{value0} tokens est.", {
+                              value0: formatNumber(artifact.estimated_tokens),
+                            })
+                          : portalText("no token estimate"),
+                      value3: " ",
+                      value4: artifact.lineage_count,
+                    },
+                  )}
                 </div>
                 <div className="meta">{artifact.preview}</div>
                 <details>
-                  <summary>Artifact id</summary>
+                  <summary>{portalText("Artifact id")}</summary>
                   <pre>{artifact.id}</pre>
                 </details>
               </div>
             ))
           ) : (
-            <div className="muted">{intl.formatMessage(messages.noArtifacts)}</div>
+            <div className="muted">
+              {intl.formatMessage(messages.noArtifacts)}
+            </div>
           )}
         </div>
       </section>
@@ -766,15 +1106,26 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
             detail.template_renders.map((render, index) => {
               const capabilityKeys = Object.keys(render.capabilities)
               return (
-                <div className="turn-item" key={`${render.template_uri}-${index}`}>
+                <div
+                  className="turn-item"
+                  key={`${render.template_uri}-${index}`}
+                >
                   <div className="row">
-                    <strong>{render.template_uri || "(inline template)"}</strong>
-                    <span className="pill running">{render.family || "unknown"}</span>
+                    <strong>
+                      {render.template_uri || portalText("(inline template)")}
+                    </strong>
+                    <span className="pill running">
+                      {render.family || portalText("unknown")}
+                    </span>
                   </div>
                   <div className="meta">
                     {render.provider}
                     {render.model ? ` • ${render.model}` : ""}
-                    {render.rendered_bytes ? ` • ${formatNumber(render.rendered_bytes)} bytes` : ""}
+                    {render.rendered_bytes
+                      ? portalText(" • {value0} bytes", {
+                          value0: formatNumber(render.rendered_bytes),
+                        })
+                      : ""}
                   </div>
                   <div className="turn-chip-row">
                     {render.branches.length ? (
@@ -785,7 +1136,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                           title={branch.branch_label ?? undefined}
                         >
                           {branch.kind}:{branch.branch_id}
-                          {branch.branch_label ? ` — ${branch.branch_label}` : ""}
+                          {branch.branch_label
+                            ? ` — ${branch.branch_label}`
+                            : ""}
                         </span>
                       ))
                     ) : (
@@ -795,12 +1148,15 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                     )}
                   </div>
                   <details>
-                    <summary>Capability snapshot</summary>
+                    <summary>{portalText("Capability snapshot")}</summary>
                     {capabilityKeys.length ? (
                       <pre>
                         {capabilityKeys
                           .sort()
-                          .map((key) => `${key}: ${JSON.stringify(render.capabilities[key])}`)
+                          .map(
+                            (key) =>
+                              `${key}: ${JSON.stringify(render.capabilities[key])}`,
+                          )
                           .join("\n")}
                       </pre>
                     ) : (
@@ -813,7 +1169,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               )
             })
           ) : (
-            <div className="muted">{intl.formatMessage(messages.noTemplateRenders)}</div>
+            <div className="muted">
+              {intl.formatMessage(messages.noTemplateRenders)}
+            </div>
           )}
         </div>
       </section>
@@ -830,8 +1188,14 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
             detail.transcript_steps.map((step) => (
               <div className="turn-item" key={step.call_id}>
                 <div className="row">
-                  <strong>Step {step.call_index}</strong>
-                  <span className="pill running">iteration {step.iteration}</span>
+                  <strong>
+                    {portalText("Step {value0}", { value0: step.call_index })}
+                  </strong>
+                  <span className="pill running">
+                    {portalText("iteration {value0}", {
+                      value0: step.iteration,
+                    })}
+                  </span>
                 </div>
                 <div className="meta">
                   {step.model}
@@ -839,33 +1203,61 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 </div>
                 <div className="meta">{step.summary}</div>
                 <div className="turn-chip-row">
-                  <span className="turn-chip">{step.total_messages} msgs</span>
-                  <span className="turn-chip">{step.kept_messages} kept</span>
-                  <span className="turn-chip">{step.added_messages} added</span>
+                  <span className="turn-chip">
+                    {portalText("{value0} msgs", {
+                      value0: step.total_messages,
+                    })}
+                  </span>
+                  <span className="turn-chip">
+                    {portalText("{value0} kept", {
+                      value0: step.kept_messages,
+                    })}
+                  </span>
+                  <span className="turn-chip">
+                    {portalText("{value0} added", {
+                      value0: step.added_messages,
+                    })}
+                  </span>
                   {step.input_tokens != null ? (
                     <span className="turn-chip">
-                      {formatNumber(step.input_tokens)} in / {formatNumber(step.output_tokens ?? 0)} out
+                      {portalText("{value0} in / {value1} out", {
+                        value0: formatNumber(step.input_tokens),
+                        value1: formatNumber(step.output_tokens ?? 0),
+                      })}
                     </span>
                   ) : null}
-                  {step.span_id != null ? <span className="turn-chip">span {step.span_id}</span> : null}
+                  {step.span_id != null ? (
+                    <span className="turn-chip">
+                      {portalText("span {value0}", { value0: step.span_id })}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="turn-grid">
                   <div className="turn-panel">
-                    <h4>What changed right now</h4>
-                    {step.system_prompt ? <div className="meta">Always-on instructions present</div> : null}
+                    <h4>{portalText("What changed right now")}</h4>
+                    {step.system_prompt ? (
+                      <div className="meta">
+                        {portalText("Always-on instructions present")}
+                      </div>
+                    ) : null}
                     {step.added_context.length ? (
                       step.added_context.map((message, index) => (
-                        <div className="turn-message" key={`${message.role}-${index}`}>
+                        <div
+                          className="turn-message"
+                          key={`${message.role}-${index}`}
+                        >
                           <div className="role">{message.role}</div>
                           <pre>{message.content}</pre>
                         </div>
                       ))
                     ) : (
-                      <div className="muted">{intl.formatMessage(messages.noAddedContext)}</div>
+                      <div className="muted">
+                        {intl.formatMessage(messages.noAddedContext)}
+                      </div>
                     )}
                   </div>
                   <div className="turn-panel">
-                    <h4>What happened next</h4>
+                    <h4>{portalText("What happened next")}</h4>
                     {step.tool_calls.length ? (
                       <div className="turn-chip-row">
                         {step.tool_calls.map((tool) => (
@@ -875,19 +1267,25 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                         ))}
                       </div>
                     ) : (
-                      <div className="muted">{intl.formatMessage(messages.noToolCalls)}</div>
+                      <div className="muted">
+                        {intl.formatMessage(messages.noToolCalls)}
+                      </div>
                     )}
                     {step.response_text ? (
                       <details>
-                        <summary>Expand full reply</summary>
+                        <summary>{portalText("Expand full reply")}</summary>
                         <pre>{step.response_text}</pre>
                       </details>
                     ) : (
-                      <div className="muted">{intl.formatMessage(messages.noResponseText)}</div>
+                      <div className="muted">
+                        {intl.formatMessage(messages.noResponseText)}
+                      </div>
                     )}
                     {step.thinking ? (
                       <details>
-                        <summary>Expand reasoning notes</summary>
+                        <summary>
+                          {portalText("Expand reasoning notes")}
+                        </summary>
                         <pre>{step.thinking}</pre>
                       </details>
                     ) : null}
@@ -922,13 +1320,15 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                   </div>
                   <div className="meta">{section.preview}</div>
                   <details open={index < 2}>
-                    <summary>Expand full text</summary>
+                    <summary>{portalText("Expand full text")}</summary>
                     <pre>{section.text}</pre>
                   </details>
                 </div>
               ))
             ) : (
-              <div className="muted">{intl.formatMessage(messages.noStory)}</div>
+              <div className="muted">
+                {intl.formatMessage(messages.noStory)}
+              </div>
             )}
           </div>
         </section>
@@ -945,15 +1345,28 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               detail.child_runs.map((child) => {
                 const runPath = child.run_path
                 return (
-                  <div className="child-item" key={`${child.worker_name}-${child.started_at}`}>
+                  <div
+                    className="child-item"
+                    key={`${child.worker_name}-${child.started_at}`}
+                  >
                     <div className="row">
                       <strong>{child.worker_name}</strong>
-                      <span className={`pill ${statusClass(child.status)}`}>{child.status}</span>
+                      <span className={`pill ${statusClass(child.status)}`}>
+                        {child.status}
+                      </span>
                     </div>
                     <div className="meta">{child.task}</div>
-                    <div className="meta">{runPath ?? child.run_id ?? "No persisted child run path"}</div>
+                    <div className="meta">
+                      {runPath ??
+                        child.run_id ??
+                        portalText("No persisted child run path")}
+                    </div>
                     {runPath ? (
-                      <button className="run-card-link" onClick={() => onSelectRun(runPath)} type="button">
+                      <button
+                        className="run-card-link"
+                        onClick={() => onSelectRun(runPath)}
+                        type="button"
+                      >
                         {intl.formatMessage(messages.openChildRun)}
                       </button>
                     ) : null}
@@ -961,7 +1374,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 )
               })
             ) : (
-              <div className="muted">{intl.formatMessage(messages.noChildren)}</div>
+              <div className="muted">
+                {intl.formatMessage(messages.noChildren)}
+              </div>
             )}
           </div>
         </section>

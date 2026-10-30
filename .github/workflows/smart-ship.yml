@@ -1,16 +1,15 @@
 name: Smart Ship
 
-# Hands pull requests labeled `ship` to the Smart Ship shepherd, which lands
-# them and reports each step on the PR. The shared runner lives in
-# burin-labs/.github and decides which CI completions it acts on, so a green
-# PR joins the merge queue when CI finishes instead of at the next sweep.
+# Wakes the shared Smart Ship loop for pull requests labeled `ship`. Each run
+# takes one look per PR and exits: it lands an approved, green head, or stops
+# and says why on the PR. The 15-minute sweep catches events GitHub never sent.
 
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; the shared runner reads the PR through the API and runs its own pinned scripts
-    types: [labeled, unlabeled, synchronize, ready_for_review, dequeued, closed]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] same-repository PRs only; with repair off the shared loop reads the PR through the API and never checks out its code
+    types: [labeled, unlabeled, ready_for_review]
   pull_request_review:
     types: [submitted]
-  workflow_run: # zizmor: ignore[dangerous-triggers] the pinned shared runner admits only completed same-repository runs, reads metadata through the API, and never checks out the parent-run ref
+  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only a pull request's own CI run, reads metadata through the API, and never checks out the parent-run ref
     workflows: [CI]
     types: [completed]
   schedule:
@@ -22,21 +21,15 @@ on:
         type: string
         default: ""
 
-# Every write (labels, merge, PR comments) uses the release app token the
-# shared runner mints from the secrets below; GITHUB_TOKEN only reads.
 permissions:
   contents: read
 
 jobs:
   ship:
-    # The shared runner decides which events wake the shepherd.
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@12f9468a8ba51a6c38d15624ca0a50d178be7e6a
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@3be52bec8cebbe67ce99853769b3d91d33c70ac3
     with:
-      # .github/smart-ship.toml sets which problems are repaired. The repair
-      # model's key is a secret of this environment, which admits main only.
-      # Off until replays prove repairs land PRs; authors fix their own PRs meanwhile.
+      # Off until replays show repairs land pull requests; authors fix their own PRs meanwhile.
       repair: false
-      repair-environment: ship-repair
-    # A called job sees its environment's secrets only when the caller
-    # inherits secrets; an explicit secrets map hides them.
-    secrets: inherit # zizmor: ignore[secrets-inherit] the callee is the org's own runner pinned by SHA, and the repair key is an environment secret it cannot otherwise read
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

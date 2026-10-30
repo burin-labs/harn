@@ -1,15 +1,12 @@
-//! Payload bodies for `_harn/agentEvent` extension notifications.
-//!
-//! ACP defines no `session/update` discriminator for Harn-native milestones, so
-//! they ride the `_harn/agentEvent` extension channel. Each builder here
-//! produces that notification's `params` body minus the `sessionId` / `kind`
-//! keys, which `emit_agent_event_ext` stamps on. Keeping them out of the
-//! dispatch match leaves each arm a single readable line and gives the wire
-//! shapes one owner.
+//! Typed bodies for `_harn/agentEvent` notifications whose projection is more
+//! than a field-for-field copy. Keeping them out of the dispatch match leaves
+//! each arm a single readable line.
 
+use super::super::agent_event_payloads as payloads;
+use super::AcpAgentEventSink;
 use harn_vm::agent_events::AgentEvent;
 
-pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
+pub(super) fn subagent_stop(event: &AgentEvent) -> Option<payloads::SubagentStop> {
     let AgentEvent::SubagentStop {
         lineage,
         parent_run_id,
@@ -25,25 +22,33 @@ pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    serde_json::json!({
-        "parentRunId": parent_run_id,
-        "childRunId": child_run_id,
-        "parentSessionId": lineage.as_ref().map(|lineage| &lineage.parent.session_id),
-        "childSessionId": lineage.as_ref().map(|lineage| &lineage.child.session_id),
-        "terminalStatus": terminal_status,
-        "terminalClass": terminal_class,
-        "reason": reason,
-        "resultRef": result_ref,
-        "receiptRef": receipt_ref,
-        "cancellation": cancellation,
-        "timeout": timeout,
-        "completedAtMs": completed_at_ms,
+    let terminal_status = match super::to_wire(terminal_status) {
+        serde_json::Value::String(status) => status,
+        other => other.to_string(),
+    };
+    Some(payloads::SubagentStop {
+        parent_run_id: parent_run_id.clone(),
+        child_run_id: child_run_id.clone(),
+        parent_session_id: lineage
+            .as_ref()
+            .map(|lineage| lineage.parent.session_id.clone()),
+        child_session_id: lineage
+            .as_ref()
+            .map(|lineage| lineage.child.session_id.clone()),
+        terminal_status,
+        terminal_class: terminal_class.clone(),
+        reason: reason.clone(),
+        result_ref: result_ref.clone(),
+        receipt_ref: receipt_ref.clone(),
+        cancellation: cancellation.clone(),
+        timeout: timeout.clone(),
+        completed_at_ms: *completed_at_ms,
     })
 }
 
-pub(super) fn subagent_join(event: &AgentEvent) -> serde_json::Value {
+pub(super) fn subagent_join(event: &AgentEvent) -> Option<payloads::SubagentJoin> {
     let AgentEvent::SubagentJoin {
         lineage,
         worker_id,
@@ -53,30 +58,29 @@ pub(super) fn subagent_join(event: &AgentEvent) -> serde_json::Value {
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    serde_json::json!({
-        "parentSessionId": lineage.parent.session_id,
-        "parentRunId": lineage.parent.run_id,
-        "childSessionId": lineage.child.session_id,
-        "childRunId": lineage.child.run_id,
-        "workerId": worker_id,
-        "completedAtMs": completed_at_ms,
-        "joinedAtMs": joined_at_ms,
+    Some(payloads::SubagentJoin {
+        parent_session_id: lineage.parent.session_id.clone(),
+        parent_run_id: lineage.parent.run_id.clone(),
+        child_session_id: lineage.child.session_id.clone(),
+        child_run_id: lineage.child.run_id.clone(),
+        worker_id: worker_id.clone(),
+        completed_at_ms: *completed_at_ms,
+        joined_at_ms: *joined_at_ms,
         // Renamed from `waitMs`, which reported this same subtraction (#6074).
-        // It is the collection lag, not the parent's wait: the parent may have
-        // been waiting long before the child reached a terminal state, and
-        // `waitMs` below is now that number.
-        "collectionLagMs": joined_at_ms.saturating_sub(*completed_at_ms),
-        "waitStartedAtMs": boundaries.wait_started_at_ms,
-        "waitMs": boundaries.wait_ms(*joined_at_ms),
-        "resultProcessingStartedAtMs": boundaries.result_processing_started_at_ms,
-        "resultProcessingCompletedAtMs": boundaries.result_processing_completed_at_ms,
-        "resultProcessingMs": boundaries.result_processing_ms(),
+        collection_lag_ms: joined_at_ms.saturating_sub(*completed_at_ms),
+        wait_started_at_ms: boundaries.wait_started_at_ms,
+        wait_ms: boundaries.wait_ms(*joined_at_ms),
+        result_processing_started_at_ms: boundaries.result_processing_started_at_ms,
+        result_processing_completed_at_ms: boundaries.result_processing_completed_at_ms,
+        result_processing_ms: boundaries.result_processing_ms(),
     })
 }
 
-pub(super) fn missing_tool_call_verdict(event: &AgentEvent) -> serde_json::Value {
+pub(super) fn missing_tool_call_verdict(
+    event: &AgentEvent,
+) -> Option<payloads::MissingToolCallVerdict> {
     let AgentEvent::MissingToolCallVerdict {
         iteration,
         action,
@@ -92,32 +96,34 @@ pub(super) fn missing_tool_call_verdict(event: &AgentEvent) -> serde_json::Value
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    serde_json::json!({
-        "iteration": iteration,
-        "action": action,
-        "originalAction": original_action,
-        "toolName": tool_name,
-        "confidence": confidence,
-        "confidenceThreshold": confidence_threshold,
-        "evidence": evidence,
-        "language": language,
-        "classifierKind": classifier_kind,
-        "model": model,
-        "error": error,
+    Some(payloads::MissingToolCallVerdict {
+        iteration: *iteration,
+        action: action.clone(),
+        original_action: original_action.clone(),
+        tool_name: tool_name.clone(),
+        confidence: *confidence,
+        confidence_threshold: *confidence_threshold,
+        evidence: evidence.clone(),
+        language: language.clone(),
+        classifier_kind: classifier_kind.clone(),
+        model: model.clone(),
+        error: error.clone(),
     })
 }
 
-pub(super) fn documented_stdlib_event(
-    event: &AgentEvent,
-) -> (&'static str, &str, serde_json::Value) {
+pub(super) fn emit_documented_stdlib_event(sink: &AcpAgentEventSink, event: &AgentEvent) {
     match event {
         AgentEvent::SubagentJoin { session_id, .. } => {
-            ("subagent_join", session_id, subagent_join(event))
+            if let Some(payload) = subagent_join(event) {
+                sink.emit_agent_event(session_id, &payload);
+            }
         }
         AgentEvent::SubagentStop { session_id, .. } => {
-            ("subagent_stop", session_id, subagent_stop(event))
+            if let Some(payload) = subagent_stop(event) {
+                sink.emit_agent_event(session_id, &payload);
+            }
         }
         AgentEvent::RequireSuccessfulToolsViolation {
             session_id,
@@ -128,18 +134,17 @@ pub(super) fn documented_stdlib_event(
             redacted_summary,
             recurrence_hints,
             metadata,
-        } => (
-            "require_successful_tools_violation",
+        } => sink.emit_agent_event(
             session_id,
-            serde_json::json!({
-                "violationKind": kind,
-                "source": source,
-                "actor": actor,
-                "runId": run_id,
-                "redactedSummary": redacted_summary,
-                "recurrenceHints": recurrence_hints,
-                "metadata": metadata,
-            }),
+            &payloads::RequireSuccessfulToolsViolation {
+                violation_kind: kind.clone(),
+                source: source.clone(),
+                actor: actor.clone(),
+                run_id: run_id.clone(),
+                redacted_summary: redacted_summary.clone(),
+                recurrence_hints: recurrence_hints.clone(),
+                metadata: metadata.clone(),
+            },
         ),
         AgentEvent::FinalWrapup {
             session_id,
@@ -149,51 +154,53 @@ pub(super) fn documented_stdlib_event(
             host_directive,
             terminal_kind,
             unconsumed_tool_call,
-        } => (
-            "final_wrapup",
+        } => sink.emit_agent_event(
             session_id,
-            serde_json::json!({
-                "finalStatus": final_status,
-                "stopReason": stop_reason,
-                "iteration": iteration,
-                "hostDirective": host_directive,
-                "terminalKind": terminal_kind,
-                "unconsumedToolCall": unconsumed_tool_call.as_ref().map(|evidence| serde_json::json!({
-                    "parseStatus": evidence.parse_status,
-                    "parsedCallCount": evidence.parsed_call_count,
-                    "toolNames": evidence.tool_names,
-                    "diagnostics": evidence.diagnostics,
-                    "evidenceLine": evidence.evidence_line,
-                })),
-            }),
+            &payloads::FinalWrapup {
+                final_status: final_status.clone(),
+                stop_reason: stop_reason.clone(),
+                iteration: *iteration,
+                host_directive: *host_directive,
+                terminal_kind: terminal_kind.clone(),
+                unconsumed_tool_call: unconsumed_tool_call.as_ref().map(|evidence| {
+                    payloads::FinalWrapupUnconsumedToolCall {
+                        parse_status: match super::to_wire(&evidence.parse_status) {
+                            serde_json::Value::String(status) => status,
+                            other => other.to_string(),
+                        },
+                        parsed_call_count: evidence.parsed_call_count,
+                        tool_names: evidence.tool_names.clone(),
+                        diagnostics: evidence.diagnostics.clone(),
+                        evidence_line: evidence.evidence_line.clone(),
+                    }
+                }),
+            },
         ),
         AgentEvent::PackThinkingStripped {
             session_id,
             model,
             requested,
             reason,
-        } => (
-            "pack_thinking_stripped",
+        } => sink.emit_agent_event(
             session_id,
-            serde_json::json!({
-                "model": model,
-                "requested": requested,
-                "reason": reason,
-            }),
+            &payloads::PackThinkingStripped {
+                model: model.clone(),
+                requested: requested.clone(),
+                reason: reason.clone(),
+            },
         ),
         AgentEvent::SelfConsistencyTie {
             session_id,
             answer,
             total,
             distribution,
-        } => (
-            "self_consistency_tie",
+        } => sink.emit_agent_event(
             session_id,
-            serde_json::json!({
-                "answer": answer,
-                "total": total,
-                "distribution": distribution,
-            }),
+            &payloads::SelfConsistencyTie {
+                answer: answer.clone(),
+                total: *total,
+                distribution: distribution.clone(),
+            },
         ),
         AgentEvent::CodeLibrarianQueryNlFallback {
             session_id,
@@ -202,30 +209,31 @@ pub(super) fn documented_stdlib_event(
             mcts_expansions,
             result_count,
             text,
-        } => (
-            "code_librarian_query_nl_fallback",
+        } => sink.emit_agent_event(
             session_id,
-            serde_json::json!({
-                "attemptedCypher": attempted_cypher,
-                "mctsDepth": mcts_depth,
-                "mctsExpansions": mcts_expansions,
-                "resultCount": result_count,
-                "text": text,
-            }),
+            &payloads::CodeLibrarianQueryNlFallback {
+                attempted_cypher: attempted_cypher.clone(),
+                mcts_depth: *mcts_depth,
+                mcts_expansions: *mcts_expansions,
+                result_count: *result_count,
+                text: text.clone(),
+            },
         ),
-        AgentEvent::ModelJob { session_id, event } => {
-            ("model_job", session_id, serde_json::json!({"event": event}))
-        }
-        _ => unreachable!("documented_stdlib_event called for unrelated event"),
+        AgentEvent::ModelJob { session_id, event } => sink.emit_agent_event(
+            session_id,
+            &payloads::ModelJob {
+                event: event.clone(),
+            },
+        ),
+        _ => unreachable!("emit_documented_stdlib_event called for unrelated event"),
     }
 }
 
 /// The loud-boundary funnel (harn#5142). A client that renders this can tell
 /// "the model produced nothing" from "the harness dropped what the model
-/// produced" — the distinction the whole class of bug turned on. `owner`
-/// carries the attribution, `boundary` says where, `excerpt` carries the bytes
-/// that died.
-pub(super) fn boundary_failure(event: &AgentEvent) -> serde_json::Value {
+/// produced". `owner` carries the attribution, `boundary` says where,
+/// `excerpt` carries the bytes that died.
+pub(super) fn boundary_failure(event: &AgentEvent) -> Option<payloads::BoundaryFailure> {
     let AgentEvent::BoundaryFailure {
         boundary,
         kind,
@@ -238,26 +246,23 @@ pub(super) fn boundary_failure(event: &AgentEvent) -> serde_json::Value {
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    let mut payload = serde_json::json!({
-        "boundary": boundary.as_str(),
-        "failureKind": kind.as_str(),
-        "owner": owner,
-        "detail": detail,
-        "droppedCount": dropped_count,
-        "droppedBytes": dropped_bytes,
-        "unreported": unreported,
-    });
-    if let Some(excerpt) = excerpt {
-        payload["excerpt"] = serde_json::Value::String(excerpt.clone());
-    }
-    payload
+    Some(payloads::BoundaryFailure {
+        boundary: boundary.as_str().to_string(),
+        failure_kind: kind.as_str().to_string(),
+        owner: owner.clone(),
+        detail: detail.clone(),
+        dropped_count: *dropped_count,
+        dropped_bytes: *dropped_bytes,
+        unreported: *unreported,
+        excerpt: excerpt.clone(),
+    })
 }
 
 /// A concrete provider/model pair lacking a catalog recommendation, and the
 /// fallback the runtime chose instead.
-pub(super) fn capability_gap(event: &AgentEvent) -> serde_json::Value {
+pub(super) fn capability_gap(event: &AgentEvent) -> Option<payloads::CapabilityGap> {
     let AgentEvent::CapabilityGap {
         level,
         capability,
@@ -269,24 +274,21 @@ pub(super) fn capability_gap(event: &AgentEvent) -> serde_json::Value {
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    let mut payload = serde_json::json!({
-        "level": level,
-        "capability": capability,
-        "provider": provider,
-        "model": model,
-        "fallbackToolFormat": fallback_tool_format,
-        "message": message,
-    });
-    if let Some(requested) = requested_tool_format {
-        payload["requestedToolFormat"] = serde_json::Value::String(requested.clone());
-    }
-    payload
+    Some(payloads::CapabilityGap {
+        level: level.clone(),
+        capability: capability.clone(),
+        provider: provider.clone(),
+        model: model.clone(),
+        fallback_tool_format: fallback_tool_format.clone(),
+        message: message.clone(),
+        requested_tool_format: requested_tool_format.clone(),
+    })
 }
 
 /// Middleware audit metadata and its optional privacy-preserving receipt.
-pub(super) fn tool_call_audit(event: &AgentEvent) -> serde_json::Value {
+pub(super) fn tool_call_audit(event: &AgentEvent) -> Option<payloads::ToolCallAudit> {
     let AgentEvent::ToolCallAudit {
         tool_call_id,
         tool_name,
@@ -295,15 +297,12 @@ pub(super) fn tool_call_audit(event: &AgentEvent) -> serde_json::Value {
         ..
     } = event
     else {
-        return serde_json::json!({});
+        return None;
     };
-    let mut payload = serde_json::json!({
-        "toolCallId": tool_call_id,
-        "toolName": tool_name,
-        "audit": audit,
-    });
-    if let Some(receipt) = receipt {
-        payload["receipt"] = serde_json::to_value(receipt).expect("receipt serializes");
-    }
-    payload
+    Some(payloads::ToolCallAudit {
+        tool_call_id: tool_call_id.clone(),
+        tool_name: tool_name.clone(),
+        audit: audit.clone(),
+        receipt: receipt.as_ref().map(super::to_wire),
+    })
 }

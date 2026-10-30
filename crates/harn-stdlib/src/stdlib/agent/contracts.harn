@@ -32,6 +32,7 @@ pub type AgentGoalOutcomeReason = "unassessed" \
   | "requirements_unassessed" \
   | "goal_assessed" \
   | "pending_effects" \
+  | "verification_discovery_unavailable" \
   | "completion_not_accepted"
 
 pub type AgentGoalRequirementSummary = {

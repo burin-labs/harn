@@ -131,25 +131,16 @@ guard_command=(
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
 # Standalone rules need explicit grants for case folding and assignment-name
 # iteration as well as the command parser.
-guard_command+=("--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range" "$script_dir/agent_shell_guard.harn")
+guard_command+=("--allow=bytes_from_string,command_risk_scan,hostlib_ast_search,lowercase,range")
 
-# The worktree rule may only name an admission command this repository actually
-# has. The guard runs in a hook host with no filesystem builtin, so the answer
-# is measured here, once, and reported to it. The two variables keep "this
-# repository owns none" apart from "nobody measured": the guard refuses on the
-# second and allows on the first. Keep the path in step with
-# WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the guard refuses
-# by name if the two ever disagree.
-# One row per repository the command could mean, not one answer for this
-# installation. Measuring only our own root answered for the wrong repository
-# whenever a command pointed elsewhere, and named an admission command that
-# does not exist there. The guard owns argv and picks the row; this owns the
-# filesystem and measures every plausible root. Keep the path and the walk in
-# step with WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the
-# guard refuses by name if the two ever disagree.
-guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
-
-# Walk up from a directory to the nearest repository root, bounded.
+# The policy's git child processes run inside the interpreter's sandbox, which by
+# default reads only the interpreter's own working directory tree. A
+# `git -C <repo>` aimed above or beside that directory then cannot read its own
+# working directory and exits 128, so the verdict used to depend on where the
+# caller stood. Grant read access to the repository of the caller's directory
+# and of every absolute path the command names. The grant is read-only and covers
+# what git must open to read alias configuration. An explicit HARN_BIN override
+# may name an older Harn without the flag and keeps its pinned argument list.
 guard_repository_root_of() {
   local directory="$1" depth=0
   [[ -d "$directory" ]] || return 1
@@ -165,39 +156,64 @@ guard_repository_root_of() {
   done
   return 1
 }
-
-# The admission command a root owns, empty when it owns none. The row is keyed
-# by the spelling the caller used, not by the resolved path: the guard matches
-# the directory as it appears in the command, and on macOS a resolved root
-# routinely differs from it by a /private prefix, which would leave every
-# target looking unmeasured.
-guard_admission_row() {
-  local key="$1" root="$2"
-  if [[ -f "$root/scripts/fleet-worktree-admit.ts" ]]; then
-    printf '%s\t%s\n' "$key" "scripts/fleet-worktree-admit.ts"
-  else
-    printf '%s\t\n' "$key"
+# A linked worktree keeps its git directory, and the common directory it shares,
+# outside its own tree; git reads both when it reads configuration.
+guard_git_directories_of() {
+  local root="$1" gitdir="" common=""
+  [[ -f "$root/.git" ]] || return 0
+  IFS= read -r gitdir <"$root/.git" || true
+  gitdir="${gitdir#gitdir: }"
+  # A relative pointer is relative to the worktree, not to the caller.
+  [[ "$gitdir" == /* ]] || gitdir="$root/$gitdir"
+  [[ -d "$gitdir" ]] || return 0
+  gitdir="$(cd "$gitdir" && pwd -P)"
+  printf '%s\n' "$gitdir"
+  if [[ -f "$gitdir/commondir" ]]; then
+    IFS= read -r common <"$gitdir/commondir" || true
+    # A relative commondir is relative to the git directory that names it.
+    [[ "$common" == /* ]] || common="$gitdir/$common"
+    [[ -n "$common" && -d "$common" ]] && (cd "$common" && pwd -P)
   fi
+  return 0
 }
+# Absolute paths a command names, spaces kept. The payload is cut at every
+# character that cannot occur in an unquoted path or that quotes one, which leaves
+# each quoted or bare run as one segment; a path with spaces is then the longest
+# run of words from a leading `/` that names an existing directory. Quoting is
+# thereby honoured without a second shell grammar, which only the policy owns.
+guard_absolute_paths_in() {
+  local segment candidate index count j
+  local -a words
+  while IFS= read -r segment; do
+    [[ "$segment" == *"/"* ]] || continue
+    read -r -a words <<<"$segment"
+    count=${#words[@]}
+    for ((index = 0; index < count; index++)); do
+      [[ "${words[index]}" == /* ]] || continue
+      candidate=""
+      for ((j = index; j < count && j < index + 12; j++)); do
+        candidate="${candidate:+$candidate }${words[j]}"
+        printf '%s\n' "$candidate"
+      done
+    done
+  done < <(sed 's/\\\\ / /g' "$1" | tr -c '[:alnum:]/._@+~ -' '\n')
+}
+if [[ "$harn_mode" == "standalone" || "$harn_runner" != "${HARN_BIN:-}" ]]; then
+  guard_read_roots="$(guard_repository_root_of "$PWD" || pwd -P)"
+  while IFS= read -r guard_token; do
+    guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
+    [[ -n "$guard_candidate" ]] && guard_read_roots+=$'\n'"$guard_candidate"
+  done < <(guard_absolute_paths_in "$payload_file" | sort -u)
+  while IFS= read -r guard_root; do
+    [[ -n "$guard_root" ]] && guard_read_roots+=$'\n'"$(guard_git_directories_of "$guard_root")"
+  done < <(printf '%s\n' "$guard_read_roots" | sort -u)
+  while IFS= read -r guard_root; do
+    [[ -n "$guard_root" ]] && guard_command+=(--sandbox-read-root "$guard_root")
+  done < <(printf '%s\n' "$guard_read_roots" | sort -u)
+fi
+guard_command+=("$script_dir/agent_shell_guard.harn")
 
-# Our own root first: it is the answer when the command names no directory.
-guard_admission_rows="$(guard_admission_row "$guard_repo_root" "$guard_repo_root")"
-# Then every absolute path token in the command, keyed by the token itself and
-# answered from the repository it sits in. Tokenisation only, so the semantic
-# decision about which one the command targets stays in the guard.
-while IFS= read -r guard_token; do
-  [[ -n "$guard_token" ]] || continue
-  guard_candidate="$(guard_repository_root_of "$guard_token" || true)"
-  [[ -n "$guard_candidate" ]] || continue
-  case $'\n'"$guard_admission_rows"$'\n' in
-    *$'\n'"$guard_token"$'\t'*) continue ;;
-  esac
-  guard_admission_rows+=$'\n'"$(guard_admission_row "$guard_token" "$guard_candidate")"
-done < <(tr -c '[:alnum:]/._@+~-' '\n' <"$payload_file" | grep '^/' | sort -u)
-
-HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="$guard_admission_rows"
-export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION
-export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED=1
+guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
 
 # The Make targets this repository declares. A build tool that is not universal
 # (`swift`, unlike `cargo`) may only be redirected to a target that exists, and

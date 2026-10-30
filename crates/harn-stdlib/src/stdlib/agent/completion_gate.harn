@@ -18,6 +18,7 @@ import { COMPLETION_JUDGE_DEFAULT_CAP } from "std/agent/judge"
 // `turn_end_condition` (bounded LLM). Domain facts remain host callbacks; this module
 // owns their validation, evaluation, persistent veto budget, and option bundle.
 import {
+  CompletionVerificationDiscovery,
   CompletionVerificationState,
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
@@ -65,6 +66,7 @@ pub type CompletionFacts = {
   verification_command?: string,
   verification_current?: bool,
   verifier_available?: bool,
+  verification_discovery?: CompletionVerificationDiscovery?,
   verification_discriminates?: bool,
   behavior_evidence?: CompletionBehaviorEvidence?,
   behavior_session_id?: string,
@@ -516,6 +518,7 @@ fn __completion_gate_verification(
       "failed"
     },
     observed_at_evidence_index: nil,
+    discovery: facts.verification_discovery,
   }
 }
 

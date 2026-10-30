@@ -232,3 +232,56 @@ fn conformance_schema_accepts_every_advertised_agent_event_kind() {
         "ACP conformance schema and advertised event kinds must change together"
     );
 }
+
+/// The published agent-event schema is derived from the bodies the adapter
+/// serializes; every emitted fixture must validate against it, and a body
+/// with a mistyped field must not.
+#[tokio::test(flavor = "current_thread")]
+async fn emitted_agent_events_validate_against_the_derived_schema() {
+    let schema = crate::adapters::acp::agent_event_payloads::agent_event_schema();
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    let notifications = collect_notifications(agent_event_ext_fixture_events()).await;
+    let mut kinds = BTreeSet::new();
+    for notification in &notifications {
+        let params = &notification["params"];
+        assert!(validator.is_valid(params), "{params}");
+        kinds.insert(params["kind"].as_str().unwrap().to_string());
+    }
+    assert!(
+        kinds.len() >= 25,
+        "fixtures must cover the typed kinds: {kinds:?}"
+    );
+    let mut judge = notifications
+        .iter()
+        .find(|notification| notification["params"]["kind"] == "judge_decision")
+        .expect("judge_decision fixture")["params"]
+        .clone();
+    judge["judgeDurationMs"] = serde_json::json!("slow");
+    assert!(
+        !validator.is_valid(&judge),
+        "a mistyped body field must be rejected"
+    );
+}
+
+/// Pins the emitted agent events that host bindings decode in their own
+/// languages. Set `HARN_UPDATE_SNAPSHOTS=1` to rewrite it.
+#[tokio::test(flavor = "current_thread")]
+async fn emitted_agent_event_fixture_is_pinned() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/acp/agent_events.json");
+    let actual = serde_json::Value::Array(
+        collect_notifications(agent_event_ext_fixture_events())
+            .await
+            .into_iter()
+            .map(|notification| notification["params"].clone())
+            .collect(),
+    );
+    if std::env::var_os("HARN_UPDATE_SNAPSHOTS").is_some() {
+        let text = serde_json::to_string_pretty(&actual).unwrap() + "\n";
+        std::fs::write(&path, text).unwrap();
+    }
+    let expected: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("agent event fixture"))
+            .expect("fixture json");
+    assert_eq!(actual, expected);
+}

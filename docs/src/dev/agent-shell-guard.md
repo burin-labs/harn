@@ -2,9 +2,8 @@
 
 Harn gives Codex and Claude the same repository command rules. The guard keeps
 Rust builds and tests on the Make targets that configure a private build
-directory for each worktree. It also keeps Fleet worktree creation behind its
-durable admission command and stops long commands from losing most of their
-output in a filter.
+directory for each worktree. It also stops long commands from losing most of
+their output in a filter.
 
 The guard applies only to agent shell calls. It does not change commands run by
 people, continuous integration, Make recipes, or repository scripts.
@@ -44,49 +43,6 @@ The one-off escape is `HARN_ALLOW_RAW_SWIFT=1`. A repository with no such
 target, or one whose `Makefile` the adapter could not read, is left alone: the
 rule is inert there rather than pointing at a command that does not exist.
 
-This is the opposite of how the worktree rule treats an unreadable census, and
-deliberately so. Refusing raw worktree creation on an unknown answer prevents
-real harm wherever it fires; refusing `swift test` on an unknown answer would
-send the operator to a target that may not be there.
-
-## Admit Fleet worktrees before creating them
-
-Agent shell calls cannot run raw `git worktree add`. Use the owning
-`fleet-worktree-admit` command, which acquires the remote lease and records the
-joined ledger and recovery receipts before it creates the worktree. The guard
-does not expose an environment-variable bypass for this rule.
-
-The guard answers for the repository the command targets, not for the one it is
-installed in. A `git -C <path>` invocation names that repository, and so does an
-absolute `cd` earlier in the same command, which holds for everything after it.
-A relative `cd` is ignored: the hook payload carries no working directory to
-resolve it against.
-
-Configure the existing admission owner once for this repository. Use its
-absolute path; linked worktrees share the repository's local Git configuration:
-
-```bash
-git config --local harn.fleetAdmissionOwner /path/to/host-repo/scripts/fleet-worktree-admit.ts
-```
-
-With Node.js 22.6 or later available, run Harn's entry from the checkout
-you're admitting:
-
-```bash
-./scripts/fleet-worktree-admit.ts --help
-```
-
-The entry forwards arguments to the configured canonical admission owner and
-supplies this Harn checkout as `--repository-root`. Don't pass a separate root
-override. In a linked worktree, admission targets that linked checkout.
-
-A missing or unconfigured owner fails with its configuration remedy. A
-repository with no admission entry permits raw creation; an unmeasured target
-is refused.
-
-This restriction does not affect people, continuous integration, repository
-scripts, `git worktree list`, or retirement through `git worktree remove`.
-
 ## Commit work in progress instead of stashing it
 
 Agent shell calls cannot run `git stash` forms that write the stash list:
@@ -111,6 +67,12 @@ remains unknown. When a payload changes Git configuration, run a custom alias in
 a separate shell call so the guard can read its effective configuration.
 Within one decision, repeated scans reuse measured builtin facts for the same
 executable. A new decision queries again; different executables keep separate facts.
+
+The verdict does not depend on the caller's working directory. The adapter grants
+the policy's Git queries read access to the repository of the caller's directory
+and of each absolute path in the command, including a linked worktree's Git
+directories. When Git still cannot read the configuration, the refusal says the
+guard faulted and names why; it never reads as a `git stash` refusal.
 
 ## Keep complete command output
 

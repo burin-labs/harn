@@ -17,7 +17,7 @@
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.181"
+        "version": "0.10.182-dev"
       }
     },
     {
@@ -29,11 +29,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
-        "checksum": "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
-        "name": "tree-sitter-typescript",
-        "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.23.2"
+        "artifact_digest": "sha256:133141a1d96f267968365c64b07697dfc6545ee317f28bbebc2d3b705c9da887",
+        "checksum": null,
+        "name": "harn-grammars",
+        "source": "workspace-path",
+        "version": "0.10.182-dev"
       }
     },
     {
@@ -45,11 +45,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
-        "checksum": "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
-        "name": "tree-sitter-typescript",
-        "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.23.2"
+        "artifact_digest": "sha256:133141a1d96f267968365c64b07697dfc6545ee317f28bbebc2d3b705c9da887",
+        "checksum": null,
+        "name": "harn-grammars",
+        "source": "workspace-path",
+        "version": "0.10.182-dev"
       }
     },
     {

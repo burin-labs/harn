@@ -1,4 +1,5 @@
 name: Build release binaries
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Build release binaries [{0}]', inputs.source_candidate && 'source-candidate' || inputs.benchmark_only && 'benchmark' || inputs.warm_cache_only && 'warm' || 'invalid') || 'Build release binaries' }}
 
 # Triggers, in order of importance:
 #
