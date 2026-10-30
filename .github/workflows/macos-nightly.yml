@@ -216,6 +216,8 @@ jobs:
       - name: Remove restored compiler timings
         shell: bash
         run: rm -f "${CARGO_TARGET_DIR:-target}/cargo-timings/cargo-timing.html"
+      - name: Prove workspace artifact reuse and changed-source invalidation
+        run: make test-workspace-reuse-cargo
       - name: Run workspace nextest
         shell: bash
         env:
