@@ -37,6 +37,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+mkdir -p "$tmp_root/bin"
+cp "$repo_root/scripts/tests/fixtures/df-capacity.sh" "$tmp_root/bin/df"
+chmod +x "$tmp_root/bin/df"
+export PATH="$tmp_root/bin:$PATH"
+
 fail() {
   echo "prune_stale_targets_host_policy_test: $1" >&2
   shift
@@ -187,6 +192,23 @@ grep -Eq "^harn-target GC: .*status=skipped reason=another-run-active holder_pid
 [[ "$(cat "$lock/owner")" == "$wedged 1577836800" ]] || fail "the live holder's lock was modified" "$wedged_out"
 rm "$lock/owner"
 rmdir "$lock"
+
+# Measured pressure remains incomplete when protected working sets prevent relief.
+pressure="$tmp_root/pressure.txt"
+FIXTURE_DF_AVAILABLE_KIB=0 run_gc --host-maintenance >"$pressure" 2>&1
+grep -Eq 'status=partial .*pressure_unproven_roots=1 ' "$pressure" \
+  || fail "zero capacity was mistaken for satisfied pressure" "$pressure"
+grep -Eq 'available_bytes=0 floor_bytes=[1-9][0-9]*' "$pressure" \
+  || fail "the zero-capacity measurement did not reach admission" "$pressure"
+
+unknown="$tmp_root/unknown-capacity.txt"
+FIXTURE_DF_AVAILABLE_KIB=unknown run_gc --host-maintenance >"$unknown" 2>&1
+grep -Eq 'status=partial .*pressure_unproven_roots=1 ' "$unknown" \
+  || fail "unreadable capacity was mistaken for satisfied pressure" "$unknown"
+grep -Fq 'free space after: root=' "$unknown" \
+  || fail "the unreadable capacity did not reach the final measurement" "$unknown"
+grep -Fq ' unavailable' "$unknown" \
+  || fail "unreadable capacity was reported as a measurement" "$unknown"
 
 echo "--- overlapping run (skipped) ---"
 cat "$skipped"
