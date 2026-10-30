@@ -604,6 +604,20 @@ runtime's existing MCP configuration. HTTP and SSE session intake are not
 advertised. A client `systemPrompt` is likewise refused rather than silently
 ignored. These refusals happen before creating or restoring a session.
 
+`session/new`, `session/load`, and `session/resume` accept
+`additionalDirectories` as the complete ordered list of additional workspace
+roots. Paths must name existing absolute directories. A malformed entry or a
+root outside process confinement refuses the whole request. The list expands
+filesystem scope without changing `cwd`; it cannot change during an active
+prompt. Existing execution policy ceilings still apply.
+
+Omitting the list or supplying `[]` activates no additional roots, including
+when loading a stored session. Stored paths report prior state and do not
+authorize a new launch. Accepted replacements persist before changing live
+grants; `session/list` reports the canonical ordered list. Open client sessions
+retain their runtime state until closed or released. At capacity, admission
+fails rather than evicting a still-open client's roots.
+
 ## Design rule
 
 If a behavior changes depending on whether the caller arrived over MCP, A2A, or

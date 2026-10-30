@@ -19,6 +19,9 @@ pub async fn truncate_canonical(
     let _writer = SessionWriteLease::try_acquire(store_dir, id)
         .map_err(|error| VmError::Runtime(format!("canonical session truncate: {error}")))?;
     match store.describe(id).await {
+        Ok(meta) if !meta.has_canonical_journal() => {
+            return truncate(id, keep_first).map_err(VmError::Runtime);
+        }
         Ok(_) => {}
         Err(StoreError::NotFound(_)) => return truncate(id, keep_first).map_err(VmError::Runtime),
         Err(error) => {

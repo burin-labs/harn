@@ -126,10 +126,18 @@ pub(crate) fn append_event_to_state(
     action: &str,
 ) -> Result<(), String> {
     let journal_event = crate::llm::helpers::vm_value_to_json(&event);
-    let candidate = transcript_with_appended_event(&state.transcript, event);
-    apply_transcript_with_budget(state, candidate, action)?;
+    apply_transcript_event_to_state(state, event, action)?;
     crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
     Ok(())
+}
+
+pub(crate) fn apply_transcript_event_to_state(
+    state: &mut SessionState,
+    event: VmValue,
+    action: &str,
+) -> Result<(), String> {
+    let candidate = transcript_with_appended_event(&state.transcript, event);
+    apply_transcript_with_budget(state, candidate, action)
 }
 
 fn transcript_with_appended_event(transcript: &VmValue, event: VmValue) -> VmValue {
@@ -226,6 +234,40 @@ pub fn prompt_state_json(id: &str) -> SessionPromptState {
             }
         }
         SessionPromptState { messages, summary }
+    })
+}
+
+pub(crate) fn canonical_prompt_snapshot(
+    id: &str,
+) -> Result<super::session_event::CompactionRecord, String> {
+    use super::session_event::{CompactionRecord, TranscriptEvent, TranscriptKind};
+    let transcript = super::transcript(id).ok_or_else(|| format!("unknown session '{id}'"))?;
+    let messages = messages_json(id);
+    let mut source_event_ids = transcript
+        .as_dict()
+        .and_then(|dict| dict.get("events"))
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events.as_ref()),
+            _ => None,
+        })
+        .into_iter()
+        .flatten()
+        .map(|event| TranscriptEvent::from_json(crate::llm::helpers::vm_value_to_json(event)))
+        .filter(|event| {
+            matches!(
+                event.kind,
+                Some(TranscriptKind::Message | TranscriptKind::ToolResult)
+            )
+        })
+        .map(|event| event.id)
+        .collect::<Vec<_>>();
+    if source_event_ids.len() != messages.len() {
+        source_event_ids = vec![None; messages.len()];
+    }
+    Ok(CompactionRecord {
+        messages,
+        summary: prompt_state_json(id).summary,
+        source_event_ids,
     })
 }
 

@@ -98,6 +98,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             assert_eq!(
                 initialize["result"]["agentCapabilities"]["sessionCapabilities"],
                 serde_json::json!({
+                    "additionalDirectories": {},
                     "close": {},
                     "list": {},
                     "resume": {},
@@ -287,6 +288,7 @@ harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
         for _ in 0..4 {
             let message = recv_json(&mut response_rx).await;
             if message["id"] == 4 {
+                assert!(message.get("error").is_none(), "{message}");
                 response = Some(message);
             } else if message["method"] == "session/update"
                 && message["params"]["update"]["sessionUpdate"] == "session_truncated"

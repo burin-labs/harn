@@ -6,8 +6,8 @@
 //! observability-only: a filtered or failed sink can never alter durability.
 
 use harn_session_store::{
-    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionType,
-    SessionWriteLease,
+    AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
+    SessionWriteLease, UpdateSession,
 };
 
 use crate::agent_sessions::session_event::{
@@ -20,10 +20,15 @@ use crate::value::{DictMap, VmError};
 pub(crate) mod live;
 mod queue;
 mod run_preparation;
+mod workspace_roots;
+#[cfg(test)]
+mod workspace_roots_tests;
 pub(crate) use run_preparation::register as register_run_preparation;
 pub(crate) use run_preparation::{
     adopt_prepared_run, take_initialization_accounting, with_initialization_accounting,
 };
+pub(crate) use workspace_roots::add_workspace_root_verified_persisted;
+pub use workspace_roots::install_workspace_roots;
 #[cfg(test)]
 mod run_preparation_tests;
 pub(crate) use queue::JournalAuditWriter;
@@ -65,6 +70,7 @@ pub(crate) struct JournalState {
     /// `parallel settle`) would each append the same head.
     flush_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     state_dir: session_store::SessionStoreDir,
+    persisted_directories: Vec<String>,
     _writer_lease: SessionWriteLease,
 }
 
@@ -102,6 +108,14 @@ impl JournalState {
 
     pub(crate) fn state_dir(&self) -> &session_store::SessionStoreDir {
         &self.state_dir
+    }
+
+    pub(crate) fn persisted_directories(&self) -> &[String] {
+        &self.persisted_directories
+    }
+
+    pub(crate) fn record_persisted_directories(&mut self, directories: Vec<String>) {
+        self.persisted_directories = directories;
     }
 
     pub(crate) fn first_event_id(&self) -> Option<u64> {
@@ -312,7 +326,7 @@ pub(crate) async fn prepare_standalone(
     open_journal(
         state_dir,
         session_id,
-        None,
+        crate::agent_sessions::parent_id(session_id),
         SessionType::User,
         JournalConfigIdentity {
             turn_id: run_id.clone(),
@@ -376,6 +390,12 @@ async fn open_journal(
         session_type,
     )
     .await?;
+    let persisted_directories = store
+        .describe(session_id)
+        .await
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?
+        .additional_directories()
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
     let JournalConfigIdentity {
         run_id,
         turn_id,
@@ -398,6 +418,7 @@ async fn open_journal(
         lifecycle_reservation: None,
         flush_lock: std::sync::Arc::default(),
         state_dir,
+        persisted_directories,
         _writer_lease: writer_lease,
     })
 }
@@ -499,15 +520,24 @@ pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
     let Some((store, events)) = crate::agent_sessions::pending_journal_events(session_id)? else {
         return Ok(());
     };
-    if events.is_empty() {
-        return Ok(());
+    if !events.is_empty() {
+        let stored = store
+            .append_batch(session_id, events)
+            .await
+            .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+        let event_ids: Vec<u64> = stored.iter().map(|event| event.event_id).collect();
+        crate::agent_sessions::record_persisted_journal_events(session_id, &event_ids);
     }
-    let stored = store
-        .append_batch(session_id, events)
-        .await
-        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
-    let event_ids: Vec<u64> = stored.iter().map(|event| event.event_id).collect();
-    crate::agent_sessions::record_persisted_journal_events(session_id, &event_ids);
+    if let Some(directories) = crate::agent_sessions::pending_workspace_directories(session_id)? {
+        store
+            .update(
+                session_id,
+                UpdateSession::default().with_additional_directories(directories.clone()),
+            )
+            .await
+            .map_err(|error| VmError::Runtime(format!("workspace root metadata: {error}")))?;
+        crate::agent_sessions::record_persisted_workspace_directories(session_id, directories);
+    }
     Ok(())
 }
 

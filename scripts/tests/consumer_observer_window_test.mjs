@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {consumerDeadlineReceipt,legacyConsumerObservationPolicy as consumerObservationPolicy,qualifyConsumerDeadline,observerDeadlineStep,
   observerDeadlineFilename,observerDeadlineName,observerWindowSteps,waitLegacyConsumerWindow as waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
-import {observerDeclarationName,observerDeclarationStep} from '../lib/consumer-observer.mjs';
+import {observerDeclarationName,observerDeclarationStep,observerPublicationWitness} from '../lib/consumer-observer.mjs';
 
 test('the actual deadline reader authenticates real archives and original producer steps before recovery evidence',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-observer-deadline-reader-'));
@@ -26,7 +26,7 @@ test('the actual deadline reader authenticates real archives and original produc
     const observed=step(observerWindowSteps[2],8,8100,8201,'failure');
     const published=step(observerDeadlineStep,9,8201,8202,'success');
     const job={id:701,run_id:42,run_attempt:2,head_sha:context.parent_head_sha,status:'completed',conclusion:'failure',
-      steps:[declared,observed,published]};
+      steps:[declared,step(observerPublicationWitness(context),3,1001,1002,'success'),observed,published]};
     const fixture=path.join(scratch,'fixture.json'),preload=path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));

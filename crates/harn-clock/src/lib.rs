@@ -97,6 +97,16 @@ pub fn system_now_rfc3339() -> String {
     format_rfc3339(OffsetDateTime::now_utc())
 }
 
+/// Current system time as a nonnegative decimal Unix-seconds string.
+pub fn system_now_unix_seconds_text() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}
+
 // ── Real clock ─────────────────────────────────────────────────────────────────
 
 /// Production clock. Reads `OffsetDateTime::now_utc()` and

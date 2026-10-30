@@ -291,7 +291,7 @@ async fn opted_in_prompt_captures_its_caller_identity_at_admission() {
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
 async fn historical_fork_restores_its_matching_file_boundary() {
-    use harn_session_store::{AppendEvent, CreateSession, SessionEventKind, SessionStore};
+    use harn_session_store::{AppendEvent, SessionEventKind, SessionStore};
     let dir = tempfile::TempDir::new().unwrap();
     let root = dir.path();
     let git = |args: &[&str]| {
@@ -318,15 +318,9 @@ async fn historical_fork_restores_its_matching_file_boundary() {
     let parent = created["result"]["sessionId"].as_str().unwrap().to_string();
     let store = harn_vm::open_canonical_store(root).unwrap();
     let workspace = root.canonicalize().unwrap().display().to_string();
-    store
-        .create(CreateSession {
-            id: Some(parent.clone()),
-            cwd: Some(workspace.clone()),
-            project_scope: Some(workspace),
-            ..CreateSession::default()
-        })
-        .await
-        .unwrap();
+    let admitted = store.describe(&parent).await.unwrap();
+    assert_eq!(admitted.cwd.as_deref(), Some(workspace.as_str()));
+    assert_eq!(admitted.project_scope.as_deref(), Some(workspace.as_str()));
     for (identity, text) in [("turn-1", "first prompt"), ("turn-2", "second prompt")] {
         let mut event = AppendEvent::new(
             SessionEventKind::Message,

@@ -158,103 +158,14 @@ mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
 
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[22],
-    durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage,
-);
+macro_rules! check_required_cases {
+    ($($(#[$attribute:meta])* $case:path,)*) => {
+        $(
+            $(#[$attribute])*
+            const _: fn() = $case;
+        )*
+    };
+}
 
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[23],
-    durable_spend_policy::agent_spend_guard_actor_unknown,
-);
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[24],
-    durable_spend_policy::agent_spend_guard_actor_permissive,
-);
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[25],
-    durable_spend_policy::agent_spend_guard_judge_unknown,
-);
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[26],
-    durable_spend_policy::agent_spend_guard_judge_permissive,
-);
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[27],
-    durable_spend_policy::agent_spend_guard_transcript_control,
-);
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-const _: [(&str, fn()); 2] = [
-    (
-        required_pr_e2e::CASES[15],
-        acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
-    ),
-    (
-        required_pr_e2e::CASES[16],
-        acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
-    ),
-];
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[19],
-    acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read,
-);
-
-#[cfg(target_os = "macos")]
-const _: (&str, fn()) = (
-    required_pr_e2e::CASES[17],
-    process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
-);
-
-const _: [(&str, fn()); 12] = [
-    (
-        required_pr_e2e::CASES[0],
-        eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs,
-    ),
-    (
-        required_pr_e2e::CASES[1],
-        models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts,
-    ),
-    (
-        required_pr_e2e::CASES[2],
-        models_dispatch::core::models_recommend_human_text_has_model_and_rationale,
-    ),
-    (
-        required_pr_e2e::CASES[3],
-        models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint,
-    ),
-    (
-        required_pr_e2e::CASES[4],
-        providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes,
-    ),
-    (
-        required_pr_e2e::CASES[5],
-        time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load,
-    ),
-    (
-        required_pr_e2e::CASES[6],
-        trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture,
-    ),
-    (
-        required_pr_e2e::CASES[7],
-        predicate_contract::predicate_helper_manifest_survives_warm_cache_and_tracks_changed_question,
-    ),
-    (
-        required_pr_e2e::CASES[8],
-        predicate_contract::predicate_checker_refuses_boolean_use_after_imported_helper,
-    ),
-    (
-        required_pr_e2e::CASES[9],
-        predicate_contract::predicate_census_refuses_an_invalid_imported_site,
-    ),
-    (
-        required_pr_e2e::CASES[10],
-        predicate_contract::predicate_embedding_model_is_refused_at_check_time,
-    ),
-    (
-        required_pr_e2e::CASES[11],
-        predicate_contract::predicate_operation_admission_invalidates_cached_success,
-    ),
-];
+required_pr_e2e::required_pr_e2e_cases!(check_required_cases);
+const _: usize = required_pr_e2e::CASES.len();

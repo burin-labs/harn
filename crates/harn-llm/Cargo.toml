@@ -12,8 +12,8 @@ description = "Provider-neutral message and wire contracts for Harn LLM executio
 test-support = []
 
 [dependencies]
-harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.182-dev" }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182-dev" }
+harn-provider-catalog = { path = "../harn-provider-catalog", version = "=0.10.182" }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.182" }
 arcstr = "1"
 regex = "1"
 jsonschema.workspace = true
@@ -24,7 +24,7 @@ tiktoken-rs = "0.12.0"
 tracing = "0.1"
 
 [dev-dependencies]
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.182-dev" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.182" }
 proptest = "1"
 
 [lints]

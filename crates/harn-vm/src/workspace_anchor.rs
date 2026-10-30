@@ -92,13 +92,62 @@ pub struct WorkspaceAnchor {
 }
 
 impl WorkspaceAnchor {
+    /// Normalize every directory identity before it becomes session policy.
+    /// The same physical directory can have several spellings on macOS (for
+    /// example `/var` and `/private/var`); grants and workspace comparisons
+    /// must use one canonical spelling across hosts and durable state.
+    pub fn canonicalize_roots(&mut self) -> Result<(), String> {
+        self.primary = Self::canonicalize_path(&self.primary)?;
+        for root in &mut self.additional_roots {
+            root.path = Self::canonicalize_path(&root.path)?;
+        }
+        Ok(())
+    }
+
+    /// Normalize one directory path to its physical spelling, preserving any
+    /// missing suffix so callers can identify a not-yet-created workspace.
+    pub fn canonicalize_path(path: &std::path::Path) -> Result<PathBuf, String> {
+        crate::workspace_path::canonicalize_existing_ancestor(path).map_err(|error| {
+            format!(
+                "cannot canonicalize workspace root '{}': {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// Compare path spellings by their canonical workspace identity.
+    pub fn same_canonical_path(left: &std::path::Path, right: &std::path::Path) -> bool {
+        match (
+            Self::canonicalize_path(left),
+            Self::canonicalize_path(right),
+        ) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    }
+
+    /// The ordered path projection, without restoring any mount authority.
+    pub fn additional_directories(&self) -> Result<Vec<String>, String> {
+        self.additional_roots
+            .iter()
+            .map(|root| {
+                root.path
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "workspace root must be representable as UTF-8".to_string())
+            })
+            .collect()
+    }
+
     pub fn to_json(&self) -> JsonValue {
         serde_json::to_value(self).unwrap_or(JsonValue::Null)
     }
 
     pub fn from_json(value: &JsonValue) -> Result<Self, String> {
-        serde_json::from_value(value.clone())
-            .map_err(|err| format!("invalid workspace_anchor: {err}"))
+        let mut anchor: Self = serde_json::from_value(value.clone())
+            .map_err(|err| format!("invalid workspace_anchor: {err}"))?;
+        anchor.canonicalize_roots()?;
+        Ok(anchor)
     }
 
     pub fn to_vm_value(&self) -> VmValue {
@@ -305,5 +354,19 @@ mod tests {
         let dict = VmValue::dict([("default_mount_mode", VmValue::string("sandboxed"))]);
         let policy = parse_workspace_policy_dict(&dict).expect("parse policy");
         assert_eq!(policy.default_mount_mode, MountMode::Sandboxed);
+    }
+
+    #[test]
+    fn canonical_path_comparison_matches_equivalent_spellings() {
+        let directory = tempfile::tempdir().expect("workspace tempdir");
+        let dot_suffix = directory.path().join(".");
+        assert!(WorkspaceAnchor::same_canonical_path(
+            directory.path(),
+            &dot_suffix
+        ));
+        assert!(!WorkspaceAnchor::same_canonical_path(
+            directory.path(),
+            &directory.path().join("child"),
+        ));
     }
 }

@@ -73,7 +73,7 @@ mod operator_grants;
 #[path = "user_test_cli/parent_secrets.rs"]
 mod parent_secrets;
 #[path = "user_test_cli/process_egress.rs"]
-mod process_egress;
+pub(crate) mod process_egress;
 #[path = "user_test_cli/source_discovery.rs"]
 mod source_discovery;
 

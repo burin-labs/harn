@@ -453,6 +453,20 @@ pipeline test_consumer_canary_requires_closed_public_custody_before_dispatch(har
   const steps = job.steps
   let missing = [
     steps.filter({ step -> step?.id != "observer" }).to_list(),
+    steps.filter(
+      { step -> step?.run != "node scripts/ci/consumer-observer-declare.mjs --witness" },
+    )
+      .to_list(),
+    steps.map(
+      { step ->
+        if step?.run == "node scripts/ci/consumer-observer-declare.mjs --witness" {
+          step + {env: step.env + {SOURCE_REVISION: "wrong source"}}
+        } else {
+          step
+        }
+      },
+    )
+      .to_list(),
     steps.reversed(),
     steps.map(
       { step ->

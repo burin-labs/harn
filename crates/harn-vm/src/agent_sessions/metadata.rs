@@ -267,6 +267,12 @@ pub fn pinned_reasoning_policy(id: &str) -> Option<String> {
 /// Returns `Ok(true)` when the value actually changed so callers can
 /// decide whether to broadcast `AnchorChanged` notifications.
 pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result<bool, String> {
+    let anchor = anchor
+        .map(|mut anchor| {
+            anchor.canonicalize_roots()?;
+            Ok::<_, String>(anchor)
+        })
+        .transpose()?;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -320,11 +326,12 @@ pub struct ReanchorOutcome {
 /// stale anchor-based decisions don't leak into the next turn.
 pub fn reanchor_session(
     id: &str,
-    new_anchor: WorkspaceAnchor,
+    mut new_anchor: WorkspaceAnchor,
     carry_transcript: bool,
     compacted: bool,
     reason: Option<String>,
 ) -> Result<ReanchorOutcome, String> {
+    new_anchor.canonicalize_roots()?;
     let outcome = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -425,13 +432,91 @@ pub fn add_workspace_root_verified(
     reason: Option<String>,
     verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<String, String> {
-    let applied = apply_workspace_mount(id, root, mount_mode)?;
-    if let Err(error) = verify(&applied.root) {
-        rollback_workspace_mount(id, applied);
-        return Err(error);
+    prepare_workspace_mount_verified(id, root, mount_mode, verify)?.commit(reason)
+}
+
+pub(crate) fn prepare_workspace_mount_verified(
+    id: &str,
+    root: &str,
+    mount_mode: Option<MountMode>,
+    verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
+) -> Result<PendingWorkspaceMount, String> {
+    let pending = PendingWorkspaceMount {
+        id: id.to_string(),
+        generation: SESSIONS
+            .with(|sessions| {
+                sessions
+                    .borrow()
+                    .get(id)
+                    .map(super::SessionRetention::for_state)
+            })
+            .ok_or_else(|| format!("unknown session '{id}'"))?,
+        applied: Some(apply_workspace_mount(id, root, mount_mode)?),
+    };
+    verify(&pending.applied.as_ref().unwrap().root)?;
+    Ok(pending)
+}
+
+pub(crate) struct PendingWorkspaceMount {
+    id: String,
+    generation: super::SessionRetention,
+    applied: Option<AppliedMount>,
+}
+
+impl PendingWorkspaceMount {
+    pub(crate) fn directories(&self) -> Result<Vec<String>, String> {
+        super::workspace_anchor(&self.id)
+            .ok_or_else(|| format!("unknown session '{}'", self.id))?
+            .additional_directories()
     }
-    record_workspace_mount(id, &applied, reason)?;
-    Ok(applied.mounted_at)
+
+    pub(crate) fn audit_event(&self, reason: Option<String>) -> VmValue {
+        let applied = self.applied.as_ref().unwrap();
+        crate::llm::helpers::transcript_event(
+            "RootMounted",
+            "system",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "path": applied.root.to_string_lossy(),
+                "mount_mode": applied.mode.as_str(),
+                "mounted_at": applied.mounted_at.clone(),
+                "reason": reason,
+            })),
+        )
+    }
+
+    pub(crate) fn commit(self, reason: Option<String>) -> Result<String, String> {
+        let event = self.audit_event(reason);
+        self.commit_audit(MountAudit::Pending(event))
+    }
+
+    pub(crate) fn commit_persisted(self, event: VmValue) -> Result<String, String> {
+        self.commit_audit(MountAudit::Persisted(event))
+    }
+
+    fn commit_audit(mut self, audit: MountAudit) -> Result<String, String> {
+        if !self.generation.is_current(&self.id) {
+            return Err(format!(
+                "session '{}' was closed while preparing workspace roots",
+                self.id
+            ));
+        }
+        record_workspace_mount(&self.id, audit)?;
+        Ok(self.applied.take().unwrap().mounted_at)
+    }
+}
+
+impl Drop for PendingWorkspaceMount {
+    fn drop(&mut self) {
+        if let Some(applied) = self
+            .applied
+            .take()
+            .filter(|_| self.generation.is_current(&self.id))
+        {
+            rollback_workspace_mount(&self.id, applied);
+        }
+    }
 }
 
 /// A mount as the anchor now holds it, with what it replaced.
@@ -521,29 +606,29 @@ fn rollback_workspace_mount(id: &str, applied: AppliedMount) {
     });
 }
 
-fn record_workspace_mount(
-    id: &str,
-    applied: &AppliedMount,
-    reason: Option<String>,
-) -> Result<(), String> {
+enum MountAudit {
+    Pending(VmValue),
+    Persisted(VmValue),
+}
+
+fn record_workspace_mount(id: &str, audit: MountAudit) -> Result<(), String> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
             return Err(format!("agent session '{id}' does not exist"));
         };
-        let event = crate::llm::helpers::transcript_event(
-            "RootMounted",
-            "system",
-            "internal",
-            "",
-            Some(serde_json::json!({
-                "path": applied.root.to_string_lossy(),
-                "mount_mode": applied.mode.as_str(),
-                "mounted_at": applied.mounted_at.clone(),
-                "reason": reason,
-            })),
-        );
-        append_event_to_state(state, event, "add_workspace_root")?;
+        match audit {
+            MountAudit::Pending(event) => {
+                append_event_to_state(state, event, "add_workspace_root")?;
+            }
+            MountAudit::Persisted(event) => {
+                super::transcript_lifecycle::apply_transcript_event_to_state(
+                    state,
+                    event,
+                    "add_workspace_root",
+                )?;
+            }
+        }
         crate::llm::permissions::clear_session_grants(id);
         state.touch();
         Ok(())
@@ -590,21 +675,35 @@ pub fn list_workspace_roots(id: &str) -> Result<(PathBuf, Vec<MountedRoot>), Str
 }
 
 pub(super) fn validate_workspace_root_path(root: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_workspace_root_path(root);
-    let canonical = std::fs::canonicalize(&normalized)
-        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
+    validate_workspace_root_path_with(root, |_| Ok(()))
+}
+
+pub(super) fn validate_workspace_root_path_with<E: From<String>>(
+    root: &str,
+    validate_boundary: impl FnOnce(&Path) -> Result<(), E>,
+) -> Result<PathBuf, E> {
+    let normalized = crate::workspace_path::normalize_context_path(Path::new(root));
+    let canonical = std::fs::canonicalize(&normalized).map_err(|error| {
+        E::from(format!(
+            "workspace root '{root}' must exist and be readable: {error}"
+        ))
+    })?;
+    validate_boundary(&canonical)?;
+    let metadata = std::fs::metadata(&canonical).map_err(|error| {
+        E::from(format!(
+            "workspace root '{root}' must exist and be readable: {error}"
+        ))
+    })?;
     if !metadata.is_dir() {
-        return Err(format!("workspace root '{root}' must be a directory"));
+        return Err(format!("workspace root '{root}' must be a directory").into());
     }
     std::fs::read_dir(&canonical)
-        .map_err(|error| format!("workspace root '{root}' must be readable: {error}"))?;
+        .map_err(|error| E::from(format!("workspace root '{root}' must be readable: {error}")))?;
     Ok(canonical)
 }
 
 pub(super) fn normalize_workspace_root_path(root: &str) -> PathBuf {
-    let absolute = crate::stdlib::process::normalize_context_path(Path::new(root));
+    let absolute = crate::workspace_path::normalize_context_path(Path::new(root));
     std::fs::canonicalize(&absolute).unwrap_or(absolute)
 }
 

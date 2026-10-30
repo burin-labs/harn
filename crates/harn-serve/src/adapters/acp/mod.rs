@@ -50,6 +50,7 @@ mod task_admission;
 mod tests;
 mod transport;
 mod types;
+mod workspace_roots;
 
 use auth::acp_auth_request_for_method;
 pub fn is_supported_session_mode(mode_id: &str) -> bool {
@@ -73,7 +74,8 @@ pub use schema::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 pub use sessions::{
-    acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
+    acp_persisted_session_item, resolve_acp_session_project_root, try_acp_persisted_session_item,
+    AcpSessionProjectRootError,
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
@@ -401,10 +403,16 @@ fn workspace_anchor_filter_matches(
         return false;
     };
     if let Some(raw) = filter.as_str() {
-        return anchor.primary.to_string_lossy() == raw;
+        return harn_vm::workspace_anchor::WorkspaceAnchor::canonicalize_path(
+            std::path::Path::new(raw),
+        )
+        .is_ok_and(|expected| expected == anchor.primary);
     }
     if let Some(primary) = filter.get("primary").and_then(serde_json::Value::as_str) {
-        return anchor.primary.to_string_lossy() == primary;
+        return harn_vm::workspace_anchor::WorkspaceAnchor::canonicalize_path(
+            std::path::Path::new(primary),
+        )
+        .is_ok_and(|expected| expected == anchor.primary);
     }
     harn_vm::workspace_anchor::WorkspaceAnchor::from_json(filter).is_ok_and(|expected| {
         expected.primary == anchor.primary && expected.additional_roots == anchor.additional_roots

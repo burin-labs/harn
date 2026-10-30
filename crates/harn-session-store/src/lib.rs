@@ -38,6 +38,7 @@ pub mod sqlite;
 pub mod store;
 pub mod task;
 pub mod wal_watch;
+mod workspace_roots;
 
 /// Default database name inside a session-store state directory.
 pub const SESSION_STORE_DATABASE_FILE: &str = "session-store.sqlite";

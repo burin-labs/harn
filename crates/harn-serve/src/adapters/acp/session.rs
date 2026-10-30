@@ -1,7 +1,7 @@
 use super::*;
 
 impl AcpServer {
-    pub(super) fn handle_session_new(
+    pub(super) async fn handle_session_new(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -16,34 +16,14 @@ impl AcpServer {
                 return;
             }
         };
-        let cwd = params
-            .get("cwd")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        // A confined server cannot work outside the roots it was confined to,
-        // and cannot widen them, so say that now rather than on the first
-        // denied write.
-        if let Some(confinement) = harn_vm::process_sandbox::current_process_confinement()
-            .filter(|confinement| !confinement.covers(&cwd))
-        {
-            self.send_error_with_data(
-                id,
-                -32602,
-                &format!(
-                    "this agent process is confined to {}, and `{}` is outside it",
-                    confinement
-                        .workspace_roots
-                        .iter()
-                        .map(|root| root.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    cwd.display()
-                ),
-                serde_json::json!({ "code": "outside_process_confinement" }),
-            );
-            return;
-        }
+        let roots = match self.prepare_session_roots(params, None) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        let cwd = roots.anchor().primary.clone();
 
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
@@ -68,9 +48,19 @@ impl AcpServer {
             session.environment_policy = environment_policy;
             session.workspace_checkpoint = workspace_checkpoint;
         }
-        let session = self
-            .session_item_json(&session_id, "live", None)
-            .unwrap_or_else(|| serde_json::json!({"sessionId": session_id}));
+        if let Err(message) = self.install_session_roots(&session_id, roots).await {
+            self.rollback_session_admission(&session_id);
+            self.send_error(id, -32000, &message);
+            return;
+        }
+        let session = match self.session_item_json(&session_id, "live", None) {
+            Ok(session) => session,
+            Err(error) => {
+                self.rollback_session_admission(&session_id);
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
 
         self.send_response(
             id,
@@ -235,7 +225,7 @@ impl AcpServer {
         );
     }
 
-    pub(super) fn handle_harn_session_add_root(
+    pub(super) async fn handle_harn_session_add_root(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -244,6 +234,18 @@ impl AcpServer {
             self.send_error(id, -32602, "Missing session_id");
             return;
         };
+        if self
+            .sessions
+            .get(&session_id)
+            .is_some_and(|session| session.concurrent_control.prompt_is_active())
+        {
+            self.send_error(
+                id,
+                -32602,
+                "workspace roots cannot change during an active prompt",
+            );
+            return;
+        }
         if let Err(message) = self.ensure_workspace_anchor(&session_id) {
             self.send_error(id, -32602, &message);
             return;
@@ -267,13 +269,17 @@ impl AcpServer {
         let policy = self.sessions.get(&session_id).and_then(|session| {
             super::modes::policy_for_mode(&session.current_mode_id, &self.sandbox)
         });
-        let mounted_at = match harn_vm::stdlib::add_workspace_root(
+        let scope = self.sessions[&session_id].store_scope.clone();
+        let mounted_at = match Box::pin(harn_vm::stdlib::add_workspace_root_persisted(
             &session_id,
             &path,
             mount_mode,
             reason,
             policy.as_ref(),
-        ) {
+            &scope,
+        ))
+        .await
+        {
             Ok(mounted_at) => mounted_at,
             Err(message) => {
                 self.send_error(id, -32602, &message);
@@ -693,11 +699,12 @@ impl AcpServer {
                     return;
                 }
             };
-            let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, root, &src_id, boundary, dst_id)
-                    .await;
-            let (new_session_id, source_boundary) = match new_session_id {
-                Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
+            let new_session_id = harn_vm::agent_sessions::fork_canonical_retained(
+                &store, root, &src_id, boundary, dst_id,
+            )
+            .await;
+            let (new_session_id, source_boundary, retention) = match new_session_id {
+                Ok(Some((fork, retention))) => (fork.session_id, fork.source_boundary, retention),
                 Ok(None) => {
                     self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
                     return;
@@ -765,6 +772,7 @@ impl AcpServer {
             self.sessions.insert(
                 new_session_id.clone(),
                 Session {
+                    _retention: retention,
                     cwd: fork_cwd,
                     project_root,
                     store_scope: scope.clone(),

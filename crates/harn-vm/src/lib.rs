@@ -31,6 +31,7 @@ mod agent_lifecycle_cleanup;
 #[cfg(test)]
 mod agent_session_auxiliary_usage_tests;
 pub(crate) mod agent_session_journal;
+pub use agent_session_journal::install_workspace_roots as install_session_workspace_roots;
 pub mod agent_session_restore;
 pub mod agent_session_spend;
 #[cfg(test)]

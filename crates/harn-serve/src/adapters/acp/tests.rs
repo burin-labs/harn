@@ -14,8 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
+mod additional_directories;
 mod client_capabilities;
 mod provider_default_tests;
+mod root_projection;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -154,6 +156,7 @@ async fn start_acp_channel_session_with_params(
         }))
         .expect("send session/new");
     let created = recv_json(&mut response_rx).await;
+    assert!(created["result"]["sessionId"].is_string(), "{created}");
     let session_id = created["result"]["sessionId"]
         .as_str()
         .expect("session id")
@@ -970,6 +973,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
     assert_eq!(
         capabilities["sessionCapabilities"],
         serde_json::json!({
+            "additionalDirectories": {},
             "close": {},
             "list": {},
             "resume": {},
