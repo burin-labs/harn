@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::llm::api::{LlmRequestPayload, LlmResult};
 use crate::testbench::tape::{
     content_hash, EventTape, FileEffect, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
+    TranscriptChange,
 };
 
 /// File name of the tape inside a run's tape directory; the CAS sidecar is
@@ -421,7 +422,7 @@ pub(crate) struct ToolCallRecording {
     args_digest: String,
     after_calls: u64,
     watch: EffectWatch,
-    pub(crate) reminders: Vec<serde_json::Value>,
+    pub(crate) transcript_changes: Vec<TranscriptChange>,
 }
 
 enum EffectWatch {
@@ -454,96 +455,22 @@ pub(crate) fn begin_tool_call(
         tool: tool.to_string(),
         args_digest: args_digest(args),
         watch,
-        reminders: Vec::new(),
+        transcript_changes: Vec::new(),
     })
 }
 
-tokio::task_local! {
-    /// Transcript injections made while the innermost recorded tool dispatch
-    /// runs.
-    static DISPATCH_REMINDERS: Arc<Mutex<Vec<serde_json::Value>>>;
-}
-
-/// Run a live tool dispatch, keeping each reminder it injects on `recording`.
-/// An enclosing recorded dispatch keeps them too.
-pub(crate) async fn capture_tool_reminders<F: std::future::Future>(
+/// Run a live tool dispatch, keeping each transcript change it makes on
+/// `recording`.
+pub(crate) async fn capture_transcript_changes<F: std::future::Future>(
     recording: &mut Option<ToolCallRecording>,
     live: F,
 ) -> F::Output {
     let Some(recording) = recording.as_mut() else {
         return live.await;
     };
-    let parent = DISPATCH_REMINDERS.try_with(Arc::clone).ok();
-    let frame = Arc::new(Mutex::new(Vec::new()));
-    let output = DISPATCH_REMINDERS.scope(frame.clone(), live).await;
-    let captured = std::mem::take(&mut *frame.lock().expect("reminder frame poisoned"));
-    if let Some(parent) = parent {
-        parent
-            .lock()
-            .expect("reminder frame poisoned")
-            .extend(captured.iter().cloned());
-    }
-    recording.reminders = captured;
+    let (output, changes) = transcript::capture(live).await;
+    recording.transcript_changes = changes;
     output
-}
-
-/// Note a transcript injection for the recorded dispatch running now, if
-/// any. The two session writers, reminders and messages, call this, so every
-/// hook, provider and host path that injects during a dispatch is taped.
-fn note_injection(entry: serde_json::Value) {
-    let _ = DISPATCH_REMINDERS.try_with(|frame| {
-        frame.lock().expect("reminder frame poisoned").push(entry);
-    });
-}
-
-pub(crate) fn note_injected_reminder(
-    session_id: &str,
-    reminder: &crate::llm::helpers::SystemReminder,
-    retain_unchanged: bool,
-) {
-    note_injection(serde_json::json!({
-        "session_id": session_id,
-        "reminder": reminder,
-        "retain_unchanged": retain_unchanged,
-    }));
-}
-
-pub(crate) fn note_injected_message(session_id: &str, message: &crate::value::VmValue) {
-    note_injection(serde_json::json!({
-        "session_id": session_id,
-        "message": crate::llm::helpers::vm_value_to_json(message),
-    }));
-}
-
-/// Replay the transcript injections a served dispatch's recording made,
-/// through the same writers, into the sessions that still exist, and return
-/// them for the branch's own tape.
-fn reinject_reminders(reminders: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>, String> {
-    for entry in &reminders {
-        let session_id = entry
-            .get("session_id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        if !crate::agent_sessions::exists(session_id) {
-            continue;
-        }
-        if let Some(message) = entry.get("message") {
-            crate::agent_sessions::inject_message(
-                session_id,
-                crate::schema::json_to_vm_value(message),
-            )?;
-            continue;
-        }
-        let reminder: crate::llm::helpers::SystemReminder =
-            serde_json::from_value(entry.get("reminder").cloned().unwrap_or_default())
-                .map_err(|error| format!("recorded reminder: {error}"))?;
-        let retain = entry
-            .get("retain_unchanged")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        crate::agent_sessions::inject_reminder_with_policy(session_id, reminder, retain)?;
-    }
-    Ok(reminders)
 }
 
 pub(crate) fn args_digest(args: &serde_json::Value) -> String {
@@ -563,7 +490,7 @@ pub(crate) fn finish_tool_call(
         args_digest,
         after_calls,
         watch,
-        reminders,
+        transcript_changes,
     } = recording;
     let recorder = &tape.recorder;
     let full = tape.level == RecordingLevel::Full;
@@ -611,7 +538,7 @@ pub(crate) fn finish_tool_call(
         outcome,
         effects,
         unservable,
-        reminders: if full { reminders } else { Vec::new() },
+        transcript_changes: if full { transcript_changes } else { Vec::new() },
     });
 }
 
@@ -676,7 +603,7 @@ struct RecordedTool {
     outcome: Option<RecordedToolResult>,
     effects: Vec<(String, Option<Vec<u8>>)>,
     unservable: Option<String>,
-    reminders: Vec<serde_json::Value>,
+    transcript_changes: Vec<TranscriptChange>,
 }
 
 struct PrefixTool {
@@ -886,7 +813,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 outcome,
                 effects,
                 unservable,
-                reminders,
+                transcript_changes,
             } if *after_calls <= k => {
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
@@ -913,7 +840,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                         outcome,
                         effects: resolved,
                         unservable: unservable.clone(),
-                        reminders: reminders.clone(),
+                        transcript_changes: transcript_changes.clone(),
                     },
                     used: false,
                 });
@@ -1217,9 +1144,9 @@ fn recorded_lookup(
 pub(crate) enum ToolServe {
     /// Not part of a served prefix: run it.
     Live,
-    /// Served from the recording; effects and reminders already applied.
-    /// Carries the reminders, for the branch's own tape.
-    Served(RecordedToolResult, Vec<serde_json::Value>),
+    /// Served from the recording, its effects and transcript changes applied.
+    /// Carries the changes, for the branch's own tape.
+    Served(RecordedToolResult, Vec<TranscriptChange>),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
 }
@@ -1285,7 +1212,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         }
     };
     let effects = recorded.effects.clone();
-    let reminders = recorded.reminders.clone();
+    let changes = recorded.transcript_changes.clone();
     let root = state.workspace_root.clone();
     for (path, content) in &effects {
         if let Err(error) = apply_effect(&root, path, content.as_deref()) {
@@ -1296,12 +1223,12 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     state.report.served_tool_calls += 1;
     // Injecting reaches the session table, which may read the branch.
     drop(guard);
-    match reinject_reminders(reminders) {
-        Ok(reminders) => ToolServe::Served(outcome, reminders),
+    match transcript::replay(changes) {
+        Ok(changes) => ToolServe::Served(outcome, changes),
         Err(error) => {
             let branch = branch.expect("a served call has a branch");
             let mut state = branch.state();
-            diverge(&mut state, "tool reminder", error)
+            diverge(&mut state, "transcript change", error)
         }
     }
 }
@@ -1335,11 +1262,16 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
 #[path = "run_tape_prompts.rs"]
 mod prompts;
 
+#[path = "run_tape_transcript.rs"]
+mod transcript;
+pub(crate) use transcript::{apply as apply_transcript_change, note_transcript_change};
+
 #[path = "run_tape_scope.rs"]
 mod scope;
 pub use scope::BranchScope;
 pub(crate) use scope::{
-    branch_event_log, branch_path, current_branch, durable_path, scoped_state_root, BranchHandle,
+    branch_event_log, branch_path, current_branch, durable_path, scoped_state_root, state_branch,
+    BranchHandle,
 };
 
 #[path = "run_tape_prefix.rs"]

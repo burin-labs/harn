@@ -1300,6 +1300,55 @@ fn the_llm_transcript_inside_the_recording_lands_in_the_branch() {
     );
 }
 
+/// `mark_script` whose tool handler also runs `change` against its session,
+/// bound as `sid`, inside the dispatch.
+fn transcript_change_script(hook_marker: &Path, exec_marker: &Path, change: &str) -> String {
+    let source = mark_script(hook_marker, exec_marker)
+        .replace(
+            "  let tools = tool_define(",
+            "  const sid = \"branch-\" + id\n  let tools = tool_define(",
+        )
+        .replace(
+            "        return \"marked\"\n",
+            &format!("        {change}\n        return \"marked\"\n"),
+        );
+    assert!(source.contains(change));
+    source
+}
+
+/// Each transcript writer a tool dispatch reaches is taped at the one owner,
+/// so a served call leaves the next request exactly as the recording sent it.
+#[test]
+fn a_served_tool_call_replays_every_transcript_writer() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let host_event = r#"harness.agent.inject_host_event(sid, {kind: "host_tool_result", delivery: "immediate", payload: {tool_name: "note", raw_output: "hook host note"}, provenance: {initiator: "host_auto", source: "test", host: "tui", ts_ms: 1}})"#;
+    for (writer, change) in [
+        ("inject_host_event", host_event),
+        ("trim", "harness.agent.trim(sid, 1)"),
+    ] {
+        let dirs = dirs();
+        let hook_marker = dirs.markers.join("hook-marker");
+        let exec_marker = dirs.markers.join("exec-marker");
+        let source = transcript_change_script(&hook_marker, &exec_marker, change);
+        record(&source, &dirs.tapes, &dirs.workspace);
+        let tape = std::fs::read_to_string(dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+        assert!(
+            tape.contains("\"transcript_changes\""),
+            "{writer}: the dispatch's change was not taped"
+        );
+        remove_marker(&hook_marker, &dirs.tapes);
+        remove_marker(&exec_marker, &dirs.tapes);
+
+        let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
+        output.expect("the branched run succeeds");
+        assert_eq!(report.divergence, None, "{writer}: {report:?}");
+        assert_eq!(report.served_tool_calls, 1, "{writer}: {report:?}");
+        assert!(!exec_marker.exists(), "{writer}: the branch ran the tool");
+    }
+}
+
 /// A generator body runs as its own task; in the prefix it belongs to the
 /// branch like any spawned task.
 #[test]

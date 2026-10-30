@@ -71,7 +71,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    match crate::run_tape::current_branch() {
+    match crate::run_tape::state_branch() {
         Some(branch) => crate::vm::subtask::spawn_lifecycle_cleanup(
             crate::persistent_state::run_in_branch(branch, future),
         ),

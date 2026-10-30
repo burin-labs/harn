@@ -504,6 +504,58 @@ fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
     assert_eq!(raw, path);
 }
 
+/// Work that outlives the host's guard, such as lifecycle cleanup finishing
+/// late, serves nothing but still writes only into the branch.
+#[test]
+fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _guard = record_full(tmp.path());
+        record_llm_call(&request("work"), &result("done", None));
+    }
+    let state = tempfile::tempdir().unwrap();
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: tmp.path().to_path_buf(),
+        state_root: state.path().join("branch"),
+    })
+    .unwrap();
+    let scope = guard.scope();
+    let path = tmp.path().join("late.json");
+    let during = {
+        let _in = scope.enter();
+        crate::run_tape::durable_path(&path, "probe").unwrap()
+    };
+    drop(guard);
+
+    let _in = scope.enter();
+    assert!(
+        crate::run_tape::current_branch().is_none(),
+        "an ended branch serves nothing"
+    );
+    assert_eq!(
+        crate::run_tape::durable_path(&path, "probe").unwrap(),
+        during,
+        "a late write lands where the branch put it"
+    );
+    let outside = tempfile::tempdir().unwrap();
+    assert!(
+        crate::run_tape::durable_path(&outside.path().join("x"), "probe").is_err(),
+        "a late write outside the branch is refused"
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let cleanup = runtime
+        .block_on(crate::task_spawn::spawn_lifecycle_cleanup(async move {
+            crate::run_tape::durable_path(&path, "probe").unwrap()
+        }))
+        .unwrap();
+    assert_eq!(cleanup, during, "late cleanup keeps the branch");
+}
+
 #[test]
 fn a_torn_final_tape_record_loads_the_complete_ones() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());

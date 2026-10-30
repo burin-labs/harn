@@ -683,6 +683,22 @@ pub fn exists(id: &str) -> bool {
     SESSIONS.with(|s| s.borrow().contains_key(id))
 }
 
+/// Apply a transcript change a served tool dispatch recorded, through the
+/// one transcript writer. A session that no longer exists is skipped.
+pub(crate) fn replay_transcript_change(
+    id: &str,
+    fields: &std::collections::BTreeMap<String, crate::testbench::tape::FieldChange>,
+) -> Result<(), String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Ok(());
+        };
+        let next = crate::run_tape::apply_transcript_change(&state.transcript, fields)?;
+        state.replace_transcript(next)
+    })
+}
+
 pub fn length(id: &str) -> Option<usize> {
     SESSIONS.with(|s| {
         s.borrow().get(id).map(|state| {
@@ -1280,7 +1296,6 @@ pub(crate) fn inject_message_with_source(
                 .into(),
         );
     }
-    crate::run_tape::note_injected_message(id, &message);
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {

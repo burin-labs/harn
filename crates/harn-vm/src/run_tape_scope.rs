@@ -18,12 +18,16 @@ use crate::value::VmError;
 
 /// Branches alive in this process; zero lets hot paths skip the scope lookup.
 static ARMED: AtomicUsize = AtomicUsize::new(0);
+/// Branch handles not yet dropped, ended or not; zero lets path resolution
+/// skip the scope lookup.
+static HELD: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) struct BranchHandle {
     state: Mutex<BranchState>,
     /// True while the prefix replays.
     prefix: AtomicBool,
-    /// Set when the host's guard drops; a scope that outlives it is inert.
+    /// Set when the host's guard drops. A scope that outlives it serves
+    /// nothing, but its durable writes still stay in the branch.
     ended: AtomicBool,
     state_root: PathBuf,
     /// Recording-owned trees, longest first, with where each lands under
@@ -48,6 +52,7 @@ impl BranchHandle {
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
         ARMED.fetch_add(1, Ordering::AcqRel);
+        HELD.fetch_add(1, Ordering::AcqRel);
         Arc::new(Self {
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
@@ -121,12 +126,28 @@ impl BranchHandle {
     }
 }
 
+impl Drop for BranchHandle {
+    fn drop(&mut self) {
+        HELD.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// The branch the current execution belongs to, if any.
 pub(crate) fn current_branch() -> Option<Arc<BranchHandle>> {
     if ARMED.load(Ordering::Acquire) == 0 {
         return None;
     }
     crate::persistent_state::current_branch().filter(|branch| !branch.ended.load(Ordering::Acquire))
+}
+
+/// The branch whose state the current execution writes, ended or not: work
+/// that finishes after the host's guard drops, such as lifecycle cleanup,
+/// still writes into the branch and never into the recording.
+pub(crate) fn state_branch() -> Option<Arc<BranchHandle>> {
+    if HELD.load(Ordering::Acquire) == 0 {
+        return None;
+    }
+    crate::persistent_state::current_branch()
 }
 
 /// The scope a host enters around the execution that branches. It is `Send`,
@@ -153,11 +174,17 @@ impl BranchScope {
 /// branch, a path the branch owns or remaps lands under its state root; any
 /// other path is outside the branch, refused in the prefix and reported live.
 pub(crate) fn durable_path(path: &Path, writer: &str) -> Result<PathBuf, VmError> {
-    let Some(branch) = current_branch() else {
+    let Some(branch) = state_branch() else {
         return Ok(path.to_path_buf());
     };
     if let Some(mapped) = branch.remap(path) {
         return Ok(mapped);
+    }
+    if branch.ended.load(Ordering::Acquire) {
+        return Err(VmError::Runtime(format!(
+            "{writer} would write {} after its branch ended, outside the branch",
+            path.display()
+        )));
     }
     let mut state = branch.state();
     if !state.live {
@@ -185,7 +212,7 @@ pub(crate) fn durable_path(path: &Path, writer: &str) -> Result<PathBuf, VmError
 pub(crate) fn branch_path(path: PathBuf, writer: &str) -> PathBuf {
     match durable_path(&path, writer) {
         Ok(mapped) => mapped,
-        Err(_) => match current_branch() {
+        Err(_) => match state_branch() {
             Some(branch) => branch
                 .state_root
                 .join("refused")
@@ -200,8 +227,8 @@ pub(crate) fn branch_path(path: PathBuf, writer: &str) -> PathBuf {
 /// the recording's state.
 pub(crate) fn scoped_state_root(branch: Option<&BranchHandle>, root: &Path) -> PathBuf {
     match branch {
-        Some(branch) if !branch.ended.load(Ordering::Acquire) => branch.state_root.clone(),
-        _ => root.to_path_buf(),
+        Some(branch) => branch.state_root.clone(),
+        None => root.to_path_buf(),
     }
 }
 
@@ -216,7 +243,7 @@ pub(crate) fn branch_event_log(
     if matches!(active.map(AsRef::as_ref), Some(AnyEventLog::Memory(_))) {
         return None;
     }
-    Some(current_branch()?.event_log())
+    Some(state_branch()?.event_log())
 }
 
 /// Refuse a state root that is, sits inside, or holds a tree the recording

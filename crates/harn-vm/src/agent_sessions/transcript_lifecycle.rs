@@ -586,12 +586,11 @@ pub(crate) fn inject_provider_reminder(
     inject_reminder_with_policy(id, reminder, true)
 }
 
-pub(crate) fn inject_reminder_with_policy(
+fn inject_reminder_with_policy(
     id: &str,
     reminder: crate::llm::helpers::SystemReminder,
     retain_unchanged_nonexpiring: bool,
 ) -> Result<ReminderInjectionReport, String> {
-    crate::run_tape::note_injected_reminder(id, &reminder, retain_unchanged_nonexpiring);
     let reminder_id = reminder.id.clone();
     let dedupe_key = reminder.dedupe_key.clone();
     let mut deduped_reminder_ids = Vec::new();

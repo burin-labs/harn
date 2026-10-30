@@ -54,8 +54,30 @@ use crate::clock_mock;
 /// breaking change. Loaders refuse tapes with a higher version. Version 2
 /// widened the model-call `request_digest` to the whole request, so a
 /// version 1 digest never compares with a version 2 one. Version 3 records
-/// where a run tape's recording kept its durable state.
-pub const TAPE_FORMAT_VERSION: u32 = 3;
+/// where a run tape's recording kept its durable state. Version 4 records
+/// each tool dispatch's transcript changes as typed [`TranscriptChange`]s.
+pub const TAPE_FORMAT_VERSION: u32 = 4;
+
+/// One change a tool dispatch made to a session's transcript: the fields it
+/// changed, against the transcript the session held just before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TranscriptChange {
+    pub session_id: String,
+    pub fields: BTreeMap<String, FieldChange>,
+}
+
+/// How one transcript field changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum FieldChange {
+    /// The field now holds this value.
+    Set(serde_json::Value),
+    /// The list kept every item it had and gained these at its end.
+    Append(Vec<serde_json::Value>),
+    /// The field is gone.
+    Remove,
+}
 
 /// Records whose serialized payload exceeds this size are spilled into
 /// the content-addressed sidecar. Picked to be larger than typical
@@ -254,12 +276,11 @@ pub enum TapeRecordKind {
         /// re-executes such a call and counts any difference as divergence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unservable: Option<String>,
-        /// Transcript injections the dispatch made, in order: each
-        /// `{session_id, reminder, retain_unchanged}` or `{session_id,
-        /// message}`. A served dispatch runs no hooks or providers, so the
-        /// branch replays these instead.
+        /// Every transcript change the dispatch made, in order. A served
+        /// dispatch runs no hooks or providers, so the branch replays these
+        /// instead.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        reminders: Vec<serde_json::Value>,
+        transcript_changes: Vec<TranscriptChange>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {
