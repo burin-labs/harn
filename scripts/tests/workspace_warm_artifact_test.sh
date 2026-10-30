@@ -390,10 +390,18 @@ test ! -e "$tmpdir/preserved-target/debug/deps/libserde-abc123.rlib"
 
 dispatch_source="$(jq -nc --argjson run "$producer_run" '{workflow_runs:[$run + {event:"workflow_dispatch",head_sha:"1111111111111111111111111111111111111111"}]}')"
 if [[ "$platform" == windows ]]; then
-  echo "Windows dispatch may publish its admitted ancestor rather than the workflow head"
-  FAKE_RUNS_JSON="$dispatch_source" run_download "$tmpdir/dispatched" >"$tmpdir/dispatch.out" 2>&1
-  grep -Fxq 'windows_warm_restore_source_contract=admitted_dispatch' "$tmpdir/dispatch.out"
+  echo "Windows dispatch requires the source selected by its default checkout"
+  matching_dispatch="$(jq -nc --argjson run "$producer_run" '{workflow_runs:[$run + {event:"workflow_dispatch"}]}')"
+  FAKE_RUNS_JSON="$matching_dispatch" run_download "$tmpdir/dispatched" >"$tmpdir/dispatch.out" 2>&1
+  grep -Fxq 'windows_warm_restore_source_contract=workflow_head' "$tmpdir/dispatch.out"
   test -f "$tmpdir/dispatched/debug/deps/libserde-abc123.rlib"
+  if FAKE_RUNS_JSON="$dispatch_source" run_download "$tmpdir/preserved-target" >"$tmpdir/dispatch-mismatch.out" 2>&1; then
+    echo "expected mismatched Windows dispatch source to refuse" >&2
+    exit 1
+  fi
+  grep -Fq 'producer commit does not match its GitHub run' "$tmpdir/dispatch-mismatch.out"
+  [[ "$(cat "$tmpdir/preserved-target/sentinel")" == retained ]]
+  test ! -e "$tmpdir/preserved-target/debug/deps/libserde-abc123.rlib"
 else
   echo "macOS owned dispatches are not warm artifact publishers"
   if FAKE_RUNS_JSON="$dispatch_source" run_download "$tmpdir/dispatched" >"$tmpdir/dispatch.out" 2>&1; then

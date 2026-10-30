@@ -400,7 +400,7 @@ discover_source() {
   fi
   require_repo "$repo"
 
-  local runs_json run_rows run_id artifacts_json head_sha source_contract
+  local runs_json run_rows run_id artifacts_json head_sha
   runs_json="$(gh api \
     "repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?branch=${PRODUCER_BRANCH}&status=completed&per_page=30")"
   # Finish decoding before an early successful return closes the reader.
@@ -423,12 +423,7 @@ discover_source() {
       'any(.artifacts[]?; (.name == $name) and .expired == false and
         (.size_in_bytes | type == "number" and . > 0))' \
       <<<"$artifacts_json" >/dev/null; then
-      source_contract=workflow_head
-      if [[ "$POLICY_KEY" == windows_workspace_warm && "$(jq -r '.event' <<<"$run_json")" == workflow_dispatch ]]; then
-        source_contract=admitted_dispatch
-      fi
-      jq -nc --argjson id "$run_id" --arg sha "$head_sha" --arg contract "$source_contract" \
-        '{id:$id, head_sha:$sha, source_contract:$contract}'
+      jq -nc --argjson id "$run_id" --arg sha "$head_sha" '{id:$id, head_sha:$sha}'
       return 0
     fi
   done <<<"$run_rows"
@@ -456,11 +451,10 @@ download_and_restore() {
   require_repo "$repo"
   target_dir="$(resolve_target_dir "$target_dir")"
 
-  local run_id staging source_record expected_commit source_contract
+  local run_id staging source_record expected_commit
   source_record="$(discover_source --repo "$repo")"
   run_id="$(jq -r '.id' <<<"$source_record")"
   expected_commit="$(jq -r '.head_sha' <<<"$source_record")"
-  source_contract="$(jq -r '.source_contract' <<<"$source_record")"
   staging="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/${ARTIFACT_NAME}.XXXXXX")"
   cleanup_dir="$staging"
   trap '[[ -z "${cleanup_dir:-}" ]] || rm -rf "$cleanup_dir"' EXIT
@@ -470,17 +464,12 @@ download_and_restore() {
   if [[ ! -f "$staging/manifest" && -f "$staging/$ARTIFACT_NAME/manifest" ]]; then
     staging="$staging/$ARTIFACT_NAME"
   fi
-  if [[ "$source_contract" == workflow_head ]]; then
-    if [[ "$(sed -n 's/^producer_commit=//p' "$staging/manifest")" != "$expected_commit" ]]; then
-      echo "error: warm artifact producer commit does not match its GitHub run" >&2
-      return 1
-    fi
-  elif [[ "$source_contract" != admitted_dispatch || "$POLICY_KEY" != windows_workspace_warm ]]; then
-    echo "error: warm artifact producer source contract is unmeasured" >&2
+  if [[ "$(sed -n 's/^producer_commit=//p' "$staging/manifest")" != "$expected_commit" ]]; then
+    echo "error: warm artifact producer commit does not match its GitHub run" >&2
     return 1
   fi
   printf "${KEY_PREFIX}_warm_restore_run_id=%s\n" "$run_id"
-  printf "${KEY_PREFIX}_warm_restore_source_contract=%s\n" "$source_contract"
+  printf "${KEY_PREFIX}_warm_restore_source_contract=workflow_head\n"
   restore "$staging" "$target_dir"
 }
 
