@@ -58,6 +58,8 @@ case "$1 $2" in
     jq -n --argjson runs "${FAKE_PROMOTIONS:-[]}" --arg state "$state" '$runs|map(select(.status==$state))|{total_count:length,workflow_runs:.}' ;;
   "api repos/o/r/actions/runs/600")
     jq -n --argjson runs "$FAKE_PROMOTIONS" '$runs[]|select(.id==600)' ;;
+  "api repos/o/r/actions/runs/600/attempts/1/jobs?per_page=100&page=1")
+    jq -n --argjson runs "$FAKE_PROMOTIONS" '($runs[]|select(.id==600).head_sha) as $sha|{total_count:1,jobs:[{id:601,run_id:600,run_attempt:1,head_sha:$sha,name:"Publish",status:"in_progress",conclusion:null}]}' ;;
   "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=100&page="*)
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
     if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then

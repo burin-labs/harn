@@ -12,6 +12,13 @@ import {
 const shaPattern=/^[0-9a-f]{40}$/;
 const cliAuthority='gh-cli-authenticated-read';
 function refuse(reason){throw new Error(`CONSUMER_OBSERVER reason=${reason}`);}
+function reportJobs(result,jobs){
+  if(jobs.some(job=>!(observerRunIsLive(job.status)&&job.conclusion===null
+    ||job.status==='completed'&&observerConclusionIsKnown(job.conclusion))))refuse('promotion_job_state_unmeasured');
+  result.pending_jobs.push(...jobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name));
+  result.bad_jobs.push(...jobs.filter(job=>job.status==='completed'
+    &&!['success','skipped'].includes(job.conclusion)).map(job=>job.name));
+}
 function sourceRuns(rows,source){
   if(rows.some(row=>row.head_sha!==source||typeof row.event!=='string'
     ||!Number.isSafeInteger(row.run_attempt)||row.run_attempt<1
@@ -72,6 +79,8 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
       ||parent.head_repository?.full_name!==repository){
       refuse('promotion_identity_unmeasured');
     }
+    const parentJobs=await githubRunJobs(token,repository,runId,parent.run_attempt,fetchRecord);
+    reportJobs(result,parentJobs);
     if(await successfulCandidate(token,repository,source,fetchRecord)){
       const finalParent=await githubRecord(token,repository,runId,fetchRecord);
       if(observerRunIsLive(finalParent.status)&&finalParent.run_attempt===parent.run_attempt
@@ -91,7 +100,6 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
       refuse('promotion_source_mismatch');
     }
     admitObserver(context,parent);
-    const parentJobs=await githubRunJobs(token,repository,runId,parent.run_attempt,fetchRecord);
     if(parentJobs.some(job=>!Array.isArray(job.steps)))refuse('promotion_step_census_unmeasured');
     qualifyObserverPublisher(context,parentJobs);
     if(!consumerToken||!consumer?.repository||!consumer?.workflow)refuse('consumer_read_authority_unmeasured');
@@ -111,9 +119,7 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
         if(['archive_producer_identity_unproven','archive_producer_builds_unproven',
           'archive_producer_artifacts_unproven'].includes(observerRefusal(error).reason)){
           const jobs=await githubRunJobs(token,repository,String(producer.id),producer.run_attempt,fetchRecord);
-          result.pending_jobs.push(...jobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name));
-          result.bad_jobs.push(...jobs.filter(job=>job.status==='completed'
-            &&!['success','skipped'].includes(job.conclusion)).map(job=>job.name));
+          reportJobs(result,jobs);
           continue;
         }
         throw error;
@@ -139,9 +145,6 @@ export async function activePromotions(token,consumerToken,repository,selfRun,co
       if(!observerRunIsLive(finalParent.status)||finalParent.run_attempt!==parent.run_attempt
         ||finalParent.head_sha!==parent.head_sha)continue;
       result.promoting.push(runId);result.recoveries.push(recovery);
-      result.pending_jobs.push(...parentJobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name));
-      result.bad_jobs.push(...parentJobs.filter(job=>job.status==='completed'
-        &&!['success','skipped'].includes(job.conclusion)).map(job=>job.name));
     }
   }
   return result;
