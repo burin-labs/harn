@@ -2553,6 +2553,15 @@ fn consumer_observer_descriptor_safe(step: dict) -> bool {
     )
 }
 
+fn consumer_declaration_step_safe(step: dict, declaration: dict?) -> bool {
+  return consumer_declaration_safe(declaration)
+    && step?.name == declaration?.name
+    && step?.id == "observer"
+    && step?.if == "inputs.rehearsal_promotion_run_id == ''"
+    && step?.with == {"source-revision": CONSUMER_CANARY_SOURCE, token: "$" + "{{ github.token }}"}
+    && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
+}
+
 fn consumer_action_allowed(step: dict) -> bool {
   const uses = step_uses(step)
   return uses == "" || CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) })
@@ -2616,13 +2625,7 @@ pub fn consumer_canary_errors(
   for step in steps {
     const uses = step_uses(step)
     if uses == CONSUMER_DECLARATION_ACTION {
-      const safe = consumer_declaration_safe(declaration)
-        && step?.name == declaration?.name
-        && step?.id == "observer"
-        && step?.if == "inputs.rehearsal_promotion_run_id == ''"
-        && step?.with
-          == {"source-revision": CONSUMER_CANARY_SOURCE, token: "$" + "{{ github.token }}"}
-        && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
+      const safe = consumer_declaration_step_safe(step, declaration)
       custody_declared = safe
       if !safe {
         errors = errors + ["consumer declaration must publish only canonical public custody"]
