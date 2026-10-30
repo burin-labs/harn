@@ -115,6 +115,41 @@ test('candidate and baseline custody pairs each authenticated nonce to its own p
   }
 });
 
+test('historical retirement requires the exact completed publication and never admits a live observer', () => {
+  const context = {schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',
+    parent_run_id:'41065732964',parent_run_attempt:1,parent_head_sha:'f45a4d4bf3477fff82ea5e05d897d0d6810e98ef',
+    source_revision:'ffb247e184337284fddfbab84da80f490edef57d',
+    dispatch_nonce:'54863eea-c067-4d70-8ba3-22a3a74cba5a',started_at:1793368397};
+  const parent = {id:Number(context.parent_run_id),run_attempt:1,head_sha:context.parent_head_sha,
+    head_repository:{full_name:context.parent_repository},path:'.github/workflows/ci.yml',status:'completed',conclusion:'cancelled'};
+  const artifact = {id:12983720319,digest:'sha256:e52d3b772efb81949002111273b6fc1ef12304c7c0f50646c6b36ab36641ddb7'};
+  const publisher = {id:124100749916,run_id:parent.id,run_attempt:1,head_sha:parent.head_sha,steps:[
+    {name:observerDeclarationStep,number:7,status:'completed',conclusion:'success'},
+    {name:observerDispatchStep,number:8,status:'completed',conclusion:'success'}]};
+  const completed = {parent,artifact};
+  assert.throws(()=>qualifyObserverPublisher(context,[publisher]),/observer_job_identity_unproven/);
+  assert.equal(qualifyObserverPublisher(context,[publisher],completed).job.id,publisher.id);
+  for (const bad of [
+    {...completed,parent:{...parent,status:'in_progress'}},
+    {...completed,parent:{...parent,run_attempt:2}},
+    {...completed,parent:{...parent,head_sha:'a'.repeat(40)}},
+    {...completed,artifact:{...artifact,id:artifact.id+1}},
+    {...completed,artifact:{...artifact,digest:`sha256:${'a'.repeat(64)}`}},
+  ]) assert.throws(()=>qualifyObserverPublisher(context,[publisher],bad),/observer_job_identity_unproven/);
+  for (const change of [{parent_run_attempt:2},{parent_head_sha:'a'.repeat(40)},
+    {source_revision:'b'.repeat(40)},{dispatch_nonce:'11234567-89ab-4cde-8fab-0123456789ab'},
+    {started_at:context.started_at+1}]) {
+    assert.throws(()=>qualifyObserverPublisher({...context,...change},[publisher],completed),/observer_job_identity_unproven/);
+  }
+  for (const jobs of [[],[publisher,{...publisher,id:publisher.id+1}],
+    [{...publisher,id:publisher.id+1}],
+    [{...publisher,steps:publisher.steps.slice(0,1)}],
+    [{...publisher,steps:[{...publisher.steps[0],conclusion:'failure'},publisher.steps[1]]}],
+    [{...publisher,steps:[publisher.steps[0],{...publisher.steps[1],conclusion:'failure'}]}]]) {
+    assert.throws(()=>qualifyObserverPublisher(context,jobs,completed),/observer_job_identity_unproven/);
+  }
+});
+
 test('declaration preparation reaches a closed public file only for a measured live parent', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-publish-'));
   try {
