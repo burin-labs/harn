@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
-import { observerRunName, observerDeclarationName, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
+import { createObserverContext, observerRunName, observerDeclarationName, observerPublicationWitness, qualifyObserverPublisher, githubParentDeclarations, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
 
 test('manual cleanup rejects feature refs and checks out trusted code before credentials', () => {
   const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8'));
@@ -37,6 +37,82 @@ test('the inert declaration action projects the owning publication step identity
   assert.match(listener, /cron: '8,23,38,53 \* \* \* \*'/);
   assert.match(listener, /workflows: \[Consumer canary, Build release binaries, Promote release, CI\]/);
   assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
+  const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-canary.yml', import.meta.url), 'utf8'));
+  const steps = workflow.jobs.consumers.steps;
+  const publication = steps.findIndex(step => step.id === 'observer');
+  const witness = steps[publication + 1];
+  const context = createObserverContext({runId:'42',attempt:1,headSha:'a'.repeat(40),sourceRevision:'b'.repeat(40)});
+  const rendered = witness.name.replace("${{ fromJSON(steps.observer.outputs.context || '{}').dispatch_nonce }}",context.dispatch_nonce);
+  assert.equal(rendered,observerPublicationWitness(context));
+  assert.equal(witness.run, 'node scripts/ci/consumer-observer-declare.mjs --witness');
+  assert.equal(witness.env.OBSERVER_CONTEXT, '${{ steps.observer.outputs.context }}');
+  assert.equal(steps[publication + 2].name, observerDispatchStep);
+});
+
+test('candidate and baseline custody pairs each authenticated nonce to its own publisher', async () => {
+  const context = {schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',
+    parent_run_id:'41044671103',parent_run_attempt:1,parent_head_sha:'23b1a0fe1f2ca7a361bbeb0eef150149c09d48b1',
+    source_revision:'43c8228630c66aecd1c74aab0144a2fc103bf9f8',
+    dispatch_nonce:'be040d3a-74ae-472d-b8bc-1a373f6486fb',started_at:1793350000};
+  const baseline = {...context,source_revision:'bd0ed627228d5433ebb2c6b7e81744d218d05d79',
+    dispatch_nonce:'ac917952-af08-4207-8a87-dde1636c6d78'};
+  const publisher = (owner,id) => ({id,run_id:Number(owner.parent_run_id),run_attempt:owner.parent_run_attempt,
+    head_sha:owner.parent_head_sha,status:'completed',conclusion:'success',steps:[
+      {name:observerDeclarationStep,number:7,status:'completed',conclusion:'success'},
+      {name:observerPublicationWitness(owner),number:8,status:'completed',conclusion:'success'}]});
+  const jobs = [publisher(context,124029936391),publisher(baseline,124043792303)];
+  for (const [index,owner] of [context,baseline].entries()) {
+    assert.equal(qualifyObserverPublisher(owner,jobs).job.id,jobs[index].id);
+    const bad = jobs.map(job => ({...job,steps:job.steps.map(step=>({...step}))}));
+    const target = bad[index];
+    for (const change of [
+      {steps:target.steps.slice(0,1)},
+      {steps:[target.steps[0],{...target.steps[1],name:observerPublicationWitness(index===0?baseline:context)}]},
+      {steps:[...target.steps,target.steps[1]]},
+      {steps:[target.steps[0],{...target.steps[1],conclusion:'failure'}]},
+      {steps:[target.steps[0],{...target.steps[1],number:6}]},
+      {head_sha:'f'.repeat(40)},{run_attempt:2},{run_id:42},{id:null},
+    ]) {
+      assert.throws(()=>qualifyObserverPublisher(owner,bad.map((job,i)=>i===index?{...target,...change}:job)),
+        /observer_job_identity_unproven/);
+    }
+    assert.throws(()=>qualifyObserverPublisher({...owner,dispatch_nonce:'11234567-89ab-4cde-8fab-0123456789ab'},jobs),
+      /observer_job_identity_unproven/);
+  }
+  const parent = {id:Number(context.parent_run_id),run_attempt:1,head_sha:context.parent_head_sha,
+    head_repository:{full_name:context.parent_repository},path:'.github/workflows/ci.yml',status:'completed',conclusion:'failure'};
+  const values = [context,baseline].map(value=>Buffer.from(JSON.stringify(value)));
+  const artifacts = values.map((bytes,index)=>({id:501+index,name:observerDeclarationName([context,baseline][index]),
+    expired:false,size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+    workflow_run:{id:parent.id,head_sha:parent.head_sha}}));
+  let measuredJobs = jobs;
+  const read = async url => {
+    const p = new URL(url).pathname;
+    if (p.endsWith('/jobs')) return {ok:true,json:async()=>({total_count:measuredJobs.length,jobs:measuredJobs})};
+    if (p.endsWith('/artifacts')) return {ok:true,json:async()=>({total_count:artifacts.length,artifacts})};
+    if (p.endsWith('/zip')) return {ok:true,arrayBuffer:async()=>values[Number(p.split('/').at(-2))-501]};
+    return {ok:true,json:async()=>parent};
+  };
+  const declarations = () => githubParentDeclarations('fixture',context.parent_run_id,1,read,bytes=>JSON.parse(bytes));
+  assert.deepEqual(await declarations(),[context,baseline]);
+  measuredJobs = [jobs[0],{...jobs[1],steps:[jobs[1].steps[0]]}];
+  await assert.rejects(declarations(),/observer_job_identity_unproven/);
+  measuredJobs = [...jobs,{...jobs[0],id:991}];
+  await assert.rejects(declarations(),/successful_declaration_missing/);
+
+  const frozen = {...context,parent_run_id:'41016965350',parent_run_attempt:3,
+    parent_head_sha:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc',source_revision:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'};
+  const legacy = publisher(frozen,99); legacy.steps.pop();
+  assert.equal(qualifyObserverPublisher(frozen,[legacy]).job.id,99);
+  for (const publishers of [[],[legacy,{...legacy,id:100}],
+    [{...legacy,steps:[]}],
+    [{...legacy,steps:[{...legacy.steps[0],conclusion:'failure'}]}]]) {
+    assert.throws(()=>qualifyObserverPublisher(frozen,publishers),/observer_job_identity_unproven/);
+  }
+  for (const change of [{parent_run_attempt:4},{parent_run_id:'41016965351'},
+    {parent_head_sha:'e'.repeat(40)},{source_revision:context.source_revision}]) {
+    assert.throws(()=>qualifyObserverPublisher({...frozen,...change},[legacy]),/observer_job_identity_unproven/);
+  }
 });
 
 test('declaration preparation reaches a closed public file only for a measured live parent', () => {
@@ -68,6 +144,41 @@ test('declaration preparation reaches a closed public file only for a measured l
     assert.equal(declared.parent_run_id, '42');
     assert.equal(declared.started_at,1000,'the original issuer starts before declaration qualification and upload');
     assert.equal(Object.keys(declared).length, 8, 'public custody carries no private consumer identity');
+    const archive = path.join(scratch,'declaration.zip');
+    const zipped = spawnSync('zip',['-j',archive,fields.file],{encoding:'utf8'});
+    assert.equal(zipped.status,0,zipped.stderr);
+    const bytes = fs.readFileSync(archive);
+    const artifact = {id:501,name:fields.name,expired:false,size_in_bytes:bytes.length,
+      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      workflow_run:{id:42,head_sha:parent.head_sha}};
+    const witnessConfig = path.join(scratch,'witness.json');
+    const witnessPreload = path.join(scratch,'witness-fetch.mjs');
+    fs.writeFileSync(witnessPreload,`import fs from 'node:fs';
+      const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(witnessConfig)},'utf8'));
+      globalThis.fetch=async url=>{
+        const endpoint=new URL(url);
+        if(endpoint.pathname.endsWith('/artifacts')){
+          const selected=fixture.artifacts.filter(a=>a.name===endpoint.searchParams.get('name'));
+          return {ok:true,json:async()=>({total_count:selected.length,artifacts:selected})};
+        }
+        if(endpoint.pathname.endsWith('/zip'))return {ok:true,arrayBuffer:async()=>fs.readFileSync(${JSON.stringify(archive)})};
+        return {ok:true,json:async()=>fixture.parent};
+      };`);
+    const witness = (changes={},extraEnv={}) => {
+      fs.writeFileSync(witnessConfig,JSON.stringify({parent,artifacts:[artifact],...changes}));
+      return spawnSync(process.execPath,[entry,'--witness'],{encoding:'utf8',
+        env:{...env,NODE_OPTIONS:`--import=${witnessPreload}`,OBSERVER_CONTEXT:fields.context,...extraEnv}});
+    };
+    const reached = witness();
+    assert.equal(reached.status,0,reached.stderr);
+    assert.match(reached.stdout,/publication=authenticated parent=live attempt=current/);
+    for (const [changes,extraEnv] of [[{artifacts:[]},{}],[{artifacts:[artifact,artifact]},{}],
+      [{parent:{...parent,status:'completed'}},{}],[{}, {SOURCE_REVISION:'f'.repeat(40)}],
+      [{}, {OBSERVER_CONTEXT:JSON.stringify({...declared,parent_run_attempt:3})}]]) {
+      const rejected = witness(changes,extraEnv);
+      assert.equal(rejected.status,1);
+      assert.doesNotMatch(rejected.stdout,/publication=authenticated/);
+    }
     for (const reading of [{ ...parent, status: 'completed' }, { ...parent, run_attempt: 3 }, {}]) {
       fs.writeFileSync(record, JSON.stringify(reading));
       fs.writeFileSync(output, '');
@@ -141,7 +252,10 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
           completed_at:null,runner_id:1,runner_name:'private-worker',
           steps:[{status:'in_progress',conclusion:null,started_at:new Date(1010*1000).toISOString()}],
         }]};
-        else if (p.endsWith('/jobs')) record={total_count:1,jobs:[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps}]};
+        else if (p.endsWith('/jobs')) {
+          const jobs=[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps},...(fixture.extraJobs??[])];
+          record={total_count:jobs.length,jobs};
+        }
         else if (p.endsWith('/artifacts')) {
           const index=p.includes('/42/') ? 0 : 1;
           const missing=fixture.missing === index;
@@ -165,7 +279,8 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const entry = fileURLToPath(new URL('../ci/consumer-observer-reconcile.mjs', import.meta.url));
     const execute = (changes, observerMode = false, sweep = false) => {
       fs.writeFileSync(config, JSON.stringify({ parent, child, archives, jobName: 'Declare consumer observer',
-        steps: [{ name: observerDeclarationStep, status: 'completed', conclusion: 'success' }], ...changes }));
+        steps: [{ name: observerDeclarationStep, number:2, status: 'completed', conclusion: 'success' },
+          {name:observerPublicationWitness(context),number:3,status:'completed',conclusion:'success'}], ...changes }));
       const run = spawnSync(process.execPath, [entry, ...(observerMode ? ['--observer'] : [])], {
         env: {...env,GITHUB_EVENT_NAME:sweep ? 'schedule' : env.GITHUB_EVENT_NAME,
           GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:parent.head_sha,
@@ -179,17 +294,33 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.deepEqual(positive.posts.map(call => call.path), ['/repos/acme/widget-host/actions/runs/73/cancel']);
     const liveParent = {...parent,status:'in_progress',conclusion:null};
     const declaration = {name:observerDeclarationStep,number:2,status:'completed',conclusion:'success'};
-    const observed = {name:'Observe the first bounded window',number:3,status:'completed',conclusion:'failure'};
-    const stoppedObserver = execute({parent:liveParent,steps:[declaration,observed]},true);
+    const witness = {name:observerPublicationWitness(context),number:3,status:'completed',conclusion:'success'};
+    const declared = [declaration,witness];
+    const observed = {name:'Observe the first bounded window',number:4,status:'completed',conclusion:'failure'};
+    const stoppedObserver = execute({parent:liveParent,steps:[...declared,observed]},true);
     assert.equal(stoppedObserver.run.status,1,stoppedObserver.run.stderr);
     assert.deepEqual(stoppedObserver.posts,[],'a failed read cannot retire a live measurement');
     assert.match(stoppedObserver.run.stdout,/cancelled=0 pending=1 refused=0/);
-    const failedDispatch = execute({parent:liveParent,steps:[declaration,{...observed,name:observerDispatchStep}]},true);
+    const failedDispatch = execute({parent:liveParent,steps:[...declared,{...observed,name:observerDispatchStep}]},true);
     assert.equal(failedDispatch.run.status,1,failedDispatch.run.stderr);
     assert.deepEqual(failedDispatch.posts,[]);
-    const expiredObserver = execute({parent:liveParent,steps:[declaration,observed],now:8210},true);
+    const expiredObserver = execute({parent:liveParent,steps:[...declared,observed],now:8210},true);
     assert.equal(expiredObserver.run.status,0,expiredObserver.run.stderr);
     assert.deepEqual(expiredObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    const baseline = {id:802,run_id:42,run_attempt:2,head_sha:parent.head_sha,status:'completed',conclusion:'failure',
+      steps:[declaration,{...witness,name:observerPublicationWitness({...context,source_revision:'d'.repeat(40),
+        dispatch_nonce:'21234567-89ab-4cde-8fab-0123456789ab'})},observed]};
+    const paired = execute({parent:liveParent,steps:[...declared,observed],extraJobs:[baseline],now:8210},true);
+    assert.equal(paired.run.status,0,paired.run.stderr);
+    assert.deepEqual(paired.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    const otherFailed = execute({parent:liveParent,steps:[...declared,{...observed,conclusion:'success'}],
+      extraJobs:[baseline],now:8210},true);
+    assert.equal(otherFailed.posts.length,0,'the other publisher stopping cannot end this observer');
+    assert.match(otherFailed.run.stdout,/cancelled=0 pending=1 refused=0/);
+    const absentWitness = execute({parent:liveParent,steps:[declaration,observed],extraJobs:[baseline],now:8210},true);
+    assert.equal(absentWitness.run.status,1);
+    assert.match(absentWitness.run.stderr,/observer_job_identity_unproven/);
+    assert.equal(absentWitness.posts.length,0);
     const failedParent = execute({parent:{...parent,conclusion:'failure'}});
     assert.equal(failedParent.run.status,0,failedParent.run.stderr);
     assert.deepEqual(failedParent.posts,[],'completion cleanup also preserves a measurement after observer failure');
@@ -228,7 +359,7 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     }
     for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
       {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
-      const needed = execute({parent:liveParent,steps:[declaration,step]},true);
+      const needed = execute({parent:liveParent,steps:[...declared,step]},true);
       assert.equal(needed.posts.length,0,'a live observer must preserve its child');
       assert.match(needed.run.stdout,/cancelled=0 pending=1 refused=0/);
     }
