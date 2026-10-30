@@ -289,10 +289,12 @@ pub(super) async fn list(
     sessions
         .into_iter()
         .filter(|session| {
-            session
-                .cwd
-                .as_deref()
-                .is_some_and(|session_cwd| super::canonical_paths_match(session_cwd, cwd))
+            session.cwd.as_deref().is_some_and(|session_cwd| {
+                harn_vm::workspace_anchor::WorkspaceAnchor::same_canonical_path(
+                    Path::new(session_cwd),
+                    Path::new(cwd),
+                )
+            })
         })
         .map(|session| {
             harn_serve::try_acp_persisted_session_item(session)
