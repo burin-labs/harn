@@ -9,11 +9,17 @@ import tomllib
 
 def release_artifacts(registry):
     artifacts = []
+    orders = set()
     for row in tomllib.loads(registry.read_text())["artifact"]:
         if "release_phase" not in row:
             continue
         if row["release_phase"] not in ("before-version", "after-version"):
             raise ValueError(f"invalid release phase for {row.get('id')}")
+        order = row.get("release_order")
+        key = (row["release_phase"], order)
+        if type(order) is not int or order < 1 or key in orders:
+            raise ValueError(f"invalid or duplicate release order for {row.get('id')}")
+        orders.add(key)
         if not isinstance(row.get("gen"), str) or not re.fullmatch(r"[a-z][a-z0-9-]*", row["gen"]):
             raise ValueError(f"missing release generator for {row.get('id')}")
         outputs = row.get("outputs")
@@ -28,7 +34,7 @@ def release_artifacts(registry):
         artifacts.append(row)
     if not artifacts:
         raise ValueError("release artifact census is empty")
-    return artifacts
+    return sorted(artifacts, key=lambda row: row["release_order"])
 
 
 def main():

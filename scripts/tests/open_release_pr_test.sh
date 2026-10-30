@@ -32,7 +32,22 @@ for registry in 'artifact = []' '[[artifact]]
 id = "broken"
 release_phase = "invented"
 gen = "gen-example"
-outputs = ["example.json"]'; do
+outputs = ["example.json"]' '[[artifact]]
+id = "missing-order"
+release_phase = "before-version"
+gen = "gen-example"
+outputs = ["example.json"]' '[[artifact]]
+id = "one"
+release_phase = "before-version"
+release_order = 1
+gen = "gen-one"
+outputs = ["one.json"]
+[[artifact]]
+id = "two"
+release_phase = "before-version"
+release_order = 1
+gen = "gen-two"
+outputs = ["two.json"]'; do
   printf '%s\n' "$registry" > "$registry_fixture"
   if python3 "$repo_root/scripts/lib/release-generated-artifacts.py" targets after-version \
     --registry "$registry_fixture" > "$tmp_root/targets" 2> "$tmp_root/registry-error"; then
@@ -40,6 +55,8 @@ outputs = ["example.json"]'; do
   fi
   [[ ! -s "$tmp_root/targets" ]] || fail 'invalid release registry emitted a partial target plan'
 done
+targets=$(python3 "$repo_root/scripts/lib/release-generated-artifacts.py" targets before-version)
+[[ "$targets" == $'sync-language-spec\ngen-highlight' ]] || fail 'release generator order changed'
 
 # `gh` stub. `pr list` applies the caller's own --jq program to $FAKE_GH_PRS,
 # so the title/branch match under test is the opener's real jq expression.
