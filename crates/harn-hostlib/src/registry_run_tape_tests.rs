@@ -68,6 +68,15 @@ impl ToolEffectObserver for NoChanges {
 
 #[test]
 fn a_tool_starting_a_background_command_is_unservable() {
+    assert_background_is_unservable(false);
+}
+
+#[test]
+fn a_hook_cannot_rewrite_a_foreground_command_to_background() {
+    assert_background_is_unservable(true);
+}
+
+fn assert_background_is_unservable(rewritten: bool) {
     let dir = tempfile::tempdir().unwrap();
     let _session = harn_vm::agent_sessions::enter_current_session("tape-background-command");
     let guard = start_recording(
@@ -82,14 +91,25 @@ fn a_tool_starting_a_background_command_is_unservable() {
     .unwrap()
     .unwrap();
     let root = serde_json::to_string(&dir.path().display().to_string()).unwrap();
+    let marker = dir.path().join("executed");
+    let marker_arg = serde_json::to_string(&marker.display().to_string()).unwrap();
+    let policy = if rewritten {
+        format!(
+            "harness.runtime.command_policy_push(command_policy({{workspace_roots: [{root}], pre: {{ _ctx -> return {{rewrite: {{background: true}}}} }} }}))"
+        )
+    } else {
+        String::new()
+    };
+    let background = !rewritten;
     let source = format!(
         r#"
+{policy}
 const tools = tool_define(tool_registry(), "launch", "Launch a command", {{
   parameters: {{}},
   handler: {{ _args ->
     const command = harness.tools.run_command({{
-      argv: ["/usr/bin/printf", "recorded"], cwd: {root}, sandbox_profile: "workspace_paths",
-      background: true, env_mode: "replace",
+      argv: ["/usr/bin/touch", {marker_arg}], cwd: {root}, sandbox_profile: "workspace_paths",
+      background: {background}, env_mode: "replace",
     }})
     assert(command.handle_id != nil)
     const settled = harness.tools.wait_command({{handle_id: command.handle_id, timeout_ms: 5000}})
@@ -102,10 +122,22 @@ return harness.tools.dispatch_agent_call({{id: "launch-1", name: "launch", argum
 "#
     );
     let (value, output) = run(&source, dir.path());
+    if rewritten {
+        let result = harn_vm::value::json::vm_value_to_json(&value);
+        assert_eq!(result["ok"], false);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("rewrite cannot modify field \"background\""));
+        assert!(!marker.exists(), "the refused command must not execute");
+        assert_eq!(guard.error(), None);
+        return;
+    }
     assert!(
         output.contains("spawned-and-settled"),
         "{value:?}: {output}"
     );
+    assert!(marker.exists(), "the recorded command actually executed");
     assert_eq!(guard.error(), None);
     drop(guard);
     let tape = EventTape::load(&dir.path().join(TAPE_FILE_NAME)).unwrap();

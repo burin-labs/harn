@@ -134,6 +134,7 @@ pub(super) fn retire_session_state(
     id: &str,
 ) -> Option<RetiredSession> {
     sessions.remove(id)?;
+    crate::run_tape::note_session_closed(id);
     Some(RetiredSession {
         id: id.to_owned(),
         inputs: active_session_runtime().inputs.write().remove(id),

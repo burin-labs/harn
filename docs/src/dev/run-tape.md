@@ -42,6 +42,15 @@ not run again. Changing a command's arguments makes the prefix diverge. A host
 must read `BranchGuard::finish` and treat divergence or an unfinished prefix as
 failure.
 
+A served tool dispatch replays recorded transcript field changes. For a child
+created and closed entirely within that dispatch, the tape retains its initial
+transcript, changes, and closure. Replay validates those changes separately from
+live sessions, without rerunning the child or its hooks. A missing target without
+that lifecycle evidence still refuses. A newly created session that remains open,
+or a dispatch that closes a previously existing session, is not yet replayable.
+Tape version 5 carries these lifecycle records. Field-change records retain their
+version 4 shape, so existing recordings remain readable by the new runtime.
+
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
 prefix. Filesystem builtins resolve absolute paths under the recorded workspace
 into the restored workspace before applying normal permission checks. A mapped

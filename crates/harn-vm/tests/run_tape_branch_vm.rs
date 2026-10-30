@@ -28,6 +28,9 @@ mod first_call;
 #[path = "run_tape_branch_vm/workspace.rs"]
 mod workspace;
 
+#[path = "run_tape_branch_vm/review_cases.rs"]
+mod review_cases;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;
