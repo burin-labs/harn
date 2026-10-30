@@ -303,6 +303,7 @@ jobs:
           destination="$RUNNER_TEMP/calibration-cli"
           mkdir -p "$destination"
           cp "${CARGO_TARGET_DIR:-target}/debug/harn" "$destination/harn"
+          (cd "$destination" && shasum -a 256 harn > harn.sha256)
           {
             git rev-parse HEAD
             shasum -a 256 "$destination/harn"
@@ -383,6 +384,7 @@ jobs:
           report="$RUNNER_TEMP/report.log"
           {
             echo "sample=$SAMPLE source=$GITHUB_SHA"
+            (cd calibration-cli && shasum -a 256 -c harn.sha256)
             cat calibration-cli/identity.txt
             shasum -a 256 "$HARN_BIN"
             make check-test-case-performance
