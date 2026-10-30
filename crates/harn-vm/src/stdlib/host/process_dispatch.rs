@@ -58,7 +58,7 @@ async fn dispatch_process_exec_with_policy_origin(
         "process.exec",
         &args,
         false,
-        dispatch_untaped(ctx, params, caller, origin),
+        Box::pin(dispatch_untaped(ctx, params, caller, origin)),
     )
     .await
 }
