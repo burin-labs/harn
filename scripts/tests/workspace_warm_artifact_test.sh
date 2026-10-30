@@ -289,7 +289,9 @@ if (
 fi
 
 echo "discover selects the newest successful main warm artifact run"
-export FAKE_RUNS_JSON='{"workflow_runs":[{"id":41,"conclusion":"failure"},{"id":42,"conclusion":"success"},{"id":43,"conclusion":"success"}]}'
+producer_run="$(jq -nc --arg sha "$commit" '{id:42, conclusion:"success", status:"completed", event:"push", head_branch:"main", head_repository:{full_name:"burin-labs/harn"}, head_sha:$sha}')"
+FAKE_RUNS_JSON="$(jq -nc --argjson run "$producer_run" '{workflow_runs:[{id:41,conclusion:"failure"},$run,{id:43,conclusion:"success"}]}')"
+export FAKE_RUNS_JSON
 export FAKE_ARTIFACTS_JSON="{\"artifacts\":[{\"name\":\"${warm_artifact_name}\",\"expired\":false,\"size_in_bytes\":1234}]}"
 discovered="$(
   env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
@@ -297,8 +299,56 @@ discovered="$(
 )"
 [[ "$discovered" == "42" ]]
 
+echo "discover refuses a pull-request run even when its branch is named main"
+if env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+  FAKE_RUNS_JSON='{"workflow_runs":[{"id":42,"conclusion":"success","status":"completed","event":"pull_request","head_branch":"main","head_repository":{"full_name":"burin-labs/harn"},"head_sha":"0123456789abcdef0123456789abcdef01234567"}]}' \
+  "$script" "$platform" discover --repo burin-labs/harn >"$tmpdir/untrusted.out" 2>&1; then
+  echo "expected non-producer event to refuse" >&2
+  exit 1
+fi
+
+echo "discover refuses missing, foreign, incomplete and malformed producer metadata"
+invalid_runs="$(jq -nc --argjson run "$producer_run" '
+  ($run | del(.event)),
+  ($run | .head_repository.full_name="foreign/harn"),
+  ($run | .status="in_progress"),
+  ($run | .head_branch="feature"),
+  ($run | .head_sha="unmeasured")
+')"
+refusals=0
+while IFS= read -r invalid; do
+  invalid_list="$(jq -nc --argjson run "$invalid" '{workflow_runs:[$run]}')"
+  if env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+    FAKE_RUNS_JSON="$invalid_list" "$script" "$platform" discover --repo burin-labs/harn \
+    >"$tmpdir/invalid-run.out" 2>&1; then
+    echo "expected unmeasured producer metadata to refuse" >&2
+    exit 1
+  fi
+  refusals=$((refusals + 1))
+done <<< "$invalid_runs"
+[[ "$refusals" == 5 ]]
+
+echo "discover requires a measured live, nonempty artifact"
+invalid_artifacts="$(jq -nc --arg name "$warm_artifact_name" '
+  {artifacts:[{name:$name,size_in_bytes:1234}]},
+  {artifacts:[{name:$name,expired:true,size_in_bytes:1234}]},
+  {artifacts:[{name:$name,expired:false,size_in_bytes:0}]},
+  {artifacts:[{name:$name,expired:false,size_in_bytes:"1234"}]}
+')"
+refusals=0
+while IFS= read -r invalid; do
+  if env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+    FAKE_ARTIFACTS_JSON="$invalid" "$script" "$platform" discover --repo burin-labs/harn \
+    >"$tmpdir/invalid-artifact.out" 2>&1; then
+    echo "expected unmeasured artifact metadata to refuse" >&2
+    exit 1
+  fi
+  refusals=$((refusals + 1))
+done <<< "$invalid_artifacts"
+[[ "$refusals" == 4 ]]
+
 echo "discover can stop at the first hit without breaking the JSON producer"
-export FAKE_RUNS_JSON="$(jq -nc '{workflow_runs: [range(0;30) | {id:42, conclusion:"success", metadata:("x" * 3500)}]}')"
+FAKE_RUNS_JSON="$(jq -nc --argjson run "$producer_run" '{workflow_runs: [range(0;30) | $run + {metadata:("x" * 3500)}]}')"
 discovered="$(
   env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
     "$script" "$platform" discover --repo burin-labs/harn 2>"$tmpdir/discover.err"
@@ -310,7 +360,7 @@ rm -rf "$tmpdir/downloaded"
 mkdir -p "$tmpdir/fake-artifact"
 cp -R "$tmpdir/out/staging/." "$tmpdir/fake-artifact/"
 export FAKE_ARTIFACT_DIR="$tmpdir/fake-artifact"
-(
+run_download() (
   cd "$tmpdir/work"
   env \
     PATH="$tmpdir/bin:$PATH" \
@@ -321,8 +371,35 @@ export FAKE_ARTIFACT_DIR="$tmpdir/fake-artifact"
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings" \
-    "$script" "$platform" download-and-restore --repo burin-labs/harn --target-dir "$tmpdir/downloaded"
+    "$script" "$platform" download-and-restore --repo burin-labs/harn --target-dir "$1"
 )
+run_download "$tmpdir/downloaded"
 test -f "$tmpdir/downloaded/debug/deps/libserde-abc123.rlib"
+
+echo "download refuses a manifest from another source before replacing the target"
+wrong_source="$(jq -nc --argjson run "$producer_run" '{workflow_runs:[$run + {head_sha:"1111111111111111111111111111111111111111"}]}')"
+mkdir -p "$tmpdir/preserved-target"
+printf 'retained\n' > "$tmpdir/preserved-target/sentinel"
+if FAKE_RUNS_JSON="$wrong_source" run_download "$tmpdir/preserved-target" >"$tmpdir/source-mismatch.out" 2>&1; then
+  echo "expected producer source mismatch to refuse" >&2
+  exit 1
+fi
+grep -Fq 'producer commit does not match its GitHub run' "$tmpdir/source-mismatch.out"
+[[ "$(cat "$tmpdir/preserved-target/sentinel")" == retained ]]
+test ! -e "$tmpdir/preserved-target/debug/deps/libserde-abc123.rlib"
+
+dispatch_source="$(jq -nc --argjson run "$producer_run" '{workflow_runs:[$run + {event:"workflow_dispatch",head_sha:"1111111111111111111111111111111111111111"}]}')"
+if [[ "$platform" == windows ]]; then
+  echo "Windows dispatch may publish its admitted ancestor rather than the workflow head"
+  FAKE_RUNS_JSON="$dispatch_source" run_download "$tmpdir/dispatched" >"$tmpdir/dispatch.out" 2>&1
+  grep -Fxq 'windows_warm_restore_source_contract=admitted_dispatch' "$tmpdir/dispatch.out"
+  test -f "$tmpdir/dispatched/debug/deps/libserde-abc123.rlib"
+else
+  echo "macOS owned dispatches are not warm artifact publishers"
+  if FAKE_RUNS_JSON="$dispatch_source" run_download "$tmpdir/dispatched" >"$tmpdir/dispatch.out" 2>&1; then
+    echo "expected a macOS dispatch to refuse as an archive producer" >&2
+    exit 1
+  fi
+fi
 
 echo "workspace_warm_artifact_test: ok"
