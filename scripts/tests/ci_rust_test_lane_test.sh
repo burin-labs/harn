@@ -36,10 +36,10 @@ grep -qE '^    timeout-minutes: [0-9]+$' <<<"$rust_test_block"
 GITHUB_STEP_SUMMARY="$summary" "$script" true >"$log" 2>&1
 grep -q 'Rust test resources before' "$summary"
 grep -q 'Rust test resources after' "$summary"
-grep -q 'Rust test execution' "$summary"
+grep -q 'Rust build and test lane' "$summary"
 grep -q 'Exit status: 0' "$summary"
 grep -q '::group::Rust test resources before' "$log"
-grep -q 'rust_test_execution_seconds=' "$log"
+grep -q 'rust_test_lane_seconds=' "$log"
 
 # Test workers mirror the production CLI stack by default, but callers can
 # deliberately exercise another stack size.
@@ -95,9 +95,9 @@ grep -q 'Rust test resources before' "$tmpdir/wrapper-output.log"
 custom_summary="$tmpdir/custom-summary.md"
 custom_log="$tmpdir/custom-output.log"
 RUST_TEST_JOB_LIMIT_MINUTES=75 GITHUB_STEP_SUMMARY="$custom_summary" "$script" true >"$custom_log" 2>&1
-grep -q 'Rust test execution' "$custom_summary"
-grep -q 'Rust workspace test step:.*of 4500s.*80%.*MiB' "$custom_log"
-grep -q 'Rust workspace test step:' "$custom_summary"
+grep -q 'Rust build and test lane' "$custom_summary"
+grep -q 'Rust build and test lane:.*of 4500s.*80%.*MiB' "$custom_log"
+grep -q 'Rust build and test lane:' "$custom_summary"
 
 set +e
 "$script" bash -c 'exit 23' >/dev/null 2>&1

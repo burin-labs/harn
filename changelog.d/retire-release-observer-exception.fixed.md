@@ -1,2 +1,2 @@
-Require the nonce-bound publisher witness for every consumer observer after the final in-flight release
-without that witness completed.
+Retire the release-182 publisher exception after its final in-flight observer completed. Live observers
+require the nonce-bound witness; authenticated historical retirement retains its exact publication binding.

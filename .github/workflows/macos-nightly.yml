@@ -20,6 +20,14 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Native qualifi
 # Tracking issue: harn#946 (cross-platform test coverage).
 
 on:
+  # Publish a new generation immediately when its format or reuse owner changes.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/macos-nightly.yml"
+      - ".github/cache-policy.json"
+      - "scripts/ci/workspace_warm_artifact.sh"
+      - "scripts/ci/reuse_workspace_crates.sh"
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
     # the Windows workspace tests so the two don't contend for cache lookups.
@@ -46,6 +54,12 @@ on:
       - ".config/native-qualification.json"
       - ".github/workflows/windows-nightly.yml"
       - ".github/workflows/macos-nightly.yml"
+      - ".github/cache-policy.json"
+      - "Makefile"
+      - "scripts/ci/reuse_workspace_crates.sh"
+      - "scripts/ci/workspace_warm_artifact.sh"
+      - "scripts/ci/run_rust_test_lane.sh"
+      - "scripts/tests/workspace_reuse_cargo_test.sh"
 
 permissions:
   contents: read
@@ -174,6 +188,9 @@ jobs:
           if [[ "${outcome}" != "hit" ]]; then
             echo "No compatible macOS warm target; this lane builds cold."
           fi
+      - name: Reuse unchanged workspace crates
+        if: ${{ github.event_name == 'pull_request' && steps.macos-warm-restore.outputs.macos_warm_restore == 'hit' }}
+        run: ./scripts/ci/reuse_workspace_crates.sh restore
       - name: Install Go formatter
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -202,13 +219,28 @@ jobs:
         env:
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
           HARN_BUDGET_PROFILE: producer
+      - name: Remove restored compiler timings
+        shell: bash
+        run: rm -f "${CARGO_TARGET_DIR:-target}/cargo-timings/cargo-timing.html"
+      - name: Prove workspace artifact reuse and changed-source invalidation
+        # Qualification may select an older main ancestor without this target.
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: make test-workspace-reuse-cargo
+      - name: Invalidate workspace units before publishing a new warm generation
+        # A producer must not attest unused units left over from an older build.
+        # Consumers retain their validated workspace units; this is writer-only.
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
+        run: cargo clean --workspace
       - name: Run workspace nextest
+        id: workspace-nextest
         shell: bash
         env:
           # A skipped budget step yields an empty output, which Cargo rejects,
           # so non-hosted runs name Cargo's own default explicitly.
           CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
           RUST_TEST_JOB_LIMIT_MINUTES: 75
+          # Routine feedback gets an early signal, separate from the cold-build fuse.
+          RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native
@@ -218,15 +250,23 @@ jobs:
         # `wasm32-unknown-unknown` workflow, and the Linux workspace lane still
         # compiles it for a native target, so no build coverage is lost.
         #
-        # This is not a cosmetic saving. The lane is build-bound: the warm
-        # artifact strips every workspace member by design, so each run compiles
-        # the workspace from scratch, and this crate had grown to the single
-        # largest item in that compile.
+        # Main's artifact retains the complete native test graph and its source
+        # record. The source reuse step dates unchanged inputs before that
+        # build and leaves changed inputs new, so Cargo still rebuilds affected
+        # crates and their dependents while reusing the rest of the workspace.
         #
         # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
+        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
+      - name: Upload workspace compile timings
+        if: ${{ always() && !cancelled() && (steps.workspace-nextest.outcome == 'success' || steps.workspace-nextest.outcome == 'failure') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-workspace-test-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CARGO_TARGET_DIR || 'target' }}/cargo-timings/cargo-timing.html
+          if-no-files-found: error
+          retention-days: 7
       - name: Smoke test harn run
         shell: bash
         run: |

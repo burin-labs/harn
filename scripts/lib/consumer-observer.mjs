@@ -362,11 +362,37 @@ export function observerPublicationWitness(context) {
   return `Confirm consumer observer declaration ${observerContext(context).dispatch_nonce}`;
 }
 
-/** A nonce-bound successful step pairs the authenticated declaration to one job. */
-export function qualifyObserverPublisher(context, jobs) {
+/** Exact completed-parent publications that predate the nonce witness.
+ * @type {readonly {context:Partial<ObserverContext>, retirement:{jobId:number,artifactId:number,digest:string}}[]} */
+const historicalPublications = Object.freeze([
+  {context:{schema:'harn.consumer_observer.v2',parent_repository:parentRepository,
+    parent_run_id:'41065732964',parent_run_attempt:1,parent_head_sha:'f45a4d4bf3477fff82ea5e05d897d0d6810e98ef',
+    source_revision:'ffb247e184337284fddfbab84da80f490edef57d',
+    dispatch_nonce:'54863eea-c067-4d70-8ba3-22a3a74cba5a',started_at:1793368397},
+    retirement:{jobId:124100749916,artifactId:12983720319,
+      digest:'sha256:e52d3b772efb81949002111273b6fc1ef12304c7c0f50646c6b36ab36641ddb7'}},
+]);
+
+/** A nonce-bound successful step pairs the authenticated declaration to one job.
+ * @param {ObserverContext} context @param {object[]} jobs
+ * @param {{parent:object,artifact:{id:number,digest:string}}} [completedPublication]
+ * Authenticated completed-parent publication, never supplied by live admission. */
+export function qualifyObserverPublisher(context, jobs, completedPublication) {
   const observer = observerContext(context);
   const name = observerPublicationWitness(observer);
-  const matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
+  let matches = jobs.flatMap(job => job.steps.filter(step => step.name === name).map(step => ({job, step})));
+  const historical = historicalPublications.find(binding => Object.entries(binding.context).every(([key,value])=>observer[key]===value));
+  const retirement = historical?.retirement;
+  const parent = completedPublication?.parent;
+  const frozen = historical && parent?.status === 'completed'
+    && String(parent.id) === observer.parent_run_id && parent.run_attempt === observer.parent_run_attempt
+    && parent.head_sha === observer.parent_head_sha && parent.head_repository?.full_name === parentRepository
+    && parentWorkflows.has(parent.path) && completedConclusions.has(parent.conclusion)
+    && completedPublication.artifact?.id === retirement.artifactId
+    && completedPublication.artifact?.digest === retirement.digest;
+  if (matches.length === 0 && frozen) {
+    matches = jobs.flatMap(job => job.steps.filter(step => step.name === observerDeclarationStep).map(step => ({job, step})));
+  }
   if (matches.length !== 1) refuse('observer_job_identity_unproven');
   const {job, step} = matches[0];
   const publication = job.steps.filter(item => item.name === observerDeclarationStep);
@@ -377,6 +403,12 @@ export function qualifyObserverPublisher(context, jobs) {
     || !Number.isSafeInteger(publication[0].number)
     || step.status !== 'completed' || step.conclusion !== 'success' || !Number.isSafeInteger(step.number)
     || (step !== publication[0] && step.number <= publication[0].number)) refuse('observer_job_identity_unproven');
+  if (retirement) {
+    const dispatch = job.steps.filter(item => item.name === observerDispatchStep);
+    if (job.id !== retirement.jobId || dispatch.length !== 1 || dispatch[0].status !== 'completed'
+      || dispatch[0].conclusion !== 'success' || !Number.isSafeInteger(dispatch[0].number)
+      || dispatch[0].number <= publication[0].number) refuse('observer_job_identity_unproven');
+  }
   return {job, publication:publication[0], witness:step};
 }
 
@@ -594,7 +626,7 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
     }, fetchRecord, extract));
     qualifyObserverParent(context, parent);
     if (artifact.name !== observerDeclarationName(context)) refuse('dispatch_declaration_mismatch');
-    const {job} = qualifyObserverPublisher(context, jobs);
+    const {job} = qualifyObserverPublisher(context, jobs, {parent,artifact});
     if (publishers.has(job.id)) refuse('declaration_publication_ambiguous');
     publishers.add(job.id);
     contexts.push(context);
