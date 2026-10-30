@@ -84,6 +84,7 @@ pub(crate) struct ServeAcpArgs {
     pub transport: AcpServeTransport,
     /// Socket address to bind when serving ACP over WebSocket.
     #[arg(
+        hide_env_values = true,
         long,
         env = "HARN_SERVE_ACP_BIND",
         default_value = "127.0.0.1:8789",
@@ -105,23 +106,42 @@ pub(crate) struct ServeAcpArgs {
     #[arg(long = "confine-workspace", value_name = "PATH")]
     pub confine_workspace: Vec<PathBuf>,
     /// Static API keys accepted by the ACP authenticate method.
-    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_SERVE_API_KEY",
+        value_delimiter = ','
+    )]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC authentication through the ACP authenticate method.
-    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "hmac-secret",
+        env = "HARN_SERVE_HMAC_SECRET"
+    )]
     pub hmac_secret: Option<String>,
     /// TLS listener mode for WebSocket transport. Supplying both `--cert` and
     /// `--key` implies `pem`.
     #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
     pub tls: ServeTlsMode,
     /// PEM-encoded certificate chain for WebSocket TLS termination.
-    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for WebSocket TLS termination.
-    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Enable LLM trace summaries on shutdown.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "trace",
         env = "HARN_TRACE",
         action = clap::ArgAction::SetTrue,
@@ -175,31 +195,63 @@ pub(crate) struct WorkerServeArgs {
 pub(crate) struct A2aServeArgs {
     /// Socket address to bind the A2A server to. Defaults to loopback; use
     /// `--bind 0.0.0.0:PORT` only behind explicit auth/TLS or a trusted edge.
-    #[arg(long, env = "HARN_SERVE_A2A_BIND", value_name = "ADDR")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_A2A_BIND",
+        value_name = "ADDR"
+    )]
     pub bind: Option<SocketAddr>,
     /// Port to bind the A2A server to.
     #[arg(long, default_value_t = 8080)]
     pub port: u16,
     /// Public URL advertised in the A2A agent card.
-    #[arg(long = "public-url", env = "HARN_SERVE_A2A_PUBLIC_URL")]
+    #[arg(
+        hide_env_values = true,
+        long = "public-url",
+        env = "HARN_SERVE_A2A_PUBLIC_URL"
+    )]
     pub public_url: Option<String>,
     /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
-    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_SERVE_API_KEY",
+        value_delimiter = ','
+    )]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC request signing.
-    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "hmac-secret",
+        env = "HARN_SERVE_HMAC_SECRET"
+    )]
     pub hmac_secret: Option<String>,
     /// Shared secret used to attach an HS256 signature to the agent card.
-    #[arg(long = "card-signing-secret", env = "HARN_SERVE_A2A_CARD_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "card-signing-secret",
+        env = "HARN_SERVE_A2A_CARD_SECRET"
+    )]
     pub card_signing_secret: Option<String>,
     /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
     #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
     pub tls: ServeTlsMode,
     /// PEM-encoded certificate chain for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Where to route `harness.obs.*` spans/metrics/logs.
     #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
@@ -215,6 +267,7 @@ pub(crate) struct ApiServeArgs {
     pub default_session_mode: String,
     /// Socket address to bind the local Agents API server to.
     #[arg(
+        hide_env_values = true,
         long,
         env = "HARN_SERVE_API_BIND",
         default_value = "127.0.0.1:8787",
@@ -222,25 +275,48 @@ pub(crate) struct ApiServeArgs {
     )]
     pub bind: SocketAddr,
     /// Public URL printed and advertised for the local API server.
-    #[arg(long = "public-url", env = "HARN_SERVE_API_PUBLIC_URL")]
+    #[arg(
+        hide_env_values = true,
+        long = "public-url",
+        env = "HARN_SERVE_API_PUBLIC_URL"
+    )]
     pub public_url: Option<String>,
     /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
-    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_SERVE_API_KEY",
+        value_delimiter = ','
+    )]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC request signing.
-    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "hmac-secret",
+        env = "HARN_SERVE_HMAC_SECRET"
+    )]
     pub hmac_secret: Option<String>,
     /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
     #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
     pub tls: ServeTlsMode,
     /// PEM-encoded certificate chain for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Enable LLM trace summaries on shutdown.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "trace",
         env = "HARN_TRACE",
         action = clap::ArgAction::SetTrue,
@@ -262,6 +338,7 @@ pub(crate) struct SiteServeArgs {
     /// use `--bind 0.0.0.0:PORT` only behind explicit auth/TLS or a
     /// trusted edge.
     #[arg(
+        hide_env_values = true,
         long,
         env = "HARN_SERVE_SITE_BIND",
         default_value = "127.0.0.1:8788",
@@ -269,26 +346,49 @@ pub(crate) struct SiteServeArgs {
     )]
     pub bind: SocketAddr,
     /// Public URL printed in the startup banner.
-    #[arg(long = "public-url", env = "HARN_SERVE_SITE_PUBLIC_URL")]
+    #[arg(
+        hide_env_values = true,
+        long = "public-url",
+        env = "HARN_SERVE_SITE_PUBLIC_URL"
+    )]
     pub public_url: Option<String>,
     /// Create a JSON receipt containing the actual bound URL and process ID.
     /// The destination must not exist. Useful with --bind 127.0.0.1:0.
     #[arg(long, value_name = "PATH")]
     pub ready_file: Option<PathBuf>,
     /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
-    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_SERVE_API_KEY",
+        value_delimiter = ','
+    )]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC request signing.
-    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "hmac-secret",
+        env = "HARN_SERVE_HMAC_SECRET"
+    )]
     pub hmac_secret: Option<String>,
     /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
     #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
     pub tls: ServeTlsMode,
     /// PEM-encoded certificate chain for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Where to route `harness.obs.*` spans/metrics/logs.
     #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
@@ -297,7 +397,7 @@ pub(crate) struct SiteServeArgs {
     /// / `X-Real-IP` headers may set `req.client_ip`. Repeatable. When
     /// unset, those headers are ignored and `client_ip` is the direct
     /// peer — spoof-proof for servers not behind a trusted proxy.
-    #[arg(
+    #[arg(hide_env_values = true,
         long = "trusted-proxy",
         env = "HARN_SERVE_SITE_TRUSTED_PROXIES",
         value_name = "CIDR",
@@ -326,6 +426,7 @@ pub(crate) struct ServeMcpArgs {
     pub watch: bool,
     /// Socket address to bind when serving over HTTP.
     #[arg(
+        hide_env_values = true,
         long,
         env = "HARN_SERVE_MCP_BIND",
         default_value = "127.0.0.1:8765",
@@ -336,19 +437,38 @@ pub(crate) struct ServeMcpArgs {
     #[arg(long, default_value = "/mcp", value_name = "PATH")]
     pub path: String,
     /// Static API keys accepted over HTTP via `Authorization: Bearer` or `X-API-Key`.
-    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    #[arg(
+        hide_env_values = true,
+        long = "api-key",
+        env = "HARN_SERVE_API_KEY",
+        value_delimiter = ','
+    )]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC request signing on HTTP transports.
-    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    #[arg(
+        hide_env_values = true,
+        long = "hmac-secret",
+        env = "HARN_SERVE_HMAC_SECRET"
+    )]
     pub hmac_secret: Option<String>,
     /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
     #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
     pub tls: ServeTlsMode,
     /// PEM-encoded certificate chain for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_CERT",
+        value_name = "PATH"
+    )]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for in-process HTTPS termination.
-    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        env = "HARN_SERVE_KEY",
+        value_name = "PATH"
+    )]
     pub key: Option<PathBuf>,
     /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
     /// `.json` file OR an inline JSON string. The card is embedded in

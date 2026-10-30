@@ -79,6 +79,54 @@ const LOCALES: [(&str, &str); 9] = [
     ("zh_CN.UTF-8", "用法"),
 ];
 
+#[test]
+fn localized_help_keeps_environment_names_without_exposing_their_values() {
+    let sentinel = "harn-dummy-secret-{0}-%@-100%";
+    let cache = tempfile::tempdir().unwrap();
+    for (locale, _) in LOCALES {
+        for arguments in [
+            vec!["orchestrator", "deploy", "--help"],
+            vec!["serve", "a2a", "--help"],
+        ] {
+            let output = harn_e2e_command()
+                .env_clear()
+                .env("HARN_CACHE_DIR", cache.path())
+                .env("LC_ALL", locale)
+                .env("RENDER_API_KEY", sentinel)
+                .env("FLY_API_TOKEN", sentinel)
+                .env("RAILWAY_TOKEN", sentinel)
+                .env("HARN_SERVE_API_KEY", sentinel)
+                .env("HARN_SERVE_HMAC_SECRET", sentinel)
+                .env("HARN_SERVE_A2A_CARD_SECRET", sentinel)
+                .args(&arguments)
+                .output()
+                .expect("run help with dummy credentials only");
+            assert!(output.status.success(), "{locale}: help must complete");
+            let text = String::from_utf8(output.stdout).unwrap();
+            assert!(output.stderr.is_empty(), "help must not write diagnostics");
+            assert!(
+                !text.contains(sentinel),
+                "{locale}: help exposed a dummy env value"
+            );
+            let names: &[&str] = if arguments[0] == "orchestrator" {
+                &["RENDER_API_KEY", "FLY_API_TOKEN", "RAILWAY_TOKEN"]
+            } else {
+                &[
+                    "HARN_SERVE_API_KEY",
+                    "HARN_SERVE_HMAC_SECRET",
+                    "HARN_SERVE_A2A_CARD_SECRET",
+                ]
+            };
+            for name in names {
+                assert!(
+                    text.contains(&format!("[env: {name}]")),
+                    "{locale}: env name missing: {name}"
+                );
+            }
+        }
+    }
+}
+
 fn run(locale: &str, arguments: &[&str]) -> Output {
     harn_e2e_command()
         .env("LC_ALL", locale)
