@@ -327,7 +327,7 @@ Usage:
   ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
-  ./scripts/release_gate.sh full --bump patch [--dry-run]
+  ./scripts/release_gate.sh full --bump patch --dry-run
 
 Commands:
   audit    Run the full audit, source-only lanes, or the residual lanes (receipt-authorized,
@@ -336,9 +336,9 @@ Commands:
            sibling CI job that runs `make check-docs` on the same commit instead of
            repeating it.
   prepare  Bump the workspace version locally and print next tag/release steps.
-  publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
+  publish  Publish through scripts/publish.sh in the hosted publisher, or use --dry-run locally.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
-  full     Run audit, prepare, and publish in sequence.
+  full     Run audit, prepare, and a publish dry run locally; requires --dry-run.
 EOF
 }
 
@@ -504,13 +504,6 @@ run_grammar_audit() {
   time_phase "verify_language_spec" harn_cmd run scripts/verify_language_spec.harn
 }
 
-run_security_audit() {
-  echo "=== Security/trust boundary audit ==="
-  time_phase "boundary-keyword grep" \
-    rg -n "OAuth|oauth|MCP|trust boundary|mutation session|worker_update|tool/pre_use|tool/post_use" \
-      README.md docs/src crates/harn-vm crates/harn-cli .github CLAUDE.md >/dev/null
-}
-
 release_rust_test() {
   # Blacksmith's Ubuntu image does not expose Landlock. Harn CI therefore runs
   # every environment-neutral workspace test there and owns the host-bound
@@ -585,9 +578,6 @@ release_gate_preflight_audit_tools() {
         ;;
       docs-audit | grammar-audit)
         required+=(npm)
-        ;;
-      security-audit)
-        required+=(rg)
         ;;
     esac
   done
@@ -917,7 +907,7 @@ cmd_audit() {
   elif [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt $(( ${#SELECTED_AUDIT_STEPS[@]} * 2 )) ]]; then
     # Rust, Harn conformance, and package verification each own an internal
     # worker/compiler pool. Serialize only those resource-heavy lanes while
-    # allowing single-process docs/generated/grammar/security/smoke work to
+    # allowing single-process docs/generated/grammar/smoke work to
     # overlap. This avoids both hosted-runner starvation and the old eight-lane
     # serial tail on ordinary 12-core build servers.
     serialize_heavy_lanes=1
@@ -1409,6 +1399,10 @@ cmd_full() {
         ;;
     esac
   done
+  if [[ -z "$dry_run" ]]; then
+    echo "error: full is a local dry-run command; use the maintainer release workflow for live publication" >&2
+    return 1
+  fi
   PRESERVE_AUDIT_TMP=1
   trap cleanup_preserved_audit_tmp EXIT
   cmd_audit

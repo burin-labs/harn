@@ -232,6 +232,39 @@ pub fn windows_release_certify_warm_errors(
  * cache rather than the artifact that replaced it. A structural check that
  * cannot report the absence of the thing it governs is not a check.
  */
+fn macos_producer_bootstrap_errors(job: dict, identity: string) -> list<string> {
+  let errors: list<string> = []
+  const caches = matching_steps(job, "./.github/actions/rust-cache")
+  if caches.count != 1 || caches[0]?.id != "rust-cache" {
+    errors = errors + ["${identity} must name the exact Actions cache result rust-cache"]
+  }
+  const invalidations = matching_run_steps(job, "cargo clean --workspace")
+  let restore_index = -1
+  let invalidate_index = -1
+  let build_index = -1
+  const steps = job?.steps ?? []
+  for index in range(0, steps.count) {
+    const step = steps[index] ?? {}
+    if step?.id == "macos-warm-restore" {
+      restore_index = index
+    }
+    if step_run_contains(step, "cargo clean --workspace") {
+      invalidate_index = index
+    }
+    if step?.name == "Run workspace nextest" {
+      build_index = index
+    }
+  }
+  if invalidations.count != 1 || invalidations[0]?.if != MACOS_WARM_MAIN_GUARD
+    || restore_index < 0
+    || invalidate_index <= restore_index
+    || build_index <= invalidate_index {
+    errors = errors
+      + ["${identity} must invalidate workspace units after restore and before rebuilding on main"]
+  }
+  return errors
+}
+
 pub fn macos_warm_errors(
   policy: CiCachePolicy,
   nightly_workflow: dict,
@@ -253,11 +286,12 @@ pub fn macos_warm_errors(
       + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
   }
   const pack_steps = matching_run_steps(job, MACOS_WARM_PACK_MARKER)
-  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD {
+  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD
+    || pack_steps[0]?.id != MACOS_WARM_PACK_STEP_ID {
     errors = errors
       + ["${warm.workflow}:${warm.job} must pack the macOS warm artifact only on main"]
   }
-  const upload_steps = matching_upload_steps(job, warm.artifact_name)
+  const upload_steps = matching_upload_steps(job, MACOS_WARM_UPLOAD_NAME)
   if len(upload_steps) != 1
     || trim(upload_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD
     || upload_steps[0]?.with?.["retention-days"]
@@ -272,14 +306,15 @@ pub fn macos_warm_errors(
   const nightly_restores = matching_run_steps(job, MACOS_WARM_RESTORE_MARKER)
   if len(nightly_restores) != 1
     || trim(nightly_restores[0]?.if ?? "")
-      != MACOS_WARM_PULL_REQUEST_GUARD
+      != MACOS_WARM_HOSTED_RESTORE_GUARD
     || nightly_restores[0]?.["continue-on-error"]
       != true {
     errors = errors
       + [
-        "${warm.workflow}:${warm.job} must restore the main warm artifact on pull requests with cold fallback",
+        "${warm.workflow}:${warm.job} must restore the main warm artifact for PRs and missing exact hosted-main caches with cold fallback",
       ]
   }
+  errors = errors + macos_producer_bootstrap_errors(job, "${warm.workflow}:${warm.job}")
   // The blocking pull-request lane is the one this exists to speed up, so its
   // consumer is part of the contract rather than an optional extra.
   const ci_job = ci_workflow?.jobs?.["macos-lint"]
@@ -612,14 +647,50 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
   if aggregate?.name != "Rust on macOS (deny-warnings build + lint)"
     || job_needs(aggregate) != ["changes", "macos-lint"]
     || len(aggregate_steps) != 1
-    || aggregate?.permissions?.actions != "read"
-    || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}" {
+    || aggregate?.permissions != {contents: "read"}
+    || aggregate?.["timeout-minutes"] != 5
+    || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}"
+    || aggregate_steps[0]?.env?.LINT_PROOFS != "$" + "{{ toJSON(needs.macos-lint.outputs) }}" {
     errors = errors
       + [
-        "ci.yml:macos must retain the required aggregate and verify the complete current-attempt lint census",
+        "ci.yml:macos must retain the required aggregate and verify complete matrix-output receipts",
       ]
   }
-  return errors
+  return errors + macos_lint_receipt_errors(lint_job ?? {}, lint_steps)
+}
+
+fn macos_lint_receipt_errors(job: dict, lint_steps: list) -> list<string> {
+  let expected_outputs: dict = {}
+  for leg in RUST_LINT_LEGS {
+    expected_outputs[leg] = "$" + "{{ steps.lint-proof.outputs['${leg}'] }}"
+  }
+  const publication = matching_run_steps(job, "./scripts/ci/require_macos_lint.sh record")
+  const parity = matching_named_steps(job, "Verify canonical package hash parity")
+  const steps = job?.steps ?? []
+  const last = if len(steps) > 0 {
+    steps[len(steps) - 1] ?? {}
+  } else {
+    {}
+  }
+  const parity_command =
+    "scripts/ci/run_rust_test_lane.sh cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent"
+  if job?.outputs != expected_outputs || len(publication) != 1
+    || publication[0]?.id != "lint-proof"
+    || publication[0]?.if != "$" + "{{ success() }}"
+    || publication[0]?.env?.LINT_LEG != "$" + "{{ matrix.kind }}"
+    || publication[0]?.env?.LINT_OUTCOME != "$" + "{{ steps.strict-lint.outcome }}"
+    || last != publication[0]
+    || lint_steps[0]?.id != "strict-lint"
+    || lint_steps[0]?.["continue-on-error"] == true
+    || len(parity) != 1
+    || parity[0]?.if != "matrix.kind == 'workspace'"
+    || trim(parity[0]?.run ?? "") != parity_command
+    || parity[0]?.["continue-on-error"] == true {
+    return [
+      "ci.yml:macos-lint must publish distinct role receipts only after successful strict lint and parity",
+    ]
+  }
+  return []
 }
 // The warm-artifact restore is a consumer-only step and is not a cache-key
 // input. Exempting it by id keeps the parity check meaningful instead of

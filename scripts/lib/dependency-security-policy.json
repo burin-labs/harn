@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "harn.dependency_security_policy.v1",
+  "proofSchema": "harn.dependency_security.v1",
+  "predicateType": "https://burin.dev/attestations/dependency-security/v1",
+  "signerWorkflow": "burin-labs/.github/.github/workflows/dependency-security-proof.yml",
+  "signerRevision": "502c1d9f2f110a9aa0d56ffd548cd06fe198608e",
+  "maximumAgeMs": 3600000,
+  "discoveryWindowMs": 86400000
+}

@@ -58,6 +58,25 @@ SCRIPT
 
 chmod +x "$tmp_root/bin/"*
 
+cat > "$tmp_root/bin/uname" <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ -n "${TOOLCHAIN_TEST_UNAME:-}" ]]; then
+  echo "$TOOLCHAIN_TEST_UNAME"
+else
+  /usr/bin/uname "$@"
+fi
+SCRIPT
+cat > "$tmp_root/bin/sysctl" <<'SCRIPT'
+#!/usr/bin/env bash
+[[ "${TOOLCHAIN_TEST_CENSUS_FAIL:-0}" != 1 ]] || exit 1
+case "$*" in
+  '-n hw.logicalcpu') echo "${TOOLCHAIN_TEST_CORES:?}" ;;
+  '-n hw.memsize') echo "${TOOLCHAIN_TEST_MEMORY:?}" ;;
+  *) exit 2 ;;
+esac
+SCRIPT
+chmod +x "$tmp_root/bin/uname" "$tmp_root/bin/sysctl"
+
 run_case() {
   local name=$1 mode=$2 expected_status=$3
   local state="$tmp_root/$name"
@@ -68,8 +87,12 @@ run_case() {
     GITHUB_ENV="$state/github_env" \
     OS="${CASE_OS:-}" \
     RUNNER_TEMP="$state/runner-temp" \
-    HARN_RUSTC_FRONTEND_THREADS="${CASE_FRONTEND_THREADS:-8}" \
+    HARN_RUSTC_FRONTEND_THREADS="${CASE_FRONTEND_THREADS-8}" \
     RUNNER_ENVIRONMENT="${CASE_RUNNER_ENVIRONMENT:-self-hosted}" \
+    TOOLCHAIN_TEST_UNAME="${CASE_UNAME:-}" \
+    TOOLCHAIN_TEST_CORES="${CASE_CORES:-}" \
+    TOOLCHAIN_TEST_MEMORY="${CASE_MEMORY:-}" \
+    TOOLCHAIN_TEST_CENSUS_FAIL="${CASE_CENSUS_FAIL:-0}" \
     TOOLCHAIN_TEST_STATE="$state" \
     TOOLCHAIN_TEST_MODE="$mode" \
     EXTRA_COMPONENTS='rustfmt, clippy' \
@@ -155,5 +178,38 @@ CASE_OS=Windows_NT run_case frontend-windows cargo-transient 0
 [[ ! -s "$tmp_root/frontend-windows/github_env" ]]
 CASE_FRONTEND_THREADS=1 run_case frontend-off cargo-transient 0
 [[ ! -s "$tmp_root/frontend-off/github_env" ]]
+
+# Exercise automatic selection through the real installer, including its
+# decision to install a Cargo wrapper or leave workspace compilation serial.
+CASE_RUNNER_ENVIRONMENT=github-hosted CASE_UNAME=Darwin CASE_CORES=3 \
+  CASE_MEMORY=7516192768 CASE_FRONTEND_THREADS='' \
+  run_case frontend-small-mac cargo-transient 0
+[[ ! -s "$tmp_root/frontend-small-mac/github_env" ]]
+grep -Fq 'rustc front end: serial for workspace crates' "$tmp_root/frontend-small-mac/output"
+
+CASE_RUNNER_ENVIRONMENT=github-hosted CASE_UNAME=Darwin CASE_CORES=5 \
+  CASE_MEMORY=15032385536 CASE_FRONTEND_THREADS='' \
+  run_case frontend-large-mac cargo-transient 0
+grep -Fq 'RUSTC_WORKSPACE_WRAPPER=' "$tmp_root/frontend-large-mac/github_env"
+grep -Fq 'rustc front end: -Zthreads=8 for workspace crates' "$tmp_root/frontend-large-mac/output"
+
+CASE_RUNNER_ENVIRONMENT=self-hosted CASE_UNAME=Darwin CASE_CORES=3 \
+  CASE_MEMORY=7516192768 CASE_FRONTEND_THREADS='' \
+  run_case frontend-owned-mac cargo-transient 0
+grep -Fq 'RUSTC_WORKSPACE_WRAPPER=' "$tmp_root/frontend-owned-mac/github_env"
+
+CASE_RUNNER_ENVIRONMENT=github-hosted CASE_UNAME=Linux CASE_FRONTEND_THREADS='' \
+  run_case frontend-linux cargo-transient 0
+grep -Fq 'RUSTC_WORKSPACE_WRAPPER=' "$tmp_root/frontend-linux/github_env"
+
+CASE_RUNNER_ENVIRONMENT=github-hosted CASE_UNAME=Darwin CASE_CORES=3 \
+  CASE_MEMORY=7516192768 CASE_FRONTEND_THREADS=8 \
+  run_case frontend-explicit cargo-transient 0
+grep -Fq 'RUSTC_WORKSPACE_WRAPPER=' "$tmp_root/frontend-explicit/github_env"
+
+CASE_RUNNER_ENVIRONMENT=github-hosted CASE_UNAME=Darwin CASE_CENSUS_FAIL=1 \
+  CASE_FRONTEND_THREADS='' run_case frontend-unmeasured cargo-transient 2
+[[ ! -s "$tmp_root/frontend-unmeasured/github_env" ]]
+grep -Fq 'cannot measure hosted macOS compiler resources' "$tmp_root/frontend-unmeasured/output"
 
 echo 'rust toolchain action tests passed'

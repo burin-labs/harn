@@ -10,7 +10,7 @@ on:
   pull_request_review:
     types: [submitted]
   workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only a pull request's own CI run, reads metadata through the API, and never checks out the parent-run ref
-    workflows: [CI]
+    workflows: [CI, "macOS workspace tests"]
     types: [completed]
   schedule:
     - cron: "7,22,37,52 * * * *"
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   ship:
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@3be52bec8cebbe67ce99853769b3d91d33c70ac3
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@6958845300760fb5923b7da8d3e57f9df655558f
     with:
       # Off until replays show repairs land pull requests; authors fix their own PRs meanwhile.
       repair: false

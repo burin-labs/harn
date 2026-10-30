@@ -320,7 +320,13 @@ pub(crate) struct Cli {
     #[arg(long = harn_vm::secrets::PARENT_SECRET_HANDOFF_OPTION, global = true)]
     pub parent_secret_stdin: bool,
     /// Apply a durable provider allowance from a TOML policy file.
-    #[arg(long, global = true, env = "HARN_SPEND_POLICY", value_name = "PATH")]
+    #[arg(
+        hide_env_values = true,
+        long,
+        global = true,
+        env = "HARN_SPEND_POLICY",
+        value_name = "PATH"
+    )]
     pub spend_policy: Option<std::path::PathBuf>,
 
     /// Emit the versioned argument tree used by the native CLI parser.

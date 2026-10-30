@@ -84,23 +84,24 @@ const HarnAppLocalization = (() => {
     if (!value) {
       return undefined;
     }
-    const normalized = value.replaceAll("_", "-").toLowerCase();
-    const exact = Object.keys(catalogs).find(
-      (locale) => locale.toLowerCase() === normalized,
-    );
-    if (exact) {
-      return /** @type {Locale} */ (exact);
-    }
-    if (/^zh-(?:hant|tw|hk|mo)(?:-|$)/.test(normalized)) {
+    let parsed;
+    try {
+      parsed = new Intl.Locale(value.replaceAll("_", "-"));
+    } catch {
       return undefined;
     }
-    if (normalized === "zh" || normalized.startsWith("zh-")) {
-      return "zh-Hans";
+    const base = parsed.language;
+    if (base === "zh") {
+      if (parsed.script) {
+        return parsed.script === "Hans" ? "zh-Hans" : undefined;
+      }
+      return ["TW", "HK", "MO"].includes(parsed.region ?? "")
+        ? undefined
+        : "zh-Hans";
     }
-    if (normalized === "pt" || normalized.startsWith("pt-")) {
+    if (base === "pt") {
       return "pt-BR";
     }
-    const base = normalized.split("-")[0];
     return Object.hasOwn(catalogs, base)
       ? /** @type {Locale} */ (base)
       : undefined;

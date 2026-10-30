@@ -1,3 +1,6 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/scaffold/init"
+
 /**
  * `harn init` and `harn new` ported to .harn — see harn#2308 (W8).
  *
@@ -692,57 +695,97 @@ fn __template_files(
   throw "unknown template: " + template
 }
 
-fn __write_if_new(fs: HarnessFs, stdio: HarnessStdio, dir: string, rel: string, content: string) {
+fn __write_if_new(
+  __cli_locale: string,
+  fs: HarnessFs,
+  stdio: HarnessStdio,
+  dir: string,
+  rel: string,
+  content: string,
+) {
   const path = path_join(dir, rel)
   const parent = dirname(path)
   if parent != "" && !fs.exists(parent) {
     try {
       fs.mkdir(parent)
     } catch (e) {
-      stdio.eprintln("Failed to create " + parent + ": " + to_string(e))
+      stdio.eprintln(
+        cli_message(
+          __cli_locale,
+          "Failed to create {0}: {1}",
+          [to_string(parent), to_string(to_string(e))],
+        ),
+      )
       return
     }
   }
   if fs.exists(path) {
-    stdio.println("  skip  " + path + " (already exists)")
+    stdio.println(cli_message(__cli_locale, "  skip  {0} (already exists)", [to_string(path)]))
     return
   }
   try {
     fs.write_text(path, content)
   } catch (e) {
-    stdio.eprintln("Failed to write " + path + ": " + to_string(e))
+    stdio.eprintln(
+      cli_message(
+        __cli_locale,
+        "Failed to write {0}: {1}",
+        [to_string(path), to_string(to_string(e))],
+      ),
+    )
     return
   }
-  stdio.println("  create  " + path)
+  stdio.println(cli_message(__cli_locale, "  create  {0}", [to_string(path)]))
 }
 
-fn __print_next_steps(stdio: HarnessStdio, name: string, template: string) {
+fn __print_next_steps(__cli_locale: string, stdio: HarnessStdio, name: string, template: string) {
   stdio.println("")
   if name != "" {
     stdio.println("  cd " + name)
   }
   if template == "chat" {
-    stdio.println("  harn run main.harn       # run the program")
+    stdio.println(cli_message(__cli_locale, "  harn run main.harn       # run the program", []))
   } else if template == "mcp-server" {
-    stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
+    stdio.println(
+      cli_message(__cli_locale, "  harn serve mcp main.harn # expose the starter MCP server", []),
+    )
   } else if template == "pipeline-lab" {
-    stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
-    stdio.println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  harn playground --task \"Explain this repo\"    # run the lab",
+        [],
+      ),
+    )
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  harn playground --watch --task \"Refine the prompt\"  # live iteration",
+        [],
+      ),
+    )
   } else {
     // basic | agent | eval | package | connector
-    stdio.println("  harn run main.harn       # run the program")
-    stdio.println("  harn package verify      # run the canonical package gate")
+    stdio.println(cli_message(__cli_locale, "  harn run main.harn       # run the program", []))
+    stdio.println(
+      cli_message(__cli_locale, "  harn package verify      # run the canonical package gate", []),
+    )
   }
-  stdio.println("  harn fmt main.harn       # format code")
-  stdio.println("  harn lint main.harn      # lint code")
+  stdio.println(cli_message(__cli_locale, "  harn fmt main.harn       # format code", []))
+  stdio.println(cli_message(__cli_locale, "  harn lint main.harn      # lint code", []))
   if template == "package" || template == "connector" {
-    stdio.println("  harn package docs        # generate API docs")
-    stdio.println("  harn package pack        # build an inspectable artifact")
+    stdio.println(cli_message(__cli_locale, "  harn package docs        # generate API docs", []))
+    stdio.println(
+      cli_message(__cli_locale, "  harn package pack        # build an inspectable artifact", []),
+    )
   }
-  stdio.println("  harn doctor              # verify the local environment")
+  stdio.println(
+    cli_message(__cli_locale, "  harn doctor              # verify the local environment", []),
+  )
 }
 
 fn main(harness: Harness) {
+  const __cli_locale = cli_locale(harness.env)
   const name = harness.env.get_or("HARN_INIT_NAME", "")
   const project_name = harness.env.get_or("HARN_INIT_PROJECT_NAME", "my-project")
   const dir = harness.env.get_or("HARN_INIT_DIR", "")
@@ -756,9 +799,11 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   if name != "" {
-    harness.stdio.println("Creating project '" + name + "'...")
+    harness.stdio.println(cli_message(__cli_locale, "Creating project '{0}'...", [to_string(name)]))
   } else {
-    harness.stdio.println("Initializing harn project in current directory...")
+    harness.stdio.println(
+      cli_message(__cli_locale, "Initializing harn project in current directory...", []),
+    )
   }
   const files = try {
     __template_files(template, project_name, harn_range, harn_version)
@@ -767,7 +812,7 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   for entry in files {
-    __write_if_new(harness.fs, harness.stdio, dir, entry[0], entry[1])
+    __write_if_new(__cli_locale, harness.fs, harness.stdio, dir, entry[0], entry[1])
   }
-  __print_next_steps(harness.stdio, name, template)
+  __print_next_steps(__cli_locale, harness.stdio, name, template)
 }

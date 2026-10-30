@@ -430,7 +430,7 @@
   "portal.runsPage.usage": "Utilizzo",
   "portal.runsPage.actions": "Azioni",
   "portal.runsPage.inspect": "Ispeziona",
-  "portal.runsPage.empty": "Nessuna esecuzione corrisponde alla query الحالية.",
+  "portal.runsPage.empty": "Nessuna esecuzione corrisponde alla query attuale.",
   "portal.runsPage.previous": "Precedente",
   "portal.runsPage.next": "Successiva",
   "portal.runsPage.pageSummary": "Pagina {page} di {total}",

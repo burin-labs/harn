@@ -1,3 +1,4 @@
+import { cli_message } from "std/cli/localization/models/batch_cancel"
 import { __batch_artifact_read } from "std/cli/models/batch_artifacts"
 import {
   __batch_lifecycle_job_base,
@@ -417,25 +418,79 @@ fn __cancel_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
   return "unknown"
 }
 
-fn __render_cancel_human(stdio: HarnessStdio, report: dict) {
+fn __render_cancel_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    stdio.eprintln("Batch cancel failed")
+    stdio.eprintln(cli_message(__cli_locale, "Batch cancel failed", []))
   } else if safe_bool(report["dry_run"], false) {
-    stdio.println("Batch cancel dry run written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch cancel dry run written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   } else {
-    stdio.println("Batch cancellation receipt written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch cancellation receipt written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   }
-  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  stdio.println("  cancelable: " + safe_int_string(report["cancelable_count"], "0"))
-  stdio.println("  canceling: " + safe_int_string(report["canceling_count"], "0"))
-  stdio.println("  canceled: " + safe_int_string(report["canceled_count"], "0"))
-  stdio.println("  skipped: " + safe_int_string(report["skipped_count"], "0"))
-  stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  jobs: {0}",
+      [to_string(safe_int_string(report["job_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  cancelable: {0}",
+      [to_string(safe_int_string(report["cancelable_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  canceling: {0}",
+      [to_string(safe_int_string(report["canceling_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  canceled: {0}",
+      [to_string(safe_int_string(report["canceled_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  skipped: {0}",
+      [to_string(safe_int_string(report["skipped_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  failed: {0}",
+      [to_string(safe_int_string(report["failed_count"], "0"))],
+    ),
+  )
   if safe_string(report["receipt_sha256"], "") != "" {
-    stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  receipt sha256: {0}",
+        [to_string(safe_string(report["receipt_sha256"], ""))],
+      ),
+    )
   }
-  print_list(stdio, "errors", safe_list(report["errors"]))
-  print_list(stdio, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, cli_message(__cli_locale, "errors", []), safe_list(report["errors"]))
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), safe_list(report["warnings"]))
 }
 
 fn __render_cancel_json(report: dict) -> string {
@@ -465,7 +520,7 @@ fn __render_cancel_json(report: dict) -> string {
  * @effects: [env.read, fs.read, fs.write, network, stdio.write]
  * @errors: [runtime]
  */
-pub fn __run_cancel(harness: Harness) -> int {
+pub fn __run_cancel(__cli_locale: string, harness: Harness) -> int {
   const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_RECEIPT", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
@@ -538,7 +593,7 @@ pub fn __run_cancel(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_cancel_json(report))
   } else {
-    __render_cancel_human(harness.stdio, report)
+    __render_cancel_human(__cli_locale, harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0

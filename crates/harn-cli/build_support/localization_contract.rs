@@ -1,4 +1,4 @@
-//! A translated sentence may surround stable console record field identifiers.
+//! Translated prose preserves console field and diagnostic identifiers.
 
 use std::collections::BTreeMap;
 
@@ -45,6 +45,34 @@ pub fn validate_fields(
                 "changed CLI record field identifiers in {key}: {expected:?} != {actual:?}"
             ));
         }
+        let expected = diagnostic_identifiers(text);
+        let actual = diagnostic_identifiers(value);
+        if expected != actual {
+            return Err(format!(
+                "changed CLI diagnostic identifiers in {key}: {expected:?} != {actual:?}"
+            ));
+        }
     }
     Ok(())
+}
+
+pub fn diagnostic_identifiers(text: &str) -> Vec<String> {
+    let mut identifiers: Vec<_> = text
+        .match_indices("HARN-")
+        .map(|(start, _)| {
+            let suffix = text.get(start..).expect("ASCII diagnostic prefix boundary");
+            let length = suffix
+                .bytes()
+                .take_while(|byte| {
+                    byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'-'
+                })
+                .count();
+            suffix
+                .get(..length)
+                .expect("ASCII diagnostic identifier boundary")
+                .to_owned()
+        })
+        .collect();
+    identifiers.sort();
+    identifiers
 }

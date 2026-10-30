@@ -39,8 +39,9 @@ chmod +x "$scratch/controller-harn"
 
 for mode in slow child-failure success; do
   workspace="$scratch/$mode"
-  mkdir -p "$workspace/scripts" "$workspace/bench/test-case-performance"
+  mkdir -p "$workspace/scripts/ci" "$workspace/bench/test-case-performance"
   cp "$repo_root/scripts/check_test_case_performance.harn" "$workspace/scripts/"
+  cp "$repo_root/scripts/ci/macos_performance_profile.harn" "$workspace/scripts/ci/"
   cp "$repo_root/bench/test-case-performance/baselines.toml" "$workspace/bench/test-case-performance/"
   cp "$scratch/measured-harn" "$workspace/measured-harn"
   status=0
