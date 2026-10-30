@@ -104,6 +104,35 @@ fn announced_retirements_are_structured_and_recorded() {
 }
 
 #[test]
+fn the_explicitly_withdrawn_minimax_free_route_is_retired_without_retiring_live_routes() {
+    let catalog = artifact_embedded(None, None);
+    let model = |id: &str| {
+        catalog
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .unwrap_or_else(|| panic!("missing catalog route {id}"))
+    };
+    let free = model("minimax/minimax-m3.1-flash:free");
+    assert_eq!(free.deprecation.status, DeprecationStatus::Deprecated);
+    assert_eq!(free.deprecation.sunset_date.as_deref(), Some("2026-10-22"));
+    assert!(free.aliases.is_empty());
+    assert!(!catalog
+        .routing_routes
+        .iter()
+        .any(|route| route.provider == "openrouter" && route.model == free.id));
+    for id in ["minimax/minimax-m2", "qwen/qwen3-coder-next"] {
+        let active = model(id);
+        assert_eq!(active.deprecation.status, DeprecationStatus::Active, "{id}");
+        assert_eq!(active.deprecation.sunset_date, None, "{id}");
+        assert!(catalog
+            .routing_routes
+            .iter()
+            .any(|route| route.provider == "openrouter" && route.model == id));
+    }
+}
+
+#[test]
 fn a_lapsed_alias_target_and_a_lapsed_announcement_are_reported() {
     let overlay = llm_config::parse_config_toml(
         r#"

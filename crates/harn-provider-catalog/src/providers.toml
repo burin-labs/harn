@@ -10133,10 +10133,13 @@ output_per_mtok = 1.2
 availability = "unknown"
 capabilities = []
 context_window = 1000000
+deprecated = true
+deprecation_note = "OpenRouter's October 26 response confirms the free launch ended October 22. The October 30 public model catalog omits this route and retains the paid minimax/minimax-m3.1-flash route."
 family = "minimax"
 name = "MiniMax: MiniMax M3.1 Flash (free)"
 open_weight = false
 provider = "openrouter"
+sunset_date = "2026-10-22"
 tier = "frontier"
 
 [models."minimax/minimax-m3.1-flash:free".pricing]

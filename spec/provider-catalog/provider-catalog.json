@@ -27802,7 +27802,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenRouter's October 26 response confirms the free launch ended October 22. The October 30 public model catalog omits this route and retains the paid minimax/minimax-m3.1-flash route.",
+        "sunset_date": "2026-10-22"
       },
       "availability": "unknown",
       "quality_tags": [],
@@ -48230,18 +48232,6 @@
         "tools",
         "video",
         "vision"
-      ]
-    },
-    {
-      "provider": "openrouter",
-      "model": "minimax/minimax-m3.1-flash:free",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "MiniMax: MiniMax M3.1 Flash (free)",
-      "family": "minimax",
-      "capabilities": [
-        "streaming",
-        "structured_output_mode:none"
       ]
     },
     {
