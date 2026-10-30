@@ -216,6 +216,38 @@ async fn acp_harn_workspace_anchor_methods_mutate_live_session() {
             serde_json::json!(canonical_target.display().to_string())
         );
 
+        let target_root = dir.path().join("target-tools");
+        std::fs::create_dir_all(&target_root).expect("target root");
+        let canonical_target_root = target_root.canonicalize().expect("canonical target root");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "harn.session_add_root",
+                "params": {
+                    "sessionId": session_id,
+                    "path": target_root.display().to_string(),
+                    "mountMode": "extend",
+                },
+            }))
+            .expect("send add-root after reanchor");
+        let added_after_reanchor = recv_response_with_id(&mut response_rx, 6).await;
+        assert!(
+            added_after_reanchor.get("error").is_none(),
+            "the captured store scope must still accept roots at the current anchor: {added_after_reanchor}"
+        );
+        let current_anchor = added_after_reanchor["result"]["workspaceAnchor"]
+            .as_object()
+            .expect("current workspace anchor");
+        assert_eq!(
+            current_anchor["primary"],
+            serde_json::json!(canonical_target.display().to_string())
+        );
+        assert_eq!(
+            current_anchor["additional_roots"][0]["path"],
+            serde_json::json!(canonical_target_root.display().to_string())
+        );
+
         request_tx
             .send(serde_json::json!({
                 "jsonrpc": "2.0",

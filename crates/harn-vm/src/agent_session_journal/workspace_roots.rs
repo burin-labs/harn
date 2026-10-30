@@ -54,9 +54,8 @@ pub(crate) async fn add_workspace_root_verified_persisted(
     scope: &crate::SessionStoreScope,
     verify: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<String, String> {
-    if agent_sessions::workspace_anchor(id).is_none_or(|anchor| anchor.primary != scope.workspace())
-    {
-        return Err("workspace root mutation must use the session's captured workspace".into());
+    if agent_sessions::workspace_anchor(id).is_none() {
+        return Err("workspace root mutation requires a live workspace anchor".into());
     }
     let pending = agent_sessions::prepare_workspace_mount_verified(id, root, mount_mode, verify)?;
     let standalone = if agent_sessions::has_journal(id) {
@@ -87,13 +86,6 @@ pub(crate) async fn add_workspace_root_verified_persisted(
     }
     .map_err(|error| error.to_string())?;
     let directories = pending.directories()?;
-    store
-        .update(
-            id,
-            UpdateSession::default().with_additional_directories(directories.clone()),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
     let mut events = Vec::new();
     if standalone.is_some()
         && !store
@@ -112,7 +104,7 @@ pub(crate) async fn add_workspace_root_verified_persisted(
     }
     events.push(append);
     store
-        .append_batch(id, events)
+        .update_additional_directories_and_append_batch(id, directories.clone(), events)
         .await
         .map_err(|error| error.to_string())?;
     agent_sessions::record_persisted_workspace_directories(id, directories);

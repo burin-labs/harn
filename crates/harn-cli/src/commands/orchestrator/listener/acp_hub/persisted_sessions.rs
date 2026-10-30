@@ -37,6 +37,96 @@ impl ProjectAuthority {
 
 pub(super) type DiscoveryResult = Result<Vec<JsonValue>, DiscoveryError>;
 
+fn is_session_list_request(value: &JsonValue) -> bool {
+    value.get("method").and_then(JsonValue::as_str) == Some("session/list")
+}
+
+fn acp_session_summary_matches(
+    summary: &AcpSessionSummary,
+    live_state: &str,
+    params: &JsonValue,
+) -> bool {
+    if let Some(cwd) = acp_session_filter_value(params, "cwd", "cwd").and_then(JsonValue::as_str) {
+        if !summary.cwd.as_deref().is_some_and(|session_cwd| {
+            harn_vm::workspace_anchor::WorkspaceAnchor::same_canonical_path(
+                Path::new(session_cwd),
+                Path::new(cwd),
+            )
+        }) {
+            return false;
+        }
+    }
+    if let Some(states) = acp_session_state_filter(params) {
+        if !states.iter().any(|state| state == live_state) {
+            return false;
+        }
+    }
+    if let Some(filter) = acp_session_filter_value(params, "workspaceAnchor", "workspace_anchor") {
+        let Some(anchor) = summary.workspace_anchor.as_ref() else {
+            return false;
+        };
+        if let Some(primary) = filter.as_str() {
+            return anchor
+                .get("primary")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|value| {
+                    harn_vm::workspace_anchor::WorkspaceAnchor::same_canonical_path(
+                        Path::new(value),
+                        Path::new(primary),
+                    )
+                });
+        }
+        if let Some(primary) = filter.get("primary").and_then(JsonValue::as_str) {
+            return anchor
+                .get("primary")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|value| {
+                    harn_vm::workspace_anchor::WorkspaceAnchor::same_canonical_path(
+                        Path::new(value),
+                        Path::new(primary),
+                    )
+                });
+        }
+        return anchor == filter;
+    }
+    true
+}
+
+fn acp_session_state_filter(params: &JsonValue) -> Option<Vec<String>> {
+    let value = acp_session_filter_value(params, "liveState", "live_state")
+        .or_else(|| acp_session_filter_value(params, "state", "state"))?;
+    if let Some(raw) = value.as_str() {
+        return Some(vec![raw.to_string()]);
+    }
+    value.as_array().map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
+}
+
+fn acp_session_filter_value<'a>(
+    params: &'a JsonValue,
+    camel: &str,
+    snake: &str,
+) -> Option<&'a JsonValue> {
+    params
+        .get(camel)
+        .or_else(|| params.get(snake))
+        .or_else(|| {
+            params
+                .get("filter")
+                .and_then(|filter| filter.get(camel).or_else(|| filter.get(snake)))
+        })
+        .or_else(|| {
+            params
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(|harn| harn.get(camel).or_else(|| harn.get(snake)))
+        })
+}
+
 #[derive(Debug)]
 pub(super) enum DiscoveryError {
     ProjectRoot(harn_serve::AcpSessionProjectRootError),

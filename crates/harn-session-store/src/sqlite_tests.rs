@@ -67,6 +67,71 @@ async fn directory_metadata_survives_reopen_without_a_schema_upgrade() {
     );
 }
 
+#[tokio::test]
+async fn directory_projection_and_audit_batch_commit_or_rollback_together() {
+    use crate::{AppendEvent, CreateSession, SessionEventKind, SessionStore, SqliteSessionStore};
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("atomic-roots.sqlite");
+    let store = SqliteSessionStore::open(&database).unwrap();
+    store
+        .create(CreateSession {
+            id: Some("atomic-roots".into()),
+            ..CreateSession::default()
+        })
+        .await
+        .unwrap();
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_root_audit BEFORE INSERT ON session_events
+             WHEN NEW.custom_kind = 'transcript_event'
+             BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END;",
+        )
+        .unwrap();
+    let audit = || {
+        AppendEvent::new(
+            SessionEventKind::Custom {
+                custom_type: "transcript_event".into(),
+            },
+            serde_json::json!({"kind":"RootMounted"}),
+        )
+    };
+    assert!(store
+        .update_additional_directories_and_append_batch(
+            "atomic-roots",
+            vec!["/work/extra".into()],
+            vec![audit()],
+        )
+        .await
+        .is_err());
+    let rejected = store.describe("atomic-roots").await.unwrap();
+    assert!(rejected.additional_directories().unwrap().is_empty());
+    assert!(store.read_all("atomic-roots").await.unwrap().is_empty());
+
+    connection
+        .execute_batch("DROP TRIGGER fail_root_audit;")
+        .unwrap();
+    store
+        .update_additional_directories_and_append_batch(
+            "atomic-roots",
+            vec!["/work/extra".into()],
+            vec![audit()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .describe("atomic-roots")
+            .await
+            .unwrap()
+            .additional_directories()
+            .unwrap(),
+        ["/work/extra"]
+    );
+    assert_eq!(store.read_all("atomic-roots").await.unwrap().len(), 1);
+}
+
 fn record_immediate_busy(_attempt: i32) -> bool {
     IMMEDIATE_BUSY_CALLBACKS.fetch_add(1, Ordering::SeqCst);
     false

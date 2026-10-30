@@ -115,6 +115,17 @@ impl WorkspaceAnchor {
         })
     }
 
+    /// Compare path spellings by their canonical workspace identity.
+    pub fn same_canonical_path(left: &std::path::Path, right: &std::path::Path) -> bool {
+        match (
+            Self::canonicalize_path(left),
+            Self::canonicalize_path(right),
+        ) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    }
+
     /// The ordered path projection, without restoring any mount authority.
     pub fn additional_directories(&self) -> Result<Vec<String>, String> {
         self.additional_roots
@@ -343,5 +354,19 @@ mod tests {
         let dict = VmValue::dict([("default_mount_mode", VmValue::string("sandboxed"))]);
         let policy = parse_workspace_policy_dict(&dict).expect("parse policy");
         assert_eq!(policy.default_mount_mode, MountMode::Sandboxed);
+    }
+
+    #[test]
+    fn canonical_path_comparison_matches_equivalent_spellings() {
+        let directory = tempfile::tempdir().expect("workspace tempdir");
+        let dot_suffix = directory.path().join(".");
+        assert!(WorkspaceAnchor::same_canonical_path(
+            directory.path(),
+            &dot_suffix
+        ));
+        assert!(!WorkspaceAnchor::same_canonical_path(
+            directory.path(),
+            &directory.path().join("child"),
+        ));
     }
 }

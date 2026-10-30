@@ -366,6 +366,42 @@ impl SqliteSessionStore {
         Ok(stored)
     }
 
+    /// Replace one session's additional-directory projection and append its
+    /// audit batch atomically. A failed audit append must not leave metadata
+    /// describing a root mutation that was rejected.
+    pub async fn update_additional_directories_and_append_batch(
+        &self,
+        session_id: &str,
+        directories: Vec<String>,
+        events: Vec<AppendEvent>,
+    ) -> StoreResult<Vec<StoredEvent>> {
+        let request = UpdateSession::default().with_additional_directories(directories);
+        let mut conn = self.lock_for_mutation()?;
+        let tx = write_transaction(&mut conn)?;
+        let (current, _) = read_session_meta(&tx, session_id)?;
+        let mut attributes = current.attributes;
+        attributes.extend(request.attributes);
+        let attributes_json =
+            serde_json::to_string(&attributes).unwrap_or_else(|_| "{}".to_string());
+        let (updated_at_ms, updated_at) = now_ms_and_rfc3339();
+        let changed = tx
+            .execute(
+                "UPDATE sessions SET attributes_json = ?1, updated_at_ms = ?2, updated_at = ?3 WHERE id = ?4",
+                params![attributes_json, updated_at_ms, updated_at, session_id],
+            )
+            .map_err(map_sql)?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(session_id.to_string()));
+        }
+        let stored = append_events_in_tx(&tx, self.hooks(), session_id, events)?;
+        let (meta, _) = read_session_meta(&tx, session_id)?;
+        tx.commit().map_err(map_sql)?;
+        self.record_append_commit();
+        drop(conn);
+        self.hooks().notify_session_changed(&meta);
+        Ok(stored)
+    }
+
     /// Event-append transactions this store has committed since it opened,
     /// counted across clones of the handle. A diagnostic for callers that
     /// batch appends: one flush of N events should cost one transaction.

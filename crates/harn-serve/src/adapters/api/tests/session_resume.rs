@@ -375,8 +375,17 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
         !replay_before.events.is_empty(),
         "the replay path must be reached"
     );
+    let replayed_message_count =
+        |replay: &harn_vm::agent_session_restore::CanonicalSessionReplay| {
+            replay
+                .events
+                .iter()
+                .filter(|event| event.kind == "message")
+                .count()
+        };
+    let messages_before = replayed_message_count(&replay_before);
     assert!(
-        replay_before.transcript_message_count > 1,
+        messages_before > 1,
         "canonical transcript rows must contain messages beyond the retained prefix"
     );
     let response = request(
@@ -400,10 +409,11 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     .await
     .unwrap()
     .expect("canonical transcript replay after truncate");
-    assert_eq!(replay_after.transcript_message_count, 1);
+    let messages_after = replayed_message_count(&replay_after);
+    assert_eq!(messages_after, 1);
     assert_eq!(
         truncated["removed_turn_count"],
-        replay_before.transcript_message_count - replay_after.transcript_message_count,
+        messages_before - messages_after,
         "truncate's reported count matches the canonical transcript rows it removed"
     );
     let app = api_router(ApiServer::new(config.clone()).state);
