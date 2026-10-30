@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::testbench::tape::{FieldChange, TranscriptChange};
+use crate::testbench::tape::{FieldChange, TranscriptChange, TranscriptLifecycle};
 use crate::value::{DictMap, VmValue};
 
 tokio::task_local! {
@@ -42,11 +42,37 @@ pub(crate) fn note_transcript_change(session_id: &str, before: &VmValue, after: 
             frame
                 .lock()
                 .expect("transcript frame poisoned")
-                .push(TranscriptChange {
+                .push(TranscriptChange::Fields {
                     session_id: session_id.to_string(),
                     fields,
                 });
         }
+    });
+}
+
+pub(crate) fn note_session_opened(session_id: &str, transcript: &VmValue) {
+    let _ = DISPATCH_CHANGES.try_with(|frame| {
+        frame
+            .lock()
+            .expect("transcript frame poisoned")
+            .push(TranscriptChange::Lifecycle {
+                session_id: session_id.to_string(),
+                lifecycle: TranscriptLifecycle::Opened {
+                    transcript: crate::llm::helpers::vm_value_to_json(transcript),
+                },
+            });
+    });
+}
+
+pub(crate) fn note_session_closed(session_id: &str) {
+    let _ = DISPATCH_CHANGES.try_with(|frame| {
+        frame
+            .lock()
+            .expect("transcript frame poisoned")
+            .push(TranscriptChange::Lifecycle {
+                session_id: session_id.to_string(),
+                lifecycle: TranscriptLifecycle::Closed,
+            });
     });
 }
 
@@ -109,11 +135,52 @@ pub(crate) fn apply(
     Ok(VmValue::dict_map(next))
 }
 
-/// Replay a served dispatch's recorded changes into the sessions that still
-/// exist, and return them for the branch's own tape.
+/// Closed ephemeral transcripts are reconstructed off-table. They never become
+/// live sessions or run lifecycle hooks a second time. Surviving new sessions
+/// need more than a transcript and therefore refuse instead of being fabricated.
 pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptChange>, String> {
+    let mut ephemeral = BTreeMap::new();
     for change in &changes {
-        crate::agent_sessions::replay_transcript_change(&change.session_id, &change.fields)?;
+        match change {
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Opened { transcript },
+            } => {
+                if crate::agent_sessions::exists(session_id) || ephemeral.contains_key(session_id) {
+                    return Err(format!(
+                        "recorded new transcript target `{session_id}` already exists"
+                    ));
+                }
+                ephemeral.insert(
+                    session_id.clone(),
+                    crate::schema::json_to_vm_value(transcript),
+                );
+            }
+            TranscriptChange::Fields { session_id, fields } => {
+                if let Some(transcript) = ephemeral.get_mut(session_id) {
+                    *transcript = apply(transcript, fields)?;
+                } else {
+                    crate::agent_sessions::replay_transcript_change(session_id, fields)?;
+                }
+            }
+            TranscriptChange::Lifecycle {
+                session_id,
+                lifecycle: TranscriptLifecycle::Closed,
+            } => {
+                if ephemeral.remove(session_id).is_none() {
+                    return Err(format!(
+                        "recorded close of `{session_id}` has no ephemeral transcript to retire"
+                    ));
+                }
+            }
+        }
+    }
+    if !ephemeral.is_empty() {
+        return Err(format!(
+            "{} recorded new session(s) remain open after the dispatch: {}",
+            ephemeral.len(),
+            ephemeral.keys().cloned().collect::<Vec<_>>().join(", ")
+        ));
     }
     Ok(changes)
 }

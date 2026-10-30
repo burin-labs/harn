@@ -835,9 +835,10 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
     {
         return Err(format!(
-            "this tape is format {}, which does not record where the run kept its state; \
-             re-record it to branch",
-            tape.header.version
+            "this tape is format {}; branch replay requires format {} with session lifecycle \
+             and state-location evidence; re-record it to branch",
+            tape.header.version,
+            crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));
     }
     match &tape.header.run {
@@ -1399,7 +1400,10 @@ mod prompts;
 
 #[path = "run_tape_transcript.rs"]
 mod transcript;
-pub(crate) use transcript::{apply as apply_transcript_change, note_transcript_change};
+pub(crate) use transcript::{
+    apply as apply_transcript_change, note_session_closed, note_session_opened,
+    note_transcript_change,
+};
 
 #[path = "run_tape_scope.rs"]
 mod scope;

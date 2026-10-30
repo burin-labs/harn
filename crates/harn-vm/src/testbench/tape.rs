@@ -59,15 +59,30 @@ mod privacy;
 /// version 1 digest never compares with a version 2 one. Version 3 records
 /// where a run tape's recording kept its durable state. Version 4 records
 /// each tool dispatch's transcript changes as typed [`TranscriptChange`]s.
-pub const TAPE_FORMAT_VERSION: u32 = 4;
+/// Version 5 also records ephemeral transcript creation and closure.
+pub const TAPE_FORMAT_VERSION: u32 = 5;
 
-/// One change a tool dispatch made to a session's transcript: the fields it
-/// changed, against the transcript the session held just before.
+/// Ordered transcript effects within one tool dispatch. Lifecycle records
+/// distinguish a closed ephemeral transcript from an unexpectedly absent target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TranscriptChange {
-    pub session_id: String,
-    pub fields: BTreeMap<String, FieldChange>,
+#[serde(untagged, deny_unknown_fields)]
+pub enum TranscriptChange {
+    Fields {
+        session_id: String,
+        fields: BTreeMap<String, FieldChange>,
+    },
+    Lifecycle {
+        session_id: String,
+        lifecycle: TranscriptLifecycle,
+    },
+}
+
+/// A transcript's lifetime within one recorded dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TranscriptLifecycle {
+    Opened { transcript: serde_json::Value },
+    Closed,
 }
 
 /// How one transcript field changed.

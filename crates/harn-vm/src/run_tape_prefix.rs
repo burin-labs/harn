@@ -98,6 +98,8 @@ fn runs_a_process(owner: Owner<'_>) -> bool {
                 | "shell_at"
                 | "git_status"
                 | "git_diff"
+                | "git_conflicts"
+                | "git_ls_remote"
                 | "git_merge_base"
                 | "git_tag_list"
                 | "git_describe"

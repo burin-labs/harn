@@ -5,7 +5,7 @@ use std::fs;
 #[test]
 fn private_storage_stays_private_under_an_ordinary_umask() {
     use std::os::unix::fs::PermissionsExt;
-    const CHILD: &str = "HARN_SEED_UMASK_CHILD";
+    const CHILD: &str = "WORKSPACE_SEED_TEST_UMASK_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let evidence = tempfile::tempdir().unwrap();
         let marker = evidence.path().join("completed");
