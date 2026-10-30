@@ -1,6 +1,7 @@
 //! Independent checkpoint history for a conversation fork.
 
 use super::*;
+use serde::Serialize;
 
 /// Result of copying a session's checkpoint history to a fork.
 #[derive(Debug, Serialize)]
