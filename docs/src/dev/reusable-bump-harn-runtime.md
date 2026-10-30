@@ -63,6 +63,12 @@ For example, use `pnpm run codegen` to regenerate bytecode from the final source
 The default is empty. A failed finalizer refuses refresh success.
 With the default `publish-failure-for-repair: false`, the bump stops before validation or publication.
 
+The workflow defaults to the `burin-labs` owned large Linux pool, `harn-ci-big`. Set
+`runs-on` to an available runner label when calling it from another organization,
+or when refresh and validation require a different machine. The orchestration
+step has a 20-minute limit and the complete job has a 30-minute limit, so a
+stalled bump fails before the hosted runner's longer disconnect window.
+
 ```yaml
 name: Bump Harn Runtime
 on:

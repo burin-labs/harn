@@ -154,6 +154,20 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   let errors: list<string> = []
   const inputs = workflow?.on?.workflow_call?.inputs ?? {}
   errors = errors + workflow_input_errors(inputs)
+  const job = workflow?.jobs?.bump ?? {}
+  if inputs?.get("runs-on")?.type != "string"
+    || inputs?.get("runs-on")?.default != "harn-ci-big"
+    || job.get("runs-on") != "$" + "{{ inputs.runs-on }}" {
+    errors = errors + ["consumer bump capacity must be caller-selectable with a large Linux default"]
+  }
+  const job_minutes = to_int(job.get("timeout-minutes")) ?? 0
+  const orchestration = job?.steps?.find({ step -> step?.name == "Run bump orchestration" })
+  const orchestration_minutes = to_int(orchestration?.get("timeout-minutes")) ?? 0
+  if job_minutes <= 0 || job_minutes > 30
+    || orchestration_minutes <= 0
+    || orchestration_minutes >= job_minutes {
+    errors = errors + ["consumer bump orchestration must time out before its bounded job"]
+  }
   const steps = workflow?.jobs?.bump?.steps ?? []
   errors = errors + checkout_boundary_errors(steps)
   errors = errors + orchestration_identity_errors(inputs, steps, text)
@@ -325,6 +339,35 @@ pipeline test_bump_workflow_rejects_expiring_token_or_permission_drift(harness: 
       "bootstrap and renewable permission differ: contents"
     }
     assert(errors.contains(expected))
+  }
+}
+
+pipeline test_bump_workflow_refuses_starved_or_unbounded_capacity(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const text = harness.fs.read_text(path)
+  const workflow = read_yaml(harness.fs, path)
+  const job = workflow.jobs.bump
+  for mutation in [
+    {"runs-on": "ubuntu-24.04"},
+    {"timeout-minutes": nil},
+    {"timeout-minutes": 90},
+    {
+      steps: job.steps.map(
+        { step ->
+          if step.name == "Run bump orchestration" {
+            return step + {"timeout-minutes": nil}
+          }
+          return step
+        },
+      )
+        .to_list(),
+    },
+  ] {
+    const changed = workflow + {jobs: workflow.jobs + {bump: job + mutation}}
+    assert(
+      len(bump_workflow_errors(changed, text)) > 0,
+      "the shipped check must reject unbounded or undersized routing",
+    )
   }
 }
 
