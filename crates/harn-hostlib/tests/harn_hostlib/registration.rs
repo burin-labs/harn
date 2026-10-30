@@ -336,7 +336,7 @@ fn scanner_layout_profiles_are_validated_at_the_capability_boundary() {
     let shell =
         serde_json::json!({"language": "shell", "extensions": ["bats"], "patterns": [".bats"]});
     for profiles in [
-        serde_json::json!([shell.clone(), shell.clone()]),
+        serde_json::json!([shell.clone(), shell]),
         serde_json::json!([{"language": "shell", "extensions": [], "patterns": [".bats"]}]),
         serde_json::json!([{"language": "shell", "extensions": ["bats"], "patterns": [".bats"], "extra": true}]),
     ] {

@@ -560,7 +560,7 @@ fn unreadable_test_directory_is_unavailable_and_recovers() {
     let directory = tmp.path().join("locked");
     let original = fs::metadata(&directory).unwrap().permissions();
     let mut denied = original.clone();
-    denied.set_mode(0);
+    denied.set_mode(0o0);
     fs::set_permissions(&directory, denied).unwrap();
     let read_error = fs::read_dir(&directory).err();
     let inaccessible = scan_without_git_history(tmp.path());
@@ -595,7 +595,7 @@ fn unchanged_files_do_not_hide_discovery_denial_or_recovery() {
     assert!(test_commands(&initial.project).is_empty());
     let original = fs::metadata(&directory).unwrap().permissions();
     let mut denied = original.clone();
-    denied.set_mode(0);
+    denied.set_mode(0o0);
     fs::set_permissions(&directory, denied).unwrap();
     let read_error = fs::read_dir(&directory).err();
     let inaccessible = scan_incremental(&initial.snapshot_token, None, options.clone());
@@ -626,7 +626,7 @@ fn unreadable_test_file_cannot_expose_a_partial_command_set() {
     let file = tmp.path().join("test_b.py");
     let original = fs::metadata(&file).unwrap().permissions();
     let mut denied = original.clone();
-    denied.set_mode(0);
+    denied.set_mode(0o0);
     fs::set_permissions(&file, denied).unwrap();
     let read_error = fs::read_to_string(&file).err();
     let result = scan_without_git_history(tmp.path());
