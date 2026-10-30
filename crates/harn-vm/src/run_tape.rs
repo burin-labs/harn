@@ -1366,7 +1366,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     };
     let effects = recorded.effects.clone();
     let changes = recorded.transcript_changes.clone();
-    if let Err(error) = transcript::validate_lifetimes(&changes) {
+    if let Err(error) = transcript::preflight(&changes) {
         return diverge(state, "transcript change", error);
     }
     let root = state.workspace_root.clone();
