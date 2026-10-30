@@ -38,7 +38,7 @@ fn environment_backed_argument_metadata_hides_values() {
         count
     }
     let control = clap::Command::new("fixture")
-        .arg(clap::Arg::new("credential").env("HARN_TEST_DUMMY_CREDENTIAL"));
+        .arg(clap::Arg::new("credential").env("CLI_TEST_DUMMY_CREDENTIAL"));
     let mut missing = Vec::new();
     assert_eq!(inspect(&control, &mut missing), 1);
     assert_eq!(missing, ["credential"]);
