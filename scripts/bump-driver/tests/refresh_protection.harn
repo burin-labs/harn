@@ -114,6 +114,8 @@ pipeline test_refresh_refuses_partial_missing_and_moved_admission_snapshot(harne
     refresh_snapshot(HEAD)
       + {latestOpinionatedReviews: {totalCount: 1, nodes: [{state: "APPROVED", commit: nil}]}},
     refresh_snapshot("cccccccccccccccccccccccccccccccccccccccc"),
+    refresh_snapshot(HEAD) + {state: "CLOSED"},
+    refresh_snapshot(HEAD) + {state: "MERGED"},
     {headRefOid: HEAD},
   ] {
     harness.testing.http_mock_clear()

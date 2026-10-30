@@ -57,6 +57,7 @@ pub type GithubBumpRemoteConfig = {
 type GithubRepo = {owner: string, name: string}
 
 type RefreshProtectionPull = {
+  state: string,
   headRefOid: string,
   autoMergeRequest: {enabledAt: string}?,
   isInMergeQueue: bool,
@@ -86,7 +87,7 @@ fn __require_refresh_mutable(
           method: "POST",
           body: {
             query:
-              "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){headRefOid autoMergeRequest{enabledAt} isInMergeQueue labels(first:100){totalCount nodes{name}} latestOpinionatedReviews(first:100,writersOnly:true){totalCount nodes{state commit{oid}}}}}}",
+              "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state headRefOid autoMergeRequest{enabledAt} isInMergeQueue labels(first:100){totalCount nodes{name}} latestOpinionatedReviews(first:100,writersOnly:true){totalCount nodes{state commit{oid}}}}}}",
             variables: {owner: repo.owner, repo: repo.name, number: number},
           },
           options: options,
@@ -98,8 +99,8 @@ fn __require_refresh_mutable(
   )
   require len(response.errors ?? []) == 0, "bump-driver: refresh protection query reported errors"
   const pull = response.data.repository?.pullRequest
-  require pull != nil && pull.headRefOid == expected_head,
-    "bump-driver: refresh protection did not read the expected pull request head"
+  require pull != nil && pull.state == "OPEN" && pull.headRefOid == expected_head,
+    "bump-driver: refresh protection did not read the expected open pull request head"
   const admission = bump_refresh_admission(
     {
       head_oid: pull.headRefOid,

@@ -3,6 +3,7 @@ const API = "https://api.github.com"
 
 pub fn refresh_snapshot(head: string) -> dict {
   return {
+    state: "OPEN",
     headRefOid: head,
     autoMergeRequest: nil,
     isInMergeQueue: false,
