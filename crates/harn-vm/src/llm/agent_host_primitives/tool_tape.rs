@@ -8,6 +8,12 @@
 use crate::run_tape::{RecordedToolResult, ToolCallRecording, ToolServe};
 use crate::tool_annotations::SideEffectLevel;
 use crate::value::{DictMap, VmError, VmValue};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+tokio::task_local! {
+    static IN_RECORDED_DISPATCH: Arc<AtomicBool>;
+}
 
 /// Dispatch one agent tool call: served whole from a branch prefix, or run
 /// live and recorded.
@@ -26,14 +32,58 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         )))
         }
     };
-    let mut recording = match begin(&call, tools) {
+    let recording = match begin(&call, tools) {
         Taped::Served(result) => return result,
         Taped::Live(recording) => recording,
     };
     let live = Box::pin(super::dispatch_tool_call_live(ctx, call, tools, options));
+    run_recorded(recording, live).await
+}
+
+async fn run_recorded(
+    mut recording: Option<ToolCallRecording>,
+    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
+) -> Result<VmValue, VmError> {
+    let background = Arc::new(AtomicBool::new(false));
+    let live = IN_RECORDED_DISPATCH.scope(background.clone(), live);
     let result = crate::run_tape::capture_transcript_changes(&mut recording, live).await;
-    finish(recording, &result);
+    if let Some(recording) = recording {
+        let outcome = if background.load(Ordering::Acquire) {
+            Err("a background command outlives the recorded dispatch".to_string())
+        } else {
+            recorded_from_result(&result)
+        };
+        crate::run_tape::finish_tool_call(recording, outcome);
+    }
     result
+}
+
+/// Record a foreground host command, or serve its result and workspace effects.
+/// Commands inside an agent dispatch belong to that dispatch's recording.
+pub async fn taped_command_run(
+    name: &str,
+    args: &[VmValue],
+    background: bool,
+    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
+) -> Result<VmValue, VmError> {
+    if background {
+        crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
+        let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
+        return live.await;
+    }
+    if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
+        return live.await;
+    }
+    let tool = format!("process:{name}");
+    let args = serde_json::Value::Array(
+        args.iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect(),
+    );
+    match begin_with("", &tool, &args, false) {
+        Taped::Served(result) => result,
+        Taped::Live(recording) => run_recorded(recording, live).await,
+    }
 }
 
 enum Taped {
@@ -63,10 +113,14 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
             SideEffectLevel::ReadOnly | SideEffectLevel::NetworkRead
         )
     });
+    begin_with(&id, &name, &args, read_only)
+}
+
+fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -> Taped {
     // Recording starts before serving, so a branch's own tape keeps what it
     // served and the effects it re-applied.
-    let recording = crate::run_tape::begin_tool_call(&id, &name, &args, read_only);
-    match crate::run_tape::serve_tool_call(&id, &name, &args) {
+    let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
+    match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
         ToolServe::Served(recorded, changes) => {
             if let Some(mut recording) = recording {
@@ -84,13 +138,6 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
             }
             Taped::Served(Err(error))
         }
-    }
-}
-
-/// Record what a live dispatch returned.
-fn finish(recording: Option<ToolCallRecording>, result: &Result<VmValue, VmError>) {
-    if let Some(recording) = recording {
-        crate::run_tape::finish_tool_call(recording, recorded_from_result(result));
     }
 }
 

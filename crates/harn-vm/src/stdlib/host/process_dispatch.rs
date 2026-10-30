@@ -53,6 +53,22 @@ async fn dispatch_process_exec_with_policy_origin(
     caller: JsonValue,
     origin: crate::orchestration::CommandDispatchOrigin,
 ) -> Result<VmValue, VmError> {
+    let args = [VmValue::dict(params.clone())];
+    crate::run_tape::taped_command_run(
+        "process.exec",
+        &args,
+        false,
+        dispatch_untaped(ctx, params, caller, origin),
+    )
+    .await
+}
+
+async fn dispatch_untaped(
+    ctx: Option<&AsyncBuiltinCtx>,
+    params: &crate::value::DictMap,
+    caller: JsonValue,
+    origin: crate::orchestration::CommandDispatchOrigin,
+) -> Result<VmValue, VmError> {
     let preflight =
         crate::orchestration::run_command_policy_preflight_with_origin(ctx, params, caller, origin)
             .await?;

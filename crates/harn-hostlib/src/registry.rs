@@ -359,7 +359,13 @@ impl HostlibRegistry {
                         Box<dyn Future<Output = Result<VmValue, VmError>> + Send>,
                     > {
                         let handler = handler.clone();
+                        let background = args
+                            .first()
+                            .and_then(VmValue::as_dict)
+                            .is_some_and(crate::tools::run_command_request_is_background);
                         Box::pin(async move {
+                            let taped_args = args.clone();
+                            let live = async move {
                             let request = crate::schemas::validate_request_args(
                                 ambient_name,
                                 module,
@@ -453,6 +459,8 @@ impl HostlibRegistry {
                                     .map_err(VmError::from)
                                 }
                             }
+                            };
+                            harn_vm::run_tape::taped_command_run(ambient_name, &taped_args, background, live).await
                         })
                     }
                 });
@@ -585,6 +593,10 @@ impl HostlibRegistry {
         &self.modules
     }
 }
+
+#[cfg(test)]
+#[path = "registry_run_tape_tests.rs"]
+mod run_tape_tests;
 
 #[cfg(test)]
 mod tests {

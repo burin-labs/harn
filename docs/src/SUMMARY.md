@@ -416,6 +416,7 @@
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Windows CI speed experiments](./dev/windows-ci-experiments.md)
 - [Testbench mode](./dev/testbench.md)
+- [Run-tape branch contract](./dev/run-tape.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [Tape format](./dev/tape-format.md)
 - [Annotation tape format](./dev/annotation-tape-format.md)

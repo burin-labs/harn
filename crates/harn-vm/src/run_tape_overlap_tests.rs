@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn a_dispatch_starting_a_background_command_is_not_replayed() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    {
+        let _guard = record_full(tmp.path());
+        rt.block_on(taped_command_run("outer", &[], false, async {
+            taped_command_run("background", &[], true, async { Ok(VmValue::Nil) }).await
+        }))
+        .unwrap();
+        record_llm_call(&request("first"), &result("done", None));
+    }
+    let workspace = tmp.path().join("branch");
+    let replay = branch(tmp.path(), 1, &workspace);
+    let ran = std::sync::atomic::AtomicBool::new(false);
+    let result = rt.block_on(taped_command_run("outer", &[], false, async {
+        ran.store(true, Ordering::SeqCst);
+        Ok(VmValue::Nil)
+    }));
+    assert!(result.unwrap_err().to_string().contains("background"));
+    assert!(!ran.load(Ordering::SeqCst));
+    assert!(!workspace.join("src").exists());
+    assert_eq!(replay.report().live_calls, 0);
+}
+
+#[test]
 fn sequential_dispatches_remain_replayable() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();

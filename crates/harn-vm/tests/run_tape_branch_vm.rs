@@ -425,7 +425,7 @@ fn a_branch_live_tail_continues_the_mock_script_after_the_served_prefix() {
 }
 
 #[test]
-fn a_script_level_exec_in_the_prefix_is_refused_not_run() {
+fn a_script_level_exec_in_the_prefix_is_served_not_run() {
     let _serial = SERIAL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -467,15 +467,32 @@ pipeline main(harness: Harness, task: unknown) {{
     remove_marker(&exec_marker, &dirs.tapes);
 
     let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 1);
-    assert!(output.is_err(), "a refused exec fails the run: {output:?}");
+    assert!(
+        output
+            .as_ref()
+            .is_ok_and(|output| output.contains("[harn] done")),
+        "{output:?}"
+    );
     assert!(
         !exec_marker.exists(),
         "the branch ran the script-level exec"
     );
-    assert_eq!(report.served_calls, 0, "report: {report:?}");
-    let divergence = report.divergence.expect("the refusal is the divergence");
-    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
-    assert_eq!(divergence.call, 1, "the refusal came before model call 1");
+    assert_eq!(report.served_calls, 1, "report: {report:?}");
+    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
+    assert_eq!(report.divergence, None, "report: {report:?}");
+
+    let other_marker = dirs.markers.join("unrecorded-exec");
+    let changed = source.replace(&quote(&exec_marker), &quote(&other_marker));
+    let Branched { output, report, .. } = branch(&changed, &dirs.tapes, &dirs.workspace, 1);
+    assert!(
+        output.is_err(),
+        "an unrecorded command must fail: {output:?}"
+    );
+    assert!(!other_marker.exists());
+    let divergence = report.divergence.expect("an unrecorded command diverges");
+    assert_eq!(divergence.what, "tool call");
+    assert!(divergence.detail.contains("process:process.exec"));
+    assert_eq!(report.live_calls, 0);
 }
 
 /// One `mark` tool call, then done, with a post-turn session reset.
@@ -1077,7 +1094,7 @@ pipeline main(harness: Harness, task: unknown) {{
 }
 
 /// Record `source`, then branch it at K=1: the spawned task must belong to the
-/// branch, so its exec is refused rather than run and its store write never
+/// branch, so its exec is served rather than run and its store write never
 /// reaches the recording's store.
 fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) {
     let dirs = dirs();
@@ -1097,10 +1114,14 @@ fn assert_spawned_task_stays_in_the_branch(source: &str, marker: &Path) {
         !marker.exists(),
         "the branch re-ran a spawned task's exec: {output:?}"
     );
-    let divergence = report
-        .divergence
-        .expect("the refused exec is the divergence");
-    assert_eq!(divergence.what, "refused effect", "{divergence:?}");
+    assert!(
+        output
+            .as_ref()
+            .is_ok_and(|output| output.contains("[harn] done")),
+        "{output:?}"
+    );
+    assert_eq!(report.divergence, None, "{report:?}");
+    assert_eq!(report.served_tool_calls, 1, "{report:?}");
     assert_eq!(
         std::fs::read_to_string(harn_vm::runtime_paths::store_path(&dirs.workspace)).unwrap(),
         recorded_store,

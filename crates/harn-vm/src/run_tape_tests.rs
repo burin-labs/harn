@@ -217,13 +217,10 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         session_id: "session-1".to_string(),
         fields: BTreeMap::from([(
             "messages".to_string(),
-            crate::testbench::tape::FieldChange::Set(serde_json::json!(text.clone())),
+            crate::testbench::tape::FieldChange::Set(serde_json::json!(text)),
         )]),
     });
-    finish_tool_call(
-        recording,
-        Ok(ok(serde_json::json!({"output": text.clone()}))),
-    );
+    finish_tool_call(recording, Ok(ok(serde_json::json!({"output": text}))));
     cache_lookup("prompt-cache", "request-1", || {
         Ok(Some(serde_json::json!({"result": text.clone()})))
     })

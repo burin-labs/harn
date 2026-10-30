@@ -81,6 +81,28 @@ fn gates_own_network_reads(owner: Owner<'_>) -> bool {
     )
 }
 
+/// These methods reach the command recorder before policy or execution.
+fn runs_a_process(owner: Owner<'_>) -> bool {
+    match owner {
+        Some((CapabilityId::Tools, "run_command")) => true,
+        Some((CapabilityId::Process, method)) => matches!(
+            method,
+            "run"
+                | "exec"
+                | "shell"
+                | "exec_at"
+                | "shell_at"
+                | "git_status"
+                | "git_diff"
+                | "git_merge_base"
+                | "git_tag_list"
+                | "git_describe"
+                | "git_repo_discover"
+        ),
+        _ => false,
+    }
+}
+
 /// `harness.agent` methods whose state target, the session id argument, is one
 /// entry of the in-process session table that `agent-sessions` names. Durable
 /// agent state (`state_write`, `state_delete`, `state_handoff`) and live-client
@@ -202,6 +224,9 @@ fn serve_read_in_prefix(
     effects: Option<&[EffectSpec]>,
     args: &[VmValue],
 ) -> Option<Result<VmValue, VmError>> {
+    if runs_a_process(owner) {
+        return None;
+    }
     let Some(effects) = effects else {
         return refuse_in_prefix(name, "it declares no effect contract")
             .err()

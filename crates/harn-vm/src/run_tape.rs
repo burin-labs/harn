@@ -490,7 +490,7 @@ pub(crate) struct ToolCallRecording {
 }
 
 enum EffectWatch {
-    Scanned,
+    Scanned(String),
     ReadOnly,
     Unobserved,
 }
@@ -508,8 +508,14 @@ pub(crate) fn begin_tool_call(
     let watch = match (tape.level, &tape.workspace) {
         (RecordingLevel::Full, _) if read_only => EffectWatch::ReadOnly,
         (RecordingLevel::Full, Some(workspace)) => {
-            workspace.observer.begin(&workspace.root, call_id);
-            EffectWatch::Scanned
+            static NEXT_SCAN: AtomicU64 = AtomicU64::new(0);
+            let key = if call_id.is_empty() {
+                format!("script-run#{}", NEXT_SCAN.fetch_add(1, Ordering::Relaxed))
+            } else {
+                call_id.to_string()
+            };
+            workspace.observer.begin(&workspace.root, &key);
+            EffectWatch::Scanned(key)
         }
         _ => EffectWatch::Unobserved,
     };
@@ -564,9 +570,9 @@ pub(crate) fn finish_tool_call(
     let mut unservable = None;
     let mut effects = Vec::new();
     match watch {
-        EffectWatch::Scanned => {
+        EffectWatch::Scanned(key) => {
             let workspace = tape.workspace.as_ref().expect("a scan implies a workspace");
-            let scan = workspace.observer.end(&workspace.root, &call_id);
+            let scan = workspace.observer.end(&workspace.root, &key);
             if scan.incomplete {
                 unservable = Some("the file-effect scan was incomplete".to_string());
             }
@@ -1379,6 +1385,8 @@ pub(crate) use scope::{
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;
+
+pub use crate::llm::agent_host_primitives::taped_command_run;
 
 #[path = "run_tape_overlap.rs"]
 mod overlap;

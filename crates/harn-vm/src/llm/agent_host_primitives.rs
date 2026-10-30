@@ -25,6 +25,7 @@ pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 mod tool_tape;
 pub(crate) use tool_tape::host_agent_dispatch_tool_call;
+pub use tool_tape::taped_command_run;
 pub(crate) mod tool_result_budget;
 mod undispatched_tool;
 use crate::orchestration::ToolDispatchPolicy;

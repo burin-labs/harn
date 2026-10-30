@@ -35,59 +35,65 @@ async fn open_session(root: &Path) -> String {
         .to_owned()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_branch_reuses_the_recorded_acp_session_identity() {
+#[test]
+fn a_branch_reuses_the_recorded_acp_session_identity() {
     let _lock = acp_env_lock().lock().unwrap();
-    let tmp = tempfile::tempdir().unwrap();
-    let recorded_workspace = tmp.path().join("recorded");
-    let branch_workspace = tmp.path().join("branch");
-    std::fs::create_dir_all(&recorded_workspace).unwrap();
-    std::fs::create_dir_all(&branch_workspace).unwrap();
-    let tapes = tmp.path().join("tapes");
-    let recording = start_recording(
-        &tapes,
-        RecordingLevel::Full,
-        Some(TapeWorkspace {
-            root: recorded_workspace.clone(),
-            observer: Box::new(NoEffects),
-        }),
-    )
-    .unwrap()
-    .unwrap();
-    let recorded_id = open_session(&recorded_workspace).await;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let tmp = tempfile::tempdir().unwrap();
+        let recorded_workspace = tmp.path().join("recorded");
+        let branch_workspace = tmp.path().join("branch");
+        std::fs::create_dir_all(&recorded_workspace).unwrap();
+        std::fs::create_dir_all(&branch_workspace).unwrap();
+        let tapes = tmp.path().join("tapes");
+        let recording = start_recording(
+            &tapes,
+            RecordingLevel::Full,
+            Some(TapeWorkspace {
+                root: recorded_workspace.clone(),
+                observer: Box::new(NoEffects),
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        let recorded_id = open_session(&recorded_workspace).await;
 
-    // Arm a prefix without inference; admission must consume the recorded id
-    // before the first model call.
-    let recorder = process_recorder().unwrap();
-    recorder.record(TapeRecordKind::LlmCall {
-        request_digest: "unused-before-inference".to_owned(),
-        response: recorder.payload_from_bytes(
-            serde_json::to_vec(&serde_json::json!({
-                "text": "", "tool_calls": [], "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "cache_write_tokens": 0,
-                "model": "fixture", "provider": "fixture", "blocks": [], "logprobs": []
-            }))
-            .unwrap(),
-        ),
-        call_index: Some(1),
-        request: None,
-        messages: Vec::new(),
-        attribution: None,
+        // Arm a prefix without inference; admission must consume the recorded id
+        // before the first model call.
+        let recorder = process_recorder().unwrap();
+        recorder.record(TapeRecordKind::LlmCall {
+            request_digest: "unused-before-inference".to_owned(),
+            response: recorder.payload_from_bytes(
+                serde_json::to_vec(&serde_json::json!({
+                    "text": "", "tool_calls": [], "input_tokens": 0, "output_tokens": 0,
+                    "cache_read_tokens": 0, "cache_write_tokens": 0,
+                    "model": "fixture", "provider": "fixture", "blocks": [], "logprobs": []
+                }))
+                .unwrap(),
+            ),
+            call_index: Some(1),
+            request: None,
+            messages: Vec::new(),
+            attribution: None,
+        });
+        assert_eq!(recording.error(), None);
+        drop(recording);
+        harn_vm::agent_sessions::reset_session_store();
+
+        let branch = start_branch(BranchPlan {
+            tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
+            live_after_calls: 1,
+            workspace_root: branch_workspace.clone(),
+            state_root: tmp.path().join("branch-state"),
+        })
+        .unwrap();
+        let replayed_id = branch.scope().run(open_session(&branch_workspace)).await;
+        assert_eq!(replayed_id, recorded_id);
+        assert_eq!(branch.report().divergence, None);
+        // Admission alone must not be mistaken for a completed replay.
+        assert_eq!(branch.finish().divergence.unwrap().what, "under-run prefix");
     });
-    assert_eq!(recording.error(), None);
-    drop(recording);
-    harn_vm::agent_sessions::reset_session_store();
-
-    let branch = start_branch(BranchPlan {
-        tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
-        live_after_calls: 1,
-        workspace_root: branch_workspace.clone(),
-        state_root: tmp.path().join("branch-state"),
-    })
-    .unwrap();
-    let replayed_id = branch.scope().run(open_session(&branch_workspace)).await;
-    assert_eq!(replayed_id, recorded_id);
-    assert_eq!(branch.report().divergence, None);
-    // Admission alone must not be mistaken for a completed replay.
-    assert_eq!(branch.finish().divergence.unwrap().what, "under-run prefix");
 }
