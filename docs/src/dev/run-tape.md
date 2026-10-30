@@ -64,21 +64,35 @@ does not rewrite prompt text, host arguments, or command strings.
 
 `BranchPlan.prompt_edits` accepts `PromptSourceEdit` records for complete literal
 spans in the tape. Each edit names the template URI and revision, one-based
-Unicode line and column, recorded text, and replacement text. Admission requires
+Unicode line and column, recorded text, replacement text, and `activation`.
+Admission requires
 that exact literal and location in recorded provenance. Interpolated values and
 partial spans are not source edits.
 
-The template renderer applies edits after the selected model prefix has been
-served. Earlier renders retain the original source. Filesystem templates,
+With `Origin`, the template renderer applies edits from the start, including
+values rendered early and sent to a model later. Earlier model requests still
+have to match their recorded digests. `AfterPrefix` is an explicit mid-run
+intervention: earlier renders retain the original source. Filesystem templates,
 included templates, and embedded standard-library assets use the same renderer;
 source files are never written. Source revision changes, overlapping ranges,
 and edits never loaded by the run make the branch incomplete.
 
+For edits with `Origin` activation, `plan_prompt_branch(&tape, &edits)` returns the first
+attributed model call that used any edited literal and its `live_after_calls`
+prefix. Its `first_consumers` list records the first use of every edit in input
+order. Pass that prefix and the same edits to `BranchPlan`. The planner refuses
+unused or unattributed edits, ambiguous overlapping source attribution, and
+malformed source identities. A short render without request attribution is
+unavailable for automatic planning, even if the tape recorded its source.
+Recorded renders remain candidates for attribution throughout the run, so a
+value first consumed later or reused after an unrelated call keeps its source.
+
 `BranchReport.prompt_edits` reports how many renders prepared each edit. This is
 not proof that the edited text reached inference: a script can render text and
 discard it. Experiments must verify use in the actual recorded model request.
-The host chooses `live_after_calls`; this API does not infer a safe intervention
-boundary or establish whether an edit improves model behavior.
+An explicit `live_after_calls` remains available for a host offering a labeled
+mid-run intervention. Neither a planned boundary nor a successful replay
+establishes whether an edit improves model behavior.
 
 ## Refusals and limits
 

@@ -640,7 +640,7 @@ pub struct BranchPlan {
     pub state_root: PathBuf,
     /// The host's durable roots for this execution, remapped into `state_root`.
     pub host_state_roots: Vec<PathBuf>,
-    /// Literal source edits applied only after the recorded model prefix.
+    /// Literal source edits, each with explicit origin or mid-run activation.
     pub prompt_edits: Vec<PromptSourceEdit>,
 }
 
@@ -1434,7 +1434,11 @@ pub use crate::llm::agent_host_primitives::tool_tape::taped_command_run;
 #[path = "run_tape_prompt_edits.rs"]
 mod prompt_edits;
 pub(crate) use prompt_edits::prepare as prepare_prompt_source;
-pub use prompt_edits::{PromptEditReport, PromptSourceEdit};
+pub use prompt_edits::{PromptEditActivation, PromptEditReport, PromptSourceEdit};
+
+#[path = "run_tape_prompt_plan.rs"]
+mod prompt_plan;
+pub use prompt_plan::{plan_prompt_branch, PromptBranchPoint};
 
 #[path = "run_tape_overlap.rs"]
 mod overlap;

@@ -20,11 +20,6 @@ const MIN_ATTRIBUTABLE_BYTES: usize = 24;
 #[derive(Default)]
 pub(super) struct PromptLedger {
     texts: BTreeMap<String, Arc<str>>,
-    /// Renders recorded since the previous model call.
-    fresh: BTreeSet<String>,
-    /// Renders the previous model call contained. A prompt rendered once and
-    /// resent every turn stays a candidate through this set.
-    carried: BTreeSet<String>,
     consumers: BTreeMap<String, Vec<u64>>,
 }
 
@@ -56,7 +51,6 @@ impl PromptLedger {
             self.texts
                 .insert(render_id.to_string(), Arc::from(rendered));
         }
-        self.fresh.insert(render_id.to_string());
     }
 
     pub(super) fn consumers(&self, render_id: &str) -> Vec<u64> {
@@ -71,16 +65,13 @@ impl PromptLedger {
     ) -> CallAttribution {
         let fields = text_fields(surface);
         let mut candidates: Vec<(String, Arc<str>)> = self
-            .fresh
+            .texts
             .iter()
-            .chain(self.carried.iter())
-            .filter_map(|id| {
-                let text = self.texts.get(id)?;
+            .filter_map(|(id, text)| {
                 (text.len() >= MIN_ATTRIBUTABLE_BYTES).then(|| (id.clone(), text.clone()))
             })
             .collect();
         candidates.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
-        candidates.dedup_by(|a, b| a.0 == b.0);
 
         let mut attribution = CallAttribution::default();
         let mut matched = BTreeSet::new();
@@ -116,8 +107,6 @@ impl PromptLedger {
                 .or_default()
                 .push(call_index);
         }
-        self.fresh.clear();
-        self.carried = matched;
         attribution
     }
 }
