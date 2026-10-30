@@ -286,11 +286,12 @@ pub fn macos_warm_errors(
       + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
   }
   const pack_steps = matching_run_steps(job, MACOS_WARM_PACK_MARKER)
-  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD {
+  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD
+    || pack_steps[0]?.id != MACOS_WARM_PACK_STEP_ID {
     errors = errors
       + ["${warm.workflow}:${warm.job} must pack the macOS warm artifact only on main"]
   }
-  const upload_steps = matching_upload_steps(job, warm.artifact_name)
+  const upload_steps = matching_upload_steps(job, MACOS_WARM_UPLOAD_NAME)
   if len(upload_steps) != 1
     || trim(upload_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD
     || upload_steps[0]?.with?.["retention-days"]

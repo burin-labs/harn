@@ -84,7 +84,7 @@ pub fn windows_warm_policy() {
 pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
   return {
     artifact_name: "workspace-macos-warm",
-    manifest_schema: "harn.macos_workspace_warm.v1",
+    manifest_schema: "harn.macos_workspace_warm.v3",
     workflow: "macos-nightly.yml",
     job: "nextest",
     retention_days: 3,
@@ -573,6 +573,7 @@ pub fn workflows() {
             {name: "Run workspace nextest", run: "cargo-nextest nextest run --workspace"},
             {
               name: "Stage macOS workspace warm artifact",
+              id: "macos-warm-pack",
               if: gha_expression(
                 "github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'",
               ),
@@ -585,7 +586,7 @@ pub fn workflows() {
               ),
               uses: "actions/upload-artifact@exact-pin",
               with: {
-                name: "workspace-macos-warm",
+                name: gha_expression("steps.macos-warm-pack.outputs.artifact_name"),
                 "if-no-files-found": "error",
                 "retention-days": 3,
               },

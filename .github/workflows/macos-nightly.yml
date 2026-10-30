@@ -332,6 +332,7 @@ jobs:
       # is always the least recently used one (harn#8016). Artifact storage is
       # not contended the same way.
       - name: Stage macOS workspace warm artifact
+        id: macos-warm-pack
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         shell: bash
         run: |
@@ -341,7 +342,7 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: workspace-macos-warm
+          name: ${{ steps.macos-warm-pack.outputs.artifact_name }}
           path: ${{ runner.temp }}/workspace-macos-warm/
           if-no-files-found: error
           retention-days: 3

@@ -77,11 +77,28 @@ assert_freshness false
 # from parallel compilation to serial compilation, or back again.
 source "$repo_root/scripts/lib/rustc_frontend.sh"
 wrapper="$(harn_rustc_frontend_install_wrapper "$repo_root/scripts" "$root/wrappers")"
+pack_compiler_fixture() {
+  env CARGO_INCREMENTAL=0 CARGO_TARGET_DIR="$PWD/target" \
+    "$repo_root/scripts/ci/workspace_warm_artifact.sh" macos pack "$1"
+}
+restore_compiler_fixture() {
+  env CARGO_INCREMENTAL=0 "$repo_root/scripts/ci/workspace_warm_artifact.sh" \
+    macos restore "$1" "$PWD/target"
+  "$script" restore
+}
+RUSTC_WORKSPACE_WRAPPER='' HARN_RUSTC_FRONTEND_THREADS=1 build_fixture
+RUSTC_WORKSPACE_WRAPPER='' HARN_RUSTC_FRONTEND_THREADS=1 pack_compiler_fixture "$root/serial-bundle"
 RUSTC_WORKSPACE_WRAPPER="$wrapper" HARN_RUSTC_FRONTEND_THREADS=8 build_fixture
 assert_freshness false
 RUSTC_WORKSPACE_WRAPPER="$wrapper" HARN_RUSTC_FRONTEND_THREADS=8 build_fixture
 assert_freshness true
+RUSTC_WORKSPACE_WRAPPER="$wrapper" HARN_RUSTC_FRONTEND_THREADS=8 pack_compiler_fixture "$root/parallel-bundle"
+RUSTC_WORKSPACE_WRAPPER='' HARN_RUSTC_FRONTEND_THREADS=1 restore_compiler_fixture "$root/serial-bundle"
 RUSTC_WORKSPACE_WRAPPER='' HARN_RUSTC_FRONTEND_THREADS=1 build_fixture
-assert_freshness false
+assert_freshness true
 [[ "$(target/debug/reuse_fixture_app)" == 2 ]]
-echo "workspace_reuse_cargo_test: unchanged units reused; changed source and compiler wrapper rebuilt workspace executables"
+RUSTC_WORKSPACE_WRAPPER="$wrapper" HARN_RUSTC_FRONTEND_THREADS=8 restore_compiler_fixture "$root/parallel-bundle"
+RUSTC_WORKSPACE_WRAPPER="$wrapper" HARN_RUSTC_FRONTEND_THREADS=8 build_fixture
+assert_freshness true
+[[ "$(target/debug/reuse_fixture_app)" == 2 ]]
+echo "workspace_reuse_cargo_test: source edits rebuild; serial and parallel archives each restore fresh executable units"

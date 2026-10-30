@@ -551,6 +551,10 @@ pub const WINDOWS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh windows down
 
 pub const MACOS_WARM_PACK_MARKER = "workspace_warm_artifact.sh macos pack"
 
+pub const MACOS_WARM_PACK_STEP_ID = "macos-warm-pack"
+
+pub const MACOS_WARM_UPLOAD_NAME = "$" + "{{ steps.macos-warm-pack.outputs.artifact_name }}"
+
 pub const MACOS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh macos download-and-restore"
 
 pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"

@@ -52,6 +52,20 @@ select_platform() {
 
 load_warm_policy() {
   ARTIFACT_NAME="$(harn_cache_policy_jq ".${POLICY_KEY}.artifact_name")"
+  WORKSPACE_COMPILER_SHA256=""
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    # Cargo fingerprints the workspace wrapper path. Its effective flags also
+    # belong to the archive identity, so different compiler settings can coexist.
+    source "${SCRIPT_DIR}/../lib/rustc_frontend.sh"
+    local flags="" identity
+    if [[ -n "${RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
+      flags="$(harn_rustc_frontend_flags)"
+    fi
+    identity="$(jq -nc --arg wrapper "${RUSTC_WORKSPACE_WRAPPER:-}" --arg flags "$flags" \
+      '{wrapper:$wrapper,flags:$flags}')"
+    WORKSPACE_COMPILER_SHA256="$(sha256_string "$identity")"
+    ARTIFACT_NAME="${ARTIFACT_NAME}-${WORKSPACE_COMPILER_SHA256}"
+  fi
   SCHEMA="$(harn_cache_policy_jq ".${POLICY_KEY}.manifest_schema")"
   WORKFLOW_FILE="$(harn_cache_policy_jq ".${POLICY_KEY}.workflow")"
   DEFAULT_MAX_BYTES="$(harn_cache_policy_jq ".${POLICY_KEY}.max_bytes")"
@@ -187,6 +201,9 @@ rustflags_sha256=$(sha256_string "${RUSTFLAGS:-}")
 cargo_incremental=${CARGO_INCREMENTAL:-}
 target_bytes=${target_bytes}
 EOF
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    printf 'workspace_compiler_sha256=%s\n' "$WORKSPACE_COMPILER_SHA256" >> "$destination/manifest"
+  fi
 }
 
 require_manifest_value() {
@@ -209,6 +226,7 @@ verify_compat_manifest() {
   require_manifest_value "$manifest" rustflags_sha256 "$(sha256_string "${RUSTFLAGS:-}")"
   require_manifest_value "$manifest" cargo_incremental "${CARGO_INCREMENTAL:-}"
   if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    require_manifest_value "$manifest" workspace_compiler_sha256 "$WORKSPACE_COMPILER_SHA256"
     require_manifest_value "$manifest" rustc_sha256 "$(rustc_identity_sha256)"
     require_manifest_value "$manifest" producer_ref "$PRODUCER_REF"
   fi
@@ -307,6 +325,10 @@ pack() {
   printf "${KEY_PREFIX}_warm_artifact_bytes=%s\n" "$bytes"
   printf "${KEY_PREFIX}_warm_artifact_target_bytes=%s\n" "$target_bytes"
   printf "${KEY_PREFIX}_warm_artifact_producer_commit=%s\n" "$producer_commit"
+  printf "${KEY_PREFIX}_warm_artifact_name=%s\n" "$ARTIFACT_NAME"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'artifact_name=%s\n' "$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+  fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "### ${PLATFORM_LABEL} workspace warm artifact"
@@ -374,6 +396,9 @@ restore() {
   printf "${KEY_PREFIX}_warm_restore_available_after_replace_bytes=%s\n" "$available_after_replace_bytes"
   printf "${KEY_PREFIX}_warm_restore_producer_commit=%s\n" \
     "$(sed -n 's/^producer_commit=//p' "$manifest")"
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    printf "macos_warm_restore_workspace_compiler_sha256=%s\n" "$WORKSPACE_COMPILER_SHA256"
+  fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "### ${PLATFORM_LABEL} workspace warm restore"
