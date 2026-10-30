@@ -1,6 +1,38 @@
 /** Repository automation retains the bootstrap workflow's permission ceiling. */
 pub const GITHUB_BUMP_PERMISSIONS = {contents: "write", pull_requests: "write"}
 
+pub type GithubBumpRefreshState = {
+  head_oid: string,
+  auto_merge_armed: bool,
+  queued: bool,
+  labels: {total_count: int, names: list<string>},
+  reviews: {total_count: int, nodes: list<{state: string, head_oid: string?}>},
+}
+
+/** Delivery and review own an admitted head until their controls are withdrawn. */
+pub fn bump_refresh_admission(state: GithubBumpRefreshState) -> {allowed: bool, reason: string} {
+  if state.labels.total_count != len(state.labels.names)
+    || state.reviews.total_count != len(state.reviews.nodes) {
+    return {
+      allowed: false,
+      reason:
+        "incomplete admission census: labels ${len(state.labels.names)}/${state.labels.total_count}, writer reviews ${len(state.reviews.nodes)}/${state.reviews.total_count}",
+    }
+  }
+  if state.auto_merge_armed || state.queued || state.labels.names.contains("ship") {
+    return {allowed: false, reason: "delivery is armed"}
+  }
+  if state.reviews.nodes.any({ review -> review.state == "APPROVED" && review.head_oid == nil }) {
+    return {allowed: false, reason: "writer approval has no measured head"}
+  }
+  if state.reviews.nodes.any(
+    { review -> review.state == "APPROVED" && review.head_oid == state.head_oid },
+  ) {
+    return {allowed: false, reason: "the current head has a writer's approval"}
+  }
+  return {allowed: true, reason: "unarmed and unreviewed head"}
+}
+
 /**
  * The headline std/bump/runtime gives every refresh publication. The App
  * identity and GitHub signature alone do not mark a commit as refresh output:

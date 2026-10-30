@@ -21,6 +21,13 @@ The boundary is deliberate:
   mints tokens for only the calling repository, with Contents: write and Pull
   requests: write. REST requests and Git fetches share token renewal, so a long
   validation cannot leave publication using an expired bootstrap token.
+- An open bump admitted to delivery or approved by a writer keeps its head.
+  The driver reads the current head, complete label and writer-review counts,
+  auto-merge and queue membership together before refresh and again before
+  replacing an existing branch. The `ship` delivery label, enabled auto-merge,
+  queue membership, or a current-head approval refuses replacement. Missing,
+  partial, changed or unreadable evidence also refuses. Let that head finish
+  delivery before requesting a replacement.
 
 `GithubBumpRemoteConfig.options` accepts `GithubClientOptions`. The legacy
 `token` field remains available for callers that manage their own token

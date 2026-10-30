@@ -1,0 +1,56 @@
+/** Exact provider fixtures shared by the admission and publication regressions. */
+const API = "https://api.github.com"
+
+pub fn refresh_snapshot(head: string) -> dict {
+  return {
+    headRefOid: head,
+    autoMergeRequest: nil,
+    isInMergeQueue: false,
+    labels: {totalCount: 0, nodes: []},
+    latestOpinionatedReviews: {totalCount: 0, nodes: []},
+  }
+}
+
+pub fn mock_refresh_snapshot(testing: HarnessTesting, snapshots: list<dict>) {
+  testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {
+      responses: snapshots.map(
+        { pull -> {status: 200, body: json_stringify({data: {repository: {pullRequest: pull}}})} },
+      ),
+    },
+  )
+}
+
+pub fn mock_open_bump(testing: HarnessTesting, head: string) {
+  testing.http_mock(
+    "GET",
+    API
+      + "/repos/octo-org/octo-repo/pulls?state=open&head=octo-org%3Aautomation%2Fbump-harn-runtime&base=main",
+    {
+      status: 200,
+      body: json_stringify(
+        [
+          {
+            number: 42,
+            title: "Bump Harn runtime",
+            state: "open",
+            html_url: "https://github.com/octo-org/octo-repo/pull/42",
+            base: {
+              ref: "main",
+              sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+            },
+            head: {
+              ref: "automation/bump-harn-runtime",
+              sha: head,
+              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+            },
+            auto_merge: nil,
+          },
+        ],
+      ),
+    },
+  )
+}
