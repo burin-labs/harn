@@ -1,3 +1,5 @@
+// Tests own their tasks and run no branch, so they spawn raw.
+#![allow(clippy::disallowed_methods)]
 //! Consolidated integration-test binary for the `harn-vm` crate.
 //!
 //! Most `harn-vm` integration tests compile into this single binary. Each

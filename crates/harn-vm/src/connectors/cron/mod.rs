@@ -224,7 +224,7 @@ impl Connector for CronConnector {
                 state_store,
             });
             if let Some(tick_at) = test_single_tick_at()? {
-                let task = tokio::spawn(async move {
+                let task = crate::task_spawn::spawn(async move {
                     let _ = handler.on_tick(tick_at, false).await;
                 });
                 self.tasks
@@ -234,7 +234,7 @@ impl Connector for CronConnector {
                 continue;
             }
             let shutdown = shutdown.clone();
-            let task = tokio::spawn(async move {
+            let task = crate::task_spawn::spawn(async move {
                 let _ = run_tick_loop(
                     handler.trigger.schedule.clone(),
                     clock,

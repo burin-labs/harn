@@ -176,7 +176,7 @@ async fn run_acp_provider_process(
         ))
     })?;
     let stderr_task = child.stderr.take().map(|stderr| {
-        tokio::spawn(async move {
+        crate::task_spawn::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::debug!(target: "harn::llm::acp", stderr = %line);

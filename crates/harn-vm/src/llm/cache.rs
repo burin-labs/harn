@@ -110,7 +110,9 @@ fn cache_envelope_base(options: &CacheOptions) -> crate::value::DictMap {
 fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_get(key, options?)")?;
     let options = parse_cache_options(args.get(1))?;
-    let hit = cache_get_at(&options, &key, now_wall_ms())?;
+    let hit = crate::run_tape::cache_lookup(&options.namespace, &key, || {
+        cache_get_at(&options, &key, now_wall_ms())
+    })?;
     record_lookup(&options, hit.is_some());
 
     let mut envelope = cache_envelope_base(&options);
@@ -426,6 +428,10 @@ fn parse_cache_options(value: Option<&VmValue>) -> Result<CacheOptions, VmError>
         .or_else(|| read_string_field(dict, "cache_dir"))
         .map(resolve_cache_path)
         .unwrap_or_else(|| default_cache_path(backend));
+    let path = match backend {
+        CacheBackend::Mem => path,
+        _ => crate::run_tape::durable_path(&path, "model cache")?,
+    };
 
     let ttl_seconds = read_duration_field(store_dict, "ttl")
         .transpose()?

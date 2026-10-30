@@ -274,9 +274,7 @@ fn scan_node_bundle(
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
-        Node::MethodCall { method, args, .. }
-            if method == "render_prompt" || method == "render_prompt_with_provenance" =>
-        {
+        Node::MethodCall { method, args, .. } if method == "render_prompt" => {
             if let Some(template_path) = args.first().and_then(literal_string) {
                 let candidates = resolve_preflight_target(file_path, &template_path, config);
                 manifest.add_asset(

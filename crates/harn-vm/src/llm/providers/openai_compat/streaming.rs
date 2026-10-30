@@ -67,7 +67,7 @@ impl DeltaCanonicalizer {
 /// live display / ACP text stream.
 pub(super) fn canonicalizing_delta_tx(orig: DeltaSender) -> DeltaSender {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::spawn(async move {
+    crate::task_spawn::spawn(async move {
         let mut canon = DeltaCanonicalizer::default();
         while let Some(chunk) = rx.recv().await {
             let emit = canon.push(&chunk);

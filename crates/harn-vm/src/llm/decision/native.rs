@@ -152,6 +152,8 @@ impl DecisionBackend for NativeDecisionBackend {
         &self,
         request: DecisionRequest<'_>,
     ) -> Result<RawDecisionResponse, DecisionTransportError> {
+        crate::run_tape::refuse_in_prefix("native decision", "decisions are not on the tape")
+            .map_err(|_| DecisionTransportError::AuthorityDenied)?;
         crate::llm::ensure_real_llm_allowed(request.provider)
             .map_err(|_| DecisionTransportError::AuthorityDenied)?;
         let boundary_rule = crate::llm::api::inference_boundary::preflight(

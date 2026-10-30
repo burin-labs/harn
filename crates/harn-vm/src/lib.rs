@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
+// Tests may spawn raw: they own their threads and run no branch.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! # harn-vm
 //!
 //! The Harn compiler, virtual machine, standard library, provider/LLM layer,
@@ -96,6 +98,7 @@ pub use native_vm::NativeBuiltinCtxExt;
 pub(crate) use native_vm::NativeCleanupTestExt;
 pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
+pub(crate) mod task_spawn;
 pub(crate) mod tool_call_mutations;
 
 /// Placement policy for child-interpreter subtasks.
@@ -161,6 +164,7 @@ pub mod receipts;
 pub mod record_filter;
 pub mod redact;
 pub mod run_events;
+pub mod run_tape;
 pub mod runtime_context;
 pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;
@@ -493,8 +497,8 @@ pub use stdlib::io::{
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
 pub use stdlib::observability::install_default_backend as install_obs_default_backend;
 pub use stdlib::template::{
-    lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,
-    PromptSourceSpan, PromptSpanKind,
+    lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, PromptSourceSpan,
+    PromptSpanKind,
 };
 pub use stdlib::waitpoint::{
     process_waitpoint_resume_event, service_waitpoints_once, WAITPOINT_RESUME_TOPIC,

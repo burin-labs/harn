@@ -3,16 +3,12 @@ use crate::text::case::{
     lowercase_first, split_camel, split_kebab, split_snake, uppercase_first, words_to_camel,
     words_to_kebab, words_to_pascal, words_to_snake,
 };
-use crate::value::VmDictExt;
 use crate::value::{values_equal, VmError, VmValue};
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::stdlib::template::{
-    render_asset_result, render_asset_with_provenance_result, render_template_result,
-    PromptSourceSpan, PromptSpanKind, TemplateAsset,
-};
+use crate::stdlib::template::{render_asset_result, render_template_result, TemplateAsset};
 
 fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
     let template = args.first().map(|a| a.display()).unwrap_or_default();
@@ -35,76 +31,6 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
 /// to the legacy source-relative path resolver for plain strings.
 fn resolve_render_target(path: &str) -> Result<TemplateAsset, VmError> {
     TemplateAsset::render_target(path).map_err(|msg| VmError::Thrown(VmValue::string(msg)))
-}
-
-/// `render_with_provenance(path, bindings)` — the debugger's hook for
-/// the prompt-template source-map UX (an IDE host feature). Returns
-/// `{ text: string, template_uri: string, spans: list<dict> }` where
-/// each span carries the template range that produced an output byte
-/// range so the IDE can highlight the originating `.harn.prompt`
-/// section when a user clicks a chunk of the rendered prompt.
-fn render_asset_with_provenance(args: &[VmValue]) -> Result<VmValue, VmError> {
-    let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let asset = resolve_render_target(&path)?;
-    let bindings = args.get(1).and_then(|a| a.as_dict());
-    let (rendered, spans) =
-        render_asset_with_provenance_result(&asset, bindings, true).map_err(VmError::from)?;
-    // Register in the thread-local provenance map so the DAP adapter
-    // can answer `burin/promptProvenance` / `burin/promptConsumers`
-    // queries for this render by id — the IDE only needs the id;
-    // span payloads arrive over the DAP channel on demand.
-    let prompt_id = crate::stdlib::template::register_prompt(
-        asset.uri.clone(),
-        rendered.clone(),
-        spans.clone(),
-    );
-    Ok(provenance_result_dict(
-        rendered, asset.uri, prompt_id, &spans,
-    ))
-}
-
-fn provenance_result_dict(
-    rendered: String,
-    template_uri: String,
-    prompt_id: String,
-    spans: &[PromptSourceSpan],
-) -> VmValue {
-    let spans_list: Vec<VmValue> = spans.iter().map(span_to_vm_dict).collect();
-    let mut out = std::collections::BTreeMap::new();
-    out.put_str("text", rendered);
-    out.put_str("template_uri", template_uri);
-    out.put_str("prompt_id", prompt_id);
-    out.put("spans", VmValue::list(spans_list));
-    VmValue::dict(out)
-}
-
-fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
-    let mut d: std::collections::BTreeMap<String, VmValue> = std::collections::BTreeMap::new();
-    d.put_int("template_line", span.template_line as i64);
-    d.put_int("template_col", span.template_col as i64);
-    d.put_int("output_start", span.output_start as i64);
-    d.put_int("output_end", span.output_end as i64);
-    d.put_str("kind", span_kind_label(span.kind));
-    d.put_str("template_uri", span.template_uri.as_str());
-    if let Some(ref v) = span.bound_value {
-        d.put_str("bound_value", v.as_str());
-    }
-    if let Some(parent) = span.parent_span.as_deref() {
-        d.insert("parent_span".into(), span_to_vm_dict(parent));
-    }
-    VmValue::dict(d)
-}
-
-fn span_kind_label(kind: PromptSpanKind) -> &'static str {
-    match kind {
-        PromptSpanKind::Text => "text",
-        PromptSpanKind::Expr => "expr",
-        PromptSpanKind::LegacyBareInterp => "legacy_bare",
-        PromptSpanKind::If => "if",
-        PromptSpanKind::ForIteration => "for_iteration",
-        PromptSpanKind::Include => "include",
-        PromptSpanKind::Section => "section",
-    }
 }
 
 harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_string_builtins);
@@ -624,42 +550,6 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 )]
 fn render_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     render_template_string(args)
-}
-
-#[harn_builtin(
-    exposure = "runtime_internal",
-    sig = "render_with_provenance(path: string?, bindings?: dict) -> dict",
-    category = "strings"
-)]
-fn render_with_provenance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    render_asset_with_provenance(args)
-}
-
-// #106: pipelines invoke prompt_mark_rendered(prompt_id) just
-// before passing a rendered prompt to llm_call. The builtin
-// records (prompt_id, next_event_index) against the thread-local
-// render-index map, which the DAP `burin/promptConsumers`
-// response exposes so the IDE template gutter can jump-to-next-
-// render. The `next_event_index` is a session-opaque counter —
-// the IDE correlates it to AgentEvent.index via timestamp in the
-// JSONL, or via the monotonic per-session render counter when
-// scrubbing by render ordinal.
-#[harn_builtin(
-    exposure = "harness.agent.prompt_mark_rendered",
-    effects = ["state.write@arg0"],
-    runtime_control_plane = true,
-    sig = "prompt_mark_rendered(prompt_id: string) -> int",
-    category = "strings"
-)]
-fn prompt_mark_rendered_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let Some(VmValue::String(prompt_id)) = args.first() else {
-        return Err(VmError::TypeError(
-            "prompt_mark_rendered: prompt_id must be a string".into(),
-        ));
-    };
-    let event_index = crate::stdlib::template::next_prompt_render_ordinal();
-    crate::stdlib::template::record_prompt_render_index(prompt_id, event_index);
-    Ok(VmValue::Int(event_index as i64))
 }
 
 // Internal LLM render-context plumbing — paired push/pop hooks used

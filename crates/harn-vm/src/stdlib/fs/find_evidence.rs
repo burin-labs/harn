@@ -584,7 +584,7 @@ fn search_receipt(
             let exclude = exclude.clone();
             let options = options.clone();
             let next = &next;
-            scope.spawn(move || loop {
+            crate::task_spawn::scoped_thread(scope, move || loop {
                 let index = next.fetch_add(1, Ordering::AcqRel);
                 let Some(root) = roots.get(index) else { break };
                 let result = scan_root(

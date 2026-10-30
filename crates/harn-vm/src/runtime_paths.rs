@@ -243,10 +243,13 @@ pub fn state_root_reference(base_dir: &Path) -> PathBuf {
 
 pub fn run_root(base_dir: &Path) -> PathBuf {
     let run_env_value = std::env::var(HARN_RUN_DIR_ENV).ok();
-    run_root_value(
-        base_dir,
-        run_env_value.as_deref(),
-        nextest_attempt_root().as_deref(),
+    crate::run_tape::branch_path(
+        run_root_value(
+            base_dir,
+            run_env_value.as_deref(),
+            nextest_attempt_root().as_deref(),
+        ),
+        "run records",
     )
 }
 

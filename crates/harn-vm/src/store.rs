@@ -11,18 +11,20 @@ use std::sync::Arc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-struct StoreState {
+pub(crate) struct StoreState {
     data: BTreeMap<String, serde_json::Value>,
     path: PathBuf,
     loaded: bool,
 }
+
+type SharedStore = Arc<parking_lot::Mutex<StoreState>>;
 
 impl StoreState {
     fn new(base_dir: &Path) -> Self {
         Self::at_path(crate::runtime_paths::store_path(base_dir))
     }
 
-    fn at_state_root(state_root: &Path) -> Self {
+    pub(crate) fn at_state_root(state_root: &Path) -> Self {
         Self::at_path(state_root.join(crate::runtime_paths::STORE_FILE))
     }
 
@@ -34,64 +36,65 @@ impl StoreState {
         }
     }
 
-    fn ensure_loaded(&mut self) {
+    fn ensure_loaded(&mut self) -> Result<(), VmError> {
         if self.loaded {
-            return;
+            return Ok(());
         }
+        // Resolved at use, so a VM built before its branch was armed still
+        // stays out of the recording's store.
+        let path = crate::run_tape::durable_path(&self.path, "runtime store")?;
+        let contents = crate::run_tape::store_seed(&path, || {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|contents| serde_json::from_str(&contents).ok())
+        })?;
         self.loaded = true;
-        if let Ok(contents) = std::fs::read_to_string(&self.path) {
-            if let Ok(serde_json::Value::Object(map)) =
-                serde_json::from_str::<serde_json::Value>(&contents)
-            {
-                for (k, v) in map {
-                    self.data.insert(k, v);
-                }
-            }
+        if let Some(serde_json::Value::Object(map)) = contents {
+            self.data.extend(map);
         }
+        Ok(())
     }
 
-    fn save(&self) -> Result<(), String> {
+    fn save(&mut self) -> Result<(), VmError> {
         let obj: serde_json::Map<String, serde_json::Value> = self
             .data
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
-            .map_err(|e| format!("store save error: {e}"))?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("store mkdir error: {e}"))?;
+            .map_err(|e| VmError::Runtime(format!("store save error: {e}")))?;
+        let path = crate::run_tape::durable_path(&self.path, "runtime store")?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| VmError::Runtime(format!("store mkdir error: {e}")))?;
         }
-        std::fs::write(&self.path, json).map_err(|e| format!("store write error: {e}"))?;
-        Ok(())
+        std::fs::write(&path, json).map_err(|e| VmError::Runtime(format!("store write error: {e}")))
     }
 
-    fn get(&mut self, key: &str) -> VmValue {
-        self.ensure_loaded();
-        match self.data.get(key) {
-            Some(v) => json_to_vm_value(v),
-            None => VmValue::Nil,
-        }
+    fn get(&mut self, key: &str) -> Result<Option<serde_json::Value>, VmError> {
+        self.ensure_loaded()?;
+        Ok(self.data.get(key).cloned())
     }
 
-    fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), String> {
-        self.ensure_loaded();
+    pub(crate) fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.insert(key, value);
         self.save()
     }
 
-    fn delete(&mut self, key: &str) -> Result<(), String> {
-        self.ensure_loaded();
+    fn delete(&mut self, key: &str) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.remove(key);
         self.save()
     }
 
-    fn list(&mut self) -> Vec<String> {
-        self.ensure_loaded();
-        self.data.keys().cloned().collect()
+    fn list(&mut self) -> Result<Vec<String>, VmError> {
+        self.ensure_loaded()?;
+        Ok(self.data.keys().cloned().collect())
     }
 
-    fn clear(&mut self) -> Result<(), String> {
-        self.ensure_loaded();
+    fn clear(&mut self) -> Result<(), VmError> {
+        self.ensure_loaded()?;
         self.data.clear();
         self.save()
     }
@@ -99,6 +102,16 @@ impl StoreState {
 
 use crate::json_to_vm_value;
 use crate::value::vm_to_storage_json as vm_to_json;
+
+/// Read `key`. A branch's store starts from what its recording opened, so a
+/// replayed read never sees what the store gained since.
+pub(crate) fn store_get(
+    state: &parking_lot::Mutex<StoreState>,
+    key: &str,
+) -> Result<VmValue, VmError> {
+    let value = state.lock().get(key)?;
+    Ok(value.as_ref().map_or(VmValue::Nil, json_to_vm_value))
+}
 
 /// Register persistent key-value store builtins on a VM.
 ///
@@ -117,7 +130,7 @@ pub(crate) fn register_store_builtins_at_state_root(vm: &mut Vm, state_root: &Pa
 }
 
 fn register_store_state(vm: &mut Vm, state: StoreState) {
-    let state = Arc::new(parking_lot::Mutex::new(state));
+    let state: SharedStore = Arc::new(parking_lot::Mutex::new(state));
 
     let s = Arc::clone(&state);
     vm.register_capability_method(
@@ -125,7 +138,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_get",
         move |args, _out| {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
-            Ok(s.lock().get(&key))
+            store_get(&s, &key)
         },
     );
 
@@ -137,7 +150,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
             let value = args.get(1).unwrap_or(&VmValue::Nil);
             let json_val = vm_to_json(value)?;
-            s.lock().set(key, json_val).map_err(VmError::Runtime)?;
+            s.lock().set(key, json_val)?;
             Ok(VmValue::Nil)
         },
     );
@@ -148,7 +161,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_delete",
         move |args, _out| {
             let key = args.first().map(|a| a.display()).unwrap_or_default();
-            s.lock().delete(&key).map_err(VmError::Runtime)?;
+            s.lock().delete(&key)?;
             Ok(VmValue::Nil)
         },
     );
@@ -158,7 +171,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_list",
         move |_args, _out| {
-            let keys = s.lock().list();
+            let keys = s.lock().list()?;
             Ok(VmValue::strings(keys))
         },
     );
@@ -168,7 +181,11 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_save",
         move |_args, _out| {
-            s.lock().save().map_err(VmError::Runtime)?;
+            // Load first: saving an unopened store would overwrite its file
+            // with nothing, and a branch's open seeds it from the tape.
+            let mut store = s.lock();
+            store.ensure_loaded()?;
+            store.save()?;
             Ok(VmValue::Nil)
         },
     );
@@ -178,7 +195,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_clear",
         move |_args, _out| {
-            s.lock().clear().map_err(VmError::Runtime)?;
+            s.lock().clear()?;
             Ok(VmValue::Nil)
         },
     );

@@ -446,7 +446,6 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "package_snapshot_open"
         | "render"
         | "render_prompt"
-        | "render_with_provenance"
         | "read_lines"
             if !policy_allows_capability(&policy, "workspace", "read_text") =>
         {

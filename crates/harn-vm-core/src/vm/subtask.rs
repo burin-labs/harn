@@ -187,7 +187,18 @@ pub fn prepare<F: Future>(
     }
 }
 
+/// Put a prepared subtask that must stay on this thread on the local set.
+#[allow(clippy::disallowed_methods)] // The owner of local placement.
+pub fn spawn_local<F>(future: PreparedSubtask<F>) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + 'static,
+    F::Output: 'static,
+{
+    tokio::task::spawn_local(future)
+}
+
 /// Put a prepared subtask on the runtime.
+#[allow(clippy::disallowed_methods)] // The owner of subtask placement.
 pub fn spawn<F>(future: PreparedSubtask<F>) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -200,6 +211,7 @@ where
 }
 
 /// Put a prepared subtask on the runtime as a member of `set`.
+#[allow(clippy::disallowed_methods)] // The owner of subtask placement.
 pub fn spawn_into<F>(
     set: &mut tokio::task::JoinSet<F::Output>,
     future: PreparedSubtask<F>,
@@ -246,6 +258,7 @@ where
 /// shutdown. Cleanup spawned on that runtime can therefore be cancelled
 /// before its first poll. This process-owned runtime is deliberately tiny and
 /// exists only for terminal persistence and release of task-owned sessions.
+#[allow(clippy::disallowed_methods)] // The owner of the cleanup runtime.
 pub fn spawn_lifecycle_cleanup<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,

@@ -107,11 +107,24 @@ pub struct Divergence {
 
 /// Compare two tapes under `mode`.
 pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> FidelityReport {
-    let divergences = match mode {
-        FidelityMode::ByteIdentical => compare_record_by_record(recorded, replay, true),
-        FidelityMode::Semantic => compare_record_by_record(recorded, replay, false),
-        FidelityMode::Outcome => compare_outcome(recorded, replay),
-        FidelityMode::PhaseAware => compare_phase_aware(recorded, replay),
+    // Record shapes and digests change between formats, so a cross-format
+    // comparison would report every record as a confusing mismatch.
+    let (old, new) = (recorded.header.version, replay.header.version);
+    let divergences = if old != new {
+        vec![Divergence {
+            seq: None,
+            category: "tape_format_version".to_string(),
+            message: format!(
+                "the recorded tape was written in format version {old} and the replay in \
+                 version {new}; re-record the tape with this runtime"
+            ),
+        }]
+    } else {
+        let mut divergences = compare_mode(recorded, replay, mode);
+        for divergence in &mut divergences {
+            name_request_difference(recorded, replay, divergence);
+        }
+        divergences
     };
     let baseline = recorded.records.len().max(replay.records.len()).max(1);
     let score = match mode {
@@ -132,6 +145,51 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
         replay_records: replay.records.len(),
         divergences,
         score,
+    }
+}
+
+fn llm_calls(tape: &EventTape) -> Vec<(u64, &TapeRecordKind)> {
+    tape.records
+        .iter()
+        .filter(|record| matches!(record.kind, TapeRecordKind::LlmCall { .. }))
+        .map(|record| (record.seq, &record.kind))
+        .collect()
+}
+
+/// Append the first request field that differs to a request-digest
+/// divergence, matching the recorded call to the replay's call in the same
+/// position. Tapes that kept no request body say so instead.
+fn name_request_difference(recorded: &EventTape, replay: &EventTape, divergence: &mut Divergence) {
+    if divergence.category != "llm_request_digest" {
+        return;
+    }
+    let recorded_calls = llm_calls(recorded);
+    let Some(position) = recorded_calls
+        .iter()
+        .position(|(seq, _)| Some(*seq) == divergence.seq)
+    else {
+        return;
+    };
+    let detail = llm_calls(replay).get(position).map_or_else(
+        || "the replay made no call at this position".to_string(),
+        |(_, replayed)| {
+            crate::run_tape::request_difference(
+                recorded,
+                recorded_calls[position].1,
+                replay,
+                replayed,
+            )
+        },
+    );
+    divergence.message = format!("{}; {detail}", divergence.message);
+}
+
+fn compare_mode(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> Vec<Divergence> {
+    match mode {
+        FidelityMode::ByteIdentical => compare_record_by_record(recorded, replay, true),
+        FidelityMode::Semantic => compare_record_by_record(recorded, replay, false),
+        FidelityMode::Outcome => compare_outcome(recorded, replay),
+        FidelityMode::PhaseAware => compare_phase_aware(recorded, replay),
     }
 }
 
@@ -318,10 +376,12 @@ fn compare_kind(
             LlmCall {
                 request_digest: recorded_req,
                 response: recorded_res,
+                ..
             },
             LlmCall {
                 request_digest: replay_req,
                 response: replay_res,
+                ..
             },
         )
         | (
@@ -713,19 +773,7 @@ fn count_llm_calls(tape: &EventTape) -> usize {
 }
 
 fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
-    match kind {
-        TapeRecordKind::ClockRead { .. } => "clock_read",
-        TapeRecordKind::ClockSleep { .. } => "clock_sleep",
-        TapeRecordKind::LlmCall { .. } => "llm_call",
-        TapeRecordKind::DecisionEvaluation { .. } => "decision_evaluation",
-        TapeRecordKind::FileRead { .. } => "file_read",
-        TapeRecordKind::FileWrite { .. } => "file_write",
-        TapeRecordKind::FileDelete { .. } => "file_delete",
-        TapeRecordKind::ProcessSpawn { .. } => "process_spawn",
-        TapeRecordKind::McpJsonRpc { .. } => "mcp_json_rpc",
-        TapeRecordKind::ModelJob { .. } => "model_job",
-        TapeRecordKind::Unknown => "unknown",
-    }
+    kind.label()
 }
 
 #[cfg(test)]

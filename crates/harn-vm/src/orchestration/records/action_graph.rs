@@ -122,7 +122,7 @@ pub(super) fn publish_action_graph_event(
     });
     let policy = crate::redact::current_policy();
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
+        crate::task_spawn::spawn_on(&handle, async move {
             let _ = append_action_graph_update_with_policy(headers, payload, policy).await;
         });
     } else {

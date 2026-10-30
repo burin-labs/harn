@@ -462,7 +462,7 @@ async fn spawn(
     let stderr_pipe = child.stderr.take();
 
     let task_entry = Arc::clone(&entry);
-    tokio::spawn(async move {
+    crate::task_spawn::spawn(async move {
         run_to_completion(
             child,
             stdout_pipe,
@@ -504,11 +504,11 @@ async fn run_to_completion(
 
     let stdout_task = stdout_pipe.map(|pipe| {
         let buf = Arc::clone(&stdout_buf);
-        tokio::spawn(drain_into(pipe, buf))
+        crate::task_spawn::spawn(drain_into(pipe, buf))
     });
     let stderr_task = stderr_pipe.map(|pipe| {
         let buf = Arc::clone(&stderr_buf);
-        tokio::spawn(drain_into(pipe, buf))
+        crate::task_spawn::spawn(drain_into(pipe, buf))
     });
 
     // Race the child's natural exit against a kill request and (optionally)

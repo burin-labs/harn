@@ -51,8 +51,33 @@ use serde::{Deserialize, Serialize};
 use crate::clock_mock;
 
 /// Format version of the on-disk tape representation. Bump on any
-/// breaking change. Loaders refuse tapes with a higher version.
-pub const TAPE_FORMAT_VERSION: u32 = 1;
+/// breaking change. Loaders refuse tapes with a higher version. Version 2
+/// widened the model-call `request_digest` to the whole request, so a
+/// version 1 digest never compares with a version 2 one. Version 3 records
+/// where a run tape's recording kept its durable state. Version 4 records
+/// each tool dispatch's transcript changes as typed [`TranscriptChange`]s.
+pub const TAPE_FORMAT_VERSION: u32 = 4;
+
+/// One change a tool dispatch made to a session's transcript: the fields it
+/// changed, against the transcript the session held just before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TranscriptChange {
+    pub session_id: String,
+    pub fields: BTreeMap<String, FieldChange>,
+}
+
+/// How one transcript field changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum FieldChange {
+    /// The field now holds this value.
+    Set(serde_json::Value),
+    /// The list kept every item it had and gained these at its end.
+    Append(Vec<serde_json::Value>),
+    /// The field is gone.
+    Remove,
+}
 
 /// Records whose serialized payload exceeds this size are spilled into
 /// the content-addressed sidecar. Picked to be larger than typical
@@ -82,6 +107,9 @@ pub struct TapeHeader {
     /// so two re-runs that differ only in argv are distinguishable.
     #[serde(default)]
     pub argv: Vec<String>,
+    /// How a production run tape was recorded. Absent on testbench tapes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<crate::run_tape::RunTapeHeader>,
 }
 
 impl TapeHeader {
@@ -96,6 +124,7 @@ impl TapeHeader {
             started_at_unix_ms,
             script_path,
             argv,
+            run: None,
         }
     }
 }
@@ -183,13 +212,75 @@ pub enum TapeRecordKind {
     /// Script slept (or otherwise advanced the unified mock clock) by
     /// `duration_ms`. The recorded virtual time is post-advance.
     ClockSleep { duration_ms: u64 },
-    /// LLM call. `request_digest` is a deterministic hash of the call's
-    /// matchable surface (messages + system + tools + tool_choice +
-    /// thinking). `response` is the recorded mock — inline JSON for
-    /// small payloads, a CAS reference for large ones.
+    /// LLM call. `request_digest` hashes the whole request minus the
+    /// credential and session id; the fidelity oracle and branch
+    /// verification both compare it. `response` is the recorded mock:
+    /// inline JSON for small payloads, a CAS reference for large ones.
     LlmCall {
         request_digest: String,
         response: TapePayload,
+        /// 1-based order of this call in a production run tape. Absent on
+        /// testbench tapes, which order calls by `seq` alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_index: Option<u64>,
+        /// The request `request_digest` covers, without its messages. Present
+        /// only at `recording: full`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<TapePayload>,
+        /// The request's messages in order, each its own CAS entry, so a
+        /// later call that repeats a prefix stores only its new messages.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        messages: Vec<TapePayload>,
+        /// Which byte ranges of the request came from which prompt render.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attribution: Option<CallAttribution>,
+    },
+    /// One persistent LLM-cache lookup. The cache outlives runs, so a branch
+    /// replays these instead of reading a cache that has since changed.
+    CacheLookup {
+        namespace: String,
+        key: String,
+        /// Model calls the run had made before this lookup; a branch serves
+        /// the lookup only at the same point.
+        after_calls: u64,
+        /// The cached value on a hit; absent on a miss.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<TapePayload>,
+    },
+    /// One prompt asset render, recorded once per distinct output. Model
+    /// calls point at it through [`CallAttribution`] segments.
+    PromptRender {
+        render_id: String,
+        template_uri: String,
+        rendered: TapePayload,
+        /// JSON list of the render's source spans (template line and column
+        /// per output byte range).
+        spans: TapePayload,
+    },
+    /// One agent tool dispatch: what the handler returned and which files it
+    /// changed. A branch serves `outcome` and re-applies `effects` instead of
+    /// re-running the tool.
+    ToolCall {
+        call_id: String,
+        tool: String,
+        args_digest: String,
+        /// Model calls the run had made when this dispatch began. Ids alone
+        /// cannot place a call: text-format calls carry none and providers
+        /// reuse generated ones.
+        after_calls: u64,
+        outcome: TapePayload,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effects: Vec<FileEffect>,
+        /// Set when the outcome cannot be served faithfully (an error variant
+        /// with no recorded shape, or an incomplete effect scan). A branch
+        /// re-executes such a call and counts any difference as divergence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unservable: Option<String>,
+        /// Every transcript change the dispatch made, in order. A served
+        /// dispatch runs no hooks or providers, so the branch replays these
+        /// instead.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        transcript_changes: Vec<TranscriptChange>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {
@@ -266,6 +357,9 @@ impl TapeRecordKind {
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
+            Self::ToolCall { .. } => "tool_call",
+            Self::PromptRender { .. } => "prompt_render",
+            Self::CacheLookup { .. } => "cache_lookup",
             Self::DecisionEvaluation { .. } => "decision_evaluation",
             Self::FileRead { .. } => "file_read",
             Self::FileWrite { .. } => "file_write",
@@ -276,6 +370,38 @@ impl TapeRecordKind {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// Prompt provenance for one model call: each segment is a whole prompt
+/// render found verbatim in a request text field. Segments may nest when one
+/// render was interpolated into another.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CallAttribution {
+    pub segments: Vec<AttributedSegment>,
+    /// Bytes of the system prompt, and how many fall in some segment.
+    pub system_bytes: u64,
+    pub system_attributed: u64,
+    /// The same over every request text except tool results.
+    pub prompt_bytes: u64,
+    pub prompt_attributed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttributedSegment {
+    /// `system`, `messages[i]`, or `messages[i].content[j]`.
+    pub field: String,
+    pub start: u64,
+    pub end: u64,
+    pub render_id: String,
+}
+
+/// One file a tool call changed, relative to the run's workspace root.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileEffect {
+    pub path: String,
+    /// Post-call bytes; `None` means the call deleted the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<TapePayload>,
 }
 
 /// Which face of the unified clock the script read. Captured so a
@@ -289,7 +415,7 @@ pub enum ClockSource {
 
 /// On-disk representation of a record payload. Inline for small values,
 /// CAS-by-hash for anything over [`MAX_INLINE_BYTES`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum TapePayload {
     /// Inline UTF-8 text payload. Carries a content hash so a fidelity
@@ -321,6 +447,16 @@ impl TapePayload {
 /// every record path keys CAS lookups identically.
 pub fn content_hash(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
+}
+
+fn cas_payload(bytes: Vec<u8>, cas: &mut BTreeMap<String, Vec<u8>>) -> TapePayload {
+    let hash = content_hash(&bytes);
+    let len_bytes = bytes.len() as u64;
+    cas.entry(hash.clone()).or_insert(bytes);
+    TapePayload::Cas {
+        content_hash: hash,
+        len_bytes,
+    }
 }
 
 /// Build a [`TapePayload`] from raw bytes, spilling to the sidecar map
@@ -480,18 +616,26 @@ impl EventTape {
             ));
         }
         let mut records = Vec::new();
-        for (idx, line) in lines.enumerate() {
+        // A streaming writer killed mid-record leaves a torn last line with no
+        // newline; the records before it are complete.
+        let torn_tail = !body.ends_with('\n');
+        let lines: Vec<&str> = lines.collect();
+        for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let parsed: TapeLine = serde_json::from_str(trimmed).map_err(|err| {
-                format!(
-                    "parse tape record at line {} in {}: {err}",
-                    idx + 2,
-                    path.display()
-                )
-            })?;
+            let parsed: TapeLine = match serde_json::from_str(trimmed) {
+                Ok(parsed) => parsed,
+                Err(_) if torn_tail && idx + 1 == lines.len() => break,
+                Err(err) => {
+                    return Err(format!(
+                        "parse tape record at line {} in {}: {err}",
+                        idx + 2,
+                        path.display()
+                    ))
+                }
+            };
             match parsed {
                 TapeLine::Record(record) => records.push(record),
                 TapeLine::Header(_) => {
@@ -537,8 +681,35 @@ fn cas_dir_for(tape_path: &Path) -> PathBuf {
 
 fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
     match kind {
-        TapeRecordKind::LlmCall { response, .. }
-        | TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
+        TapeRecordKind::LlmCall {
+            response,
+            request,
+            messages,
+            ..
+        } => {
+            visit(response);
+            if let Some(request) = request {
+                visit(request);
+            }
+            messages.iter().for_each(&mut visit);
+        }
+        TapeRecordKind::CacheLookup { value, .. } => value.iter().for_each(&mut visit),
+        TapeRecordKind::PromptRender {
+            rendered, spans, ..
+        } => {
+            visit(rendered);
+            visit(spans);
+        }
+        TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
+        TapeRecordKind::ToolCall {
+            outcome, effects, ..
+        } => {
+            visit(outcome);
+            effects
+                .iter()
+                .filter_map(|effect| effect.content.as_ref())
+                .for_each(&mut visit);
+        }
         TapeRecordKind::ProcessSpawn {
             stdout_payload,
             stderr_payload,
@@ -581,6 +752,51 @@ pub struct TapeRecorder {
 struct RecorderInner {
     records: Vec<TapeRecord>,
     cas: BTreeMap<String, Vec<u8>>,
+    /// Set for a production run tape: every record and CAS entry is written
+    /// as it is made, so a killed run keeps its prefix.
+    sink: Option<StreamSink>,
+}
+
+#[derive(Debug)]
+struct StreamSink {
+    file: std::fs::File,
+    cas_dir: PathBuf,
+    error: Option<String>,
+}
+
+impl StreamSink {
+    fn write_line(&mut self, line: &TapeLine) {
+        use std::io::Write;
+        if self.error.is_some() {
+            return;
+        }
+        let result = serde_json::to_string(line)
+            .map_err(|err| err.to_string())
+            .and_then(|mut text| {
+                text.push('\n');
+                self.file
+                    .write_all(text.as_bytes())
+                    .map_err(|err| err.to_string())
+            });
+        if let Err(error) = result {
+            self.error = Some(format!("tape write failed: {error}"));
+        }
+    }
+
+    fn write_cas(&mut self, hash: &str, bytes: &[u8]) {
+        if self.error.is_some() {
+            return;
+        }
+        let entry = self.cas_dir.join(hash);
+        if entry.exists() {
+            return;
+        }
+        if let Err(error) =
+            std::fs::create_dir_all(&self.cas_dir).and_then(|()| std::fs::write(&entry, bytes))
+        {
+            self.error = Some(format!("tape CAS write {}: {error}", entry.display()));
+        }
+    }
 }
 
 impl Default for TapeRecorder {
@@ -619,15 +835,53 @@ impl TapeRecorder {
             monotonic_ms,
             kind,
         };
-        self.inner
-            .lock()
-            .expect("tape recorder mutex poisoned")
-            .records
-            .push(record);
+        let mut inner = self.inner.lock().expect("tape recorder mutex poisoned");
+        if let Some(sink) = inner.sink.as_mut() {
+            sink.write_line(&TapeLine::Record(record.clone()));
+        }
+        inner.records.push(record);
     }
 
     fn swap_phase(&self, phase: TapePhase) -> TapePhase {
         TapePhase::from_u8(self.phase.swap(phase.as_u8(), Ordering::SeqCst))
+    }
+
+    /// A recorder that streams to `path` (NDJSON) and `<path>.cas/` as it
+    /// records. CAS bodies go straight to disk and are not retained in
+    /// memory, so [`Self::snapshot`] of a streaming recorder has records only.
+    pub fn streaming(path: &Path, header: TapeHeader) -> Result<Self, String> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("mkdir {}: {err}", parent.display()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|err| format!("create tape {}: {err}", path.display()))?;
+        let mut sink = StreamSink {
+            file,
+            cas_dir: cas_dir_for(path),
+            error: None,
+        };
+        sink.write_line(&TapeLine::Header(header));
+        if let Some(error) = sink.error.take() {
+            return Err(error);
+        }
+        let recorder = Self::new();
+        recorder
+            .inner
+            .lock()
+            .expect("tape recorder mutex poisoned")
+            .sink = Some(sink);
+        Ok(recorder)
+    }
+
+    /// The first write failure of a streaming recorder. A tape with a write
+    /// error is incomplete and must not be offered for branching.
+    pub fn sink_error(&self) -> Option<String> {
+        let inner = self.inner.lock().expect("tape recorder mutex poisoned");
+        inner.sink.as_ref().and_then(|sink| sink.error.clone())
     }
 
     /// Convenience wrapper: build a [`TapePayload`] from `bytes` (spilling
@@ -635,8 +889,35 @@ impl TapeRecorder {
     /// axes that have raw bodies on hand (subprocess stdout, LLM
     /// response JSON, file content).
     pub fn payload_from_bytes(&self, bytes: Vec<u8>) -> TapePayload {
-        let mut inner = self.inner.lock().expect("tape recorder mutex poisoned");
-        build_payload(bytes, &mut inner.cas)
+        self.payload(bytes, false)
+    }
+
+    /// Like [`Self::payload_from_bytes`], but always content-addressed, so
+    /// identical bodies recorded many times are stored once.
+    pub fn payload_cas(&self, bytes: Vec<u8>) -> TapePayload {
+        self.payload(bytes, true)
+    }
+
+    fn payload(&self, bytes: Vec<u8>, force_cas: bool) -> TapePayload {
+        let mut guard = self.inner.lock().expect("tape recorder mutex poisoned");
+        let inner = &mut *guard;
+        let Some(sink) = inner.sink.as_mut() else {
+            return if force_cas {
+                cas_payload(bytes, &mut inner.cas)
+            } else {
+                build_payload(bytes, &mut inner.cas)
+            };
+        };
+        let mut spilled = BTreeMap::new();
+        let payload = if force_cas {
+            cas_payload(bytes, &mut spilled)
+        } else {
+            build_payload(bytes, &mut spilled)
+        };
+        for (hash, bytes) in spilled {
+            sink.write_cas(&hash, &bytes);
+        }
+        payload
     }
 
     /// Snapshot the tape into a self-contained [`EventTape`]. Consumes
@@ -677,10 +958,13 @@ pub fn install_recorder(recorder: Arc<TapeRecorder>) -> TapeRecorderGuard {
     TapeRecorderGuard { previous }
 }
 
-/// Currently installed recorder, if any. Production callers stay
-/// untouched because nothing installs a recorder outside testbench mode.
+/// Currently installed recorder: the thread's testbench recorder, else the
+/// process run tape (see [`crate::run_tape`]), which every thread sees so
+/// offthread provider calls are recorded too.
 pub fn active_recorder() -> Option<Arc<TapeRecorder>> {
-    ACTIVE_RECORDER.with(|slot| slot.borrow().clone())
+    ACTIVE_RECORDER
+        .with(|slot| slot.borrow().clone())
+        .or_else(crate::run_tape::process_recorder)
 }
 
 /// Record a model-job lifecycle event in the active unified tape.

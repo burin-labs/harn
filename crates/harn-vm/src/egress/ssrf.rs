@@ -297,7 +297,7 @@ impl Resolve for GuardedResolver {
             // worker — hand it to the blocking pool. The trait's error slot is
             // reqwest's internal `BoxError`, i.e. `Box<dyn Error + Send + Sync>`.
             let host_for_lookup = host.clone();
-            let lookup = tokio::task::spawn_blocking(move || inner.lookup(&host_for_lookup))
+            let lookup = crate::task_spawn::spawn_blocking(move || inner.lookup(&host_for_lookup))
                 .await
                 .map_err(|join_err| Box::new(join_err) as BoxError)?;
             let resolved = lookup.map_err(|io_err| Box::new(io_err) as BoxError)?;

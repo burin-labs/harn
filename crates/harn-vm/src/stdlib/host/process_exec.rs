@@ -161,7 +161,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
             let mut pipe = child.stdin.take().ok_or_else(|| {
                 VmError::Runtime("host_call process.exec stdin pipe was not captured".to_string())
             })?;
-            Some(tokio::spawn(async move {
+            Some(crate::task_spawn::spawn(async move {
                 pipe.write_all(&input).await?;
                 pipe.shutdown().await
             }))
@@ -203,8 +203,8 @@ pub(super) async fn dispatch_process_exec_after_policy(
             ));
         }
     };
-    let stdout_task = tokio::spawn(read_process_exec_pipe(stdout_pipe));
-    let stderr_task = tokio::spawn(read_process_exec_pipe(stderr_pipe));
+    let stdout_task = crate::task_spawn::spawn(read_process_exec_pipe(stdout_pipe));
+    let stderr_task = crate::task_spawn::spawn(read_process_exec_pipe(stderr_pipe));
 
     enum ProcessExecWait {
         Exited(std::io::Result<std::process::ExitStatus>),

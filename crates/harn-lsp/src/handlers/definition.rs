@@ -457,11 +457,7 @@ fn find_render_string_at_offset(program: &[SNode], offset: usize) -> Option<(Str
 
 fn find_render_string_in_node(node: &SNode, offset: usize) -> Option<(String, Span)> {
     if let Node::MethodCall { method, args, .. } = &node.node {
-        if matches!(
-            method.as_str(),
-            "render_prompt" | "render_prompt_with_provenance"
-        ) && !args.is_empty()
-        {
+        if matches!(method.as_str(), "render_prompt") && !args.is_empty() {
             if let Node::StringLiteral(value) = &args[0].node {
                 let span = args[0].span;
                 if span_contains_offset(&span, offset) {

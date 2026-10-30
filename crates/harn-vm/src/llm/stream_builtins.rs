@@ -46,7 +46,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
     let tx_arc = Arc::new(tx);
     let tx_for_task = tx_arc.clone();
 
-    tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
+    crate::task_spawn::spawn_local(async move {
         if provider == "mock" {
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
@@ -68,7 +68,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
                 .await;
         }
         close_for_task.close();
-    }));
+    });
 
     #[allow(clippy::arc_with_non_send_sync)]
     let handle = VmChannelHandle {
@@ -153,20 +153,19 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
     let mut cancel_rx = cancel.subscribe();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
 
-    tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
+    crate::task_spawn::spawn_local(async move {
         let mut visible = crate::visible_text::VisibleTextState::default();
         let mut partial = String::new();
         let mut deltas_open = true;
         let ledger = super::provider_dispatch::ProviderDispatchLedger::default();
         let task_ledger = ledger.clone();
-        let mut llm_task =
-            tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
-                super::provider_dispatch::with_provider_dispatch_ledger(
-                    task_ledger,
-                    api::vm_call_llm_full_streaming(&opts, delta_tx),
-                )
-                .await
-            }));
+        let mut llm_task = crate::task_spawn::spawn_local(async move {
+            super::provider_dispatch::with_provider_dispatch_ledger(
+                task_ledger,
+                api::vm_call_llm_full_streaming(&opts, delta_tx),
+            )
+            .await
+        });
 
         loop {
             tokio::select! {
@@ -229,7 +228,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                 }
             }
         }
-    }));
+    });
 
     Ok(VmValue::stream(VmStream {
         done: Arc::new(AtomicBool::new(false)),

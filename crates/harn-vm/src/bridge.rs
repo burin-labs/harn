@@ -604,7 +604,7 @@ impl HostBridge {
         let resume_clone = resume_requested.clone();
         let skills_reload_clone = skills_reload_requested.clone();
         let tool_call_cancellations_clone = tool_call_cancellations.clone();
-        tokio::task::spawn_local(async move {
+        crate::task_spawn::spawn_local(async move {
             let stdin = tokio::io::stdin();
             let reader = tokio::io::BufReader::new(stdin);
             let mut lines = reader.lines();

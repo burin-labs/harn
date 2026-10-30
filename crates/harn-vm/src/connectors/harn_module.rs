@@ -319,10 +319,11 @@ impl HarnConnectorWorker {
     ) -> Result<Arc<Self>, ConnectorError> {
         let (tx, rx) = mpsc::channel();
         let run = crate::egress::bind_policy_context(move || run_worker_loop(module_path, rx));
-        let join = crate::runtime_stack::builder()
-            .name(format!("harn-connector-{}", provider_id.as_str()))
-            .spawn(run)
-            .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+        let join = crate::task_spawn::named_thread(
+            format!("harn-connector-{}", provider_id.as_str()),
+            run,
+        )
+        .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
         Ok(Arc::new(Self {
             tx,
             join: Mutex::new(Some(join)),
@@ -543,7 +544,7 @@ impl Connector for HarnConnector {
                     let shutdown = shutdown.clone();
                     let provider_id = self.provider_id.clone();
                     let payload_schema = payload_schema.clone();
-                    tokio::spawn(async move {
+                    crate::task_spawn::spawn(async move {
                         if let Err(error) = run_poll_loop(
                             provider_id,
                             payload_schema,

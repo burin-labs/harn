@@ -422,25 +422,29 @@ impl Vm {
             body_source_dir,
         );
         let tx_for_error = child.yield_sender.clone();
-        tokio::task::spawn_local(super::scope_runtime(scope, async move {
-            let result = child
-                .run_chunk_ref(
-                    chunk,
-                    argc,
-                    None,
-                    module_functions,
-                    module_state,
-                    Some(local_slots),
-                )
-                .await;
-            if let Err(error) = result {
-                if let Some(sender) = tx_for_error {
-                    let _ = sender.send(Err(error)).await;
+        let ambient = child.runtime.subtask_scope();
+        super::subtask::spawn_local(super::subtask::prepare(
+            ambient,
+            super::scope_runtime(scope, async move {
+                let result = child
+                    .run_chunk_ref(
+                        chunk,
+                        argc,
+                        None,
+                        module_functions,
+                        module_state,
+                        Some(local_slots),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    if let Some(sender) = tx_for_error {
+                        let _ = sender.send(Err(error)).await;
+                    }
                 }
-            }
-            // When the generator body finishes (return or fall-through),
-            // the sender is dropped, signaling completion to the receiver.
-        }));
+                // When the generator body finishes (return or fall-through),
+                // the sender is dropped, signaling completion to the receiver.
+            }),
+        ));
 
         let receiver = Arc::new(tokio::sync::Mutex::new(rx));
         if closure.func.is_stream {

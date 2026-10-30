@@ -512,7 +512,7 @@ pub async fn channel_subscribe_from_vm(
         .await
         .map_err(channel_log_error)?;
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
-    tokio::task::spawn_local(async move {
+    crate::task_spawn::spawn_local(async move {
         while let Some(next) = events.next().await {
             let value = match next {
                 Ok((event_id, event)) => projection::event_value(&topic, event_id, event)
@@ -1415,9 +1415,8 @@ fn emit_channel_transcript_event(kind: &'static str, payload: serde_json::Value)
     };
     let event = LogEvent::new(kind, payload);
     if tokio::runtime::Handle::try_current().is_ok() {
-        if let Ok(join) = crate::runtime_stack::builder()
-            .name("harn-channel-transcript".to_string())
-            .spawn(move || {
+        if let Ok(join) =
+            crate::task_spawn::named_thread("harn-channel-transcript".to_string(), move || {
                 let _ = futures::executor::block_on(log.append(&topic, event));
             })
         {

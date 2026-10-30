@@ -387,11 +387,9 @@ impl Debugger {
         let payload: Vec<_> = consumers
             .into_iter()
             .map(|(prompt_id, span)| {
-                // eventIndices: every AgentEvent index where this
-                // prompt_id was consumed by an LLM call (#106).
-                // Empty vec when emission sites haven't yet wired
-                // record_prompt_render_index — the IDE's jump-to-
-                // next-render falls back to no-op cleanly.
+                // eventIndices: the 1-based run-tape model calls whose
+                // request contained this render; empty when no run tape
+                // is recording.
                 let event_indices = harn_vm::prompt_render_indices(&prompt_id);
                 let mut entry = serialize_span(&span);
                 // The consumer view doesn't surface the parent chain

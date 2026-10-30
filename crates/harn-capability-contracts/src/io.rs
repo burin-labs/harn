@@ -425,13 +425,6 @@ capability_method!(
     "Load and render a prompt asset."
 );
 capability_method!(
-    fs_render_prompt_with_provenance,
-    "harness.fs.render_prompt_with_provenance",
-    ["fs.read@arg0"],
-    "__cap_fs_render_prompt_with_provenance(path: string, bindings?: dict) -> dict",
-    "Load and render a prompt asset together with source provenance."
-);
-capability_method!(
     fs_render_template,
     "harness.fs.render_template",
     ["fs.read@dynamic"],

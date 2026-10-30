@@ -15,6 +15,21 @@ thread_local! {
 pub(crate) struct PersistentStateContext {
     state_root: PathBuf,
     workspace: Option<PathBuf>,
+    /// The branch this execution belongs to. Inner scopes inherit it, so a
+    /// host scope entered inside a branch still resolves to its state root.
+    branch: Option<std::sync::Arc<crate::run_tape::BranchHandle>>,
+}
+
+impl PersistentStateContext {
+    /// A scope at `state_root`, inside whatever branch is current.
+    fn within_current(state_root: &Path, workspace: Option<PathBuf>) -> Self {
+        let branch = current_branch();
+        Self {
+            state_root: crate::run_tape::scoped_state_root(branch.as_deref(), state_root),
+            workspace,
+            branch,
+        }
+    }
 }
 
 /// One selected workspace and its captured physical store address.
@@ -54,10 +69,10 @@ impl SessionStoreScope {
 
     /// Bind a synchronous store open. Use `run` across async suspensions.
     pub fn enter(&self) -> ScopedPersistentStateRoot {
-        replace_context(PersistentStateContext {
-            state_root: self.state_root.clone(),
-            workspace: Some(self.workspace.clone()),
-        })
+        replace_context(PersistentStateContext::within_current(
+            &self.state_root,
+            Some(self.workspace.clone()),
+        ))
     }
 
     /// Save and restore this storage scope at every async suspension.
@@ -65,10 +80,7 @@ impl SessionStoreScope {
         // Capture when the execution is polled, after outer transport and host
         // scopes are installed, rather than while its future is constructed.
         crate::orchestration::scope_persistent_state_context(
-            PersistentStateContext {
-                state_root: self.state_root.clone(),
-                workspace: Some(self.workspace.clone()),
-            },
+            PersistentStateContext::within_current(&self.state_root, Some(self.workspace.clone())),
             future,
         )
         .await
@@ -108,9 +120,35 @@ pub struct ScopedPersistentStateRoot {
 /// such as the agent session journal that resolve their paths during execution
 /// rather than when builtins are registered.
 pub fn scope_persistent_state_root(root: PersistentStateRoot<'_>) -> ScopedPersistentStateRoot {
-    replace_context(PersistentStateContext {
-        state_root: root.as_path().to_path_buf(),
-        workspace: None,
+    replace_context(PersistentStateContext::within_current(root.as_path(), None))
+}
+
+fn branch_context(branch: std::sync::Arc<crate::run_tape::BranchHandle>) -> PersistentStateContext {
+    PersistentStateContext {
+        state_root: branch.state_root().to_path_buf(),
+        workspace: current_session_workspace(),
+        branch: Some(branch),
+    }
+}
+
+pub(crate) fn enter_branch(
+    branch: std::sync::Arc<crate::run_tape::BranchHandle>,
+) -> ScopedPersistentStateRoot {
+    replace_context(branch_context(branch))
+}
+
+pub(crate) async fn run_in_branch<F: std::future::Future>(
+    branch: std::sync::Arc<crate::run_tape::BranchHandle>,
+    future: F,
+) -> F::Output {
+    crate::orchestration::scope_persistent_state_context(branch_context(branch), future).await
+}
+
+pub(crate) fn current_branch() -> Option<std::sync::Arc<crate::run_tape::BranchHandle>> {
+    SCOPED_PERSISTENT_STATE_ROOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|context| context.branch.clone())
     })
 }
 

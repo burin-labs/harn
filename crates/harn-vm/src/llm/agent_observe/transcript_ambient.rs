@@ -326,7 +326,12 @@ pub(crate) fn current_transcript_dir() -> Option<String> {
 }
 
 pub(crate) fn current_transcript_path() -> Option<std::path::PathBuf> {
-    current_transcript_dir().map(|dir| std::path::PathBuf::from(dir).join("llm_transcript.jsonl"))
+    current_transcript_dir().map(|dir| {
+        crate::run_tape::branch_path(
+            std::path::PathBuf::from(dir).join("llm_transcript.jsonl"),
+            "LLM transcript",
+        )
+    })
 }
 
 #[cfg(test)]

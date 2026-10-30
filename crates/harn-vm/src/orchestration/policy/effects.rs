@@ -226,7 +226,6 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "package_snapshot_open"
         | "render"
         | "render_prompt"
-        | "render_with_provenance"
         | "find_text"
         | "find_evidence"
         | "read_lines"

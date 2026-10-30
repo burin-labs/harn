@@ -30,9 +30,10 @@ impl DurableEventSink {
         if dir.is_empty() {
             return None;
         }
-        Some(Self::Jsonl(
+        Some(Self::Jsonl(crate::run_tape::branch_path(
             PathBuf::from(dir).join(format!("event_log-{session_id}.jsonl")),
-        ))
+            "event log JSONL sink",
+        )))
     }
 
     /// Open this sink and register it for `session_id`.

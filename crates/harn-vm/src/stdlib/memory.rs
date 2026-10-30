@@ -276,7 +276,7 @@ async fn memory_store_impl(
     })?;
     let tags = parse_tags(args.get(3), "__memory_store")?;
     let options = args.get(4).and_then(VmValue::as_dict);
-    let root = memory_root(options);
+    let root = crate::run_tape::durable_path(&memory_root(options), "memory store")?;
     let record = MemoryRecord {
         id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
         namespace: namespace.clone(),
@@ -448,7 +448,7 @@ fn memory_forget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         VmError::Runtime("__memory_forget: `predicate` argument is required".to_string())
     })?;
     let options = args.get(2).and_then(VmValue::as_dict);
-    let root = memory_root(options);
+    let root = crate::run_tape::durable_path(&memory_root(options), "memory store")?;
     let active = active_records(&root, &namespace)?;
     let predicate_json = crate::llm::vm_value_to_json(&predicate);
     let forgotten_ids = active
@@ -478,7 +478,7 @@ fn memory_update_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let id = required_string(args, 1, "__memory_update", "id")?;
     let patch = args.get(2).and_then(VmValue::as_dict);
     let options = args.get(3).and_then(VmValue::as_dict);
-    let root = memory_root(options);
+    let root = crate::run_tape::durable_path(&memory_root(options), "memory store")?;
 
     // Ignore a patch that targets an unknown/forgotten id: nothing to overlay.
     let exists = active_records(&root, &namespace)?

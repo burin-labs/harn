@@ -264,10 +264,10 @@ pub(super) fn vm_websocket_server(
     let running = Arc::new(AtomicBool::new(true));
     let server_routes = routes.clone();
     let server_running = running.clone();
-    crate::runtime_stack::builder()
-        .name(format!("harn-ws-{id}"))
-        .spawn(move || websocket_server_loop(listener, server_routes, event_tx, server_running))
-        .map_err(|error| vm_error(format!("websocket_server: spawn failed: {error}")))?;
+    crate::task_spawn::named_thread(format!("harn-ws-{id}"), move || {
+        websocket_server_loop(listener, server_routes, event_tx, server_running);
+    })
+    .map_err(|error| vm_error(format!("websocket_server: spawn failed: {error}")))?;
     WEBSOCKET_SERVERS.with(|servers| {
         let mut servers = servers.borrow_mut();
         if servers.len() >= MAX_WEBSOCKET_SERVERS {
@@ -426,11 +426,9 @@ fn websocket_server_loop(
                 let event_tx = event_tx.clone();
                 let running = running.clone();
                 let peer = peer.to_string();
-                let _ = crate::runtime_stack::builder()
-                    .name("harn-ws-conn".to_string())
-                    .spawn(move || {
-                        websocket_connection_thread(stream, peer, routes, event_tx, running);
-                    });
+                let _ = crate::task_spawn::named_thread("harn-ws-conn".to_string(), move || {
+                    websocket_connection_thread(stream, peer, routes, event_tx, running);
+                });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
