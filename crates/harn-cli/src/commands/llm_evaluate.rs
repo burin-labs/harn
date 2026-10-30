@@ -91,8 +91,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
                 );
             } else {
                 println!("{}", result.outcome);
-                println!(
-                    "model={} requests={} input_tokens={} output_tokens={} cost_usd={} elapsed_ms={} receipt={}",
+                println!("{}", crate::localization::formatted!("model={} requests={} input_tokens={} output_tokens={} cost_usd={} elapsed_ms={} receipt={}",
                     result.receipt.served_model.as_deref().unwrap_or("unknown"),
                     result.receipt.physical_attempts,
                     result.receipt.input_tokens.map_or_else(|| "unknown".into(), |value| value.to_string()),
@@ -102,8 +101,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
                         .cost_usd
                         .map_or_else(|| "unknown".into(), |value| value.to_string()),
                     result.receipt.elapsed_ms,
-                    result.receipt.reference()
-                );
+                    result.receipt.reference()));
             }
             0
         }
@@ -129,12 +127,18 @@ fn verify(request: &Request, path: &Path, json: bool) -> i32 {
                     serde_json::to_string(&report).expect("verification serializes")
                 );
             } else if report.verified {
-                println!("Request identity verified.");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("Request identity verified.")
+                );
             } else {
                 println!(
-                    "Request identity refused: {}",
-                    serde_json::to_string(&report.refusals)
-                        .expect("verification refusals serialize")
+                    "{}",
+                    crate::localization::formatted!(
+                        "Request identity refused: {}",
+                        serde_json::to_string(&report.refusals)
+                            .expect("verification refusals serialize")
+                    )
                 );
             }
             i32::from(!report.verified)

@@ -291,6 +291,7 @@ harn dump-builtin-methods --check
 harn dump-builtin-methods --output
 harn dump-cli-surface
 harn dump-cli-surface --check
+harn dump-cli-surface --messages-output
 harn dump-cli-surface --output
 harn dump-connector-matrix
 harn dump-connector-matrix --check

@@ -37,9 +37,18 @@ pub(super) async fn run(args: OrchestratorResumeArgs) -> Result<(), Orchestrator
     if args.json {
         return print_json(&result);
     }
-    println!("Resumed escalation:");
-    println!("- request_id={}", result.request_id);
-    println!("- reviewer={}", result.reviewer);
-    println!("- reason={}", result.reason.as_deref().unwrap_or("-"));
+    println!("{}", crate::localization::formatted!("Resumed escalation:"));
+    println!(
+        "{}",
+        crate::localization::formatted!("- request_id={}", result.request_id)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- reviewer={}", result.reviewer)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- reason={}", result.reason.as_deref().unwrap_or("-"))
+    );
     Ok(())
 }

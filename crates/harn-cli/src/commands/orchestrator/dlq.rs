@@ -41,14 +41,29 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), OrchestratorErr
                 handle,
             });
         }
-        println!("DLQ replay:");
-        println!("- entry_id={}", entry.id);
-        println!("- event_id={}", handle.event_id);
-        println!("- status={}", handle.status);
-        println!("- error={}", handle.error.as_deref().unwrap_or("-"));
+        println!("{}", crate::localization::formatted!("DLQ replay:"));
         println!(
-            "- replay_of_event_id={}",
-            handle.replay_of_event_id.as_deref().unwrap_or("-")
+            "{}",
+            crate::localization::formatted!("- entry_id={}", entry.id)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- event_id={}", handle.event_id)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- status={}", handle.status)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- error={}", handle.error.as_deref().unwrap_or("-"))
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "- replay_of_event_id={}",
+                handle.replay_of_event_id.as_deref().unwrap_or("-")
+            )
         );
         return Ok(());
     }
@@ -63,10 +78,22 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), OrchestratorErr
         if args.json {
             return print_json(&DlqDiscardPayload { entry: discarded });
         }
-        println!("DLQ entry discarded:");
-        println!("- entry_id={}", discarded.id);
-        println!("- event_id={}", discarded.event_id);
-        println!("- state={}", discarded.state);
+        println!(
+            "{}",
+            crate::localization::formatted!("DLQ entry discarded:")
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- entry_id={}", discarded.id)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- event_id={}", discarded.event_id)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("- state={}", discarded.state)
+        );
         return Ok(());
     }
 
@@ -78,17 +105,29 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), OrchestratorErr
             entries,
         });
     }
-    println!("DLQ:");
-    println!("- dispatcher_dlq_depth={}", stats.dlq_depth);
-    println!("- pending_entries={}", entries.len());
+    println!("{}", crate::localization::formatted!("DLQ:"));
+    println!(
+        "{}",
+        crate::localization::formatted!("- dispatcher_dlq_depth={}", stats.dlq_depth)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- pending_entries={}", entries.len())
+    );
     if entries.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
         return Ok(());
     }
     for entry in entries {
         println!(
-            "- {} binding={} event={} error={}",
-            entry.id, entry.binding_id, entry.event_id, entry.error
+            "{}",
+            crate::localization::formatted!(
+                "- {} binding={} event={} error={}",
+                entry.id,
+                entry.binding_id,
+                entry.event_id,
+                entry.error
+            )
         );
     }
     Ok(())

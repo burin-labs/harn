@@ -439,7 +439,12 @@ fn print_list_table(as_json: bool) {
         );
         return;
     }
-    println!("Available demos (replayable offline, no API keys required):");
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Available demos (replayable offline, no API keys required):"
+        )
+    );
     println!();
     for s in SCENARIOS {
         println!("  {:<16}  {}", s.id, s.title);
@@ -448,8 +453,14 @@ fn print_list_table(as_json: bool) {
         }
         println!();
     }
-    println!("Run a scenario:    harn demo <id>");
-    println!("Use real provider: harn demo <id> --live");
+    println!(
+        "{}",
+        crate::localization::formatted!("Run a scenario:    harn demo <id>")
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("Use real provider: harn demo <id> --live")
+    );
 }
 
 /// Greedy word-wrap for terminal output. `width` is a column budget, so the
@@ -479,13 +490,19 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 async fn interactive_pick(args: &DemoArgs) -> i32 {
     use std::io::Write;
-    println!("Pick a Harn demo (offline replay, no API keys required):");
+    println!(
+        "{}",
+        crate::localization::formatted!("Pick a Harn demo (offline replay, no API keys required):")
+    );
     println!();
     for (idx, s) in SCENARIOS.iter().enumerate() {
         println!("  {}) {:<16}  {}", idx + 1, s.id, s.title);
     }
     println!();
-    print!("Choice [1-{}, default 1]: ", SCENARIOS.len());
+    print!(
+        "{}",
+        crate::localization::formatted!("Choice [1-{}, default 1]: ", SCENARIOS.len())
+    );
     let _ = std::io::stdout().flush();
     let mut buf = String::new();
     let n = std::io::stdin().read_line(&mut buf).unwrap_or(0);
@@ -514,18 +531,24 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
     };
 
     if !args.json {
-        println!("=== harn demo · {} ===", scenario.id);
+        println!(
+            "{}",
+            crate::localization::formatted!("=== harn demo · {} ===", scenario.id)
+        );
         println!("{}", scenario.title);
         println!();
         if !args.live {
-            println!("(offline replay — no API keys required)");
+            println!(
+                "{}",
+                crate::localization::formatted!("(offline replay — no API keys required)")
+            );
             println!();
         }
     }
 
     let llm_mock_mode = if args.live {
         if !args.json {
-            println!("(--live: routing through the configured provider — set HARN_LLM_PROVIDER if none is wired)");
+            println!("{}", crate::localization::formatted!("(--live: routing through the configured provider — set HARN_LLM_PROVIDER if none is wired)"));
             println!();
         }
         CliLlmMockMode::Off
@@ -581,9 +604,22 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
             );
             if args.live && live_failure_looks_like_provider_misconfig(&outcome) {
                 eprintln!();
-                eprintln!("hint: --live needs a configured LLM provider. Re-run without --live");
-                eprintln!("      to use the bundled offline tape, or run `harn quickstart`");
-                eprintln!("      to wire a provider.");
+                eprintln!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "hint: --live needs a configured LLM provider. Re-run without --live"
+                    )
+                );
+                eprintln!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "      to use the bundled offline tape, or run `harn quickstart`"
+                    )
+                );
+                eprintln!(
+                    "{}",
+                    crate::localization::formatted!("      to wire a provider.")
+                );
             }
         } else {
             print_json_summary(scenario, &outcome, elapsed.as_millis(), None);
@@ -612,12 +648,18 @@ async fn run_scenario(args: &DemoArgs, scenario: Scenario) -> i32 {
         );
     } else {
         println!();
-        println!("--- demo complete in {} ms ---", elapsed.as_millis());
+        println!(
+            "{}",
+            crate::localization::formatted!("--- demo complete in {} ms ---", elapsed.as_millis())
+        );
         if let Some(dir) = &receipt_dir {
-            println!("  run record: {}", dir.join("run.json").display());
+            println!(
+                "{}",
+                crate::localization::formatted!("  run record: {}", dir.join("run.json").display())
+            );
         }
         println!();
-        println!("Next steps:");
+        println!("{}", crate::localization::formatted!("Next steps:"));
         println!("  harn demo --list           list every bundled scenario");
         if !args.live {
             println!(

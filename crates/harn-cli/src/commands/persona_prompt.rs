@@ -356,23 +356,50 @@ pub(crate) async fn run_compile_prompt(args: &PersonaCompilePromptArgs) -> Resul
     if args.json {
         println!("{}", compiled.raw_json);
     } else {
-        println!("status: {}", compiled.receipt.checkpoint.status.as_str());
-        println!("attempts: {}", compiled.receipt.checkpoint.attempts);
-        println!("repaired: {}", compiled.receipt.checkpoint.repaired);
-        println!("prompt_digest: {}", compiled.receipt.prompt_digest);
-        println!("catalog_digest: {}", compiled.receipt.catalog_digest);
-        println!("provider: {}", compiled.receipt.checkpoint.provider);
-        println!("model: {}", compiled.receipt.checkpoint.model);
         println!(
-            "usage: input={} output={} total={} cost_usd={}",
-            compiled.receipt.usage.input_tokens,
-            compiled.receipt.usage.output_tokens,
-            compiled.receipt.usage.total_tokens,
-            compiled
-                .receipt
-                .usage
-                .realized_cost_usd
-                .map_or_else(|| "unknown".to_string(), |cost| cost.to_string())
+            "{}",
+            crate::localization::formatted!(
+                "status: {}",
+                compiled.receipt.checkpoint.status.as_str()
+            )
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("attempts: {}", compiled.receipt.checkpoint.attempts)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("repaired: {}", compiled.receipt.checkpoint.repaired)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("prompt_digest: {}", compiled.receipt.prompt_digest)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("catalog_digest: {}", compiled.receipt.catalog_digest)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("provider: {}", compiled.receipt.checkpoint.provider)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("model: {}", compiled.receipt.checkpoint.model)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "usage: input={} output={} total={} cost_usd={}",
+                compiled.receipt.usage.input_tokens,
+                compiled.receipt.usage.output_tokens,
+                compiled.receipt.usage.total_tokens,
+                compiled
+                    .receipt
+                    .usage
+                    .realized_cost_usd
+                    .map_or_else(|| "unknown".to_string(), |cost| cost.to_string())
+            )
         );
     }
     if compiled.receipt.ok {

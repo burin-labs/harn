@@ -114,7 +114,12 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
             for path in stale {
                 eprintln!("  {}", path.display());
             }
-            eprintln!("hint: run `make gen-protocol-artifacts` to regenerate.");
+            eprintln!(
+                "{}",
+                crate::localization::formatted!(
+                    "hint: run `make gen-protocol-artifacts` to regenerate."
+                )
+            );
             process::exit(1);
         }
         return;
@@ -126,7 +131,10 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
             cli_diagnostic!("error: {error}");
             process::exit(1);
         }
-        println!("wrote {}", path.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("wrote {}", path.display())
+        );
     }
 }
 

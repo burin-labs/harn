@@ -821,20 +821,37 @@ fn render_result(result: &LaunchResult, json: bool) -> Result<(), String> {
     }
     if let Some(pid) = result.pid {
         println!(
-            "Launched {} via {} at {} (pid {})",
-            result.model, result.provider, result.base_url, pid
+            "{}",
+            crate::localization::formatted!(
+                "Launched {} via {} at {} (pid {})",
+                result.model,
+                result.provider,
+                result.base_url,
+                pid
+            )
         );
     } else {
         println!(
-            "Loaded {} via {} at {}",
-            result.model, result.provider, result.base_url
+            "{}",
+            crate::localization::formatted!(
+                "Loaded {} via {} at {}",
+                result.model,
+                result.provider,
+                result.base_url
+            )
         );
     }
     if let Some(path) = result.log_path.as_deref() {
-        println!("  log: {path}");
+        println!(
+            "{}",
+            crate::localization::formatted!("  log: {path}", path = path)
+        );
     }
     if result.rechecked {
-        println!("  readiness re-checked after launch");
+        println!(
+            "{}",
+            crate::localization::formatted!("  readiness re-checked after launch")
+        );
     }
     Ok(())
 }

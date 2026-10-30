@@ -52,7 +52,6 @@ module.exports = function defineGrammar(dialect) {
       [$.nested_type_identifier, $.generic_type, $.primary_type, $.lookup_type, $.index_type_query, $.type],
       [$.as_expression, $.satisfies_expression, $.primary_type],
       [$._type_query_member_expression, $.member_expression],
-      [$.member_expression, $._type_query_member_expression_in_type_annotation],
       [$._type_query_member_expression, $.primary_expression],
       [$._type_query_subscript_expression, $.subscript_expression],
       [$._type_query_subscript_expression, $.primary_expression],
@@ -63,13 +62,16 @@ module.exports = function defineGrammar(dialect) {
       [$.decorator_call_expression, $.decorator],
       [$.literal_type, $.pattern],
       [$.predefined_type, $.pattern],
-      [$.call_expression, $._type_query_call_expression_in_type_annotation],
       [$.new_expression, $.primary_expression],
       [$.meta_property, $.primary_expression],
       [$.construct_signature, $._property_name],
     ]),
 
     conflicts: ($, previous) => previous.concat([
+      [$.member_expression, $._type_query_member_expression_in_type_annotation],
+      [$.call_expression, $._type_query_call_expression_in_type_annotation],
+      [$._type_query_call_expression_in_type_annotation, $.type],
+      [$._type_query_member_expression_in_type_annotation, $.type],
       [$.call_expression, $._type_query_call_expression],
       [$.call_expression, $.instantiation_expression, $.binary_expression],
       [$.call_expression, $.instantiation_expression, $.binary_expression, $.unary_expression],
@@ -726,8 +728,8 @@ module.exports = function defineGrammar(dialect) {
         $.readonly_type,
         $.constructor_type,
         $.infer_type,
-        prec(-1, alias($._type_query_member_expression_in_type_annotation, $.member_expression)),
-        prec(-1, alias($._type_query_call_expression_in_type_annotation, $.call_expression)),
+        alias($._type_query_member_expression_in_type_annotation, $.member_expression),
+        alias($._type_query_call_expression_in_type_annotation, $.call_expression),
       ),
 
       tuple_parameter: $ => seq(

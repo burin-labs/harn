@@ -194,10 +194,14 @@ impl AcpServer {
             );
             return;
         }
-        let closed = self
-            .sessions
-            .remove(session_id)
-            .expect("validated session should still exist after sink flush");
+        self.release_session_resources(session_id);
+        self.send_response(id, serde_json::json!({}));
+    }
+
+    pub(super) fn release_session_resources(&mut self, session_id: &str) {
+        let Some(closed) = self.sessions.remove(session_id) else {
+            return;
+        };
         closed.checkpoint_tracking.close();
         self.release_session_workspace_warm(&closed);
         self.session_cancellations
@@ -218,7 +222,6 @@ impl AcpServer {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
             harn_hostlib::workspace_checkpoint::drop_session(session_id);
         }
-        self.send_response(id, serde_json::json!({}));
     }
 
     pub(super) async fn clear_active_prompt_transport(

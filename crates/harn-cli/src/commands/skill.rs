@@ -12,9 +12,24 @@ use serde::Serialize;
 pub(crate) fn run_key_generate(args: &SkillKeyGenerateArgs) {
     match skill_provenance::generate_keypair(Path::new(&args.out)) {
         Ok(outcome) => {
-            println!("private_key: {}", outcome.private_key_path.display());
-            println!("public_key: {}", outcome.public_key_path.display());
-            println!("fingerprint: {}", outcome.fingerprint);
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "private_key: {}",
+                    outcome.private_key_path.display()
+                )
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "public_key: {}",
+                    outcome.public_key_path.display()
+                )
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("fingerprint: {}", outcome.fingerprint)
+            );
         }
         Err(error) => {
             cli_diagnostic!("error: {error}");
@@ -26,9 +41,18 @@ pub(crate) fn run_key_generate(args: &SkillKeyGenerateArgs) {
 pub(crate) fn run_sign(args: &SkillSignArgs) {
     match skill_provenance::sign_skill(Path::new(&args.skill), Path::new(&args.key)) {
         Ok(outcome) => {
-            println!("signature: {}", outcome.signature_path.display());
-            println!("fingerprint: {}", outcome.signer_fingerprint);
-            println!("skill_sha256: {}", outcome.skill_sha256);
+            println!(
+                "{}",
+                crate::localization::formatted!("signature: {}", outcome.signature_path.display())
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("fingerprint: {}", outcome.signer_fingerprint)
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("skill_sha256: {}", outcome.skill_sha256)
+            );
         }
         Err(error) => {
             cli_diagnostic!("error: {error}");
@@ -40,9 +64,21 @@ pub(crate) fn run_sign(args: &SkillSignArgs) {
 pub(crate) fn run_endorse(args: &SkillEndorseArgs) {
     match skill_provenance::endorse_skill(Path::new(&args.skill), Path::new(&args.key)) {
         Ok(outcome) => {
-            println!("signature: {}", outcome.signature_path.display());
-            println!("endorser_fingerprint: {}", outcome.endorser_fingerprint);
-            println!("skill_sha256: {}", outcome.skill_sha256);
+            println!(
+                "{}",
+                crate::localization::formatted!("signature: {}", outcome.signature_path.display())
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "endorser_fingerprint: {}",
+                    outcome.endorser_fingerprint
+                )
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("skill_sha256: {}", outcome.skill_sha256)
+            );
         }
         Err(error) => {
             cli_diagnostic!("error: {error}");
@@ -105,8 +141,14 @@ pub(crate) async fn run_who_signed(args: &SkillWhoSignedArgs) {
 pub(crate) fn run_trust_add(args: &SkillTrustAddArgs) {
     match skill_provenance::trust_add(&args.from) {
         Ok(record) => {
-            println!("fingerprint: {}", record.fingerprint);
-            println!("path: {}", record.path.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("fingerprint: {}", record.fingerprint)
+            );
+            println!(
+                "{}",
+                crate::localization::formatted!("path: {}", record.path.display())
+            );
         }
         Err(error) => {
             cli_diagnostic!("error: {error}");
@@ -231,36 +273,66 @@ fn open_trust_log() -> Result<std::sync::Arc<harn_vm::event_log::AnyEventLog>, S
 }
 
 fn print_verified_report(report: &skill_provenance::VerificationReport) {
-    println!("verified: {}", report.skill_path.display());
     println!(
-        "author_fingerprint: {}",
-        report.signer_fingerprint.clone().unwrap_or_default()
+        "{}",
+        crate::localization::formatted!("verified: {}", report.skill_path.display())
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "author_fingerprint: {}",
+            report.signer_fingerprint.clone().unwrap_or_default()
+        )
     );
     for endorsement in &report.endorsements {
-        println!("endorser_fingerprint: {}", endorsement.endorser_fingerprint);
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "endorser_fingerprint: {}",
+                endorsement.endorser_fingerprint
+            )
+        );
     }
-    println!("skill_sha256: {}", report.skill_sha256);
+    println!(
+        "{}",
+        crate::localization::formatted!("skill_sha256: {}", report.skill_sha256)
+    );
 }
 
 fn print_who_signed_report(output: &SkillVerificationOutput) {
-    println!("skill: {}", output.skill_path);
-    println!("status: {}", output.status);
-    println!("trusted: {}", output.trusted);
+    println!(
+        "{}",
+        crate::localization::formatted!("skill: {}", output.skill_path)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("status: {}", output.status)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("trusted: {}", output.trusted)
+    );
     if let Some(author) = &output.author {
         println!(
-            "author: {} trusted={} score={}",
-            author.fingerprint,
-            author.trusted,
-            format_score(author.trust_score.as_ref())
+            "{}",
+            crate::localization::formatted!(
+                "author: {} trusted={} score={}",
+                author.fingerprint,
+                author.trusted,
+                format_score(author.trust_score.as_ref())
+            )
         );
     }
     for endorsement in &output.endorsements {
         println!(
-            "endorsement: {} trusted={} status={} score={}",
-            endorsement.fingerprint,
-            endorsement.trusted,
-            endorsement.status,
-            format_score(endorsement.trust_score.as_ref())
+            "{}",
+            crate::localization::formatted!(
+                "endorsement: {} trusted={} status={} score={}",
+                endorsement.fingerprint,
+                endorsement.trusted,
+                endorsement.status,
+                format_score(endorsement.trust_score.as_ref())
+            )
         );
     }
 }
@@ -290,7 +362,10 @@ pub(crate) fn run_trust_list(_args: &SkillTrustListArgs) {
     match skill_provenance::trust_list() {
         Ok(records) => {
             if records.is_empty() {
-                println!("No trusted skill signers installed.");
+                println!(
+                    "{}",
+                    crate::localization::formatted!("No trusted skill signers installed.")
+                );
                 return;
             }
             for record in records {

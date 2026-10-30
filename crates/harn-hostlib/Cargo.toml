@@ -36,6 +36,9 @@ full = ["ast", "native-secret-store", "terminal-session", "grammars-all"]
 # product surface opts into the platform implementation explicitly.
 native-secret-store = ["harn-vm/native-keyring"]
 
+# Locale policy and Clap help projection for command-line product adapters.
+cli-localization = ["dep:clap"]
+
 # Typed pseudo-terminal sessions. The implementation is linked into full
 # embedders; script authority is carried by the `HarnessTerminalSession`
 # receiver and the active execution policy.
@@ -178,6 +181,7 @@ globset = "0.4"
 walkdir = "2"
 base64 = "0.23"
 regex = "1"
+clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "string"], optional = true }
 regex-automata = "0.4"
 
 # Computer-use local backend (screenshot capture + synthetic input). Optional;

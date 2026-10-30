@@ -779,6 +779,11 @@ async fn suspended_worker_snapshot_preserves_sub_agent_workspace_anchor() {
         }],
         anchored_at: "2026-06-29T00:00:00Z".to_string(),
     };
+    let anchor = {
+        let mut anchor = anchor;
+        anchor.canonicalize_roots().unwrap();
+        anchor
+    };
     let snapshot_path = active_worker_registry()
         .get(&worker_id)
         .unwrap()

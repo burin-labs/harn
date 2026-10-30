@@ -39,6 +39,7 @@ pub use commands::check::{
 };
 #[cfg(feature = "hostlib")]
 mod local_embed;
+mod localization;
 mod net;
 pub mod package;
 mod path_policy;
@@ -75,7 +76,7 @@ pub(crate) use self::provider_info::*;
 pub(crate) use self::run_records::*;
 pub(crate) use self::source_exec::*;
 
-use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
+use clap::{error::ErrorKind, CommandFactory, FromArgMatches};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Once};
 use std::{env, fs, panic, process};

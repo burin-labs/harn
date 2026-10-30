@@ -14,6 +14,11 @@ name: Bump Harn Runtime (reusable)
 on:
   workflow_call:
     inputs:
+      runs-on:
+        description: "Runner label for refresh and validation. The default is the burin-labs large Linux pool; other organizations must supply an available label."
+        required: false
+        type: string
+        default: harn-ci-big
       version:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
@@ -106,7 +111,8 @@ concurrency:
 
 jobs:
   bump:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
     steps:
       - name: Mint GitHub App installation token
         id: app-token
@@ -279,6 +285,7 @@ jobs:
           fi
 
       - name: Run bump orchestration
+        timeout-minutes: 20
         working-directory: package
         # Caller-owned refresh and validation commands inherit this step's
         # environment. The driver's App identity therefore uses driver-owned

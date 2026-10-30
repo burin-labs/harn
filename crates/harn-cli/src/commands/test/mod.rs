@@ -935,7 +935,10 @@ fn write_junit_xml_or_exit(path: &str, report: &TestReport, announce: bool) {
     match test_report::write_junit(path, report) {
         Ok(written) => {
             if announce {
-                println!("JUnit XML written to {}", written.display());
+                println!(
+                    "{}",
+                    crate::localization::formatted!("JUnit XML written to {}", written.display())
+                );
             }
         }
         Err(error) => {
@@ -949,7 +952,10 @@ fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool)
     match test_report::write_json(path, report) {
         Ok(written) => {
             if announce {
-                println!("JSON report written to {}", written.display());
+                println!(
+                    "{}",
+                    crate::localization::formatted!("JSON report written to {}", written.display())
+                );
             }
         }
         Err(error) => {
@@ -1155,13 +1161,23 @@ fn preflight_dependencies_or_exit(paths: &[PathBuf]) {
 /// write the tracefile. A write failure fails the run loudly.
 fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>) {
     if report.is_empty() {
-        eprintln!("\n[coverage] no executed source files were found on disk to report");
+        eprintln!(
+            "{}",
+            crate::localization::formatted!(
+                "\n[coverage] no executed source files were found on disk to report"
+            )
+        );
     } else {
         let (covered, total) = report.totals();
         println!(
-            "\nLine coverage: {covered}/{total} ({:.1}%)\n{}",
-            report.percent(),
-            report.render_text(),
+            "{}",
+            crate::localization::formatted!(
+                "\nLine coverage: {covered}/{total} ({:.1}%)\n{}",
+                report.percent(),
+                report.render_text(),
+                covered = covered,
+                total = total
+            )
         );
     }
     // Honour an explicit --coverage-out even for an empty report: a CI step that
@@ -1173,7 +1189,10 @@ fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>)
             cli_diagnostic!("failed to write coverage report to {path}: {error}");
             process::exit(1);
         }
-        println!("LCOV tracefile written to {path}");
+        println!(
+            "{}",
+            crate::localization::formatted!("LCOV tracefile written to {path}", path = path)
+        );
     }
 }
 
@@ -1466,7 +1485,7 @@ pub(crate) async fn run_determinism_tests(
             passed + failed
         );
         println!();
-        println!("Failures:");
+        println!("{}", crate::localization::formatted!("Failures:"));
         for error in errors {
             println!("  {error}");
         }

@@ -77,14 +77,24 @@ async fn run_list(args: SessionListArgs) {
         // looked in, so a wrong `--session-root` does not read as a workspace
         // that has never run an agent.
         println!(
-            "No persisted sessions under {}/.harn/session-store.sqlite",
-            root.display()
+            "{}",
+            crate::localization::formatted!(
+                "No persisted sessions under {}/.harn/session-store.sqlite",
+                root.display()
+            )
         );
         return;
     }
     println!(
-        "{:<38} {:<8} {:>8} {:>10} {:<20} TITLE",
-        "SESSION", "STATUS", "EVENTS", "COST_USD", "CREATED"
+        "{}",
+        crate::localization::formatted!(
+            "{:<38} {:<8} {:>8} {:>10} {:<20} TITLE",
+            "SESSION",
+            "STATUS",
+            "EVENTS",
+            "COST_USD",
+            "CREATED"
+        )
     );
     for session in &sessions {
         // A session that recorded no usage at all is not a session that cost
@@ -110,12 +120,15 @@ async fn run_list(args: SessionListArgs) {
         );
     }
     println!(
-        "\nReport on one with: harn runs report --from-session <SESSION>{}",
-        if explicit_root {
-            " --session-root <PATH>"
-        } else {
-            ""
-        }
+        "{}",
+        crate::localization::formatted!(
+            "\nReport on one with: harn runs report --from-session <SESSION>{}",
+            if explicit_root {
+                " --session-root <PATH>"
+            } else {
+                ""
+            }
+        )
     );
 }
 
@@ -324,8 +337,13 @@ fn run_validate(args: SessionValidateArgs) {
         }
     } else {
         println!(
-            "OK {} schema_version={} mode={}",
-            bundle.bundle_id, bundle.schema_version, bundle.redaction.mode
+            "{}",
+            crate::localization::formatted!(
+                "OK {} schema_version={} mode={}",
+                bundle.bundle_id,
+                bundle.schema_version,
+                bundle.redaction.mode
+            )
         );
     }
 }
@@ -367,15 +385,18 @@ fn run_view_fixtures(args: SessionViewFixturesArgs) {
     };
     match harn_vm::orchestration::sync_run_view_fixtures(&args.repository_root, mode) {
         Ok(summary) => println!(
-            "{} {} run/session-view snapshots across {} cases ({} run views)",
-            if mode == harn_vm::orchestration::RunViewFixtureMode::Write {
-                "wrote"
-            } else {
-                "checked"
-            },
-            summary.snapshot_count,
-            summary.case_count,
-            summary.run_view_count,
+            "{}",
+            crate::localization::formatted!(
+                "{} {} run/session-view snapshots across {} cases ({} run views)",
+                if mode == harn_vm::orchestration::RunViewFixtureMode::Write {
+                    "wrote"
+                } else {
+                    "checked"
+                },
+                summary.snapshot_count,
+                summary.case_count,
+                summary.run_view_count,
+            )
         ),
         Err(error) => {
             crate::fatal_error(error);

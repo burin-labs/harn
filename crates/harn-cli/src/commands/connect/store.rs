@@ -49,9 +49,11 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
         (None, Some(path), None) => std::fs::read(path)
             .map_err(|error| format!("failed to read API key file {}: {error}", path.display()))?,
         (None, None, Some(name)) => read_named_env_secret(name, "API key")?.into_bytes(),
-        (None, None, None) => rpassword::prompt_password("API key: ")
-            .map_err(|error| format!("failed to read API key: {error}"))?
-            .into_bytes(),
+        (None, None, None) => rpassword::prompt_password(crate::localization::translate(
+            crate::localization::API_KEY_PROMPT,
+        ))
+        .map_err(|error| format!("failed to read API key: {error}"))?
+        .into_bytes(),
         _ => unreachable!("clap enforces API key value conflicts"),
     };
     if value.is_empty() {
@@ -94,7 +96,14 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
             .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else {
-        println!("Stored API key for {} as {}.", args.connector, secret_id);
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Stored API key for {} as {}.",
+                args.connector,
+                secret_id
+            )
+        );
     }
     Ok(())
 }
@@ -163,23 +172,38 @@ pub(super) async fn run_connect_list(json_output: bool) -> Result<(), String> {
                 .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else if index.providers.is_empty() {
-        println!("No connector OAuth tokens stored in secret providers {store}.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "No connector OAuth tokens stored in secret providers {store}.",
+                store = store
+            )
+        );
     } else {
-        println!("Connector credentials in secret providers {store}:");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Connector credentials in secret providers {store}:",
+                store = store
+            )
+        );
         for entry in &index.providers {
             println!(
-                "{}\t{}\t{}\texpires={}\tlast_used={}",
-                entry.provider,
-                entry.kind,
-                display_secret_ids(entry),
-                entry
-                    .expires_at_unix
-                    .map(format_expiry)
-                    .unwrap_or_else(|| "unknown".to_string()),
-                entry
-                    .last_used_at_unix
-                    .map(format_expiry)
-                    .unwrap_or_else(|| "never".to_string())
+                "{}",
+                crate::localization::formatted!(
+                    "{}\t{}\t{}\texpires={}\tlast_used={}",
+                    entry.provider,
+                    entry.kind,
+                    display_secret_ids(entry),
+                    entry
+                        .expires_at_unix
+                        .map(format_expiry)
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    entry
+                        .last_used_at_unix
+                        .map(format_expiry)
+                        .unwrap_or_else(|| "never".to_string())
+                )
             );
         }
     }
@@ -215,7 +239,13 @@ pub(super) async fn run_connect_revoke(
             .map_err(|error| format!("failed to encode JSON output: {error}"))?
         );
     } else {
-        println!("Revoked stored connector credentials for {provider_name}.");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Revoked stored connector credentials for {provider_name}.",
+                provider_name = provider_name
+            )
+        );
     }
     Ok(())
 }

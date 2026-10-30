@@ -15,12 +15,7 @@ use crate::value::{VmError, VmValue};
 /// to stop the next reader assuming RFC3339 and to keep this from being folded
 /// into `harn_clock::system_now_rfc3339` as if it were another copy.
 pub fn now_unix_seconds_text() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{ts}")
+    harn_clock::system_now_unix_seconds_text()
 }
 
 pub(crate) fn new_id(prefix: &str) -> String {

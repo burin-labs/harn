@@ -1,10 +1,16 @@
 use super::*;
 
 impl AcpServer {
-    pub(super) fn session_restore_result(&self, session_id: &str) -> Option<serde_json::Value> {
-        let session = self.sessions.get(session_id)?;
+    pub(super) fn session_restore_result(
+        &self,
+        session_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("unknown session: {session_id}"))?;
         let session_value = self.session_item_json(session_id, "live", None)?;
-        Some(serde_json::json!({
+        Ok(serde_json::json!({
             "sessionId": session_id,
             "session": session_value,
             "workspaceCheckpointTracking": session.workspace_checkpoint,
@@ -18,8 +24,11 @@ impl AcpServer {
         session_id: &str,
         live_state: &str,
         last_event_id: Option<u64>,
-    ) -> Option<serde_json::Value> {
-        let session = self.sessions.get(session_id)?;
+    ) -> Result<serde_json::Value, String> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("unknown session: {session_id}"))?;
         let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(session_id);
         let snapshot = harn_vm::agent_sessions::snapshot(session_id)
             .map(|value| harn_vm::llm::vm_value_to_json(&value))
@@ -45,6 +54,9 @@ impl AcpServer {
         }
         if let Some(anchor) = workspace_anchor.as_ref() {
             item["workspaceAnchor"] = anchor.to_json();
+            item["additionalDirectories"] = serde_json::json!(anchor.additional_directories()?);
+        } else {
+            item["additionalDirectories"] = serde_json::json!([]);
         }
 
         let mut meta = session.info.meta.clone();
@@ -70,7 +82,7 @@ impl AcpServer {
         }
         meta.insert("harn".to_string(), serde_json::Value::Object(harn_meta));
         item["_meta"] = serde_json::Value::Object(meta);
-        Some(item)
+        Ok(item)
     }
 
     pub(super) fn session_matches_list_filters(
@@ -156,12 +168,25 @@ impl AcpServer {
         params: &serde_json::Value,
         environment: harn_vm::security::SessionEnvironment,
     ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
-        let cwd = params
-            .get("cwd")
-            .and_then(|value| value.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let cwd = self
+            .restore_store_scope(params)
+            .map_err(
+                |error| harn_vm::agent_sessions::SessionOpenError::LineageRejected {
+                    session_id: session_id.to_string(),
+                    reason: format!("session storage workspace: {error}"),
+                },
+            )?
+            .workspace()
+            .to_path_buf();
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default())?;
+        // A cold admission replaces prior runtime authority, including a
+        // retired host's reanchored state still present on this VM thread.
+        harn_vm::agent_sessions::set_workspace_anchor(session_id, None).map_err(|reason| {
+            harn_vm::agent_sessions::SessionOpenError::LineageRejected {
+                session_id: session_id.to_string(),
+                reason,
+            }
+        })?;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.environment_policy = environment;
             session.admission_unavailable = true;
@@ -260,6 +285,14 @@ impl AcpServer {
             None
         };
 
+        let roots = match self.prepare_session_roots(params, Some(&session_id)) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        let cold_admission = !self.sessions.contains_key(&session_id);
         if let Err(error) = flush_session_sinks(&session_id).await {
             self.send_error(
                 id,
@@ -343,6 +376,14 @@ impl AcpServer {
             }
         }
 
+        if let Err(message) = self.install_session_roots(&session_id, roots).await {
+            if cold_admission {
+                self.rollback_session_admission(&session_id);
+            }
+            self.send_error(id, -32000, &message);
+            return;
+        }
+
         if let Some(requested) = workspace_checkpoint {
             if let Some(session) = self.sessions.get_mut(&session_id) {
                 session.workspace_checkpoint = requested;
@@ -388,28 +429,56 @@ impl AcpServer {
             })
             .collect();
 
-        let mut result = self
-            .session_restore_result(&session_id)
-            .expect("validated session should still exist");
+        let mut result = match self.session_restore_result(&session_id) {
+            Ok(result) => result,
+            Err(error) => {
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
         if durable_checkpoint.is_some() {
-            result["session"] = self
-                .session_item_json(&session_id, "live", durable_checkpoint)
-                .expect("restored session should still exist");
+            result["session"] =
+                match self.session_item_json(&session_id, "live", durable_checkpoint) {
+                    Ok(item) => item,
+                    Err(error) => {
+                        self.send_error(id, -32000, &error);
+                        return;
+                    }
+                };
         }
         result["replayed"] = serde_json::json!(replayed);
         self.send_response(id, result);
     }
 
-    pub(super) fn handle_session_resume(&self, id: &serde_json::Value, params: &serde_json::Value) {
+    pub(super) async fn handle_session_resume(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
         if !self.validate_protocol_session_options(id, params) {
             return;
         }
         let Some(session_id) = self.restored_session_id(id, params, "session/resume") else {
             return;
         };
-        let result = self
-            .session_restore_result(session_id)
-            .expect("validated session should still exist");
+        let roots = match self.prepare_session_roots(params, Some(session_id)) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.send_root_grant_error(id, error);
+                return;
+            }
+        };
+        if let Err(message) = self.install_session_roots(session_id, roots).await {
+            self.send_error(id, -32000, &message);
+            return;
+        }
+        let result = match self.session_restore_result(session_id) {
+            Ok(result) => result,
+            Err(error) => {
+                self.send_error(id, -32000, &error);
+                return;
+            }
+        };
         self.send_response(id, result);
     }
 

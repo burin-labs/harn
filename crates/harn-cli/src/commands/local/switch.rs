@@ -160,24 +160,47 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         );
     } else {
         println!(
-            "Activated {} via {} at {}",
-            result.model, result.provider, result.base_url
+            "{}",
+            crate::localization::formatted!(
+                "Activated {} via {} at {}",
+                result.model,
+                result.provider,
+                result.base_url
+            )
         );
         println!(
-            "  ctx={} keep_alive={} (machine profile)",
-            result.ctx, result.keep_alive
+            "{}",
+            crate::localization::formatted!(
+                "  ctx={} keep_alive={} (machine profile)",
+                result.ctx,
+                result.keep_alive
+            )
         );
         for record in &result.evicted {
             println!(
-                "  evicted {}::{} -> {}",
-                record.provider, record.target, record.outcome
+                "{}",
+                crate::localization::formatted!(
+                    "  evicted {}::{} -> {}",
+                    record.provider,
+                    record.target,
+                    record.outcome
+                )
             );
         }
         if result.rechecked {
-            println!("  readiness re-checked after warm");
+            println!(
+                "{}",
+                crate::localization::formatted!("  readiness re-checked after warm")
+            );
         }
         if result.runtime_profile.requires_probe_gate {
-            println!("  runtime profile: {}", result.profile_gate.message);
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  runtime profile: {}",
+                    result.profile_gate.message
+                )
+            );
         }
     }
     Ok(())

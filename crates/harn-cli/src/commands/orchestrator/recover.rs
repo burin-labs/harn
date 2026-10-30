@@ -16,21 +16,32 @@ pub(super) async fn run(args: OrchestratorRecoverArgs) -> Result<(), Orchestrato
     let mut ctx = load_local_runtime(&args.local).await?;
     let stranded = stranded_envelopes(&ctx.event_log, args.envelope_age).await?;
 
-    println!("Recovery:");
-    println!("- dry_run={}", args.dry_run);
-    println!("- min_envelope_age={}", format_duration(args.envelope_age));
-    println!("- stranded_envelopes={}", stranded.len());
+    println!("{}", crate::localization::formatted!("Recovery:"));
+    println!(
+        "{}",
+        crate::localization::formatted!("- dry_run={}", args.dry_run)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "- min_envelope_age={}",
+            format_duration(args.envelope_age)
+        )
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("- stranded_envelopes={}", stranded.len())
+    );
 
     println!();
-    println!("Candidates:");
+    println!("{}", crate::localization::formatted!("Candidates:"));
     if stranded.is_empty() {
-        println!("- none");
+        println!("{}", crate::localization::formatted!("- none"));
         return Ok(());
     }
 
     for envelope in &stranded {
-        println!(
-            "- event_id={} trigger_id={} binding_version={} provider={} kind={} age={} received_at={} inbox_offset={}",
+        println!("{}", crate::localization::formatted!("- event_id={} trigger_id={} binding_version={} provider={} kind={} age={} received_at={} inbox_offset={}",
             envelope.event_id,
             envelope.trigger_id.as_deref().unwrap_or("-"),
             envelope
@@ -41,8 +52,7 @@ pub(super) async fn run(args: OrchestratorRecoverArgs) -> Result<(), Orchestrato
             envelope.kind,
             format_duration(envelope.age),
             format_timestamp(envelope.received_at),
-            envelope.inbox_offset,
-        );
+            envelope.inbox_offset,));
     }
 
     if args.dry_run {
@@ -50,19 +60,17 @@ pub(super) async fn run(args: OrchestratorRecoverArgs) -> Result<(), Orchestrato
     }
 
     println!();
-    println!("Replay results:");
+    println!("{}", crate::localization::formatted!("Replay results:"));
     for envelope in stranded {
         let handle = trigger_replay(&mut ctx, &envelope.event_id).await?;
-        println!(
-            "- event_id={} status={} replay_of_event_id={} binding_id={} binding_version={} dlq_entry_id={} error={}",
+        println!("{}", crate::localization::formatted!("- event_id={} status={} replay_of_event_id={} binding_id={} binding_version={} dlq_entry_id={} error={}",
             handle.event_id,
             handle.status,
             handle.replay_of_event_id.as_deref().unwrap_or("-"),
             handle.binding_id,
             handle.binding_version,
             handle.dlq_entry_id.as_deref().unwrap_or("-"),
-            handle.error.as_deref().unwrap_or("-"),
-        );
+            handle.error.as_deref().unwrap_or("-"),));
     }
 
     Ok(())

@@ -1,10 +1,5 @@
-const _: (&str, fn()) = (
-    crate::required_pr_e2e::CASES[18],
-    connector_http_get_uses_read_authority_and_preserves_retry,
-);
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn connector_http_get_uses_read_authority_and_preserves_retry() {
+pub(crate) async fn connector_http_get_uses_read_authority_and_preserves_retry() {
     use std::sync::{Arc, Mutex};
 
     let received = Arc::new(Mutex::new(Vec::new()));

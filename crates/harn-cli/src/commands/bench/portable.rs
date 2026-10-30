@@ -41,31 +41,33 @@ pub(super) fn run(args: BenchPortableArgs, profile: &ProfileArgs) -> Result<(), 
         println!("{json}");
     } else {
         println!(
-            "Portable kernel: {}::{} ({} bytes, {} workers, {} dispatches)",
-            receipt.source,
-            receipt.entry,
-            receipt.artifact_bytes,
-            receipt.workers,
-            receipt.iterations
+            "{}",
+            crate::localization::formatted!(
+                "Portable kernel: {}::{} ({} bytes, {} workers, {} dispatches)",
+                receipt.source,
+                receipt.entry,
+                receipt.artifact_bytes,
+                receipt.workers,
+                receipt.iterations
+            )
         );
-        println!(
-            "First compile: {:.3} ms | repeated compile p50/p95: {:.3}/{:.3} ms | decode: {:.3}/{:.3} ms",
+        println!("{}", crate::localization::formatted!("First compile: {:.3} ms | repeated compile p50/p95: {:.3}/{:.3} ms | decode: {:.3}/{:.3} ms",
             receipt.compile.first_ms,
             receipt.compile.repeated.p50_ms,
             receipt.compile.repeated.p95_ms,
             receipt.decode.as_ref().expect("native decode samples").p50_ms,
-            receipt.decode.as_ref().expect("native decode samples").p95_ms,
-        );
-        println!(
-            "First dispatch: {:.3} ms | repeated dispatch p50/p95: {:.3}/{:.3} ms | batch: {:.3} ms ({:.1} dispatches/s)",
+            receipt.decode.as_ref().expect("native decode samples").p95_ms,));
+        println!("{}", crate::localization::formatted!("First dispatch: {:.3} ms | repeated dispatch p50/p95: {:.3}/{:.3} ms | batch: {:.3} ms ({:.1} dispatches/s)",
             receipt.dispatch.first_ms,
             receipt.dispatch.repeated.p50_ms,
             receipt.dispatch.repeated.p95_ms,
             receipt.dispatch.batch_wall_ms,
-            receipt.dispatch.throughput_per_second,
-        );
+            receipt.dispatch.throughput_per_second,));
         if let Some(path) = args.output {
-            println!("Receipt JSON: {}", path.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("Receipt JSON: {}", path.display())
+            );
         }
     }
     Ok(())

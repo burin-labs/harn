@@ -164,15 +164,22 @@ fn run_test(args: crate::cli::RuleTestArgs) {
             }
         }
         for path in &missing_fixtures {
-            println!("SKIP  {} (no fixture)", path.display());
+            println!(
+                "{}",
+                crate::localization::formatted!("SKIP  {} (no fixture)", path.display())
+            );
         }
         for err in &errors {
             cli_diagnostic!("error: {err}");
         }
         println!(
-            "{} passed, {failed} failed, {} skipped",
-            cases.len() - failed,
-            missing_fixtures.len()
+            "{}",
+            crate::localization::formatted!(
+                "{} passed, {failed} failed, {} skipped",
+                cases.len() - failed,
+                missing_fixtures.len(),
+                failed = failed
+            )
         );
     }
 

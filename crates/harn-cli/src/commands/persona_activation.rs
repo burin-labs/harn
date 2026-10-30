@@ -94,14 +94,17 @@ fn print_receipt(receipt: &PersonaActivationReceipt, json: bool) -> Result<(), S
         );
     } else {
         println!(
-            "{}: {} changed={} ledger={}",
-            match receipt.action {
-                package::PersonaActivationAction::Activate => "activated",
-                package::PersonaActivationAction::Deactivate => "deactivated",
-            },
-            receipt.persona_id,
-            receipt.changed,
-            receipt.ledger_path
+            "{}",
+            crate::localization::formatted!(
+                "{}: {} changed={} ledger={}",
+                match receipt.action {
+                    package::PersonaActivationAction::Activate => "activated",
+                    package::PersonaActivationAction::Deactivate => "deactivated",
+                },
+                receipt.persona_id,
+                receipt.changed,
+                receipt.ledger_path
+            )
         );
     }
     Ok(())
@@ -109,10 +112,16 @@ fn print_receipt(receipt: &PersonaActivationReceipt, json: bool) -> Result<(), S
 
 fn print_activations(activations: &[PersonaActivationRecord]) {
     if activations.is_empty() {
-        println!("No installed persona activations found.");
+        println!(
+            "{}",
+            crate::localization::formatted!("No installed persona activations found.")
+        );
         return;
     }
-    println!("Installed persona activations:");
+    println!(
+        "{}",
+        crate::localization::formatted!("Installed persona activations:")
+    );
     for activation in activations {
         let status = activation
             .migration
@@ -120,12 +129,15 @@ fn print_activations(activations: &[PersonaActivationRecord]) {
             .map(|_| " reactivation-required")
             .unwrap_or("");
         println!(
-            "  {}  package={} digest={} autonomy={}{}",
-            activation.persona_id,
-            activation.package.alias,
-            activation.package.content_hash,
-            activation.effective_policy.autonomy_tier.as_str(),
-            status
+            "{}",
+            crate::localization::formatted!(
+                "  {}  package={} digest={} autonomy={}{}",
+                activation.persona_id,
+                activation.package.alias,
+                activation.package.content_hash,
+                activation.effective_policy.autonomy_tier.as_str(),
+                status
+            )
         );
     }
 }

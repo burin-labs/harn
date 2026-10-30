@@ -39,10 +39,13 @@ pub fn run_unpack(args: PackUnpackArgs) {
     match unpack(&args) {
         Ok(outcome) => {
             println!(
-                "unpacked {} to {} ({} payload entries)",
-                args.bundle.display(),
-                outcome.output_dir.display(),
-                outcome.content_entry_count
+                "{}",
+                crate::localization::formatted!(
+                    "unpacked {} to {} ({} payload entries)",
+                    args.bundle.display(),
+                    outcome.output_dir.display(),
+                    outcome.content_entry_count
+                )
             );
         }
         Err(err) => command_error(&err.message),
@@ -53,11 +56,14 @@ pub fn run_repack(args: PackRepackArgs) {
     match repack(&args) {
         Ok(outcome) => {
             println!(
-                "repacked {} to {} ({} payload entries, {} bytes)",
-                args.dir.display(),
-                outcome.output_path.display(),
-                outcome.content_entry_count,
-                outcome.size_bytes
+                "{}",
+                crate::localization::formatted!(
+                    "repacked {} to {} ({} payload entries, {} bytes)",
+                    args.dir.display(),
+                    outcome.output_path.display(),
+                    outcome.content_entry_count,
+                    outcome.size_bytes
+                )
             );
         }
         Err(err) => command_error(&err.message),
@@ -539,10 +545,13 @@ pub fn run_verify(args: PackVerifyArgs) {
                 println!("{}", to_string_pretty(&envelope));
             } else {
                 println!(
-                    "ok {} (bundle_hash {}, signature_verified={})",
-                    outcome.bundle.display(),
-                    outcome.bundle_hash,
-                    outcome.signature_verified
+                    "{}",
+                    crate::localization::formatted!(
+                        "ok {} (bundle_hash {}, signature_verified={})",
+                        outcome.bundle.display(),
+                        outcome.bundle_hash,
+                        outcome.signature_verified
+                    )
                 );
             }
         }

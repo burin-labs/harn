@@ -113,6 +113,22 @@ jq -e \
 recorded="$(jq -r '.artifacts[] | select(.file == "release-notes.md") | .sha256' "$manifest")"
 [[ "$recorded" == "$(sha256_file "$tmp/files/release-notes.md")" ]] \
   || fail "release notes digest is not the file's digest"
+predicate="$tmp/release-files-provenance.json"
+bash "$root/scripts/release_files_provenance.sh" "$manifest" 0.10.182 > "$predicate"
+jq -e --slurpfile manifest "$manifest" '
+  .schemaVersion == "harn.release_files_provenance.v1" and
+  .repository == $manifest[0].repository and .sourceCommit == $manifest[0].sourceCommit and
+  .workflow == {runId:$manifest[0].runId,runAttempt:$manifest[0].runAttempt} and
+  .files == [$manifest[0].artifacts[] | select(.kind != "archive") | {file,kind,sha256}]
+' "$predicate" >/dev/null || fail 'signed file identities differ from the canonical manifest'
+for mutation in '.artifacts=[]' '.artifacts += [.artifacts[-1]]' '.artifacts[-1].sha256="invalid"'; do
+  jq "$mutation" "$manifest" > "$tmp/invalid-provenance-manifest.json"
+  if bash "$root/scripts/release_files_provenance.sh" "$tmp/invalid-provenance-manifest.json" 0.10.182 \
+    > "$tmp/invalid-predicate.json" 2>/dev/null; then
+    fail "invalid provenance accepted: $mutation"
+  fi
+  [[ ! -s "$tmp/invalid-predicate.json" ]] || fail 'invalid provenance emitted a predicate'
+done
 recorded="$(jq -r '.artifacts[] | select(.target == "x86_64-pc-windows-msvc") | .sha256' "$manifest")"
 [[ "$recorded" == "$(sha256_file "$tmp/archives/harn-x86_64-pc-windows-msvc.zip")" ]] \
   || fail "archive digest is not the archive's digest"

@@ -377,15 +377,13 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
                     .map_err(|error| format!("failed to serialize migration census: {error}"))?
             );
         } else {
-            println!(
-                "implicit-any compatibility: scanned={} observed={} changed={} pending={} unresolved={} changed-semantics={}",
+            println!("{}", crate::localization::formatted!("implicit-any compatibility: scanned={} observed={} changed={} pending={} unresolved={} changed-semantics={}",
                 report.scanned_file_count,
                 report.observed_count,
                 report.changed_count,
                 report.pending_count,
                 report.unresolved_count,
-                report.changed_semantics_count
-            );
+                report.changed_semantics_count));
             for finding in report
                 .unresolved
                 .iter()

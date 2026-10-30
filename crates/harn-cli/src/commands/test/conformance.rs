@@ -1401,7 +1401,7 @@ pub(crate) async fn run_conformance_tests(
 
     if !skipped_summary.is_empty() {
         println!();
-        println!("Skipped (xfail):");
+        println!("{}", crate::localization::formatted!("Skipped (xfail):"));
         for (path, reason) in &skipped_summary {
             println!("  {path}  ({reason})");
         }
@@ -1409,7 +1409,13 @@ pub(crate) async fn run_conformance_tests(
 
     if show_timing {
         println!();
-        println!("Total time: {total_duration_ms} ms");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Total time: {total_duration_ms} ms",
+                total_duration_ms = total_duration_ms
+            )
+        );
 
         print_per_test_timing(&report);
     }
@@ -1420,7 +1426,7 @@ pub(crate) async fn run_conformance_tests(
 
     if !errors.is_empty() {
         println!();
-        println!("Failures:");
+        println!("{}", crate::localization::formatted!("Failures:"));
         for err in &errors {
             println!("  {err}");
         }
@@ -1474,7 +1480,7 @@ pub(crate) async fn run_conformance_determinism_tests(
             passed + failed
         );
         println!();
-        println!("Failures:");
+        println!("{}", crate::localization::formatted!("Failures:"));
         for error in errors {
             println!("  {error}");
         }

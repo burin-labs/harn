@@ -75,7 +75,7 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
             }))
             .expect("send timeline query");
         let snapshot = recv_json(&mut response_rx).await;
-        assert_eq!(snapshot["id"], 20);
+        assert_eq!(snapshot["id"], 20, "{snapshot}");
         assert_eq!(
             snapshot["result"]["schemaVersion"],
             SESSION_TIMELINE_SCHEMA_VERSION

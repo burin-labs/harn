@@ -184,9 +184,12 @@ pub async fn doctor_report_for_persona(
 
 fn print_report(report: &PersonaDoctorReport) {
     println!(
-        "persona doctor: {} ({})",
-        report.persona,
-        report.manifest_path.display()
+        "{}",
+        crate::localization::formatted!(
+            "persona doctor: {} ({})",
+            report.persona,
+            report.manifest_path.display()
+        )
     );
     for check in &report.checks {
         println!(

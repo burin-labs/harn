@@ -2,7 +2,7 @@
   "baseline": {
     "agent_events->orchestration": 6,
     "agent_sessions->orchestration": 12,
-    "agent_sessions->stdlib": 17,
+    "agent_sessions->stdlib": 16,
     "connectors->stdlib": 9,
     "llm->agent_events": 116,
     "llm->agent_sessions": 405,

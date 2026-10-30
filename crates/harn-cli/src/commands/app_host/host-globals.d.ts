@@ -2,6 +2,21 @@ declare const __HARN_SANDBOX_ORIGIN__: string;
 declare const __HARN_TITLE__: string;
 declare const __HARN_VERSION__: string;
 
+declare const HarnAppLocalization: {
+  resolve(candidates: readonly (string | null | undefined)[]): {
+    locale: string;
+    copy: {
+      app: string;
+      sandbox: string;
+      content: string;
+      starting: string;
+      ready: string;
+      connected: string;
+    };
+  };
+  supportedLocales: readonly string[];
+};
+
 type JsonRpcId = string | number;
 
 type JsonRpcMessage = {

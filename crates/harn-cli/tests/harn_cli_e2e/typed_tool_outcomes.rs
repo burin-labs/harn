@@ -342,7 +342,7 @@ fn calls(temp: &tempfile::TempDir, name: &str) -> usize {
 }
 
 #[test]
-fn agent_validates_payload_without_losing_the_explicit_outcome() {
+pub(crate) fn agent_validates_payload_without_losing_the_explicit_outcome() {
     let temp = fixture();
     fs::write(
         temp.path().join("tools.harn"),
@@ -391,7 +391,7 @@ fn request(id: u64, method: &str, mut params: Value) -> Value {
 }
 
 #[test]
-fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
+pub(crate) fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
     provenance::assert_cli_and_mcp_provenance();
     let temp = fixture();
     let domain = json!({"ok": false, "success": false, "status": "error"});
@@ -564,7 +564,7 @@ fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
 }
 
 #[tokio::test]
-async fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
+pub(crate) async fn exported_mcp_resolves_typed_payload_schema_and_preserves_feedback() {
     let temp = fixture();
     let mut command = harn_e2e_command();
     command

@@ -54,6 +54,9 @@ pub(crate) fn dispatch(command: Command) {
         }
         Command::DumpCliSurface(args) => {
             commands::argument_schema::dump_surface(&args.output, args.check);
+            if let Some(path) = args.messages_output {
+                crate::localization::dump_catalog(&path, args.check);
+            }
         }
         Command::DumpConnectorMatrix(args) => {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);

@@ -1,0 +1,11 @@
+Landed parser, product-path Harn tests:
+
+PASS  test_generic_import_query_keeps_call_tree
+FAIL  test_import_type_member_in_generic_call
+PASS  test_invalid_generic_import_query_reports_post_edit_diagnostic
+PASS  test_post_edit_syntax_check_reads_the_changed_file
+PASS  test_typeof_import_comparison_remains_valid
+PASS  test_valid_generic_import_query_has_no_post_edit_diagnostic
+
+5 passed, 1 failed, 0 skipped, 6 total
+test_import_type_member_in_generic_call: expected "applied", actual "parser_not_verified"

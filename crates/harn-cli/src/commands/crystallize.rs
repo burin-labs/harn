@@ -88,15 +88,28 @@ fn run_mine(args: CrystallizeArgs) -> Result<(), String> {
         .as_deref()
         .unwrap_or("none");
     println!(
-        "Crystallization: selected={selected} candidates={} rejected={} traces={}",
-        report_struct.candidates.len(),
-        report_struct.rejected_candidates.len(),
-        report_struct.source_trace_count
+        "{}",
+        crate::localization::formatted!(
+            "Crystallization: selected={selected} candidates={} rejected={} traces={}",
+            report_struct.candidates.len(),
+            report_struct.rejected_candidates.len(),
+            report_struct.source_trace_count,
+            selected = selected
+        )
     );
-    println!("Workflow: {out}");
-    println!("Report: {report}");
+    println!(
+        "{}",
+        crate::localization::formatted!("Workflow: {out}", out = out)
+    );
+    println!(
+        "{}",
+        crate::localization::formatted!("Report: {report}", report = report)
+    );
     if let Some(path) = args.eval_pack.as_deref() {
-        println!("Eval pack: {path}");
+        println!(
+            "{}",
+            crate::localization::formatted!("Eval pack: {path}", path = path)
+        );
     }
 
     if let (Some(bundle_dir), Some(bundle)) = (args.bundle.as_deref(), bundle) {
@@ -104,10 +117,14 @@ fn run_mine(args: CrystallizeArgs) -> Result<(), String> {
             harn_vm::orchestration::write_crystallization_bundle(&bundle, Path::new(bundle_dir))
                 .map_err(|error| error.to_string())?;
         println!(
-            "Bundle: {bundle_dir} (kind={:?} schema_version={} fixtures={})",
-            manifest.kind,
-            manifest.schema_version,
-            manifest.fixtures.len()
+            "{}",
+            crate::localization::formatted!(
+                "Bundle: {bundle_dir} (kind={:?} schema_version={} fixtures={})",
+                manifest.kind,
+                manifest.schema_version,
+                manifest.fixtures.len(),
+                bundle_dir = bundle_dir
+            )
         );
     }
 
@@ -123,33 +140,34 @@ fn run_validate(args: CrystallizeValidateArgs) -> Result<(), String> {
         harn_vm::orchestration::validate_crystallization_bundle(Path::new(&args.bundle_dir))
             .map_err(|error| error.to_string())?;
     println!(
-        "Bundle: {} (schema={} schema_version={} kind={:?} candidate_id={})",
-        validation.bundle_dir,
-        if validation.schema.is_empty() {
-            "(unknown)".to_string()
-        } else {
-            validation.schema.clone()
-        },
-        validation.schema_version,
-        validation.kind,
-        if validation.candidate_id.is_empty() {
-            "-"
-        } else {
-            validation.candidate_id.as_str()
-        }
+        "{}",
+        crate::localization::formatted!(
+            "Bundle: {} (schema={} schema_version={} kind={:?} candidate_id={})",
+            validation.bundle_dir,
+            if validation.schema.is_empty() {
+                "(unknown)".to_string()
+            } else {
+                validation.schema.clone()
+            },
+            validation.schema_version,
+            validation.kind,
+            if validation.candidate_id.is_empty() {
+                "-"
+            } else {
+                validation.candidate_id.as_str()
+            }
+        )
     );
-    println!(
-        "Checks: manifest={} workflow={} report={} eval_pack={} skill={} fixtures={} redaction={}",
+    println!("{}", crate::localization::formatted!("Checks: manifest={} workflow={} report={} eval_pack={} skill={} fixtures={} redaction={}",
         ok_label(validation.manifest_ok),
         ok_label(validation.workflow_ok),
         ok_label(validation.report_ok),
         ok_label(validation.eval_pack_ok),
         ok_label(validation.skill_ok),
         ok_label(validation.fixtures_ok),
-        ok_label(validation.redaction_ok),
-    );
+        ok_label(validation.redaction_ok),));
     if validation.problems.is_empty() {
-        println!("OK");
+        println!("{}", crate::localization::formatted!("OK"));
         Ok(())
     } else {
         for problem in &validation.problems {
@@ -167,8 +185,14 @@ fn run_shadow(args: CrystallizeShadowArgs) -> Result<(), String> {
         harn_vm::orchestration::shadow_replay_bundle(Path::new(&args.bundle_dir))
             .map_err(|error| error.to_string())?;
     println!(
-        "Shadow replay: bundle={} candidate_id={} compared={} pass={}",
-        args.bundle_dir, manifest.candidate_id, shadow.compared_traces, shadow.pass
+        "{}",
+        crate::localization::formatted!(
+            "Shadow replay: bundle={} candidate_id={} compared={} pass={}",
+            args.bundle_dir,
+            manifest.candidate_id,
+            shadow.compared_traces,
+            shadow.pass
+        )
     );
     if !shadow.failures.is_empty() {
         for failure in &shadow.failures {
@@ -248,10 +272,19 @@ fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
             args.eval_pack.as_deref().map(Path::new),
         )
         .map_err(|error| error.to_string())?;
-        println!("Workflow: {out}");
-        println!("Report: {report_path}");
+        println!(
+            "{}",
+            crate::localization::formatted!("Workflow: {out}", out = out)
+        );
+        println!(
+            "{}",
+            crate::localization::formatted!("Report: {report_path}", report_path = report_path)
+        );
         if let Some(eval_path) = args.eval_pack.as_deref() {
-            println!("Eval pack: {eval_path}");
+            println!(
+                "{}",
+                crate::localization::formatted!("Eval pack: {eval_path}", eval_path = eval_path)
+            );
         }
     }
 
@@ -261,34 +294,46 @@ fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
     let report = &artifacts.report;
     let candidate_id = report.selected_candidate_id.as_deref().unwrap_or("(none)");
     println!(
-        "Ingest: from={} run_id={} version={}->{} candidate={}",
-        args.from,
-        fixture.manifest.run_id,
-        fixture.manifest.release.current_version,
-        fixture.manifest.release.next_version,
-        candidate_id
+        "{}",
+        crate::localization::formatted!(
+            "Ingest: from={} run_id={} version={}->{} candidate={}",
+            args.from,
+            fixture.manifest.run_id,
+            fixture.manifest.release.current_version,
+            fixture.manifest.release.next_version,
+            candidate_id
+        )
     );
     println!(
-        "Bundle: {} (kind={:?} schema_version={} fixtures={})",
-        args.bundle,
-        manifest.kind,
-        manifest.schema_version,
-        manifest.fixtures.len()
+        "{}",
+        crate::localization::formatted!(
+            "Bundle: {} (kind={:?} schema_version={} fixtures={})",
+            args.bundle,
+            manifest.kind,
+            manifest.schema_version,
+            manifest.fixtures.len()
+        )
     );
     if let Some(summary) = &report.segment_summary {
         println!(
-            "Segments: deterministic={} agentic={} (review-required: {})",
-            summary.deterministic_count,
-            summary.agentic_count,
-            summary.requires_human_review.len()
+            "{}",
+            crate::localization::formatted!(
+                "Segments: deterministic={} agentic={} (review-required: {})",
+                summary.deterministic_count,
+                summary.agentic_count,
+                summary.requires_human_review.len()
+            )
         );
     }
     if let Some(recovery) = &report.recovery_summary {
         println!(
-            "Recovery: shell_failures={} recovery_runs={} fed_into_agent={}",
-            recovery.shell_failures_seen,
-            recovery.recovery_advice_runs,
-            recovery.failures_fed_into_agent
+            "{}",
+            crate::localization::formatted!(
+                "Recovery: shell_failures={} recovery_runs={} fed_into_agent={}",
+                recovery.shell_failures_seen,
+                recovery.recovery_advice_runs,
+                recovery.failures_fed_into_agent
+            )
         );
     }
 
@@ -300,8 +345,13 @@ fn run_ingest(args: CrystallizeIngestArgs) -> Result<(), String> {
         let (shadow_manifest, shadow) = harn_vm::orchestration::shadow_replay_bundle(&bundle_dir)
             .map_err(|error| error.to_string())?;
         println!(
-            "Shadow replay: candidate_id={} compared={} pass={}",
-            shadow_manifest.candidate_id, shadow.compared_traces, shadow.pass
+            "{}",
+            crate::localization::formatted!(
+                "Shadow replay: candidate_id={} compared={} pass={}",
+                shadow_manifest.candidate_id,
+                shadow.compared_traces,
+                shadow.pass
+            )
         );
         if !shadow.pass {
             for failure in &shadow.failures {

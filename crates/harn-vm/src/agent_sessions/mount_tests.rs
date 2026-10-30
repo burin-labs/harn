@@ -3,6 +3,72 @@
 
 use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
 
+struct SessionCapRestore(usize);
+
+impl SessionCapRestore {
+    fn set(cap: usize) -> Self {
+        let previous = crate::agent_sessions::session_cap();
+        crate::agent_sessions::set_session_cap(cap);
+        Self(previous)
+    }
+}
+
+impl Drop for SessionCapRestore {
+    fn drop(&mut self) {
+        crate::agent_sessions::set_session_cap(self.0);
+    }
+}
+
+#[test]
+fn retained_session_roots_survive_capacity_pressure_until_release() {
+    use crate::agent_sessions::{open_or_create, open_retained_with_actor_chain, SessionOpenError};
+    crate::reset_thread_local_state();
+    let _cap = SessionCapRestore::set(1);
+    let (session, retention) =
+        open_retained_with_actor_chain(Some("retained-root".into()), None).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let mut anchor = WorkspaceAnchor {
+        primary: root.path().to_path_buf(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".into(),
+    };
+    anchor.canonicalize_roots().unwrap();
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor.clone())).unwrap();
+    let error = open_or_create(Some("pressure".into())).unwrap_err();
+    assert!(matches!(
+        error,
+        SessionOpenError::CapacityExhausted {
+            limit: 1,
+            active: 1,
+            protected: 1
+        }
+    ));
+    assert_eq!(
+        crate::agent_sessions::workspace_anchor(&session),
+        Some(anchor)
+    );
+    drop(retention);
+    assert_eq!(open_or_create(Some("pressure".into())).unwrap(), "pressure");
+    assert!(!crate::agent_sessions::exists(&session));
+}
+
+#[test]
+fn session_retention_is_bound_to_the_admitted_generation() {
+    use crate::agent_sessions::{close, open_or_create, open_retained_with_actor_chain};
+    crate::reset_thread_local_state();
+    let _cap = SessionCapRestore::set(1);
+    let (id, old) = open_retained_with_actor_chain(Some("reused-root".into()), None).unwrap();
+    assert!(close(&id));
+    let (_, current) = open_retained_with_actor_chain(Some(id.clone()), None).unwrap();
+    drop(old);
+    open_or_create(Some("pressure".into())).unwrap_err();
+    assert!(close(&id));
+    open_or_create(Some(id.clone())).unwrap();
+    assert_eq!(open_or_create(Some("pressure".into())).unwrap(), "pressure");
+    assert!(!crate::agent_sessions::exists(&id));
+    drop(current);
+}
+
 fn root_mounted_events(session: &str) -> usize {
     crate::agent_sessions::transcript(session)
         .as_ref()

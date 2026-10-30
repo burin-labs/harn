@@ -1760,20 +1760,8 @@ jobs:
             --archives-dir "$archives" \
             --release-files-dir "$release_files"
           cat "$manifest_dir/candidate-manifest.json"
-          jq -n \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg sourceCommit "$SOURCE_COMMIT" \
-            --arg version "$VERSION" \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
-            '{
-              schemaVersion: "harn.release_files_provenance.v1",
-              phase: "candidate",
-              repository: $repository,
-              sourceCommit: $sourceCommit,
-              version: $version,
-              workflow: {runId: $runId, runAttempt: $runAttempt}
-            }' > "$RUNNER_TEMP/release-files-provenance.json"
+          bash scripts/release_files_provenance.sh "$manifest_dir/candidate-manifest.json" "$VERSION" \
+            > "$RUNNER_TEMP/release-files-provenance.json"
           {
             echo "release_files=$release_files"
             echo "manifest=$manifest_dir/candidate-manifest.json"

@@ -1,8 +1,8 @@
 import { LiveBumpFetch, LiveBumpRemote } from "std/bump/live"
-import { BumpAutoMerge } from "std/bump/runtime"
+import { BumpAutoMerge, BumpPrState } from "std/bump/runtime"
 import { command_run } from "std/command"
 import { github_bump_access_token } from "./authentication"
-import { bump_refresh_headline } from "./github_authority"
+import { bump_refresh_admission, bump_refresh_headline } from "./github_authority"
 /** GitHub package implementation of std/bump/live's remote capability. */
 import {
   GithubBranchHeadRequest,
@@ -55,6 +55,116 @@ pub type GithubBumpRemoteConfig = {
 }
 
 type GithubRepo = {owner: string, name: string}
+
+type RefreshProtectionPull = {
+  state: string,
+  headRefOid: string,
+  autoMergeRequest: {enabledAt: string}?,
+  isInMergeQueue: bool,
+  labels: {totalCount: int, pageInfo: {hasNextPage: bool}, nodes: list<{name: string}>},
+  latestOpinionatedReviews: {
+    totalCount: int,
+    pageInfo: {hasNextPage: bool},
+    nodes: list<{state: string, commit: {oid: string}?}>,
+  },
+}
+
+type RefreshProtectionResponse = {
+  data: {repository: {pullRequest: RefreshProtectionPull?}?},
+  errors?: list<{message: string}>,
+}
+
+/** Read every admission control together and bind it to the head being replaced. */
+fn __require_refresh_mutable(
+  harness: Harness,
+  repo: GithubRepo,
+  options: GithubClientOptions,
+  number: int,
+  expected_head: string,
+) {
+  const response: RefreshProtectionResponse = schema_expect(
+    __must(
+      api_call(
+        harness,
+        {
+          path: "/graphql",
+          method: "POST",
+          body: {
+            query:
+              "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state headRefOid autoMergeRequest{enabledAt} isInMergeQueue labels(first:100){totalCount pageInfo{hasNextPage} nodes{name}} latestOpinionatedReviews(first:100,writersOnly:true){totalCount pageInfo{hasNextPage} nodes{state commit{oid}}}}}}",
+            variables: {owner: repo.owner, repo: repo.name, number: number},
+          },
+          options: options,
+        },
+      ),
+      "refresh protection read",
+    ),
+    schema_of(RefreshProtectionResponse),
+  )
+  require len(response.errors ?? []) == 0, "bump-driver: refresh protection query reported errors"
+  const pull = response.data.repository?.pullRequest
+  require pull != nil && pull.state == "OPEN" && pull.headRefOid == expected_head,
+    "bump-driver: refresh protection did not read the expected open pull request head"
+  const admission = bump_refresh_admission(
+    {
+      head_oid: pull.headRefOid,
+      auto_merge_armed: pull.autoMergeRequest != nil,
+      queued: pull.isInMergeQueue,
+      labels: {
+        total_count: pull.labels.totalCount,
+        has_next_page: pull.labels.pageInfo.hasNextPage,
+        names: pull.labels.nodes.map({ label -> label.name }),
+      },
+      reviews: {
+        total_count: pull.latestOpinionatedReviews.totalCount,
+        has_next_page: pull.latestOpinionatedReviews.pageInfo.hasNextPage,
+        nodes: pull.latestOpinionatedReviews.nodes.map(
+          { review -> {state: review.state, head_oid: review.commit?.oid} },
+        ),
+      },
+    },
+  )
+  require admission.allowed,
+    "bump-driver: preserving #${number} at ${expected_head}: ${admission.reason}; let this head finish delivery before requesting a replacement"
+}
+
+fn __find_mutable_bump_pr(
+  harness: Harness,
+  repo: GithubRepo,
+  config: GithubBumpRemoteConfig,
+  options: GithubClientOptions,
+) -> BumpPrState? {
+  const found = github_find_open_pr(
+    harness,
+    {
+      owner: repo.owner,
+      repo: repo.name,
+      head_ref: config.branch,
+      base_ref: config.base,
+      head_owner: repo.owner,
+      options: options,
+    },
+  )
+  require found.ok, "bump-driver: pull request lookup failed: " + json_stringify(found.error)
+  require found.total_matches <= 1,
+    "bump-driver: pull request lookup found multiple exact head/base matches"
+  if !found.found {
+    return nil
+  }
+  const pull = found.pull_request
+  require pull != nil, "bump-driver: found pull request lookup omitted its typed pull request"
+  __require_refresh_mutable(harness, repo, options, pull.number, pull.head.sha)
+  return {
+    number: pull.number,
+    head_oid: pull.head.sha,
+    base_ref: pull.base.ref,
+    base_oid: pull.base.sha,
+    auto_merge_enabled: pull.auto_merge_armed,
+    auto_merge_method: pull.auto_merge_method,
+    url: pull.url,
+    state: pull.github_state,
+  }
+}
 
 /** Older targets can parse the driver and reach its runtime-contract diagnostic. */
 type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<string>, ...rest}
@@ -355,44 +465,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       }
       return outcome
     },
-    find_bump_pr: fn() {
-      const found = github_find_open_pr(
-        harness,
-        {
-          owner: repo.owner,
-          repo: repo.name,
-          head_ref: config.branch,
-          base_ref: config.base,
-          head_owner: repo.owner,
-          options: options,
-        },
-      )
-      if !found.ok {
-        throw "bump-driver: pull request lookup failed: " + json_stringify(found.error)
-      }
-      if found.total_matches > 1 {
-        throw "bump-driver: pull request lookup found "
-          + to_string(found.total_matches)
-          + " exact head/base matches"
-      }
-      if !found.found {
-        return nil
-      }
-      const pull = found.pull_request
-      if pull == nil {
-        throw "bump-driver: found pull request lookup omitted its typed pull request"
-      }
-      return {
-        number: pull.number,
-        head_oid: pull.head.sha,
-        base_ref: pull.base.ref,
-        base_oid: pull.base.sha,
-        auto_merge_enabled: pull.auto_merge_armed,
-        auto_merge_method: pull.auto_merge_method,
-        url: pull.url,
-        state: pull.github_state,
-      }
-    },
+    find_bump_pr: fn() { return __find_mutable_bump_pr(harness, repo, config, options) },
     disable_auto_merge: fn(pull, base_oid) {
       __must(
         pulls_disable_auto_merge(
@@ -414,6 +487,11 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
     },
     publish_commit: fn(request) {
       const metadata: PublicationMetadata = schema_expect(request, schema_of(PublicationMetadata))
+      if (metadata.expected_branch_oid ?? "") != "" {
+        const current = __find_mutable_bump_pr(harness, repo, config, options)
+        require current != nil && current.head_oid == metadata.expected_branch_oid,
+          "bump-driver: the existing pull request moved or closed during refresh"
+      }
       const publication: GithubWorktreeCommitRequest = {
         owner: repo.owner,
         repo: repo.name,

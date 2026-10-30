@@ -68,7 +68,12 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
             &artifacts,
         )?);
         if drift.is_empty() {
-            println!("provider catalog generated artifacts are up to date");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "provider catalog generated artifacts are up to date"
+                )
+            );
             return Ok(());
         }
         for path in drift {
@@ -81,18 +86,27 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
 
     write_file(&args.providers_output, &provider_config.body)?;
     println!(
-        "wrote {} from {} TOML fragments",
-        args.providers_output.display(),
-        provider_config.fragment_count
+        "{}",
+        crate::localization::formatted!(
+            "wrote {} from {} TOML fragments",
+            args.providers_output.display(),
+            provider_config.fragment_count
+        )
     );
     write_file(&args.capabilities_output, &capabilities.body)?;
     println!(
-        "wrote {} from {} TOML fragments",
-        args.capabilities_output.display(),
-        capabilities.fragment_count
+        "{}",
+        crate::localization::formatted!(
+            "wrote {} from {} TOML fragments",
+            args.capabilities_output.display(),
+            capabilities.fragment_count
+        )
     );
     write_file(&args.stdlib_provider_names_output, &stdlib_provider_names)?;
-    println!("wrote {}", args.stdlib_provider_names_output.display());
+    println!(
+        "{}",
+        crate::localization::formatted!("wrote {}", args.stdlib_provider_names_output.display())
+    );
     fs::create_dir_all(&args.artifact_dir).map_err(|error| {
         format!(
             "failed to create provider catalog artifact directory {}: {error}",
@@ -102,7 +116,10 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
     for artifact in artifacts {
         let path = args.artifact_dir.join(artifact.relative_path);
         write_file(&path, &artifact.body)?;
-        println!("wrote {}", path.display());
+        println!(
+            "{}",
+            crate::localization::formatted!("wrote {}", path.display())
+        );
     }
     Ok(())
 }

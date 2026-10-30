@@ -1,6 +1,6 @@
 use super::*;
 use axum::response::IntoResponse;
-use harn_session_store::{CreateSession, ReadRange, SessionStore};
+use harn_session_store::{ReadRange, SessionStore};
 use serde_json::json;
 
 #[tokio::test(flavor = "current_thread")]
@@ -90,15 +90,9 @@ auth_style = "none"
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    store
-        .create(CreateSession {
-            id: Some(session_id.clone()),
-            cwd: Some(workspace.clone()),
-            project_scope: Some(workspace),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    let admitted = store.describe(&session_id).await.unwrap();
+    assert_eq!(admitted.cwd.as_deref(), Some(workspace.as_str()));
+    assert_eq!(admitted.project_scope.as_deref(), Some(workspace.as_str()));
     let (response, body) = {
         let prompt =
             super::served_agent_turn::prompt(&tx, &mut rx, &session_id, 2, "Reply briefly");

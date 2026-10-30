@@ -583,9 +583,17 @@ fn round4(value: f64) -> f64 {
 
 fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
     if report.responses == 0 {
-        println!("No LLM usage recorded (0 provider_call_response events matched).");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "No LLM usage recorded (0 provider_call_response events matched)."
+            )
+        );
         if !report.sources.is_empty() {
-            println!("Sources: {}", report.sources.join(", "));
+            println!(
+                "{}",
+                crate::localization::formatted!("Sources: {}", report.sources.join(", "))
+            );
         }
         return;
     }
@@ -598,20 +606,28 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
         );
 
     println!(
-        "harn usage — {} provider calls in {} responses across {} source{}, {} by {}",
-        report.provider_calls,
-        report.responses,
-        report.sources.len(),
-        if report.sources.len() == 1 { "" } else { "s" },
-        format_accounted_cost(&report.totals),
-        header,
+        "{}",
+        crate::localization::formatted!(
+            "harn usage: provider calls={}, responses={}, sources={}, {}, grouped by {}",
+            report.provider_calls,
+            report.responses,
+            report.sources.len(),
+            format_accounted_cost(&report.totals),
+            header,
+        )
     );
     println!();
 
     if time_series {
         println!(
             "{:<12}  {:>6}  {:>10}  {:>12}  {:>10}  {:>9}  {:>7}",
-            header, "calls", "known cost", "known cumulative", "in_tok", "out_tok", "cache%"
+            header,
+            crate::localization::formatted!("calls"),
+            crate::localization::formatted!("known cost"),
+            crate::localization::formatted!("known cumulative"),
+            crate::localization::formatted!("in_tok"),
+            crate::localization::formatted!("out_tok"),
+            crate::localization::formatted!("cache%")
         );
         for group in &report.groups {
             println!(
@@ -629,13 +645,13 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
         println!(
             "{:<20}  {:>6}  {:>10}  {:>10}  {:>9}  {:>7}  {:>10}  {:>9}",
             header,
-            "calls",
-            "known cost",
-            "in_tok",
-            "out_tok",
-            "cache%",
-            "cache_save",
-            "ms/response"
+            crate::localization::formatted!("calls"),
+            crate::localization::formatted!("known cost"),
+            crate::localization::formatted!("in_tok"),
+            crate::localization::formatted!("out_tok"),
+            crate::localization::formatted!("cache%"),
+            crate::localization::formatted!("cache_save"),
+            crate::localization::formatted!("ms/response")
         );
         for group in &report.groups {
             println!(
@@ -654,19 +670,20 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
 
     println!();
     println!(
-        "total: {} provider calls, {}, {} in / {} out tok, {} cache savings",
-        report.totals.provider_calls,
-        format_accounted_cost(&report.totals),
-        report.totals.input_tokens,
-        report.totals.output_tokens,
-        format_usd(report.totals.cache_savings_usd),
+        "{}",
+        crate::localization::formatted!(
+            "total: {} provider calls, {}, {} in / {} out tok, {} cache savings",
+            report.totals.provider_calls,
+            format_accounted_cost(&report.totals),
+            report.totals.input_tokens,
+            report.totals.output_tokens,
+            format_usd(report.totals.cache_savings_usd),
+        )
     );
     if report.totals.usage_unknown_calls > 0 {
-        println!(
-            "warning: token usage is unknown for {} provider call{}; zero token fields are not measurements",
+        println!("{}", crate::localization::formatted!("warning: token usage is unknown (provider calls: {}); zero token fields are not measurements",
             report.totals.usage_unknown_calls,
-            if report.totals.usage_unknown_calls == 1 { "" } else { "s" },
-        );
+            ));
     }
 }
 

@@ -1,5 +1,5 @@
 // @ts-check
-/* global HarnAppHostProtocol */
+/* global HarnAppHostProtocol, HarnAppLocalization */
 
 /**
  * @typedef {object} ResourcePolicy
@@ -40,6 +40,13 @@
   const view = /** @type {HTMLIFrameElement} */ (
     document.getElementById("view")
   );
+  const { locale, copy } = HarnAppLocalization.resolve([
+    new URLSearchParams(location.search).get("locale"),
+    ...navigator.languages,
+  ]);
+  document.documentElement.lang = locale;
+  document.title = copy.sandbox;
+  view.title = copy.content;
   /** @type {Worker | null} */
   let portableWorker = null;
 

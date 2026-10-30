@@ -158,7 +158,10 @@ fn parse_sub_agent_workspace_anchor(
     if matches!(value, VmValue::Nil) {
         return Ok(None);
     }
-    let anchor = crate::workspace_anchor::parse_anchor_dict(value)
+    let mut anchor = crate::workspace_anchor::parse_anchor_dict(value)
+        .map_err(|message| VmError::Runtime(format!("{SUB_AGENT_RUN_FN}: anchor: {message}")))?;
+    anchor
+        .canonicalize_roots()
         .map_err(|message| VmError::Runtime(format!("{SUB_AGENT_RUN_FN}: anchor: {message}")))?;
     Ok(Some(anchor))
 }

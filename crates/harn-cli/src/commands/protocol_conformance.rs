@@ -84,14 +84,23 @@ pub(crate) fn run_protocol_conformance(
             eprintln!("{error}");
         }
         eprintln!(
-            "Protocol conformance failed: {} passed, {} failed, {} skipped",
-            report.passed, report.failed, report.skipped
+            "{}",
+            crate::localization::formatted!(
+                "Protocol conformance failed: {} passed, {} failed, {} skipped",
+                report.passed,
+                report.failed,
+                report.skipped
+            )
         );
         process::exit(1);
     }
     println!(
-        "Protocol conformance passed: {} passed, {} skipped",
-        report.passed, report.skipped
+        "{}",
+        crate::localization::formatted!(
+            "Protocol conformance passed: {} passed, {} skipped",
+            report.passed,
+            report.skipped
+        )
     );
 }
 

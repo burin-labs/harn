@@ -1,5 +1,5 @@
 // @ts-check
-/* global HarnAppHostProtocol */
+/* global HarnAppHostProtocol, HarnAppLocalization */
 
 /**
  * @typedef {object} AppDescriptor
@@ -15,6 +15,7 @@
   const sandboxOrigin = __HARN_SANDBOX_ORIGIN__;
   const hostVersion = __HARN_VERSION__;
   const viewConnection = HarnAppHostProtocol.createViewConnection();
+  const { locale, copy } = HarnAppLocalization.resolve(navigator.languages);
   const frame = /** @type {HTMLIFrameElement} */ (
     document.getElementById("sandbox")
   );
@@ -25,7 +26,10 @@
   /** @type {AppDescriptor | null} */
   let descriptor = null;
   name.textContent = title;
-  document.title = `${title} — Harn App`;
+  document.title = `${title} | ${copy.app}`;
+  document.documentElement.lang = locale;
+  frame.title = copy.app;
+  status.textContent = copy.starting;
 
   /** @param {JsonRpcMessage} message */
   function reply(message) {
@@ -108,7 +112,7 @@
           permissions: descriptor.sandbox.permissions,
         },
       });
-      status.textContent = "ready";
+      status.textContent = copy.ready;
       return;
     }
 
@@ -144,7 +148,7 @@
           displayMode: "fullscreen",
           availableDisplayModes: ["fullscreen"],
           containerDimensions: { width: innerWidth, height: innerHeight - 48 },
-          locale: navigator.language,
+          locale,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           userAgent: navigator.userAgent,
           platform: "web",
@@ -159,7 +163,7 @@
 
     if (message.method === "ui/notifications/initialized") {
       if (viewConnection.markReady()) {
-        status.textContent = "connected";
+        status.textContent = copy.connected;
       }
       return;
     }
@@ -240,5 +244,5 @@
     });
   });
 
-  frame.src = `${sandboxOrigin}/sandbox?host_origin=${encodeURIComponent(location.origin)}`;
+  frame.src = `${sandboxOrigin}/sandbox?host_origin=${encodeURIComponent(location.origin)}&locale=${encodeURIComponent(locale)}`;
 })();

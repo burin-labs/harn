@@ -152,7 +152,15 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
     match harn_ir::explain_handler_invariant(&program, target, invariant) {
         Ok(diagnostics) => {
             if diagnostics.is_empty() {
-                println!("No `{invariant}` violations found for `{target}` in {file}.");
+                println!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "No `{invariant}` violations found for `{target}` in {file}.",
+                        file = file,
+                        invariant = invariant,
+                        target = target
+                    )
+                );
                 return 0;
             }
             for diagnostic in diagnostics {
@@ -171,7 +179,10 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
                     );
                 }
                 if let Some(help) = &diagnostic.help {
-                    println!("  help: {help}");
+                    println!(
+                        "{}",
+                        crate::localization::formatted!("  help: {help}", help = help)
+                    );
                 }
             }
             0

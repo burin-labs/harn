@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # The opener owns recovery; this read-only plan names the immutable attempts
-# and proves which conflicts come only from fragments the attempt folded.
+# and proves which conflicts can be refolded or regenerated from green.
 release_attempt_plan() {
   local version=$1 green=$2 prs=$3 main_oid pr url branch oid record base output status tree path main_blob green_blob
   local clean='[]' superseded='[]' waiting='[]' conflicts=()
@@ -50,10 +50,12 @@ release_attempt_plan() {
     [[ "$tree" =~ ^[0-9a-f]{40}$ && ${#conflicts[@]} -gt 0 ]] || return 1
     base=$(git merge-base "$main_oid" "$oid") || return 1
     for path in "${conflicts[@]}"; do
-      if ! release_fragment_path "$path" ||
-        [[ $(git diff --name-only --no-renames --diff-filter=D "$base" "$oid" -- "$path") != "$path" ]] ||
-        [[ $(git diff --name-only --no-renames --diff-filter=M "$base" "$main_oid" -- "$path") != "$path" ]]; then
-        echo "error: release conflict is not a modified folded fragment: $path" >&2
+      if release_fragment_path "$path" &&
+        [[ $(git diff --name-only --no-renames --diff-filter=D "$base" "$oid" -- "$path") == "$path" ]] &&
+        [[ $(git diff --name-only --no-renames --diff-filter=M "$base" "$main_oid" -- "$path") == "$path" ]]; then
+        :
+      elif ! python3 "$(dirname "${BASH_SOURCE[0]}")/release-generated-artifacts.py" matches "$path"; then
+        echo "error: release conflict is neither a modified folded fragment nor a regenerated release artifact: $path" >&2
         return 1
       fi
       main_blob=$(git rev-parse --verify "$main_oid:$path") || return 1
@@ -101,6 +103,6 @@ release_deliver_attempt() {
     release_enroll_ship "$current_url" || return 1
   fi
   for url in ${closing[@]+"${closing[@]}"}; do
-    gh pr close "$url" --comment "Superseded by $current_url at immutable attempt $current_sha after refolding modified changelog fragments. The earlier attempt remains recorded." || return 1
+    gh pr close "$url" --comment "Superseded by $current_url at immutable attempt $current_sha after preparing a coherent replacement from green. The earlier attempt remains recorded." || return 1
   done
 }

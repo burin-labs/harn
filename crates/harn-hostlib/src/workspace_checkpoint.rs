@@ -1356,7 +1356,8 @@ fn store_blob(dir: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
 
 fn resolve_root(root: Option<&Path>) -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    normalize_against(&cwd, root.unwrap_or_else(|| Path::new(".")))
+    let resolved = normalize_against(&cwd, root.unwrap_or_else(|| Path::new(".")));
+    harn_vm::workspace_path::canonicalize_existing_ancestor(&resolved).unwrap_or(resolved)
 }
 
 fn require_non_empty(

@@ -118,6 +118,31 @@ fn fork_refuses_when_a_restore_changes_the_same_boundary_during_copy() {
 use std::os::unix::fs::symlink;
 
 #[test]
+fn checkpoint_capture_accepts_an_existing_root_alias_but_rejects_another_root() {
+    let (dir, id) = deleted_in_subdir("root-alias");
+    let alias = dir.path().with_file_name(format!(
+        "{}-alias",
+        dir.path()
+            .file_name()
+            .expect("tempdir name")
+            .to_string_lossy()
+    ));
+    symlink(dir.path(), &alias).unwrap();
+
+    let outcome = capture(&id, "turn-2", Some(&alias)).unwrap();
+    assert!(matches!(outcome, Outcome::Ready(_)), "{outcome:?}");
+
+    let other = tempfile::TempDir::new().unwrap();
+    let outcome = capture(&id, "turn-3", Some(other.path()));
+    assert!(matches!(
+        outcome,
+        Err(HostlibError::InvalidParameter { param: "root", .. })
+    ));
+    stdfs::remove_file(alias).unwrap();
+    drop_session(&id);
+}
+
+#[test]
 fn a_new_runtime_path_is_excluded_by_the_scan_without_a_second_list() {
     let dir = tempfile::TempDir::new().unwrap();
     let root = dir.path();

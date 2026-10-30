@@ -64,29 +64,54 @@ pub(crate) async fn run(args: LocalStatusArgs, base_dir: &Path) -> Result<(), St
 
     if let Some(selection) = selection.as_ref() {
         println!(
-            "Active: {provider} :: {model}{alias}",
-            provider = selection.provider,
-            model = selection.model,
-            alias = selection
-                .alias
-                .as_deref()
-                .map(|alias| format!(" (alias {alias})"))
-                .unwrap_or_default(),
+            "{}",
+            crate::localization::formatted!(
+                "Active: {provider} :: {model}{alias}",
+                provider = selection.provider,
+                model = selection.model,
+                alias = selection
+                    .alias
+                    .as_deref()
+                    .map(|alias| format!(" (alias {alias})"))
+                    .unwrap_or_default(),
+            )
         );
-        println!("URL:    {}", selection.base_url);
+        println!(
+            "{}",
+            crate::localization::formatted!("URL:    {}", selection.base_url)
+        );
         if let Some(ctx) = selection.ctx {
-            println!("Ctx:    {ctx}");
+            println!(
+                "{}",
+                crate::localization::formatted!("Ctx:    {ctx}", ctx = ctx)
+            );
         }
         if let Some(keep_alive) = selection.keep_alive.as_deref() {
-            println!("Keep:   {keep_alive}");
+            println!(
+                "{}",
+                crate::localization::formatted!("Keep:   {keep_alive}", keep_alive = keep_alive)
+            );
         }
-        println!("Since:  {}", selection.switched_at);
+        println!(
+            "{}",
+            crate::localization::formatted!("Since:  {}", selection.switched_at)
+        );
     } else {
-        println!("Active: (no selection — run `harn local switch <alias>`)");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Active: (no selection — run `harn local switch <alias>`)"
+            )
+        );
     }
     println!(
-        "Profile: {} (default ctx {}, keep-alive {})",
-        profile.bucket, profile.default_ctx, profile.default_keep_alive
+        "{}",
+        crate::localization::formatted!(
+            "Profile: {} (default ctx {}, keep-alive {})",
+            profile.bucket,
+            profile.default_ctx,
+            profile.default_keep_alive
+        )
     );
     println!();
 

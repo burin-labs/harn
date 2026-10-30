@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::format::plural_suffix;
 use crate::test_report::{TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::test_timing::DurationSummary;
@@ -129,16 +128,32 @@ pub(super) fn print_per_test_timing(report: &TestReport) {
     ) else {
         return;
     };
-    println!("Per-test: avg={avg} ms  p50={p50} ms  p90={p90} ms  p95={p95} ms  p99={p99} ms");
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Per-test: avg={avg} ms  p50={p50} ms  p90={p90} ms  p95={p95} ms  p99={p99} ms",
+            avg = avg,
+            p50 = p50,
+            p90 = p90,
+            p95 = p95,
+            p99 = p99
+        )
+    );
 
     let mut by_time: Vec<&TestCaseReport> = report.cases.iter().collect();
     by_time.sort_by_key(|case| std::cmp::Reverse(case.duration_ms));
     let top_n = by_time.len().min(10);
     if top_n > 0 {
         println!();
-        println!("Slowest {top_n} test{}:", plural_suffix(top_n));
+        println!(
+            "{}",
+            crate::localization::formatted!("Slowest tests: {top_n}", top_n = top_n)
+        );
         for case in &by_time[..top_n] {
-            println!("  {:>6} ms  {}", case.duration_ms, case.name);
+            println!(
+                "{}",
+                crate::localization::formatted!("  {:>6} ms  {}", case.duration_ms, case.name)
+            );
         }
     }
 }
@@ -219,7 +234,10 @@ fn report_relative_path(suite_root: &Path, file: &str) -> String {
 /// result line, indented one level past the `{line}` convention already
 /// used for error text so the two blocks stay visually distinct.
 pub(super) fn print_captured_output(output: &str) {
-    println!("        captured output:");
+    println!(
+        "{}",
+        crate::localization::formatted!("        captured output:")
+    );
     for line in output.lines() {
         println!("          {line}");
     }
@@ -236,13 +254,14 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
             if total_tests > 0 {
                 let mode = if parallel { "dynamic" } else { "sequential" };
                 println!(
-                    "Running {} test{} from {} file{} with {} worker{} ({mode} scheduling)\n",
-                    total_tests,
-                    plural_suffix(total_tests),
-                    total_files,
-                    plural_suffix(total_files),
-                    workers,
-                    plural_suffix(workers),
+                    "{}",
+                    crate::localization::formatted!(
+                        "Running tests: {}, files: {}, workers: {} ({mode} scheduling)\n",
+                        total_tests,
+                        total_files,
+                        workers,
+                        mode = mode
+                    )
                 );
             }
         }
@@ -261,7 +280,16 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
             total_tests,
         } => {
             if verbose {
-                println!("    RUN   {name} [{file}] ({test_index}/{total_tests})");
+                println!(
+                    "{}",
+                    crate::localization::formatted!(
+                        "    RUN   {name} [{file}] ({test_index}/{total_tests})",
+                        file = file,
+                        name = name,
+                        test_index = test_index,
+                        total_tests = total_tests
+                    )
+                );
             }
         }
         test_runner::TestRunEvent::TestFinished(result) => {
@@ -313,11 +341,12 @@ pub(super) fn print_test_results(
 
     if !options.progress && summary.total > 0 {
         println!(
-            "Running {} test{} from {} file{}...\n",
-            summary.total,
-            plural_suffix(summary.total),
-            file_count,
-            plural_suffix(file_count),
+            "{}",
+            crate::localization::formatted!(
+                "Running tests: {}, files: {}...\n",
+                summary.total,
+                file_count,
+            )
         );
     }
 
@@ -354,7 +383,10 @@ pub(super) fn print_test_results(
             summary.passed, summary.failed, summary.skipped, summary.total, summary.duration_ms
         );
     } else if summary.total == 0 {
-        println!("No test pipelines found");
+        println!(
+            "{}",
+            crate::localization::formatted!("No test pipelines found")
+        );
     } else {
         println!(
             "\x1b[32m{} passed, {} skipped, {} total ({} ms)\x1b[0m",
@@ -363,8 +395,18 @@ pub(super) fn print_test_results(
     }
 
     match (summary.timing.p50_ms, summary.timing.p90_ms) {
-        (Some(p50), Some(p90)) => println!("Latency: p50={p50} ms  p90={p90} ms"),
-        _ => println!("Latency: p50=n/a  p90=n/a (0 samples)"),
+        (Some(p50), Some(p90)) => println!(
+            "{}",
+            crate::localization::formatted!(
+                "Latency: p50={p50} ms  p90={p90} ms",
+                p50 = p50,
+                p90 = p90
+            )
+        ),
+        _ => println!(
+            "{}",
+            crate::localization::formatted!("Latency: p50=n/a  p90=n/a (0 samples)")
+        ),
     }
 
     if options.timing {
@@ -373,7 +415,7 @@ pub(super) fn print_test_results(
 
     if options.progress && summary.failed > 0 {
         println!();
-        println!("Failures:");
+        println!("{}", crate::localization::formatted!("Failures:"));
         for result in summary.results.iter().filter(|result| !result.passed) {
             if let Some(error) = &result.error {
                 println!("  {} [{}]", result.name, result.file);
@@ -394,13 +436,24 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     }
 
     println!();
-    println!("Total time: {} ms", summary.duration_ms);
+    println!(
+        "{}",
+        crate::localization::formatted!("Total time: {} ms", summary.duration_ms)
+    );
     if let (Some(avg), Some(p95), Some(p99)) = (
         summary.timing.average_ms,
         summary.timing.p95_ms,
         summary.timing.p99_ms,
     ) {
-        println!("Per-test detail: avg={avg} ms  p95={p95} ms  p99={p99} ms");
+        println!(
+            "{}",
+            crate::localization::formatted!(
+                "Per-test detail: avg={avg} ms  p95={p95} ms  p99={p99} ms",
+                avg = avg,
+                p95 = p95,
+                p99 = p99
+            )
+        );
     }
 
     let mut by_test = summary.results.iter().collect::<Vec<_>>();
@@ -409,13 +462,21 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     if top_test_count > 0 {
         println!();
         println!(
-            "Slowest {top_test_count} test{}:",
-            plural_suffix(top_test_count)
+            "{}",
+            crate::localization::formatted!(
+                "Slowest tests: {top_test_count}",
+                top_test_count = top_test_count
+            )
         );
         for result in &by_test[..top_test_count] {
             println!(
-                "  {:>6} ms  {} [{}]",
-                result.duration_ms, result.name, result.file
+                "{}",
+                crate::localization::formatted!(
+                    "  {:>6} ms  {} [{}]",
+                    result.duration_ms,
+                    result.name,
+                    result.file
+                )
             );
         }
     }
@@ -430,38 +491,47 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     if top_file_count > 0 {
         println!();
         println!(
-            "Slowest {top_file_count} file{}:",
-            plural_suffix(top_file_count)
+            "{}",
+            crate::localization::formatted!(
+                "Slowest files: {top_file_count}",
+                top_file_count = top_file_count
+            )
         );
         for (file, duration_ms) in &by_file[..top_file_count] {
-            println!("  {duration_ms:>6} ms  {file}");
+            println!(
+                "{}",
+                crate::localization::formatted!(
+                    "  {duration_ms:>6} ms  {file}",
+                    duration_ms = duration_ms,
+                    file = file
+                )
+            );
         }
     }
 
     let aggregate = summary.aggregate;
     println!();
-    println!(
-        "Phase totals: collection={} ms  setup={} ms  compile={} ms  admission={} ms  execute={} ms  teardown={} ms",
+    println!("{}", crate::localization::formatted!("Phase totals: collection={} ms  setup={} ms  compile={} ms  admission={} ms  execute={} ms  teardown={} ms",
         aggregate.collection_ms,
         aggregate.setup_ms,
         aggregate.compile_ms,
         aggregate.admission_ms,
         aggregate.execute_ms,
-        aggregate.teardown_ms,
-    );
+        aggregate.teardown_ms,));
     println!(
-        "Test-file entries: compile={} ms ({} files, {} entries)",
-        aggregate.test_file_compile_ms,
-        aggregate.test_files_compiled,
-        aggregate.test_entries_compiled,
+        "{}",
+        crate::localization::formatted!(
+            "Test-file entries: compile={} ms ({} files, {} entries)",
+            aggregate.test_file_compile_ms,
+            aggregate.test_files_compiled,
+            aggregate.test_entries_compiled,
+        )
     );
-    println!(
-        "Module attribution (overlaps phases): compile={} ms ({} modules)  load={} ms ({} modules)",
+    println!("{}", crate::localization::formatted!("Module attribution (overlaps phases): compile={} ms ({} modules)  load={} ms ({} modules)",
         aggregate.modules.module_compile_ms,
         aggregate.modules.modules_compiled,
         aggregate.modules.module_load_ms,
-        aggregate.modules.modules_loaded,
-    );
+        aggregate.modules.modules_loaded,));
 }
 
 #[cfg(test)]

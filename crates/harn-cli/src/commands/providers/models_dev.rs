@@ -53,6 +53,6 @@ pub(super) async fn update(args: &ProvidersUpdateSourceArgs) -> Result<(), Strin
     let path = args.source_dir.join(CACHE_FILE);
     harn_vm::atomic_io::atomic_write(&path, body.as_bytes())
         .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
-    println!("updated {} from Models.dev v2.0 SHA-256 {digest}; regenerate and review catalog projections before shipping", path.display());
+    println!("{}", crate::localization::formatted!("updated {} from Models.dev v2.0 SHA-256 {digest}; regenerate and review catalog projections before shipping", path.display(), digest = digest));
     Ok(())
 }
