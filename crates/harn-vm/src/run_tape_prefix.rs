@@ -37,6 +37,7 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
     for effect in effects {
         let reads = matches!(effect.access, EffectAccess::Read | EffectAccess::Observe);
         match effect.kind {
+            EffectKind::Stdio if reads => return Verdict::Refuse(*effect),
             EffectKind::Stdio
             | EffectKind::Observability
             | EffectKind::Llm
