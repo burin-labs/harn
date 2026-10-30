@@ -181,6 +181,7 @@ GATES=(
   verify-tree-sitter-parse
   check-docs
   check-protocol-artifacts
+  check-cli-localization
   check-connector-schemas
   check-harness-migrations
   check-openapi-snapshot

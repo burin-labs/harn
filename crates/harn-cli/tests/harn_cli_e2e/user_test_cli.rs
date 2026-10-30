@@ -525,6 +525,7 @@ pipeline test_beta(task) {
     .expect("write beta");
 
     let output = Command::new(binary_path())
+        .env("LC_ALL", "C")
         .args([
             "test",
             suite.to_str().unwrap(),
@@ -543,7 +544,7 @@ pipeline test_beta(task) {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Running 2 tests from 2 files with 1 worker (sequential scheduling)"),
+        stdout.contains("Running tests: 2, files: 2, workers: 1 (sequential scheduling)"),
         "stdout did not include the suite banner:\n{stdout}"
     );
     assert!(stdout.contains("RUN   test_alpha"));
@@ -551,8 +552,8 @@ pipeline test_beta(task) {
     assert!(stdout.contains("Latency: p50="));
     assert!(stdout.contains("p90="));
     assert!(stdout.contains("Per-test detail: avg="));
-    assert!(stdout.contains("Slowest 2 tests:"));
-    assert!(stdout.contains("Slowest 2 files:"));
+    assert!(stdout.contains("Slowest tests: 2"));
+    assert!(stdout.contains("Slowest files: 2"));
     assert!(stdout.contains("Module attribution (overlaps phases):"));
 
     let first_run = stdout.find("RUN   test_alpha").expect("alpha start");

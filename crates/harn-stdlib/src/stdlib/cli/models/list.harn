@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/list"
 /**
  * `harn models list` renderer.
  *
@@ -33,6 +35,7 @@ fn __read_query_payload(env: HarnessEnv) -> dict {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const payload = try {
     __read_query_payload(harness.env)
   } catch (e) {
@@ -41,14 +44,18 @@ fn main(harness: Harness) -> int {
   }
   if json_mode(harness.env) && payload?.columns != nil {
     harness.stdio.eprintln(
-      "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
+      cli_message(
+        __cli_locale,
+        "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
+        [],
+      ),
     )
     return 2
   }
   const query = try {
     normalize_model_catalog_query(payload)
   } catch (e) {
-    harness.stdio.eprintln("error: " + to_string(e))
+    harness.stdio.eprintln(cli_message(__cli_locale, "error: {0}", [to_string(to_string(e))]))
     return 2
   }
   const catalog = catalog_with_installed_ollama_models(

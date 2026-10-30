@@ -72,6 +72,68 @@ fn assert_snapshots_match(label: &str, harn_snapshot: &Snapshot, repeat_snapshot
     }
 }
 
+#[test]
+fn localized_scaffolds_preserve_source_and_literal_project_names() {
+    let english: serde_json::Value =
+        serde_json::from_str(include_str!("../../src/localization/en.json")).unwrap();
+    let literal = "app{0}%@100%";
+    let mut baseline = None;
+    for (locale, catalog) in [
+        ("en", include_str!("../../src/localization/en.json")),
+        ("es", include_str!("../../src/localization/es.json")),
+        ("fr", include_str!("../../src/localization/fr.json")),
+        ("de", include_str!("../../src/localization/de.json")),
+        ("pt-BR", include_str!("../../src/localization/pt-BR.json")),
+        ("it", include_str!("../../src/localization/it.json")),
+        ("ja", include_str!("../../src/localization/ja.json")),
+        ("ko", include_str!("../../src/localization/ko.json")),
+        (
+            "zh-Hans",
+            include_str!("../../src/localization/zh-Hans.json"),
+        ),
+    ] {
+        let catalog: serde_json::Value = serde_json::from_str(catalog).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let output = crate::test_util::process::harn_e2e_command()
+            .env("LC_ALL", locale)
+            .current_dir(root.path())
+            .args(["new", literal, "--template", "basic"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{locale}: {output:?}");
+        let key = "Creating project '{0}'...";
+        let expected = catalog[key].as_str().unwrap().replace("{0}", literal);
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(&expected),
+            "{locale}: {output:?}"
+        );
+        if locale != "en" {
+            assert_ne!(catalog[key], english[key]);
+        }
+        let snapshot = snapshot_tree(&root.path().join(literal));
+        assert!(snapshot.contains_key("main.harn") && snapshot.contains_key("harn.toml"));
+        if let Some(ref baseline) = baseline {
+            assert_snapshots_match(locale, baseline, &snapshot);
+        } else {
+            baseline = Some(snapshot);
+        }
+        let initialized = tempfile::tempdir().unwrap();
+        let output = crate::test_util::process::harn_e2e_command()
+            .env("LC_ALL", locale)
+            .current_dir(initialized.path())
+            .args(["init", "--template", "basic"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{locale}: {output:?}");
+        let key = "Initializing harn project in current directory...";
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(catalog[key].as_str().unwrap()),
+            "{locale}: {output:?}"
+        );
+        assert!(initialized.path().join("main.harn").is_file());
+    }
+}
+
 fn pair_run(
     label: &str,
     args_with: impl Fn(&Path) -> Vec<String>,

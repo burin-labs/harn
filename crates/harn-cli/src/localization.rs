@@ -12,6 +12,10 @@ use crate::cli::Cli;
 
 include!(concat!(env!("OUT_DIR"), "/localization_formats.rs"));
 
+#[cfg(test)]
+#[path = "../build_support/localization_contract.rs"]
+mod field_contract;
+
 pub(crate) fn selected_locale() -> Locale {
     process_locale()
 }
@@ -27,6 +31,21 @@ const CATALOGS: [(&str, &str); 8] = [
     ("zh-Hans", include_str!("localization/zh-Hans.json")),
 ];
 type Catalog = BTreeMap<String, String>;
+
+#[derive(serde::Deserialize)]
+struct ScriptCatalog {
+    locale_env: String,
+    messages: BTreeMap<String, usize>,
+}
+
+static SCRIPT_CATALOG: LazyLock<ScriptCatalog> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("localization_scripts.json"))
+        .expect("checked CLI script message registry")
+});
+
+pub(crate) fn script_locale_env() -> &'static str {
+    &SCRIPT_CATALOG.locale_env
+}
 pub(crate) const API_KEY_PROMPT: &str = "API key: ";
 pub(crate) const OAUTH_SECRET_PROMPT: &str = "OAuth client secret: ";
 pub(crate) const OAUTH_REDIRECT_PROMPT: &str = "OAuth redirect URI registered for this client: ";
@@ -121,6 +140,9 @@ fn command_for(locale: &str) -> Command {
 /// Canonical English source for translators and the existing CLI drift guard.
 pub(crate) fn source_catalog() -> Catalog {
     let mut catalog = shared::collect_help_messages(Cli::command());
+    for source in SCRIPT_CATALOG.messages.keys() {
+        catalog.insert(source.clone(), source.clone());
+    }
     catalog.extend(
         serde_json::from_str::<Catalog>(include_str!("localization_formats.json"))
             .expect("checked command-result templates"),
@@ -206,6 +228,40 @@ mod tests {
                 "{locale} credential prompt spacing"
             );
         }
+    }
+
+    #[test]
+    fn every_catalog_keeps_console_record_field_identifiers() {
+        let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
+        assert!(
+            source.values().any(|text| text.contains("binding_id=")),
+            "measure a known populated console record field"
+        );
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            field_contract::validate_fields(&source, catalog)
+                .unwrap_or_else(|error| panic!("{locale}: {error}"));
+        }
+        field_contract::validate_fields(&source, &source).unwrap();
+    }
+
+    #[test]
+    fn translated_console_record_keys_are_rejected_by_the_catalog_owner() {
+        let source = Catalog::from([(
+            "field".into(),
+            "- binding_id={0} dispatcher_in_flight={1}".into(),
+        )]);
+        assert_eq!(
+            field_contract::field_identifiers(&source["field"]),
+            ["binding_id=", "dispatcher_in_flight="]
+        );
+        let mut translated = source.clone();
+        translated.insert(
+            "field".into(),
+            "- identifiant_de_liaison={0} en_cours_du_dispatcher={1}".into(),
+        );
+        let error = field_contract::validate_fields(&source, &translated)
+            .expect_err("a translated machine field must fail the same owning validator");
+        assert!(error.contains("changed CLI record field identifiers"));
     }
 
     #[test]

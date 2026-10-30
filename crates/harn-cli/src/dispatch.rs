@@ -247,6 +247,10 @@ async fn run_embedded_script_inner(
     // export still wins, matching the NO_COLOR convention. ScopedEnvVar
     // restores the prior value on drop so tests stay isolated.
     let _scope = json_mode.then(|| ScopedEnvVar::set(JSON_MODE_ENV, "1"));
+    let _locale_scope = ScopedEnvVar::set(
+        crate::localization::script_locale_env(),
+        crate::localization::selected_locale().id(),
+    );
 
     let outcome = match sandbox {
         Some(sandbox) => {

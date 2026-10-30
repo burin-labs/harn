@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/lora_preflight"
 /**
  * `harn models lora preflight` renderer.
  *
@@ -25,7 +27,7 @@ fn __percent(value: any) -> string {
   return to_string(number) + "%"
 }
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const base = safe_dict(report["base"])
   const request = safe_dict(report["request"])
   const thresholds = safe_dict(report["thresholds"])
@@ -41,141 +43,229 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const errors = safe_list(report["errors"])
   const base_id = safe_string(base["id"], "")
   const provider = safe_string(base["provider"], "")
-  stdio.println("LoRA preflight for " + base_id + " via " + provider)
-  stdio.println("  corpus: " + safe_string(request["corpus"], ""))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "LoRA preflight for {0} via {1}",
+      [to_string(base_id), to_string(provider)],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  corpus: {0}", [to_string(safe_string(request["corpus"], ""))]),
+  )
   const config_path = safe_string(config["path"], "")
   if config_path != "" {
-    stdio.println("  config: " + config_path)
+    stdio.println(cli_message(__cli_locale, "  config: {0}", [to_string(config_path)]))
   }
   stdio.println(
-    "  target tool format: "
-      + safe_string(request["target_tool_format"], "")
-      + " (requested "
-      + safe_string(request["requested_tool_format"], "auto")
-      + ")",
+    cli_message(
+      __cli_locale,
+      "  target tool format: {0} (requested {1})",
+      [
+        to_string(safe_string(request["target_tool_format"], "")),
+        to_string(safe_string(request["requested_tool_format"], "auto")),
+      ],
+    ),
   )
   const correction = safe_string(request["tool_format_correction"], "")
   if correction != "" {
-    stdio.println("  tool format correction: " + correction)
+    stdio.println(
+      cli_message(__cli_locale, "  tool format correction: {0}", [to_string(correction)]),
+    )
   }
   stdio.println(
-    "  expected source tool format: "
-      + safe_string(thresholds["expected_source_tool_format"], ""),
+    cli_message(
+      __cli_locale,
+      "  expected source tool format: {0}",
+      [to_string(safe_string(thresholds["expected_source_tool_format"], ""))],
+    ),
   )
   stdio.println(
-    "  export-required source tool format: "
-      + safe_string(thresholds["required_export_source_tool_format"], ""),
-  )
-  stdio.println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
-  stdio.println("  required fit ratio: " + __percent(thresholds["min_fit_ratio"]))
-  stdio.println(
-    "  hard token estimate limit: " + safe_int_string(thresholds["hard_token_limit"], "0"),
+    cli_message(
+      __cli_locale,
+      "  export-required source tool format: {0}",
+      [to_string(safe_string(thresholds["required_export_source_tool_format"], ""))],
+    ),
   )
   stdio.println(
-    "  minimum records: " + safe_int_string(thresholds["min_records"], "not configured"),
+    cli_message(
+      __cli_locale,
+      "  max_seq_length: {0}",
+      [to_string(safe_int_string(thresholds["max_seq_length"], "0"))],
+    ),
   )
-  stdio.println("  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  required fit ratio: {0}",
+      [to_string(__percent(thresholds["min_fit_ratio"]))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  hard token estimate limit: {0}",
+      [to_string(safe_int_string(thresholds["hard_token_limit"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  minimum records: {0}",
+      [to_string(safe_int_string(thresholds["min_records"], "not configured"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  minimum tool-call share: {0}",
+      [to_string(__percent(thresholds["min_tool_call_share"]))],
+    ),
+  )
   const marker = safe_string(thresholds["done_marker"], "")
   if marker != "" {
-    stdio.println("  required done marker: " + marker)
+    stdio.println(cli_message(__cli_locale, "  required done marker: {0}", [to_string(marker)]))
   }
   stdio.println(
-    "  records: raw="
-      + safe_int_string(stats["raw_records"], "0")
-      + " trainable="
-      + safe_int_string(stats["trainable_records"], "0")
-      + " skipped="
-      + to_string(skipped.count),
+    cli_message(
+      __cli_locale,
+      "  records: raw={0} trainable={1} skipped={2}",
+      [
+        to_string(safe_int_string(stats["raw_records"], "0")),
+        to_string(safe_int_string(stats["trainable_records"], "0")),
+        to_string(to_string(skipped.count)),
+      ],
+    ),
   )
   stdio.println(
-    "  fit: "
-      + safe_int_string(stats["fit_records"], "0")
-      + "/"
-      + safe_int_string(stats["trainable_records"], "0")
-      + " ("
-      + __percent(stats["fit_ratio"])
-      + ")",
+    cli_message(
+      __cli_locale,
+      "  fit: {0}/{1} ({2})",
+      [
+        to_string(safe_int_string(stats["fit_records"], "0")),
+        to_string(safe_int_string(stats["trainable_records"], "0")),
+        to_string(__percent(stats["fit_ratio"])),
+      ],
+    ),
   )
   stdio.println(
-    "  tool calls: json="
-      + safe_int_string(tool_calls["json_tool_calls"], "0")
-      + " text="
-      + safe_int_string(tool_calls["text_tool_calls"], "0")
-      + " unknown="
-      + safe_int_string(tool_calls["unknown_tool_blocks"], "0")
-      + " malformed_json="
-      + safe_int_string(tool_calls["malformed_json_bodies"], "0"),
+    cli_message(
+      __cli_locale,
+      "  tool calls: json={0} text={1} unknown={2} malformed_json={3}",
+      [
+        to_string(safe_int_string(tool_calls["json_tool_calls"], "0")),
+        to_string(safe_int_string(tool_calls["text_tool_calls"], "0")),
+        to_string(safe_int_string(tool_calls["unknown_tool_blocks"], "0")),
+        to_string(safe_int_string(tool_calls["malformed_json_bodies"], "0")),
+      ],
+    ),
   )
   stdio.println(
-    "  behavior strata: source="
-      + json_stringify(safe_dict(behavior_strata["source"]))
-      + " emitted="
-      + json_stringify(safe_dict(behavior_strata["emitted"])),
+    cli_message(
+      __cli_locale,
+      "  behavior strata: source={0} emitted={1}",
+      [
+        to_string(json_stringify(safe_dict(behavior_strata["source"]))),
+        to_string(json_stringify(safe_dict(behavior_strata["emitted"]))),
+      ],
+    ),
   )
   stdio.println(
-    "  behavior strata policy: "
-      + safe_string(behavior_strata["policy"], "strict")
-      + " status="
-      + safe_string(behavior_strata["status"], "incomplete"),
+    cli_message(
+      __cli_locale,
+      "  behavior strata policy: {0} status={1}",
+      [
+        to_string(safe_string(behavior_strata["policy"], "strict")),
+        to_string(safe_string(behavior_strata["status"], "incomplete")),
+      ],
+    ),
   )
   const missing_behavior_classes = safe_list(behavior_strata["missing_required"])
   if missing_behavior_classes.count > 0 {
-    stdio.println("  missing behavior strata: " + json_stringify(missing_behavior_classes))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  missing behavior strata: {0}",
+        [to_string(json_stringify(missing_behavior_classes))],
+      ),
+    )
   }
   const unclassified_record_ids = safe_list(behavior_strata["unclassified_record_ids"])
   if unclassified_record_ids.count > 0 {
-    print_list(stdio, "unclassified record ids", unclassified_record_ids)
+    print_list(
+      stdio,
+      cli_message(__cli_locale, "unclassified record ids", []),
+      unclassified_record_ids,
+    )
   }
   stdio.println(
-    "  declared tool formats: "
-      + json_stringify(safe_dict(breakdown["declared_tool_formats"])),
+    cli_message(
+      __cli_locale,
+      "  declared tool formats: {0}",
+      [to_string(json_stringify(safe_dict(breakdown["declared_tool_formats"])))],
+    ),
   )
-  stdio.println("  languages: " + json_stringify(safe_dict(breakdown["languages"])))
-  stdio.println("  task types: " + json_stringify(safe_dict(breakdown["task_types"])))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  languages: {0}",
+      [to_string(json_stringify(safe_dict(breakdown["languages"])))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  task types: {0}",
+      [to_string(json_stringify(safe_dict(breakdown["task_types"])))],
+    ),
+  )
   if longest.count > 0 {
-    stdio.println("  longest examples:")
+    stdio.println(cli_message(__cli_locale, "  longest examples:", []))
     for example in longest {
       const item = safe_dict(example)
       stdio.println(
-        "    - "
-          + safe_string(item["id"], "")
-          + " line="
-          + safe_int_string(item["line_number"], "0")
-          + " approx_tokens="
-          + safe_int_string(item["approx_tokens"], "0")
-          + " "
-          + safe_string(item["language"], "")
-          + "/"
-          + safe_string(item["task_type"], ""),
+        cli_message(
+          __cli_locale,
+          "    - {0} line={1} approx_tokens={2} {3}/{4}",
+          [
+            to_string(safe_string(item["id"], "")),
+            to_string(safe_int_string(item["line_number"], "0")),
+            to_string(safe_int_string(item["approx_tokens"], "0")),
+            to_string(safe_string(item["language"], "")),
+            to_string(safe_string(item["task_type"], "")),
+          ],
+        ),
       )
     }
   }
   if problems.count > 0 {
-    stdio.println("  problem examples:")
+    stdio.println(cli_message(__cli_locale, "  problem examples:", []))
     for problem in problems {
       const item = safe_dict(problem)
       stdio.println(
-        "    - "
-          + safe_string(item["id"], "")
-          + " line="
-          + safe_int_string(item["line_number"], "0")
-          + " "
-          + safe_string(item["kind"], "")
-          + ": "
-          + safe_string(item["detail"], ""),
+        cli_message(
+          __cli_locale,
+          "    - {0} line={1} {2}: {3}",
+          [
+            to_string(safe_string(item["id"], "")),
+            to_string(safe_int_string(item["line_number"], "0")),
+            to_string(safe_string(item["kind"], "")),
+            to_string(safe_string(item["detail"], "")),
+          ],
+        ),
       )
     }
   }
-  print_list(stdio, "warnings", warnings)
-  print_list(stdio, "errors", errors)
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), warnings)
+  print_list(stdio, cli_message(__cli_locale, "errors", []), errors)
   const result = if safe_string(behavior_strata["status"], "") == "legacy_unclassified" {
-    "MIGRATION REVIEW"
+    cli_message(__cli_locale, "MIGRATION REVIEW", [])
   } else if safe_bool(report["ok"], false) {
-    "PASS"
+    cli_message(__cli_locale, "PASS", [])
   } else {
-    "FAIL"
+    cli_message(__cli_locale, "FAIL", [])
   }
-  stdio.println("  result: " + result)
+  stdio.println(cli_message(__cli_locale, "  result: {0}", [to_string(result)]))
 }
 
 fn __render_json(report: dict) -> string {
@@ -199,6 +289,7 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON not set")
@@ -217,7 +308,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if ok || !check {
     return 0

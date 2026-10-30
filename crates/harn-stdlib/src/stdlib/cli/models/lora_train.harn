@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/lora_train"
 import {
   render_peft_save_policy,
   render_probe_command_templates,
@@ -30,7 +32,7 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __path_line(stdio: HarnessStdio, label: string, value: unknown) {
+fn __path_line(__cli_locale: string, stdio: HarnessStdio, label: string, value: unknown) {
   const path_ref = safe_dict(value)
   const path = safe_string(path_ref["path"], "")
   if path == "" {
@@ -45,23 +47,24 @@ fn __path_line(stdio: HarnessStdio, label: string, value: unknown) {
   const suffix = if hash == "" {
     ""
   } else {
-    " sha256=" + hash
+    cli_message(__cli_locale, " sha256={0}", [to_string(hash)])
   }
   stdio.println(
-    "  "
-      + label
-      + ": "
-      + path
-      + " ("
-      + safe_string(path_ref["kind"], "")
-      + ", exists="
-      + exists
-      + ")"
-      + suffix,
+    cli_message(
+      __cli_locale,
+      "  {0}: {1} ({2}, exists={3}){4}",
+      [
+        to_string(label),
+        to_string(path),
+        to_string(safe_string(path_ref["kind"], "")),
+        to_string(exists),
+        to_string(suffix),
+      ],
+    ),
   )
 }
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const base = safe_dict(report["base"])
   const request = safe_dict(report["request"])
   const training = safe_dict(report["training"])
@@ -81,66 +84,126 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const post_training = safe_dict(report["post_training"])
   const warnings = safe_list(report["warnings"])
   stdio.println(
-    "LoRA train "
-      + safe_string(report["mode"], "")
-      + " for "
-      + safe_string(target["adapter_name"], "")
-      + " on "
-      + safe_string(base["id"], "")
-      + " via "
-      + safe_string(base["provider"], ""),
-  )
-  stdio.println("  producer: " + safe_string(report["producer"], ""))
-  stdio.println("  request model: " + safe_string(target["request_model"], ""))
-  stdio.println("  output dir: " + safe_string(target["output_dir"], ""))
-  stdio.println("  contract: " + safe_string(contract["id"], ""))
-  stdio.println(
-    "  tool format: "
-      + safe_string(request["effective_tool_format"], "")
-      + " (requested "
-      + safe_string(request["requested_tool_format"], "auto")
-      + ")",
-  )
-  stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
-  stdio.println("  trainer: " + safe_string(training["trainer"], ""))
-  render_trainer_identity_check(stdio, training["trainer_identity"])
-  render_trainer_environment_check(stdio, training["trainer_environment"])
-  stdio.println(
-    "  training: "
-      + safe_string(training["method"], "")
-      + " + "
-      + safe_string(training["adapter_type"], ""),
+    cli_message(
+      __cli_locale,
+      "LoRA train {0} for {1} on {2} via {3}",
+      [
+        to_string(safe_string(report["mode"], "")),
+        to_string(safe_string(target["adapter_name"], "")),
+        to_string(safe_string(base["id"], "")),
+        to_string(safe_string(base["provider"], "")),
+      ],
+    ),
   )
   stdio.println(
-    "  LoRA hparams: rank="
-      + safe_int_string(training["rank"], "")
-      + " alpha="
-      + safe_int_string(training["alpha"], "")
-      + " dropout="
-      + safe_number_string(training["dropout"], ""),
+    cli_message(__cli_locale, "  producer: {0}", [to_string(safe_string(report["producer"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  request model: {0}",
+      [to_string(safe_string(target["request_model"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  output dir: {0}",
+      [to_string(safe_string(target["output_dir"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  contract: {0}", [to_string(safe_string(contract["id"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  tool format: {0} (requested {1})",
+      [
+        to_string(safe_string(request["effective_tool_format"], "")),
+        to_string(safe_string(request["requested_tool_format"], "auto")),
+      ],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  dataset format: {0}",
+      [to_string(safe_string(request["dataset_format"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  trainer: {0}", [to_string(safe_string(training["trainer"], ""))]),
+  )
+  render_trainer_identity_check(__cli_locale, stdio, training["trainer_identity"])
+  render_trainer_environment_check(__cli_locale, stdio, training["trainer_environment"])
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  training: {0} + {1}",
+      [
+        to_string(safe_string(training["method"], "")),
+        to_string(safe_string(training["adapter_type"], "")),
+      ],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  LoRA hparams: rank={0} alpha={1} dropout={2}",
+      [
+        to_string(safe_int_string(training["rank"], "")),
+        to_string(safe_int_string(training["alpha"], "")),
+        to_string(safe_number_string(training["dropout"], "")),
+      ],
+    ),
   )
   const max_seq_length = safe_int_string(training["max_seq_length"], "")
   if max_seq_length != "" {
-    stdio.println("  max_seq_length: " + max_seq_length)
+    stdio.println(cli_message(__cli_locale, "  max_seq_length: {0}", [to_string(max_seq_length)]))
   }
-  stdio.println("  template: " + safe_string(template["name"], ""))
-  render_peft_save_policy(stdio, peft_save_policy)
-  render_tool_catalog_contract(stdio, safe_dict(training_contract["tool_catalog"]))
   stdio.println(
-    "  training base precision: " + safe_string(precision["training_base_precision"], ""),
+    cli_message(__cli_locale, "  template: {0}", [to_string(safe_string(template["name"], ""))]),
+  )
+  render_peft_save_policy(__cli_locale, stdio, peft_save_policy)
+  render_tool_catalog_contract(__cli_locale, stdio, safe_dict(training_contract["tool_catalog"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  training base precision: {0}",
+      [to_string(safe_string(precision["training_base_precision"], ""))],
+    ),
   )
   stdio.println(
-    "  training compute precision: " + safe_string(precision["training_compute_precision"], ""),
+    cli_message(
+      __cli_locale,
+      "  training compute precision: {0}",
+      [to_string(safe_string(precision["training_compute_precision"], ""))],
+    ),
   )
-  stdio.println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
-  stdio.println("  backend status: " + safe_string(backend["status"], ""))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  adapter precision: {0}",
+      [to_string(safe_string(precision["adapter_weight_precision"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  backend status: {0}",
+      [to_string(safe_string(backend["status"], ""))],
+    ),
+  )
   const backend_result_path = safe_string(backend["result_path"], "")
   if backend_result_path != "" {
-    stdio.println("  backend result: " + backend_result_path)
+    stdio.println(
+      cli_message(__cli_locale, "  backend result: {0}", [to_string(backend_result_path)]),
+    )
   }
   const exit_code = safe_int_string(backend["exit_code"], "")
   if exit_code != "" {
-    stdio.println("  backend exit code: " + exit_code)
+    stdio.println(cli_message(__cli_locale, "  backend exit code: {0}", [to_string(exit_code)]))
   }
   const backend_result = safe_dict(backend["result"])
   const backend_rendered = safe_int_string(backend_result["rendered_records"], "")
@@ -148,69 +211,116 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const backend_retention = safe_number_string(backend_result["retention_ratio"], "")
   if backend_rendered != "" || backend_trainable != "" || backend_retention != "" {
     stdio.println(
-      "  backend realized rows: rendered="
-        + backend_rendered
-        + " trainable="
-        + backend_trainable
-        + " retention="
-        + backend_retention,
+      cli_message(
+        __cli_locale,
+        "  backend realized rows: rendered={0} trainable={1} retention={2}",
+        [to_string(backend_rendered), to_string(backend_trainable), to_string(backend_retention)],
+      ),
     )
   }
   if safe_bool(backend["argv_required"], false) {
-    stdio.println("  backend argv: required")
+    stdio.println(cli_message(__cli_locale, "  backend argv: required", []))
   }
-  __path_line(stdio, "dataset", inputs["dataset"])
+  __path_line(__cli_locale, stdio, "dataset", inputs["dataset"])
   stdio.println(
-    "  dataset audit: status="
-      + safe_string(dataset_audit["status"], "")
-      + " rows="
-      + safe_int_string(dataset_audit["rows"], "0")
-      + " invalid_tool_blocks="
-      + safe_int_string(dataset_audit["invalid_tool_block_rows"], "0")
-      + " parse_errors="
-      + safe_int_string(dataset_audit["json_parse_errors"], "0"),
+    cli_message(
+      __cli_locale,
+      "  dataset audit: status={0} rows={1} invalid_tool_blocks={2} parse_errors={3}",
+      [
+        to_string(safe_string(dataset_audit["status"], "")),
+        to_string(safe_int_string(dataset_audit["rows"], "0")),
+        to_string(safe_int_string(dataset_audit["invalid_tool_block_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["json_parse_errors"], "0")),
+      ],
+    ),
   )
   stdio.println(
-    "  dataset coverage: text_tool_rows="
-      + safe_int_string(dataset_audit["assistant_tool_text_rows"], "0")
-      + " native_tool_rows="
-      + safe_int_string(dataset_audit["native_tool_call_rows"], "0")
-      + " no_tool_rows="
-      + safe_int_string(dataset_audit["no_tool_rows"], "0")
-      + " parallel_rows="
-      + safe_int_string(dataset_audit["parallel_tool_call_rows"], "0")
-      + " multi_turn_rows="
-      + safe_int_string(dataset_audit["multi_turn_rows"], "0"),
+    cli_message(
+      __cli_locale,
+      "  dataset coverage: text_tool_rows={0} native_tool_rows={1} no_tool_rows={2} parallel_rows={3} multi_turn_rows={4}",
+      [
+        to_string(safe_int_string(dataset_audit["assistant_tool_text_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["native_tool_call_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["no_tool_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["parallel_tool_call_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["multi_turn_rows"], "0")),
+      ],
+    ),
   )
   stdio.println(
-    "  dataset repairs: schema_repaired="
-      + safe_int_string(dataset_audit["schema_repaired_rows"], "0")
-      + " unavailable_tool="
-      + safe_int_string(dataset_audit["unavailable_tool_rows"], "0")
-      + " tool_result_rows="
-      + safe_int_string(dataset_audit["tool_result_rows"], "0"),
+    cli_message(
+      __cli_locale,
+      "  dataset repairs: schema_repaired={0} unavailable_tool={1} tool_result_rows={2}",
+      [
+        to_string(safe_int_string(dataset_audit["schema_repaired_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["unavailable_tool_rows"], "0")),
+        to_string(safe_int_string(dataset_audit["tool_result_rows"], "0")),
+      ],
+    ),
   )
-  __path_line(stdio, "corpus", inputs["corpus"])
-  __path_line(stdio, "export manifest", inputs["export_manifest"])
+  __path_line(__cli_locale, stdio, "corpus", inputs["corpus"])
+  __path_line(__cli_locale, stdio, "export manifest", inputs["export_manifest"])
   const teacher = safe_dict(inputs["teacher"])
   const teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
-    stdio.println("  teacher: " + teacher_id + " via " + safe_string(teacher["provider"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  teacher: {0} via {1}",
+        [to_string(teacher_id), to_string(safe_string(teacher["provider"], ""))],
+      ),
+    )
   }
-  stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
-  stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
-  print_list(stdio, "trainer contract", safe_list(training["trainer_contract"]))
-  print_list(stdio, "precision gates", safe_list(precision["promotion_gates"]))
-  print_list(stdio, "promotion receipts", safe_list(evidence["required_receipts"]))
-  render_required_probe_cases(stdio, evidence["required_probe_cases"])
-  render_probe_command_templates(stdio, evidence["probe_command_templates"])
-  print_list(stdio, "warnings", warnings)
-  print_list(stdio, "backend warnings", safe_list(backend_result["warnings"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  adapter binding: {0}",
+      [to_string(safe_string(serving["adapter_binding"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  promotion id: {0}",
+      [to_string(safe_string(evidence["promotion_id"], ""))],
+    ),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "trainer contract", []),
+    safe_list(training["trainer_contract"]),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "precision gates", []),
+    safe_list(precision["promotion_gates"]),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "promotion receipts", []),
+    safe_list(evidence["required_receipts"]),
+  )
+  render_required_probe_cases(__cli_locale, stdio, evidence["required_probe_cases"])
+  render_probe_command_templates(__cli_locale, stdio, evidence["probe_command_templates"])
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), warnings)
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "backend warnings", []),
+    safe_list(backend_result["warnings"]),
+  )
   if len(backend_argv) > 0 {
-    render_command(stdio, "backend", backend_argv)
+    render_command(stdio, cli_message(__cli_locale, "backend", []), backend_argv)
   }
-  render_command(stdio, "post-training manifest", safe_list(post_training["manifest_command"]))
-  render_command(stdio, "inspect adapter", safe_list(post_training["inspect_command"]))
+  render_command(
+    stdio,
+    cli_message(__cli_locale, "post-training manifest", []),
+    safe_list(post_training["manifest_command"]),
+  )
+  render_command(
+    stdio,
+    cli_message(__cli_locale, "inspect adapter", []),
+    safe_list(post_training["inspect_command"]),
+  )
 }
 
 fn __render_json(report: dict) -> string {
@@ -234,6 +344,7 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON not set")
@@ -249,7 +360,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if safe_bool(report["ok"], false) {
     return 0

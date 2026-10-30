@@ -114,3 +114,5 @@ docs/src/connectors/parity-matrix.md -merge
 # The external scanner is hand-written and only seeded into the generated
 # parser tree, so it keeps ordinary text merges.
 tree-sitter-harn/src/scanner.c merge
+crates/harn-stdlib/src/stdlib/cli/localization.harn -merge
+crates/harn-stdlib/src/stdlib/cli/localization/** -merge

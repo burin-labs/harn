@@ -1,3 +1,4 @@
+import { cli_message } from "std/cli/localization/models/batch_status"
 import { __batch_artifact_read } from "std/cli/models/batch_artifacts"
 import {
   __batch_lifecycle_job_base,
@@ -510,25 +511,79 @@ fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
   return "completed"
 }
 
-fn __render_status_human(stdio: HarnessStdio, report: dict) {
+fn __render_status_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   if !safe_bool(report["ok"], false) {
-    stdio.eprintln("Batch status failed")
+    stdio.eprintln(cli_message(__cli_locale, "Batch status failed", []))
   } else if safe_bool(report["dry_run"], false) {
-    stdio.println("Batch status dry run written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch status dry run written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   } else {
-    stdio.println("Batch status receipt written: " + safe_string(report["out"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "Batch status receipt written: {0}",
+        [to_string(safe_string(report["out"], ""))],
+      ),
+    )
   }
-  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
-  stdio.println("  completed: " + safe_int_string(report["completed_count"], "0"))
-  stdio.println("  running: " + safe_int_string(report["running_count"], "0"))
-  stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
-  stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
-  stdio.println("  unknown: " + safe_int_string(report["unknown_count"], "0"))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  jobs: {0}",
+      [to_string(safe_int_string(report["job_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  completed: {0}",
+      [to_string(safe_int_string(report["completed_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  running: {0}",
+      [to_string(safe_int_string(report["running_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  ready: {0}",
+      [to_string(safe_int_string(report["ready_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  failed: {0}",
+      [to_string(safe_int_string(report["failed_count"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  unknown: {0}",
+      [to_string(safe_int_string(report["unknown_count"], "0"))],
+    ),
+  )
   if safe_string(report["receipt_sha256"], "") != "" {
-    stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  receipt sha256: {0}",
+        [to_string(safe_string(report["receipt_sha256"], ""))],
+      ),
+    )
   }
-  print_list(stdio, "errors", safe_list(report["errors"]))
-  print_list(stdio, "warnings", safe_list(report["warnings"]))
+  print_list(stdio, cli_message(__cli_locale, "errors", []), safe_list(report["errors"]))
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), safe_list(report["warnings"]))
 }
 
 fn __render_status_json(report: dict) -> string {
@@ -558,7 +613,7 @@ fn __render_status_json(report: dict) -> string {
  * @effects: [env.read, fs.read, fs.write, network, stdio.write]
  * @errors: [runtime]
  */
-pub fn __run_status(harness: Harness) -> int {
+pub fn __run_status(__cli_locale: string, harness: Harness) -> int {
   const submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
@@ -630,7 +685,7 @@ pub fn __run_status(harness: Harness) -> int {
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     harness.stdio.println(__render_status_json(report))
   } else {
-    __render_status_human(harness.stdio, report)
+    __render_status_human(__cli_locale, harness.stdio, report)
   }
   if len(errors) == 0 {
     return 0

@@ -27,6 +27,84 @@ fn run(locale: &str, arguments: &[&str]) -> Output {
 }
 
 #[test]
+fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
+    let report = run("en", &["doctor", "--no-network", "--json"]);
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&report.stdout).expect("actual doctor JSON report");
+    assert!(!parsed["data"]["checks"]
+        .as_array()
+        .expect("doctor checks")
+        .is_empty());
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../harn-stdlib/src/stdlib/cli/doctor.harn");
+    for (locale, _) in LOCALES {
+        let output = run(locale, &["doctor", "--no-network"]);
+        assert!(!output.stdout.is_empty(), "{locale}: {output:?}");
+        let normalized =
+            harn_hostlib::localization::resolve_locale(locale).expect("supported locale");
+        let catalog: serde_json::Value = serde_json::from_str(match normalized.id() {
+            "es" => include_str!("../../src/localization/es.json"),
+            "fr" => include_str!("../../src/localization/fr.json"),
+            "de" => include_str!("../../src/localization/de.json"),
+            "pt-BR" => include_str!("../../src/localization/pt-BR.json"),
+            "it" => include_str!("../../src/localization/it.json"),
+            "ja" => include_str!("../../src/localization/ja.json"),
+            "ko" => include_str!("../../src/localization/ko.json"),
+            "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+            _ => include_str!("../../src/localization/en.json"),
+        })
+        .unwrap();
+        let text = String::from_utf8(output.stdout).unwrap();
+        for key in [
+            "--- Targets ---\n",
+            "--- Providers ---\n",
+            "--- Summary ---\n",
+        ] {
+            assert!(
+                text.contains(catalog[key].as_str().unwrap()),
+                "{locale}: {text}"
+            );
+        }
+        let output = harn_e2e_command()
+            .env("LC_ALL", locale)
+            .env(
+                "HARN_DOCTOR_REPORT_JSON",
+                serde_json::to_string(&parsed["data"]).unwrap(),
+            )
+            .env(
+                "HARN_DOCTOR_REPORT_ENVELOPE_JSON",
+                String::from_utf8(report.stdout.clone()).unwrap().trim_end(),
+            )
+            .env("HARN_OUTPUT_JSON", "1")
+            .args(["run", "--no-sandbox"])
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.stdout, report.stdout,
+            "{locale}: nonempty JSON projection changed; {output:?}"
+        );
+    }
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("literal-values.harn");
+    std::fs::write(&source, r#"import { cli_message } from "std/cli/localization/scaffold/init"
+fn main(harness: Harness) {
+  harness.stdio.println(cli_message("unsupported", "Creating project '{0}'...", ["literal{0}{not_a_field}%@100%"]))
+}
+"#).unwrap();
+    let output = harn_e2e_command()
+        .args(["run", "--no-sandbox"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Creating project 'literal{0}{not_a_field}%@100%'...\n"
+    );
+}
+
+#[test]
 fn browser_independent_locales_reach_root_and_nested_cli_help() {
     for (locale, heading) in LOCALES {
         for arguments in [&["--help"][..], &["run", "--help"][..]] {
@@ -163,5 +241,101 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
         assert!(japanese.status.success(), "{format}: {japanese:?}");
         assert!(!english.stdout.is_empty(), "must measure populated output");
         assert_eq!(english.stdout, japanese.stdout, "{format} output changed");
+    }
+}
+
+#[test]
+fn localized_orchestrator_records_preserve_field_names_and_raw_result_values() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let expected: BTreeSet<_> = [
+        "binding_id",
+        "binding_version",
+        "event_id",
+        "status",
+        "replay_of_event_id",
+        "dlq_entry_id",
+        "error",
+        "result",
+    ]
+    .into_iter()
+    .collect();
+    for (locale, _) in LOCALES {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "localized-console-record"
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+match = { events = ["a2a.task.received"] }
+handler = "worker://triage"
+priority = "high"
+"#,
+        )
+        .unwrap();
+        let run_local = |arguments: &[&str]| {
+            harn_e2e_command()
+                .current_dir(project.path())
+                .env("LC_ALL", locale)
+                .args(arguments)
+                .output()
+                .expect("run local orchestrator")
+        };
+        let fire = run_local(&[
+            "orchestrator",
+            "fire",
+            "incoming-review-task",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "state",
+        ]);
+        assert!(fire.status.success(), "{locale}: {fire:?}");
+        let text = String::from_utf8(fire.stdout).unwrap();
+        let fields: BTreeMap<_, _> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("- ").and_then(|row| row.split_once('=')))
+            .collect();
+        assert_eq!(
+            fields.keys().copied().collect::<BTreeSet<_>>(),
+            expected,
+            "{locale}: {text}"
+        );
+        assert_eq!(fields["binding_id"], "incoming-review-task");
+        let result: serde_json::Value = serde_json::from_str(fields["result"])
+            .expect("raw result braces must remain literal JSON");
+        assert_eq!(result["queue"], "triage", "{locale}: {text}");
+        let queue = run_local(&[
+            "orchestrator",
+            "queue",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "state",
+            "ls",
+        ]);
+        assert!(queue.status.success(), "{locale}: {queue:?}");
+        let queue_text = String::from_utf8(queue.stdout).unwrap();
+        assert!(
+            queue_text.contains("triage"),
+            "must reach the populated worker queue: {queue_text}"
+        );
+        let in_flight = queue_text
+            .lines()
+            .find_map(|line| line.strip_prefix("- dispatcher_in_flight="))
+            .unwrap_or_else(|| panic!("{locale}: missing stable field: {queue_text}"));
+        in_flight
+            .parse::<u64>()
+            .expect("field retains its numeric value");
+        let literal = "literal{0}{not_a_field}%@100%";
+        let matched = run_local(&["skill", "match", literal]);
+        assert!(matched.status.success(), "{locale}: {matched:?}");
+        assert!(
+            String::from_utf8_lossy(&matched.stdout).contains(literal),
+            "argument braces and percent sequences must remain literal: {matched:?}"
+        );
     }
 }

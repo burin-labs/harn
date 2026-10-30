@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/lora_manifest"
 import {
   render_peft_save_policy,
   render_probe_command_templates,
@@ -28,7 +30,7 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __path_line(stdio: HarnessStdio, label: string, value: unknown) {
+fn __path_line(__cli_locale: string, stdio: HarnessStdio, label: string, value: unknown) {
   const path_ref = safe_dict(value)
   const path = safe_string(path_ref["path"], "")
   if path == "" {
@@ -43,23 +45,24 @@ fn __path_line(stdio: HarnessStdio, label: string, value: unknown) {
   const suffix = if hash == "" {
     ""
   } else {
-    " sha256=" + hash
+    cli_message(__cli_locale, " sha256={0}", [to_string(hash)])
   }
   stdio.println(
-    "  "
-      + label
-      + ": "
-      + path
-      + " ("
-      + safe_string(path_ref["kind"], "")
-      + ", exists="
-      + exists
-      + ")"
-      + suffix,
+    cli_message(
+      __cli_locale,
+      "  {0}: {1} ({2}, exists={3}){4}",
+      [
+        to_string(label),
+        to_string(path),
+        to_string(safe_string(path_ref["kind"], "")),
+        to_string(exists),
+        to_string(suffix),
+      ],
+    ),
   )
 }
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const base = safe_dict(report["base"])
   const request = safe_dict(report["request"])
   const target = safe_dict(report["target"])
@@ -77,106 +80,259 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const batch_ready = safe_dict(evidence["batch_ready"])
   const warnings = safe_list(report["warnings"])
   stdio.println(
-    "LoRA manifest for "
-      + safe_string(target["adapter_name"], "")
-      + " on "
-      + safe_string(base["id"], "")
-      + " via "
-      + safe_string(base["provider"], ""),
+    cli_message(
+      __cli_locale,
+      "LoRA manifest for {0} on {1} via {2}",
+      [
+        to_string(safe_string(target["adapter_name"], "")),
+        to_string(safe_string(base["id"], "")),
+        to_string(safe_string(base["provider"], "")),
+      ],
+    ),
   )
-  stdio.println("  producer: " + safe_string(report["producer"], ""))
+  stdio.println(
+    cli_message(__cli_locale, "  producer: {0}", [to_string(safe_string(report["producer"], ""))]),
+  )
   const output = safe_string(request["output"], "")
   if output != "" {
-    stdio.println("  output: " + output)
+    stdio.println(cli_message(__cli_locale, "  output: {0}", [to_string(output)]))
   }
   const run_id = safe_string(training["run_id"], "")
   if run_id != "" {
-    stdio.println("  training run: " + run_id)
+    stdio.println(cli_message(__cli_locale, "  training run: {0}", [to_string(run_id)]))
   }
   stdio.println(
-    "  tool format: "
-      + safe_string(request["effective_tool_format"], "")
-      + " (requested "
-      + safe_string(request["requested_tool_format"], "auto")
-      + ")",
-  )
-  stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
-  stdio.println("  chat template: " + safe_string(target["chat_template"], ""))
-  stdio.println("  contract: " + safe_string(contract["id"], ""))
-  stdio.println("  request model: " + safe_string(target["request_model"], ""))
-  stdio.println("  trainer: " + safe_string(training["trainer"], ""))
-  render_trainer_identity_check(stdio, training["trainer_identity"])
-  stdio.println(
-    "  training: "
-      + safe_string(training["method"], "")
-      + " + "
-      + safe_string(training["adapter_type"], ""),
+    cli_message(
+      __cli_locale,
+      "  tool format: {0} (requested {1})",
+      [
+        to_string(safe_string(request["effective_tool_format"], "")),
+        to_string(safe_string(request["requested_tool_format"], "auto")),
+      ],
+    ),
   )
   stdio.println(
-    "  LoRA hparams: rank="
-      + safe_int_string(training["rank"], "")
-      + " alpha="
-      + safe_int_string(training["alpha"], "")
-      + " dropout="
-      + safe_number_string(training["dropout"], ""),
+    cli_message(
+      __cli_locale,
+      "  dataset format: {0}",
+      [to_string(safe_string(request["dataset_format"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  chat template: {0}",
+      [to_string(safe_string(target["chat_template"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  contract: {0}", [to_string(safe_string(contract["id"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  request model: {0}",
+      [to_string(safe_string(target["request_model"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  trainer: {0}", [to_string(safe_string(training["trainer"], ""))]),
+  )
+  render_trainer_identity_check(__cli_locale, stdio, training["trainer_identity"])
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  training: {0} + {1}",
+      [
+        to_string(safe_string(training["method"], "")),
+        to_string(safe_string(training["adapter_type"], "")),
+      ],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  LoRA hparams: rank={0} alpha={1} dropout={2}",
+      [
+        to_string(safe_int_string(training["rank"], "")),
+        to_string(safe_int_string(training["alpha"], "")),
+        to_string(safe_number_string(training["dropout"], "")),
+      ],
+    ),
   )
   const target_module_contract = safe_dict(training["target_modules"])
   const target_modules = safe_list(target_module_contract["modules"])
   if len(target_modules) > 0 {
     stdio.println(
-      "  target modules: " + join(target_modules.map({ item -> safe_string(item, "") }), ", "),
+      cli_message(
+        __cli_locale,
+        "  target modules: {0}",
+        [to_string(join(target_modules.map({ item -> safe_string(item, "") }), ", "))],
+      ),
     )
-    stdio.println("  target module policy: " + safe_string(target_module_contract["policy"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  target module policy: {0}",
+        [to_string(safe_string(target_module_contract["policy"], ""))],
+      ),
+    )
   }
-  stdio.println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
-  render_peft_save_policy(stdio, peft_save_policy)
-  stdio.println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
-  render_tool_catalog_contract(stdio, safe_dict(training_contract["tool_catalog"]))
-  stdio.println("  split policy: " + safe_string(training_contract["dataset_split_policy"], ""))
   stdio.println(
-    "  training base precision: "
-      + safe_string(precision["training_base_precision"], ""),
+    cli_message(
+      __cli_locale,
+      "  assistant mask: {0}",
+      [to_string(safe_string(training_contract["assistant_mask_policy"], ""))],
+    ),
+  )
+  render_peft_save_policy(__cli_locale, stdio, peft_save_policy)
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  parser owner: {0}",
+      [to_string(safe_string(training_contract["tool_parser_owner"], ""))],
+    ),
+  )
+  render_tool_catalog_contract(__cli_locale, stdio, safe_dict(training_contract["tool_catalog"]))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  split policy: {0}",
+      [to_string(safe_string(training_contract["dataset_split_policy"], ""))],
+    ),
   )
   stdio.println(
-    "  training compute precision: "
-      + safe_string(precision["training_compute_precision"], ""),
+    cli_message(
+      __cli_locale,
+      "  training base precision: {0}",
+      [to_string(safe_string(precision["training_base_precision"], ""))],
+    ),
   )
-  stdio.println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
-  stdio.println("  serving base precision: " + safe_string(precision["serving_base_precision"], ""))
-  stdio.println("  template: " + safe_string(template["name"], ""))
-  stdio.println("  template source: " + safe_string(template["source"], ""))
-  __path_line(stdio, "dataset", inputs["dataset"])
-  __path_line(stdio, "corpus", inputs["corpus"])
-  __path_line(stdio, "export manifest", inputs["export_manifest"])
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  training compute precision: {0}",
+      [to_string(safe_string(precision["training_compute_precision"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  adapter precision: {0}",
+      [to_string(safe_string(precision["adapter_weight_precision"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  serving base precision: {0}",
+      [to_string(safe_string(precision["serving_base_precision"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(__cli_locale, "  template: {0}", [to_string(safe_string(template["name"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  template source: {0}",
+      [to_string(safe_string(template["source"], ""))],
+    ),
+  )
+  __path_line(__cli_locale, stdio, "dataset", inputs["dataset"])
+  __path_line(__cli_locale, stdio, "corpus", inputs["corpus"])
+  __path_line(__cli_locale, stdio, "export manifest", inputs["export_manifest"])
   const teacher = safe_dict(inputs["teacher"])
   const teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
-    stdio.println("  teacher: " + teacher_id + " via " + safe_string(teacher["provider"], ""))
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  teacher: {0} via {1}",
+        [to_string(teacher_id), to_string(safe_string(teacher["provider"], ""))],
+      ),
+    )
   }
   const adapter_reference = safe_string(artifacts["adapter_reference"], "")
   if adapter_reference != "" {
-    stdio.println("  adapter reference: " + adapter_reference)
+    stdio.println(
+      cli_message(__cli_locale, "  adapter reference: {0}", [to_string(adapter_reference)]),
+    )
   }
-  __path_line(stdio, "adapter path", artifacts["local_path"])
+  __path_line(__cli_locale, stdio, "adapter path", artifacts["local_path"])
   for item in safe_list(artifacts["adapter_files"]) {
-    __path_line(stdio, "adapter file", item)
+    __path_line(__cli_locale, stdio, "adapter file", item)
   }
-  stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
-  stdio.println("  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""))
-  stdio.println("  promotion minimum trials: " + safe_int_string(promotion["minimum_trials"], "0"))
-  stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
-  stdio.println("  promotion baseline: " + safe_string(promotion["comparison_baseline"], ""))
-  print_list(stdio, "template requirements", safe_list(template["requirements"]))
-  print_list(stdio, "precision gates", safe_list(precision["promotion_gates"]))
-  print_list(stdio, "promotion metrics", safe_list(promotion["required_metrics"]))
-  print_list(stdio, "promotion gates", safe_list(promotion["gates"]))
-  print_list(stdio, "promotion receipts", safe_list(evidence["required_receipts"]))
-  render_required_probe_cases(stdio, evidence["required_probe_cases"])
-  render_probe_command_templates(stdio, evidence["probe_command_templates"])
-  print_list(stdio, "batch receipts", safe_list(evidence["optional_batch_receipts"]))
-  render_command(stdio, "eval", safe_list(promotion["eval_command"]))
-  render_command(stdio, "batch eval manifest", safe_list(batch_ready["manifest_command"]))
-  print_list(stdio, "warnings", warnings)
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  adapter binding: {0}",
+      [to_string(safe_string(serving["adapter_binding"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  LoRA module format: {0}",
+      [to_string(safe_string(serving["lora_module_value_format"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  promotion minimum trials: {0}",
+      [to_string(safe_int_string(promotion["minimum_trials"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  promotion id: {0}",
+      [to_string(safe_string(evidence["promotion_id"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  promotion baseline: {0}",
+      [to_string(safe_string(promotion["comparison_baseline"], ""))],
+    ),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "template requirements", []),
+    safe_list(template["requirements"]),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "precision gates", []),
+    safe_list(precision["promotion_gates"]),
+  )
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "promotion metrics", []),
+    safe_list(promotion["required_metrics"]),
+  )
+  print_list(stdio, cli_message(__cli_locale, "promotion gates", []), safe_list(promotion["gates"]))
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "promotion receipts", []),
+    safe_list(evidence["required_receipts"]),
+  )
+  render_required_probe_cases(__cli_locale, stdio, evidence["required_probe_cases"])
+  render_probe_command_templates(__cli_locale, stdio, evidence["probe_command_templates"])
+  print_list(
+    stdio,
+    cli_message(__cli_locale, "batch receipts", []),
+    safe_list(evidence["optional_batch_receipts"]),
+  )
+  render_command(stdio, cli_message(__cli_locale, "eval", []), safe_list(promotion["eval_command"]))
+  render_command(
+    stdio,
+    cli_message(__cli_locale, "batch eval manifest", []),
+    safe_list(batch_ready["manifest_command"]),
+  )
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), warnings)
 }
 
 fn __render_json(report: dict) -> string {
@@ -200,6 +356,7 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON not set")
@@ -216,7 +373,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if ok {
     return 0

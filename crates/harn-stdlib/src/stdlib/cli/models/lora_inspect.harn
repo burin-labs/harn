@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/lora_inspect"
 /**
  * `harn models lora inspect` renderer.
  *
@@ -35,7 +37,7 @@ fn __base_match_label(value: string) -> string {
   return "unknown"
 }
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const base = safe_dict(report["base"])
   const adapter = safe_dict(report["adapter"])
   const compatibility = safe_dict(report["compatibility"])
@@ -46,62 +48,116 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   const adapter_name = safe_string(adapter["name"], "lora-adapter")
   const base_id = safe_string(base["id"], "")
   const provider = safe_string(base["provider"], "")
-  stdio.println(adapter_name + " -> " + base_id + " via " + provider)
-  stdio.println("  adapter: " + safe_string(adapter["input"], ""))
   stdio.println(
-    "  base match: "
-      + __base_match_label(safe_string(compatibility["base_model_match"], "unknown")),
+    cli_message(
+      __cli_locale,
+      "{0} -> {1} via {2}",
+      [to_string(adapter_name), to_string(base_id), to_string(provider)],
+    ),
   )
-  stdio.println("  tool format: " + safe_string(base["tool_format"], ""))
-  stdio.println("  request model: " + safe_string(launch["request_model"], adapter_name))
+  stdio.println(
+    cli_message(__cli_locale, "  adapter: {0}", [to_string(safe_string(adapter["input"], ""))]),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  base match: {0}",
+      [to_string(__base_match_label(safe_string(compatibility["base_model_match"], "unknown")))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  tool format: {0}",
+      [to_string(safe_string(base["tool_format"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  request model: {0}",
+      [to_string(safe_string(launch["request_model"], adapter_name))],
+    ),
+  )
   const native_tools = if safe_bool(tool_calling["native_tools"], false) {
-    "yes"
+    cli_message(__cli_locale, "yes", [])
   } else {
-    "no"
+    cli_message(__cli_locale, "no", [])
   }
   stdio.println(
-    "  native tools: "
-      + native_tools
-      + ", preferred: "
-      + nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+    cli_message(
+      __cli_locale,
+      "  native tools: {0}, preferred: {1}",
+      [
+        to_string(native_tools),
+        to_string(nonempty_string(tool_calling["preferred_tool_format"], "unset")),
+      ],
+    ),
   )
   const launch_supported = if safe_bool(compatibility["provider_supports_lora_launch"], false) {
-    "yes"
+    cli_message(__cli_locale, "yes", [])
   } else {
-    "no"
+    cli_message(__cli_locale, "no", [])
   }
-  stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  stdio.println(
+    cli_message(__cli_locale, "  catalog LoRA launch flags: {0}", [to_string(launch_supported)]),
+  )
   const module_format = safe_string(compatibility["provider_lora_module_value_format"], "")
   if module_format != "" {
-    stdio.println("  LoRA module format: " + module_format)
+    stdio.println(
+      cli_message(__cli_locale, "  LoRA module format: {0}", [to_string(module_format)]),
+    )
   }
   const modules_to_save = safe_list(adapter["modules_to_save"])
   if len(modules_to_save) > 0 {
     stdio.println(
-      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+      cli_message(
+        __cli_locale,
+        "  modules to save: {0}",
+        [to_string(join(modules_to_save.map({ item -> safe_string(item, "") }), ", "))],
+      ),
     )
   } else {
-    stdio.println("  modules to save: none")
+    stdio.println(cli_message(__cli_locale, "  modules to save: none", []))
   }
   const rank_supported = if safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
-    "yes"
+    cli_message(__cli_locale, "yes", [])
   } else {
-    "no"
+    cli_message(__cli_locale, "no", [])
   }
-  stdio.println("  catalog LoRA rank flag: " + rank_supported)
+  stdio.println(
+    cli_message(__cli_locale, "  catalog LoRA rank flag: {0}", [to_string(rank_supported)]),
+  )
   const max_rank = safe_int_string(launch["max_lora_rank"], "")
   if max_rank != "" {
-    stdio.println("  max LoRA rank: " + max_rank)
+    stdio.println(cli_message(__cli_locale, "  max LoRA rank: {0}", [to_string(max_rank)]))
   }
   const contract_id = safe_string(contract["contract_id"], "")
   const contract_manifest = safe_string(contract["manifest_path"], "")
   if contract_id != "" || contract_manifest != "" {
-    stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
-    stdio.println("  contract manifest: " + contract_manifest)
-    stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
     stdio.println(
-      "  adapter contract id: "
-        + nonempty_string(contract["adapter_contract_id"], "<missing>"),
+      cli_message(
+        __cli_locale,
+        "  contract: {0}",
+        [to_string(nonempty_string(contract["contract_id"], "<missing>"))],
+      ),
+    )
+    stdio.println(
+      cli_message(__cli_locale, "  contract manifest: {0}", [to_string(contract_manifest)]),
+    )
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  contract status: {0}",
+        [to_string(safe_string(contract["status"], "unknown"))],
+      ),
+    )
+    stdio.println(
+      cli_message(
+        __cli_locale,
+        "  adapter contract id: {0}",
+        [to_string(nonempty_string(contract["adapter_contract_id"], "<missing>"))],
+      ),
     )
     const provider_match = if safe_bool(contract["provider_matches"], false) {
       "match"
@@ -130,27 +186,28 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
       "mismatch"
     }
     stdio.println(
-      "  contract route: base="
-        + __base_match_label(safe_string(contract["base_model_match"], "unknown"))
-        + " provider="
-        + provider_match
-        + " tool_format="
-        + tool_format_match
-        + " adapter="
-        + adapter_match
-        + " modules_to_save="
-        + save_policy_match,
+      cli_message(
+        __cli_locale,
+        "  contract route: base={0} provider={1} tool_format={2} adapter={3} modules_to_save={4}",
+        [
+          to_string(__base_match_label(safe_string(contract["base_model_match"], "unknown"))),
+          to_string(provider_match),
+          to_string(tool_format_match),
+          to_string(adapter_match),
+          to_string(save_policy_match),
+        ],
+      ),
     )
   }
   for warning in warnings {
     const text = safe_string(warning, "")
     if text != "" {
-      stdio.println("  warning: " + text)
+      stdio.println(cli_message(__cli_locale, "  warning: {0}", [to_string(text)]))
     }
   }
   const launch_argv = safe_list(launch["harn_local_launch"])
   if launch_argv.count != 0 {
-    stdio.println("  launch:")
+    stdio.println(cli_message(__cli_locale, "  launch:", []))
     stdio.println("    " + join_shell_argv(launch_argv, " "))
   }
 }
@@ -176,6 +233,7 @@ fn __render_json(report: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln(
@@ -194,7 +252,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if ok {
     return 0
