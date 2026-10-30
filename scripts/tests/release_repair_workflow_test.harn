@@ -1,5 +1,7 @@
 import { read_yaml } from "std/fs"
 
+type DependencySecurityPolicy = {signerWorkflow: string, signerRevision: string}
+
 fn expression(value: string) -> string {
   return "$" + "{{ " + value + " }}"
 }
@@ -48,7 +50,10 @@ pipeline test_publication_refreshes_security_after_all_other_authority(harness: 
 pipeline test_existing_tag_recovery_uses_the_same_source_bound_security_owner(harness: Harness) {
   const flow = read_yaml(harness.fs, "../../.github/workflows/publish-release.yml", nil)
   const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)
-  const policy = json_parse(harness.fs.read_text("../lib/dependency-security-policy.json"))
+  const policy = schema_expect(
+    json_parse(harness.fs.read_text("../lib/dependency-security-policy.json")),
+    schema_of(DependencySecurityPolicy),
+  )
   const security = flow.jobs["publication-security"]
   assert_eq(security.uses, supply.jobs["cargo-deny"].uses)
   assert_eq(security.uses, policy.signerWorkflow + "@" + policy.signerRevision)
