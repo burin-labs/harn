@@ -152,8 +152,8 @@ fn authentication_boundary_errors(steps: list, env: dict) -> list<string> {
 
 fn bump_capacity_errors(inputs: dict, job: dict) -> list<string> {
   let errors: list<string> = []
-  if inputs?.get("runs-on")?.type != "string"
-    || inputs?.get("runs-on")?.default != "harn-ci-big"
+  if inputs.get("runs-on")?.type != "string"
+    || inputs.get("runs-on")?.default != "harn-ci-big"
     || job.get("runs-on") != "$" + "{{ inputs.runs-on }}" {
     errors = errors
       + ["consumer bump capacity must be caller-selectable with a large Linux default"]
