@@ -192,6 +192,7 @@ enum SessionAdmissionRole {
 
 pub struct SessionState {
     admission_role: SessionAdmissionRole,
+    transcript_recording_ready: bool,
     retention: Arc<()>,
     pub id: String,
     pub transcript: VmValue,
@@ -380,7 +381,9 @@ use runtime_store::{
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
-pub(crate) use transcript_lifecycle::{append_event_to_state, canonical_prompt_snapshot};
+pub(crate) use transcript_lifecycle::{
+    append_event_to_state, canonical_prompt_snapshot, replay_transcript_change,
+};
 pub use types::*;
 pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};
 
@@ -691,24 +694,6 @@ pub fn exists(id: &str) -> bool {
     SESSIONS.with(|s| s.borrow().contains_key(id))
 }
 
-/// Apply a transcript change a served tool dispatch recorded, through the
-/// one transcript writer. A missing session refuses replay.
-pub(crate) fn replay_transcript_change(
-    id: &str,
-    fields: &std::collections::BTreeMap<String, crate::testbench::tape::FieldChange>,
-) -> Result<(), String> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return Err(format!(
-                "recorded transcript target session `{id}` is not open"
-            ));
-        };
-        let next = crate::run_tape::apply_transcript_change(&state.transcript, fields)?;
-        state.replace_transcript(next)
-    })
-}
-
 pub fn length(id: &str) -> Option<usize> {
     SESSIONS.with(|s| {
         s.borrow().get(id).map(|state| {
@@ -839,7 +824,7 @@ fn open_with_retention(
         if retain {
             retention = Some(SessionRetention::for_state(&state));
         }
-        map.insert(resolved.clone(), state);
+        state.insert_into(&mut map);
         Ok(())
     })?;
     for retired in evicted {
@@ -946,13 +931,13 @@ fn admit_linked_sessions(
             let mut parent = SessionState::new(parent_id.to_string());
             parent.admission_role = SessionAdmissionRole::ParentReference;
             parent.actor_chain = inherited_actor_chain.clone();
-            map.insert(parent_id.to_string(), parent);
+            parent.insert_into(&mut map);
             created.push(parent_id.to_string());
         }
         if !map.contains_key(child_id) {
             let mut child = SessionState::new(child_id.to_string());
             child.actor_chain = child_actor_chain.clone();
-            map.insert(child_id.to_string(), child);
+            child.insert_into(&mut map);
             created.push(child_id.to_string());
         } else if let Some(actor_chain) = requested_child_actor_chain {
             if let Some(child) = map.get_mut(child_id) {
@@ -1207,7 +1192,7 @@ fn fork_with_retention(
         if retain {
             retention = Some(SessionRetention::for_state(&state));
         }
-        map.insert(dst.clone(), state);
+        state.insert_into(&mut map);
         map.get_mut(src_id)
             .expect("fork source remains protected during atomic admission")
             .touch();

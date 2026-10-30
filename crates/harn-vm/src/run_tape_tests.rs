@@ -64,6 +64,43 @@ fn record_full(dir: &Path) -> RunTapeGuard {
         .unwrap()
 }
 
+#[test]
+fn version_four_transcripts_remain_readable_without_claiming_lifecycle_evidence() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let guard = record_full(dir.path());
+    let legacy = serde_json::json!({
+        "session_id": "legacy-session",
+        "fields": {"messages": {"append": [{"role": "user", "content": "legacy"}]}}
+    });
+    let change: TranscriptChange = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&change).unwrap(), legacy);
+    let mut recording =
+        begin_tool_call("legacy-tool", "read", &serde_json::json!({}), true).unwrap();
+    recording.transcript_changes.push(change.clone());
+    finish_tool_call(recording, Ok(ok(serde_json::json!("read"))));
+    drop(guard);
+    let path = dir.path().join(TAPE_FILE_NAME);
+    let mut tape = EventTape::load(&path).unwrap();
+    tape.header.version = 4;
+    tape.persist(&path).unwrap();
+    let loaded = EventTape::load(&path).expect("format four remains inspectable");
+    assert!(loaded.records.iter().any(|record| {
+        matches!(&record.kind, TapeRecordKind::ToolCall { transcript_changes, .. } if transcript_changes == &[change.clone()])
+    }));
+    let result = start_branch(BranchPlan {
+        tape: loaded,
+        live_after_calls: 1,
+        workspace_root: dir.path().to_path_buf(),
+        state_root: dir.path().join("branch-state"),
+        host_state_roots: Vec::new(),
+    });
+    let Err(error) = result else {
+        panic!("old recording cannot claim lifecycle evidence")
+    };
+    assert!(error.contains("session lifecycle"), "{error}");
+}
+
 /// A branch entered on this thread for the life of the value.
 struct TestBranch {
     guard: BranchGuard,
@@ -216,7 +253,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     record_llm_call(&request(&text), &result(&text, None));
     let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
         .expect("active tape recording");
-    recording.transcript_changes.push(TranscriptChange {
+    recording.transcript_changes.push(TranscriptChange::Fields {
         session_id: "session-1".to_string(),
         fields: BTreeMap::from([(
             "messages".to_string(),
