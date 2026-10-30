@@ -63,7 +63,7 @@ case "$1 $2" in
   "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=100&page="*)
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
     if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then
-      jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+      jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
   "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"

@@ -85,7 +85,7 @@ case "$1 $2" in
     run="${FAKE_CANDIDATE_RUN-9001}"
     if [[ -n "$run" ]]; then
       sha="${2#*head_sha=}"; sha="${sha%%&*}"
-      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
   "api "*/artifacts\?name=candidate-manifest-*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"

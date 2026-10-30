@@ -31,7 +31,8 @@ function reportJobs(result,jobs){
     &&!['success','skipped'].includes(job.conclusion)).map(job=>job.name));
 }
 function sourceRuns(rows,source){
-  if(rows.some(row=>row.head_sha!==source||typeof row.event!=='string'
+  if(rows.some(row=>row.head_sha!==source||typeof row.event!=='string'||!row.event
+    ||typeof row.head_branch!=='string'||!row.head_branch
     ||!Number.isSafeInteger(row.run_attempt)||row.run_attempt<1
     ||!(observerRunIsLive(row.status)&&row.conclusion===null
       ||row.status==='completed'&&observerConclusionIsKnown(row.conclusion)))) refuse('source_census_unmeasured');

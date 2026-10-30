@@ -236,5 +236,10 @@ if(endpoint.pathname.includes('/workflows/')){
     assert.equal(partialArtifacts.status,1);
     assert.equal(partialArtifacts.stdout,'');
     assert.match(partialArtifacts.stderr,/census_unmeasured/);
+    fs.writeFileSync(record,JSON.stringify({runs:runs.map(row=>({...row,head_branch:undefined})),available}));
+    const unmeasuredBranch=spawnSync('bash',[entry],options);
+    assert.equal(unmeasuredBranch.status,1);
+    assert.equal(unmeasuredBranch.stdout,'');
+    assert.match(unmeasuredBranch.stderr,/source_census_unmeasured/);
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });
