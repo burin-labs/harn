@@ -88,6 +88,7 @@ pipeline main(harness: Harness) {
       source_revision: env_or(harness.env, "HARN_BUMP_SOURCE_REVISION", ""),
       package_test_receipt: package_test_receipt(harness.fs, harness.env) ?? "",
       labels: bump_pull_request_labels(harness.env.get_or("HARN_EXT_BUMP_LABELS", "")),
+      pr_title: harness.env.get_or("BUMP_DRIVER_PR_TITLE", ""),
     },
   )
   const adapter = github_bump_live_adapter(

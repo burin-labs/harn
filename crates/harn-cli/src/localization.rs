@@ -31,6 +31,21 @@ const CATALOGS: [(&str, &str); 8] = [
     ("zh-Hans", include_str!("localization/zh-Hans.json")),
 ];
 type Catalog = BTreeMap<String, String>;
+
+#[derive(serde::Deserialize)]
+struct ScriptCatalog {
+    locale_env: String,
+    messages: BTreeMap<String, usize>,
+}
+
+static SCRIPT_CATALOG: LazyLock<ScriptCatalog> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("localization_scripts.json"))
+        .expect("checked CLI script message registry")
+});
+
+pub(crate) fn script_locale_env() -> &'static str {
+    &SCRIPT_CATALOG.locale_env
+}
 pub(crate) const API_KEY_PROMPT: &str = "API key: ";
 pub(crate) const OAUTH_SECRET_PROMPT: &str = "OAuth client secret: ";
 pub(crate) const OAUTH_REDIRECT_PROMPT: &str = "OAuth redirect URI registered for this client: ";
@@ -56,7 +71,19 @@ pub(crate) const OAUTH_FAILED_PREFIX: &str = "Authorization failed: ";
 pub(crate) const OAUTH_DENIED: &str = "OAuth authorization was denied";
 pub(crate) const OAUTH_CALLBACK_STATE_MISMATCH: &str = "OAuth callback state did not match";
 pub(crate) const OAUTH_CALLBACK_TIMEOUT: &str = "OAuth callback timed out after 5 minutes";
-const RUNTIME_MESSAGES: [&str; 22] = [
+pub(crate) const DOCTOR_PICK_MODEL: &str =
+    "Run `harn models recommend` to pick a starter model for your machine.";
+pub(crate) const DOCTOR_SCAFFOLD: &str =
+    "Run `harn new my-agent --template agent` to scaffold a project.";
+pub(crate) const DOCTOR_READY: &str =
+    "You're ready. Try `harn try \"summarize this README\"` or `harn demo` for a bundled scenario.";
+pub(crate) const DOCTOR_FIX_CHECKS: &str =
+    "Address the failing checks above, then re-run `harn doctor`.";
+const RUNTIME_MESSAGES: [&str; 26] = [
+    DOCTOR_PICK_MODEL,
+    DOCTOR_SCAFFOLD,
+    DOCTOR_READY,
+    DOCTOR_FIX_CHECKS,
     API_KEY_PROMPT,
     OAUTH_SECRET_PROMPT,
     OAUTH_REDIRECT_PROMPT,
@@ -125,6 +152,9 @@ fn command_for(locale: &str) -> Command {
 /// Canonical English source for translators and the existing CLI drift guard.
 pub(crate) fn source_catalog() -> Catalog {
     let mut catalog = shared::collect_help_messages(Cli::command());
+    for source in SCRIPT_CATALOG.messages.keys() {
+        catalog.insert(source.clone(), source.clone());
+    }
     catalog.extend(
         serde_json::from_str::<Catalog>(include_str!("localization_formats.json"))
             .expect("checked command-result templates"),
@@ -213,6 +243,29 @@ mod tests {
     }
 
     #[test]
+    fn catalogs_do_not_introduce_unrelated_scripts_into_translated_prose() {
+        let unexpected = |source: &str, translated: &str| {
+            translated.chars().any(|ch| {
+                matches!(ch, '\u{0400}'..='\u{052f}' | '\u{0590}'..='\u{06ff}' | '\u{0900}'..='\u{097f}')
+                    && !source.contains(ch)
+            })
+        };
+        assert!(unexpected("Allow a provider", "Aplica una अनुमति"));
+        assert!(unexpected("Retry policy", "Política de повторição"));
+        assert!(unexpected("Repeatable", "قابل répétable"));
+        assert!(!unexpected("Example: العربية", "Exemple : العربية"));
+        let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            for (key, text) in catalog {
+                assert!(
+                    !unexpected(&source[key], text),
+                    "{locale}: unrelated script in {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_catalog_keeps_console_record_field_identifiers() {
         let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
         assert!(
@@ -244,6 +297,24 @@ mod tests {
         let error = field_contract::validate_fields(&source, &translated)
             .expect_err("a translated machine field must fail the same owning validator");
         assert!(error.contains("changed CLI record field identifiers"));
+    }
+
+    #[test]
+    fn changed_help_diagnostic_identifiers_are_rejected_by_the_catalog_owner() {
+        let source: Catalog = BTreeMap::from([(
+            "message".into(),
+            "Preserve pre-HARN-TYP-028 behavior.".into(),
+        )]);
+        assert_eq!(
+            field_contract::diagnostic_identifiers(&source["message"]),
+            ["HARN-TYP-028"]
+        );
+        field_contract::validate_fields(&source, &source).unwrap();
+        let translated: Catalog =
+            BTreeMap::from([("message".into(), "pre-TYP-028 の HARN 動作".into())]);
+        let error = field_contract::validate_fields(&source, &translated)
+            .expect_err("a split diagnostic identifier must fail the same owning validator");
+        assert!(error.contains("changed CLI diagnostic identifiers"));
     }
 
     #[test]

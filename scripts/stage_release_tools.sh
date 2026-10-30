@@ -43,5 +43,7 @@ do
   cp "$repo_root/scripts/$source" "$destination/$source"
 done
 cp -R "$repo_root/scripts/lib" "$destination/lib"
+mkdir -p "$destination/ci"
+cp "$repo_root/scripts/ci/consumer_observation_budget.json" "$destination/ci/"
 cp "$repo_root/scripts/ci/require_full_suite.sh" "$destination/require_full_suite.sh"
 cp "$repo_root/scripts/ci/require_native_qualification.sh" "$destination/require_native_qualification.sh"

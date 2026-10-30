@@ -48,4 +48,6 @@ jobs:
     permissions:
       contents: read
       issues: write # the shared workflow's default-branch tracking issue
-    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@bd2f36fff6b659ef6042eeea733fdf9a3050daec
+      id-token: write
+      attestations: write
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@502c1d9f2f110a9aa0d56ffd548cd06fe198608e

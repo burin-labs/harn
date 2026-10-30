@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/test"
 import { safe_dict, safe_string } from "std/cli/render"
 
 /**
@@ -63,25 +65,25 @@ fn __format_cost(value: any) -> string {
  * `first_token_ms` is `"-"` when the streaming probe didn't see a
  * delta in time.
  */
-fn __render_success_line(result: dict) -> string {
+fn __render_success_line(__cli_locale: string, result: dict) -> string {
   const first_token = if result["first_token_ms"] == nil {
     "-"
   } else {
     to_string(result["first_token_ms"])
   }
-  return "model_id=" + safe_string(result["model_id"], "")
-    + " provider="
-    + safe_string(result["provider"], "")
-    + " latency_ms="
-    + to_string(result["latency_ms"] ?? 0)
-    + " first_token_ms="
-    + first_token
-    + " input_tokens="
-    + to_string(result["input_tokens"] ?? 0)
-    + " output_tokens="
-    + to_string(result["output_tokens"] ?? 0)
-    + " estimated_cost_usd="
-    + __format_cost(result["estimated_cost_usd"])
+  return cli_message(
+    __cli_locale,
+    "model_id={0} provider={1} latency_ms={2} first_token_ms={3} input_tokens={4} output_tokens={5} estimated_cost_usd={6}",
+    [
+      to_string(safe_string(result["model_id"], "")),
+      to_string(safe_string(result["provider"], "")),
+      to_string(to_string(result["latency_ms"] ?? 0)),
+      to_string(first_token),
+      to_string(to_string(result["input_tokens"] ?? 0)),
+      to_string(to_string(result["output_tokens"] ?? 0)),
+      to_string(__format_cost(result["estimated_cost_usd"])),
+    ],
+  )
 }
 
 /**
@@ -119,6 +121,7 @@ fn __render_failure_envelope(error: string) -> string {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_TEST_RESULT_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_TEST_RESULT_JSON not set by dispatch shim")
@@ -137,7 +140,7 @@ fn main(harness: Harness) -> int {
     if json_mode {
       harness.stdio.println(__render_success_envelope(result))
     } else {
-      harness.stdio.println(__render_success_line(result))
+      harness.stdio.println(__render_success_line(__cli_locale, result))
     }
     return 0
   }

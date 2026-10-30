@@ -488,10 +488,26 @@ jobs:
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  source-security:
+    name: Candidate dependency security
+    needs: setup
+    if: needs.setup.outputs.build_mode == 'candidate'
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+      attestations: write
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@502c1d9f2f110a9aa0d56ffd548cd06fe198608e
+    with:
+      source-revision: ${{ needs.setup.outputs.candidate_source_sha }}
+      policy: false
+
   source-ci:
     name: Qualify candidate source
-    needs: setup
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    needs: [setup, source-security]
+    if: >-
+      !cancelled() && needs.setup.outputs.should_build_binaries == 'true' &&
+      (needs.setup.outputs.build_mode != 'candidate' || needs.source-security.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -1834,7 +1850,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # The residual release audit lanes (generated files, docs, grammar, security,
+  # The residual release audit lanes (generated files, docs, grammar,
   # smoke; owned by scripts/release_audit_contract.json) on the candidate's own
   # shipped Linux CLI. restore-candidate proves the executable came from the
   # archive the manifest records at this commit, and exports the identity the
@@ -1986,7 +2002,7 @@ jobs:
   # reads.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
+    needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -2025,7 +2041,7 @@ jobs:
             exit 1
           fi
           if ! jq -e '
-            ["setup", "source-ci", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
+            ["setup", "source-security", "source-ci", "prepare_cli_aot", "build", "collect_candidate_manifest", "release-residual-audit", "release-smoke"] as $required |
             . as $jobs | all($required[]; $jobs[.].result == "success")
           ' <<<"$RESULTS" >/dev/null; then
             echo "::error::A candidate job did not succeed: $RESULTS"

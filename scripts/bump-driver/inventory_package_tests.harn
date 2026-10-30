@@ -1,0 +1,85 @@
+pub type TestInventoryMode = "package" | "repository-validation"
+
+pub type TestInventoryOptions = {
+  mode: TestInventoryMode,
+  root: string,
+  validator: string,
+  receipt_path: string,
+}
+
+/** An applicability observation is not a package test Result or a measured zero. */
+pub type RepositoryValidationObservation = {
+  schema_version: "harn_bump.repository_validation.v1",
+  status: "not_applicable",
+  root: string,
+  manifest_status: "missing",
+  validator: string,
+  reason: string,
+}
+
+pub fn inventory_package_tests(
+  harness: {fs: HarnessFs, process: HarnessProcess},
+  options: TestInventoryOptions,
+) -> int {
+  if options.mode == "repository-validation" {
+    const root_status = harness.fs.status(options.root, "read").status
+    require root_status == "present_dir",
+      "bump-driver: repository root classification failed: ${root_status}"
+    const manifest_status = harness.fs.status(path_join(options.root, "harn.toml"), "read").status
+    require manifest_status == "missing",
+      "bump-driver: repository-validation requires a positively measured absent harn.toml: ${manifest_status}"
+    require trim(options.validator) != "",
+      "bump-driver: repository-validation requires a declared validator"
+    const observation: RepositoryValidationObservation = {
+      schema_version: "harn_bump.repository_validation.v1",
+      status: "not_applicable",
+      root: options.root,
+      manifest_status: "missing",
+      validator: options.validator,
+      reason:
+        "This root is not a Harn package. The declared post-refresh validator owns readiness; package test discovery was not measured.",
+    }
+    harness.fs.write_text(options.receipt_path, json_stringify_pretty(observation))
+    return 0
+  }
+  const support = harness.process.run(
+    {program: "harn", args: ["package", "test-inventory", "--help"], cwd: options.root},
+  )
+  if !support.success {
+    harness.fs.write_text(
+      options.receipt_path,
+      json_stringify(
+        {
+          schemaVersion: 1,
+          ok: false,
+          error: {
+            code: "package_test_inventory_unsupported",
+            message: "target Harn runtime predates package test inventory",
+          },
+        },
+      ),
+    )
+    return 2
+  }
+  const inventory = harness.process.run(
+    {
+      program: "harn",
+      args: ["package", "test-inventory", ".", "--json", "--receipt-out", options.receipt_path],
+      cwd: options.root,
+    },
+  )
+  return inventory.exit_code ?? 1
+}
+
+pipeline main(harness: Harness) {
+  const options: TestInventoryOptions = schema_expect(
+    {
+      mode: harness.env.get_or("BUMP_INVENTORY_MODE", "package"),
+      root: harness.env.get_or("BUMP_INVENTORY_ROOT", ""),
+      validator: harness.env.get_or("BUMP_INVENTORY_VALIDATOR", ""),
+      receipt_path: harness.env.get_or("RECEIPT_PATH", ""),
+    },
+    schema_of(TestInventoryOptions),
+  )
+  return inventory_package_tests(pick(harness, ["fs", "process"]), options)
+}

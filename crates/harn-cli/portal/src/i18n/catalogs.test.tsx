@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import ts from "typescript"
 import { createIntl } from "react-intl"
 import { Sidebar } from "../components/Sidebar"
-import { getLocale, setLocale } from "../../../../../ui/localization"
+import { getLocale, setLocale, resolveLocale } from "../../../../../ui/localization"
 import { PortalIntlProvider } from "./PortalIntlProvider"
 import { catalogs } from "./catalogs"
 
@@ -22,6 +22,14 @@ afterEach(() => {
 })
 
 describe("portal languages", () => {
+  it("uses script and region fields before considering browser language fallbacks", () => {
+    for (const tag of ["zh-Hans-TW", "zh-Hans-HK", "zh-Hans-MO", "zh-CN-x-hant", "zh-x-tw", "zh-u-rg-twzzzz", "zh-Hans-TW-x-hant"]) {
+      expect(resolveLocale(tag), tag).toBe("zh-Hans")
+    }
+    for (const tag of ["zh-Hant-CN", "zh-Hant", "zh-TW-x-hans", "zh-HK", "zh-MO", "zh-Latn-CN"]) {
+      expect(resolveLocale(tag), tag).toBeUndefined()
+    }
+  })
   it.each(Object.entries(catalogs))(
     "%s has a complete, parseable catalog",
     (_, catalog) => {

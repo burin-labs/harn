@@ -672,8 +672,19 @@ sources = [
   "crates/harn-cli/src/commands/argument_schema.rs",
   "crates/harn-cli/src/localization.rs",
   "crates/harn-cli/src/localization_formats.json",
+  "crates/harn-cli/src/localization_scripts.json",
   "crates/harn-hostlib/src/localization.rs",
 ]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "cli-localization"
+description = "Argument-safe Harn renderers projected from the CLI catalog and its explicit script call census."
+gen = "gen-cli-localization"
+check = "check-cli-localization"
+outputs = ["crates/harn-stdlib/src/stdlib/cli/localization.harn", "crates/harn-stdlib/src/stdlib/cli/localization/", "crates/harn-stdlib/src/catalog_entries.rs"]
+sources = ["scripts/generate_cli_localization.mjs", "scripts/tests/cli_localization_generator_test.mjs", "crates/harn-cli/src/localization_scripts.json", "crates/harn-cli/src/localization/", "crates/harn-stdlib/src/stdlib/cli/", "crates/harn-vm/src/environment_registry_names.txt"]
 ci = true
 make_all = true
 
@@ -832,6 +843,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-session-bundle-schema" = "binary"
 "check-trigger-quickref" = "binary"
 "check-cli-surface" = "binary"
+"check-cli-localization" = "binary"
 "check-provider-matrix" = "binary"
 "check-provider-support" = "binary"
 "check-provider-catalog" = "binary"

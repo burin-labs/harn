@@ -113,6 +113,13 @@ fn workflow_input_errors(inputs: dict) -> list<string> {
   if inputs.get("labels")?.type != "string" || inputs.get("labels")?.default != "" {
     errors = errors + ["labels must remain an optional typed empty-default input"]
   }
+  if inputs.get("pr-title")?.type != "string" || inputs.get("pr-title")?.default != "" {
+    errors = errors + ["title policy must default once at the typed driver boundary"]
+  }
+  if inputs.get("test-inventory-mode")?.type != "string"
+    || inputs.get("test-inventory-mode")?.default != "package" {
+    errors = errors + ["test inventory must default to strict package discovery"]
+  }
   return errors
 }
 
@@ -223,6 +230,9 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     errors = errors + ["refresh, validation, and git effects must run from the consumer package"]
   }
   const env = run?.env ?? {}
+  if env?.BUMP_DRIVER_PR_TITLE != "$" + "{{ inputs.pr-title }}" {
+    errors = errors + ["the full caller title must reach the driver"]
+  }
   if env?.BUMP_REFRESH_FINALIZE_COMMAND != "$" + "{{ inputs.finalize-refresh-command }}" {
     errors = errors + ["artifact finalization must consume only the typed caller command"]
   }
@@ -452,6 +462,7 @@ fn assert_refresh_execution(
   caller_ok: bool,
   finalize_ok: bool = true,
   finalize_enabled: bool = true,
+  validator_ok: bool = true,
 ) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const workflow = read_yaml(harness.fs, path)
@@ -468,7 +479,7 @@ fn assert_refresh_execution(
     const adapter = [
       "harn() {",
       "  case \"$1\" in",
-      "    run) bash -c \"$HARN_BUMP_REFRESH\" ;;",
+      "    run) bash -c \"$HARN_BUMP_REFRESH\" && bash -c \"$HARN_BUMP_VALIDATE\" ;;",
       "    fix) printf 'migration\\n' >> \"$PHASES\" ;;",
       "    --version) : ;;",
       "    *) return 64 ;;",
@@ -493,6 +504,12 @@ fn assert_refresh_execution(
               "false"
             },
           HARN_BUMP_FORMAT_COMMAND: "printf 'format\\n' >> \"$PHASES\"",
+          HARN_BUMP_VALIDATE_COMMAND: "printf 'validation\\n' >> \"$PHASES\"; "
+            + if validator_ok {
+              "true"
+            } else {
+              "false"
+            },
           BUMP_REFRESH_FINALIZE_COMMAND: if finalize_enabled {
             "printf 'finalize\\n' >> \"$PHASES\"; "
               + if finalize_ok {
@@ -508,10 +525,11 @@ fn assert_refresh_execution(
         },
       },
     )
-    const completed = caller_ok && (!finalize_enabled || finalize_ok)
+    const refresh_completed = caller_ok && (!finalize_enabled || finalize_ok)
+    const completed = refresh_completed && validator_ok
     assert_eq(result.success, completed, result.stderr)
     const observed = harness.fs.read_text(phases)
-    const expected = if caller_ok {
+    const refreshed = if caller_ok {
       "caller\nmigration\nmigration\n"
         + if repairs == "true" {
           "migration\nformat\n"
@@ -526,9 +544,15 @@ fn assert_refresh_execution(
     } else {
       "caller\n"
     }
+    const expected = refreshed
+      + if refresh_completed {
+        "validation\n"
+      } else {
+        ""
+      }
     assert_eq(observed, expected)
-    assert_eq(harness.fs.exists(sentinel), completed)
-    if completed {
+    assert_eq(harness.fs.exists(sentinel), refresh_completed)
+    if refresh_completed {
       assert_eq(harness.fs.read_text(sentinel), "ok\n")
     }
   }
@@ -544,6 +568,10 @@ pipeline test_successful_caller_reaches_format_and_sentinel(harness: Harness) {
 
 pipeline test_failed_finalizer_refuses_refresh_success(harness: Harness) {
   assert_refresh_execution(harness, true, false)
+}
+
+pipeline test_failed_declared_validator_refuses_bump_success(harness: Harness) {
+  assert_refresh_execution(harness, true, true, true, false)
 }
 
 pipeline test_callers_without_generated_artifacts_need_no_finalizer(harness: Harness) {

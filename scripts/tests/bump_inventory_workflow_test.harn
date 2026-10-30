@@ -1,0 +1,122 @@
+import { read_yaml } from "std/fs"
+
+fn run_inventory(
+  harness: Harness,
+  mode: string,
+  shape: string,
+  validator: string,
+) -> {success: bool, receipt: dict?, stderr: string} {
+  const checkout = path_join(harness.fs.source_dir(), "../..")
+  const workflow = read_yaml(harness.fs, path_join(checkout, ".github/workflows/bump-harn.yml"))
+  const step = workflow.jobs.bump.steps.find(
+    { entry -> entry.name == "Inventory package tests before mutation" },
+  )
+  assert(step != nil)
+  assert_eq(step.env.BUMP_INVENTORY_MODE, "$" + "{{ inputs.test-inventory-mode }}")
+  assert_eq(step.env.BUMP_INVENTORY_ROOT, "$" + "{{ github.workspace }}/package")
+  assert_eq(step.env.BUMP_INVENTORY_VALIDATOR, "$" + "{{ inputs.validate-command }}")
+  const root = harness.fs.mkdtemp_in_workspace("bump-inventory-")
+  const package = path_join(root, "package")
+  harness.fs.mkdir(package)
+  const link = harness.process.run(
+    {program: "ln", args: ["-s", checkout, path_join(root, ".harn-runtime")]},
+  )
+  assert(link.success, link.stderr)
+  if shape == "package" || shape == "empty-package" {
+    harness.fs.write_text(
+      path_join(package, "harn.toml"),
+      "[package]\nname = \"inventory-fixture\"\nversion = \"0.1.0\"\n",
+    )
+    if shape == "package" {
+      harness.fs.mkdir(path_join(package, "tests"))
+      harness.fs.write_text(
+        path_join(package, "tests/smoke.harn"),
+        "pipeline test_reached() { assert(true) }\n",
+      )
+    }
+  }
+  const receipt_path = path_join(root, "receipt.json")
+  harness.fs.write_text(receipt_path, "{\"ok\":true,\"data\":{\"discovered_test_count\":99}}")
+  if shape == "unstatable-manifest" {
+    const loop = harness.process.run(
+      {program: "ln", args: ["-s", "harn.toml", path_join(package, "harn.toml")]},
+    )
+    assert(loop.success, loop.stderr)
+  }
+  const binary = harness.env.get_or("HARN_BIN", "harn")
+  const result = harness.process.run(
+    {
+      program: "bash",
+      args: ["-c", step.run],
+      cwd: package,
+      env: {
+        PATH: dirname(binary) + ":" + harness.env.get_or("PATH", ""),
+        BUMP_INVENTORY_MODE: mode,
+        BUMP_INVENTORY_ROOT: if shape == "unreadable-root" {
+          path_join(root, "absent")
+        } else {
+          package
+        },
+        BUMP_INVENTORY_VALIDATOR: validator,
+        RECEIPT_PATH: receipt_path,
+        GITHUB_OUTPUT: path_join(root, "outputs"),
+      },
+    },
+  )
+  const receipt = if harness.fs.exists(receipt_path)
+    && trim(harness.fs.read_text(receipt_path)) != "" {
+    json_parse(harness.fs.read_text(receipt_path))
+  } else {
+    nil
+  }
+  harness.fs.delete(root)
+  return {success: result.success, receipt: receipt, stderr: result.stderr}
+}
+
+pipeline test_repository_validation_is_explicitly_not_package_discovery(harness: Harness) {
+  const result = run_inventory(
+    harness,
+    "repository-validation",
+    "non-package",
+    "harn test reconcile-index.test.harn",
+  )
+  assert(result.success, result.stderr)
+  const receipt = result.receipt ?? {}
+  assert_eq(result.receipt.status, "not_applicable")
+  assert_eq(result.receipt.schema_version, "harn_bump.repository_validation.v1")
+  assert_eq(result.receipt.manifest_status, "missing")
+  assert_eq(result.receipt.validator, "harn test reconcile-index.test.harn")
+  assert(!receipt.keys().contains("ok"))
+  assert(!receipt.keys().contains("selected_file_count"))
+  assert(!receipt.keys().contains("discovered_test_count"))
+}
+
+pipeline test_repository_validation_refuses_packages_missing_validators_and_unknown_classification(
+  harness: Harness,
+) {
+  for shape in ["package", "unreadable-root", "unstatable-manifest"] {
+    const result = run_inventory(harness, "repository-validation", shape, "true")
+    assert(!result.success, shape)
+    assert_eq(result.receipt, nil)
+  }
+  for mode in ["repository-validation", "typo"] {
+    const result = run_inventory(harness, mode, "non-package", "")
+    assert(!result.success, mode)
+    assert_eq(result.receipt, nil)
+  }
+}
+
+pipeline test_package_discovery_keeps_measured_counts_and_empty_suite_failure(harness: Harness) {
+  const measured = run_inventory(harness, "package", "package", "")
+  assert(measured.success)
+  assert_eq(measured.receipt.ok, true)
+  assert_eq(measured.receipt.data.selected_file_count, 1)
+  assert_eq(measured.receipt.data.discovered_test_count, 1)
+  for shape in ["empty-package", "non-package"] {
+    const empty = run_inventory(harness, "package", shape, "true")
+    assert(empty.success, "a discovery failure remains repair evidence, not workflow suppression")
+    assert_eq(empty.receipt.ok, false)
+    assert_eq(empty.receipt.error.code, "package_test_discovery_failed")
+    assert_eq(empty.receipt.error.details.inventory.discovered_test_count, 0)
+  }
+}

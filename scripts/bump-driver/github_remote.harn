@@ -52,6 +52,7 @@ pub type GithubBumpRemoteConfig = {
   package_test_receipt?: string,
   bot_login?: string,
   labels?: list<string>,
+  pr_title?: string,
 }
 
 type GithubRepo = {owner: string, name: string}
@@ -356,6 +357,14 @@ fn __publish_worktree(harness: Harness, publication: GithubWorktreeCommitRequest
 
 /** Bind the GitHub connector package to std/bump/live's provider boundary. */
 pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
+  const pr_title = trim(config.pr_title ?? "")
+  const title = if pr_title == "" {
+    "[CI] Bump Harn runtime"
+  } else {
+    pr_title
+  }
+  require !title.contains("\n") && !title.contains("\r"),
+    "bump-driver: pull request title must be one line"
   if !contains(schema_of(LiveBumpRemote).properties.keys(), "is_generated_commit") {
     throw "bump-driver: target runtime lacks the authenticated repair identity contract; upgrade Harn before refreshing a consumer branch"
   }
@@ -538,7 +547,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         repo: repo.name,
         head: config.branch,
         base: config.base,
-        title: "Bump Harn runtime",
+        title: title,
         body: bump_pull_request_body(config.package_test_receipt, config.source_revision),
         expected_head_oid: expected_head_oid,
         previous_head_oid: existing?.head_oid,

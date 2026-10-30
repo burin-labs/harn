@@ -1,3 +1,5 @@
+import { cli_locale } from "std/cli/localization"
+import { cli_message } from "std/cli/localization/models/lora_promote"
 /**
  * `harn models lora promote` renderer.
  *
@@ -26,40 +28,77 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __render_human(stdio: HarnessStdio, report: dict) {
+fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
   const request = safe_dict(report["request"])
   const contract = safe_dict(report["contract"])
   const totals = safe_dict(report["totals"])
   const cases = safe_list(report["cases"])
   const warnings = safe_list(report["warnings"])
   const errors = safe_list(report["errors"])
-  stdio.println("LoRA promotion probe matrix")
-  stdio.println("  train receipt: " + safe_string(request["train_receipt"], ""))
-  stdio.println("  probe root: " + safe_string(request["probe_root"], ""))
+  stdio.println(cli_message(__cli_locale, "LoRA promotion probe matrix", []))
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  train receipt: {0}",
+      [to_string(safe_string(request["train_receipt"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  probe root: {0}",
+      [to_string(safe_string(request["probe_root"], ""))],
+    ),
+  )
   const out = safe_string(request["out"], "")
   if out != "" {
-    stdio.println("  receipt: " + out)
+    stdio.println(cli_message(__cli_locale, "  receipt: {0}", [to_string(out)]))
   }
-  stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
-  stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
-  render_trainer_identity_check(stdio, contract["trainer_identity"])
-  render_trainer_environment_check(stdio, contract["trainer_environment"])
-  stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
-  stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
   stdio.println(
-    "  totals: adapter_passed="
-      + safe_int_string(totals["adapter_passed"], "0")
-      + " adapter_failed="
-      + safe_int_string(totals["adapter_failed"], "0")
-      + " base_present="
-      + safe_int_string(totals["base_present"], "0")
-      + " missing="
-      + safe_int_string(totals["missing"], "0")
-      + " cost_usd="
-      + safe_number_string(totals["total_cost_usd"], "0"),
+    cli_message(
+      __cli_locale,
+      "  promotion id: {0}",
+      [to_string(safe_string(contract["promotion_id"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  LoRA contract: {0}",
+      [to_string(safe_string(contract["lora_contract_id"], ""))],
+    ),
+  )
+  render_trainer_identity_check(__cli_locale, stdio, contract["trainer_identity"])
+  render_trainer_environment_check(__cli_locale, stdio, contract["trainer_environment"])
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  eval dataset: {0}",
+      [to_string(safe_string(contract["eval_dataset"], ""))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  minimum trials: {0}",
+      [to_string(safe_int_string(contract["minimum_trials"], "0"))],
+    ),
+  )
+  stdio.println(
+    cli_message(
+      __cli_locale,
+      "  totals: adapter_passed={0} adapter_failed={1} base_present={2} missing={3} cost_usd={4}",
+      [
+        to_string(safe_int_string(totals["adapter_passed"], "0")),
+        to_string(safe_int_string(totals["adapter_failed"], "0")),
+        to_string(safe_int_string(totals["base_present"], "0")),
+        to_string(safe_int_string(totals["missing"], "0")),
+        to_string(safe_number_string(totals["total_cost_usd"], "0")),
+      ],
+    ),
   )
   if len(cases) > 0 {
-    stdio.println("  probe cases:")
+    stdio.println(cli_message(__cli_locale, "  probe cases:", []))
     for item in cases {
       const probe = safe_dict(item)
       const summary_path = safe_string(probe["summary_path"], "")
@@ -82,19 +121,23 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
       stdio.println("    - " + line)
       print_list(
         stdio,
-        "probe " + safe_string(probe["case_id"], "") + " failures",
+        cli_message(
+          __cli_locale,
+          "probe {0} failures",
+          [to_string(safe_string(probe["case_id"], ""))],
+        ),
         safe_list(probe["failed_case_reasons"]),
       )
     }
   }
-  print_list(stdio, "warnings", warnings)
-  print_list(stdio, "errors", errors)
+  print_list(stdio, cli_message(__cli_locale, "warnings", []), warnings)
+  print_list(stdio, cli_message(__cli_locale, "errors", []), errors)
   const result = if safe_bool(report["ok"], false) {
-    "PASS"
+    cli_message(__cli_locale, "PASS", [])
   } else {
-    "FAIL"
+    cli_message(__cli_locale, "FAIL", [])
   }
-  stdio.println("  result: " + result)
+  stdio.println(cli_message(__cli_locale, "  result: {0}", [to_string(result)]))
 }
 
 fn __render_json(report: dict) -> string {
@@ -282,6 +325,7 @@ fn __promotion_report(bundle: dict) -> dict {
 }
 
 fn main(harness: Harness) -> int {
+  const __cli_locale = cli_locale(harness.env)
   const raw = harness.env.get_or("HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON", "")
   if raw == "" {
     harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON not set")
@@ -301,7 +345,7 @@ fn main(harness: Harness) -> int {
   if json_mode {
     harness.stdio.println(__render_json(report))
   } else {
-    __render_human(harness.stdio, report)
+    __render_human(__cli_locale, harness.stdio, report)
   }
   if ok || !check {
     return 0
