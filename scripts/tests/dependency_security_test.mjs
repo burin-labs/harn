@@ -33,7 +33,7 @@ function fixture(fallback = false) {
       {name:'Publish immutable dependency security proof', status:'completed', conclusion:'success', number:4}]}];
   const bytes = Buffer.from(JSON.stringify(proof)+'\n');
   const artifact = {id:50, name:`dependency-security-proof-${source}-${runId}-1`, created_at:new Date(now-1000).toISOString()};
-  const record = {verificationResult:{verifiedTimestamps:[{}], signature:{certificate:{
+  const record = {verificationResult:{verifiedTimestamps:[{timestamp:new Date(now).toISOString()}], signature:{certificate:{
     issuer:'https://token.actions.githubusercontent.com', sourceRepositoryURI:`https://github.com/${repository}`,
     sourceRepositoryDigest:producerSource, sourceRepositoryRef:'refs/heads/main',
     buildSignerURI:`https://github.com/${policy.signerWorkflow}@${policy.signerRevision}`, buildSignerDigest:policy.signerRevision,
@@ -65,7 +65,7 @@ test('a real measured source differs safely from the workflow policy and event h
 
 test('missing, stale, future, subworkspace, or mismatched scan measurements refuse', () => {
   const f=fixture();
-  for (const patch of [{sourceRevision:''}, {sourceRevision:eventHead}, {advisoryDatabaseRevision:''},
+  for (const patch of [{sourceRevision:''}, {sourceRevision:eventHead}, {advisoryDatabaseRevision:''}, {advisoryDatabaseRevision:['d'.repeat(40)]},
     {workingDirectory:'crates/harn-vm'}, {issuedAtMs:undefined}, {issuedAtMs:now-policy.maximumAgeMs-1}, {issuedAtMs:now+60_001}]) {
     assert.throws(()=>validateProof({...f.proof,...patch},source,now), /proof_unmeasured/);
   }
@@ -76,15 +76,21 @@ test('JSON claims do not replace the actual producer, job, owner revision, or ru
   for (const patch of [{path:promote}, {run_attempt:2}, {head_sha:source}, {referenced_workflows:[]}, {head_repository:{full_name:'fork/harn'}}]) {
     assert.throws(()=>validateProducer(f.proof,{...f.run,...patch},f.jobs,publisherContext(f.env)), /producer_identity/);
   }
-  for (const patch of [{status:'in_progress'}, {conclusion:'skipped'}, {run_attempt:2}, {head_sha:source}, {steps:[]}]) {
+  for (const patch of [{status:'in_progress'}, {conclusion:'skipped'}, {run_attempt:2}, {head_sha:source}]) {
     assert.throws(()=>validateProducer(f.proof,f.run,[{...f.jobs[0],...patch}],publisherContext(f.env)), /signer_job/);
+  }
+  for (const jobs of [[], [f.jobs[0], f.jobs[0]]]) {
+    assert.throws(()=>validateProducer(f.proof,f.run,jobs,publisherContext(f.env)), /signer_job/);
+  }
+  for (const patch of [{started_at:null}, {completed_at:null}, {completed_at:new Date(now-4000).toISOString()}]) {
+    assert.throws(()=>validateProducer(f.proof,f.run,[{...f.jobs[0],...patch}],publisherContext(f.env)), /signer_time/);
   }
 });
 
 test('absent, forged, wrong-subject, or unsigned verification never counts as a signature', () => {
   const f=fixture();
   assert.throws(()=>validateAttestation([],f.proof,f.bytes), /attestation_identity/);
-  for (const change of [r=>r.verificationResult.verifiedTimestamps=[],
+  for (const change of [r=>r.verificationResult.verifiedTimestamps=[], r=>r.verificationResult.verifiedTimestamps=[{}],
     r=>r.verificationResult.signature.certificate.buildSignerDigest=source,
     r=>r.verificationResult.signature.certificate.runInvocationURI='https://github.com/other/run',
     r=>r.verificationResult.statement.subject=[], r=>r.verificationResult.statement.predicateType='other',
@@ -115,6 +121,13 @@ test('hosted manual recovery reaches its own fresh proof and verified signer', a
 
 test('a frozen tag workflow reaches promotion proof without new write permissions', async()=> {
   await exercise(fixture(true));
+});
+
+test('verified cryptographic custody works with an empty nested step inventory, never without crypto', async()=> {
+  const f=fixture();
+  f.jobs[0].steps=[];
+  await exercise(f);
+  await assert.rejects(exercise(f,{verify:async()=>{throw new Error('missing cryptographic proof');}}),/no_admitted_proof/);
 });
 
 test('manual recovery cannot borrow another run proof or accept a missing archive', async()=> {

@@ -403,6 +403,28 @@ fn run_cargo_publish(env: HarnessEnv, tools: HarnessTools, args: list<string>) -
   return command_run(tools, args, {env: cargo_publish_env(env), env_mode: "patch"})
 }
 
+fn dependency_security_env(env: HarnessEnv) -> dict {
+  let overlay = {}
+  for name in [
+    "GITHUB_ACTIONS",
+    "GITHUB_REPOSITORY",
+    "GITHUB_RUN_ID",
+    "GITHUB_RUN_ATTEMPT",
+    "GITHUB_SHA",
+    "GITHUB_WORKFLOW_REF",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_REF_TYPE",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+  ] {
+    const value = env.get(name)
+    if value != nil {
+      overlay[name] = value
+    }
+  }
+  return overlay
+}
+
 fn tree_requires_allow_dirty(fs: HarnessFs, tools: HarnessTools) -> bool {
   const diff = command_run(tools, ["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
   if !diff.success {
@@ -471,6 +493,7 @@ fn main(harness: Harness) {
     const admission = command_run(
       harness.tools,
       ["node", path_join(policy_root, "lib", "dependency-security.mjs")],
+      {env: dependency_security_env(harness.env), env_mode: "patch"},
     )
     harness.stdio.print(admission.stdout)
     harness.stdio.eprint(admission.stderr)

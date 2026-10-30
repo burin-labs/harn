@@ -13,13 +13,15 @@ const publishWorkflow = '.github/workflows/publish-release.yml';
 const promotionWorkflow = '.github/workflows/promote-release.yml';
 const sha = /^[0-9a-f]{40}$/;
 const id = /^[1-9][0-9]*$/;
+const isSha = value => typeof value === 'string' && sha.test(value);
+const isId = value => typeof value === 'string' && id.test(value);
 const refuse = reason => { throw new Error(`dependency_security_${reason}`); };
 export function validatePolicy(value) {
   if (value?.schemaVersion !== 'harn.dependency_security_policy.v1'
     || value.proofSchema !== 'harn.dependency_security.v1'
     || typeof value.predicateType !== 'string' || !value.predicateType.startsWith('https://')
     || typeof value.signerWorkflow !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/\.github\/workflows\/[A-Za-z0-9_.-]+\.yml$/.test(value.signerWorkflow)
-    || !sha.test(value.signerRevision ?? '')
+    || !isSha(value.signerRevision)
     || !Number.isSafeInteger(value.maximumAgeMs) || value.maximumAgeMs <= 0
     || !Number.isSafeInteger(value.discoveryWindowMs) || value.discoveryWindowMs < value.maximumAgeMs) refuse('policy_unmeasured');
   return value;
@@ -28,8 +30,8 @@ const policy = validatePolicy(JSON.parse(fs.readFileSync(new URL('./dependency-s
 
 export function publisherContext(env) {
   if (env.GITHUB_ACTIONS !== 'true' || env.GITHUB_REPOSITORY !== repository
-    || !id.test(env.GITHUB_RUN_ID ?? '') || !id.test(env.GITHUB_RUN_ATTEMPT ?? '')
-    || !sha.test(env.GITHUB_SHA ?? '') || !['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)
+    || !isId(env.GITHUB_RUN_ID) || !isId(env.GITHUB_RUN_ATTEMPT)
+    || !isSha(env.GITHUB_SHA) || !['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)
     || !new RegExp(`^${repository.replace('.', '\\.')}/${publishWorkflow.replaceAll('.', '\\.')}@refs/(heads/main|tags/v[0-9]+\\.[0-9]+\\.[0-9]+)$`).test(env.GITHUB_WORKFLOW_REF ?? '')) {
     refuse('requires_hosted_publisher_use_maintainer_release_workflow');
   }
@@ -40,12 +42,12 @@ export function publisherContext(env) {
 
 export function validateProof(proof, source, now, configuration = policy) {
   if (!proof || proof.schemaVersion !== configuration.proofSchema || proof.sourceRevision !== source
-    || !sha.test(source) || !sha.test(proof.advisoryDatabaseRevision ?? '') || proof.workingDirectory !== '.'
+    || !isSha(source) || !isSha(proof.advisoryDatabaseRevision) || proof.workingDirectory !== '.'
     || !Number.isSafeInteger(proof.issuedAtMs) || proof.issuedAtMs < 1
     || proof.issuedAtMs > now + 60_000 || now - proof.issuedAtMs > configuration.maximumAgeMs
-    || proof.producer?.repository !== repository || !id.test(proof.producer?.runId ?? '')
-    || !id.test(proof.producer?.runAttempt ?? '') || !sha.test(proof.producer?.sourceDigest ?? '')
-    || !sha.test(proof.producer?.eventHeadSha ?? '') || !sha.test(proof.producer?.workflowDigest ?? '')) {
+    || proof.producer?.repository !== repository || !isId(proof.producer?.runId)
+    || !isId(proof.producer?.runAttempt) || !isSha(proof.producer?.sourceDigest)
+    || !isSha(proof.producer?.eventHeadSha) || !isSha(proof.producer?.workflowDigest)) {
     refuse('proof_unmeasured_stale_or_mismatched');
   }
   return proof;
@@ -69,16 +71,12 @@ export function validateProducer(proof, run, jobs, current, configuration = poli
   if (signers.length !== 1 || signers[0].status !== 'completed' || signers[0].conclusion !== 'success'
     || !Number.isSafeInteger(signers[0].id) || signers[0].id < 1
     || String(signers[0].run_id) !== proof.producer.runId || signers[0].run_attempt !== Number(proof.producer.runAttempt)
-    || signers[0].head_sha !== run.head_sha
-    || !Array.isArray(signers[0].steps)
-    || !['Attest the measured proof', 'Publish immutable dependency security proof'].every(name =>
-      signers[0].steps.filter(step => step.name === name && step.status === 'completed' && step.conclusion === 'success').length === 1)) {
+    || signers[0].head_sha !== run.head_sha) {
     refuse('signer_job_unmeasured');
   }
-  const attestation = signers[0].steps.find(step => step.name === 'Attest the measured proof');
-  const upload = signers[0].steps.find(step => step.name === 'Publish immutable dependency security proof');
-  if (!Number.isSafeInteger(attestation.number) || !Number.isSafeInteger(upload.number)
-    || attestation.number >= upload.number) refuse('signer_publication_order_unproven');
+  // Nested jobs can omit their step inventory. The mandatory trusted-builder
+  // attestation and exact uploaded subject witness signing and publication;
+  // this census binds their completed job to the real producing attempt.
   const began = Date.parse(signers[0].started_at), ended = Date.parse(signers[0].completed_at);
   if (!Number.isFinite(began) || !Number.isFinite(ended) || ended < began
     || proof.issuedAtMs < began - 1000 || proof.issuedAtMs > ended + 1000) refuse('signer_time_unmeasured');
@@ -92,7 +90,10 @@ export function validateAttestation(records, proof, bytes, configuration = polic
     const verified = record?.verificationResult;
     const certificate = verified?.signature?.certificate;
     const statement = verified?.statement;
-    return Array.isArray(verified?.verifiedTimestamps) && verified.verifiedTimestamps.length > 0
+    return Array.isArray(verified?.verifiedTimestamps) && verified.verifiedTimestamps.some(value =>
+      typeof value.timestamp === 'string' && Number.isFinite(Date.parse(value.timestamp))
+      && Date.parse(value.timestamp) >= proof.issuedAtMs - 60_000
+      && Date.parse(value.timestamp) <= proof.issuedAtMs + configuration.maximumAgeMs)
       && certificate?.issuer === 'https://token.actions.githubusercontent.com'
       && certificate.sourceRepositoryURI === `https://github.com/${repository}`
       && certificate.sourceRepositoryDigest === proof.producer.sourceDigest
@@ -126,7 +127,7 @@ function verifySignature(bytes, proof, configuration = policy) {
 export async function requireDependencySecurity(env = process.env, adapters = {}) {
   const current = publisherContext(env);
   const source = adapters.source ?? execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
-  if (!sha.test(source)) refuse('published_source_unmeasured');
+  if (!isSha(source)) refuse('published_source_unmeasured');
   if (adapters.source === undefined && execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {encoding:'utf8'}).trim()) {
     refuse('published_source_dirty');
   }

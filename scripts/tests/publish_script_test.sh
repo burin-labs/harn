@@ -108,4 +108,27 @@ fi
 grep -q 'full is a local dry-run command' "$tmp_root/local-full-output"
 test ! -e "$tmp_root/cargo-record"
 
+cat > "$tmp_root/bin/node" <<'SH'
+#!/usr/bin/env bash
+printf 'ci=%s\nrepository=%s\nrun=%s\nattempt=%s\nworkflow=%s\ntoken=%s\n' \
+  "${GITHUB_ACTIONS:-missing}" "${GITHUB_REPOSITORY:-missing}" "${GITHUB_RUN_ID:-missing}" \
+  "${GITHUB_RUN_ATTEMPT:-missing}" "${GITHUB_WORKFLOW_REF:-missing}" "${GH_TOKEN:+present}"
+exit 99
+SH
+chmod +x "$tmp_root/bin/node"
+status=0
+GITHUB_ACTIONS=true GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=100 GITHUB_RUN_ATTEMPT=1 \
+  GITHUB_WORKFLOW_REF=burin-labs/harn/.github/workflows/publish-release.yml@refs/heads/main \
+  GH_TOKEN=fixture HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$publish_script" > "$tmp_root/hosted-context-output" 2>&1 || status=$?
+test "$status" -eq 99
+grep -q '^ci=true$' "$tmp_root/hosted-context-output"
+grep -q '^repository=burin-labs/harn$' "$tmp_root/hosted-context-output"
+grep -q '^run=100$' "$tmp_root/hosted-context-output"
+grep -q '^attempt=1$' "$tmp_root/hosted-context-output"
+grep -q '^workflow=burin-labs/harn/.github/workflows/publish-release.yml@refs/heads/main$' "$tmp_root/hosted-context-output"
+grep -q '^token=present$' "$tmp_root/hosted-context-output"
+test ! -e "$tmp_root/cargo-record"
+
 echo "publish_script_test: ok"

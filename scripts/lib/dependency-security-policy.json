@@ -3,7 +3,7 @@
   "proofSchema": "harn.dependency_security.v1",
   "predicateType": "https://burin.dev/attestations/dependency-security/v1",
   "signerWorkflow": "burin-labs/.github/.github/workflows/dependency-security-proof.yml",
-  "signerRevision": "e6f9a67577bdaba1c41819af8b5ef4dfcd457e41",
+  "signerRevision": "502c1d9f2f110a9aa0d56ffd548cd06fe198608e",
   "maximumAgeMs": 3600000,
   "discoveryWindowMs": 86400000
 }
