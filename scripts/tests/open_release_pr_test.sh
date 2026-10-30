@@ -26,6 +26,21 @@ fail() {
   exit 1
 }
 
+# Missing or malformed regeneration policy cannot read as an empty success.
+registry_fixture="$tmp_root/release-artifacts.toml"
+for registry in 'artifact = []' '[[artifact]]
+id = "broken"
+release_phase = "invented"
+gen = "gen-example"
+outputs = ["example.json"]'; do
+  printf '%s\n' "$registry" > "$registry_fixture"
+  if python3 "$repo_root/scripts/lib/release-generated-artifacts.py" targets after-version \
+    --registry "$registry_fixture" > "$tmp_root/targets" 2> "$tmp_root/registry-error"; then
+    fail 'invalid release regeneration registry was accepted'
+  fi
+  [[ ! -s "$tmp_root/targets" ]] || fail 'invalid release registry emitted a partial target plan'
+done
+
 # `gh` stub. `pr list` applies the caller's own --jq program to $FAKE_GH_PRS,
 # so the title/branch match under test is the opener's real jq expression.
 cat > "$bin_dir/gh" <<'SH'
@@ -156,6 +171,10 @@ cat > "$bin_dir/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'make %s\n' "$*" >> "$OPENER_RECORD"
+if [[ "${FAKE_REGENERATE_RECEIPT:-0}" == 1 && "$1" == gen-grammar-fitness ]]; then
+  grep -Fxq 'version = "1.2.4"' Cargo.toml
+  printf '{"version":"1.2.4","regenerated":true}\n' > crates/harn-hostlib/data/grammar-fitness/receipt.v1.json
+fi
 SH
 
 # Version-bump gate stub: rewrites the workspace version the way
@@ -716,8 +735,50 @@ git -C "$source_conflict" push --quiet origin HEAD:refs/heads/main
 mark_green "$source_conflict"
 FAKE_GH_PRS="$open_release_pr" run_opener "$source_conflict"
 [[ "$case_status" != 0 ]] || fail 'source conflict was automatically superseded'
-grep -Fq 'release conflict is not a modified folded fragment: source.txt' "$case_output" || fail 'source conflict was not named'
+grep -Fq 'release conflict' "$case_output" || fail 'source conflict refusal was not named'
+grep -Fq 'source.txt' "$case_output" || fail 'conflicting source path was not named'
 assert_no_side_effects 'source conflict' "$source_conflict"
+
+# A generated-output conflict waits for exact green proof, then recuts code,
+# all current notes and the registered release generators as one new attempt.
+generated=$(new_fixture generated-conflict 1.2.4-dev)
+printf 'old parser\n' > "$generated/parser-source.txt"
+add_fragments "$generated"
+old_generated_green=$(git -C "$generated" rev-parse HEAD)
+open_release_branch_on_origin "$generated"
+git -C "$generated" fetch --quiet origin refs/heads/release/v1.2.4
+git -C "$generated" switch --quiet --detach FETCH_HEAD
+printf '{"version":"1.2.4","parser":"old"}\n' > "$generated/crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"
+git -C "$generated" commit --quiet -am 'Generate the original release receipt'
+old_generated_attempt=$(git -C "$generated" rev-parse HEAD)
+git -C "$generated" push --quiet origin HEAD:refs/heads/release/v1.2.4 \
+  "HEAD:refs/heads/release-attempt/v1.2.4/$old_generated_attempt"
+git -C "$generated" switch --quiet main
+printf 'new parser\n' > "$generated/parser-source.txt"
+printf '{"version":"1.2.4-dev","parser":"new"}\n' > "$generated/crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"
+git -C "$generated" commit --quiet -am 'Land the new parser and its receipt'
+add_late_fragment "$generated"
+git -C "$generated" switch --quiet --detach "$old_generated_green"
+FAKE_GH_PRS="$open_release_pr" OPENER_ARGS=--existing-only run_opener "$generated"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'generated conflict did not wait for green'; }
+grep -Fxq action=blocked "$case_outputs" || fail 'stale generated receipt was admitted'
+jq -e '.recovery.waiting_for_green == ["crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"]' "$case_receipt" >/dev/null
+assert_no_side_effects 'stale generated receipt' "$generated" ''
+git -C "$generated" switch --quiet main
+mark_green "$generated"
+FAKE_GH_PRS="$open_release_pr" FAKE_REGENERATE_RECEIPT=1 run_opener "$generated"
+[[ "$case_status" == 0 ]] || { cat "$case_output" >&2; fail 'generated conflict could not prepare a new green cut'; }
+generated_attempt=$(jq -r .release_source_sha "$case_receipt")
+[[ "$generated_attempt" != "$old_generated_attempt" ]] || fail 'generated recovery reused the stale attempt'
+[[ $(git --git-dir="$generated.origin.git" rev-parse release/v1.2.4) == "$old_generated_attempt" ]] || fail 'generated recovery mutated the old attempt'
+[[ $(git -C "$generated" show "$generated_attempt:parser-source.txt") == 'new parser' ]] || fail 'new cut lost green code'
+git -C "$generated" show "$generated_attempt:CHANGELOG.md" | grep -Fq 'Late fix rides the release' || fail 'new cut omitted the new code notes'
+git -C "$generated" show "$generated_attempt:crates/harn-hostlib/data/grammar-fitness/receipt.v1.json" \
+  | jq -e '.version == "1.2.4" and .regenerated == true' >/dev/null || fail 'new cut did not regenerate its release receipt'
+if git -C "$generated" cat-file -e "$generated_attempt:changelog.d/8900.fixed.md" 2>/dev/null; then
+  fail 'new green fragment was not folded into its containing code cut'
+fi
+grep -Fq 'gh pr close https://github.com/example/harn/pull/77' "$case_record" || fail 'generated recovery did not supersede the stale PR'
 
 # Ambiguous or misleading attempt identities cannot choose a delivery target.
 ambiguous=$(jq -nc --argjson first "$open_release_pr" '$first + [($first[0] + {url:"https://github.com/example/harn/pull/78"})]')

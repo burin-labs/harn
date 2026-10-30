@@ -33,6 +33,7 @@ pub fn generated_artifact_schema() {
       outputs: schema_field(schema_list(schema_string()), false),
       sources: schema_field(schema_list(schema_string()), false),
       depends_on: schema_field(schema_list(schema_string()), false),
+      release_phase: schema_field(schema_enum(["before-version", "after-version"]), false),
     },
     {additional_properties: true},
   )

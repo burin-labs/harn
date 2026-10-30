@@ -41,8 +41,12 @@ ahead of this release. A push changing `changelog.d` checks existing attempts
 before restoring or building Harn.
 
 If a fragment already folded into the attempt is edited on main, Git reports a
-modify/delete conflict. The opener waits until green contains the exact edited
-fragment blobs, then refolds from green into a new signed, immutable attempt.
+modify/delete conflict. Conflicts in outputs that release preparation regenerates
+are recoverable too; `scripts/generated_artifacts.toml` owns both their commands
+and their conflict scope. The opener waits until green contains the exact current
+blobs, then prepares a new signed, immutable attempt from that green snapshot.
+The replacement contains green's code and folds green's complete fragment set,
+including later fragments, so its notes describe the same new cut as its code.
 It enrolls the replacement in Smart Ship and closes the conflicted PR with a
 link to the replacement. It preserves the earlier commit and attempt ref.
 Other conflicts, missing attempt records, and multiple mergeable attempts fail

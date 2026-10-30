@@ -197,6 +197,7 @@ make_all = false
 
 [[artifact]]
 id = "highlight"
+release_phase = "before-version"
 description = "Versioned Harn language vocabulary plus the legacy docs adapter, generated from the live lexer and stdlib builtin registry."
 gen = "gen-highlight"
 check = "check-highlight"
@@ -328,6 +329,7 @@ make_all = true
 
 [[artifact]]
 id = "language-spec"
+release_phase = "before-version"
 description = "spec/HARN_SPEC.md (single-file assembly), docs/src/language-spec.md (docs landing page), the per-chapter docs pages under docs/src/spec/language/, and the chapter list in docs/src/SUMMARY.md are all generated from the per-chapter sources in spec/chapters/."
 gen = "sync-language-spec"
 check = "check-language-spec"
@@ -386,6 +388,7 @@ make_all = true
 
 [[artifact]]
 id = "grammar-fitness"
+release_phase = "after-version"
 description = "Resolved Tree-sitter artifact provenance and versioned parse/search/safe-edit corpus fitness receipt consumed by ParserHealth."
 gen = "gen-grammar-fitness"
 check = "check-grammar-fitness"

@@ -20,6 +20,14 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "exact",
+    pattern: "scripts/lib/release-generated-artifacts.py",
+    category: "foreign-runtime-bootstrap",
+    owner: "Release attempt recovery",
+    reason:
+      "Reads the existing TOML artifact registry before the release decision may restore Harn; preparation consumes the same projection.",
+  },
+  {
     kind: "prefix",
     pattern: "experiments/shared-agent-guidance/fixtures/",
     category: "subprocess-fixture",
@@ -94,6 +102,27 @@ const PYTHON_ALLOWLIST = [
 ]
 
 const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "scripts/lib/release_attempt_plan.sh",
+    pattern: r"release-generated-artifacts\.py.* matches ",
+    category: "foreign-runtime-bootstrap",
+    owner: "Release attempt recovery",
+    reason: "Classifies regenerable conflicts before restoring a release CLI.",
+  },
+  {
+    path: "scripts/release_ship.sh",
+    pattern: r"release-generated-artifacts\.py.* targets ",
+    category: "foreign-runtime-bootstrap",
+    owner: "Release preparation",
+    reason: "Uses the bootstrap registry projection that owns conflict admission too.",
+  },
+  {
+    path: "scripts/tests/open_release_pr_test.sh",
+    pattern: r"release-generated-artifacts\.py.* targets ",
+    category: "subprocess-fixture",
+    owner: "Release attempt recovery",
+    reason: "Proves malformed bootstrap registry input refuses without a partial plan.",
+  },
   {
     path: "Makefile",
     pattern: r"^\s*python3\s+\./scripts/tests/prune_stale_targets_reader_test\.py(?:\s|$)",
