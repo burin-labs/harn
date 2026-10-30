@@ -7,8 +7,8 @@
 #      release for it already merged and the development bump has not landed,
 #      so there is nothing to release yet.
 #   2. A mergeable release stays frozen at its recorded immutable attempt.
-#      Modified folded fragments can supersede a conflicted attempt once green
-#      contains their current blobs. Other conflicts refuse recovery.
+#      Modified folded fragments or release-generated outputs can supersede a
+#      conflicted attempt once green contains their current blobs.
 #   3. Without unreleased changelog fragments there is nothing to release.
 # Otherwise the opener prepares on a local release/vX.Y.Z branch, runs
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
@@ -161,11 +161,11 @@ resolve_existing_attempts() {
   action="$(jq -r .action <<< "$plan")"
   case "$action" in
     wait-green)
-      echo "::notice::Folded fragments changed on main; waiting for green to include those exact blobs before refolding $title."
+      echo "::notice::Release inputs changed on main; waiting for green to include those exact blobs before preparing $title."
       emit action=blocked "version=$version" pr_url=
       exit 0 ;;
     open)
-      echo "::notice::Refolding modified fragments into a new immutable $title attempt."
+      echo "::notice::Preparing a coherent green cut as a new immutable $title attempt."
       return 0 ;;
     existing|reconcile)
       current_url="$(jq -r .current.url <<< "$plan")"

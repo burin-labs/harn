@@ -454,12 +454,12 @@ commit_prepare_transaction() {
 }
 
 regenerate_derived_files() {
+  local phase=$1 targets target
   log_step "Regenerate derived files"
-  # Both targets are idempotent no-ops when the generated artifact is
-  # already current. They exist as Makefile targets so the same
-  # canonical command works locally and from CI.
-  make sync-language-spec
-  make gen-highlight
+  targets=$(python3 "$SCRIPT_DIR/lib/release-generated-artifacts.py" targets "$phase") || return 1
+  while IFS= read -r target; do
+    make "$target" || return 1
+  done <<< "$targets"
 }
 
 prepare_here() {
@@ -481,7 +481,7 @@ prepare_here() {
   require_changelog_top_matches "$next"
   require_no_unfolded_fragments
 
-  regenerate_derived_files
+  regenerate_derived_files before-version
 
   log_step "Version bump (in place)"
   local prepare_args=(prepare --bump "$BUMP")
@@ -496,7 +496,7 @@ prepare_here() {
     echo "error: expected version $next, got $actual_next"
     exit 1
   fi
-  make gen-grammar-fitness
+  regenerate_derived_files after-version
 
   if [[ "$materialize_candidate" -eq 0 ]]; then
     run_common_gates
