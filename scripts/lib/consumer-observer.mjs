@@ -601,10 +601,13 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
 
 /** Build evidence belongs to its producing attempt. A new live promotion can
  * measure a repaired consumer without rerunning those immutable archives. */
-export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
+export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historical = null) {
   const {sourceRevision, runId, attempt} = request;
+  const policyRevision = run?.head_sha;
+  const distinctSource = policyRevision !== sourceRevision;
   if (!sha.test(sourceRevision) || !id.test(runId) || !Number.isSafeInteger(attempt) || attempt < 1
-    || String(run?.id) !== runId || run.run_attempt !== attempt || run.head_sha !== sourceRevision
+    || !sha.test(policyRevision)
+    || String(run?.id) !== runId || run.run_attempt !== attempt
     || run.head_repository?.full_name !== parentRepository || run.repository?.full_name !== parentRepository
     || run.path !== observerParentWorkflows.candidate || run.head_branch !== 'main'
     || !['push','workflow_dispatch'].includes(run.event)
@@ -614,6 +617,14 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     || targets.some(target => typeof target !== 'string' || !/^[a-z0-9_-]+$/.test(target))
     || !Array.isArray(jobs) || jobs.length === 0 || new Set(jobs.map(job=>job.id)).size !== jobs.length
     || new Set(jobs.map(job=>job.name)).size !== jobs.length) refuse('archive_producer_identity_unproven');
+  if (distinctSource && (run.event !== 'workflow_dispatch'
+    || historical?.lineage?.status !== 'ahead'
+    || historical.lineage.merge_base_commit?.sha !== sourceRevision
+    || historical?.manifest?.schemaVersion !== 'burin-labs.candidate_manifest.v1'
+    || historical.manifest.repository !== parentRepository
+    || historical.manifest.sourceCommit !== sourceRevision
+    || historical.manifest.runId !== runId
+    || historical.manifest.runAttempt !== String(attempt))) refuse('archive_producer_identity_unproven');
   // Only a child of this live candidate can proceed while its audit runs. Recovery and
   // standalone promotion require a completed, successful audit before using the archives.
   const audit=jobs.find(job=>job.name==='Release residual audit');
@@ -630,7 +641,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
-      || job.run_attempt!==attempt || job.head_sha!==sourceRevision || typeof job.name!=='string'
+      || job.run_attempt!==attempt || job.head_sha!==policyRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
@@ -645,7 +656,7 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
       || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
       || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
-      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==sourceRevision;
+      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==policyRevision;
   })) refuse('archive_producer_artifacts_unproven');
   return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
@@ -655,14 +666,26 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets) {
     failed_jobs:[],next_action:'measure-consumer-repair'};
 }
 
-export async function githubArchiveProducer(token, request, fetchRecord=fetch) {
+export async function githubArchiveProducer(token, request, fetchRecord=fetch, extract=artifactJsonFromZip) {
   const run=await githubRecord(token,parentRepository,request.runId,fetchRecord,request.attempt);
   const jobs=await githubRunJobs(token,parentRepository,request.runId,request.attempt,fetchRecord);
   const artifacts=await githubArtifactCensus(token,parentRepository,request.runId,fetchRecord);
   // The shell contract owns the target list for writers and readers alike.
   const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('./candidate_archive_contract.sh',import.meta.url)),'--targets-json'],
     {encoding:'utf8',timeout:10_000,maxBuffer:16_384}));
-  return qualifyArchiveProducer(run,jobs,artifacts,request,targets);
+  let historical = null;
+  if (run.head_sha !== request.sourceRevision) {
+    if (!sha.test(request.sourceRevision) || !sha.test(run.head_sha)) refuse('archive_producer_identity_unproven');
+    const response = await githubRead(token,
+      `https://api.github.com/repos/${parentRepository}/compare/${request.sourceRevision}...${run.head_sha}`, fetchRecord);
+    if (!response.ok) refuse('archive_producer_lineage_read_refused', refusalDiagnostic(response));
+    const manifests = artifacts.filter(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
+    if (manifests.length !== 1) refuse('archive_producer_artifacts_unproven');
+    historical = {lineage:await response.json(),manifest:await githubArtifactJson(token,parentRepository,manifests[0],{
+      runId:request.runId,headSha:run.head_sha,name:manifests[0].name,filename:'candidate-manifest.json',
+    },fetchRecord,extract)};
+  }
+  return qualifyArchiveProducer(run,jobs,artifacts,request,targets,historical);
 }
 
 /** One authenticated, bounded archive reader for public declarations and
@@ -671,7 +694,7 @@ export async function githubArtifactJson(token, repository, artifact, expected, 
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^consumer-observer(?:-[0-9a-f-]+)?\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
