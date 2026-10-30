@@ -849,6 +849,17 @@ fn offline_coding_replay_cli_proves_execution_and_universal_envelope() {
     assert_eq!(receipt["data"]["kind"], "offline_coding");
     assert_eq!(receipt["data"]["runs"].as_array().map(Vec::len), Some(2));
     assert_eq!(receipt["data"]["repeatability"]["pass"], true);
+    let seed = &receipt["data"]["runs"][0]["workspace_seed"];
+    assert_eq!(seed["schema"], "harn.workspace-seed.v1");
+    assert_eq!(seed["files"], 3);
+    assert_eq!(seed["entries"], 4);
+    assert!(seed["bytes"].as_u64().is_some_and(|bytes| bytes > 6));
+    assert_eq!(seed["sha256"].as_str().map(str::len), Some(64));
+    assert_eq!(seed, &receipt["data"]["runs"][1]["workspace_seed"]);
+    assert_eq!(
+        std::fs::read_to_string(path.parent().unwrap().join("seed/repo/note.txt")).unwrap(),
+        "hello\n"
+    );
     assert_eq!(
         receipt["data"]["runs"][0]["isolation"]["provider"]["pass"],
         true

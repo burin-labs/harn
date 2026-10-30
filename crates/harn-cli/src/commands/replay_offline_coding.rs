@@ -16,6 +16,7 @@ use crate::commands::run::{
     RunProfileOptions, RunSandboxOptions,
 };
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
+use harn_hostlib::workspace_checkpoint::{ReplayWorkspace, SeedLimits, SeedReceipt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
@@ -108,6 +109,7 @@ struct RepeatabilityReceipt {
 #[derive(Clone, Debug, Serialize)]
 struct OfflineCodingReplayReceipt {
     run: usize,
+    workspace_seed: Option<SeedReceipt>,
     pass: bool,
     comparisons: Vec<ComparisonReceipt>,
     tools: ToolComparison,
@@ -300,8 +302,21 @@ pub(crate) async fn run(
     json_output: bool,
 ) -> i32 {
     let mut receipts = Vec::with_capacity(runs);
+    let mut workspace = prepare_workspace(fixture_path, fixture);
     for index in 0..runs {
-        match execute_once(fixture_path, fixture, index + 1).await {
+        let result = match &mut workspace {
+            Ok(workspace) => {
+                async {
+                    if index > 0 {
+                        workspace.restore().map_err(|error| error.to_string())?;
+                    }
+                    execute_in_workspace(workspace, fixture, index + 1).await
+                }
+                .await
+            }
+            Err(error) => Err(error.clone()),
+        };
+        match result {
             Ok(receipt) => receipts.push(receipt),
             Err(error) => receipts.push(setup_failure_receipt(index + 1, fixture, error)),
         }
@@ -363,18 +378,31 @@ pub(crate) async fn run(
     i32::from(!ok)
 }
 
+fn prepare_workspace(
+    fixture_path: &Path,
+    fixture: &OfflineCodingReplayFixture,
+) -> Result<ReplayWorkspace, String> {
+    let base = fixture_path.parent().unwrap_or_else(|| Path::new("."));
+    let seed = resolve_existing_directory(base, &fixture.workspace_seed, "workspace_seed")?;
+    ReplayWorkspace::capture(&seed, SeedLimits::default()).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
 async fn execute_once(
     fixture_path: &Path,
     fixture: &OfflineCodingReplayFixture,
     run: usize,
 ) -> Result<OfflineCodingReplayReceipt, String> {
-    let base = fixture_path.parent().unwrap_or_else(|| Path::new("."));
-    let seed = resolve_existing_directory(base, &fixture.workspace_seed, "workspace_seed")?;
-    let temp = tempfile::tempdir()
-        .map_err(|error| format!("failed to create replay workspace: {error}"))?;
-    let workspace = temp.path().join("workspace");
-    copy_tree(&seed, &workspace)?;
+    let workspace = prepare_workspace(fixture_path, fixture)?;
+    execute_in_workspace(&workspace, fixture, run).await
+}
 
+async fn execute_in_workspace(
+    replay: &ReplayWorkspace,
+    fixture: &OfflineCodingReplayFixture,
+    run: usize,
+) -> Result<OfflineCodingReplayReceipt, String> {
+    let workspace = replay.path().to_path_buf();
     let program = resolve_workspace_file(&workspace, &fixture.program, "program")?;
     let llm_mock = resolve_workspace_file(&workspace, &fixture.llm_mock, "llm_mock")?;
     let effect_root = resolve_workspace_directory(&workspace, &fixture.effect_root, "effect_root")?;
@@ -460,7 +488,7 @@ async fn execute_once(
     let execution_error = error_from_events(&run_events);
     let provider_isolation = provider_isolation_from_events(&agent_events);
 
-    Ok(compare(
+    let mut receipt = compare(
         run,
         fixture,
         ObservedReplay {
@@ -475,7 +503,9 @@ async fn execute_once(
             provider_isolation,
             network_isolation,
         },
-    ))
+    );
+    receipt.workspace_seed = Some(replay.receipt().clone());
+    Ok(receipt)
 }
 
 fn compare(
@@ -615,6 +645,7 @@ fn compare(
     let pass = failures.is_empty() && missing.is_empty();
     OfflineCodingReplayReceipt {
         run,
+        workspace_seed: None,
         pass,
         comparisons,
         tools: ToolComparison {
@@ -659,6 +690,7 @@ fn setup_failure_receipt(
 ) -> OfflineCodingReplayReceipt {
     OfflineCodingReplayReceipt {
         run,
+        workspace_seed: None,
         pass: false,
         comparisons: [
             TOOL_SEQUENCE,
@@ -1008,65 +1040,6 @@ fn snapshot_tree_into(
             snapshot.insert(relative, blake3::hash(&bytes).to_hex().to_string());
         } else {
             return Err(format!("unsupported replay tree entry: {}", path.display()));
-        }
-    }
-    Ok(())
-}
-
-fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    fs::create_dir_all(destination).map_err(|error| {
-        format!(
-            "failed to create replay workspace {}: {error}",
-            destination.display()
-        )
-    })?;
-    let mut entries = fs::read_dir(source)
-        .map_err(|error| {
-            format!(
-                "failed to read workspace seed {}: {error}",
-                source.display()
-            )
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| {
-            format!(
-                "failed to enumerate workspace seed {}: {error}",
-                source.display()
-            )
-        })?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&source_path)
-            .map_err(|error| format!("failed to inspect {}: {error}", source_path.display()))?;
-        if metadata.file_type().is_symlink() {
-            return Err(format!(
-                "workspace seeds must not contain symlinks: {}",
-                source_path.display()
-            ));
-        }
-        if metadata.is_dir() {
-            copy_tree(&source_path, &destination_path)?;
-        } else if metadata.is_file() {
-            fs::copy(&source_path, &destination_path).map_err(|error| {
-                format!(
-                    "failed to copy {} to {}: {error}",
-                    source_path.display(),
-                    destination_path.display()
-                )
-            })?;
-            fs::set_permissions(&destination_path, metadata.permissions()).map_err(|error| {
-                format!(
-                    "failed to preserve permissions on {}: {error}",
-                    destination_path.display()
-                )
-            })?;
-        } else {
-            return Err(format!(
-                "unsupported workspace seed entry: {}",
-                source_path.display()
-            ));
         }
     }
     Ok(())

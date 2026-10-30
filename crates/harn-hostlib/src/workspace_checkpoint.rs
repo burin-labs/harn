@@ -40,6 +40,7 @@ mod anchored_fs;
 mod fork;
 mod receipts;
 mod scan;
+mod seed;
 mod tape_effects;
 use anchored_fs::{open_anchor, restore_one, Step};
 #[cfg(all(test, unix))]
@@ -54,6 +55,7 @@ pub use receipts::{
 #[cfg(all(test, unix))]
 use scan::scan_tree_with_exclusions;
 use scan::{excluded_paths, is_excluded, scan_tree};
+pub use seed::{ReplayWorkspace, SeedError, SeedLimits, SeedReceipt};
 pub use tape_effects::tape_effect_observer;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
