@@ -692,7 +692,9 @@ pub(crate) fn replay_transcript_change(
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
-            return Ok(());
+            return Err(format!(
+                "recorded transcript target session `{id}` is not open"
+            ));
         };
         let next = crate::run_tape::apply_transcript_change(&state.transcript, fields)?;
         state.replace_transcript(next)
@@ -769,7 +771,7 @@ pub(crate) fn open_or_create_for_test(id: Option<String>) -> String {
 
 /// A fresh session id. Taped, so a branch prefix replays the recorded id and
 /// later calls naming the session still find it.
-fn minted_session_id() -> String {
+pub fn minted_session_id() -> String {
     crate::run_tape::taped_random("session_id", || uuid::Uuid::now_v7().to_string())
 }
 

@@ -8,6 +8,17 @@ use crate::value::VmDictExt;
 use futures::StreamExt as _;
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn replay_refuses_a_transcript_change_for_a_missing_session() {
+    let id = format!("absent-replay-target-{}", uuid::Uuid::now_v7());
+    let fields = std::collections::BTreeMap::from([(
+        "messages".to_owned(),
+        crate::testbench::tape::FieldChange::Set(serde_json::json!([])),
+    )]);
+    let error = replay_transcript_change(&id, &fields).unwrap_err();
+    assert!(error.contains(&id), "{error}");
+}
+
 fn open_or_create(id: Option<String>) -> String {
     super::open_or_create(id).expect("open fixture session")
 }

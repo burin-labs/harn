@@ -2,6 +2,7 @@ use super::*;
 
 mod cancellation;
 mod prompt_output;
+mod run_tape;
 mod timeline;
 mod typed_observability;
 

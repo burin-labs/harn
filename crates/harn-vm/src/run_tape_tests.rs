@@ -371,6 +371,52 @@ fn a_run_that_ends_before_its_prefix_is_consumed_diverges() {
 }
 
 #[test]
+fn an_unconsumed_prefix_cannot_start_live_inference() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    record_run(tmp.path());
+    let skipped = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    serve_llm_call(&request("first")).unwrap().unwrap();
+    let error = serve_llm_call(&request("second"))
+        .expect("an incomplete prefix must not reach a provider")
+        .unwrap_err();
+    assert!(error.to_string().contains("`write` call t1 was never made"));
+    assert_eq!(skipped.report().live_calls, 0);
+    assert!(serve_llm_call(&request("third")).unwrap().is_err());
+    assert_eq!(skipped.report().live_calls, 0);
+}
+
+#[test]
+fn a_tool_with_nested_inference_is_refused_before_applying_its_effects() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let args = serde_json::json!({"path": "src/t1.txt"});
+    {
+        let _guard = record_full(tmp.path());
+        record_llm_call(&request("first"), &result("calling", Some("t1")));
+        let tool = begin_tool_call("t1", "write", &args, false).unwrap();
+        record_llm_call(&request("nested"), &result("nested result", None));
+        finish_tool_call(tool, Ok(ok(serde_json::json!("done"))));
+    }
+    let workspace = tmp.path().join("branch");
+    let replay = branch(tmp.path(), 1, &workspace);
+    serve_llm_call(&request("first")).unwrap().unwrap();
+    assert!(matches!(
+        serve_tool_call("t1", "write", &args),
+        ToolServe::Diverged(_)
+    ));
+    assert!(replay
+        .report()
+        .divergence
+        .unwrap()
+        .detail
+        .contains("nested inference"));
+    assert!(!workspace.join("src/t1.txt").exists());
+    assert!(serve_llm_call(&request("continuation")).unwrap().is_err());
+    assert_eq!(replay.report().live_calls, 0);
+}
+
+#[test]
 fn a_prefix_refuses_effects_no_recording_serves_and_serves_recorded_reads() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();

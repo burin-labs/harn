@@ -516,6 +516,12 @@ pub(crate) fn finish_tool_call(
         }
         EffectWatch::Unobserved => {}
     }
+    if tape.next_llm_call.load(Ordering::SeqCst) != after_calls {
+        unservable.get_or_insert_with(|| {
+            "model calls occurred during the tool dispatch; nested inference cannot be replayed"
+                .to_string()
+        });
+    }
     let outcome_bytes = match &outcome {
         Ok(outcome) if full => serde_json::to_vec(outcome).unwrap_or_default(),
         Ok(_) => Vec::new(),
@@ -1018,6 +1024,11 @@ pub(crate) fn serve_llm_call(
         return Some(Err(divergence_error(divergence)));
     }
     if state.report.served_calls >= state.report.live_after_calls {
+        if let Some(divergence) = under_run(state) {
+            let error = divergence_error(&divergence);
+            state.report.divergence = Some(divergence);
+            return Some(Err(error));
+        }
         state.live = true;
         if let Some(branch) = &branch {
             branch.go_live();

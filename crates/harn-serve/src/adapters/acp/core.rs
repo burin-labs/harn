@@ -405,7 +405,7 @@ impl AcpServer {
 
     /// Generate a unique session ID.
     pub(super) fn next_session_id(&mut self) -> String {
-        uuid::Uuid::new_v4().to_string()
+        harn_vm::agent_sessions::minted_session_id()
     }
 
     pub(super) fn register_session_cancellation(
