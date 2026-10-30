@@ -51,7 +51,7 @@ fn models_batch_prepare_keeps_receipt_states_canonical_across_locales() {
             );
             assert_eq!(
                 output.exit_code,
-                if valid { 0 } else { 1 },
+                i32::from(!valid),
                 "{locale}: {}",
                 output.stderr
             );
