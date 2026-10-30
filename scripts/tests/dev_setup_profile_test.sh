@@ -47,9 +47,12 @@ trap cleanup EXIT
 # ambient environment. Both are unset in CI and exported in exactly the
 # developer and agent shells this suite exists to protect, which is how a case
 # that assumes "no per-worktree target dir" can pass in CI and fail locally.
-# Cases that want one set it explicitly.
+# Cases that want one set it explicitly. The fake toolchain also writes to the
+# configured target, so an inherited Cargo target must not redirect setup away
+# from the fixture's own target.
 export HARN_DEV_TARGET_WORKTREE_PATH=
 export CODEX_WORKTREE_PATH=
+unset CARGO_TARGET_DIR
 # The front-end default, whatever the developer running the test opted into.
 export HARN_RUSTC_FRONTEND_THREADS=8
 
