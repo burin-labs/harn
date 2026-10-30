@@ -9,13 +9,29 @@
 # workspace rustc wrapper in local setup and CI, passes it with
 # RUSTC_BOOTSTRAP=1 to Harn's own crates only. Dependencies compile exactly as
 # on stable. The value is a constant rather than a per-machine core count so
-# every machine compiles the same way, and rustc's front-end threads draw from
-# Cargo's jobserver, so a smaller machine does not oversubscribe.
+# most machines compile the same way. The 3-core, 7-GiB hosted Mac stays serial
+# because its large test compilation swaps under the parallel front end.
 #
 # HARN_RUSTC_FRONTEND_THREADS=1 turns it off.
 
 harn_rustc_frontend_threads() {
-  threads="${HARN_RUSTC_FRONTEND_THREADS:-8}"
+  threads="${HARN_RUSTC_FRONTEND_THREADS:-}"
+  if [ -z "$threads" ]; then
+    threads=8
+    if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] && [ "$(uname -s)" = Darwin ]; then
+      cores="$(sysctl -n hw.logicalcpu 2>/dev/null)" || cores=""
+      memory="$(sysctl -n hw.memsize 2>/dev/null)" || memory=""
+      case "$cores:$memory" in
+        *[!0-9:]* | :* | *: | 0:* | *:0)
+          echo "error: cannot measure hosted macOS compiler resources" >&2
+          return 2
+          ;;
+      esac
+      if [ "$cores:$memory" = 3:7516192768 ]; then
+        threads=1
+      fi
+    fi
+  fi
   case "$threads" in
     '' | *[!0-9]* | 0)
       echo "error: HARN_RUSTC_FRONTEND_THREADS must be a positive integer" >&2

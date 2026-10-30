@@ -103,10 +103,13 @@ pipeline test_macos_uploads_nonempty_evidence_after_failed_performance(
     "scripts/check_test_case_performance.harn",
     "scripts/ci/macos_performance_profile.harn",
     "bench/test-case-performance/**",
+    "scripts/lib/rustc_frontend.sh",
+    "scripts/rustc_frontend_wrapper.sh",
+    ".github/actions/rust-toolchain/**",
   ] {
     assert(
       workflow.on.pull_request.paths.contains(path),
-      "native performance edits must exercise the hosted gate",
+      "native compiler and performance edits must exercise the hosted gate",
     )
   }
   const uploads = workflow.jobs.nextest.steps.filter(

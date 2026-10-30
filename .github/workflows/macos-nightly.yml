@@ -28,6 +28,9 @@ on:
       - ".github/cache-policy.json"
       - "scripts/ci/workspace_warm_artifact.sh"
       - "scripts/ci/reuse_workspace_crates.sh"
+      - "scripts/lib/rustc_frontend.sh"
+      - "scripts/rustc_frontend_wrapper.sh"
+      - ".github/actions/rust-toolchain/**"
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
     # the Windows workspace tests so the two don't contend for cache lookups.
@@ -60,6 +63,9 @@ on:
       - "scripts/ci/workspace_warm_artifact.sh"
       - "scripts/ci/run_rust_test_lane.sh"
       - "scripts/tests/workspace_reuse_cargo_test.sh"
+      - "scripts/lib/rustc_frontend.sh"
+      - "scripts/rustc_frontend_wrapper.sh"
+      - ".github/actions/rust-toolchain/**"
       - "scripts/check_test_case_performance.harn"
       - "scripts/ci/macos_performance_profile.harn"
       - "bench/test-case-performance/**"
