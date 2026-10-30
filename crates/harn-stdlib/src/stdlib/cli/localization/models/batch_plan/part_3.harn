@@ -81,42 +81,6 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "fehlgeschlagen"
-  }
-  if locale == "es" {
-    return "falló"
-  }
-  if locale == "fr" {
-    return "échec"
-  }
-  if locale == "it" {
-    return "fallito"
-  }
-  if locale == "ja" {
-    return "失敗"
-  }
-  if locale == "ko" {
-    return "실패"
-  }
-  if locale == "pt-BR" {
-    return "falhou"
-  }
-  if locale == "zh-Hans" {
-    return "失败"
-  }
-  return "failed"
-}
-
-/**
- * Render one registered CLI message from literal argument values.
- * @effects: []
- * @errors: ["CLI localization argument count does not match its registered template"]
- */
-pub fn message_18(locale: string, values: list<string>) -> string {
-  if len(values) != 0 {
-    throw "CLI localization argument count does not match its registered template"
-  }
-  if locale == "de" {
     return "Live-Einreichung"
   }
   if locale == "es" {
@@ -148,7 +112,7 @@ pub fn message_18(locale: string, values: list<string>) -> string {
  * @effects: []
  * @errors: ["CLI localization argument count does not match its registered template"]
  */
-pub fn message_19(locale: string, values: list<string>) -> string {
+pub fn message_18(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
@@ -177,4 +141,40 @@ pub fn message_19(locale: string, values: list<string>) -> string {
     return "规划器约束"
   }
   return "planner constraints"
+}
+
+/**
+ * Render one registered CLI message from literal argument values.
+ * @effects: []
+ * @errors: ["CLI localization argument count does not match its registered template"]
+ */
+pub fn message_19(locale: string, values: list<string>) -> string {
+  if len(values) != 0 {
+    throw "CLI localization argument count does not match its registered template"
+  }
+  if locale == "de" {
+    return "Warnungen"
+  }
+  if locale == "es" {
+    return "advertencias"
+  }
+  if locale == "fr" {
+    return "avertissements"
+  }
+  if locale == "it" {
+    return "avvisi"
+  }
+  if locale == "ja" {
+    return "警告"
+  }
+  if locale == "ko" {
+    return "경고"
+  }
+  if locale == "pt-BR" {
+    return "avisos"
+  }
+  if locale == "zh-Hans" {
+    return "警告"
+  }
+  return "warnings"
 }

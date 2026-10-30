@@ -1244,9 +1244,9 @@ fn __run_prepare(__cli_locale: string, harness: Harness) -> int {
     path_join(out_dir, "receipt.json")
   }
   const status = if len(errors) == 0 {
-    cli_message(__cli_locale, "prepared", [])
+    "prepared"
   } else {
-    cli_message(__cli_locale, "failed", [])
+    "failed"
   }
   let receipt = {
     schemaVersion: 1,

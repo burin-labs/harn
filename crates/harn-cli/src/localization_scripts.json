@@ -236,7 +236,6 @@
     "eval gates": 0,
     "exact": 0,
     "export dataset": 0,
-    "failed": 0,
     "failed to create {0}: {1}": 2,
     "failed to write {0}: {1}": 2,
     "hard negatives": 0,
@@ -259,7 +258,6 @@
     "post-training manifest": 0,
     "precision gates": 0,
     "preflight corpus": 0,
-    "prepared": 0,
     "probe {0}": 1,
     "probe {0} failures": 1,
     "probe {0} notes": 1,
@@ -408,10 +406,8 @@
         "constraints": 1,
         "dry-run only": 1,
         "errors": 2,
-        "failed": 1,
         "live submit": 1,
         "planner constraints": 1,
-        "prepared": 1,
         "warnings": 5
       }
     },

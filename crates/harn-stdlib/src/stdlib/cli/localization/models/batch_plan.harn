@@ -27,7 +27,6 @@ import {
   message_18,
   message_19,
 } from "std/cli/localization/models/batch_plan/part_3"
-import { message_20, message_21 } from "std/cli/localization/models/batch_plan/part_4"
 
 /**
  * Select a registered CLI template without interpreting argument text.
@@ -86,20 +85,14 @@ pub fn cli_message(locale: string, source: string, values: list<string>) -> stri
   if source == "errors" {
     return message_16(locale, values)
   }
-  if source == "failed" {
+  if source == "live submit" {
     return message_17(locale, values)
   }
-  if source == "live submit" {
+  if source == "planner constraints" {
     return message_18(locale, values)
   }
-  if source == "planner constraints" {
-    return message_19(locale, values)
-  }
-  if source == "prepared" {
-    return message_20(locale, values)
-  }
   if source == "warnings" {
-    return message_21(locale, values)
+    return message_19(locale, values)
   }
   throw "Unregistered CLI localization message"
 }

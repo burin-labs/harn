@@ -142,7 +142,6 @@ catalog_entries! {
     "cli/localization/models/batch_plan/part_1" => "stdlib/cli/localization/models/batch_plan/part_1.harn",
     "cli/localization/models/batch_plan/part_2" => "stdlib/cli/localization/models/batch_plan/part_2.harn",
     "cli/localization/models/batch_plan/part_3" => "stdlib/cli/localization/models/batch_plan/part_3.harn",
-    "cli/localization/models/batch_plan/part_4" => "stdlib/cli/localization/models/batch_plan/part_4.harn",
     "cli/localization/models/batch_rejoin" => "stdlib/cli/localization/models/batch_rejoin.harn",
     "cli/localization/models/batch_rejoin/part_0" => "stdlib/cli/localization/models/batch_rejoin/part_0.harn",
     "cli/localization/models/batch_rejoin/part_1" => "stdlib/cli/localization/models/batch_rejoin/part_1.harn",
