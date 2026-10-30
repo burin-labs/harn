@@ -60,7 +60,9 @@ pub use receipts::{
 #[cfg(all(test, unix))]
 use scan::scan_tree_with_exclusions;
 use scan::{excluded_paths, is_excluded, scan_tree};
-pub use seed::{ReplayWorkspace, SeedError, SeedLimits, SeedReceipt};
+pub use seed::{
+    ReplayWorkspace, SavedReplayWorkspace, SeedError, SeedLimits, SeedReceipt, SeedSchema,
+};
 pub use tape_effects::tape_effect_observer;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

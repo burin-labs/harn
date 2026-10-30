@@ -113,8 +113,25 @@ entry count, depth, per-file content, and total bytes; its defaults allow
 `receipt()` reports the observed entries, regular files, bytes, and a SHA-256
 identity covering sorted paths, contents, link targets, and file and directory permissions.
 Restore verifies that identity before replacing the working copy. A changed
-seed leaves the previous working copy available. Dropping the owner deletes
-its private storage without changing the source.
+seed leaves the previous working copy available. Dropping an ordinary owner
+deletes its private storage without changing the source.
+
+For a run that must survive an application restart, `persist()` retains the
+directory and returns a serializable `SavedReplayWorkspace`. Save that descriptor
+with the run in private product storage. It carries the original directory,
+seed receipt, and capture limits. `ReplayWorkspace::restore_saved(&saved)`
+acquires an exclusive operating-system file lock, verifies the seed, and restores
+the working copy before returning it for a new trial. A competing owner refuses
+before restoration. Closing a retained owner releases its lock but keeps its
+files; the product's run-retention policy owns their eventual retirement.
+
+Keep the handle inside the execution owner until the session and every child
+process has stopped. A frontend holding it on behalf of an independent worker
+does not establish that lifetime after a frontend crash. Reopening recovers
+either half of an interrupted workspace replacement and removes abandoned
+restore staging. It does not resume a partially executed trial. A saved root
+must remain at its original canonical path; Unix reopening also refuses a root
+whose permissions now allow other users to access it.
 
 Unix storage is created with owner-only access, including under shared temporary
 directories. On Windows, the storage parent must have a user-private ACL; child
