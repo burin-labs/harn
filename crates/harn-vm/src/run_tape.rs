@@ -547,7 +547,11 @@ pub(crate) fn finish_tool_call(
     } = recording;
     let recorder = &tape.recorder;
     let full = tape.level == RecordingLevel::Full;
-    let mut unservable = None;
+    let mut unservable = if full {
+        transcript::validate_lifetimes(&transcript_changes).err()
+    } else {
+        None
+    };
     let mut effects = Vec::new();
     match watch {
         EffectWatch::Scanned(key) => {
@@ -1362,6 +1366,9 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     };
     let effects = recorded.effects.clone();
     let changes = recorded.transcript_changes.clone();
+    if let Err(error) = transcript::validate_lifetimes(&changes) {
+        return diverge(state, "transcript change", error);
+    }
     let root = state.workspace_root.clone();
     for (path, content) in &effects {
         if let Err(error) = apply_effect(&root, path, content.as_deref()) {
@@ -1369,11 +1376,17 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         }
         state.report.applied_file_effects += 1;
     }
-    state.report.served_tool_calls += 1;
     // Injecting reaches the session table, which may read the branch.
     drop(guard);
     match transcript::replay(changes) {
-        Ok(changes) => ToolServe::Served(outcome, changes),
+        Ok(changes) => {
+            branch
+                .expect("a served call has a branch")
+                .state()
+                .report
+                .served_tool_calls += 1;
+            ToolServe::Served(outcome, changes)
+        }
         Err(error) => {
             let branch = branch.expect("a served call has a branch");
             let mut state = branch.state();

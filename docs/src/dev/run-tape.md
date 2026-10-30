@@ -44,10 +44,13 @@ failure.
 
 A served tool dispatch replays recorded transcript field changes. For a child
 created and closed entirely within that dispatch, the tape retains its initial
-transcript, changes, and closure. Replay validates those changes separately from
-live sessions, without rerunning the child or its hooks. A missing target without
+transcript, changes, and closure. Replay validates the initial transcript's type,
+version, session identity, and required lists before applying workspace effects.
+It applies changes separately from live sessions, without rerunning the child or
+its hooks. A missing target without
 that lifecycle evidence still refuses. A newly created session that remains open,
-or a dispatch that closes a previously existing session, is not yet replayable.
+or a dispatch that closes a previously existing session, is marked unservable
+when recorded. A refused dispatch is not counted as served.
 Tape version 5 carries these lifecycle records. Field-change records retain their
 version 4 shape, so existing recordings remain readable by the new runtime.
 
