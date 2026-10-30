@@ -81,7 +81,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "  Manifest-ша256: " + (values[0] ?? "")
+    return "  Manifest-SHA256: " + (values[0] ?? "")
   }
   if locale == "es" {
     return "  sha256 del manifiesto: " + (values[0] ?? "")

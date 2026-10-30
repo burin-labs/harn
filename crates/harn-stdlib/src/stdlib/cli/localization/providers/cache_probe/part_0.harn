@@ -144,7 +144,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+    return (values[0] ?? "") + "  Lauf " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
       + (values[3] ?? "")
       + " fresh="
       + (values[4] ?? "")
@@ -191,7 +191,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ja" {
-    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+    return (values[0] ?? "") + "  実行 " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
       + (values[3] ?? "")
       + " fresh="
       + (values[4] ?? "")
@@ -202,7 +202,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ko" {
-    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+    return (values[0] ?? "") + "  실행 " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
       + (values[3] ?? "")
       + " fresh="
       + (values[4] ?? "")
@@ -213,7 +213,8 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "pt-BR" {
-    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+    return (values[0] ?? "") + "  execução " + (values[1] ?? "") + ": " + (values[2] ?? "")
+      + " input="
       + (values[3] ?? "")
       + " fresh="
       + (values[4] ?? "")
@@ -224,7 +225,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "zh-Hans" {
-    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+    return (values[0] ?? "") + "  运行 " + (values[1] ?? "") + "：" + (values[2] ?? "") + " input="
       + (values[3] ?? "")
       + " fresh="
       + (values[4] ?? "")

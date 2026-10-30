@@ -126,7 +126,7 @@ pub fn message_7(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
   }
   if locale == "ko" {
-    return "  contract route: base=" + (values[0] ?? "") + " provider=" + (values[1] ?? "")
+    return "  계약 경로: base=" + (values[0] ?? "") + " provider=" + (values[1] ?? "")
       + " tool_format="
       + (values[2] ?? "")
       + " adapter="

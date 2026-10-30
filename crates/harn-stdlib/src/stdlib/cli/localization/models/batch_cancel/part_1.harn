@@ -96,7 +96,7 @@ pub fn message_7(locale: string, values: list<string>) -> string {
     return "バッチキャンセルのドライランを書き込みました: " + (values[0] ?? "")
   }
   if locale == "ko" {
-    return "배치 취소 드라이 रन 작성됨: " + (values[0] ?? "")
+    return "배치 취소 시험 실행 작성됨: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
     return "Cancelamento em lote de execução simulada gravado: " + (values[0] ?? "")

@@ -162,7 +162,7 @@ pub fn message_8(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
   }
   if locale == "ko" {
-    return "  totals: adapter_passed=" + (values[0] ?? "") + " adapter_failed=" + (values[1] ?? "")
+    return "  합계: adapter_passed=" + (values[0] ?? "") + " adapter_failed=" + (values[1] ?? "")
       + " base_present="
       + (values[2] ?? "")
       + " missing="

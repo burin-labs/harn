@@ -180,7 +180,7 @@
   "Auto compact": "Compactação automática",
   "Output visibility": "Visibilidade da saída",
   "Context policy": "Política de contexto",
-  "Retry policy": "Política de повторição",
+  "Retry policy": "Política de novas tentativas",
   "Prompt": "Prompt",
   "System prompt": "Prompt do sistema",
   "Rendered context": "Contexto renderizado",

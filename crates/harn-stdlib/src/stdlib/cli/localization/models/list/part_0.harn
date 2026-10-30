@@ -24,7 +24,7 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "エラー: --columns は --json と組み合わせられません。JSON は常に完全なカタログ行を返します"
   }
   if locale == "ko" {
-    return "error: --columns cannot be combined with --json; JSON always returns complete catalog rows"
+    return "오류: --columns와 --json은 함께 사용할 수 없습니다. JSON은 항상 완전한 카탈로그 행을 반환합니다"
   }
   if locale == "pt-BR" {
     return "erro: --columns não pode ser combinado com --json; JSON sempre retorna linhas completas do catálogo"

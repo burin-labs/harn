@@ -243,6 +243,29 @@ mod tests {
     }
 
     #[test]
+    fn catalogs_do_not_introduce_unrelated_scripts_into_translated_prose() {
+        let unexpected = |source: &str, translated: &str| {
+            translated.chars().any(|ch| {
+                matches!(ch, '\u{0400}'..='\u{052f}' | '\u{0590}'..='\u{06ff}' | '\u{0900}'..='\u{097f}')
+                    && !source.contains(ch)
+            })
+        };
+        assert!(unexpected("Allow a provider", "Aplica una अनुमति"));
+        assert!(unexpected("Retry policy", "Política de повторição"));
+        assert!(unexpected("Repeatable", "قابل répétable"));
+        assert!(!unexpected("Example: العربية", "Exemple : العربية"));
+        let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            for (key, text) in catalog {
+                assert!(
+                    !unexpected(&source[key], text),
+                    "{locale}: unrelated script in {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_catalog_keeps_console_record_field_identifiers() {
         let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
         assert!(
@@ -278,7 +301,7 @@ mod tests {
 
     #[test]
     fn changed_help_diagnostic_identifiers_are_rejected_by_the_catalog_owner() {
-        let source = BTreeMap::from([(
+        let source: Catalog = BTreeMap::from([(
             "message".into(),
             "Preserve pre-HARN-TYP-028 behavior.".into(),
         )]);
@@ -287,7 +310,8 @@ mod tests {
             ["HARN-TYP-028"]
         );
         field_contract::validate_fields(&source, &source).unwrap();
-        let translated = BTreeMap::from([("message".into(), "pre-TYP-028 の HARN 動作".into())]);
+        let translated: Catalog =
+            BTreeMap::from([("message".into(), "pre-TYP-028 の HARN 動作".into())]);
         let error = field_contract::validate_fields(&source, &translated)
             .expect_err("a split diagnostic identifier must fail the same owning validator");
         assert!(error.contains("changed CLI diagnostic identifiers"));

@@ -30,8 +30,8 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + " ルートは一切測定できませんでした。カタログの結論はありません"
   }
   if locale == "ko" {
-    return "effort-probe: " + (values[0] ?? "") + "/" + (values[1] ?? "")
-      + " routes could not be measured at all; no catalog conclusion is available"
+    return "effort-probe: 경로 " + (values[1] ?? "") + "개 중 " + (values[0] ?? "")
+      + "개를 전혀 측정하지 못했습니다. 카탈로그에 대한 결론을 내릴 수 없습니다"
   }
   if locale == "pt-BR" {
     return "sonda de esforço: " + (values[0] ?? "") + "/" + (values[1] ?? "")

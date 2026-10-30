@@ -377,7 +377,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return (values[0] ?? "") + "  provider-summary " + (values[1] ?? "") + " routes="
+    return (values[0] ?? "") + "  Anbieterübersicht " + (values[1] ?? "") + " routes="
       + (values[2] ?? "")
       + " cases="
       + (values[3] ?? "")
@@ -461,7 +461,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ja" {
-    return (values[0] ?? "") + "  provider-summary " + (values[1] ?? "") + " routes="
+    return (values[0] ?? "") + "  プロバイダー概要 " + (values[1] ?? "") + " routes="
       + (values[2] ?? "")
       + " cases="
       + (values[3] ?? "")
@@ -482,8 +482,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ko" {
-    return (values[0] ?? "") + "  provider-summary " + (values[1] ?? "") + " routes="
-      + (values[2] ?? "")
+    return (values[0] ?? "") + "  공급자 요약 " + (values[1] ?? "") + " routes=" + (values[2] ?? "")
       + " cases="
       + (values[3] ?? "")
       + " required="
@@ -524,8 +523,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "zh-Hans" {
-    return (values[0] ?? "") + "  provider-summary " + (values[1] ?? "") + " routes="
-      + (values[2] ?? "")
+    return (values[0] ?? "") + "  提供商摘要 " + (values[1] ?? "") + " routes=" + (values[2] ?? "")
       + " cases="
       + (values[3] ?? "")
       + " required="
@@ -575,7 +573,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return (values[0] ?? "") + "  unscorecardable " + (values[1] ?? "") + " reason="
+    return (values[0] ?? "") + "  nicht bewertbar " + (values[1] ?? "") + " reason="
       + (values[2] ?? "")
       + " models="
       + (values[3] ?? "")
@@ -635,8 +633,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ja" {
-    return (values[0] ?? "") + "  unscorecardable " + (values[1] ?? "") + " reason="
-      + (values[2] ?? "")
+    return (values[0] ?? "") + "  評価不能 " + (values[1] ?? "") + " reason=" + (values[2] ?? "")
       + " models="
       + (values[3] ?? "")
       + " active_models="
@@ -650,8 +647,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "ko" {
-    return (values[0] ?? "") + "  unscorecardable " + (values[1] ?? "") + " reason="
-      + (values[2] ?? "")
+    return (values[0] ?? "") + "  평가 불가 " + (values[1] ?? "") + " reason=" + (values[2] ?? "")
       + " models="
       + (values[3] ?? "")
       + " active_models="
@@ -680,8 +676,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "zh-Hans" {
-    return (values[0] ?? "") + "  unscorecardable " + (values[1] ?? "") + " reason="
-      + (values[2] ?? "")
+    return (values[0] ?? "") + "  无法评分 " + (values[1] ?? "") + " reason=" + (values[2] ?? "")
       + " models="
       + (values[3] ?? "")
       + " active_models="
