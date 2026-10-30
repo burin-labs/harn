@@ -194,24 +194,28 @@ test('gh read transport preserves ZIP bytes and refuses mutation',async()=>{
     await assert.rejects(ghRead('https://api.github.com/repos/acme/test',{method:'POST'}),/read_endpoint_invalid/);
   }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
 });
-test('actual source reuse reaches a complete successful candidate on page two and refuses partial inventory',()=>{
+test('actual source reuse measures run and artifact page two and refuses either partial inventory',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-source-reuse-'));
   try{
     const runs=[...Array.from({length:100},(_,index)=>({...producer,id:1000+index})),
       {...producer,conclusion:'success'}];
     const record=path.join(scratch,'fixture.json'),calls=path.join(scratch,'calls');
-    const available=['harn-a','harn-b',`candidate-manifest-${source}`,'harn-release-files']
-      .map(name=>({name,expired:false,size_in_bytes:1}));
+    const available=[...Array.from({length:100},(_,index)=>`other-${index}`),
+      'harn-a','harn-b',`candidate-manifest-${source}`,'harn-release-files']
+      .map((name,index)=>({id:index+1,name,expired:false,size_in_bytes:1}));
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:false}));
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
 const data=JSON.parse(fs.readFileSync(process.env.FIXTURE,'utf8'));
-fs.appendFileSync(process.env.CALLS,endpoint.search+'\\n');
+fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 if(endpoint.pathname.includes('/workflows/')){
   const page=Number(endpoint.searchParams.get('page'));
   console.log(JSON.stringify({total_count:data.runs.length+(data.partial?1:0),workflow_runs:data.runs.slice((page-1)*100,page*100)}));
-}else console.log(JSON.stringify({total_count:data.available.length,artifacts:data.available}));
+}else {
+  const page=Number(endpoint.searchParams.get('page'));
+  console.log(JSON.stringify({total_count:data.available.length+(data.partialArtifacts?1:0),artifacts:data.available.slice((page-1)*100,page*100)}));
+}
 `,{mode:0o700});
     const entry=path.join(scratch,'reuse.sh');
     fs.writeFileSync(entry,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_candidate_run.sh',import.meta.url))}'\nsource_candidate_live_run_id burin-labs/harn '${source}' '[{"target":"a"},{"target":"b"}]'\n`);
@@ -221,10 +225,16 @@ if(endpoint.pathname.includes('/workflows/')){
     assert.equal(admitted.status,0,admitted.stderr);
     assert.equal(admitted.stdout.trim(),'42');
     assert.match(fs.readFileSync(calls,'utf8'),/page=2/);
+    assert.match(fs.readFileSync(calls,'utf8'),/\/runs\/42\/artifacts\?per_page=100&page=2/);
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:true}));
     const partial=spawnSync('bash',[entry],options);
     assert.equal(partial.status,1);
     assert.equal(partial.stdout,'');
     assert.match(partial.stderr,/census_unmeasured/);
+    fs.writeFileSync(record,JSON.stringify({runs,available,partial:false,partialArtifacts:true}));
+    const partialArtifacts=spawnSync('bash',[entry],options);
+    assert.equal(partialArtifacts.status,1);
+    assert.equal(partialArtifacts.stdout,'');
+    assert.match(partialArtifacts.stderr,/census_unmeasured/);
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });

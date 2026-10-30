@@ -180,6 +180,10 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
     if(operation==='successful')console.log(await successfulCandidate(token,repository,sourceOrSelf,ghRead));
     else if(operation==='successful-main-runs')console.log((await successfulCandidateRuns(token,repository,
       sourceOrSelf,ghRead)).filter(run=>run.head_branch==='main').map(run=>String(run.id)).join('\n'));
+    else if(operation==='artifacts'){
+      const artifacts=await githubArtifactCensus(token,repository,sourceOrSelf,ghRead);
+      console.log(JSON.stringify({total_count:artifacts.length,artifacts}));
+    }
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
       process.env.RELEASE_RECOVERY_READ_TOKEN,repository,sourceOrSelf,{repository:process.env.CANARY_REPOSITORY,
         workflow:`.github/workflows/${process.env.CANARY_WORKFLOW}`},ghRead)));

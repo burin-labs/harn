@@ -78,7 +78,7 @@ source_candidate_live_run_id() {
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-candidate-state.mjs"
   runs="$(node "$reader" successful-main-runs "$repository" "$sha")" || return 1
   for run_id in $runs; do
-    artifacts="$(gh api "repos/${repository}/actions/runs/${run_id}/artifacts?per_page=100")" || return 1
+    artifacts="$(node "$reader" artifacts "$repository" "$run_id")" || return 1
     if release_candidate_artifacts_complete "$artifacts" "$expected"; then
       printf '%s\n' "$run_id"
       return 0
