@@ -723,6 +723,10 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
     name: &str,
     args: &VmValue,
 ) -> Result<VmValue, VmError> {
+    crate::run_tape::refuse_in_prefix(
+        "host_tool_call",
+        "direct host tool invocations have no recorded result",
+    )?;
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.call_tool(name, args)? {
