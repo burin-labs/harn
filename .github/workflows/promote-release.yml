@@ -499,7 +499,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@fa7ac62e70ddbc3efa655f881734df1a5ec2e8ab
+    uses: burin-labs/.github/.github/workflows/cargo-deny.yml@e00241c1d60d8d5687f7849b9015d1669ee64620
     with:
       source-revision: ${{ needs.plan.outputs.source_sha }}
       policy: false
