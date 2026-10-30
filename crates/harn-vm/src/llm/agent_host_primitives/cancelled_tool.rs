@@ -65,6 +65,18 @@ pub(super) fn with_applied_mutations(
 ) -> serde_json::Value {
     let applied = crate::tool_call_mutations::take(session_id, tool_call_id);
     if let Some(obj) = result.as_object_mut().filter(|_| !applied.is_empty()) {
+        let observation = obj
+            .get("observation")
+            .and_then(|value| value.as_str())
+            .map(|text| {
+                format!(
+                    "{text}Files changed before stopping: {}\n",
+                    serde_json::json!(applied)
+                )
+            });
+        if let Some(observation) = observation {
+            obj.insert("observation".to_string(), serde_json::json!(observation));
+        }
         obj.insert(
             "mutation_status".to_string(),
             serde_json::json!(crate::agent_events::ToolMutationStatus::Applied.as_str()),

@@ -144,17 +144,15 @@ pub enum VmError {
     TypeError(String),
     Runtime(String),
     DivisionByZero,
-    /// A host-imposed deadline expired while executing the VM. Unlike a Harn
-    /// `deadline` block, this control-plane stop cannot be caught by user code.
+    /// Host deadline; unlike a Harn `deadline`, user code cannot catch it.
     ExecutionDeadlineExceeded,
-    /// A user test deliberately did not run its remaining assertions. The
-    /// test runner alone turns this control signal into a skipped case.
+    /// A user test skipped its remaining assertions; the runner records it.
     TestSkipped(String),
-    /// A Harn program requested that its embedding process terminate with this
-    /// status code. Like a host deadline, this is control flow rather than a
-    /// catchable Harn error; the embedding boundary owns the final cleanup and
-    /// process exit.
+    /// Uncatchable process exit request; the embedding boundary owns cleanup.
     ProcessExit(i32),
+    /// Unwind a stopped tool handler without letting script error recovery
+    /// start further work. The agent boundary reports completed mutations.
+    ToolCallStopped,
     /// A host dropped a polled top-level execution future. Interpreter state is
     /// intentionally not resumed after arbitrary async cancellation. Discard
     /// this VM; see [`crate::Vm::execute_with_timeout`] for ambient-state
@@ -227,6 +225,7 @@ impl VmError {
             Self::ExecutionDeadlineExceeded
                 | Self::TestSkipped(_)
                 | Self::ProcessExit(_)
+                | Self::ToolCallStopped
                 | Self::McpInputRequired(_)
         )
     }
@@ -676,11 +675,9 @@ pub fn categorized_error(message: impl Into<String>, category: ErrorCategory) ->
 pub fn error_to_category(err: &VmError) -> ErrorCategory {
     match err {
         VmError::ExecutionDeadlineExceeded => ErrorCategory::Timeout,
-        // ProcessExit is uncatchable control flow rather than an agent-facing
-        // failure. Keep this fallback total for callers that classify an
-        // arbitrary VmError without treating the request as retryable.
+        // Process exit is control flow, not a retryable agent-facing failure.
         VmError::ProcessExit(_) => ErrorCategory::Generic,
-        VmError::AbandonedExecution => ErrorCategory::Cancelled,
+        VmError::AbandonedExecution | VmError::ToolCallStopped => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::ProviderStreamFailure(failure) => failure.category(),
         VmError::SchemaStreamAbort(abort) => abort.category(),
@@ -850,6 +847,7 @@ impl std::fmt::Display for VmError {
             VmError::ExecutionDeadlineExceeded => write!(f, "Execution deadline exceeded"),
             VmError::TestSkipped(reason) => write!(f, "Test skipped: {reason}"),
             VmError::ProcessExit(code) => write!(f, "Process exit requested: {code}"),
+            VmError::ToolCallStopped => write!(f, "Tool call stopped"),
             VmError::AbandonedExecution => write!(
                 f,
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"

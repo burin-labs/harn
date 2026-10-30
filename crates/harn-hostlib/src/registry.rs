@@ -68,17 +68,29 @@ async fn run_interruptible(
         .is_some_and(|token| token.load(Ordering::SeqCst));
     let cancel = Arc::new(AtomicBool::new(cancelled));
     sources.cancel = Some(Arc::clone(&cancel));
-    let call = HostCallContext::new(CallAddress::current());
+    let address = CallAddress::current();
+    let call = HostCallContext::new(address.clone());
+    let completion = call.clone();
     let _cancel_on_drop = CancelOnDrop(cancel);
-    harn_vm::orchestration::run_blocking_with_ambient(move || {
+    let result = harn_vm::orchestration::run_blocking_with_ambient(move || {
         let _interrupt = sources.install();
+        let _session = address
+            .as_ref()
+            .map(|call| harn_vm::agent_sessions::enter_current_session(call.session_id.clone()));
+        let _tool_call = address.as_ref().map(|call| {
+            harn_vm::agent_sessions::enter_current_tool_call(call.tool_call_id.clone())
+        });
         let _call = call.enter();
         handler(&[request]).map_err(VmError::from)
     })
     .await
     .map_err(|error| {
         VmError::Runtime(format!("{builtin} blocking host operation failed: {error}"))
-    })?
+    })?;
+    if completion.tool_call_cancelled() {
+        return Err(VmError::ToolCallStopped);
+    }
+    result
 }
 
 #[derive(Clone)]
