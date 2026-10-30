@@ -1,3 +1,4 @@
+import { assert_throws, with_capability_fixtures } from "std/testing"
 import {
   aggregate_runs,
   best_metrics,
@@ -10,6 +11,64 @@ import {
   time_args,
   validated_baseline_profile,
 } from "../check_test_case_performance.harn"
+import {
+  hosted_mac_profile,
+  measured_hosted_mac_profile,
+} from "../ci/macos_performance_profile.harn"
+
+@test
+pipeline test_hosted_mac_baselines_follow_measured_hardware(harness: Harness) {
+  assert_eq(hosted_mac_profile(3, 7516192768), "macos_hosted_arm64")
+  assert_eq(hosted_mac_profile(5, 15032385536), "macos_hosted_5core_arm64")
+  for hardware in [
+    {cores: 0, memory: 0},
+    {cores: 3, memory: 15032385536},
+    {cores: 5, memory: 7516192768},
+    {cores: 8, memory: 15032385536},
+  ] {
+    assert_eq(hosted_mac_profile(hardware.cores, hardware.memory), nil)
+  }
+  for output in [
+    "3\n7516192768\n1\n",
+    "5\n15032385536\n1\n",
+    "",
+    "5\n",
+    "x\ny\n1\n",
+    "5\n7516192768\n1\n",
+    "5\n15032385536\n0\n",
+  ] {
+    with_capability_fixtures(
+      harness.testing,
+      [
+        {
+          capability: "process",
+          method: "run",
+          result: {success: true, exit_code: 0, stdout: output, stderr: ""},
+        },
+      ],
+      { ->
+        if output == "3\n7516192768\n1\n" {
+          assert_eq(measured_hosted_mac_profile(harness.process), "macos_hosted_arm64")
+        } else if output == "5\n15032385536\n1\n" {
+          assert_eq(measured_hosted_mac_profile(harness.process), "macos_hosted_5core_arm64")
+        } else {
+          assert_throws({ -> measured_hosted_mac_profile(harness.process) })
+        }
+      },
+    )
+  }
+  with_capability_fixtures(
+    harness.testing,
+    [
+      {
+        capability: "process",
+        method: "run",
+        result: {success: false, exit_code: 1, stdout: "5\n15032385536\n", stderr: "refused"},
+      },
+    ],
+    { -> assert_throws({ -> measured_hosted_mac_profile(harness.process) }) },
+  )
+}
 
 type PerformanceWorkflow = {
   jobs: {
