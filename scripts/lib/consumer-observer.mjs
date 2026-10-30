@@ -33,7 +33,7 @@ const liveStates = new Set(['queued', 'requested', 'waiting', 'pending', 'in_pro
 export function observerRunIsLive(status) {
   return liveStates.has(status);
 }
-const completedConclusions = new Set(['success', 'failure', 'cancelled', 'timed_out', 'action_required', 'neutral', 'skipped', 'stale']);
+const completedConclusions = new Set(['success', 'failure', 'cancelled', 'timed_out', 'action_required', 'neutral', 'skipped', 'stale', 'startup_failure']);
 export function observerConclusionIsKnown(conclusion) {
   return completedConclusions.has(conclusion);
 }

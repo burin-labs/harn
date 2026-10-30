@@ -112,7 +112,7 @@ test('failed overall producer counts only through actual archive and nonce-bound
   assert.deepEqual(result.bad_jobs,[]);
 });
 test('ordinary selector remains success-only and measures complete source inventory',async()=>{
-  for(const conclusion of ['failure','success']){
+  for(const conclusion of ['failure','startup_failure','success']){
     const data=fixture({producers:[{...producer,conclusion}]});
     try{assert.equal(await successfulCandidate('public',repository,source,data.read),conclusion==='success'?'42':'');}
     finally{data.close();}
@@ -157,6 +157,7 @@ test('failed build, ended recovery and failed consumer do not count as active pr
   assert.deepEqual(failed.promoting,[]);
   assert.deepEqual(failed.bad_jobs,targets.map(target=>`Build ${target}`));
   assert.deepEqual((await recovery({parent:{...parent,status:'completed',conclusion:'failure'}})).promoting,[]);
+  assert.deepEqual((await recovery({parent:{...parent,status:'completed',conclusion:'startup_failure'}})).promoting,[]);
   assert.deepEqual((await recovery({child:{...child,status:'completed',conclusion:'failure'}})).promoting,[]);
 });
 test('foreign archive binding cannot qualify an otherwise owned live consumer',async()=>{
