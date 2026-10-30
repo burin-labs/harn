@@ -297,6 +297,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+      - name: Export the measured calibration binary
+        shell: bash
+        run: |
+          destination="$RUNNER_TEMP/calibration-cli"
+          mkdir -p "$destination"
+          cp "${CARGO_TARGET_DIR:-target}/debug/harn" "$destination/harn"
+          {
+            git rev-parse HEAD
+            shasum -a 256 "$destination/harn"
+            "$destination/harn" --version
+          } > "$destination/identity.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-xlarge-calibration-cli
+          path: ${{ runner.temp }}/calibration-cli/
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 1
       - name: Record native qualification receipt
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
@@ -334,3 +352,73 @@ jobs:
           if-no-files-found: error
           retention-days: 3
           compression-level: 6
+
+  calibration:
+    name: Calibrate hosted xlarge (${{ matrix.sample }})
+    needs: nextest
+    runs-on: macos-latest-xlarge
+    timeout-minutes: 2
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        sample: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: macos-xlarge-calibration-cli
+          path: calibration-cli
+      - name: Measure the existing workload without compiling
+        shell: bash
+        env:
+          HARN_BIN_NO_BUILD: "1"
+          HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64
+          SAMPLE: ${{ matrix.sample }}
+        run: |
+          chmod +x calibration-cli/harn
+          export HARN_BIN="$PWD/calibration-cli/harn"
+          report="$RUNNER_TEMP/report.log"
+          {
+            echo "sample=$SAMPLE source=$GITHUB_SHA"
+            cat calibration-cli/identity.txt
+            shasum -a 256 "$HARN_BIN"
+            make check-test-case-performance
+          } > "$report" 2>&1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-xlarge-performance-sample-${{ matrix.sample }}
+          path: ${{ runner.temp }}/report.log
+          retention-days: 1
+          if-no-files-found: error
+
+  collect-calibration:
+    name: Retain the complete calibration census
+    if: always()
+    needs: calibration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/download-artifact-with-retry
+        with:
+          pattern: macos-xlarge-performance-sample-*
+          path: calibration-census
+      - name: Require every sample report
+        shell: bash
+        run: |
+          count=$(find calibration-census -type f -name report.log | wc -l)
+          echo "calibration_reports=$count expected=30"
+          test "$count" -eq 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-xlarge-calibration-census
+          path: calibration-census/
+          retention-days: 7
+          if-no-files-found: error
