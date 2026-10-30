@@ -1328,7 +1328,7 @@ fn apply_effect(root: &Path, path: &str, content: Option<&[u8]>) -> Result<(), S
         return Err(format!("refusing effect outside the workspace: {path}"));
     }
     let target = root.join(relative);
-    crate::stdlib::sandbox::apply_workspace_effect(root, relative, content)
+    crate::stdlib::sandbox::apply_effect(root, relative, content)
         .map_err(|err| format!("apply {}: {err}", target.display()))
 }
 
