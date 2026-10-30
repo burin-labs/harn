@@ -5,6 +5,7 @@
 # a green build, so the negative cases matter as much as the positive one.
 set -euo pipefail
 script=${HARN_WORKSPACE_REUSE_SCRIPT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ci/reuse_workspace_crates.sh"}
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
@@ -75,8 +76,8 @@ echo "ci_reuse_workspace_crates_test: source attestation controls passed"
 
 probe="$root/probe"
 touch "$probe"
-if ! touch -h -d @946684800 "$probe" 2>/dev/null \
-  || [[ "$(stat -c %Y "$probe" 2>/dev/null)" != 946684800 ]]; then
+if ! TZ=UTC touch -h -t 200001010000.00 "$probe" 2>/dev/null \
+  || [[ "$(stat -c %Y "$probe" 2>/dev/null || stat -f %m "$probe" 2>/dev/null)" != 946684800 ]]; then
   rm -f "$probe"
   # The producer runners are Linux. Elsewhere the script refuses by name, so
   # check that refusal instead of the stamps it cannot set.
@@ -98,7 +99,7 @@ mkdir -p crates/c/src && echo new > crates/c/src/new.rs
 git add -A && git commit -q -m two
 
 build_time=1577836800 # 2020-01-01T00:00:00Z
-stamp() { stat -c %Y "$1"; }
+stamp() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 out=$("$script" restore)
 [[ "$out" == *"3 path(s) changed"* ]]
 [[ ! -e "$record" ]]
@@ -129,3 +130,57 @@ out=$("$script" restore)
 (( $(stamp crates/a/src/lib.rs) > build_time ))
 
 echo "ci_reuse_workspace_crates_test: ok"
+
+# Prove Cargo's decision, not only the timestamps: an unchanged restored unit
+# must be fresh, and an edited dependency must reach the executable it owns.
+mkdir -p "$root/cargo-fixture/crates/dep/src" "$root/cargo-fixture/src"
+cd "$root/cargo-fixture"
+git init -q -b main .
+git config user.email test@example.com
+git config user.name test
+git config commit.gpgsign false
+printf 'target/\n.harn-workspace-source/\n' > .gitignore
+cp "$repo_root/rust-toolchain.toml" .
+cat > Cargo.toml <<'TOML'
+[package]
+name = "reuse_fixture_app"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+reuse_fixture_dep = { path = "crates/dep" }
+TOML
+cat > crates/dep/Cargo.toml <<'TOML'
+[package]
+name = "reuse_fixture_dep"
+version = "0.0.0"
+edition = "2021"
+TOML
+printf 'pub fn value() -> u32 { 1 }\n' > crates/dep/src/lib.rs
+printf 'fn main() { println!("{}", reuse_fixture_dep::value()); }\n' > src/main.rs
+build_fixture() {
+  env CARGO_INCREMENTAL=0 RUSTC_WRAPPER= CARGO_TARGET_DIR="$PWD/target" \
+    cargo build --offline --verbose > "$root/cargo-build.log" 2>&1
+}
+build_fixture
+[[ "$(target/debug/reuse_fixture_app)" == 1 ]]
+git add -A && git commit -q -m compiled
+# Exercise the actual main bundle writer and consumer together. A new checkout
+# gives the same unchanged bytes fresh mtimes after the producer compiled them.
+env CARGO_TARGET_DIR="$PWD/target" CARGO_INCREMENTAL=0 \
+  "$repo_root/scripts/ci/workspace_warm_artifact.sh" macos pack "$root/warm-bundle"
+touch src/main.rs crates/dep/src/lib.rs
+env CARGO_INCREMENTAL=0 "$repo_root/scripts/ci/workspace_warm_artifact.sh" \
+  macos restore "$root/warm-bundle" "$PWD/target"
+"$script" restore
+build_fixture
+grep -Eq 'Fresh reuse_fixture_app ' "$root/cargo-build.log"
+grep -Eq 'Fresh reuse_fixture_dep ' "$root/cargo-build.log"
+"$script" record
+printf 'pub fn value() -> u32 { 2 }\n' > crates/dep/src/lib.rs
+git add crates/dep/src/lib.rs && git commit -q -m changed-dependency
+"$script" restore
+build_fixture
+grep -Eq 'Compiling reuse_fixture_dep ' "$root/cargo-build.log"
+grep -Eq 'Compiling reuse_fixture_app ' "$root/cargo-build.log"
+[[ "$(target/debug/reuse_fixture_app)" == 2 ]]
+echo "ci_reuse_workspace_crates_test: Cargo reused unchanged units and rebuilt the changed dependency and executable"

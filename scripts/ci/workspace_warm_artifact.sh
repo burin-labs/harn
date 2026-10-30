@@ -77,8 +77,9 @@ usage:
 the prefix on every machine readable output key, so a caller can never read one
 platform's numbers on another platform's run.
 
-pack strips workspace-member and incremental outputs from CARGO_TARGET_DIR, then
-writes a typed warm bundle under <staging-dir> for actions/upload-artifact.
+pack strips incremental outputs from CARGO_TARGET_DIR and writes a typed warm
+bundle under <staging-dir> for actions/upload-artifact. macOS retains workspace
+outputs with their successful producer source; Windows retains dependencies.
 
 download-and-restore finds the newest successful main nightly warm artifact for
 that platform, restores it into the target dir, and exits 0 only on a compatible
@@ -207,6 +208,16 @@ verify_compat_manifest() {
   require_manifest_value "$manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
   require_manifest_value "$manifest" rustflags_sha256 "$(sha256_string "${RUSTFLAGS:-}")"
   require_manifest_value "$manifest" cargo_incremental "${CARGO_INCREMENTAL:-}"
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    require_manifest_value "$manifest" rustc_sha256 "$(rustc_identity_sha256)"
+    require_manifest_value "$manifest" producer_ref "$PRODUCER_REF"
+    local producer
+    producer="$(sed -n 's/^producer_commit=//p' "$manifest")"
+    [[ "$producer" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "error: warm artifact producer_commit must be a full commit SHA" >&2
+      exit 1
+    }
+  fi
   local target_bytes
   target_bytes="$(sed -n 's/^target_bytes=//p' "$manifest")"
   if [[ ! "$target_bytes" =~ ^[1-9][0-9]*$ ]]; then
@@ -263,7 +274,15 @@ pack() {
     exit 1
   fi
 
-  strip_workspace_member_artifacts "$target_dir"
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    # Only the successful main nightly publishes this generation. It builds
+    # the complete native test graph after a dependency-only restore. Preserve
+    # those units with the producer identity, then let the existing source
+    # reuse owner invalidate changed inputs in each read-only PR consumer.
+    find "$target_dir" -type d -name incremental -prune -exec rm -rf {} +
+  else
+    strip_workspace_member_artifacts "$target_dir"
+  fi
   target_bytes="$(directory_bytes "$target_dir")"
   rm -rf "$staging"
   mkdir -p "$staging"
@@ -339,6 +358,10 @@ restore() {
     cd "$(dirname "$archive")"
     tar -xzf "$(basename "$archive")" -C "$target_dir"
   )
+  if [[ "$POLICY_KEY" == macos_workspace_warm ]]; then
+    mkdir -p .harn-workspace-source
+    sed -n 's/^producer_commit=//p' "$manifest" > .harn-workspace-source/commit
+  fi
   printf "${KEY_PREFIX}_warm_restore=hit\n"
   printf "${KEY_PREFIX}_warm_restore_target_bytes=%s\n" "$target_bytes"
   printf "${KEY_PREFIX}_warm_restore_headroom_bytes=%s\n" "$headroom_bytes"

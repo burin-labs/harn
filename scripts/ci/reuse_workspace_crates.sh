@@ -37,8 +37,8 @@ set -euo pipefail
 # Keep in step with the rust-cache action's cache-directories, which saves
 # this directory with every workspace-crate cache entry.
 RECORD_DIR=".harn-workspace-source"
-# 2000-01-01T00:00:00Z, written as an epoch so no implementation reads a zone.
-BEFORE_ANY_BUILD="@946684800"
+# POSIX touch format, explicitly interpreted in UTC by both BSD and GNU touch.
+BEFORE_ANY_BUILD="200001010000.00"
 # Projected from NATIVE_SOURCE_PATHS in scripts/ci_cache_policy/policy_core.harn.
 SOURCE_PATHS=(Cargo.lock Cargo.toml crates spec tree-sitter-harn)
 
@@ -103,14 +103,13 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   fi
 fi
 
-# Probe the capability, not the brand: GNU and uutils both accept these flags,
-# BSD touch does not.
+# Probe the operation and read it back on both BSD and GNU systems.
 can_back_date() {
   local probe expected
   probe=$(mktemp "${TMPDIR:-/tmp}/harn-reuse-probe.XXXXXX") || return 1
-  expected=${BEFORE_ANY_BUILD#@}
-  touch -h -d "$BEFORE_ANY_BUILD" "$probe" 2>/dev/null \
-    && [[ "$(stat -c %Y "$probe" 2>/dev/null)" == "$expected" ]]
+  expected=946684800
+  TZ=UTC touch -h -t "$BEFORE_ANY_BUILD" "$probe" 2>/dev/null \
+    && [[ "$(stat -c %Y "$probe" 2>/dev/null || stat -f %m "$probe" 2>/dev/null)" == "$expected" ]]
   local status=$?
   rm -f -- "$probe"
   return "$status"
@@ -147,12 +146,12 @@ fi
 # Everything first, then the changed paths, so a path in both ends up new.
 # Only tracked files and the directories that hold them: the target directory,
 # untracked generated inputs, and .git keep their own stamps.
-git ls-files -z | xargs -0 -r touch -c -h -d "$BEFORE_ANY_BUILD"
+git ls-files -z | TZ=UTC xargs -0 touch -c -h -t "$BEFORE_ANY_BUILD"
 git ls-files \
   | awk -F/ '{ p = ""; for (i = 1; i < NF; i++) { p = (i == 1 ? $1 : p "/" $i); print p } }' \
   | sort -u \
-  | while IFS= read -r dir; do [[ -d "$dir" ]] && touch -h -d "$BEFORE_ANY_BUILD" "$dir"; done
-touch -h -d "$BEFORE_ANY_BUILD" .
+  | while IFS= read -r dir; do [[ -d "$dir" ]] && TZ=UTC touch -h -t "$BEFORE_ANY_BUILD" "$dir"; done
+TZ=UTC touch -h -t "$BEFORE_ANY_BUILD" .
 count=0
 while IFS= read -r -d '' path; do
   count=$((count + 1))

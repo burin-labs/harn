@@ -176,7 +176,9 @@ test -f "$drive_staging/target.tar.gz"
 grep -qx "schema=${warm_schema}" "$tmpdir/out/staging/manifest"
 grep -qx "producer_commit=${commit}" "$tmpdir/out/staging/manifest"
 grep -Eq '^target_bytes=[1-9][0-9]*$' "$tmpdir/out/staging/manifest"
-if [[ -e "$tmpdir/target/debug/deps/libharn_vm-def456.rlib" ]]; then
+if [[ "$platform" == macos ]]; then
+  test -f "$tmpdir/target/debug/deps/libharn_vm-def456.rlib"
+elif [[ -e "$tmpdir/target/debug/deps/libharn_vm-def456.rlib" ]]; then
   echo "workspace member artifact was not stripped" >&2
   exit 1
 fi
@@ -191,12 +193,28 @@ rm -rf "$tmpdir/restored"
 mkdir -p "$tmpdir/restored"
 run_restore "$tmpdir/out/staging" "$tmpdir/restored"
 test -f "$tmpdir/restored/debug/deps/libserde-abc123.rlib"
-if [[ -e "$tmpdir/restored/debug/deps/libharn_vm-def456.rlib" ]]; then
+if [[ "$platform" == macos ]]; then
+  test -f "$tmpdir/restored/debug/deps/libharn_vm-def456.rlib"
+  test "$(cat "$tmpdir/work/.harn-workspace-source/commit")" = "$commit"
+elif [[ -e "$tmpdir/restored/debug/deps/libharn_vm-def456.rlib" ]]; then
   echo "restore unexpectedly reintroduced workspace artifacts" >&2
   exit 1
 fi
 
 echo "restore rejects insufficient build headroom before replacing a target"
+if [[ "$platform" == macos ]]; then
+  echo "restore refuses a forged source identity before replacing the target"
+  cp -R "$tmpdir/out/staging" "$tmpdir/out/forged-source"
+  sed -i.bak 's/^producer_commit=.*/producer_commit=not-a-commit/' "$tmpdir/out/forged-source/manifest"
+  mkdir -p "$tmpdir/refused-source"
+  printf 'preserve\n' > "$tmpdir/refused-source/sentinel"
+  if run_restore "$tmpdir/out/forged-source" "$tmpdir/refused-source" >"$tmpdir/forged.out" 2>&1; then
+    echo "expected forged producer identity to fail" >&2
+    exit 1
+  fi
+  grep -Fq 'producer_commit must be a full commit SHA' "$tmpdir/forged.out"
+  test -f "$tmpdir/refused-source/sentinel"
+fi
 rm -rf "$tmpdir/restored-tight"
 mkdir -p "$tmpdir/restored-tight"
 printf 'preserve\n' > "$tmpdir/restored-tight/sentinel"
