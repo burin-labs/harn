@@ -23,7 +23,12 @@ fn embedded_agent_modules_load_under_the_native_runtime_without_compiling() {
                 let recorder = vm.enable_module_phase_timing();
                 vm.load_module_exports_from_source(
                     PathBuf::from("<test>/embedded-agent.harn"),
-                    "import { agent_loop } from \"std/agent/loop\"\npub const run = agent_loop\n",
+                    "import { agent_loop } from \"std/agent/loop\"\n\
+                     import { message_10 as cancel_error } from \"std/cli/localization/models/batch_cancel/part_2\"\n\
+                     import { message_10 as status_error } from \"std/cli/localization/models/batch_status/part_2\"\n\
+                     assert_eq(cancel_error(\"de\", []), \"Fehler\")\n\
+                     assert_eq(status_error(\"de\", []), \"Fehler\")\n\
+                     pub const run = agent_loop\n",
                 )
                 .await
                 .expect("load the real agent module graph");

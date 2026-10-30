@@ -31,7 +31,8 @@ pub struct CompiledStdlibArtifact {
 pub struct StdlibArtifactBuild {
     /// Modules in this binary's stdlib catalog.
     pub modules: usize,
-    /// One artifact per module that compiled, sorted by file name.
+    /// One artifact per compiled content key, sorted by file name. Logical
+    /// module aliases with identical sources share the same immutable blob.
     pub artifacts: Vec<CompiledStdlibArtifact>,
     /// Modules that did not compile on their own, with the reason. Such a
     /// module is simply absent from the table and compiles on import.
@@ -73,10 +74,11 @@ pub fn compile_embedded_stdlib_artifacts(threads: usize) -> StdlibArtifactBuild 
             }
         }
     });
-    let mut artifacts = artifacts
+    let artifacts = artifacts
         .into_inner()
         .expect("stdlib export artifact list poisoned");
-    artifacts.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+    let artifacts =
+        unique_artifacts(artifacts).expect("stdlib content keys must identify one blob");
     let mut failed = failed
         .into_inner()
         .expect("stdlib export failure list poisoned");
@@ -86,6 +88,26 @@ pub fn compile_embedded_stdlib_artifacts(threads: usize) -> StdlibArtifactBuild 
         artifacts,
         failed,
     }
+}
+
+fn unique_artifacts(
+    mut artifacts: Vec<CompiledStdlibArtifact>,
+) -> Result<Vec<CompiledStdlibArtifact>, String> {
+    artifacts.sort_by(|left, right| {
+        left.file_name
+            .cmp(&right.file_name)
+            .then_with(|| left.module.cmp(&right.module))
+    });
+    for pair in artifacts.windows(2) {
+        if pair[0].file_name == pair[1].file_name && pair[0].bytes != pair[1].bytes {
+            return Err(format!(
+                "stdlib modules {} and {} have conflicting blobs for {}",
+                pair[0].module, pair[1].module, pair[0].file_name
+            ));
+        }
+    }
+    artifacts.dedup_by(|left, right| left.file_name == right.file_name);
+    Ok(artifacts)
 }
 
 pub(crate) fn compile_one(module: &str, source: &str) -> Result<CompiledStdlibArtifact, String> {
@@ -107,4 +129,31 @@ pub(crate) fn compile_one(module: &str, source: &str) -> Result<CompiledStdlibAr
         file_name: key.module_filename(),
         bytes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compile_one, unique_artifacts};
+
+    #[test]
+    fn content_aliases_share_one_blob_and_conflicts_are_refused() {
+        let first = compile_one("alias/first", "pub fn answer() -> int { return 42 }")
+            .expect("compile first logical module");
+        let second = compile_one("alias/second", "pub fn answer() -> int { return 42 }")
+            .expect("compile second logical module");
+        assert_eq!(first.file_name, second.file_name);
+        assert_eq!(
+            first.bytes, second.bytes,
+            "content artifacts must be relocatable"
+        );
+        let unique =
+            unique_artifacts(vec![second.clone(), first.clone()]).expect("identical aliases");
+        assert_eq!(unique, vec![first.clone()]);
+
+        let mut conflict = second;
+        conflict.bytes.push(0);
+        assert!(unique_artifacts(vec![first, conflict])
+            .expect_err("equal keys with different payloads cannot silently choose a winner")
+            .contains("conflicting blobs"));
+    }
 }
