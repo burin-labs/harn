@@ -309,6 +309,9 @@ pub struct PromptSourceSpan {
     /// `parent_span` chain. Defaults to empty string for callers that
     /// don't plumb it through.
     pub template_uri: String,
+    /// Content hash of that template's source at render time, so a reader
+    /// can tell whether `template_line` still points at the same text.
+    pub template_revision: String,
 }
 
 /// One conditional or section decision recorded during a template
@@ -458,12 +461,10 @@ fn render_asset_with_provenance_and_trace_result(
     // (capability-adaptive rendering), and the empty-trace events
     // would otherwise spam every doc-gen / CI render.
     let llm_ctx = current_llm_render_context();
-    let mut rc = RenderCtx {
-        current_asset: asset.clone(),
-        include_stack: Vec::new(),
-        current_include_parent: None,
-        branch_trace: (force_branch_trace || llm_ctx.is_some()).then(Vec::new),
-    };
+    let mut rc = RenderCtx::new(
+        asset,
+        (force_branch_trace || llm_ctx.is_some()).then(Vec::new),
+    );
     let mut spans = if collect_provenance {
         Some(Vec::new())
     } else {

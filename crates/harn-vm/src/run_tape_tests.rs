@@ -2,6 +2,9 @@ use super::*;
 use crate::value::VmValue;
 use harn_builtin_meta::{EffectAccess, EffectKind, EffectSpec};
 
+#[path = "run_tape_prompt_locations_tests.rs"]
+mod prompt_locations;
+
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
 static PROCESS_LOCK: Mutex<()> = Mutex::new(());

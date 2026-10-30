@@ -7,7 +7,7 @@
 use super::ast::{Expr, IfBranch, Node};
 use super::error::TemplateError;
 use super::expr_parser::parse_expr;
-use super::lexer::{tokenize, Token};
+use super::lexer::{line_col, tokenize, Token};
 use super::outline::{OutlineBlock, OutlineBlockKind};
 
 const TEMPLATE_AST_MAX_DEPTH: usize = crate::MAX_AST_DEPTH;
@@ -26,6 +26,7 @@ pub(super) fn parse_outline(src: &str) -> Result<Vec<OutlineBlock>, TemplateErro
 fn parse_all(src: &str) -> Result<(Vec<Node>, Vec<OutlineBlock>), TemplateError> {
     let tokens = tokenize(src)?;
     let mut p = Parser {
+        src,
         tokens: &tokens,
         pos: 0,
         depth: 0,
@@ -46,6 +47,7 @@ struct DirectiveSite {
 }
 
 struct Parser<'a> {
+    src: &'a str,
     tokens: &'a [Token],
     pos: usize,
     depth: usize,
@@ -96,6 +98,7 @@ impl<'a> Parser<'a> {
             match tok {
                 Token::Text {
                     content,
+                    start,
                     trim_right,
                     trim_left,
                 } => {
@@ -103,21 +106,30 @@ impl<'a> Parser<'a> {
                     if *trim_left {
                         s = trim_leading_line(&s);
                     }
+                    // Trimming the leading line moves the text's first byte.
+                    let text_start = start + (content.len() - s.len());
                     if *trim_right {
                         s = trim_trailing_line(&s);
                     }
                     if !s.is_empty() {
-                        out.push(Node::Text(s));
+                        let (line, col) = line_col(self.src, text_start);
+                        out.push(Node::Text { text: s, line, col });
                     }
                     self.pos += 1;
                 }
                 Token::Raw {
                     content,
+                    content_start,
                     start,
                     end,
                 } => {
                     if !content.is_empty() {
-                        out.push(Node::Text(content.clone()));
+                        let (line, col) = line_col(self.src, *content_start);
+                        out.push(Node::Text {
+                            text: content.clone(),
+                            line,
+                            col,
+                        });
                     }
                     self.push_block(OutlineBlockKind::Raw, *start, *end);
                     self.pos += 1;
@@ -178,7 +190,11 @@ impl<'a> Parser<'a> {
                         let node = self.parse_section(body[7..].trim(), site)?;
                         out.push(node);
                     } else if is_bare_ident(&body) {
-                        out.push(Node::LegacyBareInterp { ident: body });
+                        out.push(Node::LegacyBareInterp {
+                            ident: body,
+                            line,
+                            col,
+                        });
                     } else {
                         let expr = parse_expr(&body, line, col)?;
                         out.push(Node::Expr { expr, line, col });
@@ -818,4 +834,25 @@ fn split_once_keyword<'a>(s: &'a str, kw: &str) -> Option<(&'a str, &'a str)> {
         i += 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `-}}` trims the text that follows it, so the text's recorded position
+    /// is where its first kept byte sits, not where the raw run began.
+    #[test]
+    fn text_after_a_trimming_directive_records_its_first_kept_byte() {
+        let src = "{{ if a -}}\nKept line.\n{{- end }}";
+        let nodes = parse(src).unwrap();
+        let Node::If { branches, .. } = &nodes[0] else {
+            panic!("expected an if node: {nodes:?}");
+        };
+        let Node::Text { text, line, col } = &branches[0].body[0] else {
+            panic!("expected text: {:?}", branches[0].body);
+        };
+        assert_eq!(text, "Kept line.");
+        assert_eq!((*line, *col), (2, 1));
+    }
 }

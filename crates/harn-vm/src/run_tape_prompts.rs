@@ -28,11 +28,10 @@ pub(super) struct PromptLedger {
     consumers: BTreeMap<String, Vec<u64>>,
 }
 
-pub(super) fn render_id(template_uri: &str, rendered: &str) -> String {
-    let mut bytes = Vec::with_capacity(template_uri.len() + rendered.len() + 1);
-    bytes.extend_from_slice(template_uri.as_bytes());
-    bytes.push(0);
-    bytes.extend_from_slice(rendered.as_bytes());
+pub(super) fn render_id(template_uri: &str, rendered: &str, spans: &[PromptSourceSpan]) -> String {
+    // Equal output can come from different source locations or revisions.
+    let bytes = serde_json::to_vec(&(template_uri, rendered, spans))
+        .expect("prompt provenance contains only JSON-serializable fields");
     content_hash(&bytes)
 }
 

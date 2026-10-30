@@ -216,7 +216,7 @@ pub(crate) fn record_prompt_render(
     rendered: &str,
     spans: &[crate::stdlib::template::PromptSourceSpan],
 ) -> String {
-    let render_id = prompts::render_id(template_uri, rendered);
+    let render_id = prompts::render_id(template_uri, rendered, spans);
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         tape.prompts.lock().expect("prompt ledger poisoned").record(
             &tape.recorder,

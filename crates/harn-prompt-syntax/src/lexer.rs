@@ -11,6 +11,8 @@ pub(super) enum Token {
     /// Literal text between directives.
     Text {
         content: String,
+        /// Byte offset of `content` in the template source.
+        start: usize,
         /// `{{-` on the following directive — trim trailing whitespace of this text.
         trim_right: bool,
         /// `-}}` on the preceding directive — trim leading whitespace of this text.
@@ -28,6 +30,8 @@ pub(super) enum Token {
     /// Verbatim content of a `{{ raw }}..{{ endraw }}` block.
     Raw {
         content: String,
+        /// Byte offset of `content` in the template source.
+        content_start: usize,
         /// Byte range of the whole block, `{{ raw }}` through `{{ endraw }}`.
         start: usize,
         end: usize,
@@ -69,6 +73,7 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
         if !raw_text.is_empty() || this_trim_left || this_trim_right {
             tokens.push(Token::Text {
                 content: raw_text.to_string(),
+                start: cursor,
                 trim_right: this_trim_right,
                 trim_left: this_trim_left,
             });
@@ -124,6 +129,7 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
             let raw_content = src[raw_body_start..raw_end_open].to_string();
             tokens.push(Token::Raw {
                 content: raw_content,
+                content_start: raw_body_start,
                 start: open,
                 end: raw_end_close,
             });
@@ -167,7 +173,7 @@ fn skip_ws(s: &str, from: usize) -> usize {
     i
 }
 
-fn line_col(s: &str, offset: usize) -> (usize, usize) {
+pub(super) fn line_col(s: &str, offset: usize) -> (usize, usize) {
     let mut line = 1usize;
     let mut col = 1usize;
     for (i, ch) in s.char_indices() {

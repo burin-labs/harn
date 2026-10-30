@@ -77,6 +77,7 @@ fn provenance_legacy_bare_interp_span_tracked() {
         .expect("legacy bare span");
     assert_eq!(&out[bare.output_start..bare.output_end], "Alice");
     assert_eq!(bare.bound_value.as_deref(), Some("Alice"));
+    assert_eq!((bare.template_line, bare.template_col), (1, 4));
 }
 
 #[test]
@@ -431,6 +432,13 @@ fn include_propagates_parent_span_chain() {
     assert!(leaf_expr.template_uri.ends_with("leaf.prompt"));
     assert!(mid_parent.template_uri.ends_with("mid.prompt"));
     assert!(top_parent.template_uri.ends_with("top.prompt"));
+    for span in [leaf_expr, mid_parent, top_parent] {
+        let source = fs::read_to_string(&span.template_uri).unwrap();
+        assert_eq!(
+            span.template_revision,
+            blake3::hash(source.as_bytes()).to_hex().to_string()
+        );
+    }
 }
 
 #[test]

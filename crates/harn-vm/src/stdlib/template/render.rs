@@ -77,6 +77,42 @@ pub(super) struct RenderCtx {
     /// capability-adaptive branches fired. Only populated when the
     /// top-level render entry-point opts in.
     pub(super) branch_trace: Option<Vec<BranchDecision>>,
+    /// `current_asset`'s revision, hashed once per asset rather than per span.
+    pub(super) current_revision: String,
+}
+
+impl RenderCtx {
+    pub(super) fn new(asset: &TemplateAsset, branch_trace: Option<Vec<BranchDecision>>) -> Self {
+        Self {
+            current_asset: asset.clone(),
+            include_stack: Vec::new(),
+            current_include_parent: None,
+            branch_trace,
+            current_revision: asset.template_revision_hash(),
+        }
+    }
+
+    /// A span authored by the template being rendered, under the include
+    /// that is open, if any.
+    fn span(
+        &self,
+        kind: PromptSpanKind,
+        (line, col): (usize, usize),
+        (output_start, output_end): (usize, usize),
+        bound_value: Option<String>,
+    ) -> PromptSourceSpan {
+        PromptSourceSpan {
+            template_line: line,
+            template_col: col,
+            output_start,
+            output_end,
+            kind,
+            bound_value,
+            parent_span: self.current_include_parent.clone(),
+            template_uri: current_template_uri(self),
+            template_revision: self.current_revision.clone(),
+        }
+    }
 }
 
 /// Template URI reported alongside every span. Filesystem templates use
@@ -108,19 +144,15 @@ fn render_node(
 ) -> Result<(), TemplateError> {
     let start = out.len();
     match node {
-        Node::Text(s) => {
-            out.push_str(s);
+        Node::Text { text, line, col } => {
+            out.push_str(text);
             if let Some(spans) = spans.as_deref_mut() {
-                spans.push(PromptSourceSpan {
-                    template_line: 0,
-                    template_col: 0,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::Text,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: None,
-                });
+                spans.push(rc.span(
+                    PromptSpanKind::Text,
+                    (*line, *col),
+                    (start, out.len()),
+                    None,
+                ));
             }
         }
         Node::Expr { expr, line, col } => {
@@ -128,19 +160,15 @@ fn render_node(
             let rendered = display_value(&v);
             out.push_str(&rendered);
             if let Some(spans) = spans.as_deref_mut() {
-                spans.push(PromptSourceSpan {
-                    template_line: *line,
-                    template_col: *col,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::Expr,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: Some(crate::text::truncate_end(&rendered, PREVIEW_MAX_CHARS)),
-                });
+                spans.push(rc.span(
+                    PromptSpanKind::Expr,
+                    (*line, *col),
+                    (start, out.len()),
+                    Some(crate::text::truncate_end(&rendered, PREVIEW_MAX_CHARS)),
+                ));
             }
         }
-        Node::LegacyBareInterp { ident } => {
+        Node::LegacyBareInterp { ident, line, col } => {
             let (rendered, preview) = match scope.lookup(ident) {
                 Some(v) => {
                     let s = display_value(&v);
@@ -153,16 +181,12 @@ fn render_node(
             };
             out.push_str(&rendered);
             if let Some(spans) = spans.as_deref_mut() {
-                spans.push(PromptSourceSpan {
-                    template_line: 0,
-                    template_col: 0,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::LegacyBareInterp,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: preview,
-                });
+                spans.push(rc.span(
+                    PromptSpanKind::LegacyBareInterp,
+                    (*line, *col),
+                    (start, out.len()),
+                    preview,
+                ));
             }
         }
         Node::If {
@@ -187,16 +211,7 @@ fn render_node(
             }
             record_branch_if(rc, *line, *col, branches, else_branch.is_some(), matched);
             if let Some(spans) = spans.as_deref_mut() {
-                spans.push(PromptSourceSpan {
-                    template_line: *line,
-                    template_col: *col,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::If,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: None,
-                });
+                spans.push(rc.span(PromptSpanKind::If, (*line, *col), (start, out.len()), None));
             }
         }
         Node::For {
@@ -236,16 +251,12 @@ fn render_node(
                     scope.pop();
                     res?;
                     if let Some(spans) = spans.as_deref_mut() {
-                        spans.push(PromptSourceSpan {
-                            template_line: *line,
-                            template_col: *col,
-                            output_start: iter_start,
-                            output_end: out.len(),
-                            kind: PromptSpanKind::ForIteration,
-                            parent_span: rc.current_include_parent.clone(),
-                            template_uri: current_template_uri(rc),
-                            bound_value: None,
-                        });
+                        spans.push(rc.span(
+                            PromptSpanKind::ForIteration,
+                            (*line, *col),
+                            (iter_start, out.len()),
+                            None,
+                        ));
                     }
                 }
             }
@@ -300,16 +311,10 @@ fn render_node(
             let mut child_scope = Scope::new(Some(&child_bindings));
             let saved_asset = rc.current_asset.clone();
             let saved_parent = rc.current_include_parent.clone();
-            let include_call_span = PromptSourceSpan {
-                template_line: *line,
-                template_col: *col,
-                output_start: start,
-                output_end: start,
-                kind: PromptSpanKind::Include,
-                bound_value: None,
-                parent_span: saved_parent.clone(),
-                template_uri: current_template_uri(rc),
-            };
+            let include_call_span =
+                rc.span(PromptSpanKind::Include, (*line, *col), (start, start), None);
+            let saved_revision =
+                std::mem::replace(&mut rc.current_revision, asset.template_revision_hash());
             rc.current_asset = asset.clone();
             rc.current_include_parent = Some(Box::new(include_call_span));
             rc.include_stack.push(asset.id);
@@ -322,19 +327,16 @@ fn render_node(
             );
             rc.include_stack.pop();
             rc.current_asset = saved_asset;
+            rc.current_revision = saved_revision;
             rc.current_include_parent = saved_parent;
             res?;
             if let Some(spans) = spans.as_mut() {
-                spans.push(PromptSourceSpan {
-                    template_line: *line,
-                    template_col: *col,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::Include,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: None,
-                });
+                spans.push(rc.span(
+                    PromptSpanKind::Include,
+                    (*line, *col),
+                    (start, out.len()),
+                    None,
+                ));
             }
         }
         Node::Section {
@@ -393,16 +395,12 @@ fn render_node(
                         spans.push(span);
                     }
                 }
-                spans.push(PromptSourceSpan {
-                    template_line: *line,
-                    template_col: *col,
-                    output_start: start,
-                    output_end: out.len(),
-                    kind: PromptSpanKind::Section,
-                    parent_span: rc.current_include_parent.clone(),
-                    template_uri: current_template_uri(rc),
-                    bound_value: Some(name.clone()),
-                });
+                spans.push(rc.span(
+                    PromptSpanKind::Section,
+                    (*line, *col),
+                    (start, out.len()),
+                    Some(name.clone()),
+                ));
             }
         }
     }
