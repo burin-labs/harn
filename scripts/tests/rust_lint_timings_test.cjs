@@ -169,6 +169,7 @@ const command=async(program,args,limit,stage,timeout,allowEmpty)=>{
  report=args[4];
  if(mode==='missing') return '';
  if(mode==='symlink') {fs.symlinkSync(__filename,report);return '';}
+ if(mode==='fifo') {assert.equal(require('node:child_process').spawnSync('mkfifo',[report]).status,0);return '';}
  if(mode==='oversized') {fs.writeFileSync(report,'');fs.truncateSync(report,16*1024*1024+1);return '';}
  const graph='  20 rustc_hir_typeck::check_body\\n'.repeat(mode==='large-graph'?12000:1);
  const text='PRIVATE HOST HEADER\\nProcess: clippy-driver ['+(mode==='wrong-identity'?'322':'321')+']\\nCall graph:\\n'+graph+
@@ -180,7 +181,7 @@ compilerSymbols({pid:321,executable:'clippy-driver'},command).then(
  error=>({status:'UNMEASURED',stage:error.stage,cause:error.cause}),
 ).then(result=>console.log(JSON.stringify({...result,rawRetained:fs.existsSync(report),scratchRetained:fs.existsSync(path.dirname(report))})));
 `);
-  for (const mode of ['positive', 'large-graph', 'missing', 'empty', 'symlink', 'oversized', 'wrong-identity', 'incomplete']) {
+  for (const mode of ['positive', 'large-graph', 'missing', 'empty', 'symlink', 'fifo', 'oversized', 'wrong-identity', 'incomplete']) {
     const probe = spawnSync(process.execPath, [reportProbe, mode], {encoding:'utf8', timeout:10000, maxBuffer:32768});
     assert.equal(probe.status, 0, probe.stderr);
     const result = JSON.parse(probe.stdout);

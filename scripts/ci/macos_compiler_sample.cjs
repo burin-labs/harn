@@ -83,7 +83,7 @@ async function compilerSymbols(target, command = (...args) => hostCommand(...arg
     // sample's host headers and image inventory can exceed stdout's bound.
     // Keep the raw report outside the published artifact and delete it here.
     await command('/usr/bin/sample', [String(target.pid), '2', '10', '-file', report], 32768, 'sample_command', 30000, true);
-    descriptor = fs.openSync(report, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    descriptor = fs.openSync(report, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const maximum = 16 * 1024 * 1024;
     const info = fs.fstatSync(descriptor);
     if (!info.isFile() || info.size === 0 || info.size > maximum) {
