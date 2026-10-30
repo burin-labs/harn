@@ -209,6 +209,34 @@ mod tests {
     }
 
     #[test]
+    fn every_result_catalog_preserves_complete_rust_format_fields() {
+        let source: Catalog =
+            serde_json::from_str(include_str!("localization_formats.json")).unwrap();
+        assert!(
+            source.len() > 500,
+            "measure the complete result-template registry"
+        );
+        let fields = regex::Regex::new(r"\{\{|\}\}|\{[^{}]*\}").unwrap();
+        let tokens = |text: &str| {
+            let mut tokens: Vec<_> = fields
+                .find_iter(text)
+                .map(|field| field.as_str().to_owned())
+                .collect();
+            tokens.sort();
+            tokens
+        };
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            for (key, template) in &source {
+                assert_eq!(
+                    tokens(template),
+                    tokens(&catalog[key]),
+                    "{locale} changed formatting specifications in {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn localized_help_keeps_parser_identifiers_and_behavior() {
         for locale in TRANSLATIONS.keys() {
             let mut command = command_for(locale);

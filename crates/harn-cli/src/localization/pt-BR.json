@@ -2277,7 +2277,7 @@
   "already exists": "já existe",
   "already has [llm] config": "já tem configuração [llm]",
   "already has quickstart env keys": "já tem chaves de ambiente de início rápido",
-  "annotated {} parameter(s): {} inferred, {} left as `unknown` ({:.1}%)": "{0} parâmetro(s) anotado(s): {1} inferido(s), {2} mantido(s) como `unknown` ({3:.1f}%)",
+  "annotated {} parameter(s): {} inferred, {} left as `unknown` ({:.1}%)": "{0} parâmetro(s) anotado(s): {1} inferido(s), {2} mantido(s) como `unknown` ({3:.1}%)",
   "api key: {api_key}": "chave de API: {api_key}",
   "applied {} action(s) ({} PR(s) touched)": "{0} ação(ões) aplicada(s) ({1} PR(s) afetado(s))",
   "assignment:     {}": "atribuição:     {0}",
