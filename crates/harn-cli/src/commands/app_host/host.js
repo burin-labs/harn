@@ -15,16 +15,7 @@
   const sandboxOrigin = __HARN_SANDBOX_ORIGIN__;
   const hostVersion = __HARN_VERSION__;
   const viewConnection = HarnAppHostProtocol.createViewConnection();
-  let preference = null;
-  try {
-    preference = localStorage.getItem("harn.language");
-  } catch {
-    /* Browser storage may be disabled. */
-  }
-  const { locale, copy } = HarnAppLocalization.resolve([
-    preference,
-    ...navigator.languages,
-  ]);
+  const { locale, copy } = HarnAppLocalization.resolve(navigator.languages);
   const frame = /** @type {HTMLIFrameElement} */ (
     document.getElementById("sandbox")
   );

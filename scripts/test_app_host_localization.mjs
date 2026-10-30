@@ -54,8 +54,11 @@ for (const locale of Object.keys(languages)) {
       __HARN_VERSION__: "test",
       __HARN_SANDBOX_ORIGIN__: "http://sandbox.invalid",
       document,
-      navigator: { languages: ["en-US"], userAgent: "test", maxTouchPoints: 0 },
-      localStorage: { getItem: () => locale },
+      navigator: {
+        languages: [locale, "en-US"],
+        userAgent: "test",
+        maxTouchPoints: 0,
+      },
       location: { origin: "http://host.invalid" },
       encodeURIComponent,
       Intl,
