@@ -73,6 +73,7 @@ struct ProcessTape {
     workspace: Option<TapeWorkspace>,
     next_llm_call: AtomicU64,
     prompts: Mutex<prompts::PromptLedger>,
+    dispatches: overlap::Dispatches,
 }
 
 impl ProcessTape {
@@ -204,6 +205,7 @@ pub fn start_recording(
         workspace,
         next_llm_call: AtomicU64::new(0),
         prompts: Mutex::default(),
+        dispatches: overlap::Dispatches::default(),
     }));
     Ok(Some(RunTapeGuard { recorder, path }))
 }
@@ -478,6 +480,7 @@ pub enum RecordedToolResult {
 /// An in-flight tool call on the recording side.
 pub(crate) struct ToolCallRecording {
     tape: Arc<ProcessTape>,
+    dispatch: overlap::Dispatch,
     call_id: String,
     tool: String,
     args_digest: String,
@@ -501,6 +504,7 @@ pub(crate) fn begin_tool_call(
     read_only: bool,
 ) -> Option<ToolCallRecording> {
     let tape = process_tape()?;
+    let dispatch = tape.dispatches.begin();
     let watch = match (tape.level, &tape.workspace) {
         (RecordingLevel::Full, _) if read_only => EffectWatch::ReadOnly,
         (RecordingLevel::Full, Some(workspace)) => {
@@ -510,6 +514,7 @@ pub(crate) fn begin_tool_call(
         _ => EffectWatch::Unobserved,
     };
     Some(ToolCallRecording {
+        dispatch,
         after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         tape,
         call_id: call_id.to_string(),
@@ -546,6 +551,7 @@ pub(crate) fn finish_tool_call(
 ) {
     let ToolCallRecording {
         tape,
+        dispatch,
         call_id,
         tool,
         args_digest,
@@ -584,6 +590,11 @@ pub(crate) fn finish_tool_call(
             unservable = Some("no workspace effect observer was installed".to_string());
         }
         EffectWatch::Unobserved => {}
+    }
+    if dispatch.overlapped() {
+        unservable.get_or_insert_with(|| {
+            "overlapping tool dispatches have ambiguous effects and cannot be replayed".to_string()
+        });
     }
     if tape.next_llm_call.load(Ordering::SeqCst) != after_calls {
         unservable.get_or_insert_with(|| {
@@ -1368,6 +1379,9 @@ pub(crate) use scope::{
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;
+
+#[path = "run_tape_overlap.rs"]
+mod overlap;
 pub(crate) use prefix::{
     prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
     taped_random, taping, Owner,
