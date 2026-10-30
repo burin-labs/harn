@@ -697,11 +697,15 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
     'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
+  const sourceSecurityPassed=jobs.some(job=>job.name==='Candidate dependency security / cargo-deny'
+    && job.status==='completed' && job.conclusion==='success');
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
       || job.run_attempt!==attempt || job.head_sha!==policyRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
+        || job.name==='Candidate dependency security / Advisory tracking issue' && sourceSecurityPassed
+          && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {

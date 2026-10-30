@@ -50,6 +50,18 @@ test('archive readiness is independent of a later consumer failure and requires 
   }
 });
 
+test('source-specific advisory tracking skips require the actual successful security scan',()=>{
+  const scan={id:101,run_id:42,run_attempt:1,head_sha:source,
+    name:'Candidate dependency security / cargo-deny',status:'completed',conclusion:'success'};
+  const tracking={...scan,id:102,name:'Candidate dependency security / Advisory tracking issue',conclusion:'skipped'};
+  assert.equal(qualifyArchiveProducer(run,[...jobs,scan,tracking],artifacts,request,targets).verdict,'pass');
+  assert.throws(()=>qualifyArchiveProducer(run,[...jobs,tracking],artifacts,request,targets),/builds_unproven/);
+  for(const conclusion of ['skipped','failure','cancelled',null]) {
+    assert.throws(()=>qualifyArchiveProducer(run,[...jobs,{...scan,conclusion},tracking],artifacts,request,targets),/builds_unproven/);
+  }
+  assert.throws(()=>qualifyArchiveProducer(run,[...jobs,scan,{...tracking,name:'Unknown security job'}],artifacts,request,targets),/builds_unproven/);
+});
+
 test('only the owning live candidate can observe a pending audit; failed or absent audits never qualify',()=>{
   const pending=jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job);
   const liveRequest={...request,allowPendingAudit:true};
