@@ -165,3 +165,92 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
         assert_eq!(english.stdout, japanese.stdout, "{format} output changed");
     }
 }
+
+#[test]
+fn localized_orchestrator_records_preserve_field_names_and_raw_result_values() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let expected: BTreeSet<_> = [
+        "binding_id",
+        "binding_version",
+        "event_id",
+        "status",
+        "replay_of_event_id",
+        "dlq_entry_id",
+        "error",
+        "result",
+    ]
+    .into_iter()
+    .collect();
+    for (locale, _) in LOCALES {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "localized-console-record"
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+match = { events = ["a2a.task.received"] }
+handler = "worker://triage"
+priority = "high"
+"#,
+        )
+        .unwrap();
+        let run_local = |arguments: &[&str]| {
+            harn_e2e_command()
+                .current_dir(project.path())
+                .env("LC_ALL", locale)
+                .args(arguments)
+                .output()
+                .expect("run local orchestrator")
+        };
+        let fire = run_local(&[
+            "orchestrator",
+            "fire",
+            "incoming-review-task",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "state",
+        ]);
+        assert!(fire.status.success(), "{locale}: {fire:?}");
+        let text = String::from_utf8(fire.stdout).unwrap();
+        let fields: BTreeMap<_, _> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("- ").and_then(|row| row.split_once('=')))
+            .collect();
+        assert_eq!(
+            fields.keys().copied().collect::<BTreeSet<_>>(),
+            expected,
+            "{locale}: {text}"
+        );
+        assert_eq!(fields["binding_id"], "incoming-review-task");
+        let result: serde_json::Value = serde_json::from_str(fields["result"])
+            .expect("raw result braces must remain literal JSON");
+        assert_eq!(result["queue"], "triage", "{locale}: {text}");
+        let queue = run_local(&[
+            "orchestrator",
+            "queue",
+            "ls",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "state",
+        ]);
+        assert!(queue.status.success(), "{locale}: {queue:?}");
+        let queue_text = String::from_utf8(queue.stdout).unwrap();
+        assert!(
+            queue_text.contains("triage"),
+            "must reach the populated worker queue: {queue_text}"
+        );
+        let in_flight = queue_text
+            .lines()
+            .find_map(|line| line.strip_prefix("- dispatcher_in_flight="))
+            .unwrap_or_else(|| panic!("{locale}: missing stable field: {queue_text}"));
+        in_flight
+            .parse::<u64>()
+            .expect("field retains its numeric value");
+    }
+}

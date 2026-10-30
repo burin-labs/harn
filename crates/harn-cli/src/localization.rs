@@ -12,6 +12,10 @@ use crate::cli::Cli;
 
 include!(concat!(env!("OUT_DIR"), "/localization_formats.rs"));
 
+#[cfg(test)]
+#[path = "../build_support/localization_contract.rs"]
+mod field_contract;
+
 pub(crate) fn selected_locale() -> Locale {
     process_locale()
 }
@@ -206,6 +210,40 @@ mod tests {
                 "{locale} credential prompt spacing"
             );
         }
+    }
+
+    #[test]
+    fn every_catalog_keeps_console_record_field_identifiers() {
+        let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
+        assert!(
+            source.values().any(|text| text.contains("binding_id=")),
+            "measure a known populated console record field"
+        );
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            field_contract::validate_fields(&source, catalog)
+                .unwrap_or_else(|error| panic!("{locale}: {error}"));
+        }
+        field_contract::validate_fields(&source, &source).unwrap();
+    }
+
+    #[test]
+    fn translated_console_record_keys_are_rejected_by_the_catalog_owner() {
+        let source = Catalog::from([(
+            "field".into(),
+            "- binding_id={0} dispatcher_in_flight={1}".into(),
+        )]);
+        assert_eq!(
+            field_contract::field_identifiers(&source["field"]),
+            ["binding_id=", "dispatcher_in_flight="]
+        );
+        let mut translated = source.clone();
+        translated.insert(
+            "field".into(),
+            "- identifiant_de_liaison={0} en_cours_du_dispatcher={1}".into(),
+        );
+        let error = field_contract::validate_fields(&source, &translated)
+            .expect_err("a translated machine field must fail the same owning validator");
+        assert!(error.contains("changed CLI record field identifiers"));
     }
 
     #[test]

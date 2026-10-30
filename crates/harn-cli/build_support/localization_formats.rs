@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
 
+#[path = "localization_contract.rs"]
+mod contract;
+
 pub fn generate(manifest: &Path) {
     let formats = manifest.join("src/localization_formats.json");
     println!("cargo:rerun-if-changed={}", formats.display());
@@ -11,6 +14,12 @@ pub fn generate(manifest: &Path) {
         serde_json::from_str(&std::fs::read_to_string(&formats).expect("read CLI templates"))
             .expect("CLI templates must be strings");
     assert!(!source.is_empty(), "CLI templates must be populated");
+    let english_path = manifest.join("src/localization/en.json");
+    println!("cargo:rerun-if-changed={}", english_path.display());
+    let english: BTreeMap<String, String> = serde_json::from_str(
+        &std::fs::read_to_string(english_path).expect("read canonical CLI catalog"),
+    )
+    .expect("canonical CLI messages must map strings");
     let mut catalogs = Vec::new();
     for (name, variant) in [
         ("es", "Spanish"),
@@ -27,6 +36,8 @@ pub fn generate(manifest: &Path) {
         let catalog: BTreeMap<String, String> =
             serde_json::from_str(&std::fs::read_to_string(path).expect("read CLI catalog"))
                 .expect("CLI catalog must map strings");
+        contract::validate_fields(&english, &catalog)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert!(
             source.keys().all(|key| catalog
                 .get(key)

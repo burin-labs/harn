@@ -552,8 +552,8 @@ pipeline test_beta(task) {
     assert!(stdout.contains("Latency: p50="));
     assert!(stdout.contains("p90="));
     assert!(stdout.contains("Per-test detail: avg="));
-    assert!(stdout.contains("Slowest 2 tests:"));
-    assert!(stdout.contains("Slowest 2 files:"));
+    assert!(stdout.contains("Slowest tests: 2"));
+    assert!(stdout.contains("Slowest files: 2"));
     assert!(stdout.contains("Module attribution (overlaps phases):"));
 
     let first_run = stdout.find("RUN   test_alpha").expect("alpha start");
