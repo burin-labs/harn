@@ -2219,19 +2219,24 @@ mod tests {
         let session_id = crate::agent_sessions::open_or_create_for_test(Some(
             "workspace-anchor-reminder".into(),
         ));
-        crate::agent_sessions::set_workspace_anchor(
-            &session_id,
-            Some(crate::workspace_anchor::WorkspaceAnchor {
-                primary: std::path::PathBuf::from("/workspace/main"),
-                additional_roots: vec![crate::workspace_anchor::MountedRoot {
-                    path: std::path::PathBuf::from("/workspace/lib"),
-                    mount_mode: crate::workspace_anchor::MountMode::Extend,
-                    mounted_at: "2026-05-24T00:00:01Z".to_string(),
-                }],
-                anchored_at: "2026-05-24T00:00:00Z".to_string(),
-            }),
-        )
-        .expect("set anchor");
+        let mut anchor = crate::workspace_anchor::WorkspaceAnchor {
+            primary: std::path::PathBuf::from("/workspace/main"),
+            additional_roots: vec![crate::workspace_anchor::MountedRoot {
+                path: std::path::PathBuf::from("/workspace/lib"),
+                mount_mode: crate::workspace_anchor::MountMode::Extend,
+                mounted_at: "2026-05-24T00:00:01Z".to_string(),
+            }],
+            anchored_at: "2026-05-24T00:00:00Z".to_string(),
+        };
+        anchor
+            .canonicalize_roots()
+            .expect("canonical fixture roots");
+        let primary = format!("primary: {}", anchor.primary.display());
+        let mounted = format!(
+            "{} (mount_mode: extend, mounted_at: 2026-05-24T00:00:01Z)",
+            anchor.additional_roots[0].path.display()
+        );
+        crate::agent_sessions::set_workspace_anchor(&session_id, Some(anchor)).expect("set anchor");
         let ctx = ProviderContext {
             event: HookEvent::SessionStart,
             session_id,
@@ -2246,10 +2251,8 @@ mod tests {
         assert_eq!(reminder.dedupe_key.as_deref(), Some("workspace_anchor"));
         assert_eq!(reminder.ttl_turns, Some(1));
         assert!(reminder.body.contains("<workspace-anchor>"));
-        assert!(reminder.body.contains("primary: /workspace/main"));
-        assert!(reminder
-            .body
-            .contains("/workspace/lib (mount_mode: extend, mounted_at: 2026-05-24T00:00:01Z)"));
+        assert!(reminder.body.contains(&primary));
+        assert!(reminder.body.contains(&mounted));
     }
 
     #[test]

@@ -789,7 +789,7 @@ fn workspace_anchor_in_transcript_metadata_round_trips_to_bundle_workspace() {
     use std::path::PathBuf;
 
     let mut run = fixture_run();
-    let anchor = WorkspaceAnchor {
+    let mut anchor = WorkspaceAnchor {
         primary: PathBuf::from("/workspace/example"),
         additional_roots: vec![MountedRoot {
             path: PathBuf::from("/workspace/lib"),
@@ -798,6 +798,9 @@ fn workspace_anchor_in_transcript_metadata_round_trips_to_bundle_workspace() {
         }],
         anchored_at: "2026-05-01T00:00:00Z".to_string(),
     };
+    anchor
+        .canonicalize_roots()
+        .expect("canonical fixture roots");
     let transcript = run.transcript.as_mut().unwrap();
     transcript["metadata"]["workspace_anchor"] = anchor.to_json();
 
@@ -812,8 +815,12 @@ fn workspace_anchor_in_transcript_metadata_round_trips_to_bundle_workspace() {
     let workspace = bundle
         .workspace
         .expect("workspace section should be present");
-    assert_eq!(workspace.primary.as_deref(), Some("/workspace/example"));
+    assert_eq!(workspace.primary.as_deref(), anchor.primary.to_str());
     assert_eq!(workspace.additional_roots.len(), 1);
+    assert_eq!(
+        workspace.additional_roots[0].path,
+        anchor.additional_roots[0].path.to_str().unwrap()
+    );
     assert_eq!(workspace.additional_roots[0].mount_mode, "read_only");
     assert_eq!(
         workspace.anchored_at.as_deref(),
@@ -864,6 +871,22 @@ fn checked_session_bundle_fixtures_match_export() {
         };
         let mut bundle =
             export_run_record_bundle(&run, &options).expect("export bundle for fixture");
+        if matches!(mode, SessionBundleExportMode::Local) {
+            let raw_anchor: WorkspaceAnchor = serde_json::from_value(
+                run.transcript.as_ref().unwrap()["metadata"]["workspace_anchor"].clone(),
+            )
+            .expect("portable fixture anchor");
+            let mut canonical_anchor = raw_anchor.clone();
+            canonical_anchor
+                .canonicalize_roots()
+                .expect("canonical fixture roots");
+            assert_eq!(
+                bundle.workspace,
+                Some(BundleWorkspace::from(&canonical_anchor))
+            );
+            // Keep checked-in fixtures portable only after verifying native identity.
+            bundle.workspace = Some(BundleWorkspace::from(&raw_anchor));
+        }
         pin_fixture_bundle_fields(&mut bundle);
         let mut value = serde_json::to_value(&bundle).expect("encode bundle");
         sort_redaction_entries(&mut value);
