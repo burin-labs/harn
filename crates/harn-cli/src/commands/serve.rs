@@ -36,37 +36,37 @@ fn dispatch_core_config_for_source(path: &str) -> Result<DispatchCoreConfig, Str
 pub(crate) async fn run_command(command: ServeCommand) {
     match command {
         ServeCommand::Acp(args) => {
-            if let Err(error) = run_acp_server(&args).await {
+            if let Err(error) = Box::pin(run_acp_server(&args)).await {
                 crate::command_error(&error);
             }
         }
         ServeCommand::A2a(args) => {
-            if let Err(error) = run_a2a_server(&args).await {
+            if let Err(error) = Box::pin(run_a2a_server(&args)).await {
                 crate::command_error(&error);
             }
         }
         ServeCommand::Api(args) => {
-            if let Err(error) = run_api_server(&args).await {
+            if let Err(error) = Box::pin(run_api_server(&args)).await {
                 crate::command_error(&error);
             }
         }
         ServeCommand::Mcp(args) => {
-            if let Err(error) = run_mcp_server(&args).await {
+            if let Err(error) = Box::pin(run_mcp_server(&args)).await {
                 crate::command_error(&error);
             }
         }
         ServeCommand::Site(args) => {
-            if let Err(error) = run_site_server(&args).await {
+            if let Err(error) = Box::pin(run_site_server(&args)).await {
                 crate::fatal_error(error);
             }
         }
         ServeCommand::Worker(args) => {
-            if let Err(error) = run_worker_server(&args).await {
+            if let Err(error) = Box::pin(run_worker_server(&args)).await {
                 crate::fatal_error(error);
             }
         }
         ServeCommand::Test => {
-            if let Err(error) = crate::commands::test_worker::serve_stdio().await {
+            if let Err(error) = Box::pin(crate::commands::test_worker::serve_stdio()).await {
                 crate::fatal_error(error);
             }
         }

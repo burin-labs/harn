@@ -365,7 +365,7 @@ impl HostlibRegistry {
                             .is_some_and(crate::tools::run_command_request_is_background);
                         Box::pin(async move {
                             let taped_args = args.clone();
-                            let live = async move {
+                            let live = Box::pin(async move {
                             let request = crate::schemas::validate_request_args(
                                 ambient_name,
                                 module,
@@ -459,7 +459,7 @@ impl HostlibRegistry {
                                     .map_err(VmError::from)
                                 }
                             }
-                            };
+                            });
                             harn_vm::run_tape::taped_command_run(ambient_name, &taped_args, background, live).await
                         })
                     }

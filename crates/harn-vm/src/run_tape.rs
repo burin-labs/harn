@@ -1383,7 +1383,7 @@ pub(crate) use scope::{
 #[path = "run_tape_prefix.rs"]
 mod prefix;
 
-pub use crate::llm::agent_host_primitives::taped_command_run;
+pub use crate::llm::agent_host_primitives::tool_tape::taped_command_run;
 
 #[path = "run_tape_overlap.rs"]
 mod overlap;
