@@ -1710,6 +1710,47 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   const ci = declared["ci.yml"]
   const declared_policy = policy()
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  const without_invalidation = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step -> return !contains(step?.run ?? "", "cargo clean --workspace") },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, without_invalidation, ci).contains(
+      "macos-nightly.yml:nextest must invalidate workspace units after restore and before rebuilding on main",
+    ),
+  )
+  for condition in [gha_expression("github.event_name == 'pull_request'"), gha_expression("true")] {
+    const wrong_restore = {
+      ...producer,
+      jobs: {
+        nextest: {
+          ...producer.jobs.nextest,
+          steps: producer.jobs.nextest.steps.map(
+            { step ->
+              if step?.id == "macos-warm-restore" {
+                return {...step, if: condition}
+              }
+              return step
+            },
+          )
+            .to_list(),
+        },
+      },
+    }
+    assert(
+      macos_warm_errors(declared_policy, wrong_restore, ci).contains(
+        "macos-nightly.yml:nextest must restore the main warm artifact for PRs and missing exact hosted-main caches with cold fallback",
+      ),
+    )
+  }
   const without_pack = {
     ...producer,
     jobs: {

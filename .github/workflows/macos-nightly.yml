@@ -104,6 +104,7 @@ jobs:
       # The hosted cache restores a whole target directory; on a self-hosted
       # runner that would replace the persistent one with a colder copy.
       - uses: ./.github/actions/rust-cache
+        id: rust-cache
         if: ${{ runner.environment != 'self-hosted' }}
         continue-on-error: true
         with:
@@ -153,13 +154,11 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: git checkout --detach "$SOURCE_SHA"
-      # A pull-request run reads the main-produced warm artifact. It runs after
-      # rust-cache so the artifact wins when both exist: the restore replaces
-      # the target directory wholesale, and a cache the namespace has already
-      # evicted has nothing to contribute anyway.
+      # PRs need the workspace units the Actions cache strips. A main producer
+      # also uses this fallback when its exact Actions generation is absent.
       - name: Restore macOS workspace warm artifact
         id: macos-warm-restore
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && steps.rust-cache.outputs.cache-hit != 'true') }}
         continue-on-error: true
         shell: bash
         env:
@@ -180,9 +179,13 @@ jobs:
           fi
           exit "${status}"
       - name: Report macOS warm restore outcome
-        if: ${{ always() && github.event_name == 'pull_request' }}
+        if: ${{ always() && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch')) }}
         shell: bash
         run: |
+          if [[ "${{ github.event_name }}" != 'pull_request' && "${{ steps.rust-cache.outputs.cache-hit }}" == 'true' ]]; then
+            echo "macos_warm_restore=not-needed-exact-actions-hit"
+            exit 0
+          fi
           outcome="${{ steps.macos-warm-restore.outputs.macos_warm_restore }}"
           echo "macos_warm_restore=${outcome:-unreported}"
           if [[ "${outcome}" != "hit" ]]; then

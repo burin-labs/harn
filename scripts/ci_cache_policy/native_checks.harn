@@ -232,6 +232,39 @@ pub fn windows_release_certify_warm_errors(
  * cache rather than the artifact that replaced it. A structural check that
  * cannot report the absence of the thing it governs is not a check.
  */
+fn macos_producer_bootstrap_errors(job: dict, identity: string) -> list<string> {
+  let errors: list<string> = []
+  const caches = matching_steps(job, "./.github/actions/rust-cache")
+  if caches.count != 1 || caches[0]?.id != "rust-cache" {
+    errors = errors + ["${identity} must name the exact Actions cache result rust-cache"]
+  }
+  const invalidations = matching_run_steps(job, "cargo clean --workspace")
+  let restore_index = -1
+  let invalidate_index = -1
+  let build_index = -1
+  const steps = job?.steps ?? []
+  for index in range(0, steps.count) {
+    const step = steps[index] ?? {}
+    if step?.id == "macos-warm-restore" {
+      restore_index = index
+    }
+    if step_run_contains(step, "cargo clean --workspace") {
+      invalidate_index = index
+    }
+    if step?.name == "Run workspace nextest" {
+      build_index = index
+    }
+  }
+  if invalidations.count != 1 || invalidations[0]?.if != MACOS_WARM_MAIN_GUARD
+    || restore_index < 0
+    || invalidate_index <= restore_index
+    || build_index <= invalidate_index {
+    errors = errors
+      + ["${identity} must invalidate workspace units after restore and before rebuilding on main"]
+  }
+  return errors
+}
+
 pub fn macos_warm_errors(
   policy: CiCachePolicy,
   nightly_workflow: dict,
@@ -272,14 +305,15 @@ pub fn macos_warm_errors(
   const nightly_restores = matching_run_steps(job, MACOS_WARM_RESTORE_MARKER)
   if len(nightly_restores) != 1
     || trim(nightly_restores[0]?.if ?? "")
-      != MACOS_WARM_PULL_REQUEST_GUARD
+      != MACOS_WARM_HOSTED_RESTORE_GUARD
     || nightly_restores[0]?.["continue-on-error"]
       != true {
     errors = errors
       + [
-        "${warm.workflow}:${warm.job} must restore the main warm artifact on pull requests with cold fallback",
+        "${warm.workflow}:${warm.job} must restore the main warm artifact for PRs and missing exact hosted-main caches with cold fallback",
       ]
   }
+  errors = errors + macos_producer_bootstrap_errors(job, "${warm.workflow}:${warm.job}")
   // The blocking pull-request lane is the one this exists to speed up, so its
   // consumer is part of the contract rather than an optional extra.
   const ci_job = ci_workflow?.jobs?.["macos-lint"]
