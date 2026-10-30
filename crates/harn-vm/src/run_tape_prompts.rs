@@ -49,7 +49,7 @@ impl PromptLedger {
             return;
         }
         if !self.texts.contains_key(render_id) {
-            let spans = super::redacted_tape_json_bytes(&spans);
+            let spans = serde_json::to_vec(spans).unwrap_or_default();
             let rendered = super::redacted_tape_text(rendered);
             recorder.record(TapeRecordKind::PromptRender {
                 render_id: render_id.to_string(),
