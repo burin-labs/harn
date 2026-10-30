@@ -21,6 +21,7 @@ export default [
         innerWidth: "readonly",
         Intl: "readonly",
         location: "readonly",
+        localStorage: "readonly",
         matchMedia: "readonly",
         navigator: "readonly",
         parent: "readonly",

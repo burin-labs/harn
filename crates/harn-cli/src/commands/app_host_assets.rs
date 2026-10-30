@@ -1,6 +1,7 @@
 const HOST_DOCUMENT: &str = include_str!("app_host/host.html");
 const HOST_STYLE: &str = include_str!("app_host/host.css");
 const HOST_PROTOCOL_SCRIPT: &str = include_str!("app_host/protocol.js");
+const LOCALIZATION_SCRIPT: &str = include_str!("app_host/localization.js");
 const HOST_SCRIPT: &str = include_str!("app_host/host.js");
 const SANDBOX_DOCUMENT: &str = include_str!("app_host/sandbox.html");
 const SANDBOX_STYLE: &str = include_str!("app_host/sandbox.css");
@@ -11,7 +12,7 @@ pub(crate) const HARN_WASM_SCRIPT: &str = include_str!("app_host/runtime/harn_wa
 pub(crate) const HARN_WASM_GZIP: &[u8] = include_bytes!("app_host/runtime/harn_wasm_bg.wasm.gz");
 
 pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
-    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{HOST_SCRIPT}");
+    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{LOCALIZATION_SCRIPT}\n{HOST_SCRIPT}");
     render_document(HOST_DOCUMENT, HOST_STYLE, &script)
         .replace("__HARN_SANDBOX_ORIGIN__", &script_json(sandbox_origin))
         .replace("__HARN_TITLE__", &script_json(title))
@@ -19,7 +20,7 @@ pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
 }
 
 pub(crate) fn sandbox_document() -> String {
-    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{SANDBOX_SCRIPT}");
+    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{LOCALIZATION_SCRIPT}\n{SANDBOX_SCRIPT}");
     render_document(SANDBOX_DOCUMENT, SANDBOX_STYLE, &script)
 }
 
