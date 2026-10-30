@@ -22,7 +22,10 @@ pipeline test_reconciler_has_separate_read_only_consumer_custody_authority(harne
     }
     if step.env != nil && step.env.RELEASE_RECOVERY_READ_TOKEN != nil {
       guards = guards + 1
-      assert_eq(step.env.RELEASE_RECOVERY_READ_TOKEN, expression("steps.recovery-read.outputs.token"))
+      assert_eq(
+        step.env.RELEASE_RECOVERY_READ_TOKEN,
+        expression("steps.recovery-read.outputs.token"),
+      )
       assert(step.run.contains("release_candidate_reconcile.sh"))
     }
   }
