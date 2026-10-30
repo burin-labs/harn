@@ -97,30 +97,30 @@ pub fn message_18(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "nein"
+    return "exakt"
   }
   if locale == "es" {
-    return "no"
+    return "exacto"
   }
   if locale == "fr" {
-    return "non"
+    return "exact"
   }
   if locale == "it" {
-    return "no"
+    return "esatto"
   }
   if locale == "ja" {
-    return "いいえ"
+    return "完全一致"
   }
   if locale == "ko" {
-    return "아니오"
+    return "정확히 일치"
   }
   if locale == "pt-BR" {
-    return "não"
+    return "exato"
   }
   if locale == "zh-Hans" {
-    return "否"
+    return "完全匹配"
   }
-  return "no"
+  return "exact"
 }
 
 pub fn message_19(locale: string, values: list<string>) -> string {
@@ -128,28 +128,28 @@ pub fn message_19(locale: string, values: list<string>) -> string {
     throw "CLI localization argument count does not match its registered template"
   }
   if locale == "de" {
-    return "ja"
+    return "stimmt nicht überein"
   }
   if locale == "es" {
-    return "sí"
+    return "no coincide"
   }
   if locale == "fr" {
-    return "oui"
+    return "ne correspond pas"
   }
   if locale == "it" {
-    return "sì"
+    return "mancata corrispondenza"
   }
   if locale == "ja" {
-    return "はい"
+    return "不一致"
   }
   if locale == "ko" {
-    return "예"
+    return "불일치"
   }
   if locale == "pt-BR" {
-    return "sim"
+    return "não corresponde"
   }
   if locale == "zh-Hans" {
-    return "是"
+    return "不匹配"
   }
-  return "yes"
+  return "mismatch"
 }

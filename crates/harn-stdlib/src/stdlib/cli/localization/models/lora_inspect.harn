@@ -27,7 +27,13 @@ import {
   message_18,
   message_19,
 } from "std/cli/localization/models/lora_inspect/part_3"
-import { message_20 } from "std/cli/localization/models/lora_inspect/part_4"
+import {
+  message_20,
+  message_21,
+  message_22,
+  message_23,
+  message_24,
+} from "std/cli/localization/models/lora_inspect/part_4"
 
 pub fn cli_message(locale: string, source: string, values: list<string>) -> string {
   if source == "  LoRA module format: {0}" {
@@ -85,14 +91,26 @@ pub fn cli_message(locale: string, source: string, values: list<string>) -> stri
   if source == "  warning: {0}" {
     return message_17(locale, values)
   }
-  if source == "no" {
+  if source == "exact" {
     return message_18(locale, values)
   }
-  if source == "yes" {
+  if source == "mismatch" {
     return message_19(locale, values)
   }
-  if source == "{0} -> {1} via {2}" {
+  if source == "no" {
     return message_20(locale, values)
+  }
+  if source == "same basename" {
+    return message_21(locale, values)
+  }
+  if source == "unknown" {
+    return message_22(locale, values)
+  }
+  if source == "yes" {
+    return message_23(locale, values)
+  }
+  if source == "{0} -> {1} via {2}" {
+    return message_24(locale, values)
   }
   throw "Unregistered CLI localization message"
 }

@@ -71,7 +71,19 @@ pub(crate) const OAUTH_FAILED_PREFIX: &str = "Authorization failed: ";
 pub(crate) const OAUTH_DENIED: &str = "OAuth authorization was denied";
 pub(crate) const OAUTH_CALLBACK_STATE_MISMATCH: &str = "OAuth callback state did not match";
 pub(crate) const OAUTH_CALLBACK_TIMEOUT: &str = "OAuth callback timed out after 5 minutes";
-const RUNTIME_MESSAGES: [&str; 22] = [
+pub(crate) const DOCTOR_PICK_MODEL: &str =
+    "Run `harn models recommend` to pick a starter model for your machine.";
+pub(crate) const DOCTOR_SCAFFOLD: &str =
+    "Run `harn new my-agent --template agent` to scaffold a project.";
+pub(crate) const DOCTOR_READY: &str =
+    "You're ready. Try `harn try \"summarize this README\"` or `harn demo` for a bundled scenario.";
+pub(crate) const DOCTOR_FIX_CHECKS: &str =
+    "Address the failing checks above, then re-run `harn doctor`.";
+const RUNTIME_MESSAGES: [&str; 26] = [
+    DOCTOR_PICK_MODEL,
+    DOCTOR_SCAFFOLD,
+    DOCTOR_READY,
+    DOCTOR_FIX_CHECKS,
     API_KEY_PROMPT,
     OAUTH_SECRET_PROMPT,
     OAUTH_REDIRECT_PROMPT,

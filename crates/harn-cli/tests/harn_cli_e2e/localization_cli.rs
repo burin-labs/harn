@@ -65,6 +65,24 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
                 "{locale}: {text}"
             );
         }
+        let next_step = parsed["data"]["next_step"]
+            .as_str()
+            .expect("canonical next step");
+        assert!(
+            text.contains(
+                catalog[next_step]
+                    .as_str()
+                    .expect("registered next-step message")
+            ),
+            "{locale}: {text}"
+        );
+        let actual_json = run(locale, &["doctor", "--no-network", "--json"]);
+        let actual_report: serde_json::Value =
+            serde_json::from_slice(&actual_json.stdout).expect("localized host JSON");
+        assert_eq!(
+            actual_report["data"]["next_step"], parsed["data"]["next_step"],
+            "human language must not change the report contract"
+        );
         let output = harn_e2e_command()
             .env("LC_ALL", locale)
             .env(

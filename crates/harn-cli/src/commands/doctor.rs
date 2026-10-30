@@ -190,7 +190,12 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
         check.ensure_id();
     }
 
-    let next_step = next_step_suggestion(&checks);
+    let locale = if opts.json {
+        crate::localization::Locale::English
+    } else {
+        crate::localization::selected_locale()
+    };
+    let next_step = next_step_suggestion(&checks, locale);
     let summary = build_summary(&checks);
     let host = build_host_info(&toolchain);
     let capabilities = stdlib_capability_matrix();

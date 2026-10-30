@@ -24,17 +24,17 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __base_match_label(value: string) -> string {
+fn __base_match_label(__cli_locale: string, value: string) -> string {
   if value == "exact" {
-    return "exact"
+    return cli_message(__cli_locale, "exact", [])
   }
   if value == "suffix" {
-    return "same basename"
+    return cli_message(__cli_locale, "same basename", [])
   }
   if value == "mismatch" {
-    return "mismatch"
+    return cli_message(__cli_locale, "mismatch", [])
   }
-  return "unknown"
+  return cli_message(__cli_locale, "unknown", [])
 }
 
 fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
@@ -62,7 +62,14 @@ fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
     cli_message(
       __cli_locale,
       "  base match: {0}",
-      [to_string(__base_match_label(safe_string(compatibility["base_model_match"], "unknown")))],
+      [
+        to_string(
+          __base_match_label(
+            __cli_locale,
+            safe_string(compatibility["base_model_match"], "unknown"),
+          ),
+        ),
+      ],
     ),
   )
   stdio.println(
@@ -190,7 +197,9 @@ fn __render_human(__cli_locale: string, stdio: HarnessStdio, report: dict) {
         __cli_locale,
         "  contract route: base={0} provider={1} tool_format={2} adapter={3} modules_to_save={4}",
         [
-          to_string(__base_match_label(safe_string(contract["base_model_match"], "unknown"))),
+          to_string(
+            __base_match_label(__cli_locale, safe_string(contract["base_model_match"], "unknown")),
+          ),
           to_string(provider_match),
           to_string(tool_format_match),
           to_string(adapter_match),
