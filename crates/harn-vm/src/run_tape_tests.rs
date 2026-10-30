@@ -200,6 +200,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         bound_value: Some(text.clone()),
         parent_span: None,
         template_uri: "prompt://fixture".to_string(),
+        template_revision: blake3::hash(text.as_bytes()).to_hex().to_string(),
     };
     let span = crate::stdlib::template::PromptSourceSpan {
         parent_span: Some(Box::new(parent.clone())),
