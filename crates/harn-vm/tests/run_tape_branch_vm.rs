@@ -182,6 +182,51 @@ fn branch(source: &str, tapes: &Path, workspace: &Path, k: u64) -> Branched {
     }
 }
 
+#[test]
+fn input_reads_in_a_prefix_refuse_before_the_live_input_handler() {
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for invocation in [
+        "harness.stdio.read_line()",
+        "harness.stdio.read_stdin()",
+        "harness.stdio.prompt(\"answer: \")",
+        "harness.term.read_password(\"password: \")",
+    ] {
+        let dirs = dirs();
+        let source = format!(
+            r#"
+import {{ with_llm_script }} from "std/testing"
+pipeline main(harness: Harness, task: unknown) {{
+  harness.testing.stdin_set("fixture input\n")
+  harness.stdio.println("output before input")
+  {invocation}
+  harness.stdio.println("live input was consumed")
+  with_llm_script(harness.llm, [{{text: "done", model: "mock"}}], {{ ->
+    harness.llm.call("task", nil, {{provider: "mock", model: "mock"}})
+  }})
+}}
+"#
+        );
+        let recorded = record(&source, &dirs.tapes, &dirs.workspace);
+        assert!(
+            recorded.contains("live input was consumed"),
+            "{invocation}: {recorded}"
+        );
+        let replay = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+        let divergence = replay
+            .report
+            .divergence
+            .expect("the prefix must refuse live input");
+        assert_eq!(divergence.what, "refused effect");
+        assert!(
+            divergence.detail.contains("Stdio Read"),
+            "{invocation}: {divergence:?}"
+        );
+        assert_eq!(replay.report.live_calls, 0);
+    }
+}
+
 /// The runtime store a run under `state` saved.
 fn store_at(state: &Path) -> serde_json::Value {
     let path = state.join(harn_vm::runtime_paths::STORE_FILE);
