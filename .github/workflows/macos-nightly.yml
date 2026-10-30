@@ -339,4 +339,4 @@ jobs:
           path: ${{ runner.temp }}/workspace-macos-warm/
           if-no-files-found: error
           retention-days: 3
-          compression-level: 6
+          compression-level: 0
