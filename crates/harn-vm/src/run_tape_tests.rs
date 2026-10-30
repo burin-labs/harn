@@ -188,7 +188,21 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     .unwrap()
     .unwrap();
 
-    record_prompt_render("prompt://fixture", &text, &[]);
+    let parent = crate::stdlib::template::PromptSourceSpan {
+        template_line: 1,
+        template_col: 1,
+        output_start: 0,
+        output_end: text.len(),
+        kind: crate::stdlib::template::PromptSpanKind::Expr,
+        bound_value: Some(text.clone()),
+        parent_span: None,
+        template_uri: "prompt://fixture".to_string(),
+    };
+    let span = crate::stdlib::template::PromptSourceSpan {
+        parent_span: Some(Box::new(parent.clone())),
+        ..parent
+    };
+    record_prompt_render("prompt://fixture", &text, &[span]);
     record_llm_call(&request(&text), &result(&text, None));
     let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
         .expect("active tape recording");
