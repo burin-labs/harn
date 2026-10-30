@@ -104,6 +104,11 @@ test('candidate and baseline custody pairs each authenticated nonce to its own p
     parent_head_sha:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc',source_revision:'e1ef4c6ae5bcf6445a3b864712f2589f3d8aabcc'};
   const legacy = publisher(frozen,99); legacy.steps.pop();
   assert.equal(qualifyObserverPublisher(frozen,[legacy]).job.id,99);
+  for (const publishers of [[],[legacy,{...legacy,id:100}],
+    [{...legacy,steps:[]}],
+    [{...legacy,steps:[{...legacy.steps[0],conclusion:'failure'}]}]]) {
+    assert.throws(()=>qualifyObserverPublisher(frozen,publishers),/observer_job_identity_unproven/);
+  }
   for (const change of [{parent_run_attempt:4},{parent_run_id:'41016965351'},
     {parent_head_sha:'e'.repeat(40)},{source_revision:context.source_revision}]) {
     assert.throws(()=>qualifyObserverPublisher({...frozen,...change},[legacy]),/observer_job_identity_unproven/);
