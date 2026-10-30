@@ -1144,11 +1144,11 @@ gen-trigger-quickref:
 # gate diffs it to refuse an undeclared removal (see
 # .github/scripts/breaking-surface-check.sh).
 gen-cli-surface:
-	$(HARN_CLI_CMD) dump-cli-surface
+	$(HARN_CLI_CMD) dump-cli-surface --messages-output crates/harn-cli/src/localization/en.json
 
 check-cli-surface:
 	@echo "=== Checking spec/cli-surface.txt matches the CLI parser ==="
-	@$(HARN_CLI_CMD) dump-cli-surface --check
+	@$(HARN_CLI_CMD) dump-cli-surface --messages-output crates/harn-cli/src/localization/en.json --check
 	@echo "    CLI surface listing OK."
 
 # CI guard: fail if the trigger quickref is stale relative to ProviderCatalog.

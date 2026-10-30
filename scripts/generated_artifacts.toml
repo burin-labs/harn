@@ -660,10 +660,12 @@ id = "cli-surface"
 description = "Flat sorted listing of every harn command, alias, flag, positional slot, and enumerated value, projected from the live Clap parser; the pull-request gate diffs it to refuse an undeclared removal."
 gen = "gen-cli-surface"
 check = "check-cli-surface"
-outputs = ["spec/cli-surface.txt"]
+outputs = ["spec/cli-surface.txt", "crates/harn-cli/src/localization/en.json"]
 sources = [
   "crates/harn-cli/src/cli/",
   "crates/harn-cli/src/commands/argument_schema.rs",
+  "crates/harn-cli/src/localization.rs",
+  "crates/harn-hostlib/src/localization.rs",
 ]
 ci = true
 make_all = true

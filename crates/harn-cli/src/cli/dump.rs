@@ -101,6 +101,9 @@ pub(crate) struct DumpTriggerQuickrefArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct DumpCliSurfaceArgs {
+    /// Write or verify the canonical English CLI help catalog as well.
+    #[arg(long)]
+    pub messages_output: Option<String>,
     /// Path to the generated CLI surface listing (relative to the repo root).
     #[arg(long, default_value = "spec/cli-surface.txt")]
     pub output: String,

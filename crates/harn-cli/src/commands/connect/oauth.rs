@@ -227,8 +227,10 @@ fn prompt_migrated_client_secret(token_auth_method: &str) -> Result<String, Stri
     if !io::stdin().is_terminal() {
         return Err(guidance);
     }
-    let secret = rpassword::prompt_password("OAuth client secret: ")
-        .map_err(|error| format!("failed to read OAuth client secret: {error}. {guidance}"))?;
+    let secret = rpassword::prompt_password(crate::localization::translate(
+        crate::localization::OAUTH_SECRET_PROMPT,
+    ))
+    .map_err(|error| format!("failed to read OAuth client secret: {error}. {guidance}"))?;
     if secret.is_empty() {
         return Err(format!("OAuth client secret must not be empty. {guidance}"));
     }
@@ -240,17 +242,27 @@ fn prompt_legacy_redirect_uri() -> Result<String, String> {
     if !io::stdin().is_terminal() {
         return Err(GUIDANCE.to_string());
     }
-    eprintln!("The old OAuth credential did not record its registered redirect URI.");
-    read_legacy_oauth_field("OAuth redirect URI registered for this client: ")?
-        .ok_or_else(|| GUIDANCE.to_string())
+    eprintln!(
+        "{}",
+        crate::localization::translate(crate::localization::OAUTH_MISSING_REDIRECT)
+    );
+    read_legacy_oauth_field(&crate::localization::translate(
+        crate::localization::OAUTH_REDIRECT_PROMPT,
+    ))?
+    .ok_or_else(|| GUIDANCE.to_string())
 }
 
 fn prompt_legacy_authorization_url() -> Result<Option<String>, String> {
     if !io::stdin().is_terminal() {
         return Ok(None);
     }
-    eprintln!("The old OAuth credential did not record its authorization URL.");
-    read_legacy_oauth_field("OAuth authorization URL (Enter to discover from resource): ")
+    eprintln!(
+        "{}",
+        crate::localization::translate(crate::localization::OAUTH_MISSING_AUTHORIZATION)
+    );
+    read_legacy_oauth_field(&crate::localization::translate(
+        crate::localization::OAUTH_AUTHORIZATION_PROMPT,
+    ))
 }
 
 fn read_legacy_oauth_field(prompt: &str) -> Result<Option<String>, String> {

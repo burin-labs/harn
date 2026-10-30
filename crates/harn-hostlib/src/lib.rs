@@ -62,6 +62,8 @@ pub mod host_conditions;
 pub mod host_env_custody;
 pub mod host_lease;
 pub mod host_lease_capability;
+#[cfg(feature = "cli-localization")]
+pub mod localization;
 pub mod process;
 pub use harn_vm::process_liveness;
 pub mod sandbox;

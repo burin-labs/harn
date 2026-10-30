@@ -202,6 +202,7 @@ hostlib = [
     "dep:harn-rules",
     "dep:harn-rules-hostlib",
     "harn-hostlib/full",
+    "harn-hostlib/cli-localization",
     "harn-serve/hostlib-full",
 ]
 # Off by default: link the on-device neural injection classifier (candle/ONNX).

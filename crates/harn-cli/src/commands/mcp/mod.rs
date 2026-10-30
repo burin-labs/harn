@@ -824,29 +824,59 @@ fn read_bulk_callback(
         .map_err(|error| format!("OAuth callback URL was invalid: {error}"))?;
 
     if callback_url.path() != expected_path {
-        let _ = stream.write_all(html_response(404, "Invalid callback path").as_bytes());
+        let _ = stream.write_all(
+            html_response(
+                404,
+                &crate::localization::translate(crate::localization::OAUTH_INVALID_PATH),
+            )
+            .as_bytes(),
+        );
         return Ok(BulkCallback::WrongPath);
     }
     let query = parse_callback_query(&callback_url);
     if let Some(error) = query_get(&query, "error") {
-        let _ = stream
-            .write_all(html_response(400, &format!("Authorization failed: {error}")).as_bytes());
+        let _ = stream.write_all(
+            html_response(
+                400,
+                &format!(
+                    "{}{error}",
+                    crate::localization::translate(crate::localization::OAUTH_FAILED_PREFIX)
+                ),
+            )
+            .as_bytes(),
+        );
         return Ok(BulkCallback::Denied { error });
     }
     let Some(code) = query_get(&query, "code") else {
-        let _ = stream.write_all(html_response(400, "Missing authorization code").as_bytes());
+        let _ = stream.write_all(
+            html_response(
+                400,
+                &crate::localization::translate(crate::localization::OAUTH_MISSING_CODE),
+            )
+            .as_bytes(),
+        );
         return Ok(BulkCallback::Denied {
             error: "missing authorization code".to_string(),
         });
     };
     let Some(state) = query_get(&query, "state") else {
-        let _ = stream.write_all(html_response(400, "Missing state").as_bytes());
+        let _ = stream.write_all(
+            html_response(
+                400,
+                &crate::localization::translate(crate::localization::OAUTH_MISSING_STATE),
+            )
+            .as_bytes(),
+        );
         return Ok(BulkCallback::Denied {
             error: "missing state".to_string(),
         });
     };
     let _ = stream.write_all(
-        html_response(200, "Authorization complete. You can close this window.").as_bytes(),
+        html_response(
+            200,
+            &crate::localization::translate(crate::localization::OAUTH_SUCCESS_MESSAGE),
+        )
+        .as_bytes(),
     );
     Ok(BulkCallback::Code {
         state,
@@ -995,7 +1025,10 @@ fn wait_for_oauth_response(
         .map_err(|error| format!("OAuth callback URL was invalid: {error}"))?;
 
     let response = if callback_url.path() != expected_path {
-        html_response(404, "Invalid callback path")
+        html_response(
+            404,
+            &crate::localization::translate(crate::localization::OAUTH_INVALID_PATH),
+        )
     } else if callback_url
         .query_pairs()
         .find(|(key, _)| key == "state")
@@ -1003,17 +1036,31 @@ fn wait_for_oauth_response(
         .as_deref()
         != Some(expected_state)
     {
-        html_response(400, "State mismatch")
+        html_response(
+            400,
+            &crate::localization::translate(crate::localization::OAUTH_STATE_MISMATCH),
+        )
     } else if let Some(error) = callback_url
         .query_pairs()
         .find(|(key, _)| key == "error")
         .map(|(_, value)| value.into_owned())
     {
-        let _ = stream
-            .write_all(html_response(400, &format!("Authorization failed: {error}")).as_bytes());
+        let _ = stream.write_all(
+            html_response(
+                400,
+                &format!(
+                    "{}{error}",
+                    crate::localization::translate(crate::localization::OAUTH_FAILED_PREFIX)
+                ),
+            )
+            .as_bytes(),
+        );
         return Err(format!("Authorization failed: {error}"));
     } else {
-        html_response(200, "Authorization complete. You can close this window.")
+        html_response(
+            200,
+            &crate::localization::translate(crate::localization::OAUTH_SUCCESS_MESSAGE),
+        )
     };
     let _ = stream.write_all(response.as_bytes());
 
@@ -1041,24 +1088,56 @@ fn infer_name_from_url(url: &str) -> String {
 }
 
 fn html_response(status: u16, message: &str) -> String {
+    html_response_in(
+        status,
+        message,
+        harn_hostlib::localization::process_locale(),
+    )
+}
+
+fn html_response_in(
+    status: u16,
+    message: &str,
+    locale: harn_hostlib::localization::Locale,
+) -> String {
     let status_line = match status {
         200 => "HTTP/1.1 200 OK",
         400 => "HTTP/1.1 400 Bad Request",
         _ => "HTTP/1.1 404 Not Found",
     };
     let (title, accent, badge) = match status {
-        200 => ("Authorization Complete", "#159f6b", "Connected"),
-        400 => ("Authorization Failed", "#c76b19", "Retry Needed"),
-        _ => ("Callback Error", "#b42318", "Invalid Request"),
+        200 => (
+            crate::localization::OAUTH_COMPLETE_TITLE,
+            "#159f6b",
+            crate::localization::OAUTH_CONNECTED,
+        ),
+        400 => (
+            crate::localization::OAUTH_FAILED_TITLE,
+            "#c76b19",
+            crate::localization::OAUTH_RETRY_NEEDED,
+        ),
+        _ => (
+            crate::localization::OAUTH_CALLBACK_ERROR,
+            "#b42318",
+            crate::localization::OAUTH_INVALID_REQUEST,
+        ),
     };
+    let title = crate::format::escape_html(&crate::localization::translate_for(locale, title));
+    let badge = crate::format::escape_html(&crate::localization::translate_for(locale, badge));
     let message = crate::format::escape_html(message);
+    let hint = crate::format::escape_html(&crate::localization::translate_for(
+        locale,
+        crate::localization::OAUTH_CLOSE_TAB,
+    ));
+    let locale = locale.id();
     format!(
         r#"{status_line}
 Content-Type: text/html; charset=utf-8
+Content-Language: {locale}
 Connection: close
 
 <!doctype html>
-<html lang="en">
+<html lang="{locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1080,7 +1159,7 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
 <div class="row"><div class="dot"></div><span class="badge">{badge}</span></div>
 <h1>{title}</h1>
 <p>{message}</p>
-<p class="hint">You can close this tab and return to Harn.</p>
+<p class="hint">{hint}</p>
 </main>
 </body>
 </html>"#
@@ -1133,6 +1212,29 @@ mod tests {
         let response = html_response(400, "<script>alert('x')</script>&");
         assert!(response.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;"));
         assert!(!response.contains("<script>"));
+    }
+
+    #[test]
+    fn callback_page_localizes_owned_chrome_and_preserves_external_diagnostics() {
+        use harn_hostlib::localization::Locale;
+        for locale in Locale::ALL {
+            let body = crate::localization::translate_for(
+                locale,
+                crate::localization::OAUTH_SUCCESS_MESSAGE,
+            );
+            let response = html_response_in(200, &body, locale);
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            assert!(response.contains(&format!("Content-Language: {}", locale.id())));
+            assert!(response.contains(&format!("<html lang=\"{}\">", locale.id())));
+            assert!(response.contains(&crate::format::escape_html(&body)));
+            if locale != Locale::English {
+                assert!(!response.contains("<title>Authorization Complete</title>"));
+            }
+        }
+        let japanese = html_response_in(200, "provider-message", Locale::Japanese);
+        assert!(japanese.contains("<title>認可が完了しました</title>"));
+        let external = html_response_in(400, "Authorization Complete <script>", Locale::French);
+        assert!(external.contains("<p>Authorization Complete &lt;script&gt;</p>"));
     }
 
     #[test]

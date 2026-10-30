@@ -1,0 +1,216 @@
+//! Human-readable CLI help is a projection of the owning Clap tree.
+//! Command names, argument IDs, values, wire output, and diagnostics stay stable.
+
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+use clap::{Command, CommandFactory};
+use harn_hostlib::localization::{self as shared, process_locale, Locale};
+
+use crate::cli::Cli;
+
+const CATALOGS: [(&str, &str); 8] = [
+    ("es", include_str!("localization/es.json")),
+    ("fr", include_str!("localization/fr.json")),
+    ("de", include_str!("localization/de.json")),
+    ("pt-BR", include_str!("localization/pt-BR.json")),
+    ("it", include_str!("localization/it.json")),
+    ("ja", include_str!("localization/ja.json")),
+    ("ko", include_str!("localization/ko.json")),
+    ("zh-Hans", include_str!("localization/zh-Hans.json")),
+];
+type Catalog = BTreeMap<String, String>;
+pub(crate) const API_KEY_PROMPT: &str = "API key: ";
+pub(crate) const OAUTH_SECRET_PROMPT: &str = "OAuth client secret: ";
+pub(crate) const OAUTH_REDIRECT_PROMPT: &str = "OAuth redirect URI registered for this client: ";
+pub(crate) const OAUTH_AUTHORIZATION_PROMPT: &str =
+    "OAuth authorization URL (Enter to discover from resource): ";
+pub(crate) const OAUTH_MISSING_REDIRECT: &str =
+    "The old OAuth credential did not record its registered redirect URI.";
+pub(crate) const OAUTH_MISSING_AUTHORIZATION: &str =
+    "The old OAuth credential did not record its authorization URL.";
+pub(crate) const OAUTH_COMPLETE_TITLE: &str = "Authorization Complete";
+pub(crate) const OAUTH_FAILED_TITLE: &str = "Authorization Failed";
+pub(crate) const OAUTH_CALLBACK_ERROR: &str = "Callback Error";
+pub(crate) const OAUTH_CONNECTED: &str = "Connected";
+pub(crate) const OAUTH_RETRY_NEEDED: &str = "Retry Needed";
+pub(crate) const OAUTH_INVALID_REQUEST: &str = "Invalid Request";
+pub(crate) const OAUTH_CLOSE_TAB: &str = "You can close this tab and return to Harn.";
+pub(crate) const OAUTH_SUCCESS_MESSAGE: &str = "Authorization complete. You can close this window.";
+pub(crate) const OAUTH_INVALID_PATH: &str = "Invalid callback path";
+pub(crate) const OAUTH_MISSING_CODE: &str = "Missing authorization code";
+pub(crate) const OAUTH_MISSING_STATE: &str = "Missing state";
+pub(crate) const OAUTH_STATE_MISMATCH: &str = "State mismatch";
+pub(crate) const OAUTH_FAILED_PREFIX: &str = "Authorization failed: ";
+pub(crate) const OAUTH_DENIED: &str = "OAuth authorization was denied";
+pub(crate) const OAUTH_CALLBACK_STATE_MISMATCH: &str = "OAuth callback state did not match";
+pub(crate) const OAUTH_CALLBACK_TIMEOUT: &str = "OAuth callback timed out after 5 minutes";
+const RUNTIME_MESSAGES: [&str; 22] = [
+    API_KEY_PROMPT,
+    OAUTH_SECRET_PROMPT,
+    OAUTH_REDIRECT_PROMPT,
+    OAUTH_AUTHORIZATION_PROMPT,
+    OAUTH_MISSING_REDIRECT,
+    OAUTH_MISSING_AUTHORIZATION,
+    OAUTH_COMPLETE_TITLE,
+    OAUTH_FAILED_TITLE,
+    OAUTH_CALLBACK_ERROR,
+    OAUTH_CONNECTED,
+    OAUTH_RETRY_NEEDED,
+    OAUTH_INVALID_REQUEST,
+    OAUTH_CLOSE_TAB,
+    OAUTH_SUCCESS_MESSAGE,
+    OAUTH_INVALID_PATH,
+    OAUTH_MISSING_CODE,
+    OAUTH_MISSING_STATE,
+    OAUTH_STATE_MISMATCH,
+    OAUTH_FAILED_PREFIX,
+    OAUTH_DENIED,
+    OAUTH_CALLBACK_STATE_MISMATCH,
+    OAUTH_CALLBACK_TIMEOUT,
+];
+static TRANSLATIONS: LazyLock<BTreeMap<&str, Catalog>> = LazyLock::new(|| {
+    CATALOGS
+        .iter()
+        .map(|(locale, json)| {
+            (
+                *locale,
+                serde_json::from_str(json).expect("checked help catalog"),
+            )
+        })
+        .collect()
+});
+
+pub(crate) fn command() -> Command {
+    command_for(process_locale().id())
+}
+
+pub(crate) fn translate(source: &str) -> String {
+    translate_for(process_locale(), source)
+}
+
+pub(crate) fn translate_for(locale: Locale, source: &str) -> String {
+    let locale = locale.id();
+    if locale == "en" {
+        return source.to_owned();
+    }
+    TRANSLATIONS.get(locale).map_or_else(
+        || source.to_owned(),
+        |catalog| shared::translated_text(catalog, source),
+    )
+}
+
+fn command_for(locale: &str) -> Command {
+    let command = Cli::command();
+    if locale == "en" {
+        return command;
+    }
+    match TRANSLATIONS.get(locale) {
+        Some(catalog) => shared::localize_command(command, catalog),
+        None => command,
+    }
+}
+
+/// Canonical English source for translators and the existing CLI drift guard.
+pub(crate) fn source_catalog() -> Catalog {
+    let mut catalog = shared::collect_help_messages(Cli::command());
+    for source in RUNTIME_MESSAGES {
+        catalog.insert(source.to_owned(), source.to_owned());
+    }
+    catalog
+}
+
+pub(crate) fn dump_catalog(path: &str, check: bool) {
+    let json =
+        serde_json::to_string_pretty(&source_catalog()).expect("serializable help catalog") + "\n";
+    crate::commands::generated_artifact::write_or_check(
+        std::path::Path::new(path),
+        &json,
+        check,
+        "the Clap help metadata",
+        "gen-cli-surface",
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locale_regions_and_scripts_follow_posix_names() {
+        for (input, expected) in [
+            ("fr_CA.UTF-8", Some("fr")),
+            ("pt_PT", Some("pt-BR")),
+            ("zh_CN.UTF-8", Some("zh-Hans")),
+            ("zh_Hant_TW", None),
+            ("C.UTF-8", Some("en")),
+            ("unknown", None),
+        ] {
+            assert_eq!(
+                shared::resolve_locale(input).map(shared::Locale::id),
+                expected,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_help_catalog_covers_the_live_parser() {
+        let source = source_catalog();
+        let syntax = regex::Regex::new(
+            r"`[^`\n]+`|--[A-Za-z][A-Za-z0-9_-]*|[A-Z][A-Z0-9]*_[A-Z0-9_]+|https?://[A-Za-z0-9_./?=&%#+:@~-]+",
+        )
+        .expect("CLI syntax pattern");
+        assert!(
+            source.len() > 100,
+            "must measure the populated command tree"
+        );
+        for (locale, catalog) in TRANSLATIONS.iter() {
+            assert_eq!(
+                catalog.keys().collect::<Vec<_>>(),
+                source.keys().collect::<Vec<_>>(),
+                "{locale} help coverage"
+            );
+            assert!(
+                catalog.values().all(|value| !value.trim().is_empty()),
+                "{locale} empty help"
+            );
+            for (key, value) in catalog {
+                let tokens = |text: &str| {
+                    let mut tokens: Vec<_> = syntax
+                        .find_iter(text)
+                        .map(|found| found.as_str().to_owned())
+                        .collect();
+                    tokens.sort();
+                    tokens
+                };
+                assert_eq!(
+                    tokens(key),
+                    tokens(value),
+                    "{locale} changed CLI syntax in {key}"
+                );
+            }
+            assert!(
+                catalog[API_KEY_PROMPT].ends_with(' '),
+                "{locale} credential prompt spacing"
+            );
+        }
+    }
+
+    #[test]
+    fn localized_help_keeps_parser_identifiers_and_behavior() {
+        for locale in TRANSLATIONS.keys() {
+            let mut command = command_for(locale);
+            let help = command.render_long_help().to_string();
+            assert!(help.contains("--help"));
+            assert!(help.contains("--version"));
+            assert!(help.contains(&TRANSLATIONS[locale]["Usage"]));
+            assert!(command
+                .try_get_matches_from(["harn", "run", "--help"])
+                .is_err_and(|error| error.kind() == clap::error::ErrorKind::DisplayHelp));
+        }
+        let french = command_for("fr").render_long_help().to_string();
+        assert!(french.contains("Utilisation"));
+        assert!(!french.contains("Usage:"));
+    }
+}

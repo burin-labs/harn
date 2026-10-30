@@ -83,6 +83,7 @@ mod lint_fix_exit_cli;
 mod lint_replay_version_upgrade_json_cli;
 mod lint_strict_cli;
 mod llm_fixture_policy;
+mod localization_cli;
 mod mcp_lazy_registration;
 mod mcp_server_cli;
 mod merge_captain_cli;
