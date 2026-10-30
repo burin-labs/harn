@@ -56,6 +56,33 @@ impl GitCapabilities for CliGitCapabilities {
             .filter(|entry| !entry.is_empty())
             .map(str::to_string)
             .collect();
+        if entries.is_empty() {
+            // An explicitly requested project may itself be inside a parent
+            // checkout's ignored scratch directory. Git reports success with
+            // no paths for that root, even when it contains source files. In
+            // that case walk the requested root using Harn's ignore policy.
+            // An ordinary empty Git listing remains authoritative.
+            let mut check =
+                harn_vm::process_sandbox::session_std_command("git").map_err(|_| unavailable())?;
+            super::strip_ambient_git_env(&mut check);
+            let status = check
+                .args([
+                    "-C",
+                    root.to_str().ok_or_else(unavailable)?,
+                    "check-ignore",
+                    "-q",
+                    "--no-index",
+                    "--",
+                    ".",
+                ])
+                .status()
+                .map_err(|_| unavailable())?;
+            match status.code() {
+                Some(0) => return Ok(None),
+                Some(1) => {}
+                _ => return Err(unavailable()),
+            }
+        }
         Ok(Some(entries))
     }
 

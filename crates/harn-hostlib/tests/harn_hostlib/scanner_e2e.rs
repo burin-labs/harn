@@ -400,6 +400,98 @@ fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
 }
 
 #[test]
+fn an_explicitly_scanned_ignored_root_is_not_an_empty_project() {
+    let repo = tempdir().unwrap();
+    write(repo.path(), ".gitignore", ".harn-tmp/\n");
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(repo.path())
+        .status()
+        .unwrap()
+        .success());
+    let root = repo.path().join(".harn-tmp/fixture");
+    write(&root, ".gitignore", "test_ignored.py\n");
+    write(&root, "src/index.ts", "export const visible = 1;\n");
+    write(&root, "test_app.py", "def test_app(): assert True\n");
+    write(
+        &root,
+        "test_ignored.py",
+        "def test_ignored(): assert True\n",
+    );
+    assert!(std::process::Command::new("git")
+        .args(["check-ignore", "-q", "--no-index", "--", "."])
+        .current_dir(&root)
+        .status()
+        .unwrap()
+        .success());
+    let profiles = vec![TestLayoutProfile {
+        language: "python".into(),
+        extensions: vec!["py".into()],
+        patterns: vec!["test_".into(), "_test.py".into()],
+    }];
+    let opts = ScanProjectOptions {
+        include_git_history: false,
+        layout_profiles: profiles.clone(),
+        ..ScanProjectOptions::default()
+    };
+    let fresh = discover_test_commands(&root, false, IgnorePolicy::Project, &profiles);
+    assert!(
+        matches!(&fresh, TestCommandDiscovery::Complete {
+        layout: TestLayoutDiscovery::Single { language, files }, ..
+    } if language == "python" && files.iter().map(String::as_str).collect::<Vec<_>>() == vec!["test_app.py", "test_ignored.py"]),
+        "{fresh:?}"
+    );
+    let full = scan_project(&root, opts.clone());
+    assert_eq!(fresh, full.project.test_command_discovery);
+    assert!(full
+        .files
+        .iter()
+        .any(|file| file.relative_path == "src/index.ts"));
+    // Managed scratch uses Harn's builtin-only ignore policy: its local
+    // .gitignore is not a project boundary.
+    assert!(full
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_ignored.py"));
+    let incremental = scan_incremental(&full.snapshot_token, None, opts);
+    assert_eq!(fresh, incremental.result.project.test_command_discovery);
+}
+
+#[test]
+fn explicitly_scanned_ignored_root_preserves_its_own_ignore_rules() {
+    let repo = tempdir().unwrap();
+    write(repo.path(), ".gitignore", "scratch/\n");
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(repo.path())
+        .status()
+        .unwrap()
+        .success());
+    let root = repo.path().join("scratch/project");
+    write(&root, ".gitignore", "test_ignored.py\n");
+    write(&root, "src/index.ts", "export const visible = 1;\n");
+    write(&root, "test_app.py", "def test_app(): assert True\n");
+    write(
+        &root,
+        "test_ignored.py",
+        "def test_ignored(): assert True\n",
+    );
+    let result = scan_without_git_history(&root);
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "src/index.ts"));
+    assert!(result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_app.py"));
+    assert!(!result
+        .files
+        .iter()
+        .any(|file| file.relative_path == "test_ignored.py"));
+}
+
+#[test]
 fn tracked_ignored_unindexed_test_has_the_same_layout_in_all_scans() {
     let tmp = tempdir().unwrap();
     write(tmp.path(), ".gitignore", "*.bats\n");
