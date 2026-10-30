@@ -6,7 +6,7 @@ trap 'rm -rf "$scratch"' EXIT
 fixture="$scratch/checkout"
 mkdir -p "$fixture/scripts/ci"
 cp "$root/scripts/ci/require_macos_lint.sh" "$root/scripts/ci/run_rust_lint_lane.sh" "$fixture/scripts/ci/"
-git init -q --object-format=sha1 "$fixture"
+git init -q -b main --object-format=sha1 "$fixture"
 git -C "$fixture" add scripts
 git -C "$fixture" -c core.hooksPath=/dev/null -c commit.gpgSign=false \
   -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture
