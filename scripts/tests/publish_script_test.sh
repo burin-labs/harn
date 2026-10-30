@@ -93,6 +93,16 @@ SH
 chmod +x "$tmp_root/bin/cargo"
 if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
   PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
+  "$release_tools/publish.sh" > "$tmp_root/staged-publish-output" 2>&1; then
+  echo "error: staged bare live publisher was admitted" >&2
+  exit 1
+fi
+# Exercise the actual staged module closure. A missing policy dependency is
+# not the intended authority refusal and must fail this product-path control.
+grep -q 'requires_hosted_publisher' "$tmp_root/staged-publish-output"
+test ! -e "$tmp_root/cargo-record"
+if GITHUB_ACTIONS=false HARN_BIN="$real_harn" HARN_BIN_NO_BUILD=1 \
+  PATH="$tmp_root/bin:$PATH" FAKE_CARGO_RECORD="$tmp_root/cargo-record" \
   "$publish_script" > "$tmp_root/local-publish-output" 2>&1; then
   echo "error: bare live publisher was admitted" >&2
   exit 1
