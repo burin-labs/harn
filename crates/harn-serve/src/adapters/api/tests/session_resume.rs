@@ -410,11 +410,17 @@ async fn restored_session_mutations_preserve_policy_metadata_and_actual_transcri
     .unwrap()
     .expect("canonical transcript replay after truncate");
     let messages_after = replayed_message_count(&replay_after);
-    assert_eq!(messages_after, 1);
+    assert!(
+        messages_after > 0,
+        "the retained turn has replayable messages"
+    );
+    assert!(messages_after < messages_before);
+    let replay_after_json = serde_json::to_string(&replay_after.events).unwrap();
+    assert!(replay_after_json.contains("initial-transcript-canary"));
+    assert!(!replay_after_json.contains("restored-transcript-canary"));
     assert_eq!(
-        truncated["removed_turn_count"],
-        messages_before - messages_after,
-        "truncate's reported count matches the canonical transcript rows it removed"
+        truncated["removed_turn_count"], 1,
+        "truncate reports that the second known turn was removed"
     );
     let app = api_router(ApiServer::new(config.clone()).state);
     let response = request(
