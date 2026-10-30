@@ -62,6 +62,26 @@ test('source-specific advisory tracking skips require the actual successful secu
   assert.throws(()=>qualifyArchiveProducer(run,[...jobs,scan,{...tracking,name:'Unknown security job'}],artifacts,request,targets),/builds_unproven/);
 });
 
+test('attested candidate tracking skips require their own nested scan and proof',()=>{
+  const scan={id:101,run_id:42,run_attempt:1,head_sha:source,
+    name:'Candidate dependency security / scan / cargo-deny',status:'completed',conclusion:'success'};
+  const proof={...scan,id:102,name:'Candidate dependency security / Dependency security proof'};
+  const tracking={...scan,id:103,name:'Candidate dependency security / scan / Advisory tracking issue',conclusion:'skipped'};
+  const measured=[scan,proof,tracking];
+  assert.equal(qualifyArchiveProducer(run,[...jobs,...measured],artifacts,request,targets).verdict,'pass');
+  assert.throws(()=>qualifyArchiveProducer(run,[...jobs,scan],artifacts,request,targets),/builds_unproven/);
+  for(const required of [scan,proof]) {
+    assert.throws(()=>qualifyArchiveProducer(run,[...jobs,...measured.filter(job=>job!==required)],artifacts,request,targets),/builds_unproven/);
+    for(const conclusion of ['skipped','failure','cancelled',null]) {
+      assert.throws(()=>qualifyArchiveProducer(run,[...jobs,...measured.map(job=>job===required?{...job,conclusion}:job)],artifacts,request,targets),/builds_unproven/);
+    }
+  }
+  const legacyScan={...scan,name:'Candidate dependency security / cargo-deny'};
+  assert.throws(()=>qualifyArchiveProducer(run,[...jobs,legacyScan,proof,tracking],artifacts,request,targets),/builds_unproven/);
+  const nestedTracking={...tracking,name:'Candidate dependency security / scan / scan / Advisory tracking issue'};
+  assert.throws(()=>qualifyArchiveProducer(run,[...jobs,scan,proof,nestedTracking],artifacts,request,targets),/builds_unproven/);
+});
+
 test('only the owning live candidate can observe a pending audit; failed or absent audits never qualify',()=>{
   const pending=jobs.map(job=>job.id===98?{...job,status:'in_progress',conclusion:null}:job);
   const liveRequest={...request,allowPendingAudit:true};

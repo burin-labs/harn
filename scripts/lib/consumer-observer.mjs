@@ -702,14 +702,24 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
     'Consumer release rehearsal / Decide whether main moved',
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
-  const sourceSecurityPassed=jobs.some(job=>job.name==='Candidate dependency security / cargo-deny'
-    && job.status==='completed' && job.conclusion==='success');
+  const securityRoot='Candidate dependency security';
+  const securityFamilies=[
+    {tracking:`${securityRoot} / Advisory tracking issue`,required:[`${securityRoot} / cargo-deny`]},
+    {tracking:`${securityRoot} / scan / Advisory tracking issue`,required:[
+      `${securityRoot} / scan / cargo-deny`,`${securityRoot} / Dependency security proof`,
+    ]},
+  ].filter(family=>jobs.some(job=>job.name===family.tracking||family.required.includes(job.name)));
+  const successfulJobs=new Set(jobs.filter(job=>job.status==='completed'&&job.conclusion==='success').map(job=>job.name));
+  if(securityFamilies.some(family=>family.required.some(name=>!successfulJobs.has(name)))){
+    refuse('archive_producer_builds_unproven');
+  }
+  const securitySkips=new Set(securityFamilies.map(family=>family.tracking));
   if (required.some(name=>!jobs.some(job=>job.name===name && job.status==='completed' && job.conclusion==='success'))
     || jobs.some(job=>!Number.isSafeInteger(job.id) || job.id < 1 || String(job.run_id)!==runId
       || job.run_attempt!==attempt || job.head_sha!==policyRevision || typeof job.name!=='string'
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
-        || job.name==='Candidate dependency security / Advisory tracking issue' && sourceSecurityPassed
+        || securitySkips.has(job.name)
           && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
