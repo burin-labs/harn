@@ -80,17 +80,22 @@ fn completed_case_reaps_a_surviving_helper_before_success() {
 
 #[test]
 fn sigint_and_sigkill_of_runner_do_not_strand_helpers() {
-    assert_signals_do_not_strand_helpers(false);
+    assert_signals_do_not_strand_helpers(false, 0);
 }
 
 #[test]
 fn sigint_and_sigkill_of_parallel_runner_do_not_strand_workers_or_helpers() {
-    assert_signals_do_not_strand_helpers(true);
+    assert_signals_do_not_strand_helpers(true, 0);
 }
 
-fn assert_signals_do_not_strand_helpers(parallel: bool) {
+#[test]
+fn parallel_runner_reports_helpers_with_multidigit_descriptors() {
+    assert_signals_do_not_strand_helpers(true, 10);
+}
+
+fn assert_signals_do_not_strand_helpers(parallel: bool, minimum_report_fd: RawFd) {
     for signal in [libc::SIGINT, libc::SIGKILL] {
-        let fixture = LifetimeFixture::new(true);
+        let fixture = LifetimeFixture::with_minimum_report_fd(true, minimum_report_fd);
         let mut runner = RunnerCleanup::new(fixture.spawn_runner(parallel));
         let helper_pid = fixture.read_helper_pid(runner.child_mut());
         let mut cleanup = HelperCleanup(helper_pid);
@@ -119,6 +124,10 @@ struct LifetimeFixture {
 
 impl LifetimeFixture {
     fn new(block: bool) -> Self {
+        Self::with_minimum_report_fd(block, 0)
+    }
+
+    fn with_minimum_report_fd(block: bool, minimum_report_fd: RawFd) -> Self {
         let root = tempfile::tempdir().expect("create conformance lifetime fixture");
         let suite = root.path().join("conformance");
         std::fs::create_dir(&suite).expect("create fixture conformance directory");
@@ -129,7 +138,18 @@ impl LifetimeFixture {
         let mut report_pipe = [0_i32; 2];
         assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
         let report_read = report_pipe[0];
-        let report_write = report_pipe[1];
+        let report_write = if minimum_report_fd > 0 {
+            let descriptor =
+                unsafe { libc::fcntl(report_pipe[1], libc::F_DUPFD, minimum_report_fd) };
+            assert!(
+                descriptor >= minimum_report_fd,
+                "duplicate helper report descriptor"
+            );
+            assert_eq!(unsafe { libc::close(report_pipe[1]) }, 0);
+            descriptor
+        } else {
+            report_pipe[1]
+        };
         let background = if block { "" } else { " &" };
         let fifo_shell = fifo_path
             .to_str()
@@ -139,7 +159,7 @@ impl LifetimeFixture {
             "import {{ process_shell }} from \"std/runtime\"\n\
              pipeline test(harness: Harness, task: unknown) {{\n\
                const start = process_shell(harness.process, \"sh -c 'echo $$ \
-                 $HARN_INTERNAL_PROCESS_OWNER_TOKEN >&{report_write}; exec cat \
+                 $HARN_INTERNAL_PROCESS_OWNER_TOKEN > /dev/fd/{report_write} && exec cat \
                  {fifo_shell}' >/dev/null 2>&1{background}\")\n\
                require start?.success, \"helper started\"\n\
                harness.stdio.println(true)\n\
@@ -180,7 +200,14 @@ impl LifetimeFixture {
     fn read_helper_pid(&self, runner: &mut std::process::Child) -> i32 {
         let mut line = String::new();
         let mut report = self.report.lock().expect("lock helper report");
-        wait_for_report_event(report.get_ref().as_raw_fd(), "helper pid");
+        wait_for_report_event(
+            report.get_ref().as_raw_fd(),
+            &format!(
+                "helper pid (report descriptor {}, runner {})",
+                self.report_write,
+                runner.id()
+            ),
+        );
         report.read_line(&mut line).expect("read helper pid");
         let mut fields = line.split_whitespace();
         let pid = fields.next().unwrap_or_else(|| {
