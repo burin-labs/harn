@@ -266,7 +266,12 @@ impl InputRecorder {
 fn normalize(method: &str, params: &Value) -> Result<Value, String> {
     let fields: &[&str] = match method {
         "initialize" => &["protocolVersion", "clientInfo", "clientCapabilities"],
-        "session/new" => &["cwd", "environmentPolicy", "workspaceCheckpoint"],
+        "session/new" => &[
+            "cwd",
+            "environmentPolicy",
+            "workspaceCheckpoint",
+            "mcpServers",
+        ],
         "session/prompt" => &["sessionId", "prompt", "messageId"],
         "session/close" => &["sessionId"],
         "session/set_mode" => &["sessionId", "modeId"],
@@ -286,6 +291,12 @@ fn normalize(method: &str, params: &Value) -> Result<Value, String> {
             json!({"protocolVersion": 1, "clientCapabilities": ClientCapabilities::from_initialize(params)}),
         ),
         "session/new" => {
+            if object
+                .get("mcpServers")
+                .is_some_and(|servers| servers.as_array().is_none_or(|servers| !servers.is_empty()))
+            {
+                return Err("replay cannot reconstruct external tool-server configuration".into());
+            }
             let typed: AcpSessionNewParams = serde_json::from_value(params.clone())
                 .map_err(|_| "invalid recorded session configuration")?;
             if typed.environment_policy.is_none() || typed.cwd.is_none() {
@@ -312,5 +323,23 @@ fn normalize(method: &str, params: &Value) -> Result<Value, String> {
             serde_json::to_value(typed).map_err(|error| error.to_string())
         }
         _ => Ok(params.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_tool_server_list_does_not_admit_external_configuration() {
+        for servers in [
+            json!([{"name":"external", "command":"server"}]),
+            json!({}),
+            Value::Null,
+        ] {
+            assert!(normalize("session/new", &json!({
+                "cwd":"/workspace", "environmentPolicy":{"kind":"isolated"}, "mcpServers":servers
+            })).unwrap_err().contains("external tool-server"));
+        }
     }
 }

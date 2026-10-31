@@ -49,7 +49,7 @@ async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_c
         assert_eq!(replayed["prompt"][0]["text"], "turn-3");
 
         tx.send(json!({"jsonrpc":"2.0", "id":10, "method":"session/new", "params":{
-            "cwd":root.path(), "environmentPolicy":{"kind":"isolated", "grants":[]}
+            "cwd":root.path(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "mcpServers":[]
         }})).unwrap();
         let second = recv_response_with_id(&mut rx, 10).await["result"]["sessionId"].as_str().unwrap().to_owned();
         tx.send(json!({"jsonrpc":"2.0", "id":11, "method":"session/prompt", "params":{
