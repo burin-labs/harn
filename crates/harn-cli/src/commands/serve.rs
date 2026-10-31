@@ -163,6 +163,7 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
                 args.trace,
                 profile,
                 sandbox,
+                args.session_environment.map(|policy| policy.kind()),
                 confinement,
             )
             .await
@@ -174,10 +175,14 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
                 harn_vm::llm::enable_tracing();
             }
             crate::acp::ensure_acp_event_log(args.file.as_deref());
+            let mut config = crate::acp::server_config(args.file.clone(), auth_policy)?
+                .with_profile(profile)
+                .with_sandbox(sandbox);
+            if let Some(policy) = args.session_environment {
+                config = config.with_launcher_session_environment(policy.kind());
+            }
             let result = harn_serve::run_acp_websocket_server(
-                crate::acp::server_config(args.file.clone(), auth_policy)?
-                    .with_profile(profile)
-                    .with_sandbox(sandbox),
+                config,
                 AcpWebSocketServeOptions {
                     bind: args.bind,
                     path: args.path.clone(),

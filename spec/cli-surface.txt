@@ -1723,6 +1723,7 @@ harn serve acp --path
 harn serve acp --profile
 harn serve acp --profile-json
 harn serve acp --read-only-root
+harn serve acp --session-environment
 harn serve acp --tls
 harn serve acp --trace
 harn serve acp --transport

@@ -272,15 +272,19 @@ pub(crate) async fn run_acp_server(
     trace: bool,
     profile: AcpProfileConfig,
     sandbox: AcpSandboxConfig,
+    session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
     confinement: Option<harn_serve::AcpServerConfinement>,
 ) -> Result<(), String> {
     ensure_acp_event_log(pipeline);
     if trace {
         harn_vm::llm::enable_tracing();
     }
-    let config = server_config(pipeline.map(str::to_string), auth_policy)?
+    let mut config = server_config(pipeline.map(str::to_string), auth_policy)?
         .with_profile(profile)
         .with_sandbox(sandbox);
+    if let Some(kind) = session_environment {
+        config = config.with_launcher_session_environment(kind);
+    }
     // Confine last, once everything that reads the host has run. On Linux
     // the process was confined before its runtime started instead.
     let already_confined = harn_vm::process_sandbox::current_process_confinement().is_some();

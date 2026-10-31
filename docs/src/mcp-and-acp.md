@@ -710,8 +710,14 @@ The ACP server supports these JSON-RPC methods:
 | `workflow/resume` | Mark a workflow resumed and enqueue a control message |
 
 ACP sessions are conversation/execution contexts. Harn extends `session/new`
-and `session/fork` with an optional `environmentPolicy`; this field is not part
-of the base ACP specification. Omission means `inherited`.
+and `session/fork` with an `environmentPolicy`; this field is not part of the
+base ACP specification. A `session/new` that omits it is refused with
+`environment_policy.missing`, unless the operator started the server with
+`harn serve acp --session-environment inherited|isolated`. That flag is how a
+standard ACP editor, which never sends the field, gets a session. A policy the
+client sends always wins, and the `session/new` result reports the policy that
+applied as `environmentPolicy: {kind, source}`, where `source` is `client` or
+`launcher`. A `session/fork` that omits it keeps its parent's environment.
 
 ```json
 {

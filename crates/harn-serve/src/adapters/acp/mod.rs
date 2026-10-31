@@ -741,10 +741,16 @@ impl AcpProfileConfig {
     }
 }
 
+/// Build with [`AcpServerConfig::new`] and the `with_*` methods; new launch
+/// inputs are added as fields without breaking embedders.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AcpServerConfig {
     /// Trusted host inputs captured before engine startup, never ACP JSON.
     pub launcher_environment: harn_vm::security::LauncherEnvironment,
+    /// The operator's launch-time choice of environment policy for a client
+    /// whose `session/new` names none. `None` keeps such a request refused.
+    pub launcher_session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
     /// Trusted launch authority, independent of client environment grants.
     pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     /// Trusted machine/user billing authority, retained across transport threads.
@@ -786,6 +792,7 @@ impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
             launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
+            launcher_session_environment: None,
             host_inference_boundary: None,
             machine_spend_quota: harn_vm::llm::MachineSpendQuota::current(),
             pipeline,
@@ -811,6 +818,20 @@ impl AcpServerConfig {
         environment: harn_vm::security::LauncherEnvironment,
     ) -> Self {
         self.launcher_environment = environment;
+        self
+    }
+
+    /// State, at launch, the environment policy for clients that send none.
+    ///
+    /// A client that never heard of `environmentPolicy` (any standard ACP
+    /// editor) can then open a session, and what its children may read is
+    /// still a decision someone wrote down: the operator, on this server's
+    /// command line. A policy the client does send always wins.
+    pub fn with_launcher_session_environment(
+        mut self,
+        kind: harn_vm::security::EnvironmentPolicyKind,
+    ) -> Self {
+        self.launcher_session_environment = Some(kind);
         self
     }
 
@@ -1011,6 +1032,7 @@ pub struct AcpServer {
     replay_inputs: Option<Arc<replay_inputs::InputRecorder>>,
     client_capabilities: client_capabilities::ClientCapabilities,
     launcher_environment: harn_vm::security::LauncherEnvironment,
+    launcher_session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     descriptor: AdapterDescriptor,
