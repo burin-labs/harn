@@ -196,10 +196,14 @@ pub(super) fn configured_llm_route_for_capabilities(
 
 pub(super) fn acp_prompt_capabilities() -> serde_json::Value {
     let capabilities = configured_llm_route_for_capabilities()
+        .ok()
+        .and_then(|(provider, model)| {
+            harn_vm::llm::managed_supply::logical_route(&provider, &model).ok()
+        })
         .map(|(provider, model)| harn_vm::llm::capabilities::lookup(&provider, &model))
         .unwrap_or_default();
     serde_json::json!({
-        "image": capabilities.vision || capabilities.vision_supported,
+        "image": capabilities.vision_supported,
         "audio": capabilities.audio,
         "embeddedContext": capabilities.pdf || capabilities.files_api_supported,
         "delivery": {"steer": {}, "queue": {}},
