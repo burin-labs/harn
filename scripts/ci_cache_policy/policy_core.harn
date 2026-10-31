@@ -430,7 +430,7 @@ pub const POST_MERGE_TIER_GUARD = "needs.changes.outputs.post_merge_tier != 'tru
 pub const WINDOWS_CROSS_CHECK_IF =
   "((github.event_name == 'pull_request' || github.event_name == 'merge_group') && "
   + POST_MERGE_TIER_GUARD
-  + ") || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true')"
+  + ") || (needs.changes.outputs.main_full_suite == 'true' && needs.changes.outputs.rust == 'true')"
 
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"

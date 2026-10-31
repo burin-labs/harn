@@ -4,20 +4,20 @@
   "targets": [
     {
       "target": "x86_64-unknown-linux-gnu",
-      "distribution_fuse_bytes": 285212672,
+      "distribution_fuse_bytes": 217055232,
       "growth": {
         "warn_bytes": 4194304,
         "warn_percent_hundredths": 200
       },
       "baseline": {
-        "version": "0.10.141",
-        "source_sha": "e2221263eb6d22f1f25cc8d5f189c793d3b2bf76",
-        "bytes": 256452104,
-        "observed_at": "2026-09-22T20:28:05Z",
+        "version": "0.10.182",
+        "source_sha": "7133cd5539f049ef0b0547b8c83107689813aac3",
+        "bytes": 196408288,
+        "observed_at": "2026-10-30T17:31:47Z",
         "build_identity": {
           "profile": "dist",
-          "codegen_units": 8,
-          "lto": "thin",
+          "codegen_units": 1,
+          "lto": "fat",
           "strip": "symbols",
           "rustc": "1.95.0",
           "aot_embedded": true

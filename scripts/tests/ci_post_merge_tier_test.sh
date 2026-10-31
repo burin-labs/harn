@@ -28,11 +28,11 @@ check() {
   local event=$1 paths=$2 body=$3 expected=$4
   printf 'known_non_null=present\n' > "$scratch/output"
   jq -n --arg body "$body" '{number: 41, pull_request: {body: $body}, merge_group: {base_sha: "1111111111111111111111111111111111111111", head_sha: "2222222222222222222222222222222222222222"}}' > "$scratch/event.json"
-  EVENT_NAME="$event" FULL_SUITE_PATHS="$paths" GITHUB_EVENT_PATH="$scratch/event.json" \
+  EVENT_NAME="$event" GITHUB_REF="${5:-refs/heads/main}" FULL_SUITE_PATHS="$paths" GITHUB_EVENT_PATH="$scratch/event.json" \
     GITHUB_OUTPUT="$scratch/output" bash "$owner" > "$scratch/stdout"
   local actual
   actual=$(cat "$scratch/output")
-  if [[ "$actual" != $'known_non_null=present\nactive='"$expected" ]]; then
+  if [[ "$actual" != $'known_non_null=present\nactive='"$expected"$'\nmain_full_suite='"${6:-false}" ]]; then
     printf 'wrong post-merge tier decision: event=%s paths=%s body=%s expected=%s\n' \
       "$event" "$paths" "$body" "$expected" >&2
     exit 1
@@ -53,8 +53,21 @@ check pull_request false $'ci-scope:  full' false
 FIRST_BODY='CI-Scope: full' check merge_group false '' false
 SECOND_BODY='CI-Scope: full' check merge_group false '' false
 # Main and every other event always run everything.
-for event in push schedule workflow_dispatch pull_request_target; do
+check push false '' false refs/heads/main true
+check workflow_dispatch false '' false refs/heads/main true
+check push false '' false refs/heads/feature false
+for event in schedule pull_request_target; do
   check "$event" false '' false
+done
+
+for ref in refs/heads/feature refs/tags/v0.10.183 ''; do
+  : > "$scratch/output"
+  if EVENT_NAME=workflow_dispatch GITHUB_REF="$ref" GITHUB_OUTPUT="$scratch/output" \
+    bash "$owner" > "$scratch/stdout" 2>&1; then
+    echo 'non-main manual CI was accepted' >&2
+    exit 1
+  fi
+  [[ ! -s "$scratch/output" ]] || { echo 'refused manual CI emitted authority' >&2; exit 1; }
 done
 
 jq -n '{number: 41, pull_request: {body: "CI-Scope: harn-audit"}}' > "$scratch/event.json"
