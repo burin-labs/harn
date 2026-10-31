@@ -36,6 +36,7 @@ mod module_progress;
 mod plan_documents;
 mod prompt;
 mod prompt_owner;
+pub mod replay_inputs;
 mod schema;
 mod session;
 mod session_inputs;
@@ -1007,6 +1008,7 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    replay_inputs: Option<Arc<replay_inputs::InputRecorder>>,
     client_capabilities: client_capabilities::ClientCapabilities,
     launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,

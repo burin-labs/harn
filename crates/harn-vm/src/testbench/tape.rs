@@ -222,6 +222,8 @@ impl TapePhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TapeRecordKind {
+    /// Typed client input or completion, owned by the serving protocol adapter.
+    SessionControl { event: TapePayload },
     /// Script read the wall-clock or monotonic clock. The captured value
     /// is what the script actually saw, so a re-run that drifts (e.g.
     /// because the operator forgot `--clock paused`) produces a
@@ -374,6 +376,7 @@ impl TapeRecordKind {
     /// format without re-deriving the string each call site.
     pub fn label(&self) -> &'static str {
         match self {
+            Self::SessionControl { .. } => "session_control",
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
@@ -747,7 +750,9 @@ fn visit_payloads(kind: &mut TapeRecordKind, mut visit: impl FnMut(&mut TapePayl
             visit(request_payload);
             visit(response_payload);
         }
-        TapeRecordKind::ModelJob { event, .. } => visit(event),
+        TapeRecordKind::ModelJob { event, .. } | TapeRecordKind::SessionControl { event } => {
+            visit(event)
+        }
         TapeRecordKind::ClockRead { .. }
         | TapeRecordKind::ClockSleep { .. }
         | TapeRecordKind::FileRead { .. }

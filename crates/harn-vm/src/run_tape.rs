@@ -33,6 +33,10 @@ use crate::testbench::tape::{
 /// `run.tape.cas/` beside it.
 pub const TAPE_FILE_NAME: &str = "run.tape";
 
+#[path = "run_tape_summary.rs"]
+mod summary;
+pub use summary::{summarize_run_tape, RecordedModelCall, RecordedToolCall, RunTapeSummary};
+
 /// How much of a run the tape keeps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -649,7 +653,7 @@ pub struct BranchPlan {
 }
 
 /// The first point where a branch's prefix stopped matching its recording.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BranchDivergence {
     /// 1-based model call: the one the prefix was about to serve, or for a
     /// tool call the one that requested it.
@@ -659,7 +663,7 @@ pub struct BranchDivergence {
 }
 
 /// Progress of the active branch, for hosts and receipts.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BranchReport {
     /// Source edits prepared for rendering; this is not model-request attribution.
     pub prompt_edits: Vec<PromptEditReport>,

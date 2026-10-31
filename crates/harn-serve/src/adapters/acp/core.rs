@@ -12,6 +12,11 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        let replay_inputs = super::replay_inputs::InputRecorder::capture();
+        let output = match &replay_inputs {
+            Some(recorder) => recorder.observe_output(output),
+            None => output,
+        };
         // Every transport and embedded host reaches this assembly seam. The
         // catalog is process-wide and identical across server instances.
         let _ = harn_stdlib::install();
@@ -52,6 +57,7 @@ impl AcpServer {
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
             output,
+            replay_inputs,
             compile_cache: None,
             vm_baseline_cache: None,
             profile: config.profile,
@@ -87,6 +93,9 @@ impl AcpServer {
     /// constructor-time thread state: two embedded servers may share a Tokio
     /// worker and suspend independently while a provider request is in flight.
     pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+        if let Some(recorder) = &self.replay_inputs {
+            recorder.capture_request(&msg);
+        }
         let preparation =
             prepare_session_request(&self.session_cancellations, &self.concurrent_controls, &msg);
         self.handle_prepared_message(msg, preparation).await;

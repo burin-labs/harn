@@ -16,7 +16,7 @@ pub enum PromptEditActivation {
 }
 
 /// A replacement for one complete literal span from a recorded prompt.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptSourceEdit {
     pub template_uri: String,
@@ -30,7 +30,7 @@ pub struct PromptSourceEdit {
 }
 
 /// Loading an edit into a render does not prove it reached a model request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PromptEditReport {
     pub template_uri: String,
     pub line: usize,

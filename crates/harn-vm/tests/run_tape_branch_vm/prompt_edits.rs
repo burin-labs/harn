@@ -142,6 +142,13 @@ fn prompt_edits_preserve_the_prefix_and_change_live_requests_without_writing_sou
         assert_eq!(recording.error(), None);
         drop(recording);
         let edited = EventTape::load(&out_dir.join(TAPE_FILE_NAME)).unwrap();
+        let summary = harn_vm::run_tape::summarize_run_tape(&edited, report.served_calls).unwrap();
+        assert_eq!(summary.live_calls, 1);
+        assert!(summary.calls[0].replayed);
+        assert_eq!(summary.calls[0].cost_usd, Some(0.0));
+        assert!(!summary.calls[1].replayed);
+        assert_eq!(summary.calls[1].text, "fresh");
+        assert!(harn_vm::run_tape::summarize_run_tape(&edited, 3).is_err());
         let requests: Vec<_> = edited
             .records
             .iter()
