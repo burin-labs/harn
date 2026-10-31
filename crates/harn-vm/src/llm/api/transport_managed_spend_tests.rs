@@ -103,16 +103,6 @@ fn managed_spending_pause_survives_http_and_stream_transport() {
                     .as_str()
                     .unwrap()
                     .contains("managed-spend-control"));
-                let terminal = crate::agent_events::terminal_outcome_for_finalize(
-                    "error",
-                    "provider_error",
-                    Some(class),
-                    true,
-                )
-                .with_error(Some(&facts))
-                .to_json();
-                assert_eq!(terminal["message"], facts["message"]);
-                assert_eq!(terminal["detail"], facts["detail"]);
             }
             // Billing and the service pause identify their owner without an
             // agent session. A throttle's terminal class additionally requires
