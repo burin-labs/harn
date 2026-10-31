@@ -504,6 +504,7 @@ impl AcpServer {
             cancellation: cancellation.clone(),
             script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+            host_responder: self.host_responder.clone(),
         });
         let host_bridge = Arc::new(
             harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(

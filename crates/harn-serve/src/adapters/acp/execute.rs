@@ -688,6 +688,7 @@ require_declared_operations_served = true
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),
+            host_responder: None,
         });
 
         let host_bridge = Arc::new(
@@ -799,6 +800,7 @@ require_declared_operations_served = true
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),
+            host_responder: None,
         });
         let host_pending: Arc<
             TokioMutex<

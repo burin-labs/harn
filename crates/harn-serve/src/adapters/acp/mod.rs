@@ -27,6 +27,7 @@ mod events;
 mod execute;
 mod hitl_response;
 mod host_ownership;
+mod host_responder;
 mod inject;
 mod integrations;
 mod io;
@@ -61,6 +62,7 @@ use bridge::AcpBridge;
 pub use bridge::{acp_plan_update, AcpOutput};
 pub use confinement::{confine_acp_server_process, AcpServerConfinement};
 pub use execute::PromptExecutionError as AcpPromptExecutionError;
+pub use host_responder::HostResponder;
 use live_clients::{
     apply_live_client_operation, is_live_client_method, write_live_client_operation,
 };
@@ -761,6 +763,9 @@ pub struct AcpServerConfig {
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     /// Trusted host admission policy; RPC metadata cannot enable or disable it.
     pub task_admission: Option<Arc<dyn SessionTaskAdmission>>,
+    /// Answers `host/capabilities` and `host/call` in-process instead of
+    /// asking the connected client. `None` sends them to the client.
+    pub host_responder: Option<Arc<dyn HostResponder>>,
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
@@ -800,6 +805,7 @@ impl AcpServerConfig {
             authenticated_principal: None,
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
             task_admission: None,
+            host_responder: None,
             llm_config_overrides: None,
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
@@ -850,6 +856,13 @@ impl AcpServerConfig {
                 endpoints,
             })
         };
+        self
+    }
+
+    /// Serve every session's host requests from `responder`, so a client that
+    /// is not a host (a standard ACP editor) can still run a turn.
+    pub fn with_host_responder(mut self, responder: Arc<dyn HostResponder>) -> Self {
+        self.host_responder = Some(responder);
         self
     }
 
@@ -1033,6 +1046,7 @@ pub struct AcpServer {
     client_capabilities: client_capabilities::ClientCapabilities,
     launcher_environment: harn_vm::security::LauncherEnvironment,
     launcher_session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
+    host_responder: Option<Arc<dyn HostResponder>>,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
     machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     descriptor: AdapterDescriptor,

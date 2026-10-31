@@ -1020,6 +1020,7 @@ async fn acp_bridge_routes_session_request_permission_response() {
         cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
+        host_responder: None,
     });
 
     let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
