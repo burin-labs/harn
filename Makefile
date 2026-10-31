@@ -548,6 +548,9 @@ lint-actions-source:
 		exit 1; \
 	fi
 
+# Evaluate the admitted Smart Ship workflow predicate with GitHub's expression engine.
+	@node --test scripts/tests/smart_ship_workflow_test.mjs
+
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
 lint-actions-harn:

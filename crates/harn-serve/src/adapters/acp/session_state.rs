@@ -389,6 +389,20 @@ impl AcpServer {
                 session.workspace_checkpoint = requested;
             }
         }
+        // A restarted host picks up the boundaries an earlier process captured.
+        #[cfg(feature = "hostlib")]
+        if let Some(session) = self
+            .sessions
+            .get(&session_id)
+            .filter(|session| session.workspace_checkpoint)
+        {
+            let _scope = session.store_scope.enter();
+            if let Ok(harn_hostlib::workspace_checkpoint::Outcome::Ready(resumed)) =
+                harn_hostlib::workspace_checkpoint::resume(&session_id, &session.cwd)
+            {
+                session.checkpoint_tracking.adopt(resumed.boundary_ids);
+            }
+        }
 
         // Settle the session's spend before the client reads the row for its
         // header. A session recorded before its row carried the total gets it

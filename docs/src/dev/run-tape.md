@@ -66,24 +66,40 @@ does not rewrite prompt text, host arguments, or command strings.
 
 `BranchPlan.prompt_edits` accepts `PromptSourceEdit` records for complete literal
 spans in the tape. Each edit names the template URI and revision, one-based
-Unicode line and column, recorded text, and replacement text. Admission requires
+Unicode line and column, recorded text, replacement text, and `activation`.
+Admission requires
 that exact literal and location in recorded provenance. Interpolated values and
 partial spans are not source edits.
 Replacement text cannot contain `{{` or `}}`, or form either delimiter against
 adjacent source text. Template expressions, comments, and raw-block terminators
 are refused rather than interpreted as replacement text.
 
-The template renderer applies edits after the selected model prefix has been
-served. Earlier renders retain the original source. Filesystem templates,
+With `Origin`, the template renderer applies edits from the start, including
+values rendered early and sent to a model later. Earlier model requests still
+have to match their recorded digests. `AfterPrefix` is an explicit mid-run
+intervention: earlier renders retain the original source. Filesystem templates,
 included templates, and embedded standard-library assets use the same renderer;
 source files are never written. Source revision changes, overlapping ranges,
 and edits never loaded by the run make the branch incomplete.
 
+For edits with `Origin` activation, `plan_prompt_branch(&tape, &edits)` returns the first
+attributed model call that used any edited literal and its `live_after_calls`
+prefix. Its `first_consumers` list records the first use of every edit in input
+order. Pass that prefix and the same edits to `BranchPlan`. The planner refuses
+unused or unattributed edits, ambiguous overlapping source attribution, and
+malformed source identities. Like replay admission, planning refuses tapes with
+redacted payloads: stored render bytes may no longer match source span offsets.
+A short render without request attribution is
+unavailable for automatic planning, even if the tape recorded its source.
+Recorded renders remain candidates for attribution throughout the run, so a
+value first consumed later or reused after an unrelated call keeps its source.
+
 `BranchReport.prompt_edits` reports how many renders prepared each edit. This is
 not proof that the edited text reached inference: a script can render text and
 discard it. Experiments must verify use in the actual recorded model request.
-The host chooses `live_after_calls`; this API does not infer a safe intervention
-boundary or establish whether an edit improves model behavior.
+An explicit `live_after_calls` remains available for a host offering a labeled
+mid-run intervention. Neither a planned boundary nor a successful replay
+establishes whether an edit improves model behavior.
 
 ## Refusals and limits
 
@@ -106,6 +122,14 @@ boundary or establish whether an edit improves model behavior.
 
 ## Private trial workspaces
 
+For a pipeline package outside the editable project, retain and restore a separate
+`ReplayWorkspace`. Pass its original and restored roots as `ReplaySourceRoot`
+values to `start_branch_with_sources`, and grant the restored package read-only
+access in the host sandbox. Harn maps filesystem reads and prompt identities
+through these roots. Original package files may be absent. Overlapping roots,
+escaping paths, and changed edited source are refused. Keep both workspace leases
+alive until execution ends, including detached shutdown work.
+
 `harn_hostlib::workspace_checkpoint::ReplayWorkspace` captures a private seed
 and a disposable working copy. `path()` names the same working directory
 after every `restore()`. Stop the previous session and its children before
@@ -121,8 +145,25 @@ entry count, depth, per-file content, and total bytes; its defaults allow
 `receipt()` reports the observed entries, regular files, bytes, and a SHA-256
 identity covering sorted paths, contents, link targets, and file and directory permissions.
 Restore verifies that identity before replacing the working copy. A changed
-seed leaves the previous working copy available. Dropping the owner deletes
-its private storage without changing the source.
+seed leaves the previous working copy available. Dropping an ordinary owner
+deletes its private storage without changing the source.
+
+For a run that must survive an application restart, `persist()` retains the
+directory and returns a serializable `SavedReplayWorkspace`. Save that descriptor
+with the run in private product storage. It carries the original directory,
+seed receipt, and capture limits. `ReplayWorkspace::restore_saved(&saved)`
+acquires an exclusive operating-system file lock, verifies the seed, and restores
+the working copy before returning it for a new trial. A competing owner refuses
+before restoration. Closing a retained owner releases its lock but keeps its
+files; the product's run-retention policy owns their eventual retirement.
+
+Keep the handle inside the execution owner until the session and every child
+process has stopped. A frontend holding it on behalf of an independent worker
+does not establish that lifetime after a frontend crash. Reopening recovers
+either half of an interrupted workspace replacement and removes abandoned
+restore staging. It does not resume a partially executed trial. A saved root
+must remain at its original canonical path; Unix reopening also refuses a root
+whose permissions now allow other users to access it.
 
 Unix storage is created with owner-only access, including under shared temporary
 directories. On Windows, the storage parent must have a user-private ACL; child

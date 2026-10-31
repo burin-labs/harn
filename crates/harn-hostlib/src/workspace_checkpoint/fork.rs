@@ -60,6 +60,9 @@ pub(super) fn fork_session_checked(
         if let Some(detail) = pending_calls_detail(&state) {
             return Ok(unavailable("calls_in_flight", detail));
         }
+        if let Some(detail) = state.interrupted.as_deref() {
+            return Ok(unavailable("checkpoint_interrupted", detail));
+        }
         (
             state.root.clone(),
             state.writer_policy,
@@ -130,6 +133,9 @@ pub(super) fn fork_session_checked(
     if let Some(detail) = pending_calls_detail(&state) {
         return Ok(unavailable("calls_in_flight", detail));
     }
+    if let Some(detail) = state.interrupted.as_deref() {
+        return Ok(unavailable("checkpoint_interrupted", detail));
+    }
     if state.revision != revision {
         return Ok(unavailable(
             "source_changed",
@@ -154,18 +160,32 @@ pub(super) fn fork_session_checked(
         }
         return Err(backend(FORK)(error));
     }
-    registry.insert(
-        target_id.to_string(),
-        Arc::new(Mutex::new(Session {
-            root,
-            writer_policy,
-            read_parent_ignores,
-            blob_dir: target_blobs,
-            boundaries,
-            calls,
-            pending: HashMap::new(),
-            revision: 0,
-        })),
-    );
+    let child = Session {
+        root,
+        writer_policy,
+        read_parent_ignores,
+        blob_dir: target_blobs,
+        boundaries,
+        calls,
+        pending: HashMap::new(),
+        // Inherited calls keep their invocations; new ones must not reuse them.
+        revision,
+        interrupted: None,
+    };
+    if let Err(error) = super::persist::save(target_id, &child) {
+        if let Err(cleanup) = stdfs::remove_dir_all(&target_dir) {
+            return Err(backend(FORK)(format!(
+                "checkpoint index was not durably saved: {error}; remove {}: {cleanup}",
+                target_dir.display()
+            )));
+        }
+        return Ok(unavailable(
+            "checkpoint_persist_failed",
+            format!(
+                "fork checkpoint was not registered because its index could not be saved: {error}"
+            ),
+        ));
+    }
+    registry.insert(target_id.to_string(), Arc::new(Mutex::new(child)));
     Ok(Outcome::Ready(receipt))
 }

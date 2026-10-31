@@ -23,10 +23,9 @@ impl ConcurrentSessionControls {
                 .get(session_id)
                 .cloned()
         });
-        if self.machine_spend_quota.is_some() && control.is_none() {
+        if (self.machine_spend_quota.is_some() || session_field.is_some()) && control.is_none() {
             return Err(harn_vm::VmError::TypeError(
-                "session/set_budget requires a known sessionId when a machine spend quota is configured"
-                    .into(),
+                "session/set_budget requires a known sessionId".into(),
             ));
         }
         if let Some(control) = control {
@@ -74,7 +73,19 @@ impl ConcurrentSessionControls {
         output: &AcpOutput,
     ) -> bool {
         match self.try_apply_budget_rearm(msg) {
-            Ok(applied) => applied,
+            Ok(applied) => {
+                if applied {
+                    if let Some(id) = msg.get("id") {
+                        output.write_line(
+                            &serde_json::json!({
+                                "jsonrpc": "2.0", "id": id, "result": {}
+                            })
+                            .to_string(),
+                        );
+                    }
+                }
+                applied
+            }
             Err(error) => {
                 if let Some(id) = msg.get("id") {
                     let code = if matches!(&error, harn_vm::VmError::TypeError(_)) {

@@ -673,7 +673,6 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
                     granted.push(sibling);
                 }
             }
-            cursor = step;
             if granted.len() > MAX_DENY_EXPANSION_RULES {
                 return Err(sandbox_rejection(format!(
                     "excluding denied paths from sandbox root '{}' produced {} rules, over the \
@@ -686,6 +685,7 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
                     deny.display(),
                 )));
             }
+            cursor = step;
         }
     }
     Ok(granted)

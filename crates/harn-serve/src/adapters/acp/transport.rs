@@ -587,6 +587,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 /// with a turn. It answers host-callback responses and the controls it owns at
 /// once, and passes everything else to the dispatcher in arrival order.
 struct RouterLane {
+    replay_inputs: Option<Arc<super::replay_inputs::InputRecorder>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     controls: ConcurrentSessionControls,
@@ -596,6 +597,7 @@ struct RouterLane {
 impl RouterLane {
     fn new(server: &AcpServer) -> Self {
         Self {
+            replay_inputs: server.replay_inputs.clone(),
             pending: server.pending.clone(),
             cancellations: server.session_cancellations.clone(),
             controls: server.concurrent_controls.clone(),
@@ -604,6 +606,9 @@ impl RouterLane {
     }
 
     async fn route(&self, msg: serde_json::Value) -> Option<RoutedRequest> {
+        if let Some(recorder) = &self.replay_inputs {
+            recorder.capture_request(&msg);
+        }
         let (controls, output) = (&self.controls, &self.output);
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {

@@ -357,3 +357,413 @@ fn restore_recreates_a_file_with_a_255_byte_name() {
     let restored = stdfs::read_to_string(dir.path().join("sub").join(&leaf)).unwrap();
     assert_eq!(restored, "f original\n");
 }
+
+#[test]
+fn a_restarted_host_resumes_the_history_an_earlier_process_recorded() {
+    let (dir, id) = deleted_in_subdir("resume");
+    let root = dir.path();
+    call_begin(&id, "net").unwrap();
+    call_end(&id, "net", Some(SideEffectLevel::Network)).unwrap();
+    let before = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+    // A new process starts with an empty registry and the files on disk.
+    assert!(unload(&id));
+    assert!(matches!(
+        plan(&id, "turn-1").unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "no_checkpoint"
+    ));
+
+    let resumed = resume(&id, root).unwrap();
+    assert!(
+        matches!(resumed, Outcome::Ready(ref r) if r.loaded && r.boundaries == 1 && r.calls == 2),
+        "{resumed:?}"
+    );
+    assert_eq!(
+        serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap(),
+        before
+    );
+    // The resumed revision keeps later invocations distinct from recorded ones.
+    call_begin(&id, "net").unwrap();
+    call_end(&id, "net", Some(SideEffectLevel::Network)).unwrap();
+    let after = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+    let invocations: BTreeSet<u64> = after["irreversible"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|effect| effect["invocation"].as_u64())
+        .collect();
+    assert_eq!(invocations.len(), 2, "{after}");
+
+    let Outcome::Ready(receipt) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore after resume was unavailable");
+    };
+    assert!(receipt.failed.is_empty(), "{receipt:?}");
+    assert_eq!(
+        stdfs::read_to_string(root.join("sub").join("f.txt")).unwrap(),
+        "f original\n"
+    );
+    drop_session(&id);
+    assert!(matches!(
+        resume(&id, root).unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "no_checkpoint"
+    ));
+}
+
+#[test]
+fn begin_refuses_before_effects_when_namespace_durability_is_not_confirmed() {
+    let (dir, id) = deleted_in_subdir("begin-namespace-failure");
+    let root = dir.path();
+    let index = session_dir(root, &id).join("index.json");
+    let original_index = stdfs::read(&index).unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::MissingNamespaceSync);
+
+    let begin = call_begin(&id, "refused-call").unwrap();
+    assert!(matches!(begin, Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_persist_failed"));
+    let replaced_index = stdfs::read(&index).unwrap();
+    assert_ne!(replaced_index, original_index);
+    let replaced: serde_json::Value = serde_json::from_slice(&replaced_index).unwrap();
+    assert_eq!(replaced["phase"]["state"], "incomplete");
+
+    // Namespace durability was not confirmed after replacement. The begin
+    // admitted no effect, but a cold host must treat the visible incomplete
+    // index as interrupted rather than resume the previous complete state.
+    assert!(unload(&id));
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    drop_session(&id);
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "no_checkpoint")
+    );
+}
+
+#[test]
+fn begin_prewrite_failure_keeps_the_previous_complete_index_available() {
+    let (dir, id) = deleted_in_subdir("begin-prewrite-failure");
+    let root = dir.path();
+    let index = session_dir(root, &id).join("index.json");
+    let original_index = stdfs::read(&index).unwrap();
+    let before_plan = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::Error);
+
+    let begin = call_begin(&id, "refused-call").unwrap();
+    assert!(matches!(begin, Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_persist_failed"));
+    assert_eq!(stdfs::read(&index).unwrap(), original_index);
+
+    assert!(unload(&id));
+    assert!(matches!(resume(&id, root).unwrap(), Outcome::Ready(_)));
+    assert_eq!(
+        serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap(),
+        before_plan
+    );
+    drop_session(&id);
+}
+
+#[test]
+fn failed_capture_is_advisory_but_next_tool_begins_with_a_durable_incomplete_index() {
+    let (dir, id) = deleted_in_subdir("capture-advisory");
+    let root = dir.path();
+    let index_path = session_dir(root, &id).join("index.json");
+    let before_capture = stdfs::read(&index_path).unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::Error);
+
+    assert!(matches!(
+        capture(&id, "turn-2", Some(root)).unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "capture_failed"
+    ));
+    assert_eq!(stdfs::read(&index_path).unwrap(), before_capture);
+
+    assert!(matches!(
+        call_begin(&id, "later").unwrap(),
+        Outcome::Ready(_)
+    ));
+    let before_effect: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(&index_path).unwrap()).unwrap();
+    assert_eq!(before_effect["phase"]["state"], "incomplete");
+    assert_eq!(before_effect["boundaries"][1]["id"], "turn-2");
+    stdfs::write(root.join("sub/later.txt"), "later\n").unwrap();
+    assert!(matches!(
+        call_end(&id, "later", None).unwrap(),
+        Outcome::Ready(_)
+    ));
+
+    assert!(unload(&id));
+    assert!(matches!(resume(&id, root).unwrap(), Outcome::Ready(_)));
+    let Outcome::Ready(plan) = plan(&id, "turn-2").unwrap() else {
+        panic!("the boundary published before the tool effect did not resume");
+    };
+    assert!(plan
+        .entries
+        .iter()
+        .any(|entry| entry.path == "sub/later.txt"));
+    drop_session(&id);
+}
+
+#[test]
+fn cold_resume_refuses_an_interrupted_call_and_keeps_drop_available() {
+    let (dir, id) = deleted_in_subdir("interrupted-call");
+    let root = dir.path();
+    assert!(matches!(
+        call_begin(&id, "left-open").unwrap(),
+        Outcome::Ready(_)
+    ));
+    let index_path = session_dir(root, &id).join("index.json");
+    let index: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(index_path).unwrap()).unwrap();
+    assert_eq!(index["phase"]["state"], "incomplete");
+    assert_eq!(index["phase"]["pending_call_ids"][0], "left-open");
+    assert!(!unload(&id), "ordinary unload must preserve an active call");
+
+    // Model process loss even though normal unload correctly refuses a live
+    // call. Resume registers only the poisoned drop handle.
+    sessions()
+        .lock()
+        .expect("workspace checkpoint registry poisoned")
+        .remove(&id);
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    assert!(
+        matches!(plan(&id, "turn-1").unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    assert!(unload(&id));
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    assert!(drop_session(&id).dropped);
+    assert!(!session_dir(root, &id).exists());
+}
+
+#[test]
+fn overlapping_calls_keep_the_index_incomplete_until_both_attributions_land() {
+    let (dir, id) = deleted_in_subdir("overlapping-call-index");
+    let root = dir.path();
+    assert!(matches!(
+        call_begin(&id, "call-a").unwrap(),
+        Outcome::Ready(_)
+    ));
+    assert!(matches!(
+        call_begin(&id, "call-b").unwrap(),
+        Outcome::Ready(_)
+    ));
+    assert!(matches!(
+        call_end(&id, "call-a", Some(SideEffectLevel::Network)).unwrap(),
+        Outcome::Ready(_)
+    ));
+    let index_path = session_dir(root, &id).join("index.json");
+    let after_a: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(&index_path).unwrap()).unwrap();
+    assert_eq!(after_a["phase"]["state"], "incomplete");
+    assert_eq!(after_a["phase"]["pending_call_ids"][0], "call-b");
+    assert!(matches!(
+        call_end(&id, "call-b", Some(SideEffectLevel::Network)).unwrap(),
+        Outcome::Ready(_)
+    ));
+    let complete: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(&index_path).unwrap()).unwrap();
+    assert_eq!(complete["phase"]["state"], "complete");
+
+    assert!(unload(&id));
+    let Outcome::Ready(resumed) = resume(&id, root).unwrap() else {
+        panic!("completed overlapping calls did not resume");
+    };
+    assert_eq!(resumed.calls, 3);
+    let Outcome::Ready(plan) = plan(&id, "turn-1").unwrap() else {
+        panic!("completed calls have no plan");
+    };
+    let invocations: BTreeSet<_> = plan
+        .irreversible
+        .iter()
+        .map(|call| call.invocation)
+        .collect();
+    assert_eq!(invocations.len(), 2);
+    assert!(plan
+        .irreversible
+        .iter()
+        .any(|call| call.call_id == "call-a"));
+    assert!(plan
+        .irreversible
+        .iter()
+        .any(|call| call.call_id == "call-b"));
+    drop_session(&id);
+}
+
+#[test]
+fn a_failed_call_end_returns_effects_and_a_later_pending_call_can_complete_the_index() {
+    let (dir, id) = deleted_in_subdir("call-end-failure-recovery");
+    let root = dir.path();
+    assert!(matches!(
+        call_begin(&id, "call-a").unwrap(),
+        Outcome::Ready(_)
+    ));
+    assert!(matches!(
+        call_begin(&id, "call-b").unwrap(),
+        Outcome::Ready(_)
+    ));
+    stdfs::write(root.join("sub/call-a.txt"), "a\n").unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::Error);
+
+    let Outcome::Ready(call_a) = call_end(&id, "call-a", Some(SideEffectLevel::Network)).unwrap()
+    else {
+        panic!("the completed call outcome was lost");
+    };
+    assert!(call_a.persistence_error.is_some(), "{call_a:?}");
+    assert!(call_a
+        .changes
+        .iter()
+        .any(|change| change.path == "sub/call-a.txt"));
+    let index_path = session_dir(root, &id).join("index.json");
+    let interrupted: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(&index_path).unwrap()).unwrap();
+    assert_eq!(interrupted["phase"]["state"], "incomplete");
+
+    // Call B was already admitted. Its final save can safely complete the
+    // full in-memory attribution for both calls and recover the session.
+    stdfs::write(root.join("sub/call-b.txt"), "b\n").unwrap();
+    let Outcome::Ready(call_b) = call_end(&id, "call-b", Some(SideEffectLevel::Network)).unwrap()
+    else {
+        panic!("the remaining call did not complete its attribution");
+    };
+    assert!(call_b.persistence_error.is_none(), "{call_b:?}");
+    assert!(unload(&id));
+    assert!(matches!(resume(&id, root).unwrap(), Outcome::Ready(_)));
+    let Outcome::Ready(plan) = plan(&id, "turn-1").unwrap() else {
+        panic!("a complete retry did not resume");
+    };
+    assert!(plan
+        .irreversible
+        .iter()
+        .any(|call| call.call_id == "call-a"));
+    assert!(plan
+        .irreversible
+        .iter()
+        .any(|call| call.call_id == "call-b"));
+    assert!(plan
+        .entries
+        .iter()
+        .any(|entry| entry.path == "sub/call-a.txt"));
+    assert!(plan
+        .entries
+        .iter()
+        .any(|entry| entry.path == "sub/call-b.txt"));
+    drop_session(&id);
+}
+
+#[test]
+fn a_failed_final_call_write_keeps_the_completed_effect_receipt_and_refuses_cold_resume() {
+    let (dir, id) = deleted_in_subdir("call-end-final-failure");
+    let root = dir.path();
+    assert!(matches!(
+        call_begin(&id, "completed").unwrap(),
+        Outcome::Ready(_)
+    ));
+    stdfs::write(root.join("sub/completed.txt"), "done\n").unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::Error);
+
+    let Outcome::Ready(receipt) =
+        call_end(&id, "completed", Some(SideEffectLevel::Network)).unwrap()
+    else {
+        panic!("completed tool effects were hidden by an index error");
+    };
+    assert!(receipt.persistence_error.is_some(), "{receipt:?}");
+    assert!(receipt
+        .changes
+        .iter()
+        .any(|change| change.path == "sub/completed.txt"));
+    assert_eq!(
+        stdfs::read_to_string(root.join("sub/completed.txt")).unwrap(),
+        "done\n"
+    );
+    assert!(unload(&id));
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    assert!(drop_session(&id).dropped);
+}
+
+#[test]
+fn restore_persists_the_final_trimmed_timeline_before_restart() {
+    let (dir, id) = deleted_in_subdir("restore-final-timeline");
+    let root = dir.path();
+    assert!(matches!(
+        capture(&id, "turn-2", Some(root)).unwrap(),
+        Outcome::Ready(_)
+    ));
+    assert!(matches!(
+        call_begin(&id, "later").unwrap(),
+        Outcome::Ready(_)
+    ));
+    stdfs::write(root.join("sub/later.txt"), "later\n").unwrap();
+    assert!(matches!(
+        call_end(&id, "later", None).unwrap(),
+        Outcome::Ready(_)
+    ));
+
+    let Outcome::Ready(restored) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore unavailable");
+    };
+    assert!(restored.persistence_error.is_none(), "{restored:?}");
+    assert_eq!(
+        stdfs::read_to_string(root.join("sub/f.txt")).unwrap(),
+        "f original\n"
+    );
+    assert!(!root.join("sub/later.txt").exists());
+    let in_memory = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+
+    assert!(unload(&id));
+    let Outcome::Ready(resumed) = resume(&id, root).unwrap() else {
+        panic!("trimmed restore timeline did not resume");
+    };
+    assert_eq!(resumed.boundary_ids, vec!["turn-1"]);
+    assert_eq!(resumed.calls, 0);
+    assert_eq!(
+        serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap(),
+        in_memory
+    );
+    drop_session(&id);
+}
+
+#[test]
+fn restore_prewrite_failure_changes_no_files_and_final_failure_keeps_receipt() {
+    let (dir, id) = deleted_in_subdir("restore-persist-failures");
+    let root = dir.path();
+    let index = session_dir(root, &id).join("index.json");
+    let original_index = stdfs::read(&index).unwrap();
+    persist::fail_write_after(&id, root, 0, persist::TestWriteResult::Error);
+    assert!(matches!(
+        restore(&id, "turn-1", None).unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "checkpoint_persist_failed"
+    ));
+    assert!(!root.join("sub/f.txt").exists());
+    assert_eq!(stdfs::read(&index).unwrap(), original_index);
+
+    // The first write is the pre-effect incomplete record; fail only the
+    // final complete-state write after the restore has changed the file.
+    persist::fail_write_after(&id, root, 1, persist::TestWriteResult::Error);
+    let Outcome::Ready(receipt) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore effect was hidden by a final index failure");
+    };
+    assert!(!receipt.restored.is_empty(), "{receipt:?}");
+    assert!(receipt.persistence_error.is_some(), "{receipt:?}");
+    assert_eq!(
+        stdfs::read_to_string(root.join("sub/f.txt")).unwrap(),
+        "f original\n"
+    );
+    let incomplete: serde_json::Value =
+        serde_json::from_slice(&stdfs::read(&index).unwrap()).unwrap();
+    assert_eq!(incomplete["phase"]["state"], "incomplete");
+
+    assert!(unload(&id));
+    assert!(
+        matches!(resume(&id, root).unwrap(), Outcome::Unavailable(ref why)
+        if why.reason == "checkpoint_interrupted")
+    );
+    assert!(drop_session(&id).dropped);
+}

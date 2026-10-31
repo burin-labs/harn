@@ -45,8 +45,10 @@ run.tape.cas/      # content-addressed sidecar (BLAKE3 hex names)
     "phase": "user_script",
     "virtual_time_ms": 1700000000000,
     "monotonic_ms": 0,
-    "kind": "clock_sleep",
-    "duration_ms": 250
+    "kind": {
+      "kind": "clock_sleep",
+      "duration_ms": 250
+    }
   }
   ```
 

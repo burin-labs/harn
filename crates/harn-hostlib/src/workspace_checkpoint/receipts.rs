@@ -19,8 +19,9 @@ pub enum Outcome<T> {
 pub struct Unavailable {
     /// Always `false`.
     pub available: bool,
-    /// Stable classifier: `not_a_git_worktree`, `git_unavailable`,
-    /// `index_not_writable_as_tree`, `no_checkpoint`, or `unknown_boundary`.
+    /// Stable classifier: includes `not_a_git_worktree`, `git_unavailable`,
+    /// `index_not_writable_as_tree`, `no_checkpoint`, `unknown_boundary`,
+    /// `checkpoint_persist_failed`, and `checkpoint_interrupted`.
     pub reason: &'static str,
     /// Human-readable detail.
     pub detail: String,
@@ -148,6 +149,10 @@ pub struct CallEndReceipt {
     pub changes: Vec<AttributedChange>,
     /// Directory entries the post-call scan could not read.
     pub scan_errors: usize,
+    /// Set when the call completed but its attribution could not be durably
+    /// recorded. The session remains unavailable until it is dropped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence_error: Option<String>,
 }
 
 /// One planned or executed path action.
@@ -176,8 +181,11 @@ pub struct PlanEntry {
 /// A call whose effects a file restore cannot undo.
 #[derive(Clone, Debug, Serialize)]
 pub struct IrreversibleEffect {
-    /// Tool call id.
+    /// Tool call id, for correlation. Providers can repeat one across turns.
     pub call_id: String,
+    /// The session revision this invocation began at: distinct for every
+    /// call in the session, so two effects sharing a `call_id` stay apart.
+    pub invocation: u64,
     /// Side-effect class from the tool annotation.
     pub side_effect: SideEffectLevel,
 }
@@ -214,6 +222,10 @@ pub struct RestoreReceipt {
     pub failed: Vec<PlanEntry>,
     /// Calls after the boundary whose effects cannot be undone.
     pub irreversible: Vec<IrreversibleEffect>,
+    /// Set when workspace writes completed but the final checkpoint index
+    /// could not be durably recorded. Cold resume will refuse the index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence_error: Option<String>,
 }
 
 /// Result of [`super::drop_session`].

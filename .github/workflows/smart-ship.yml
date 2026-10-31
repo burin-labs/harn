@@ -1,34 +1,73 @@
 name: Smart Ship
 
-# Wakes the shared Smart Ship loop for pull requests labeled `ship`. Each run
-# takes one look per PR and exits: it lands an approved, green head, or stops
-# and says why on the PR. The 15-minute sweep catches events GitHub never sent.
+# HARN_SMART_SHIP_PR admits one pull request to the shared protected merger.
+# Clear the repository variable to stop admission. No scheduled sweep or repair runs.
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] same-repository PRs only; with repair off the shared loop reads the PR through the API and never checks out its code
     types: [labeled, unlabeled, ready_for_review]
   pull_request_review:
     types: [submitted]
-  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only a pull request's own CI run, reads metadata through the API, and never checks out the parent-run ref
-    workflows: [CI, "macOS workspace tests"]
+  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned CI run for the selected pull request, reads metadata through the API, and never checks out the parent-run ref
+    workflows: [CI]
     types: [completed]
-  schedule:
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       pr:
-        description: Pull request number to look at; empty runs a sweep.
+        description: Must match the repository variable HARN_SMART_SHIP_PR.
         type: string
-        default: ""
+        required: true
 
 permissions:
   contents: read
 
 jobs:
+  availability:
+    # The shared workflow's hosted route is unreachable. Admit one owned PR,
+    # then count the exact large Linux pool used by the merger.
+    if: >-
+      github.repository == 'burin-labs/harn'
+      && vars.HARN_SMART_SHIP_PR != ''
+      && format('{0}', fromJSON(vars.HARN_SMART_SHIP_PR)) == vars.HARN_SMART_SHIP_PR
+      && !contains(vars.HARN_SMART_SHIP_PR, '.')
+      && fromJSON(vars.HARN_SMART_SHIP_PR) > 0
+      && ((github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+      && inputs.pr != '' && inputs.pr == vars.HARN_SMART_SHIP_PR)
+      || ((github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.base.repo.full_name == github.repository
+      && github.event.pull_request.base.ref == 'main'
+      && format('{0}', github.event.pull_request.number) == vars.HARN_SMART_SHIP_PR
+      && (contains(github.event.pull_request.labels.*.name, 'ship')
+      || (github.event_name == 'pull_request_target'
+      && github.event.action == 'unlabeled'
+      && github.event.label.name == 'ship')))
+      || (github.event_name == 'workflow_run'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+      && github.event.workflow_run.pull_requests[0].base.repo.full_name == github.repository
+      && github.event.workflow_run.pull_requests[0].base.ref == 'main'
+      && format('{0}', github.event.workflow_run.pull_requests[0].number) == vars.HARN_SMART_SHIP_PR))
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@3d3aba7995a5f4749a1a131204445f6cb438b00a
+    with:
+      owned_only: true
+      require_measured: true
+      linux_probe_runner_tag: harn-ci-big
+      minimum_online_by_pool: '{"linux_big":1}'
+    secrets:
+      RUNNER_PROBE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RUNNER_PROBE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   ship:
+    needs: [availability]
+    if: >-
+      ${{ needs.availability.result == 'success'
+      && fromJSON(needs.availability.outputs.capacity).linux_big.measured == true
+      && fromJSON(needs.availability.outputs.capacity).linux_big.eligible == true }}
     uses: burin-labs/.github/.github/workflows/smart-ship.yml@6958845300760fb5923b7da8d3e57f9df655558f
     with:
-      # Off until replays show repairs land pull requests; authors fix their own PRs meanwhile.
+      runs-on: ${{ toJSON(fromJSON('["self-hosted","Linux","X64","harn-ci-big"]')) }}
       repair: false
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}

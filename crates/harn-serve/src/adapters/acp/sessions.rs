@@ -965,13 +965,25 @@ mod budget_rearm_tests {
         }));
         let mut cx = Context::from_waker(Waker::noop());
         assert!(turn.as_mut().poll(&mut cx).is_pending());
-        assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
-            "sessionId": "missing", "llm_cost_usd": 9.0, "llm_tokens": 90
-        }))));
+        assert!(matches!(
+            controls.try_apply_budget_rearm(&set_budget_frame(json!({
+                "sessionId": "missing", "llm_cost_usd": 9.0, "llm_tokens": 90
+            }))),
+            Err(harn_vm::VmError::TypeError(_))
+        ));
+        assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+        assert_eq!(harn_vm::peek_llm_token_budget(), Some(30));
+        assert_eq!(harn_vm::llm::peek_total_cost(), 0.5);
         for invalid_id in [json!(null), json!(42), json!({"id": "target"})] {
-            assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
-                "sessionId": invalid_id, "llm_cost_usd": 9.0, "llm_tokens": 90
-            }))));
+            assert!(matches!(
+                controls.try_apply_budget_rearm(&set_budget_frame(json!({
+                    "sessionId": invalid_id, "llm_cost_usd": 9.0, "llm_tokens": 90
+                }))),
+                Err(harn_vm::VmError::TypeError(_))
+            ));
+            assert_eq!(harn_vm::peek_llm_cost_budget(), Some(3.0));
+            assert_eq!(harn_vm::peek_llm_token_budget(), Some(30));
+            assert_eq!(harn_vm::llm::peek_total_cost(), 0.5);
         }
         assert!(controls.apply_budget_rearm(&set_budget_frame(json!({
             "sessionId": "target", "llm_cost_usd": 1.0, "llm_tokens": 10

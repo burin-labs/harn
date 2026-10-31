@@ -3,6 +3,7 @@
 mod authority;
 mod control;
 mod correlation;
+mod host_boundaries;
 mod injection_lifecycle;
 mod pending_call;
 mod remind;
@@ -11,6 +12,11 @@ pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 pub use control::HostBridgeControlState;
 use control::{handle_cancel_tool_call_notification, DaemonIdleState};
+pub(crate) use host_boundaries::ToolExecutionStart;
+pub use host_boundaries::{
+    ToolExecutionAdmission, ToolExecutionBoundary, ToolExecutionGuard, ToolExecutionStage,
+    UserInjectionBoundary, UserInjectionStage,
+};
 pub use injection_lifecycle::UserMessageDeliveryOwner;
 use remind::queued_session_remind_from_params;
 #[cfg(test)]
@@ -37,21 +43,6 @@ use crate::vm::Vm;
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
 
 pub type HostBridgeWriter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
-
-/// Stages of delivering a queued user message to the agent transcript.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum UserInjectionStage {
-    /// The message is about to enter the transcript.
-    Before,
-    /// The message entered the transcript.
-    Delivered,
-    /// The transcript rejected the message.
-    Failed,
-}
-
-/// Host callback observing transcript delivery of a queued user message.
-pub type UserInjectionBoundary = Arc<dyn Fn(&str, &str, UserInjectionStage) + Send + Sync>;
 
 fn stdout_writer(stdout_lock: Arc<std::sync::Mutex<()>>) -> HostBridgeWriter {
     Arc::new(move |line: &str| {
@@ -101,8 +92,8 @@ pub struct HostBridge {
     script_name: std::sync::Mutex<String>,
     /// Transcript injections queued by the host while a run is active.
     queued_transcript_injections: HostBridgeInjectionState,
-    /// Host-owned work to perform immediately before a user injection is delivered.
-    user_injection_boundary: std::sync::Mutex<Option<UserInjectionBoundary>>,
+    /// Host-owned work around user message delivery and tool execution.
+    boundaries: host_boundaries::HostBoundaries,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
     /// Host-triggered skill-registry invalidation signal. Set when the
@@ -673,7 +664,7 @@ impl HostBridge {
             caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections,
-            user_injection_boundary: std::sync::Mutex::new(None),
+            boundaries: Default::default(),
             resume_requested,
             skills_reload_requested,
             daemon_idle,
@@ -730,7 +721,7 @@ impl HostBridge {
             caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: control.queued_transcript_injections,
-            user_injection_boundary: std::sync::Mutex::new(None),
+            boundaries: Default::default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),
@@ -757,7 +748,7 @@ impl HostBridge {
             caller_message_id: std::sync::Mutex::new(None),
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: HostBridgeInjectionState::default(),
-            user_injection_boundary: std::sync::Mutex::new(None),
+            boundaries: Default::default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),
@@ -770,31 +761,6 @@ impl HostBridge {
                 vm,
             }),
         })
-    }
-
-    /// Observe a queued user message before insertion and after its outcome.
-    /// The callback runs synchronously on the agent's execution path.
-    pub fn set_user_injection_boundary(&self, boundary: UserInjectionBoundary) {
-        *self
-            .user_injection_boundary
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(boundary);
-    }
-
-    pub(crate) fn user_injection_stage(
-        &self,
-        session_id: &str,
-        message_id: &str,
-        stage: UserInjectionStage,
-    ) {
-        let boundary = self
-            .user_injection_boundary
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(boundary) = boundary {
-            boundary(session_id, message_id, stage);
-        }
     }
 
     /// Set the currently executing script name (without .harn suffix).
@@ -1093,12 +1059,9 @@ impl HostBridge {
         &self,
         params: &serde_json::Value,
     ) -> Result<String, String> {
-        let reminder = queued_session_remind_from_params(params)?;
-        let reminder_id = reminder.reminder.id.clone();
         self.queued_transcript_injections
-            .push_session_reminder(reminder)
-            .await;
-        Ok(reminder_id)
+            .push_queued_session_remind_from_params(params)
+            .await
     }
 
     pub async fn take_queued_user_messages(

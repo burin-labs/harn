@@ -327,12 +327,12 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<SettledCall, VmError> {
-    let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
     let mut deltas_open = true;
     let mut call = Box::pin(vm_call_llm_full_inner_request(
         observed,
+        opts,
         request,
         Some(delta_tx),
         ProviderExecution::Inline,
@@ -351,7 +351,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     while delta_rx.try_recv().is_ok() {
         first_token.observe_delta();
     }
-    Ok(settle_completed_call(reservation, result))
+    Ok(result)
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -381,15 +381,14 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<SettledCall, VmError> {
-    let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
-    let result = vm_call_llm_full_inner_request(
+    vm_call_llm_full_inner_request(
         observed,
+        opts,
         request,
         Some(delta_tx),
         ProviderExecution::Inline,
     )
-    .await?;
-    Ok(settle_completed_call(reservation, result))
+    .await
 }
 
 /// Execute provider I/O on Tokio's multithreaded scheduler while keeping
@@ -421,15 +420,14 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<SettledCall, VmError> {
-    let reservation = super::admission::reserve(opts, &request, observed.token_projection())?;
-    let result = vm_call_llm_full_inner_request(
+    vm_call_llm_full_inner_request(
         observed,
+        opts,
         &request,
         Some(delta_tx),
         ProviderExecution::Offthread,
     )
-    .await?;
-    Ok(settle_completed_call(reservation, result))
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -454,7 +452,7 @@ fn complete_bypass_result(
     result: LlmResult,
     delta_tx: Option<DeltaSender>,
     chunks: Option<Vec<String>>,
-) -> LlmResult {
+) -> SettledCall {
     record_cli_llm_result(request, &result);
     if let Some(tx) = delta_tx {
         if let Some(chunks) = chunks {
@@ -465,15 +463,16 @@ fn complete_bypass_result(
             let _ = tx.send(result.text.clone());
         }
     }
-    result
+    settle_completed_call(None, result)
 }
 
 async fn vm_call_llm_full_inner_request(
     observed: &super::agent_observe::ObservedAttemptToken,
+    opts: &LlmCallOptions,
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     execution: ProviderExecution,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     if let Some(served) = crate::run_tape::serve_llm_call(request) {
         let served = served?;
         // Mirror the recording, which answered a predicate-cache hit without
@@ -493,6 +492,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::providers::MockProvider::should_intercept_request(request) {
+        super::admission::preflight(opts, observed.token_projection())?;
         observed.record_provider_dispatch();
         request.emit_reminder_lifecycle();
         let result = mock_llm_response(request)?;
@@ -504,6 +504,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        super::admission::preflight(opts, observed.token_projection())?;
         observed.record_provider_dispatch();
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
@@ -514,7 +515,7 @@ async fn vm_call_llm_full_inner_request(
         super::mock::mark_live_after_mock_prefix(request, &mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
-        return Ok(result);
+        return Ok(settle_completed_call(None, result));
     }
 
     let replay_mode = get_replay_mode();
@@ -531,8 +532,14 @@ async fn vm_call_llm_full_inner_request(
         ))));
     }
 
-    super::ensure_real_llm_allowed(&request.provider)?;
     let boundary_rule = inference_boundary::preflight_chat(request)?;
+    let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
+    if let Err(error) = super::ensure_real_llm_allowed(&request.provider) {
+        if let Some(reservation) = reservation {
+            reservation.cancel_before_dispatch()?;
+        }
+        return Err(error);
+    }
     request.emit_reminder_lifecycle();
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the
@@ -548,7 +555,7 @@ async fn vm_call_llm_full_inner_request(
     .await?;
     super::trigger_predicate::note_result(request, &result);
 
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 async fn execute_provider_request(

@@ -220,7 +220,9 @@ impl AcpServer {
         #[cfg(feature = "hostlib")]
         {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
-            harn_hostlib::workspace_checkpoint::drop_session(session_id);
+            // Keep the checkpoint record: a later `session/load` resumes it.
+            // Only an explicit `drop` action deletes it.
+            harn_hostlib::workspace_checkpoint::unload(session_id);
         }
     }
 
@@ -340,17 +342,11 @@ impl AcpServer {
             }
             return;
         };
-        let Some(bridge) = session.host_bridge.clone() else {
-            if !id.is_null() {
-                self.send_error(
-                    id,
-                    -32004,
-                    &format!("Session has no active bridge: {session_id}"),
-                );
-            }
-            return;
-        };
-        match bridge.push_queued_session_remind_from_params(params).await {
+        match session
+            .inject_state
+            .push_queued_session_remind_from_params(params)
+            .await
+        {
             Ok(reminder_id) => {
                 if !id.is_null() {
                     self.send_response(id, serde_json::json!({"reminderId": reminder_id}));

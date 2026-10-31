@@ -347,13 +347,15 @@ async fn failed_steer_capture_never_exposes_an_older_boundary() {
     harn_clock::test_support::with_local_tasks(async {
         use harn_hostlib::workspace_checkpoint as checkpoint;
         let mut h = DeliveryHarness::start_with_checkpoint(true).await;
+        // The agent loop brackets the running tool call itself, so the older
+        // boundary is captured before the turn starts.
+        let old = checkpoint::capture(&h.session_id, "m4", Some(h._dir.path())).unwrap();
+        assert!(matches!(old, checkpoint::Outcome::Ready(_)), "{old:?}");
         h.send(serde_json::json!({
             "jsonrpc":"2.0", "id":3, "method":"session/prompt",
             "params":{"sessionId":h.session_id, "messageId":"first", "prompt":[{"type":"text", "text":"tick"}]},
         }));
         h.ticks_reach(1).await;
-        let old = checkpoint::capture(&h.session_id, "m4", Some(h._dir.path())).unwrap();
-        assert!(matches!(old, checkpoint::Outcome::Ready(_)), "{old:?}");
         let begin = checkpoint::call_begin(&h.session_id, "in-flight").unwrap();
         assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
         h.prompt(4, "change course", Some("steer"));
@@ -449,6 +451,30 @@ async fn queued_prompt_captures_its_boundary_when_the_turn_starts() {
         h.finish().await;
     })
     .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_reminder_accepted_before_the_first_turn_is_delivered_by_that_turn() {
+    harn_clock::test_support::with_local_tasks(async {
+        let mut h = DeliveryHarness::start().await;
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/remind",
+            "params":{"sessionId":h.session_id, "body":"Remember the startup canary.", "mode":"finish_step"},
+        }));
+        let (_, accepted) = h.reply(3).await;
+        let reminder_id = accepted["result"]["reminderId"].as_str().expect("startup reminder accepted");
+        h.open_gate();
+        h.prompt(4, "tick", None);
+        let (_, terminal) = h.reply(4).await;
+        assert_eq!(terminal["result"]["stopReason"], "end_turn", "{terminal}");
+        let seen = h.finish().await;
+        let delivered: Vec<_> = seen.iter().filter(|message| {
+            message["params"]["update"]["sessionUpdate"] == "reminder_emitted"
+                && message["params"]["update"]["_meta"]["harn"]["reminder"]["reminderId"] == reminder_id
+        }).collect();
+        assert_eq!(delivered.len(), TICKS + 1, "the accepted reminder must reach each model call in the first turn");
+        assert_eq!(delivered[0]["params"]["update"]["_meta"]["harn"]["reminder"]["body"], "Remember the startup canary.");
+    }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -1,14 +1,22 @@
-//! Source-checked prompt edits activated after the recorded model prefix.
+//! Source-checked prompt edits with explicit origin or mid-run activation.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{BranchDivergence, EventTape, TapeRecordKind};
-use crate::stdlib::template::{PromptSourceSpan, PromptSpanKind};
+use super::{BranchDivergence, EventTape};
+
+/// Origin edits also affect values rendered before their first model consumer.
+/// Mid-run interventions leave every render before the served prefix unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptEditActivation {
+    Origin,
+    AfterPrefix,
+}
 
 /// A replacement for one complete literal span from a recorded prompt.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptSourceEdit {
     pub template_uri: String,
@@ -18,14 +26,16 @@ pub struct PromptSourceEdit {
     pub column: usize,
     pub original: String,
     pub replacement: String,
+    pub activation: PromptEditActivation,
 }
 
 /// Loading an edit into a render does not prove it reached a model request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PromptEditReport {
     pub template_uri: String,
     pub line: usize,
     pub column: usize,
+    pub activation: PromptEditActivation,
     pub prepared_renders: u64,
 }
 
@@ -38,78 +48,26 @@ impl PromptEdits {
     pub(super) fn from_tape(
         tape: &EventTape,
         edits: Vec<PromptSourceEdit>,
+        source_roots: &[super::ReplaySourceRoot],
     ) -> Result<(Self, Vec<PromptEditReport>), String> {
         if edits.is_empty() {
             return Ok((Self::default(), Vec::new()));
         }
-        let mut proofs = BTreeSet::new();
-        for record in &tape.records {
-            let TapeRecordKind::PromptRender {
-                rendered, spans, ..
-            } = &record.kind
-            else {
-                continue;
-            };
-            let rendered = tape.resolve_payload(rendered)?;
-            let spans: Vec<PromptSourceSpan> =
-                serde_json::from_slice(&tape.resolve_payload(spans)?)
-                    .map_err(|error| format!("recorded prompt source spans: {error}"))?;
-            for span in spans {
-                if span.kind != PromptSpanKind::Text {
-                    continue;
-                }
-                let Some(text) = rendered.get(span.output_start..span.output_end) else {
-                    return Err("recorded prompt span exceeds its rendered text".to_string());
-                };
-                let text = std::str::from_utf8(text)
-                    .map_err(|_| "recorded prompt span splits a character".to_string())?;
-                proofs.insert((
-                    span.template_uri,
-                    span.template_revision,
-                    span.template_line,
-                    span.template_col,
-                    text.to_string(),
-                ));
-            }
-        }
+        super::prompt_plan::validated_sources(tape, &edits)?;
         let mut planned = Self::default();
         let mut reports = Vec::new();
-        let mut identities = BTreeSet::new();
         for edit in edits {
-            if edit.original.is_empty() || edit.original == edit.replacement {
-                return Err("a prompt edit must change a nonempty recorded literal".to_string());
-            }
-            if edit.replacement.contains("{{") || edit.replacement.contains("}}") {
-                return Err(
-                    "prompt replacements must not contain template syntax delimiters".to_string(),
-                );
-            }
-            let identity = (edit.template_uri.clone(), edit.line, edit.column);
-            if !identities.insert(identity) {
-                return Err("multiple prompt edits target the same source position".to_string());
-            }
-            if !proofs.contains(&(
-                edit.template_uri.clone(),
-                edit.template_revision.clone(),
-                edit.line,
-                edit.column,
-                edit.original.clone(),
-            )) {
-                return Err(format!(
-                    "prompt edit {}:{}:{} is not a recorded literal at that revision",
-                    edit.template_uri, edit.line, edit.column
-                ));
-            }
             let index = reports.len();
             reports.push(PromptEditReport {
                 template_uri: edit.template_uri.clone(),
                 line: edit.line,
                 column: edit.column,
+                activation: edit.activation,
                 prepared_renders: 0,
             });
             planned
                 .by_uri
-                .entry(normalize_uri(tape, &edit.template_uri))
+                .entry(normalize_uri(tape, source_roots, &edit.template_uri))
                 .or_default()
                 .push((index, edit));
         }
@@ -121,6 +79,7 @@ impl PromptEdits {
         uri: &str,
         source: &str,
         reports: &mut [PromptEditReport],
+        after_prefix: bool,
     ) -> Result<Option<String>, String> {
         let Some(edits) = self.by_uri.get(uri) else {
             return Ok(None);
@@ -128,6 +87,9 @@ impl PromptEdits {
         let revision = blake3::hash(source.as_bytes()).to_hex().to_string();
         let mut replacements = Vec::new();
         for (index, edit) in edits {
+            if !after_prefix && edit.activation == PromptEditActivation::AfterPrefix {
+                continue;
+            }
             if edit.template_revision != revision {
                 return Err(format!("prompt source changed since recording: {uri}"));
             }
@@ -142,6 +104,9 @@ impl PromptEdits {
                 ));
             }
             replacements.push((start, end, *index, &edit.replacement));
+        }
+        if replacements.is_empty() {
+            return Ok(None);
         }
         replacements.sort_by_key(|entry| entry.0);
         if replacements.windows(2).any(|pair| pair[0].1 > pair[1].0) {
@@ -170,20 +135,14 @@ impl PromptEdits {
     }
 }
 
-fn append_edit_segment(result: &mut String, segment: &str) -> Result<(), String> {
-    if matches!(
-        (result.as_bytes().last(), segment.as_bytes().first()),
-        (Some(b'{'), Some(b'{')) | (Some(b'}'), Some(b'}'))
-    ) {
-        return Err(
-            "prompt replacement forms template syntax delimiters at a source boundary".to_string(),
-        );
+fn normalize_uri(tape: &EventTape, source_roots: &[super::ReplaySourceRoot], uri: &str) -> String {
+    for root in source_roots {
+        if let Some(relative) =
+            super::scope::workspace_relative(std::path::Path::new(uri), &root.recorded)
+        {
+            return root.recorded.join(relative).display().to_string();
+        }
     }
-    result.push_str(segment);
-    Ok(())
-}
-
-fn normalize_uri(tape: &EventTape, uri: &str) -> String {
     let Some(root) = tape
         .header
         .run
@@ -195,6 +154,19 @@ fn normalize_uri(tape: &EventTape, uri: &str) -> String {
     super::scope::workspace_relative(std::path::Path::new(uri), root)
         .map(|relative| root.join(relative).display().to_string())
         .unwrap_or_else(|| uri.to_string())
+}
+
+fn append_edit_segment(result: &mut String, segment: &str) -> Result<(), String> {
+    if matches!(
+        (result.as_bytes().last(), segment.as_bytes().first()),
+        (Some(b'{'), Some(b'{')) | (Some(b'}'), Some(b'}'))
+    ) {
+        return Err(
+            "prompt replacement forms template syntax delimiters at a source boundary".to_string(),
+        );
+    }
+    result.push_str(segment);
+    Ok(())
 }
 
 fn source_offset(source: &str, wanted_line: usize, wanted_column: usize) -> Option<usize> {
@@ -219,9 +191,7 @@ pub(crate) fn prepare(uri: &str, source: &str) -> Result<Option<String>, String>
     };
     let uri = branch.prompt_uri(uri);
     let mut state = branch.state();
-    if state.report.served_calls < state.report.live_after_calls {
-        return Ok(None);
-    }
+    let after_prefix = state.report.served_calls >= state.report.live_after_calls;
     if let Some(divergence) = &state.report.divergence {
         return Err(divergence.detail.clone());
     }
@@ -230,7 +200,7 @@ pub(crate) fn prepare(uri: &str, source: &str) -> Result<Option<String>, String>
         report,
         ..
     } = &mut *state;
-    match prompt_edits.apply(&uri, source, &mut report.prompt_edits) {
+    match prompt_edits.apply(&uri, source, &mut report.prompt_edits, after_prefix) {
         Ok(value) => Ok(value),
         Err(detail) => {
             report.divergence = Some(BranchDivergence {

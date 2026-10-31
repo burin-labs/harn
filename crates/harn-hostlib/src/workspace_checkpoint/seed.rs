@@ -5,14 +5,26 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use cap_std::fs::{Dir, Permissions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod links;
+mod persistent;
 mod storage;
 
+pub use persistent::SavedReplayWorkspace;
+
+/// Versioned seed identity contract. Unknown versions refuse deserialization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum SeedSchema {
+    /// Paths, contents, links and file/directory permissions.
+    #[serde(rename = "harn.workspace-seed.v1")]
+    V1,
+}
+
 /// Resource ceilings checked while reading, including ignored files.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SeedLimits {
     /// Files and directories, excluding the root itself.
     pub max_entries: usize,
@@ -36,10 +48,11 @@ impl Default for SeedLimits {
 }
 
 /// Identity and measured size of the captured regular files and directories.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SeedReceipt {
     /// Versioned receipt contract.
-    pub schema: &'static str,
+    pub schema: SeedSchema,
     /// Digest of sorted paths, contents, links and file/directory permissions.
     pub sha256: String,
     /// Regular files actually read.
@@ -77,6 +90,12 @@ pub enum SeedError {
     /// Private seed contents no longer match the recorded identity.
     #[error("workspace seed no longer matches its captured identity; the current workspace was not replaced")]
     SeedChanged,
+    /// Another execution still owns the saved working copy.
+    #[error("replay workspace {path:?} is already in use")]
+    InUse {
+        /// Private storage whose lease is held.
+        path: PathBuf,
+    },
     /// An underlying filesystem operation failed.
     #[error("workspace seed {operation} {path:?}: {source}")]
     Io {
@@ -91,8 +110,12 @@ pub enum SeedError {
 
 /// Owns a private seed and a working copy. Restore only after the previous
 /// execution and its child processes have stopped; cancellation belongs to
-/// the session owner. Dropping this value retires both directories.
+/// the session owner. Dropping this value retires both directories unless
+/// `persist` retained them. The owner must keep this value for the execution's
+/// entire lifetime, including child-process shutdown.
 pub struct ReplayWorkspace {
+    // Release the file lock before temporary storage is removed on Windows.
+    _lease: std::fs::File,
     storage: storage::PrivateStorage,
     workspace: PathBuf,
     receipt: SeedReceipt,
@@ -135,9 +158,9 @@ impl ReplayWorkspace {
         builder.permissions(
             <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
         );
-        let storage = storage::PrivateStorage(
+        let storage = storage::PrivateStorage::new(
             builder
-                .tempdir_in(storage_parent)
+                .tempdir_in(&canonical_parent)
                 .map_err(|error| io("create private storage", storage_parent, error))?,
         );
         let parent = open_dir(storage.path())?;
@@ -161,6 +184,7 @@ impl ReplayWorkspace {
             return Err(SeedError::SeedChanged);
         }
         Ok(Self {
+            _lease: persistent::lease(&parent, storage.path(), true)?,
             workspace: storage.path().join("workspace"),
             storage,
             receipt,
@@ -182,10 +206,12 @@ impl ReplayWorkspace {
     /// stable. Verify the seed before retiring the previous copy.
     pub fn restore(&mut self) -> Result<&SeedReceipt, SeedError> {
         let parent = open_dir(self.storage.path())?;
+        persistent::require_directory(&parent, "seed")?;
         let seed = parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
-        let staging = storage::PrivateStorage(
+        storage::remove_abandoned_staging(&parent)?;
+        let staging = storage::PrivateStorage::new(
             tempfile::Builder::new()
                 .prefix("restore-")
                 .tempdir_in(self.storage.path())
@@ -197,41 +223,25 @@ impl ReplayWorkspace {
         }
         drop(next);
         let staged_name = staging.path().file_name().expect("staging has a name");
-        match parent.symlink_metadata("previous") {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io("inspect previous copy", Path::new("previous"), error)),
-            Ok(_) => {
-                return Err(SeedError::Unsupported {
-                    path: PathBuf::from("previous"),
-                    reason: "a previous restore has unfinished cleanup",
-                })
-            }
-        }
-        parent
-            .rename("workspace", &parent, "previous")
-            .map_err(|error| io("retire working copy", &self.workspace, error))?;
+        // A crashed restore may have retired the working copy or published
+        // its replacement. The verified seed above makes either state recoverable.
+        storage::remove_child(&parent, Path::new("previous"))?;
+        let retired = match parent.rename("workspace", &parent, "previous") {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(io("retire working copy", &self.workspace, error)),
+        };
         if let Err(error) = parent.rename(staged_name, &parent, "workspace") {
-            parent
-                .rename("previous", &parent, "workspace")
-                .map_err(|rollback| {
-                    io("recover previous working copy", &self.workspace, rollback)
-                })?;
+            if retired {
+                parent
+                    .rename("previous", &parent, "workspace")
+                    .map_err(|rollback| {
+                        io("recover previous working copy", &self.workspace, rollback)
+                    })?;
+            }
             return Err(io("publish restored copy", &self.workspace, error));
         }
-        storage::make_child_removable(&parent, Path::new("previous")).map_err(|error| {
-            io(
-                "prepare retired copy for removal",
-                Path::new("previous"),
-                error,
-            )
-        })?;
-        parent.remove_dir_all("previous").map_err(|error| {
-            io(
-                "remove retired copy after successful restore",
-                Path::new("previous"),
-                error,
-            )
-        })?;
+        storage::remove_child(&parent, Path::new("previous"))?;
         Ok(&self.receipt)
     }
 }
@@ -416,7 +426,7 @@ fn copy_and_measure(
     let identity =
         serde_json::to_vec(&(root_mode, &manifest)).expect("seed manifest is serializable");
     Ok(SeedReceipt {
-        schema: "harn.workspace-seed.v1",
+        schema: SeedSchema::V1,
         sha256: hex::encode(Sha256::digest(&identity)),
         files,
         entries: manifest.len(),
@@ -447,3 +457,6 @@ fn permission_mode(permissions: &Permissions) -> u32 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod persistent_tests;

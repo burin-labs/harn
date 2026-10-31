@@ -33,6 +33,10 @@ use crate::testbench::tape::{
 /// `run.tape.cas/` beside it.
 pub const TAPE_FILE_NAME: &str = "run.tape";
 
+#[path = "run_tape_summary.rs"]
+mod summary;
+pub use summary::{summarize_run_tape, RecordedModelCall, RecordedToolCall, RunTapeSummary};
+
 /// How much of a run the tape keeps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -644,12 +648,12 @@ pub struct BranchPlan {
     pub state_root: PathBuf,
     /// The host's durable roots for this execution, remapped into `state_root`.
     pub host_state_roots: Vec<PathBuf>,
-    /// Literal source edits applied only after the recorded model prefix.
+    /// Literal source edits, each with explicit origin or mid-run activation.
     pub prompt_edits: Vec<PromptSourceEdit>,
 }
 
 /// The first point where a branch's prefix stopped matching its recording.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BranchDivergence {
     /// 1-based model call: the one the prefix was about to serve, or for a
     /// tool call the one that requested it.
@@ -659,7 +663,7 @@ pub struct BranchDivergence {
 }
 
 /// Progress of the active branch, for hosts and receipts.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BranchReport {
     /// Source edits prepared for rendering; this is not model-request attribution.
     pub prompt_edits: Vec<PromptEditReport>,
@@ -826,9 +830,8 @@ pub fn branch_report() -> Option<BranchReport> {
     current_branch().map(|branch| branch.state().report.clone())
 }
 
-/// Load a tape and arm branch replay for this process.
-pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
-    let tape = plan.tape;
+/// Redaction preserves displayable evidence, not exact replay bytes or offsets.
+pub(super) fn require_unredacted_branch_payloads(tape: &EventTape) -> Result<(), String> {
     if tape
         .records
         .iter()
@@ -838,6 +841,29 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             "this tape contains redacted payloads and cannot reproduce an exact prefix".to_string(),
         );
     }
+    Ok(())
+}
+
+/// Load a tape and arm branch replay for this process.
+pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
+    start_branch_with_sources(plan, Vec::new())
+}
+
+/// A retained source package restored outside the branch's editable workspace.
+#[derive(Clone, Debug)]
+pub struct ReplaySourceRoot {
+    pub recorded: PathBuf,
+    pub restored: PathBuf,
+}
+
+/// Replay with retained source packages. The host grants these roots read-only;
+/// Harn preserves their recorded prompt identities and redirects file reads.
+pub fn start_branch_with_sources(
+    plan: BranchPlan,
+    source_roots: Vec<ReplaySourceRoot>,
+) -> Result<BranchGuard, String> {
+    let tape = plan.tape;
+    require_unredacted_branch_payloads(&tape)?;
     let k = plan.live_after_calls;
     if tape.header.run.is_some()
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
@@ -990,10 +1016,19 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     if !workspace_root.is_dir() {
         return Err("branch workspace must be a directory".to_string());
     }
+    let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
-        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits)?;
-    let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
+        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
+    let trees: Vec<PathBuf> = protected
+        .iter()
+        .map(|(tree, _)| tree.clone())
+        .chain(
+            source_roots
+                .iter()
+                .flat_map(|root| [root.recorded.clone(), root.restored.clone()]),
+        )
+        .collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
         prompt_edits,
@@ -1019,6 +1054,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 .run
                 .as_ref()
                 .and_then(|run| run.workspace_root.clone()),
+            source_roots,
         ),
     })
 }
@@ -1438,7 +1474,11 @@ pub use crate::llm::agent_host_primitives::tool_tape::taped_command_run;
 #[path = "run_tape_prompt_edits.rs"]
 mod prompt_edits;
 pub(crate) use prompt_edits::prepare as prepare_prompt_source;
-pub use prompt_edits::{PromptEditReport, PromptSourceEdit};
+pub use prompt_edits::{PromptEditActivation, PromptEditReport, PromptSourceEdit};
+
+#[path = "run_tape_prompt_plan.rs"]
+mod prompt_plan;
+pub use prompt_plan::{plan_prompt_branch, PromptBranchPoint};
 
 #[path = "run_tape_overlap.rs"]
 mod overlap;
