@@ -2828,6 +2828,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check CI latency policy
         uses: burin-labs/.github/.github/actions/ci-latency-policy@c065999bbb5411e64fd154896a45b5e192310114
         with:
