@@ -985,23 +985,7 @@ fn provider_io_disposition_covers_cli_exhaustion_composition_and_scope_restorati
 async fn public_provider_io_disposition_reaches_dispatch_without_consuming_replay() {
     use crate::llm::fake::{fake_llm_captured_calls, install_fake_llm_script, FakeLlmScript};
     let _fake = install_fake_llm_script(FakeLlmScript::new());
-    let source = r#"
-fn main(harness: Harness) {
-  const receipt = harness.llm.mock_load_jsonl("""{"schemaVersion":1,"strictScopes":true}
-{"id":"only","scope":"default","consume":"once","text":"ONLY"}
-""")
-  harness.stdio.println("${receipt.provider_io.cli_replay}|${receipt.provider_io.builtin_replay}")
-  for n in [1, 2] {
-    const d = harness.llm.provider_io_disposition()
-    harness.stdio.println("${d.provider_io}|${d.source}")
-  }
-  const r = harness.llm.call("first", nil, {provider: "fake", model: "no-live-script"})
-  harness.stdio.println(r.text)
-  const d = harness.llm.provider_io_disposition()
-  harness.stdio.println("${d.provider_io}|${d.source}")
-  harness.llm.call("exhausted", nil, {provider: "mc-unsupported-sentinel", model: "no-network"})
-}
-"#;
+    let source = include_str!("testdata/provider_io_strict_replay.harn");
     let chunk = crate::compile_source(source).expect("compile public disposition call");
     let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
@@ -1035,19 +1019,7 @@ async fn public_provider_io_disposition_does_not_certify_legacy_builtin_exhausti
         FakeLlmEvent::Token("LIVE".into()),
         FakeLlmEvent::Done(FakeStopReason::EndTurn),
     ])));
-    let source = r#"
-fn main(harness: Harness) {
-  const receipt = harness.llm.mock_load_jsonl("""{"text":"LEGACY"}
-""")
-  harness.stdio.println("${receipt.provider_io.cli_replay}|${receipt.provider_io.builtin_replay}")
-  for n in [1, 2] {
-    const d = harness.llm.provider_io_disposition()
-    harness.stdio.println("${d.provider_io}|${d.source}")
-    const r = harness.llm.call("turn ${n}", nil, {provider: "fake", model: "fake-live"})
-    harness.stdio.println(r.text)
-  }
-}
-"#;
+    let source = include_str!("testdata/provider_io_legacy_handoff.harn");
     let chunk = crate::compile_source(source).expect("compile public legacy disposition call");
     let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
@@ -1084,26 +1056,7 @@ async fn public_provider_io_composition_blocks_dispatch_after_cli_prefix_handoff
         )
         .expect("CLI prefix fixture"),
     );
-    let source = r#"
-fn main(harness: Harness) {
-  harness.llm.mock_push_scope()
-  harness.llm.mock_load_jsonl("""{"schemaVersion":1,"strictScopes":true}
-{"id":"permanent","scope":"default","consume":"sticky","text":"BUILTIN"}
-""")
-  for n in [1, 2, 3] {
-    const d = harness.llm.provider_io_disposition()
-    harness.stdio.println("${d.provider_io}|${d.source}")
-    const provider = if n == 3 { "mc-unsupported-sentinel" } else { "fake" }
-    const r = harness.llm.call("turn ${n}", nil, {provider: provider, model: "protected-never-live"})
-    harness.stdio.println(r.text)
-  }
-  harness.llm.mock_pop_scope()
-  const d = harness.llm.provider_io_disposition()
-  harness.stdio.println("${d.provider_io}|${d.source}")
-  const live = harness.llm.call("outside", nil, {provider: "fake", model: "outside-live"})
-  harness.stdio.println(live.text)
-}
-"#;
+    let source = include_str!("testdata/provider_io_composition.harn");
     let chunk = crate::compile_source(source).expect("compile public composition");
     let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
