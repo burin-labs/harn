@@ -253,7 +253,15 @@ fn a_body_local_seed_refuses_a_shadowing_or_unbound_spelling_in_its_scope() {
             source: "export function outer() {\n  const helper = () => 3;\n  enum E { helper = 2, double = helper * 2 }\n  return helper() + E.double;\n}\n",
             line: 2,
             kind: "Function",
-            expected: Refused("unresolved binding"),
+            expected: Refused("declares a member of that name"),
+        },
+        // The same member with a quoted name.
+        Case {
+            path: "main.ts",
+            source: "export function outer() {\n  const helper = () => 3;\n  enum E { 'helper' = 2, double = helper * 2 }\n  return helper() + E.double;\n}\n",
+            line: 2,
+            kind: "Function",
+            expected: Refused("declares a member of that name"),
         },
         // A macro defined outside the scope expands to the seed at the call site.
         Case {

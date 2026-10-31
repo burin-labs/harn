@@ -520,6 +520,11 @@ impl Lexical<'_> {
         }
         // A user macro's expansion resolves its names at the call site, so a
         // macro defined elsewhere can name the seed from inside the scope.
+        if script_enum_member(self.region, source, name) {
+            return Err(format!(
+                "an enum in the scope of `{name}` in {path} declares a member of that name"
+            ));
+        }
         if language == Language::Rust {
             if rust_user_macro_call(self.region, source) {
                 return Err(format!(
@@ -559,6 +564,35 @@ impl Lexical<'_> {
         }
         Ok(kept)
     }
+}
+
+/// A TypeScript enum member spelled `name`, bare or quoted. Inside the enum
+/// body an unqualified `name` reads that member, not the seed.
+fn script_enum_member(region: Node<'_>, source: &str, name: &str) -> bool {
+    let mut stack = vec![region];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "enum_body" {
+            let mut cursor = node.walk();
+            let members: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+            if members.into_iter().any(|member| {
+                let label = if member.kind() == "enum_assignment" {
+                    member
+                        .child_by_field_name("name")
+                        .or_else(|| member.named_child(0))
+                        .unwrap_or(member)
+                } else {
+                    member
+                };
+                let text = source.get(label.byte_range()).unwrap_or_default();
+                text.trim_matches(|c| matches!(c, '\'' | '"' | '`')) == name
+            }) {
+                return true;
+            }
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+    }
+    false
 }
 
 /// A macro call in `region` other than an itemless `std` macro, including one

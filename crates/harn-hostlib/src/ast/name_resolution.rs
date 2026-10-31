@@ -482,6 +482,9 @@ fn rust_enclosing_attributes_all(
 /// call-site `let` that sibling code sees; one nested in an expression expands
 /// to that expression. Opaque attributes may rewrite their item; conditional
 /// attributes separately constrain whether a declaration is present.
+///
+/// Known gap: an expression-position user macro, possibly from a dependency,
+/// can still name a binding at its call site; body-local renames refuse it.
 fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
     match node.kind() {
         "macro_invocation" => {
