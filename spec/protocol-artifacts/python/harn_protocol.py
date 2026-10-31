@@ -335,6 +335,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "parse_dropped",
     "generic_throw",
     "managed_spend_paused",
+    "managed_allowance_unavailable",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "artifact",
@@ -727,6 +728,7 @@ class AgentTerminalClass(str, Enum):
     PARSE_DROPPED = "parse_dropped"
     GENERIC_THROW = "generic_throw"
     MANAGED_SPEND_PAUSED = "managed_spend_paused"
+    MANAGED_ALLOWANCE_UNAVAILABLE = "managed_allowance_unavailable"
 
 
 class AgentTerminalKind(str, Enum):
@@ -800,6 +802,7 @@ class LlmErrorReason(str, Enum):
     UNKNOWN = "unknown"
     POLICY_DENIED = "policy_denied"
     MANAGED_SPEND_PAUSED = "managed_spend_paused"
+    MANAGED_ALLOWANCE_UNAVAILABLE = "managed_allowance_unavailable"
 
 
 class ACPPromptErrorSchema(str, Enum):

@@ -2509,6 +2509,8 @@ pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_p
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
 pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
+pub const AGENT_TERMINAL_CLASS_MANAGED_ALLOWANCE_UNAVAILABLE: &str =
+    "managed_allowance_unavailable";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
@@ -2526,6 +2528,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "parse_dropped",
     "generic_throw",
     "managed_spend_paused",
+    "managed_allowance_unavailable",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2587,6 +2590,7 @@ pub enum HarnAgentTerminalClass {
     ParseDropped,
     GenericThrow,
     ManagedSpendPaused,
+    ManagedAllowanceUnavailable,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2609,6 +2613,7 @@ impl HarnAgentTerminalClass {
         Self::ParseDropped,
         Self::GenericThrow,
         Self::ManagedSpendPaused,
+        Self::ManagedAllowanceUnavailable,
     ];
 
     /// The JSON wire string for this value.
@@ -2628,6 +2633,7 @@ impl HarnAgentTerminalClass {
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
             Self::ManagedSpendPaused => "managed_spend_paused",
+            Self::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2649,6 +2655,7 @@ impl HarnAgentTerminalClass {
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
             "managed_spend_paused" => Self::ManagedSpendPaused,
+            "managed_allowance_unavailable" => Self::ManagedAllowanceUnavailable,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -3075,6 +3082,7 @@ pub enum HarnLlmErrorReason {
     Unknown,
     PolicyDenied,
     ManagedSpendPaused,
+    ManagedAllowanceUnavailable,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -3099,6 +3107,7 @@ impl HarnLlmErrorReason {
         Self::Unknown,
         Self::PolicyDenied,
         Self::ManagedSpendPaused,
+        Self::ManagedAllowanceUnavailable,
     ];
 
     /// The JSON wire string for this value.
@@ -3120,6 +3129,7 @@ impl HarnLlmErrorReason {
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
             Self::ManagedSpendPaused => "managed_spend_paused",
+            Self::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3143,6 +3153,7 @@ impl HarnLlmErrorReason {
             "unknown" => Self::Unknown,
             "policy_denied" => Self::PolicyDenied,
             "managed_spend_paused" => Self::ManagedSpendPaused,
+            "managed_allowance_unavailable" => Self::ManagedAllowanceUnavailable,
             other => Self::Unrecognized(other.to_string()),
         }
     }

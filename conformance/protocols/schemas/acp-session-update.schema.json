@@ -334,7 +334,8 @@
             "agent_loop_protocol_failure",
             "parse_dropped",
             "generic_throw",
-            "managed_spend_paused"
+            "managed_spend_paused",
+            "managed_allowance_unavailable"
           ]
         },
         "message": { "type": "string" },
@@ -394,6 +395,8 @@
           ]
         },
         "category": { "type": "string" },
+        "message": { "type": "string" },
+        "detail": { "type": "string" },
         "kind": { "type": "string" },
         "reason": { "type": "string" },
         "origin": { "type": "string" },

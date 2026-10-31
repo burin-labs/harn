@@ -49,10 +49,12 @@ pub enum AgentTerminalClass {
     GenericThrow,
     /// Managed inference is paused by the service spending policy.
     ManagedSpendPaused,
+    /// The managed service cannot provide the caller's included allowance.
+    ManagedAllowanceUnavailable,
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
@@ -67,6 +69,7 @@ impl AgentTerminalClass {
         Self::ParseDropped,
         Self::GenericThrow,
         Self::ManagedSpendPaused,
+        Self::ManagedAllowanceUnavailable,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -85,6 +88,7 @@ impl AgentTerminalClass {
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
             Self::ManagedSpendPaused => "managed_spend_paused",
+            Self::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
         }
     }
 
@@ -97,6 +101,7 @@ impl AgentTerminalClass {
                 | Self::ProviderContentPolicy
                 | Self::ProviderBilling
                 | Self::ManagedSpendPaused
+                | Self::ManagedAllowanceUnavailable
                 | Self::RateLimited
                 | Self::Timeout
         )
@@ -118,6 +123,7 @@ impl AgentTerminalClass {
             "parse_dropped" => Some(Self::ParseDropped),
             "generic_throw" => Some(Self::GenericThrow),
             "managed_spend_paused" => Some(Self::ManagedSpendPaused),
+            "managed_allowance_unavailable" => Some(Self::ManagedAllowanceUnavailable),
             _ => None,
         }
     }
@@ -231,6 +237,11 @@ fn agent_terminal_class_from_structured_error(
     }
     if error.get("reason").and_then(serde_json::Value::as_str) == Some("managed_spend_paused") {
         return Some(AgentTerminalClass::ManagedSpendPaused);
+    }
+    if error.get("reason").and_then(serde_json::Value::as_str)
+        == Some("managed_allowance_unavailable")
+    {
+        return Some(AgentTerminalClass::ManagedAllowanceUnavailable);
     }
     // Before any `category`: a billing stop arrives as a 429, and producers
     // that predate its own category still label it `rate_limit`. The reason is
@@ -568,6 +579,10 @@ mod tests {
             (
                 AgentTerminalClass::ManagedSpendPaused,
                 "managed_spend_paused",
+            ),
+            (
+                AgentTerminalClass::ManagedAllowanceUnavailable,
+                "managed_allowance_unavailable",
             ),
         ];
         for (class, wire) in pairs {

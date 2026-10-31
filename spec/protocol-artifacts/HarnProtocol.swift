@@ -1741,6 +1741,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let parseDropped = Self(rawValue: "parse_dropped")
     public static let genericThrow = Self(rawValue: "generic_throw")
     public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
+    public static let managedAllowanceUnavailable = Self(rawValue: "managed_allowance_unavailable")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -1759,6 +1760,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "parse_dropped",
         "generic_throw",
         "managed_spend_paused",
+        "managed_allowance_unavailable",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -2021,6 +2023,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let unknown = Self(rawValue: "unknown")
     public static let policyDenied = Self(rawValue: "policy_denied")
     public static let managedSpendPaused = Self(rawValue: "managed_spend_paused")
+    public static let managedAllowanceUnavailable = Self(rawValue: "managed_allowance_unavailable")
 
     /// Every value this binding was generated from, in wire order. A value
     /// outside it is valid and preserved; it is simply not listed here.
@@ -2041,6 +2044,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "unknown",
         "policy_denied",
         "managed_spend_paused",
+        "managed_allowance_unavailable",
     ].map { Self(rawValue: $0) }
 
     /// Whether this value is part of the vocabulary this binding was generated from.
@@ -2060,6 +2064,8 @@ public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
 public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    public var message: String?
+    public var detail: String?
     /// Wire string for `HarnLlmErrorCategory`. Decode with
     /// `HarnLlmErrorCategory(rawValue:)`; `nil` means the producing Harn used
     /// a value this binding predates.
