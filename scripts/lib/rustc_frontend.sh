@@ -78,3 +78,4 @@ harn_rustc_frontend_install_wrapper() {
   done
   printf '%s\n' "$dest/rustc_frontend_wrapper.sh"
 }
+# A/B measurement branch: default 8 thread(s).
