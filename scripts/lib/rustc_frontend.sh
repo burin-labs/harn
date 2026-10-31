@@ -17,7 +17,7 @@
 harn_rustc_frontend_threads() {
   threads="${HARN_RUSTC_FRONTEND_THREADS:-}"
   if [ -z "$threads" ]; then
-    threads=8
+    threads=1
     if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] && [ "$(uname -s)" = Darwin ]; then
       cores="$(sysctl -n hw.logicalcpu 2>/dev/null)" || cores=""
       memory="$(sysctl -n hw.memsize 2>/dev/null)" || memory=""
@@ -78,3 +78,4 @@ harn_rustc_frontend_install_wrapper() {
   done
   printf '%s\n' "$dest/rustc_frontend_wrapper.sh"
 }
+# A/B measurement branch: default 1 thread(s).
