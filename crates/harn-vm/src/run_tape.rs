@@ -826,9 +826,8 @@ pub fn branch_report() -> Option<BranchReport> {
     current_branch().map(|branch| branch.state().report.clone())
 }
 
-/// Load a tape and arm branch replay for this process.
-pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
-    let tape = plan.tape;
+/// Redaction preserves displayable evidence, not exact replay bytes or offsets.
+pub(super) fn require_unredacted_branch_payloads(tape: &EventTape) -> Result<(), String> {
     if tape
         .records
         .iter()
@@ -838,6 +837,13 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
             "this tape contains redacted payloads and cannot reproduce an exact prefix".to_string(),
         );
     }
+    Ok(())
+}
+
+/// Load a tape and arm branch replay for this process.
+pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
+    let tape = plan.tape;
+    require_unredacted_branch_payloads(&tape)?;
     let k = plan.live_after_calls;
     if tape.header.run.is_some()
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION

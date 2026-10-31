@@ -52,6 +52,9 @@ pub(super) fn validated_sources(
     tape: &EventTape,
     edits: &[PromptSourceEdit],
 ) -> Result<Sources, String> {
+    // Stored render text may have different bytes and length from its spans.
+    // Apply the same eligibility rule as replay before reading source proofs.
+    super::require_unredacted_branch_payloads(tape)?;
     let mut sources = BTreeMap::new();
     let mut proofs = BTreeSet::new();
     for record in &tape.records {
