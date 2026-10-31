@@ -46,7 +46,7 @@ jobs:
       || (github.event_name == 'workflow_run'
       && github.event.workflow_run.event == 'pull_request'
       && github.event.workflow_run.head_repository.full_name == github.repository
-      && github.event.workflow_run.pull_requests[0].base.repo.full_name == github.repository
+      && format('{0}', github.event.workflow_run.pull_requests[0].base.repo.id) == github.repository_id
       && github.event.workflow_run.pull_requests[0].base.ref == 'main'
       && format('{0}', github.event.workflow_run.pull_requests[0].number) == vars.HARN_SMART_SHIP_PR))
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@3d3aba7995a5f4749a1a131204445f6cb438b00a

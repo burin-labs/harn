@@ -62,6 +62,7 @@ function pullRequestContext({
   return {
     github: {
       repository,
+      repository_id: "1192706077",
       ref: "refs/heads/topic",
       event_name: eventName,
       event: {
@@ -149,17 +150,44 @@ test("the shipped caller dispatches only the selected PR from main", () => {
   );
 });
 
-test("the shipped caller accepts only the selected owned pull request workflow run", () => {
-  const context = pullRequestContext({ eventName: "workflow_run" });
+test("the shipped caller admits the actual selected owned pull request workflow run", () => {
+  const context = pullRequestContext({
+    eventName: "workflow_run",
+    number: 10885,
+    selected: "10885",
+  });
   context.github.event = {
     workflow_run: {
       event: "pull_request",
       head_repository: { full_name: repository },
       pull_requests: [
-        { number: 42, base: { repo: { full_name: repository }, ref: "main" } },
+        {
+          number: 10885,
+          base: {
+            repo: {
+              id: 1192706077,
+              name: "harn",
+              url: "https://api.github.com/repos/burin-labs/harn",
+            },
+            ref: "main",
+          },
+        },
       ],
     },
   };
+  assert.equal(
+    context.github.event.workflow_run.pull_requests[0].base.repo.full_name,
+    undefined,
+    "the actual workflow_run base repository shape has no full_name",
+  );
+  assert.equal(
+    evaluate(
+      "github.event.workflow_run.pull_requests[0].base.repo.full_name == github.repository",
+      context,
+    ).coerceString(),
+    "false",
+    "the previous admission check rejects the actual workflow_run payload",
+  );
   assert.equal(admits(context), true);
   assert.equal(
     admits({
@@ -201,8 +229,32 @@ test("the shipped caller accepts only the selected owned pull request workflow r
             ...context.github.event.workflow_run,
             pull_requests: [
               {
-                number: 43,
-                base: { repo: { full_name: repository }, ref: "main" },
+                ...context.github.event.workflow_run.pull_requests[0],
+                base: {
+                  ...context.github.event.workflow_run.pull_requests[0].base,
+                  repo: { id: 1, name: "harn", url: "https://example.test" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    }),
+    false,
+    "a foreign base repository id must be refused",
+  );
+  assert.equal(
+    admits({
+      ...context,
+      github: {
+        ...context.github,
+        event: {
+          workflow_run: {
+            ...context.github.event.workflow_run,
+            pull_requests: [
+              {
+                ...context.github.event.workflow_run.pull_requests[0],
+                number: 10886,
               },
             ],
           },
@@ -221,8 +273,11 @@ test("the shipped caller accepts only the selected owned pull request workflow r
             ...context.github.event.workflow_run,
             pull_requests: [
               {
-                number: 42,
-                base: { repo: { full_name: repository }, ref: "release" },
+                ...context.github.event.workflow_run.pull_requests[0],
+                base: {
+                  ...context.github.event.workflow_run.pull_requests[0].base,
+                  ref: "release",
+                },
               },
             ],
           },
@@ -230,6 +285,22 @@ test("the shipped caller accepts only the selected owned pull request workflow r
       },
     }),
     false,
+  );
+  assert.equal(
+    admits({
+      ...context,
+      github: {
+        ...context.github,
+        event: {
+          workflow_run: {
+            ...context.github.event.workflow_run,
+            pull_requests: [],
+          },
+        },
+      },
+    }),
+    false,
+    "a missing associated pull request must be refused",
   );
 });
 
