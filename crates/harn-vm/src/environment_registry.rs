@@ -268,7 +268,9 @@ fn consumer_for(name: &str) -> EnvironmentConsumer {
         "HARN_CI_",
         "HARN_CODEGEN_",
         "HARN_DEV_",
+        "HARN_GC_",
         "HARN_RELEASE_",
+        "HARN_TARGET_GC_",
     ]
     .iter()
     .any(|prefix| name.starts_with(prefix))
@@ -812,6 +814,39 @@ mod tests {
              environment_registry_names.txt:\n{}",
             missing.into_iter().collect::<Vec<_>>().join("\n")
         );
+    }
+
+    #[test]
+    fn target_cache_collector_names_are_registered() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let mut names = std::collections::BTreeSet::new();
+        for script in [
+            "scripts/prune_stale_targets.sh",
+            "scripts/target_gc_maintenance.sh",
+        ] {
+            let source = std::fs::read_to_string(root.join(script)).expect("read target collector");
+            names.extend(
+                source
+                    .split(|c: char| !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_')
+                    .filter(|name| {
+                        (name.starts_with("HARN_TARGET_GC_") || name.starts_with("HARN_GC_"))
+                            && !name.ends_with('_')
+                    })
+                    .map(str::to_owned),
+            );
+        }
+        assert!(
+            names.len() >= 12,
+            "target collector name census is incomplete"
+        );
+        for name in names {
+            let spec = variable_spec(&name)
+                .unwrap_or_else(|| panic!("unregistered collector name {name}"));
+            assert_eq!(spec.consumer, EnvironmentConsumer::BuildTooling, "{name}");
+        }
     }
 
     /// Registered names that have no repository-owned reference, and why they must
