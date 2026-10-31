@@ -1,6 +1,22 @@
+import { command_run } from "std/command"
+import { read_yaml } from "std/fs"
 import { post_merge_tier_errors } from "../ci_cache_policy/post_merge_tier"
 
 const GUARD = "needs.changes.outputs.post_merge_tier != 'true'"
+
+pipeline test_manual_main_ci_preserves_private_consumer_admission(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert(ci.on.keys().contains("workflow_dispatch"))
+  const condition = ci.jobs["consumer-check"].if
+  const fixture = harness.fs.read_text("./fixtures/main-ci-consumer-condition.cjs")
+  const result = command_run(harness.tools, ["node", "-e", fixture, condition])
+  assert(result.success, result.stderr)
+  const widened = condition.replace("github.event_name == 'pull_request'", "true")
+  assert(widened != condition)
+  const negative = command_run(harness.tools, ["node", "-e", fixture, widened])
+  assert(!negative.success)
+  assert(negative.stderr.contains("manual CI dispatched a private consumer"))
+}
 
 fn gha(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -14,7 +30,7 @@ fn status_command() -> string {
     + "  \"sandbox failed\" \\\n"
     + "  test \"$RUST\" != \"true\" -o \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$harn_audit_result\" \"harn failed\" test \"$RUST\" != \"true\"\n\n"
-    + "require_result \"$macos_result\" \"macos failed\" test \"$EVENT_NAME\" != \"push\"\n\n"
+    + "require_result \"$macos_result\" \"macos failed\" test \"$MAIN_FULL_SUITE\" != \"true\"\n\n"
     + "require_result \"$package_audit_result\" \"package failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$stack_frames_result\" \"stack frames failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"\n\n"
     + "require_result \"$source_length_result\" \"lengths failed\" [ \"$RUST\" != \"true\" ]\n"
@@ -25,7 +41,10 @@ fn workflows() {
     "ci.yml": {
       jobs: {
         changes: {
-          outputs: {post_merge_tier: gha("steps.post_merge_tier.outputs.active")},
+          outputs: {
+            post_merge_tier: gha("steps.post_merge_tier.outputs.active"),
+            main_full_suite: gha("steps.post_merge_tier.outputs.main_full_suite"),
+          },
           steps: [
             {uses: "actions/checkout@fixture"},
             {
@@ -52,15 +71,16 @@ fn workflows() {
         },
         macos: {
           needs: ["changes", "macos-lint"],
-          if: gha("always() && github.event_name == 'push'"),
+          if: gha("always() && needs.changes.outputs.main_full_suite == 'true'"),
         },
-        "macos-lint": {needs: ["changes"], if: "github.event_name == 'push'"},
+        "macos-lint": {needs: ["changes"], if: "needs.changes.outputs.main_full_suite == 'true'"},
         "ci-status": {
           steps: [
             {
               name: "Verify required CI jobs",
               env: {
                 EVENT_NAME: gha("github.event_name"),
+                MAIN_FULL_SUITE: gha("needs.changes.outputs.main_full_suite"),
                 POST_MERGE_TIER_ACTIVE: gha("needs.changes.outputs.post_merge_tier"),
                 WINDOWS_CROSS_REQUIRED: gha(
                   "(github.event_name == 'merge_group' && " + GUARD + ")",
@@ -254,7 +274,7 @@ pipeline test_macos_runs_on_main_pushes_only(harness: Harness, task: unknown) {
         {
           ...step,
           run: step.run.replace(
-            "\"macos failed\" test \"$EVENT_NAME\" != \"push\"",
+            "\"macos failed\" test \"$MAIN_FULL_SUITE\" != \"true\"",
             "\"macos failed\" test \"$POST_MERGE_TIER_ACTIVE\" = \"true\"",
           ),
         },

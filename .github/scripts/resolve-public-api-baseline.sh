@@ -25,6 +25,7 @@ max_deepen=${PUBLIC_API_BASELINE_MAX_DEEPEN:-512}
 
 case "${EVENT:-}" in
   pull_request) base=$(git rev-parse HEAD^1) ;;
+  workflow_dispatch) base=$(git rev-parse HEAD^1) ;;
   merge_group) base=${MERGE_GROUP_BASE_SHA:-} ;;
   *) base=${PUSH_BEFORE_SHA:-} ;;
 esac
