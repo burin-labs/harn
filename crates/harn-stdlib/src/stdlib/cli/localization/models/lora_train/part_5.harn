@@ -168,7 +168,7 @@ pub fn message_27(locale: string, values: list<string>) -> string {
       + (values[3] ?? "")
   }
   if locale == "ru" {
-    return "Обучить LoRA " + (values[0] ?? "") + " на " + (values[1] ?? "") + " для "
+    return "Обучить LoRA " + (values[0] ?? "") + " для " + (values[1] ?? "") + " на "
       + (values[2] ?? "")
       + " через "
       + (values[3] ?? "")

@@ -30,7 +30,7 @@ pub fn message_15(locale: string, values: list<string>) -> string {
     return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  promotion id: " + (values[0] ?? "")
+    return "  идентификатор продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升 ID: " + (values[0] ?? "")
@@ -111,7 +111,8 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     return "  padrões de procedência: split=" + (values[0] ?? "") + " license=" + (values[1] ?? "")
   }
   if locale == "ru" {
-    return "  provenance defaults: split=" + (values[0] ?? "") + " license=" + (values[1] ?? "")
+    return "  значения provenance по умолчанию: split=" + (values[0] ?? "") + " license="
+      + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  溯源默认值: split=" + (values[0] ?? "") + " license=" + (values[1] ?? "")

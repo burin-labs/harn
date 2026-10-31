@@ -147,7 +147,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return "  sha256 do recibo: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  receipt sha256: " + (values[0] ?? "")
+    return "  sha256 квитанции: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  回执 sha256: " + (values[0] ?? "")

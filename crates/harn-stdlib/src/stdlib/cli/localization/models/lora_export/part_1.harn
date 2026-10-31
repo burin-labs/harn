@@ -30,7 +30,7 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     return "  máscara do assistant do contrato: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  сужение маски ассистента: " + (values[0] ?? "")
+    return "  маска ассистента контракта: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  合约助手掩码：" + (values[0] ?? "")

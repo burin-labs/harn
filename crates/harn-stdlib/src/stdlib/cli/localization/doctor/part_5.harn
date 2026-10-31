@@ -109,7 +109,7 @@ pub fn message_26(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + "bloqueado: " + (values[1] ?? "") + "\n"
   }
   if locale == "ru" {
-    return (values[0] ?? "") + "blocked: " + (values[1] ?? "") + "\n"
+    return (values[0] ?? "") + "заблокировано: " + (values[1] ?? "") + "\n"
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "已阻止：" + (values[1] ?? "") + "\n"

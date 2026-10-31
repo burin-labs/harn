@@ -175,7 +175,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + " rota(s) declaram a operação " + (values[1] ?? "")
   }
   if locale == "ru" {
-    return (values[0] ?? "") + " маршрут(ов) объявляют операцию " + (values[1] ?? "")
+    return (values[0] ?? "") + " маршрутов объявляют операцию " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + " 路由声明了 " + (values[1] ?? "") + " 操作"

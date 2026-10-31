@@ -69,7 +69,7 @@ pub fn message_21(locale: string, values: list<string>) -> string {
     return "mesmo nome de arquivo"
   }
   if locale == "ru" {
-    return "тот же базовый файл"
+    return "то же базовое имя"
   }
   if locale == "zh-Hans" {
     return "文件名相同"
@@ -186,7 +186,7 @@ pub fn message_24(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "ru" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " через " + (values[2] ?? "")
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")

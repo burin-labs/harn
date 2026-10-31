@@ -69,7 +69,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     return "  harn doctor              # verificar o ambiente local"
   }
   if locale == "ru" {
-    return "  harn doctor              # verify the local environment"
+    return "  harn doctor              # проверить локальное окружение"
   }
   if locale == "zh-Hans" {
     return "  harn doctor              # 验证本地环境"

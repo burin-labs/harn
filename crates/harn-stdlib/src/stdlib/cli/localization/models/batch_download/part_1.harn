@@ -30,7 +30,7 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     return "  sha256 do recibo: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  receipt sha256: " + (values[0] ?? "")
+    return "  sha256 квитанции: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  回执 sha256: " + (values[0] ?? "")
@@ -147,7 +147,7 @@ pub fn message_8(locale: string, values: list<string>) -> string {
     return "Recibo de resultados em lote gravado: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "Квитанция результатов batch записана: " + (values[0] ?? "")
+    return "Квитанция результатов пакета записана: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "已写入批量结果收据：" + (values[0] ?? "")

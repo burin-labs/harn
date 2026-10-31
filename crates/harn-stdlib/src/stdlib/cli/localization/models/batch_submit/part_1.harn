@@ -30,7 +30,7 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     return "Recibo de envio em lote gravado: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "Квитанция отправки batch записана: " + (values[0] ?? "")
+    return "Квитанция отправки пакета записана: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "已写入批量提交收据：" + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_6(locale: string, values: list<string>) -> string {
     return "Envio em lote de execução simulada gravado: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "Черновой запуск отправки batch записан: " + (values[0] ?? "")
+    return "Результат пробной отправки пакета записан: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "已写入批量提交演练运行：" + (values[0] ?? "")
@@ -108,7 +108,7 @@ pub fn message_7(locale: string, values: list<string>) -> string {
     return "Falha no envio em lote"
   }
   if locale == "ru" {
-    return "Отправка batch не удалась"
+    return "Отправка пакета не удалась"
   }
   if locale == "zh-Hans" {
     return "批量提交失败"

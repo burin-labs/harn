@@ -30,7 +30,7 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  promotion id: " + (values[0] ?? "")
+    return "  идентификатор продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升 ID: " + (values[0] ?? "")

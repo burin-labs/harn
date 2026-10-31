@@ -69,7 +69,7 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "  max LoRA rank: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  max LoRA rank: " + (values[0] ?? "")
+    return "  максимальный ранг LoRA: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  最大 LoRA 秩: " + (values[0] ?? "")

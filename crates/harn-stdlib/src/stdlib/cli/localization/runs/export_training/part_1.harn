@@ -212,7 +212,7 @@ pub fn message_9(locale: string, values: list<string>) -> string {
     return "  gravado: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  написал: " + (values[0] ?? "")
+    return "  записано: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  已写入：" + (values[0] ?? "")

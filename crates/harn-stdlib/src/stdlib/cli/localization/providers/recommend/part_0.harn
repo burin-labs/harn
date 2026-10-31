@@ -147,7 +147,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + "fonte: " + (values[1] ?? "") + "\n"
   }
   if locale == "ru" {
-    return (values[0] ?? "") + "source: " + (values[1] ?? "") + "\n"
+    return (values[0] ?? "") + "источник: " + (values[1] ?? "") + "\n"
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "来源：" + (values[1] ?? "") + "\n"
@@ -246,9 +246,9 @@ pub fn message_4(locale: string, values: list<string>) -> string {
       + (values[3] ?? "")
       + " ("
       + (values[4] ?? "")
-      + ", selector "
+      + ", селектор "
       + (values[5] ?? "")
-      + ", tools "
+      + ", инструменты "
       + (values[6] ?? "")
       + ")\n"
   }

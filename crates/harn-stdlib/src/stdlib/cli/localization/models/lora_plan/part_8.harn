@@ -30,7 +30,7 @@ pub fn message_40(locale: string, values: list<string>) -> string {
     return "portões do corpus"
   }
   if locale == "ru" {
-    return "ворота корпуса"
+    return "контрольные проверки корпуса"
   }
   if locale == "zh-Hans" {
     return "语料门控"
