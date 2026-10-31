@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -121,6 +122,7 @@ jobs:
       release_contract: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_contract == 'true' }}
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
+      main_full_suite: ${{ steps.post_merge_tier.outputs.main_full_suite }}
       consumer: ${{ steps.surface_filter.outputs.consumer }}
       pull_request_base: ${{ steps.merged_base.outputs.sha }}
       provider_contract_probe: ${{ steps.surface_filter.outputs.provider_contract_probe }}
@@ -2481,8 +2483,7 @@ jobs:
     if: >-
       ((github.event_name == 'pull_request' || github.event_name == 'merge_group')
       && needs.changes.outputs.post_merge_tier != 'true')
-      || (github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
+      || (needs.changes.outputs.main_full_suite == 'true'
       && needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -2541,7 +2542,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [changes]
-    # Main pushes only. Pull requests and merge groups never wait for macOS:
+    # Main pushes and admitted manual full-suite runs require macOS.
+    # Pull requests and merge groups never wait for macOS:
     # when the full suite was selected this lane was the last job to finish in
     # about a quarter of runs, at 18-27 minutes against a ~16 minute Linux
     # graph. A `#[cfg(target_os = "macos")]` warning that a Linux lane cannot
@@ -2550,7 +2552,7 @@ jobs:
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
-    if: github.event_name == 'push'
+    if: needs.changes.outputs.main_full_suite == 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2667,7 +2669,7 @@ jobs:
   macos:
     name: Rust on macOS (deny-warnings build + lint)
     needs: [changes, macos-lint]
-    if: ${{ always() && github.event_name == 'push' }}
+    if: ${{ always() && needs.changes.outputs.main_full_suite == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -3243,9 +3245,10 @@ jobs:
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
+          MAIN_FULL_SUITE: ${{ needs.changes.outputs.main_full_suite }}
           # Artifact consumers and the aggregate use the same resolved scope.
           RUST_PATHS_SELECTED: ${{ needs.changes.outputs.rust_paths }}
-          WINDOWS_CROSS_REQUIRED: ${{ ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.post_merge_tier != 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true') }}
+          WINDOWS_CROSS_REQUIRED: ${{ ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.post_merge_tier != 'true') || (needs.changes.outputs.main_full_suite == 'true' && needs.changes.outputs.rust == 'true') }}
           # Exactly the `changes` decision: true only on a pull request or
           # merge group whose change the post-merge tier may leave to main.
           # Only a skip is excused by it.
@@ -3485,10 +3488,10 @@ jobs:
             "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
             [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
-          # macOS runs on main pushes only, so only a main push requires it.
+          # The shared admission requires macOS for main full-suite runs.
           macos_result="${{ needs.macos.result }}"
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
-          require_result "$macos_result" "macOS job failed or is missing." test "$EVENT_NAME" != "push"
+          require_result "$macos_result" "macOS job failed or is missing." test "$MAIN_FULL_SUITE" != "true"
 
           # Portal and docs-site jobs are path-gated by `changes`: they run
           # when the frontend/docs surfaces or this workflow change, and skip
