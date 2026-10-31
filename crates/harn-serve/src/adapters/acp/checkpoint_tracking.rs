@@ -82,6 +82,15 @@ impl CheckpointTracking {
         Self(Arc::new(Mutex::new(copy)))
     }
 
+    /// Claim boundary ids an earlier process recorded for this session, so a
+    /// prompt cannot reuse one after a restart.
+    #[cfg(feature = "hostlib")]
+    pub(super) fn adopt(&self, ids: impl IntoIterator<Item = String>) {
+        if let Ok(mut state) = self.0.lock() {
+            state.ids.extend(ids);
+        }
+    }
+
     pub(super) fn close(&self) {
         if let Ok(mut state) = self.0.lock() {
             state.closed = true;
