@@ -25,6 +25,14 @@ impl ApiHostResponder for FixtureHost {
     }
 }
 
+struct Binder(Arc<FixtureHost>);
+
+impl ApiHostResponderBinder for Binder {
+    fn bind(&self, _root: &std::path::Path) -> Result<Arc<dyn ApiHostResponder>, String> {
+        Ok(self.0.clone())
+    }
+}
+
 #[tokio::test]
 async fn submitted_task_reaches_embedder_host_and_missing_responder_fails_closed() {
     let dir = tempfile::tempdir().unwrap();
@@ -43,7 +51,7 @@ async fn submitted_task_reaches_embedder_host_and_missing_responder_fails_closed
         calls: AtomicUsize::new(0),
     });
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned())
-        .with_host_responder(responder.clone());
+        .with_host_responder(Arc::new(Binder(responder.clone())));
     config.workspace_root = dir.path().into();
     let server = ApiServer::new(config);
     let mut events = server.state.events_tx.subscribe();
@@ -79,7 +87,7 @@ async fn responder_does_not_intercept_permissions() {
         calls: AtomicUsize::new(0),
     });
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned())
-        .with_host_responder(responder.clone());
+        .with_host_responder(Arc::new(Binder(responder.clone())));
     config.workspace_root = root.path().into();
     let mut state = ApiServer::new(config).state;
     let (tx, mut rx) = mpsc::unbounded_channel();

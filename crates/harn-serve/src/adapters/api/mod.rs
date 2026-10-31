@@ -53,7 +53,9 @@ mod workspaces;
 const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
 pub const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-10-11";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
-pub use crate::adapters::acp::HostResponder as ApiHostResponder;
+pub use crate::adapters::acp::{
+    HostResponder as ApiHostResponder, HostResponderBinder as ApiHostResponderBinder,
+};
 
 #[derive(Clone, Debug)]
 pub struct ApiHttpServeOptions {
@@ -68,7 +70,7 @@ pub struct ApiServerConfig {
     pub auth_policy: AuthPolicy,
     pub workspace_root: PathBuf,
     default_session_mode: String,
-    host_responder: Option<Arc<dyn ApiHostResponder>>,
+    host_responder: Option<Arc<dyn ApiHostResponderBinder>>,
 }
 
 impl ApiServerConfig {
@@ -89,8 +91,8 @@ impl ApiServerConfig {
         self
     }
 
-    pub fn with_host_responder(mut self, responder: Arc<dyn ApiHostResponder>) -> Self {
-        self.host_responder = Some(responder);
+    pub fn with_host_responder(mut self, binder: Arc<dyn ApiHostResponderBinder>) -> Self {
+        self.host_responder = Some(binder);
         self
     }
 
