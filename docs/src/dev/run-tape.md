@@ -117,6 +117,14 @@ establishes whether an edit improves model behavior.
 
 ## Private trial workspaces
 
+For a pipeline package outside the editable project, retain and restore a separate
+`ReplayWorkspace`. Pass its original and restored roots as `ReplaySourceRoot`
+values to `start_branch_with_sources`, and grant the restored package read-only
+access in the host sandbox. Harn maps filesystem reads and prompt identities
+through these roots. Original package files may be absent. Overlapping roots,
+escaping paths, and changed edited source are refused. Keep both workspace leases
+alive until execution ends, including detached shutdown work.
+
 `harn_hostlib::workspace_checkpoint::ReplayWorkspace` captures a private seed
 and a disposable working copy. `path()` names the same working directory
 after every `restore()`. Stop the previous session and its children before

@@ -12,8 +12,6 @@ pub struct RecordedModelCall {
     pub index: u64,
     pub replayed: bool,
     pub request_digest: String,
-    pub request: Value,
-    pub messages: Vec<Value>,
     pub text: String,
     pub tool_calls: Vec<Value>,
     pub input_tokens: i64,
@@ -59,9 +57,7 @@ pub fn summarize_run_tape(tape: &EventTape, served_calls: u64) -> Result<RunTape
             TapeRecordKind::LlmCall {
                 call_index,
                 request_digest,
-                request,
                 response,
-                messages,
                 ..
             } => {
                 let index = call_index.ok_or("run summary needs numbered model calls")?;
@@ -91,27 +87,10 @@ pub fn summarize_run_tape(tape: &EventTape, served_calls: u64) -> Result<RunTape
                         .zip(cost_usd)
                         .map(|(total, cost)| total + cost);
                 }
-                let messages = messages
-                    .iter()
-                    .map(|payload| {
-                        serde_json::from_slice(&tape.resolve_payload(payload)?)
-                            .map_err(|error| format!("recorded message: {error}"))
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                let request = serde_json::from_slice(
-                    &tape.resolve_payload(
-                        request
-                            .as_ref()
-                            .ok_or("run summary needs full request capture")?,
-                    )?,
-                )
-                .map_err(|error| format!("recorded request: {error}"))?;
                 summary.calls.push(RecordedModelCall {
                     index,
                     replayed,
                     request_digest: request_digest.clone(),
-                    request,
-                    messages,
                     text: result.text,
                     tool_calls: result.tool_calls,
                     input_tokens: result.input_tokens,

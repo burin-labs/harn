@@ -832,6 +832,22 @@ pub fn branch_report() -> Option<BranchReport> {
 
 /// Load a tape and arm branch replay for this process.
 pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
+    start_branch_with_sources(plan, Vec::new())
+}
+
+/// A retained source package restored outside the branch's editable workspace.
+#[derive(Clone, Debug)]
+pub struct ReplaySourceRoot {
+    pub recorded: PathBuf,
+    pub restored: PathBuf,
+}
+
+/// Replay with retained source packages. The host grants these roots read-only;
+/// Harn preserves their recorded prompt identities and redirects file reads.
+pub fn start_branch_with_sources(
+    plan: BranchPlan,
+    source_roots: Vec<ReplaySourceRoot>,
+) -> Result<BranchGuard, String> {
     let tape = plan.tape;
     if tape
         .records
@@ -994,10 +1010,19 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
     if !workspace_root.is_dir() {
         return Err("branch workspace must be a directory".to_string());
     }
+    let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
-        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits)?;
-    let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
+        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
+    let trees: Vec<PathBuf> = protected
+        .iter()
+        .map(|(tree, _)| tree.clone())
+        .chain(
+            source_roots
+                .iter()
+                .flat_map(|root| [root.recorded.clone(), root.restored.clone()]),
+        )
+        .collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
         prompt_edits,
@@ -1023,6 +1048,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
                 .run
                 .as_ref()
                 .and_then(|run| run.workspace_root.clone()),
+            source_roots,
         ),
     })
 }

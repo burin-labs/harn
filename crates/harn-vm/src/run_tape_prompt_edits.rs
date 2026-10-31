@@ -48,6 +48,7 @@ impl PromptEdits {
     pub(super) fn from_tape(
         tape: &EventTape,
         edits: Vec<PromptSourceEdit>,
+        source_roots: &[super::ReplaySourceRoot],
     ) -> Result<(Self, Vec<PromptEditReport>), String> {
         if edits.is_empty() {
             return Ok((Self::default(), Vec::new()));
@@ -66,7 +67,7 @@ impl PromptEdits {
             });
             planned
                 .by_uri
-                .entry(normalize_uri(tape, &edit.template_uri))
+                .entry(normalize_uri(tape, source_roots, &edit.template_uri))
                 .or_default()
                 .push((index, edit));
         }
@@ -128,7 +129,14 @@ impl PromptEdits {
     }
 }
 
-fn normalize_uri(tape: &EventTape, uri: &str) -> String {
+fn normalize_uri(tape: &EventTape, source_roots: &[super::ReplaySourceRoot], uri: &str) -> String {
+    for root in source_roots {
+        if let Some(relative) =
+            super::scope::workspace_relative(std::path::Path::new(uri), &root.recorded)
+        {
+            return root.recorded.join(relative).display().to_string();
+        }
+    }
     let Some(root) = tape
         .header
         .run

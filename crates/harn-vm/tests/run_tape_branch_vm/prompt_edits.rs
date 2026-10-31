@@ -329,3 +329,91 @@ fn prompt_edits_follow_recorded_paths_into_a_relocated_workspace() {
         );
     }
 }
+
+#[test]
+fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity() {
+    use harn_vm::run_tape::{start_branch_with_sources, ReplaySourceRoot};
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    let package = dirs.markers.join("original-package");
+    let restored = dirs.markers.join("restored-package");
+    std::fs::create_dir(&package).unwrap();
+    std::fs::create_dir(&restored).unwrap();
+    let original = package.join("prompt.harn.prompt");
+    std::fs::write(&original, "Original package instruction").unwrap();
+    let alias = dirs.markers.join("package-parent-alias");
+    std::os::unix::fs::symlink(&dirs.markers, &alias).unwrap();
+    let requested = alias.join("original-package/prompt.harn.prompt");
+    let source = program(requested.to_str().unwrap(), "baseline");
+    record(&source, &dirs.tapes, &dirs.workspace);
+    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let edit = edit_for(
+        &tape,
+        "Original package instruction",
+        "Edited package instruction",
+    );
+    std::fs::rename(&original, restored.join("prompt.harn.prompt")).unwrap();
+    std::fs::remove_dir(&package).unwrap();
+    let mapping = ReplaySourceRoot {
+        recorded: package.clone(),
+        restored: restored.clone(),
+    };
+    let guard = start_branch_with_sources(
+        plan(
+            tape.clone(),
+            &dirs.workspace,
+            &dirs.markers.join("retained-state"),
+            edit.clone(),
+            1,
+        ),
+        vec![mapping.clone()],
+    )
+    .unwrap();
+    let output = run_in(&source, &dirs.workspace, Some(guard.scope())).unwrap();
+    let report = guard.finish();
+    assert_eq!(report.divergence, None);
+    assert_eq!((report.served_calls, report.live_calls), (1, 1));
+    assert_eq!(report.prompt_edits[0].prepared_renders, 1);
+    assert!(output.contains("Edited package instruction"), "{output}");
+    assert!(!package.exists());
+    assert_eq!(
+        std::fs::read_to_string(restored.join("prompt.harn.prompt")).unwrap(),
+        "Original package instruction"
+    );
+
+    let error = start_branch_with_sources(
+        plan(
+            tape.clone(),
+            &dirs.workspace,
+            &dirs.markers.join("overlap-state"),
+            edit.clone(),
+            0,
+        ),
+        vec![mapping.clone(), mapping.clone()],
+    )
+    .err()
+    .expect("overlapping source ownership must refuse");
+    assert!(error.contains("overlap"), "{error}");
+    std::fs::write(
+        restored.join("prompt.harn.prompt"),
+        "Changed package instruction",
+    )
+    .unwrap();
+    let guard = start_branch_with_sources(
+        plan(
+            tape,
+            &dirs.workspace,
+            &dirs.markers.join("changed-package-state"),
+            edit,
+            0,
+        ),
+        vec![mapping],
+    )
+    .unwrap();
+    assert!(run_in(&source, &dirs.workspace, Some(guard.scope()))
+        .unwrap_err()
+        .contains("changed since recording"));
+    let report = guard.finish();
+    assert_eq!(report.live_calls, 0);
+    assert_eq!(report.divergence.unwrap().what, "prompt source edit");
+}

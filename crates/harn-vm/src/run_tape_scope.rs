@@ -35,6 +35,7 @@ pub(crate) struct BranchHandle {
     protected: Vec<(PathBuf, PathBuf)>,
     recorded_workspace: Option<PathBuf>,
     workspace: PathBuf,
+    source_roots: Vec<super::ReplaySourceRoot>,
     event_log: OnceLock<Option<Arc<AnyEventLog>>>,
 }
 
@@ -52,6 +53,7 @@ impl BranchHandle {
         state_root: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
         recorded_workspace: Option<PathBuf>,
+        source_roots: Vec<super::ReplaySourceRoot>,
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
         ARMED.fetch_add(1, Ordering::AcqRel);
@@ -59,6 +61,7 @@ impl BranchHandle {
         Arc::new(Self {
             workspace: state.workspace_root.clone(),
             recorded_workspace,
+            source_roots,
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
             ended: AtomicBool::new(false),
@@ -93,6 +96,11 @@ impl BranchHandle {
     /// Resolve a physical branch asset back to the recorded source identity.
     pub(super) fn prompt_uri(&self, uri: &str) -> String {
         let path = Path::new(uri);
+        for root in &self.source_roots {
+            if let Some(relative) = workspace_relative(path, &root.restored) {
+                return root.recorded.join(relative).display().to_string();
+            }
+        }
         match (
             &self.recorded_workspace,
             workspace_relative(path, &self.workspace),
@@ -174,6 +182,11 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     let Some(branch) = state_branch() else {
         return Ok(path);
     };
+    for root in &branch.source_roots {
+        if let Some(relative) = workspace_relative(&path, &root.recorded) {
+            return confined_mapping(&path, &root.restored, relative);
+        }
+    }
     let Some(recorded) = &branch.recorded_workspace else {
         return Ok(path);
     };
@@ -183,10 +196,14 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     let Some(relative) = workspace_relative(&path, recorded) else {
         return Ok(path);
     };
-    let mapped = branch.workspace.join(relative);
+    confined_mapping(&path, &branch.workspace, relative)
+}
+
+fn confined_mapping(path: &Path, root: &Path, relative: &Path) -> Result<PathBuf, VmError> {
+    let mapped = root.join(relative);
     let resolved = crate::workspace_path::canonicalize_existing_ancestor(&mapped)
         .map_err(|error| VmError::Runtime(format!("branch workspace path: {error}")))?;
-    if !resolved.starts_with(&branch.workspace) {
+    if !resolved.starts_with(root) {
         return Err(VmError::Runtime(format!(
             "recorded workspace path {} escapes the isolated workspace",
             path.display()
@@ -195,17 +212,76 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     Ok(mapped)
 }
 
+pub(super) fn validate_source_roots(
+    mut roots: Vec<super::ReplaySourceRoot>,
+    workspace: &Path,
+    tape: &super::EventTape,
+) -> Result<Vec<super::ReplaySourceRoot>, String> {
+    let recorded_workspace = tape
+        .header
+        .run
+        .as_ref()
+        .and_then(|run| run.workspace_root.as_deref());
+    let overlaps = |a: &Path, b: &Path| a.starts_with(b) || b.starts_with(a);
+    for root in &mut roots {
+        if !root.recorded.is_absolute()
+            || root
+                .recorded
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err("recorded source root must be an absolute normalized path".into());
+        }
+        root.recorded = crate::workspace_path::canonicalize_existing_ancestor(&root.recorded)
+            .map_err(|error| format!("recorded source root: {error}"))?;
+        root.restored = root
+            .restored
+            .canonicalize()
+            .map_err(|error| format!("restored source root must exist: {error}"))?;
+        if !root.restored.is_dir()
+            || overlaps(&root.recorded, &root.restored)
+            || overlaps(&root.restored, workspace)
+            || overlaps(&root.recorded, workspace)
+            || recorded_workspace.is_some_and(|recorded| {
+                overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
+            })
+        {
+            return Err(
+                "replay source roots must be separate from the original and replay workspaces"
+                    .into(),
+            );
+        }
+    }
+    for (index, root) in roots.iter().enumerate() {
+        if roots[..index].iter().any(|prior| {
+            overlaps(&root.recorded, &prior.recorded)
+                || overlaps(&root.restored, &prior.restored)
+                || overlaps(&root.recorded, &prior.restored)
+                || overlaps(&root.restored, &prior.recorded)
+        }) {
+            return Err("replay source roots must not overlap".into());
+        }
+    }
+    Ok(roots)
+}
+
 pub(super) fn workspace_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a Path> {
     if let Ok(relative) = path.strip_prefix(root) {
         return Some(relative);
     }
     // Resolve only root aliases. Descendant links belong to the isolated copy.
-    let alias = path.ancestors().find(|ancestor| {
-        ancestor
-            .canonicalize()
-            .is_ok_and(|canonical| canonical == root)
-    })?;
-    path.strip_prefix(alias).ok()
+    for ancestor in path.ancestors() {
+        let Ok(canonical) = ancestor.canonicalize() else {
+            continue;
+        };
+        let Ok(suffix) = root.strip_prefix(&canonical) else {
+            continue;
+        };
+        if let Ok(relative) = path.strip_prefix(ancestor.join(suffix)) {
+            return Some(relative);
+        }
+    }
+    None
 }
 
 /// A shell's path literals do not pass through the VM filesystem resolver.
