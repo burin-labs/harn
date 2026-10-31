@@ -30,7 +30,7 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "--- Provedores ---\n"
   }
   if locale == "ru" {
-    return "--- Providers ---\n"
+    return "--- Провайдеры ---\n"
   }
   if locale == "zh-Hans" {
     return "--- 提供方 ---\n"
@@ -108,7 +108,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     return "--- Resumo ---\n"
   }
   if locale == "ru" {
-    return "--- Summary ---\n"
+    return "--- Итог ---\n"
   }
   if locale == "zh-Hans" {
     return "--- 摘要 ---\n"
@@ -147,7 +147,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return "--- Destinos ---\n"
   }
   if locale == "ru" {
-    return "--- Targets ---\n"
+    return "--- Цели ---\n"
   }
   if locale == "zh-Hans" {
     return "--- 目标 ---\n"

@@ -30,7 +30,7 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     return "  política de holdout: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  holdout policy: " + (values[0] ?? "")
+    return "  политика отложенной выборки: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  留出策略：" + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "  loss scope: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  loss scope: " + (values[0] ?? "")
+    return "  область расчёта потерь: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  损失范围: " + (values[0] ?? "")
@@ -147,7 +147,7 @@ pub fn message_13(locale: string, values: list<string>) -> string {
     return "  model-aware selection: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  model-aware selection: " + (values[0] ?? "")
+    return "  выбор с учётом модели: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  模型感知选择: " + (values[0] ?? "")
@@ -186,7 +186,8 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
   }
   if locale == "ru" {
-    return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
+    return "  встроенные инструменты: " + (values[0] ?? "") + ", предпочтительно: "
+      + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  原生工具: " + (values[0] ?? "") + ", 首选: " + (values[1] ?? "")

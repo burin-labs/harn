@@ -30,7 +30,7 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "  formato do módulo LoRA: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  LoRA module format: " + (values[0] ?? "")
+    return "  формат модуля LoRA: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  LoRA 模块格式：" + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     return "  ID do contrato do adapter: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  adapter contract id: " + (values[0] ?? "")
+    return "  идентификатор контракта адаптера: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  适配器合约 ID：" + (values[0] ?? "")

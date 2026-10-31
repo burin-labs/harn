@@ -30,7 +30,7 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "  messages (" + (values[0] ?? "") + "):"
   }
   if locale == "ru" {
-    return "  messages (" + (values[0] ?? "") + "):"
+    return "  сообщения (" + (values[0] ?? "") + "):"
   }
   if locale == "zh-Hans" {
     return "  消息（" + (values[0] ?? "") + "）:"
@@ -69,7 +69,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     return "  recusado: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  refused: " + (values[0] ?? "")
+    return "  отказ: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  拒绝: " + (values[0] ?? "")

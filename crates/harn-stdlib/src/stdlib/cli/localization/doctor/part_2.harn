@@ -69,7 +69,7 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "instalado"
   }
   if locale == "ru" {
-    return "installed"
+    return "установлено"
   }
   if locale == "zh-Hans" {
     return "已安装"

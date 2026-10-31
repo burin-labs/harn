@@ -30,7 +30,7 @@ pub fn message_5(locale: string, values: list<string>) -> string {
     return "  observed trainer identity: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  observed trainer identity: " + (values[0] ?? "")
+    return "  установленная идентичность обучающего процесса: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  观测到的训练器标识: " + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_6(locale: string, values: list<string>) -> string {
     return "  probe command templates:"
   }
   if locale == "ru" {
-    return "  probe command templates:"
+    return "  шаблоны команд проверки:"
   }
   if locale == "zh-Hans" {
     return "  探针命令模板:"
@@ -108,7 +108,7 @@ pub fn message_7(locale: string, values: list<string>) -> string {
     return "  catálogo de prompts: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  prompt catalog: " + (values[0] ?? "")
+    return "  каталог промптов: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提示词目录: " + (values[0] ?? "")

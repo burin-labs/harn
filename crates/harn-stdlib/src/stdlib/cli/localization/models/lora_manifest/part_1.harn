@@ -186,7 +186,7 @@ pub fn message_9(locale: string, values: list<string>) -> string {
     return "  output: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  output: " + (values[0] ?? "")
+    return "  вывод: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  输出: " + (values[0] ?? "")

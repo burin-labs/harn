@@ -108,7 +108,7 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     return "  problem examples:"
   }
   if locale == "ru" {
-    return "  problem examples:"
+    return "  примеры проблем:"
   }
   if locale == "zh-Hans" {
     return "  问题示例:"

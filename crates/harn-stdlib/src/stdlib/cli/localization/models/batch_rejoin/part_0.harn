@@ -108,7 +108,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     return "  matched: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  matched: " + (values[0] ?? "")
+    return "  совпало: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  匹配: " + (values[0] ?? "")

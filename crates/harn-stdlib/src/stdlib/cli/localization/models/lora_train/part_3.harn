@@ -30,7 +30,7 @@ pub fn message_15(locale: string, values: list<string>) -> string {
     return "  producer: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  producer: " + (values[0] ?? "")
+    return "  создатель: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  生产者: " + (values[0] ?? "")

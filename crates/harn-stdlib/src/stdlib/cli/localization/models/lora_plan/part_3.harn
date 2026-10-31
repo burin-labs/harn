@@ -30,7 +30,7 @@ pub fn message_15(locale: string, values: list<string>) -> string {
     return "  packing: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  packing: " + (values[0] ?? "")
+    return "  упаковка: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  打包: " + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_16(locale: string, values: list<string>) -> string {
     return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  parser owner: " + (values[0] ?? "")
+    return "  владелец парсера: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  解析器所有者: " + (values[0] ?? "")
@@ -108,7 +108,7 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     return "  precision policy: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  precision policy: " + (values[0] ?? "")
+    return "  политика точности: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  精度策略: " + (values[0] ?? "")
@@ -186,7 +186,7 @@ pub fn message_19(locale: string, values: list<string>) -> string {
     return "  quantização: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  quantization: " + (values[0] ?? "")
+    return "  квантование: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  量化: " + (values[0] ?? "")

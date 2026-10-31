@@ -69,7 +69,7 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "  manifest: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  manifest: " + (values[0] ?? "")
+    return "  манифест: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  manifest: " + (values[0] ?? "")
@@ -108,7 +108,7 @@ pub fn message_12(locale: string, values: list<string>) -> string {
     return "  mode: check"
   }
   if locale == "ru" {
-    return "  mode: check"
+    return "  режим: проверка"
   }
   if locale == "zh-Hans" {
     return "  模式: 检查"
@@ -147,7 +147,7 @@ pub fn message_13(locale: string, values: list<string>) -> string {
     return "  output: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  output: " + (values[0] ?? "")
+    return "  вывод: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  输出: " + (values[0] ?? "")
@@ -186,7 +186,7 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     return "  promotion baseline: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  promotion baseline: " + (values[0] ?? "")
+    return "  база сравнения для продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升基线: " + (values[0] ?? "")

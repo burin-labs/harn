@@ -108,7 +108,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     return "  catálogo de inferência: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  inference catalog: " + (values[0] ?? "")
+    return "  каталог инференса: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  推理目录：" + (values[0] ?? "")
@@ -147,7 +147,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return "  modules to save: none"
   }
   if locale == "ru" {
-    return "  modules to save: none"
+    return "  модули для сохранения: нет"
   }
   if locale == "zh-Hans" {
     return "  要保存的模块: 无"
@@ -186,7 +186,7 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     return "  modules to save: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  modules to save: " + (values[0] ?? "")
+    return "  модули для сохранения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  要保存的模块: " + (values[0] ?? "")

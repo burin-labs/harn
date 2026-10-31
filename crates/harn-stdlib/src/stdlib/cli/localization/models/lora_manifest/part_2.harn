@@ -30,7 +30,7 @@ pub fn message_10(locale: string, values: list<string>) -> string {
     return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  parser owner: " + (values[0] ?? "")
+    return "  владелец парсера: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  解析器所有者: " + (values[0] ?? "")
@@ -69,7 +69,7 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "  producer: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  producer: " + (values[0] ?? "")
+    return "  создатель: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  生产者: " + (values[0] ?? "")
@@ -108,7 +108,7 @@ pub fn message_12(locale: string, values: list<string>) -> string {
     return "  promotion baseline: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  promotion baseline: " + (values[0] ?? "")
+    return "  база сравнения для продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升基线: " + (values[0] ?? "")
@@ -186,7 +186,7 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     return "  promotion minimum trials: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  promotion minimum trials: " + (values[0] ?? "")
+    return "  минимум испытаний для продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升最少试验次数: " + (values[0] ?? "")

@@ -147,7 +147,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return "  jobs: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  jobs: " + (values[0] ?? "")
+    return "  задания: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  作业: " + (values[0] ?? "")
@@ -186,7 +186,7 @@ pub fn message_4(locale: string, values: list<string>) -> string {
     return "  pronto: " + (values[0] ?? "")
   }
   if locale == "ru" {
-    return "  ready: " + (values[0] ?? "")
+    return "  готовность: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  就绪: " + (values[0] ?? "")
