@@ -9,6 +9,112 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.183
+
+### Breaking
+
+- **Tapes move to format version 2, the model-call digest covers the whole request,
+  and two prompt builtins are removed (#10783).** `request_digest` now hashes every
+  field the request serializes, minus the API key and session id, so sampling
+  settings, provider, output schema, reasoning-effort source, portable option intent,
+  inference boundary, done sentinel and mock scope all count.
+  `TapeRecordKind::LlmCall` gains `call_index`, `request`, `messages` and
+  `attribution`. The new `ToolCall`, `PromptRender` and `CacheLookup` kinds record
+  tool dispatch results, prompt renders and recorded reads. The tape header gains an
+  optional `run` block naming the recording level and whether file effects were
+  observed. A fidelity check between tapes of different formats reports one
+  `tape_format_version` divergence instead of per-record digest mismatches.
+  `render_prompt` now always records provenance, so `render_with_provenance` and
+  `prompt_mark_rendered` are gone.
+
+  Migration: re-record checked-in tapes that hold model calls. Rust code that
+  matches `TapeRecordKind::LlmCall { request_digest, response }` should match
+  `LlmCall { request_digest, response, .. }`, and a match over `TapeRecordKind`
+  needs arms or a wildcard for `ToolCall`, `PromptRender`, `CacheLookup` and `PayloadRedaction`. Readers
+  that accept only version 1 must accept version 2. Hosts pass
+  `run_tape::TapeWorkspace { root, observer }` to `start_recording`, where
+  `harn_hostlib::workspace_checkpoint::tape_effect_observer()` supplies the observer.
+  Scripts that called `render_with_provenance(path, bindings)` call
+  `render_prompt(path, bindings)`; drop any `prompt_mark_rendered(id)` call.
+  Branch replay requires an existing workspace copy and refuses tapes containing sanitized payloads.
+
+### Added
+
+- **Run tapes record a whole run, and a branch can replay its prefix (#10783).** With
+  `recording: full` and a workspace, a run records every model call, agent tool
+  dispatch result, file effect, prompt render, runtime-store seed, and clock, random,
+  env and cache read. A branch serves the first K model calls and every tool dispatch
+  and recorded read inside them from the tape. It checks each whole request against
+  its recorded digest and refuses any other effect (process exec, HTTP, MCP,
+  permission prompts, hooks, native decisions, file writes). The branch belongs to
+  the execution its host runs inside `BranchGuard::scope()`, keeps every durable
+  write in a fresh state root of its own, and fails closed with a named divergence
+  on the first mismatch, refusal or under-run. Served model calls keep their
+  recorded usage, flagged `branch_served`, and cost nothing; under a mock script
+  each served call consumes its response. Run tapes are format 3.
+- Human-readable command status, setup prompts, result headings, and summaries now
+  follow the CLI language across the eight additional supported languages. Complete
+  translated templates use Rust-checked formatting; structured JSON, CSV, command
+  examples, raw diagnostics, and authored source remain canonical. Test timing and
+  usage summaries use complete count labels rather than assembling English plural
+  suffixes.
+- CLI onboarding, environment-check section labels, and model/provider report chrome now use the selected language.
+  Generated source examples, raw report data, JSON, command identifiers, and external diagnostics retain their
+  canonical values.
+
+### Fixed
+
+- ACP session creation, loading, and resuming now bind ordered additional directory grants to the canonical workspace roots
+  and persist their listing metadata. Invalid replacements preserve the prior grant, omitted lists clear prior grants on
+  restore, and capacity pressure refuses new sessions instead of evicting a still-open client's runtime state.
+- Release archive readiness recognizes both canonical scanner job families and requires a successful proof job for
+  attested candidates before allowing the advisory notification's deliberate skip.
+- The conformance process-lifetime regression can report helper startup through multi-digit descriptors on POSIX shells.
+  Its completed-command case waits for the helper's startup acknowledgment before allowing completion cleanup.
+- Consumer checks now authenticate candidate and baseline observer declarations to their own publisher jobs,
+  preserving cancellation and release evidence when both run in one parent attempt.
+- Embedded stdlib artifacts now preserve logical module aliases while storing one blob per content key.
+  Conflicting blobs fail the build instead of producing a table that cannot register at runtime.
+- Release pull requests provide an exact-source CLI for downstream repin checks
+  when their source tree matches the tested merge, avoiding a second source build.
+- Retire the authenticated child of a superseded pre-witness observer without admitting new observers under that historical
+  publication contract.
+- The macOS lint aggregate reads distinct success receipts from the matrix engine instead of its delayed job index.
+  Failed-only reruns retain each successful producer's original attempt while validating the current consumer.
+- The macOS lint aggregate retries transient GitHub metadata failures before refusing its complete current-attempt proof.
+- Hosted macOS performance checks select a calibrated baseline from the measured CPU and memory class,
+  including the newer 5-core standard runner, and refuse unknown hardware.
+- The macOS warm-target producer restores the previous validated artifact when its exact Actions cache is missing,
+  then rebuilds workspace units before publication. Owned qualification dispatches retain their persistent targets.
+  Shared warm-archive discovery requires measured main-producer metadata and binds every artifact to its run's source.
+- Use serial Rust front-end compilation on the measured 3-core, 7-GiB GitHub-hosted Mac to reduce swapping during
+  large workspace test builds. Other hosts and explicit compiler settings retain their existing behavior.
+  Keep Mac warm artifacts separate by compiler wrapper and effective flags so different hosted hardware can reuse its
+  own compiled workspace outputs.
+- macOS workspace CI can reuse unchanged crates from the successful main build instead of recompiling the entire workspace
+  after every checkout. Changed sources and their dependents still rebuild, and each run publishes compiler timings.
+- Store native warm artifacts without recompressing their gzip payloads during upload.
+- Native workspace warm archives use faster gzip compression while preserving their payload and existing size limits.
+- Release candidates and publication require the canonical dependency advisory
+  scan at their exact source, with a fresh database check before publication.
+- Release rehearsals admit the advisory notification job's deliberate skip only after the candidate's dependency
+  security scan succeeds.
+- Retire the release-182 publisher exception after its final in-flight observer completed. Live observers
+  require the nonce-bound witness; authenticated historical retirement retains its exact publication binding.
+- Smart Ship reports unverified signing keys separately from missing approval and wakes when a
+  pull request's macOS workspace check finishes.
+- Staged release publishers include the consumer observation policy required by the authenticated dependency-security guard.
+
+### Security
+
+- Run tapes redact credentials before writing payloads or sidecars, refuse exact replay of sanitized evidence,
+  and prevent replayed file effects from following symlinks outside the branch workspace.
+- Require a fresh, source-bound dependency-security proof for live crate
+  publication and existing-tag recovery. Local audits and dry runs remain usable;
+  live publication runs through the hosted release workflow.
+- The optional WASI testbench requires Wasmtime 48.0.8 or later to address
+  RUSTSEC-2026-0420, RUSTSEC-2026-0422, RUSTSEC-2026-0423, and RUSTSEC-2026-0424.
+
 ## v0.10.182
 
 ### Breaking

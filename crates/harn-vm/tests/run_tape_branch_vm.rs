@@ -28,6 +28,9 @@ mod first_call;
 #[path = "run_tape_branch_vm/workspace.rs"]
 mod workspace;
 
+#[path = "run_tape_branch_vm/prompt_edits.rs"]
+mod prompt_edits;
+
 #[path = "run_tape_branch_vm/review_cases.rs"]
 mod review_cases;
 
@@ -218,6 +221,7 @@ fn branch_with_roots(
         workspace_root: workspace.to_path_buf(),
         state_root: state.clone(),
         host_state_roots,
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     let output = run_in(source, workspace, Some(guard.scope()));
@@ -706,6 +710,7 @@ fn a_branch_refuses_the_recordings_state_root() {
         workspace_root: dirs.workspace.clone(),
         state_root: recording_state(&dirs.workspace),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .err()
     .expect("the recording's state root is refused");
@@ -722,6 +727,7 @@ fn a_branch_refuses_the_recordings_state_root() {
             workspace_root: dirs.workspace.clone(),
             state_root: state_root.clone(),
             host_state_roots: Vec::new(),
+            prompt_edits: Vec::new(),
         })
         .err()
         .unwrap_or_else(|| panic!("{} is refused", state_root.display()));
@@ -942,6 +948,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
         workspace_root: dirs.workspace.clone(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     };
     let workspace = dirs.workspace;
     let (output, report, before, after) = harn_vm::on_vm_stack(move || {
@@ -1047,6 +1054,7 @@ pipeline main(harness: Harness, task: unknown) {{
         workspace_root: dirs.workspace.clone(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     let scope = guard.scope();
@@ -1329,6 +1337,7 @@ fn a_session_store_named_after_the_branch_starts_lands_in_the_branch() {
         workspace_root: dirs.workspace.clone(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     // SAFETY: tests here hold SERIAL, so no other thread reads the env.

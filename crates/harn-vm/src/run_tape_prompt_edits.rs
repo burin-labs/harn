@@ -1,0 +1,244 @@
+//! Source-checked prompt edits activated after the recorded model prefix.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
+use super::{BranchDivergence, EventTape, TapeRecordKind};
+use crate::stdlib::template::{PromptSourceSpan, PromptSpanKind};
+
+/// A replacement for one complete literal span from a recorded prompt.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptSourceEdit {
+    pub template_uri: String,
+    pub template_revision: String,
+    /// One-based Unicode character coordinates in the recorded source.
+    pub line: usize,
+    pub column: usize,
+    pub original: String,
+    pub replacement: String,
+}
+
+/// Loading an edit into a render does not prove it reached a model request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PromptEditReport {
+    pub template_uri: String,
+    pub line: usize,
+    pub column: usize,
+    pub prepared_renders: u64,
+}
+
+#[derive(Default)]
+pub(super) struct PromptEdits {
+    by_uri: BTreeMap<String, Vec<(usize, PromptSourceEdit)>>,
+}
+
+impl PromptEdits {
+    pub(super) fn from_tape(
+        tape: &EventTape,
+        edits: Vec<PromptSourceEdit>,
+    ) -> Result<(Self, Vec<PromptEditReport>), String> {
+        if edits.is_empty() {
+            return Ok((Self::default(), Vec::new()));
+        }
+        let mut proofs = BTreeSet::new();
+        for record in &tape.records {
+            let TapeRecordKind::PromptRender {
+                rendered, spans, ..
+            } = &record.kind
+            else {
+                continue;
+            };
+            let rendered = tape.resolve_payload(rendered)?;
+            let spans: Vec<PromptSourceSpan> =
+                serde_json::from_slice(&tape.resolve_payload(spans)?)
+                    .map_err(|error| format!("recorded prompt source spans: {error}"))?;
+            for span in spans {
+                if span.kind != PromptSpanKind::Text {
+                    continue;
+                }
+                let Some(text) = rendered.get(span.output_start..span.output_end) else {
+                    return Err("recorded prompt span exceeds its rendered text".to_string());
+                };
+                let text = std::str::from_utf8(text)
+                    .map_err(|_| "recorded prompt span splits a character".to_string())?;
+                proofs.insert((
+                    span.template_uri,
+                    span.template_revision,
+                    span.template_line,
+                    span.template_col,
+                    text.to_string(),
+                ));
+            }
+        }
+        let mut planned = Self::default();
+        let mut reports = Vec::new();
+        let mut identities = BTreeSet::new();
+        for edit in edits {
+            if edit.original.is_empty() || edit.original == edit.replacement {
+                return Err("a prompt edit must change a nonempty recorded literal".to_string());
+            }
+            if edit.replacement.contains("{{") || edit.replacement.contains("}}") {
+                return Err(
+                    "prompt replacements must not contain template syntax delimiters".to_string(),
+                );
+            }
+            let identity = (edit.template_uri.clone(), edit.line, edit.column);
+            if !identities.insert(identity) {
+                return Err("multiple prompt edits target the same source position".to_string());
+            }
+            if !proofs.contains(&(
+                edit.template_uri.clone(),
+                edit.template_revision.clone(),
+                edit.line,
+                edit.column,
+                edit.original.clone(),
+            )) {
+                return Err(format!(
+                    "prompt edit {}:{}:{} is not a recorded literal at that revision",
+                    edit.template_uri, edit.line, edit.column
+                ));
+            }
+            let index = reports.len();
+            reports.push(PromptEditReport {
+                template_uri: edit.template_uri.clone(),
+                line: edit.line,
+                column: edit.column,
+                prepared_renders: 0,
+            });
+            planned
+                .by_uri
+                .entry(normalize_uri(tape, &edit.template_uri))
+                .or_default()
+                .push((index, edit));
+        }
+        Ok((planned, reports))
+    }
+
+    pub(super) fn apply(
+        &self,
+        uri: &str,
+        source: &str,
+        reports: &mut [PromptEditReport],
+    ) -> Result<Option<String>, String> {
+        let Some(edits) = self.by_uri.get(uri) else {
+            return Ok(None);
+        };
+        let revision = blake3::hash(source.as_bytes()).to_hex().to_string();
+        let mut replacements = Vec::new();
+        for (index, edit) in edits {
+            if edit.template_revision != revision {
+                return Err(format!("prompt source changed since recording: {uri}"));
+            }
+            let start = source_offset(source, edit.line, edit.column)
+                .ok_or_else(|| format!("prompt source position no longer exists: {uri}"))?;
+            let end = start
+                .checked_add(edit.original.len())
+                .ok_or_else(|| "prompt source range overflow".to_string())?;
+            if source.get(start..end) != Some(edit.original.as_str()) {
+                return Err(format!(
+                    "recorded literal no longer matches prompt source: {uri}"
+                ));
+            }
+            replacements.push((start, end, *index, &edit.replacement));
+        }
+        replacements.sort_by_key(|entry| entry.0);
+        if replacements.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+            return Err(format!("prompt source edits overlap: {uri}"));
+        }
+        let mut result = String::new();
+        let mut cursor = 0;
+        for &(start, end, _, replacement) in &replacements {
+            append_edit_segment(
+                &mut result,
+                source
+                    .get(cursor..start)
+                    .expect("validated source boundaries"),
+            )?;
+            append_edit_segment(&mut result, replacement)?;
+            cursor = end;
+        }
+        append_edit_segment(
+            &mut result,
+            source.get(cursor..).expect("validated source boundary"),
+        )?;
+        for (_, _, index, _) in replacements {
+            reports[index].prepared_renders += 1;
+        }
+        Ok(Some(result))
+    }
+}
+
+fn append_edit_segment(result: &mut String, segment: &str) -> Result<(), String> {
+    if matches!(
+        (result.as_bytes().last(), segment.as_bytes().first()),
+        (Some(b'{'), Some(b'{')) | (Some(b'}'), Some(b'}'))
+    ) {
+        return Err(
+            "prompt replacement forms template syntax delimiters at a source boundary".to_string(),
+        );
+    }
+    result.push_str(segment);
+    Ok(())
+}
+
+fn normalize_uri(tape: &EventTape, uri: &str) -> String {
+    let Some(root) = tape
+        .header
+        .run
+        .as_ref()
+        .and_then(|run| run.workspace_root.as_ref())
+    else {
+        return uri.to_string();
+    };
+    super::scope::workspace_relative(std::path::Path::new(uri), root)
+        .map(|relative| root.join(relative).display().to_string())
+        .unwrap_or_else(|| uri.to_string())
+}
+
+fn source_offset(source: &str, wanted_line: usize, wanted_column: usize) -> Option<usize> {
+    let (mut line, mut column) = (1, 1);
+    for (offset, character) in source.char_indices() {
+        if (line, column) == (wanted_line, wanted_column) {
+            return Some(offset);
+        }
+        if character == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    None
+}
+
+pub(crate) fn prepare(uri: &str, source: &str) -> Result<Option<String>, String> {
+    let Some(branch) = super::scope::current_branch() else {
+        return Ok(None);
+    };
+    let uri = branch.prompt_uri(uri);
+    let mut state = branch.state();
+    if state.report.served_calls < state.report.live_after_calls {
+        return Ok(None);
+    }
+    if let Some(divergence) = &state.report.divergence {
+        return Err(divergence.detail.clone());
+    }
+    let super::BranchState {
+        prompt_edits,
+        report,
+        ..
+    } = &mut *state;
+    match prompt_edits.apply(&uri, source, &mut report.prompt_edits) {
+        Ok(value) => Ok(value),
+        Err(detail) => {
+            report.divergence = Some(BranchDivergence {
+                call: report.served_calls + report.live_calls + 1,
+                what: "prompt source edit".to_string(),
+                detail: detail.clone(),
+            });
+            Err(detail)
+        }
+    }
+}

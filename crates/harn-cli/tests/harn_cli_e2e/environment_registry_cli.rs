@@ -329,6 +329,25 @@ fn cli_rejects_unknown_harn_environment_name_before_dispatch() {
 }
 
 #[test]
+fn cli_accepts_target_cache_collector_environment() {
+    let output = run_harn_e2e(
+        &["--version"],
+        &[
+            ("HARN_TARGET_GC_HANDLE_PROBE", "/host/handle-probe"),
+            ("HARN_TARGET_GC_KEEP_RECENT", "3"),
+            ("HARN_TARGET_GC_LOCK_STALE_SECS", "30"),
+            ("HARN_TARGET_GC_MAX_BYTES", "0"),
+            ("HARN_TARGET_GC_MAX_IDLE_SECS", "259200"),
+            ("HARN_TARGET_GC_MIN_FREE_BYTES", "0"),
+            ("HARN_TARGET_GC_PROTECT", "/host/current-target"),
+        ],
+    );
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    assert!(output.stdout.starts_with("harn "), "{}", output.stdout);
+    assert!(output.stderr.is_empty(), "{}", output.stderr);
+}
+
+#[test]
 fn cli_accepts_caller_owned_environment_name_in_extension_namespace() {
     let output = run_harn_e2e(&["--version"], &[("HARN_EXT_RELEASE_REPO", "/tmp/repo")]);
 

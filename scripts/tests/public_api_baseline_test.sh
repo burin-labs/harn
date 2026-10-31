@@ -79,6 +79,11 @@ grep -q "base=${commits[10]} " "$tmp/resolve.log"
 echo 'PASS: a pull request merge commit compares against its first parent'
 
 checkout
+EVENT=workflow_dispatch PUSH_BEFORE_SHA='' bash "$resolve" > "$tmp/resolve.log"
+grep -q "base=${commits[10]} " "$tmp/resolve.log"
+echo 'PASS: manual main CI compares against its real first parent without a push payload'
+
+checkout
 status=0
 EVENT=merge_group MERGE_GROUP_BASE_SHA="${commits[0]}" PUBLIC_API_BASELINE_MAX_DEEPEN=8 \
   bash "$resolve" > "$tmp/resolve.log" 2>&1 || status=$?

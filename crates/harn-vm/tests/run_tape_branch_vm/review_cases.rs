@@ -130,6 +130,7 @@ fn assert_closed_child_replays(create: &str) {
         workspace_root: dirs.workspace.clone(),
         state_root: dirs.workspace.parent().unwrap().join("valid-child"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     run_in(&source, &dirs.workspace, Some(guard.scope()))
@@ -264,6 +265,7 @@ fn assert_closed_child_replays(create: &str) {
             workspace_root: dirs.workspace.clone(),
             state_root: dirs.workspace.parent().unwrap().join(case),
             host_state_roots: Vec::new(),
+            prompt_edits: Vec::new(),
         })
         .unwrap();
         assert!(run_in(&source, &dirs.workspace, Some(guard.scope())).is_err());
