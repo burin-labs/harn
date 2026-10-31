@@ -9,33 +9,33 @@ homepage.workspace = true
 description = "Linter for the Harn programming language"
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.184-dev" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.184-dev" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.184-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.184-dev" }
-harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.184-dev" }
-harn-glob = { path = "../harn-glob", version = "=0.10.184-dev" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.184" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.184" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.184" }
+harn-parser = { path = "../harn-parser", version = "=0.10.184" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.184" }
+harn-glob = { path = "../harn-glob", version = "=0.10.184" }
 # Lean by default so in-process embedders (Burin TUI, #6416) can drop
 # postgres/sqlx and other `harn-vm/full` families without Cargo unifying them
 # back on through the lint/rules edge.
-harn-vm = { path = "../harn-vm", version = "=0.10.184-dev", default-features = false }
-harn-modules = { path = "../harn-modules", version = "=0.10.184-dev" }
+harn-vm = { path = "../harn-vm", version = "=0.10.184", default-features = false }
+harn-modules = { path = "../harn-modules", version = "=0.10.184" }
 # The rule engine, run as lint rules through the registry (#2849). Default
 # features off keeps the build lean — only the `ast` matching surface is needed.
-harn-rules = { path = "../harn-rules", version = "=0.10.184-dev" }
+harn-rules = { path = "../harn-rules", version = "=0.10.184" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9"
 
 [dev-dependencies]
 rstest.workspace = true
-harn-modules = { path = "../harn-modules", version = "=0.10.184-dev", features = ["bundled-stdlib"] }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.184-dev" }
+harn-modules = { path = "../harn-modules", version = "=0.10.184", features = ["bundled-stdlib"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.184" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.184-dev" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.184" }
 
 [lints]
 workspace = true
