@@ -163,7 +163,7 @@ async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_c
             assert!(!String::from_utf8_lossy(&bytes).contains("private-input-canary"));
         }
     }
-    let empty = EventTape::new(tape.header.clone());
+    let empty = EventTape::new(tape.header);
     assert!(super::super::replay_inputs::replay_requests(&empty)
         .unwrap_err()
         .contains("no complete"));

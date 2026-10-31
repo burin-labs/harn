@@ -1,6 +1,7 @@
 //! Real local HTTP controls for conservative admission; no provider mocks.
 use super::*;
 use crate::llm::admission::{swap_scope, AdmissionMode, AdmissionScope};
+use crate::llm::api::LlmRequestPayload;
 use crate::llm::cost::LlmBudgetEnvelope;
 use crate::llm::{MachineSpendPolicy, MachineSpendQuota};
 use std::sync::atomic::{AtomicUsize, Ordering};
