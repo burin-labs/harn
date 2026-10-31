@@ -31,6 +31,9 @@ mod workspace;
 #[path = "run_tape_branch_vm/prompt_edits.rs"]
 mod prompt_edits;
 
+#[path = "run_tape_branch_vm/prompt_planning.rs"]
+mod prompt_planning;
+
 #[path = "run_tape_branch_vm/review_cases.rs"]
 mod review_cases;
 

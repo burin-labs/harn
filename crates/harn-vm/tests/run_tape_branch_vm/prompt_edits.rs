@@ -1,5 +1,5 @@
 use super::*;
-use harn_vm::run_tape::PromptSourceEdit;
+use harn_vm::run_tape::{PromptEditActivation, PromptSourceEdit};
 use harn_vm::stdlib::template::{PromptSourceSpan, PromptSpanKind};
 use harn_vm::testbench::tape::TapeRecordKind;
 
@@ -22,7 +22,7 @@ pipeline main(harness: Harness, task: unknown) {{
     )
 }
 
-fn edit_for(tape: &EventTape, original: &str, replacement: &str) -> PromptSourceEdit {
+pub(super) fn edit_for(tape: &EventTape, original: &str, replacement: &str) -> PromptSourceEdit {
     for record in &tape.records {
         if let TapeRecordKind::PromptRender {
             spans, rendered, ..
@@ -42,6 +42,7 @@ fn edit_for(tape: &EventTape, original: &str, replacement: &str) -> PromptSource
                         column: span.template_col,
                         original: original.to_string(),
                         replacement: replacement.to_string(),
+                        activation: PromptEditActivation::AfterPrefix,
                     };
                 }
             }
