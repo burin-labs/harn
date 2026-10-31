@@ -38,8 +38,8 @@ fn acp_does_not_advertise_capabilities_from_another_providers_default() {
     harn_vm::llm_config::clear_user_overrides();
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn initialize_uses_the_logical_model_capabilities_for_managed_supply() {
+#[test]
+fn initialize_uses_the_logical_model_capabilities_for_managed_supply() {
     let _guard = acp_env_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -74,15 +74,17 @@ managed_supply = { version = 2 }
     ] {
         std::env::set_var("HARN_LLM_PROVIDER", provider);
         std::env::set_var("HARN_LLM_MODEL", model);
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let config = AcpServerConfig::new(None).with_llm_overrides(Some(overlay.clone()), None);
-        let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            }))
-            .await;
-        let response = recv_response_with_id(&mut rx, 1).await;
+        let response = harn_clock::test_support::current_thread_runtime().block_on(async {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let config = AcpServerConfig::new(None).with_llm_overrides(Some(overlay.clone()), None);
+            let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(tx));
+            server
+                .handle_incoming_message(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                }))
+                .await;
+            recv_response_with_id(&mut rx, 1).await
+        });
         assert_eq!(
             response["result"]["agentCapabilities"]["promptCapabilities"]["image"], image,
             "initialize advertised the wrong image capability for {provider}:{model}: {response}"
