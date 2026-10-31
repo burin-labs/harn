@@ -135,6 +135,7 @@ fn first_call_branch_requires_an_observed_baseline_call() {
         workspace_root: dirs.workspace,
         state_root: dirs.markers.join("branch-state"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     });
     assert_eq!(
         result.err().unwrap(),

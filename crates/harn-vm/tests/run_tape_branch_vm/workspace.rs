@@ -218,6 +218,7 @@ pipeline main(harness: Harness, task: unknown) {
         workspace_root: branch_root.clone(),
         state_root: isolated.markers.join("state"),
         host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
     })
     .unwrap();
     let replay_source = if parent_escape {

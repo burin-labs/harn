@@ -279,6 +279,7 @@ fn render_node(
                 }
             };
             let asset = super::assets::resolve_include(&rc.current_asset, &path_str, *line, *col)?;
+            let asset = asset.for_render()?.into_owned();
             if rc.include_stack.iter().any(|id| id == &asset.id) {
                 let chain = rc
                     .include_stack

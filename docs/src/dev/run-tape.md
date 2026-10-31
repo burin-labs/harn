@@ -62,6 +62,29 @@ into the restored workspace before applying normal permission checks. A mapped
 path that escapes through a parent component or symlink is refused. This mapping
 does not rewrite prompt text, host arguments, or command strings.
 
+## Prompt source edits
+
+`BranchPlan.prompt_edits` accepts `PromptSourceEdit` records for complete literal
+spans in the tape. Each edit names the template URI and revision, one-based
+Unicode line and column, recorded text, and replacement text. Admission requires
+that exact literal and location in recorded provenance. Interpolated values and
+partial spans are not source edits.
+Replacement text cannot contain `{{` or `}}`, or form either delimiter against
+adjacent source text. Template expressions, comments, and raw-block terminators
+are refused rather than interpreted as replacement text.
+
+The template renderer applies edits after the selected model prefix has been
+served. Earlier renders retain the original source. Filesystem templates,
+included templates, and embedded standard-library assets use the same renderer;
+source files are never written. Source revision changes, overlapping ranges,
+and edits never loaded by the run make the branch incomplete.
+
+`BranchReport.prompt_edits` reports how many renders prepared each edit. This is
+not proof that the edited text reached inference: a script can render text and
+discard it. Experiments must verify use in the actual recorded model request.
+The host chooses `live_after_calls`; this API does not infer a safe intervention
+boundary or establish whether an edit improves model behavior.
+
 ## Refusals and limits
 
 - Live commands in a relocated workspace are refused: their embedded paths

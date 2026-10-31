@@ -446,6 +446,8 @@ fn render_asset_with_provenance_and_trace_result(
     collect_provenance: bool,
     force_branch_trace: bool,
 ) -> Result<(String, Vec<PromptSourceSpan>, Vec<BranchDecision>), TemplateError> {
+    let prepared = asset.for_render()?;
+    let asset = prepared.as_ref();
     let nodes = parse_cached(asset)?;
     let mut out = String::with_capacity(asset.source.len());
     // Materialize the ambient `llm` binding when the caller is inside

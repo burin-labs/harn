@@ -644,6 +644,8 @@ pub struct BranchPlan {
     pub state_root: PathBuf,
     /// The host's durable roots for this execution, remapped into `state_root`.
     pub host_state_roots: Vec<PathBuf>,
+    /// Literal source edits applied only after the recorded model prefix.
+    pub prompt_edits: Vec<PromptSourceEdit>,
 }
 
 /// The first point where a branch's prefix stopped matching its recording.
@@ -659,6 +661,8 @@ pub struct BranchDivergence {
 /// Progress of the active branch, for hosts and receipts.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct BranchReport {
+    /// Source edits prepared for rendering; this is not model-request attribution.
+    pub prompt_edits: Vec<PromptEditReport>,
     pub live_after_calls: u64,
     pub served_calls: u64,
     pub served_tool_calls: u64,
@@ -699,6 +703,7 @@ type RecordedLookups =
     BTreeMap<(u64, String, String), std::collections::VecDeque<Option<serde_json::Value>>>;
 
 struct BranchState {
+    prompt_edits: prompt_edits::PromptEdits,
     calls: Vec<RecordedCall>,
     /// Prefix tool calls by how many model calls preceded them.
     tools: BTreeMap<u64, Vec<PrefixTool>>,
@@ -739,6 +744,26 @@ impl BranchGuard {
         let mut state = self.handle.state();
         if state.report.divergence.is_none() {
             state.report.divergence = under_run(&state);
+        }
+        if state.report.divergence.is_none() {
+            let missing: Vec<_> = state
+                .report
+                .prompt_edits
+                .iter()
+                .filter(|edit| edit.prepared_renders == 0)
+                .map(|edit| format!("{}:{}:{}", edit.template_uri, edit.line, edit.column))
+                .collect();
+            if !missing.is_empty() {
+                state.report.divergence = Some(BranchDivergence {
+                    call: state.report.served_calls + state.report.live_calls + 1,
+                    what: "unapplied prompt edits".to_string(),
+                    detail: format!(
+                        "{} prompt edits were never prepared for rendering: {}",
+                        missing.len(),
+                        missing.join(", ")
+                    ),
+                });
+            }
         }
         if state.report.divergence.is_none()
             && state.report.live_after_calls == 0
@@ -966,9 +991,12 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         return Err("branch workspace must be a directory".to_string());
     }
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
+    let (prompt_edits, edit_reports) =
+        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits)?;
     let trees: Vec<PathBuf> = protected.iter().map(|(tree, _)| tree.clone()).collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
+        prompt_edits,
         calls,
         tools,
         cache_lookups,
@@ -977,6 +1005,7 @@ pub fn start_branch(plan: BranchPlan) -> Result<BranchGuard, String> {
         live: false,
         workspace_root,
         report: BranchReport {
+            prompt_edits: edit_reports,
             live_after_calls: plan.live_after_calls,
             ..BranchReport::default()
         },
@@ -1405,6 +1434,11 @@ pub(crate) use scope::{
 mod prefix;
 
 pub use crate::llm::agent_host_primitives::tool_tape::taped_command_run;
+
+#[path = "run_tape_prompt_edits.rs"]
+mod prompt_edits;
+pub(crate) use prompt_edits::prepare as prepare_prompt_source;
+pub use prompt_edits::{PromptEditReport, PromptSourceEdit};
 
 #[path = "run_tape_overlap.rs"]
 mod overlap;
