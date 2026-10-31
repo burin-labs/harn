@@ -321,7 +321,21 @@ test("the shipped caller admits the actual owned pull request workflow run", () 
 
 test("the shipped workflow exposes a one-PR dispatch and no scheduled sweep", () => {
   assert.equal(workflow.on.schedule, undefined);
-  assert.deepEqual(workflow.on.workflow_run.workflows, ["CI"]);
+  assert.deepEqual(workflow.on.workflow_run.workflows, [
+    "CI",
+    "Build release binaries",
+  ]);
+  const producer = load(
+    fs.readFileSync(
+      `${root}/.github/workflows/build-release-binaries.yml`,
+      "utf8",
+    ),
+  );
+  assert.equal(producer.name, "Build release binaries");
+  assert.ok(
+    producer.on.pull_request !== undefined,
+    "the release verdict must run on pull requests to wake Smart Ship",
+  );
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.required, true);
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.default, undefined);
   assert.match(

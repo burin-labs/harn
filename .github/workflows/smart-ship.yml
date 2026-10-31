@@ -11,7 +11,8 @@ on:
   pull_request_review:
     types: [submitted]
   workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned same-repository pull request CI run, reads metadata through the API, and never checks out the parent-run ref
-    workflows: [CI]
+    # A release PR's last required check, Release candidate verdict, finishes in the second.
+    workflows: [CI, Build release binaries]
     types: [completed]
   workflow_dispatch:
     inputs:
