@@ -3,6 +3,28 @@ use harn_vm::run_tape::{start_recording, RecordingLevel, TAPE_FILE_NAME};
 use harn_vm::testbench::tape::EventTape;
 use serde_json::{json, Value};
 
+#[test]
+fn replay_completion_refuses_typed_failure_even_with_end_turn() {
+    use super::super::replay_inputs::validate_replay_prompt_result;
+    assert!(validate_replay_prompt_result(&json!({"stopReason":"end_turn"})).is_ok());
+    for kind in ["natural", "unknown", "runtime_error", "user_cancelled"] {
+        let result = json!({"stopReason":"end_turn", "_meta":{"harn":{"terminal":{
+            "kind":kind, "reason":"exception", "owner":"unknown"
+        }}}});
+        assert_eq!(
+            validate_replay_prompt_result(&result).is_ok(),
+            kind == "natural"
+        );
+    }
+    for result in [
+        json!({}),
+        json!({"stopReason":"cancelled"}),
+        json!({"stopReason":"max_tokens"}),
+    ] {
+        assert!(validate_replay_prompt_result(&result).is_err());
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_controls() {
     let root = tempfile::tempdir().unwrap();

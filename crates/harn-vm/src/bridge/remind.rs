@@ -5,6 +5,18 @@ use harn_parser::diagnostic_codes::Code;
 
 use super::{authority, QueuedReminder, QueuedUserMessageMode};
 
+impl super::HostBridgeInjectionState {
+    pub async fn push_queued_session_remind_from_params(
+        &self,
+        params: &serde_json::Value,
+    ) -> Result<String, String> {
+        let reminder = queued_session_remind_from_params(params)?;
+        let reminder_id = reminder.reminder.id.clone();
+        self.push_session_reminder(reminder).await;
+        Ok(reminder_id)
+    }
+}
+
 fn reminder_unknown_option_error(message: impl AsRef<str>) -> String {
     format!(
         "{}: {}",

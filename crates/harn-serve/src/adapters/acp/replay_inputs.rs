@@ -38,6 +38,23 @@ pub struct ReplayRequest {
     created_session: Option<String>,
 }
 
+/// Require a completed pipeline and, when present, a natural agent outcome.
+pub fn validate_replay_prompt_result(value: &Value) -> Result<(), String> {
+    let result: super::AcpSessionPromptResult = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid prompt completion: {error}"))?;
+    if result.stop_reason != "end_turn"
+        || result
+            .meta
+            .and_then(|meta| meta.harn.terminal)
+            .is_some_and(|terminal| {
+                terminal.kind != harn_vm::agent_events::AgentTerminalKind::Natural
+            })
+    {
+        return Err("prompt did not complete normally; record a completed baseline".into());
+    }
+    Ok(())
+}
+
 impl ReplayRequest {
     pub fn method(&self) -> &str {
         &self.method
@@ -260,6 +277,11 @@ impl InputRecorder {
             if let Ok(frame) = serde_json::from_str::<Value>(line) {
                 if frame.get("method").is_none() {
                     if let Some(id) = frame.get("id") {
+                        if frame["result"].get("stopReason").is_some() {
+                            if let Err(reason) = validate_replay_prompt_result(&frame["result"]) {
+                                recorder.record(InputEvent::Unavailable { reason });
+                            }
+                        }
                         recorder.record(InputEvent::Completed {
                             id: id.clone(),
                             succeeded: frame.get("error").is_none()

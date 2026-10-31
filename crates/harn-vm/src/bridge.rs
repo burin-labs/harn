@@ -431,16 +431,6 @@ impl HostBridgeInjectionState {
         Self::default()
     }
 
-    pub async fn push_queued_session_remind_from_params(
-        &self,
-        params: &serde_json::Value,
-    ) -> Result<String, String> {
-        let reminder = queued_session_remind_from_params(params)?;
-        let reminder_id = reminder.reminder.id.clone();
-        self.push_session_reminder(reminder).await;
-        Ok(reminder_id)
-    }
-
     pub async fn push_pending_user_message(
         &self,
         content: String,
