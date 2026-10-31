@@ -60,7 +60,11 @@ is `false`, and a server without
 hostlib rejects `true`. A fork inherits this setting. A repeated `messageId`
 is rejected in an opted-in session. The session response confirms the
 setting in `workspaceCheckpointTracking`; clients must not treat a missing
-field as enabled. Captures can be unavailable without blocking the prompt.
+field as enabled. Captures can be unavailable without blocking the prompt,
+and tracking never blocks a tool call: when a call cannot be tracked
+(`call_begin` is unavailable, for example after a failed index write), the
+server drops the session's checkpoints and runs the call untracked. Earlier
+boundaries then plan as `no_checkpoint`; later prompts capture new ones.
 Query `plan` before offering file restoration; a failed
 capture returns `{available: false, reason: "capture_failed"}` from `plan`
 and `restore`, even if an older boundary used that ID. Loading an already-live

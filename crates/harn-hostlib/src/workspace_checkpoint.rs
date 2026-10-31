@@ -519,7 +519,7 @@ pub fn call_begin(
             state.revision = previous_revision;
             return Ok(unavailable(
                 "checkpoint_persist_failed",
-                format!("tool execution was refused before it ran: {error}"),
+                format!("the tool call could not be recorded before it ran: {error}"),
             ));
         }
         (state.root.clone(), state.read_parent_ignores)
