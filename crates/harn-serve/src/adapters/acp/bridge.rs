@@ -191,6 +191,8 @@ pub(super) struct AcpBridge {
     /// Name of the currently executing Harn script (without .harn suffix).
     pub(super) script_name: std::sync::Mutex<String>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,
+    /// When set, answers host requests in-process instead of the client.
+    pub(super) host_responder: Option<Arc<dyn super::HostResponder>>,
 }
 
 impl AcpBridge {
@@ -346,13 +348,23 @@ impl AcpBridge {
         params: serde_json::Value,
         abort_on_cancel: bool,
     ) -> Result<serde_json::Value, harn_vm::VmError> {
+        if abort_on_cancel && self.cancellation.cancelled.load(Ordering::SeqCst) {
+            return Err(harn_vm::VmError::Runtime("Cancelled".into()));
+        }
+        // The embedder is the host, so what the client advertises is moot.
+        if let Some(responder) = self
+            .host_responder
+            .clone()
+            .filter(|_| super::host_responder::is_host_method(method))
+        {
+            return self
+                .answer_in_process(responder, method, params, abort_on_cancel)
+                .await;
+        }
         if !self.client_capabilities.supports_method(method) {
             return Err(harn_vm::VmError::Runtime(format!(
                 "ACP client did not advertise support for {method}"
             )));
-        }
-        if abort_on_cancel && self.cancellation.cancelled.load(Ordering::SeqCst) {
-            return Err(harn_vm::VmError::Runtime("Cancelled".into()));
         }
 
         let id = self.next_id_counter.fetch_add(1, Ordering::SeqCst);
@@ -415,6 +427,43 @@ impl AcpBridge {
                 Err(harn_vm::VmError::Runtime(format!(
                     "Client did not respond to '{method}' within {timeout:?}"
                 )))
+            }
+        }
+    }
+
+    /// Answer a host request from the embedder's responder. Errors read exactly
+    /// as a client's would, so the pipeline sees one contract either way.
+    async fn answer_in_process(
+        &self,
+        responder: Arc<dyn super::HostResponder>,
+        method: &str,
+        params: serde_json::Value,
+        abort_on_cancel: bool,
+    ) -> Result<serde_json::Value, harn_vm::VmError> {
+        let owned_method = method.to_string();
+        let answer = tokio::task::spawn_blocking(move || responder.respond(&owned_method, &params));
+        let cancellation = self.cancellation.clone();
+        let wait_cancelled = async move {
+            loop {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
+                    return;
+                }
+                cancellation.notify.notified().await;
+            }
+        };
+        tokio::select! {
+            result = answer => match result {
+                Ok(Ok(value)) => Ok(value),
+                Ok(Err(error)) => Err(harn_vm::VmError::Runtime(format!(
+                    "Client error: {}",
+                    error.message
+                ))),
+                Err(_) => Err(harn_vm::VmError::Runtime(
+                    "Client error: Embedder host responder failed".into(),
+                )),
+            },
+            _ = wait_cancelled, if abort_on_cancel => {
+                Err(harn_vm::VmError::Runtime("Cancelled".into()))
             }
         }
     }

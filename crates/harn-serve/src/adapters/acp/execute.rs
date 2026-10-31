@@ -265,7 +265,7 @@ pub(super) async fn execute_chunk(
         let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
             setup.session_environment.clone(),
         );
-        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await
+        load_host_mcp_clients(&bridge, &served_host_capabilities).await
     };
     for global in AcpAmbientGlobal::ALL {
         let value = match global {
@@ -423,17 +423,20 @@ fn configured_execution_harness(
 }
 
 pub(super) async fn load_host_mcp_clients(
-    host_bridge: Arc<harn_vm::bridge::HostBridge>,
+    bridge: &AcpBridge,
     served_host_capabilities: &harn_modules::host_capabilities::HostCapabilitySurface,
 ) -> BTreeMap<String, harn_vm::VmValue> {
     let mut mcp_dict = BTreeMap::new();
     if !served_host_capabilities.contains("project", "mcp_config") {
         return mcp_dict;
     }
-    let response = match host_bridge
-        .call(
+    // Through the ACP bridge, like every other host request, so an embedder's
+    // host responder answers it instead of the client.
+    let response = match bridge
+        .call_client(
             "host/call",
             serde_json::json!({
+                "sessionId": bridge.session_id,
                 "name": "project.mcp_config",
                 "args": {},
                 "_meta": {"harn": {"requestTrace":
@@ -688,6 +691,7 @@ require_declared_operations_served = true
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),
+            host_responder: None,
         });
 
         let host_bridge = Arc::new(
@@ -799,6 +803,7 @@ require_declared_operations_served = true
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),
+            host_responder: None,
         });
         let host_pending: Arc<
             TokioMutex<

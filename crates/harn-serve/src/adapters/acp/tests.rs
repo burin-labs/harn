@@ -1081,6 +1081,7 @@ mod canonical_fork;
 mod commands;
 mod config_values;
 mod conservative_admission;
+mod embedder_host_responder;
 mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
