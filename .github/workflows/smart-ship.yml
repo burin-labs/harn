@@ -1,20 +1,22 @@
 name: Smart Ship
 
-# HARN_SMART_SHIP_PR admits one pull request to the shared protected merger.
-# Clear the repository variable to stop admission. No scheduled sweep or repair runs.
+# Each same-repository pull request wakes the shared protected merger on its own
+# events; the merger lands only approved, green heads labeled `ship`. Set the
+# repository variable HARN_SMART_SHIP to anything but `on` to stop admission.
+# No scheduled sweep or repair runs.
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] same-repository PRs only; with repair off the shared loop reads the PR through the API and never checks out its code
     types: [labeled, unlabeled, ready_for_review]
   pull_request_review:
     types: [submitted]
-  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned CI run for the selected pull request, reads metadata through the API, and never checks out the parent-run ref
+  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned same-repository pull request CI run, reads metadata through the API, and never checks out the parent-run ref
     workflows: [CI]
     types: [completed]
   workflow_dispatch:
     inputs:
       pr:
-        description: Must match the repository variable HARN_SMART_SHIP_PR.
+        description: Pull request number to look at.
         type: string
         required: true
 
@@ -23,22 +25,21 @@ permissions:
 
 jobs:
   availability:
-    # The shared workflow's hosted route is unreachable. Admit one owned PR,
-    # then count the exact large Linux pool used by the merger.
+    # Every route names one PR, so the shared workflow's hosted sweep is
+    # unreachable. Then count the exact large Linux pool used by the merger.
     if: >-
       github.repository == 'burin-labs/harn'
-      && vars.HARN_SMART_SHIP_PR != ''
-      && format('{0}', fromJSON(vars.HARN_SMART_SHIP_PR)) == vars.HARN_SMART_SHIP_PR
-      && !contains(vars.HARN_SMART_SHIP_PR, '.')
-      && fromJSON(vars.HARN_SMART_SHIP_PR) > 0
+      && vars.HARN_SMART_SHIP == 'on'
       && ((github.event_name == 'workflow_dispatch'
       && github.ref == 'refs/heads/main'
-      && inputs.pr != '' && inputs.pr == vars.HARN_SMART_SHIP_PR)
+      && inputs.pr != ''
+      && format('{0}', fromJSON(inputs.pr)) == inputs.pr
+      && !contains(inputs.pr, '.')
+      && fromJSON(inputs.pr) > 0)
       || ((github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review')
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.base.repo.full_name == github.repository
       && github.event.pull_request.base.ref == 'main'
-      && format('{0}', github.event.pull_request.number) == vars.HARN_SMART_SHIP_PR
       && (contains(github.event.pull_request.labels.*.name, 'ship')
       || (github.event_name == 'pull_request_target'
       && github.event.action == 'unlabeled'
@@ -48,7 +49,7 @@ jobs:
       && github.event.workflow_run.head_repository.full_name == github.repository
       && format('{0}', github.event.workflow_run.pull_requests[0].base.repo.id) == github.repository_id
       && github.event.workflow_run.pull_requests[0].base.ref == 'main'
-      && format('{0}', github.event.workflow_run.pull_requests[0].number) == vars.HARN_SMART_SHIP_PR))
+      && github.event.workflow_run.pull_requests[0].number > 0))
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@3d3aba7995a5f4749a1a131204445f6cb438b00a
     with:
       owned_only: true
