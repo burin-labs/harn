@@ -347,13 +347,15 @@ async fn failed_steer_capture_never_exposes_an_older_boundary() {
     harn_clock::test_support::with_local_tasks(async {
         use harn_hostlib::workspace_checkpoint as checkpoint;
         let mut h = DeliveryHarness::start_with_checkpoint(true).await;
+        // The agent loop brackets the running tool call itself, so the older
+        // boundary is captured before the turn starts.
+        let old = checkpoint::capture(&h.session_id, "m4", Some(h._dir.path())).unwrap();
+        assert!(matches!(old, checkpoint::Outcome::Ready(_)), "{old:?}");
         h.send(serde_json::json!({
             "jsonrpc":"2.0", "id":3, "method":"session/prompt",
             "params":{"sessionId":h.session_id, "messageId":"first", "prompt":[{"type":"text", "text":"tick"}]},
         }));
         h.ticks_reach(1).await;
-        let old = checkpoint::capture(&h.session_id, "m4", Some(h._dir.path())).unwrap();
-        assert!(matches!(old, checkpoint::Outcome::Ready(_)), "{old:?}");
         let begin = checkpoint::call_begin(&h.session_id, "in-flight").unwrap();
         assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
         h.prompt(4, "change course", Some("steer"));

@@ -1213,17 +1213,6 @@ async fn dispatch_tool_call_live(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    // Dropped after the outcome (including a cancelled one) so the host's
-    // attribution window covers every write the handler committed.
-    let _execution_window = bridge.as_ref().and_then(|bridge| {
-        bridge.begin_tool_execution(
-            &tool_id,
-            dispatch_annotations
-                .as_ref()
-                .map(|annotations| annotations.side_effect_level)
-                .unwrap_or_default(),
-        )
-    });
     // The scoped heap pin avoids retaining a large dispatch frame; the box
     // alone is insufficient (see `pin_scoped_tool_dispatch`).
     let mut dispatch_future = pin_scoped_tool_dispatch(
