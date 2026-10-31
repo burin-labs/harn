@@ -29,6 +29,9 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  launch:"
   }
+  if locale == "ru" {
+    return "  launch:"
+  }
   if locale == "zh-Hans" {
     return "  启动:"
   }
@@ -63,6 +66,9 @@ pub fn message_11(locale: string, values: list<string>) -> string {
     return "  최대 LoRA rank: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
+    return "  max LoRA rank: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
     return "  max LoRA rank: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
@@ -101,6 +107,9 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  modules to save: none"
   }
+  if locale == "ru" {
+    return "  modules to save: none"
+  }
   if locale == "zh-Hans" {
     return "  要保存的模块: 无"
   }
@@ -137,6 +146,9 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  modules to save: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  modules to save: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  要保存的模块: " + (values[0] ?? "")
   }
@@ -171,6 +183,9 @@ pub fn message_14(locale: string, values: list<string>) -> string {
     return "  기본 도구: " + (values[0] ?? "") + ", 선호: " + (values[1] ?? "")
   }
   if locale == "pt-BR" {
+    return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
+  }
+  if locale == "ru" {
     return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {

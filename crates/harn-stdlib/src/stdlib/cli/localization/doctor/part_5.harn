@@ -57,6 +57,13 @@ pub fn message_25(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
+      + (values[3] ?? "")
+      + " SKIP="
+      + (values[4] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
       + (values[3] ?? "")
@@ -100,6 +107,9 @@ pub fn message_26(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return (values[0] ?? "") + "bloqueado: " + (values[1] ?? "") + "\n"
+  }
+  if locale == "ru" {
+    return (values[0] ?? "") + "blocked: " + (values[1] ?? "") + "\n"
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "已阻止：" + (values[1] ?? "") + "\n"

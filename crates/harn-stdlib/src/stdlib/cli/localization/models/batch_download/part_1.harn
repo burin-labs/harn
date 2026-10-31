@@ -29,6 +29,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  sha256 do recibo: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  receipt sha256: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  回执 sha256: " + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "Download em lote de execução simulada gravado: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "Черновой вариант пакетной загрузки записан: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "已写入批量下载演练运行：" + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "Falha no download em lote"
   }
+  if locale == "ru" {
+    return "Пакетная загрузка не удалась"
+  }
   if locale == "zh-Hans" {
     return "批量下载失败"
   }
@@ -137,6 +146,9 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "Recibo de resultados em lote gravado: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "Квитанция результатов batch записана: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "已写入批量结果收据：" + (values[0] ?? "")
   }
@@ -172,6 +184,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "erros"
+  }
+  if locale == "ru" {
+    return "ошибки"
   }
   if locale == "zh-Hans" {
     return "错误"

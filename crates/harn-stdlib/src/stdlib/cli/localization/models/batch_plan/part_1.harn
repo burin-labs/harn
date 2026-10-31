@@ -69,6 +69,15 @@ pub fn message_5(locale: string, values: list<string>) -> string {
       + "  "
       + (values[5] ?? "")
   }
+  if locale == "ru" {
+    return "  " + (values[0] ?? "") + "  " + (values[1] ?? "") + "/" + (values[2] ?? "")
+      + "  скидка "
+      + (values[3] ?? "")
+      + "  время выполнения "
+      + (values[4] ?? "")
+      + "  "
+      + (values[5] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  " + (values[0] ?? "") + "  " + (values[1] ?? "") + "/" + (values[2] ?? "") + "  折扣 "
       + (values[3] ?? "")
@@ -132,6 +141,12 @@ pub fn message_6(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
   }
   if locale == "pt-BR" {
+    return "  " + (values[0] ?? "") + " " + (values[1] ?? "") + "/" + (values[2] ?? "") + " "
+      + (values[3] ?? "")
+      + " requests="
+      + (values[4] ?? "")
+  }
+  if locale == "ru" {
     return "  " + (values[0] ?? "") + " " + (values[1] ?? "") + "/" + (values[2] ?? "") + " "
       + (values[3] ?? "")
       + " requests="
@@ -214,6 +229,14 @@ pub fn message_7(locale: string, values: list<string>) -> string {
       + " file="
       + (values[5] ?? "")
   }
+  if locale == "ru" {
+    return "  " + (values[0] ?? "") + " " + (values[1] ?? "") + "/" + (values[2] ?? "") + " "
+      + (values[3] ?? "")
+      + " requests="
+      + (values[4] ?? "")
+      + " file="
+      + (values[5] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  " + (values[0] ?? "") + " " + (values[1] ?? "") + "/" + (values[2] ?? "") + " "
       + (values[3] ?? "")
@@ -260,6 +283,9 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "(nenhum modelo compatível com batch corresponde)"
   }
+  if locale == "ru" {
+    return "(no batch-capable models match)"
+  }
   if locale == "zh-Hans" {
     return "（没有匹配的支持批处理的模型）"
   }
@@ -295,6 +321,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "Falha no manifesto em lote"
+  }
+  if locale == "ru" {
+    return "Манифест пакета не удалось сформировать"
   }
   if locale == "zh-Hans" {
     return "批量清单失败"

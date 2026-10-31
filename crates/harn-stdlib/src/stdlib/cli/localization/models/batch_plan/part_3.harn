@@ -29,6 +29,9 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "somente execução seca"
   }
+  if locale == "ru" {
+    return "только пробный запуск"
+  }
   if locale == "zh-Hans" {
     return "仅干运行"
   }
@@ -64,6 +67,9 @@ pub fn message_16(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "erros"
+  }
+  if locale == "ru" {
+    return "ошибки"
   }
   if locale == "zh-Hans" {
     return "错误"
@@ -101,6 +107,9 @@ pub fn message_17(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "envio ao vivo"
   }
+  if locale == "ru" {
+    return "live submit"
+  }
   if locale == "zh-Hans" {
     return "实时提交"
   }
@@ -137,6 +146,9 @@ pub fn message_18(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "restrições do planejador"
   }
+  if locale == "ru" {
+    return "ограничения планировщика"
+  }
   if locale == "zh-Hans" {
     return "规划器约束"
   }
@@ -172,6 +184,9 @@ pub fn message_19(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "avisos"
+  }
+  if locale == "ru" {
+    return "предупреждения"
   }
   if locale == "zh-Hans" {
     return "警告"

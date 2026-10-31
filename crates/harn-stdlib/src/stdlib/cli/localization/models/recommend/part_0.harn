@@ -48,6 +48,12 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + " has_provider_key="
       + (values[2] ?? "")
   }
+  if locale == "ru" {
+    return "нет рекомендации модели для ram_bucket=" + (values[0] ?? "") + " gpu="
+      + (values[1] ?? "")
+      + " has_provider_key="
+      + (values[2] ?? "")
+  }
   if locale == "zh-Hans" {
     return "没有适用于 ram_bucket=" + (values[0] ?? "") + " gpu=" + (values[1] ?? "")
       + " has_provider_key="
@@ -89,6 +95,9 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "a tabela de recomendações solicitou um padrão de nuvem sem credenciais de nuvem"
   }
+  if locale == "ru" {
+    return "таблица рекомендаций запросила облачное значение по умолчанию без облачных учетных данных"
+  }
   if locale == "zh-Hans" {
     return "建议表在没有云凭据的情况下请求了云默认值"
   }
@@ -123,6 +132,9 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + "  protocol=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
@@ -161,6 +173,9 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return (values[0] ?? "") + " rota(s) declaram a operação " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return (values[0] ?? "") + " route(s) declare the " + (values[1] ?? "") + " operation"
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + " 路由声明了 " + (values[1] ?? "") + " 操作"

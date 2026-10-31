@@ -57,6 +57,13 @@ pub fn message_25(locale: string, values: list<string>) -> string {
       + ")"
       + (values[4] ?? "")
   }
+  if locale == "ru" {
+    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
+      + ", exists="
+      + (values[3] ?? "")
+      + ")"
+      + (values[4] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
       + ", exists="
@@ -99,6 +106,9 @@ pub fn message_26(locale: string, values: list<string>) -> string {
     return " sha256=" + (values[0] ?? "")
   }
   if locale == "pt-BR" {
+    return " sha256=" + (values[0] ?? "")
+  }
+  if locale == "ru" {
     return " sha256=" + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
@@ -157,6 +167,12 @@ pub fn message_27(locale: string, values: list<string>) -> string {
       + " via "
       + (values[3] ?? "")
   }
+  if locale == "ru" {
+    return "Обучить LoRA " + (values[0] ?? "") + " на " + (values[1] ?? "") + " для "
+      + (values[2] ?? "")
+      + " через "
+      + (values[3] ?? "")
+  }
   if locale == "zh-Hans" {
     return "通过 " + (values[3] ?? "") + " 在 " + (values[2] ?? "") + " 上为 " + (values[1] ?? "")
       + " 训练 "
@@ -199,6 +215,9 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "backend"
   }
+  if locale == "ru" {
+    return "бэкенд"
+  }
   if locale == "zh-Hans" {
     return "后端"
   }
@@ -234,6 +253,9 @@ pub fn message_29(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "avisos do backend"
+  }
+  if locale == "ru" {
+    return "предупреждения бэкенда"
   }
   if locale == "zh-Hans" {
     return "后端警告"

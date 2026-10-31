@@ -29,6 +29,9 @@ pub fn message_45(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "portões de avaliação"
   }
+  if locale == "ru" {
+    return "ворота eval"
+  }
   if locale == "zh-Hans" {
     return "评估门控"
   }
@@ -64,6 +67,9 @@ pub fn message_46(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "exportar conjunto de dados"
+  }
+  if locale == "ru" {
+    return "экспорт набора данных"
   }
   if locale == "zh-Hans" {
     return "导出数据集"
@@ -101,6 +107,9 @@ pub fn message_47(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "negativos difíceis"
   }
+  if locale == "ru" {
+    return "hard negatives"
+  }
   if locale == "zh-Hans" {
     return "困难负样本"
   }
@@ -137,6 +146,9 @@ pub fn message_48(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "adaptador de inspeção"
   }
+  if locale == "ru" {
+    return "inspect adapter"
+  }
   if locale == "zh-Hans" {
     return "检查适配器"
   }
@@ -172,6 +184,9 @@ pub fn message_49(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "inicialização local"
+  }
+  if locale == "ru" {
+    return "локальный запуск"
   }
   if locale == "zh-Hans" {
     return "本地启动"

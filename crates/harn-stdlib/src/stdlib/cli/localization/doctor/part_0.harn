@@ -29,6 +29,9 @@ pub fn message_0(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "--- Provedores ---\n"
   }
+  if locale == "ru" {
+    return "--- Providers ---\n"
+  }
   if locale == "zh-Hans" {
     return "--- 提供方 ---\n"
   }
@@ -64,6 +67,9 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "--- Capacidades da stdlib ---\n"
+  }
+  if locale == "ru" {
+    return "--- Stdlib capabilities ---\n"
   }
   if locale == "zh-Hans" {
     return "--- 标准库能力 ---\n"
@@ -101,6 +107,9 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "--- Resumo ---\n"
   }
+  if locale == "ru" {
+    return "--- Summary ---\n"
+  }
   if locale == "zh-Hans" {
     return "--- 摘要 ---\n"
   }
@@ -137,6 +146,9 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "--- Destinos ---\n"
   }
+  if locale == "ru" {
+    return "--- Targets ---\n"
+  }
   if locale == "zh-Hans" {
     return "--- 目标 ---\n"
   }
@@ -172,6 +184,9 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "FAIL"
+  }
+  if locale == "ru" {
+    return "СБОЙ"
   }
   if locale == "zh-Hans" {
     return "FAIL"

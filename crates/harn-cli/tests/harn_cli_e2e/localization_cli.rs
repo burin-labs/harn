@@ -20,6 +20,7 @@ fn localized_scaffolds_preserve_source_and_literal_project_names() {
         ("it", include_str!("../../src/localization/it.json")),
         ("ja", include_str!("../../src/localization/ja.json")),
         ("ko", include_str!("../../src/localization/ko.json")),
+        ("ru", include_str!("../../src/localization/ru.json")),
         (
             "zh-Hans",
             include_str!("../../src/localization/zh-Hans.json"),
@@ -67,7 +68,7 @@ fn localized_scaffolds_preserve_source_and_literal_project_names() {
     }
 }
 
-const LOCALES: [(&str, &str); 9] = [
+const LOCALES: [(&str, &str); 10] = [
     ("en_US.UTF-8", "Usage"),
     ("es_ES.UTF-8", "Uso"),
     ("fr_CA.UTF-8", "Utilisation"),
@@ -77,6 +78,7 @@ const LOCALES: [(&str, &str); 9] = [
     ("ja_JP.UTF-8", "使い方"),
     ("ko_KR.UTF-8", "사용법"),
     ("zh_CN.UTF-8", "用法"),
+    ("ru_RU.UTF-8", "Использование"),
 ];
 
 #[test]
@@ -162,6 +164,7 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
             "ja" => include_str!("../../src/localization/ja.json"),
             "ko" => include_str!("../../src/localization/ko.json"),
             "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+            "ru" => include_str!("../../src/localization/ru.json"),
             _ => include_str!("../../src/localization/en.json"),
         })
         .unwrap();
@@ -366,6 +369,7 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
         ("ja", "ja"),
         ("ko", "ko"),
         ("zh_CN", "zh-Hans"),
+        ("ru_RU", "ru"),
     ] {
         let output = run(locale, &["usage", "--project", project]);
         assert!(output.status.success(), "{locale}: {output:?}");
@@ -383,6 +387,7 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
                     "ja" => include_str!("../../src/localization/ja.json"),
                     "ko" => include_str!("../../src/localization/ko.json"),
                     "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+                    "ru" => include_str!("../../src/localization/ru.json"),
                     _ => unreachable!(),
                 })
                 .unwrap();

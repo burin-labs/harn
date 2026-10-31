@@ -29,6 +29,9 @@ pub fn message_20(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "não"
   }
+  if locale == "ru" {
+    return "нет"
+  }
   if locale == "zh-Hans" {
     return "否"
   }
@@ -64,6 +67,9 @@ pub fn message_21(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "mesmo nome de arquivo"
+  }
+  if locale == "ru" {
+    return "тот же базовый файл"
   }
   if locale == "zh-Hans" {
     return "文件名相同"
@@ -101,6 +107,9 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "desconhecido"
   }
+  if locale == "ru" {
+    return "неизвестно"
+  }
   if locale == "zh-Hans" {
     return "未知"
   }
@@ -137,6 +146,9 @@ pub fn message_23(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "sim"
   }
+  if locale == "ru" {
+    return "да"
+  }
   if locale == "zh-Hans" {
     return "是"
   }
@@ -171,6 +183,9 @@ pub fn message_24(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "zh-Hans" {

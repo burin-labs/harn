@@ -29,6 +29,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  em execução: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  выполняется: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  正在运行: " + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  desconhecido: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  неизвестно: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  未知：" + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "Status em lote de execução simulada gravado: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "Черновой запуск статуса batch записан: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "已写入批量状态演练运行：" + (values[0] ?? "")
   }
@@ -137,6 +146,9 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "Falha no status em lote"
   }
+  if locale == "ru" {
+    return "Сбой статуса batch"
+  }
   if locale == "zh-Hans" {
     return "批量状态失败"
   }
@@ -172,6 +184,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "Recibo de status em lote gravado: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "Квитанция статуса batch записана: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "已写入批量状态收据：" + (values[0] ?? "")

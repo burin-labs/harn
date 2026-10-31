@@ -29,6 +29,9 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  packing: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  packing: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  打包: " + (values[0] ?? "")
   }
@@ -63,6 +66,9 @@ pub fn message_16(locale: string, values: list<string>) -> string {
     return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
+    return "  parser owner: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
     return "  parser owner: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
@@ -101,6 +107,9 @@ pub fn message_17(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  precision policy: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  precision policy: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  精度策略: " + (values[0] ?? "")
   }
@@ -135,6 +144,9 @@ pub fn message_18(locale: string, values: list<string>) -> string {
     return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
+    return "  promotion id: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
     return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
@@ -172,6 +184,9 @@ pub fn message_19(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  quantização: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  quantization: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  量化: " + (values[0] ?? "")
