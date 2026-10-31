@@ -82,6 +82,15 @@ impl CheckpointTracking {
         Self(Arc::new(Mutex::new(copy)))
     }
 
+    /// Claim boundary ids an earlier process recorded for this session, so a
+    /// prompt cannot reuse one after a restart.
+    #[cfg(feature = "hostlib")]
+    pub(super) fn adopt(&self, ids: impl IntoIterator<Item = String>) {
+        if let Ok(mut state) = self.0.lock() {
+            state.ids.extend(ids);
+        }
+    }
+
     pub(super) fn close(&self) {
         if let Ok(mut state) = self.0.lock() {
             state.closed = true;
@@ -172,18 +181,38 @@ pub(super) fn attribute_tool_execution(
     tool_call_id: &str,
     side_effect: harn_vm::tool_annotations::SideEffectLevel,
     stage: harn_vm::bridge::ToolExecutionStage,
-) -> bool {
+) -> harn_vm::bridge::ToolExecutionAdmission {
     use harn_hostlib::workspace_checkpoint::{self as checkpoint, Outcome};
+    use harn_vm::bridge::ToolExecutionAdmission;
     let _scope = store_scope.enter();
     match stage {
-        harn_vm::bridge::ToolExecutionStage::Begin => matches!(
-            checkpoint::call_begin(session_id, tool_call_id),
-            Ok(Outcome::Ready(_))
-        ),
-        _ => matches!(
-            checkpoint::call_end(session_id, tool_call_id, Some(side_effect)),
-            Ok(Outcome::Ready(_))
-        ),
+        harn_vm::bridge::ToolExecutionStage::Begin => {
+            match checkpoint::call_begin(session_id, tool_call_id) {
+                Ok(Outcome::Ready(_)) => ToolExecutionAdmission::Tracked,
+                Ok(Outcome::Unavailable(reason)) if reason.reason == "no_checkpoint" => {
+                    ToolExecutionAdmission::Untracked
+                }
+                Ok(Outcome::Unavailable(reason)) => {
+                    ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
+                }
+                Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
+            }
+        }
+        harn_vm::bridge::ToolExecutionStage::End => {
+            match checkpoint::call_end(session_id, tool_call_id, Some(side_effect)) {
+                Ok(Outcome::Ready(receipt)) => match receipt.persistence_error {
+                    Some(error) => ToolExecutionAdmission::Refused(error),
+                    None => ToolExecutionAdmission::Tracked,
+                },
+                Ok(Outcome::Unavailable(reason)) => {
+                    ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
+                }
+                Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
+            }
+        }
+        _ => {
+            ToolExecutionAdmission::Refused(format!("unsupported tool execution stage: {stage:?}"))
+        }
     }
 }
 

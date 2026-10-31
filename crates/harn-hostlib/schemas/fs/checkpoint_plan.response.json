@@ -137,7 +137,8 @@
             "no_checkpoint",
             "unknown_boundary",
             "calls_in_flight",
-            "incomplete_attribution"
+            "incomplete_attribution",
+            "checkpoint_interrupted"
           ]
         },
         "detail": {

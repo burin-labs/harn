@@ -111,16 +111,34 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
             // Lives as long as this future, which the caller keeps until the
             // outcome (a cancelled one included), so the host's attribution
             // window covers every write the handler committed.
-            let _execution_window = request.bridge.and_then(|bridge| {
-                let annotations = super::agent_host_primitives::tool_catalog::annotations_for(
-                    request.tools,
-                    request.tool_name,
-                );
-                bridge.begin_tool_execution(
-                    &window_id,
-                    annotations.map_or_else(Default::default, |a| a.side_effect_level),
-                )
-            });
+            let _execution_window = match request.bridge {
+                None => None,
+                Some(bridge) => {
+                    let annotations = super::agent_host_primitives::tool_catalog::annotations_for(
+                        request.tools,
+                        request.tool_name,
+                    );
+                    match bridge.begin_tool_execution(
+                        &window_id,
+                        annotations.map_or_else(Default::default, |a| a.side_effect_level),
+                    ) {
+                        crate::bridge::ToolExecutionStart::Untracked => None,
+                        crate::bridge::ToolExecutionStart::Tracked(guard) => Some(guard),
+                        crate::bridge::ToolExecutionStart::Refused(detail) => {
+                            return agent_tools::ToolDispatchOutcome {
+                                result: Err(crate::value::VmError::CategorizedError {
+                                    message: format!(
+                                    "workspace checkpoint tracking refused this tool call: {detail}"
+                                ),
+                                    category: crate::value::ErrorCategory::ToolRejected,
+                                }),
+                                executor: None,
+                                handler_outcome: None,
+                            };
+                        }
+                    }
+                }
+            };
             super::agent_tool_preparation::scope(
                 request.prepared_invocation,
                 agent_tools::dispatch_tool_execution_with_mcp(

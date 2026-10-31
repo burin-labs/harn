@@ -49,7 +49,9 @@ other platforms.
 `{sessionId, action, boundaryId?, callId?, sideEffect?, paths?}` where `action`
 is `capture`, `call_begin`, `call_end`, `plan`, `restore`, or `drop`. The root is
 the session's cwd, and the result is the same typed object the `harness.fs`
-method returns. `session/close` drops the session's checkpoint state.
+method returns. `session/close` releases an idle session's checkpoint state from
+memory and keeps its record on disk for a later `session/load`; only the `drop`
+action deletes the record.
 
 Set `workspaceCheckpoint: true` on `session/new` or a cold `session/load` to
 capture a boundary when a prompt starts a turn. The prompt must carry a
@@ -62,8 +64,10 @@ field as enabled. Captures can be unavailable without blocking the prompt.
 Query `plan` before offering file restoration; a failed
 capture returns `{available: false, reason: "capture_failed"}` from `plan`
 and `restore`, even if an older boundary used that ID. Loading an already-live
-session cannot change its tracking setting. A cold load starts a new in-memory
-checkpoint history; it doesn't restore earlier file boundaries. A steer
+session cannot change its tracking setting. Loading an opted-in session that
+this process does not hold resumes the checkpoint history an earlier process
+recorded under the session's root, so a restarted host can still plan and
+restore against earlier boundaries. A steer
 inserted into a running turn captures its own boundary immediately before its
 message enters the transcript. If a tool call is still in flight or capture
 otherwise fails, `plan` and `restore` report `capture_failed` for that message.
@@ -83,8 +87,25 @@ the parent's checkpoint history was copied to the new session. An unavailable
 result is explicit and does not prevent the conversation fork. The copy has
 independent checkpoint state and stored files, so restoring it or closing the
 parent does not change the other branch's history. Forks without this option
-do not copy checkpoints. Checkpoint state is still in memory and does not
-survive a server restart.
+do not copy checkpoints.
+
+Each session records its boundaries, attributed calls, revision, and typed
+complete or incomplete state in one index beside its stored files. A tracked
+tool call is admitted only after the incomplete state is durably written; its
+attribution is recorded before the index becomes complete again. A host restart
+between those writes makes `resume`, `plan`, and `restore` report
+`checkpoint_interrupted` until the checkpoint is dropped. A failed begin write
+refuses the tool before its handler runs. If the index write fails before
+replacement, the prior complete index remains available. If replacement
+occurred but namespace durability could not be confirmed, a cold resume treats
+the visible incomplete index as interrupted. A failed final call or restore
+write keeps the index incomplete and returns the effect receipt with
+`persistence_error`, so a completed workspace mutation is not mistaken for a
+failed one. Embedding hosts use
+`workspace_checkpoint::resume(session_id, root)` to load a complete record and
+`workspace_checkpoint::unload(session_id)` to release it from memory while
+keeping its record. Both the file contents and the namespace replacement must
+be confirmed durable before a tracked tool is allowed to run.
 
 ## What a boundary stores
 
@@ -162,5 +183,6 @@ began at, is what tells two such effects apart.
 - Clean tracked content depends on the git objects for the boundary's index
   staying in the object store. Garbage collection can remove them after the
   index moves on.
-- State is in memory. Stored files live with the session and are removed by
-  `checkpoint_drop`.
+- The index and stored files live under the session's root and are removed by
+  `checkpoint_drop`. A call in flight when the process exits cannot be
+  attributed; its incomplete index is refused on restart and must be dropped.

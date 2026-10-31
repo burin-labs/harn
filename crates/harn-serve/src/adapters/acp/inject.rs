@@ -220,7 +220,9 @@ impl AcpServer {
         #[cfg(feature = "hostlib")]
         {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
-            harn_hostlib::workspace_checkpoint::drop_session(session_id);
+            // Keep the checkpoint record: a later `session/load` resumes it.
+            // Only an explicit `drop` action deletes it.
+            harn_hostlib::workspace_checkpoint::unload(session_id);
         }
     }
 

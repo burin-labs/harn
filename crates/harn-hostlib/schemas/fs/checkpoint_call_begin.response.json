@@ -49,7 +49,9 @@
             "git_unavailable",
             "index_not_writable_as_tree",
             "no_checkpoint",
-            "unknown_boundary"
+            "unknown_boundary",
+            "checkpoint_persist_failed",
+            "checkpoint_interrupted"
           ]
         },
         "detail": {

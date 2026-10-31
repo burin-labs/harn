@@ -939,11 +939,172 @@ pipeline default(harness: Harness, task: unknown) {{
             .filter_map(|effect| effect["invocation"].as_u64()).collect();
         assert_eq!(invocations.len(), 2, "{plan}");
 
-        let receipt = serde_json::to_value(
-            harn_hostlib::workspace_checkpoint::restore(&session, "turn-1", None).unwrap(),
-        ).unwrap();
-        assert_eq!(receipt["restored"][0]["path"], "agent.txt", "{receipt}");
+        // A host that closes the session after each turn holds nothing in
+        // memory; loading the session picks up the recorded boundary and its
+        // attributed calls.
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":40, "method":"session/close", "params":{"sessionId":session},
+        })).unwrap();
+        let closed = recv_response_with_id(&mut response_rx, 40).await;
+        assert!(closed["error"].is_null(), "{closed}");
+        assert!(!harn_hostlib::workspace_checkpoint::unload(&session), "close released it");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":4, "method":"session/load",
+            "params":{"sessionId":session, "cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+        })).unwrap();
+        let loaded = harn_clock::test_support::within("reload response", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["id"] == 4 {
+                    break message;
+                }
+            }
+        }).await;
+        assert!(loaded["error"].is_null(), "{loaded}");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/workspace_checkpoint",
+            "params":{"sessionId":session, "action":"plan", "boundaryId":"turn-1"},
+        })).unwrap();
+        let reloaded = recv_response_with_id(&mut response_rx, 5).await;
+        assert_eq!(reloaded["result"], plan, "{reloaded}");
+
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":6, "method":"session/workspace_checkpoint",
+            "params":{"sessionId":session, "action":"restore", "boundaryId":"turn-1"},
+        })).unwrap();
+        let receipt = recv_response_with_id(&mut response_rx, 6).await;
+        assert_eq!(receipt["result"]["restored"][0]["path"], "agent.txt", "{receipt}");
         assert_eq!(std::fs::read_to_string(root.join("agent.txt")).unwrap(), "agent original");
         harn_hostlib::workspace_checkpoint::drop_session(&session);
     }).await;
+}
+
+/// A refusal from the checkpoint admission callback must stop the real tool
+/// handler before its workspace write, even though the agent loop can then
+/// continue with a later model response.
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn agent_loop_refuses_a_tool_with_a_duplicate_checkpoint_call_id() {
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(root.join("agent.txt"), "agent original").unwrap();
+        let target = harn_lexer::escape_string_literal(&root.join("agent.txt").to_string_lossy());
+        let pipeline = root.join("test.harn");
+        std::fs::write(
+            &pipeline,
+            format!(
+                r#"import {{ agent_loop }} from "std/agent/loop"
+
+pipeline default(harness: Harness, task: unknown) {{
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "edit", name: "edit", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "done"}})
+  let tools = tool_registry()
+  tools = tool_define(tools, "edit", "Edit", {{parameters: {{}},
+    annotations: {{kind: "edit", side_effect_level: "workspace_write"}},
+    handler: {{ _args ->
+      harness.fs.write_text("{target}", "agent edited")
+      return "edited"
+    }},
+  }})
+  agent_loop(harness, "Edit", nil, {{provider: "mock", tools: tools,
+    tool_format: "native", max_iterations: 3}})
+}}
+"#
+            ),
+        )
+        .unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let config = AcpServerConfig::for_pipeline(pipeline.to_string_lossy().into_owned());
+        let _server = tokio::task::spawn_local(super::super::run_acp_channel_server(
+            config,
+            request_rx,
+            response_tx,
+        ));
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":1, "method":"session/new",
+                "params":{"cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+            }))
+            .unwrap();
+        let created = recv_response_with_id(&mut response_rx, 1).await;
+        let session = created["result"]["sessionId"].as_str().expect("session id").to_string();
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":3, "method":"session/set_mode",
+                "params":{"sessionId":session, "modeId":"code"},
+            }))
+            .unwrap();
+        let mode = recv_response_with_id(&mut response_rx, 3).await;
+        assert!(mode["error"].is_null(), "{mode}");
+        assert!(matches!(
+            harn_hostlib::workspace_checkpoint::capture(&session, "seed", Some(&root)).unwrap(),
+            harn_hostlib::workspace_checkpoint::Outcome::Ready(_)
+        ));
+        assert!(matches!(
+            harn_hostlib::workspace_checkpoint::call_begin(&session, "edit").unwrap(),
+            harn_hostlib::workspace_checkpoint::Outcome::Ready(_)
+        ));
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+                "params":{"sessionId":session, "messageId":"turn", "prompt":[{"type":"text", "text":"edit"}]},
+            }))
+            .unwrap();
+        let (response, update) = harn_clock::test_support::within("refused tool response", async {
+            let mut update = None;
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["method"] == "session/update"
+                    && message["params"]["update"]["sessionUpdate"] == "tool_call_update"
+                    && message["params"]["update"]["toolCallId"] == "edit"
+                {
+                    update = Some(message["params"]["update"].clone());
+                } else if message["id"] == 2 {
+                    break (message, update);
+                }
+            }
+        })
+        .await;
+        assert!(response["error"].is_null(), "{response}");
+        let update = update.expect("the attempted tool produced a terminal update");
+        assert_eq!(update["status"], "failed", "{update}");
+        assert!(
+            update.to_string().contains("workspace checkpoint tracking refused"),
+            "the update did not identify checkpoint admission refusal: {update}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("agent.txt")).unwrap(),
+            "agent original",
+            "the handler ran despite checkpoint admission refusal"
+        );
+        assert!(matches!(
+            harn_hostlib::workspace_checkpoint::plan(&session, "seed").unwrap(),
+            harn_hostlib::workspace_checkpoint::Outcome::Unavailable(ref why)
+                if why.reason == "calls_in_flight"
+        ));
+        harn_hostlib::workspace_checkpoint::drop_session(&session);
+    })
+    .await;
 }
