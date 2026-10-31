@@ -101,24 +101,33 @@ fn pid_is_alive(tools: HarnessTools, stdio: HarnessStdio, pid: string) -> bool {
       {mode: "shell", command: "kill -0 " + pid + " 2>/dev/null && echo ALIVE || echo DEAD"},
     )
   } catch (probe_error) {
-    stdio.eprintln(json_stringify({
-      event: "stop_contract_pid_probe_threw",
-      pid: pid,
-      error: to_string(probe_error).substring(0, 1024),
-    }))
+    stdio.eprintln(
+      json_stringify(
+        {
+          event: "stop_contract_pid_probe_threw",
+          pid: pid,
+          error: to_string(probe_error).substring(0, 1024),
+        },
+      ),
+    )
     throw probe_error
   }
   const output = trim(probe.stdout)
-  if probe.status != "completed" || probe.exit_code != 0 || (output != "ALIVE" && output != "DEAD") {
-    stdio.eprintln(json_stringify({
-      event: "stop_contract_pid_probe_unexpected",
-      pid: pid,
-      status: probe.status,
-      exit_code: probe.exit_code,
-      stdout: probe.stdout.substring(0, 512),
-      stderr: probe.stderr.substring(0, 1024),
-      error: to_string(probe?.error ?? "<absent>").substring(0, 1024),
-    }))
+  if probe.status != "completed" || probe.exit_code != 0
+    || (output != "ALIVE" && output != "DEAD") {
+    stdio.eprintln(
+      json_stringify(
+        {
+          event: "stop_contract_pid_probe_unexpected",
+          pid: pid,
+          status: probe.status,
+          exit_code: probe.exit_code,
+          stdout: probe.stdout.substring(0, 512),
+          stderr: probe.stderr.substring(0, 1024),
+          error: to_string(probe?.error ?? "<absent>").substring(0, 1024),
+        },
+      ),
+    )
   }
   return output == "ALIVE"
 }
@@ -278,31 +287,39 @@ pipeline default(harness: Harness) {
       const polite_alive = pid_is_alive(harness.tools, harness.stdio, polite_pid)
       const marker_absent = !harness.fs.exists(term_marker_file)
       const escalation_alive = immune_pid_present && polite_pid_present
-        && immune_alive && polite_alive && marker_absent
+        && immune_alive
+        && polite_alive
+        && marker_absent
       if !escalation_alive {
         const worker_id = to_string(worker?.id ?? "")
         let workers = []
         for candidate in list_agents(harness.agent) {
           if worker_id != "" && candidate?.id == worker_id {
-            workers.push({
-              status: candidate?.status,
-              error: to_string(candidate?.error ?? "<absent>").substring(0, 1024),
-              result_status: candidate?.result?.status,
-              result_error: to_string(candidate?.result?.error ?? "<absent>").substring(0, 1024),
-            })
+            workers.push(
+              {
+                status: candidate?.status,
+                error: to_string(candidate?.error ?? "<absent>").substring(0, 1024),
+                result_status: candidate?.result?.status,
+                result_error: to_string(candidate?.result?.error ?? "<absent>").substring(0, 1024),
+              },
+            )
           }
         }
-        harness.stdio.eprintln(json_stringify({
-          event: "stop_contract_escalation_precondition_failed",
-          immune_pid_present: immune_pid_present,
-          polite_pid_present: polite_pid_present,
-          immune_alive: immune_alive,
-          polite_alive: polite_alive,
-          marker_absent: marker_absent,
-          worker_id: worker_id,
-          matched_workers: workers.len(),
-          workers: workers,
-        }))
+        harness.stdio.eprintln(
+          json_stringify(
+            {
+              event: "stop_contract_escalation_precondition_failed",
+              immune_pid_present: immune_pid_present,
+              polite_pid_present: polite_pid_present,
+              immune_alive: immune_alive,
+              polite_alive: polite_alive,
+              marker_absent: marker_absent,
+              worker_id: worker_id,
+              matched_workers: workers.len(),
+              workers: workers,
+            },
+          ),
+        )
       }
       contract_effect(
         harness.stdio,
