@@ -230,7 +230,9 @@ pub(super) fn fail_write_after(
         .lock()
         .expect("checkpoint test write registry poisoned")
         .insert(
-            index_path(root, session_id),
+            // Sessions key their index by the resolved root (macOS temp dirs
+            // sit behind the /var -> /private/var symlink).
+            index_path(&resolve_root(Some(root)), session_id),
             TestWritePlan {
                 writes_before_failure,
                 result,

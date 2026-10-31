@@ -939,9 +939,15 @@ pipeline default(harness: Harness, task: unknown) {{
             .filter_map(|effect| effect["invocation"].as_u64()).collect();
         assert_eq!(invocations.len(), 2, "{plan}");
 
-        // A restarted host holds nothing in memory; loading the session picks
-        // up the recorded boundary and its attributed calls.
-        assert!(harn_hostlib::workspace_checkpoint::unload(&session));
+        // A host that closes the session after each turn holds nothing in
+        // memory; loading the session picks up the recorded boundary and its
+        // attributed calls.
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":40, "method":"session/close", "params":{"sessionId":session},
+        })).unwrap();
+        let closed = recv_response_with_id(&mut response_rx, 40).await;
+        assert!(closed["error"].is_null(), "{closed}");
+        assert!(!harn_hostlib::workspace_checkpoint::unload(&session), "close released it");
         request_tx.send(serde_json::json!({
             "jsonrpc":"2.0", "id":4, "method":"session/load",
             "params":{"sessionId":session, "cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
@@ -964,10 +970,12 @@ pipeline default(harness: Harness, task: unknown) {{
         let reloaded = recv_response_with_id(&mut response_rx, 5).await;
         assert_eq!(reloaded["result"], plan, "{reloaded}");
 
-        let receipt = serde_json::to_value(
-            harn_hostlib::workspace_checkpoint::restore(&session, "turn-1", None).unwrap(),
-        ).unwrap();
-        assert_eq!(receipt["restored"][0]["path"], "agent.txt", "{receipt}");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":6, "method":"session/workspace_checkpoint",
+            "params":{"sessionId":session, "action":"restore", "boundaryId":"turn-1"},
+        })).unwrap();
+        let receipt = recv_response_with_id(&mut response_rx, 6).await;
+        assert_eq!(receipt["result"]["restored"][0]["path"], "agent.txt", "{receipt}");
         assert_eq!(std::fs::read_to_string(root.join("agent.txt")).unwrap(), "agent original");
         harn_hostlib::workspace_checkpoint::drop_session(&session);
     }).await;

@@ -49,7 +49,9 @@ other platforms.
 `{sessionId, action, boundaryId?, callId?, sideEffect?, paths?}` where `action`
 is `capture`, `call_begin`, `call_end`, `plan`, `restore`, or `drop`. The root is
 the session's cwd, and the result is the same typed object the `harness.fs`
-method returns. `session/close` drops the session's checkpoint state.
+method returns. `session/close` releases an idle session's checkpoint state from
+memory and keeps its record on disk for a later `session/load`; only the `drop`
+action deletes the record.
 
 Set `workspaceCheckpoint: true` on `session/new` or a cold `session/load` to
 capture a boundary when a prompt starts a turn. The prompt must carry a
