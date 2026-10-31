@@ -29,7 +29,7 @@
 // actually sent first. A dead pid alone cannot distinguish TERM -> grace ->
 // KILL from an immediate KILL, because both leave the same corpse; the marker
 // is the non-null read that separates them.
-import { agent_lifecycle_tools, agent_stop, sub_agent_run } from "std/agent/workers"
+import { agent_lifecycle_tools, agent_stop, list_agents, sub_agent_run } from "std/agent/workers"
 import { command_run } from "std/command"
 import { with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
@@ -91,15 +91,36 @@ fn spawn_term_polite_job(tools: HarnessTools, pid_file: string, marker_file: str
 }
 
 /** Ask the operating system, not a receipt, whether the pid is still there. */
-fn pid_is_alive(tools: HarnessTools, pid: string) -> bool {
+fn pid_is_alive(tools: HarnessTools, stdio: HarnessStdio, pid: string) -> bool {
   if pid == "" {
     return false
   }
-  const probe = command_run(
-    tools,
-    {mode: "shell", command: "kill -0 " + pid + " 2>/dev/null && echo ALIVE || echo DEAD"},
-  )
-  return trim(probe.stdout) == "ALIVE"
+  const probe = try {
+    command_run(
+      tools,
+      {mode: "shell", command: "kill -0 " + pid + " 2>/dev/null && echo ALIVE || echo DEAD"},
+    )
+  } catch (probe_error) {
+    stdio.eprintln(json_stringify({
+      event: "stop_contract_pid_probe_threw",
+      pid: pid,
+      error: to_string(probe_error).substring(0, 1024),
+    }))
+    throw probe_error
+  }
+  const output = trim(probe.stdout)
+  if probe.status != "completed" || probe.exit_code != 0 || (output != "ALIVE" && output != "DEAD") {
+    stdio.eprintln(json_stringify({
+      event: "stop_contract_pid_probe_unexpected",
+      pid: pid,
+      status: probe.status,
+      exit_code: probe.exit_code,
+      stdout: probe.stdout.substring(0, 512),
+      stderr: probe.stderr.substring(0, 1024),
+      error: to_string(probe?.error ?? "<absent>").substring(0, 1024),
+    }))
+  }
+  return output == "ALIVE"
 }
 
 /** Poll for the pid the job records, bounded so a job that never starts fails. */
@@ -122,7 +143,7 @@ fn recorded_pid(harness: Harness, pid_file: string) -> string {
 fn pid_gone_within(harness: Harness, pid: string, budget_ms: int) -> bool {
   let waited = 0
   while waited < budget_ms {
-    if !pid_is_alive(harness.tools, pid) {
+    if !pid_is_alive(harness.tools, harness.stdio, pid) {
       return true
     }
     harness.clock.sleep_ms(200)
@@ -245,20 +266,48 @@ pipeline default(harness: Harness) {
       contract_effect(
         harness.stdio,
         "effect_job_observed_alive_before_stop",
-        child_pid != "" && pid_is_alive(harness.tools, child_pid),
+        child_pid != "" && pid_is_alive(harness.tools, harness.stdio, child_pid),
       )
       // The escalation clauses get their own liveness read, and the marker
       // must be ABSENT here. A marker written before the stop would prove
       // nothing about the stop, and a pre-dead job is the failure this whole
       // file exists to refuse.
+      const immune_pid_present = immune_pid != ""
+      const polite_pid_present = polite_pid != ""
+      const immune_alive = pid_is_alive(harness.tools, harness.stdio, immune_pid)
+      const polite_alive = pid_is_alive(harness.tools, harness.stdio, polite_pid)
+      const marker_absent = !harness.fs.exists(term_marker_file)
+      const escalation_alive = immune_pid_present && polite_pid_present
+        && immune_alive && polite_alive && marker_absent
+      if !escalation_alive {
+        const worker_id = to_string(worker?.id ?? "")
+        let workers = []
+        for candidate in list_agents(harness.agent) {
+          if worker_id != "" && candidate?.id == worker_id {
+            workers.push({
+              status: candidate?.status,
+              error: to_string(candidate?.error ?? "<absent>").substring(0, 1024),
+              result_status: candidate?.result?.status,
+              result_error: to_string(candidate?.result?.error ?? "<absent>").substring(0, 1024),
+            })
+          }
+        }
+        harness.stdio.eprintln(json_stringify({
+          event: "stop_contract_escalation_precondition_failed",
+          immune_pid_present: immune_pid_present,
+          polite_pid_present: polite_pid_present,
+          immune_alive: immune_alive,
+          polite_alive: polite_alive,
+          marker_absent: marker_absent,
+          worker_id: worker_id,
+          matched_workers: workers.len(),
+          workers: workers,
+        }))
+      }
       contract_effect(
         harness.stdio,
         "effect_escalation_jobs_observed_alive_before_stop",
-        immune_pid != ""
-          && polite_pid != ""
-          && pid_is_alive(harness.tools, immune_pid)
-          && pid_is_alive(harness.tools, polite_pid)
-          && !harness.fs.exists(term_marker_file),
+        escalation_alive,
       )
       const stopped_summary = agent_stop(
         harness.agent,
@@ -298,7 +347,7 @@ pipeline default(harness: Harness) {
       contract_negative(
         harness.stdio,
         "negative_parent_owned_job_survives_the_childs_stop",
-        bystander_pid == "" || !pid_is_alive(harness.tools, bystander_pid),
+        bystander_pid == "" || !pid_is_alive(harness.tools, harness.stdio, bystander_pid),
       )
       // Leave nothing running behind this test whatever the verdict above.
       command_run(
