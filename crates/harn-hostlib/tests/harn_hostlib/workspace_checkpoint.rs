@@ -361,6 +361,39 @@ fn restore_reports_effects_it_cannot_undo() {
 }
 
 #[test]
+fn a_fork_never_reuses_an_inherited_invocation() {
+    let dir = repo();
+    let root = dir.path();
+    let source = Session::new(root);
+    let fork = Session::new(root);
+    source.capture("turn-1");
+    source.call_with("net", Some("network"), || {});
+    let source_plan = source.plan("turn-1");
+    let forked = serde_json::to_value(
+        harn_hostlib::workspace_checkpoint::fork_session(&source.id, &fork.id, root).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(forked["available"], true, "{forked}");
+    fork.capture("turn-2");
+    fork.call_with("net", Some("network"), || {});
+
+    let plan = fork.plan("turn-1");
+    let effects = plan["irreversible"].as_array().expect("irreversible");
+    assert_eq!(effects.len(), 2, "{plan}");
+    assert_ne!(
+        effects[0]["invocation"], effects[1]["invocation"],
+        "the fork's call reused an inherited invocation: {plan}"
+    );
+    let receipt = fork.restore("turn-1");
+    assert_eq!(receipt["irreversible"], plan["irreversible"], "{receipt}");
+    assert_eq!(
+        source.plan("turn-1"),
+        source_plan,
+        "the fork's history leaks into its source"
+    );
+}
+
+#[test]
 fn a_path_already_at_the_boundary_is_skipped_not_rewritten() {
     let dir = repo();
     let root = dir.path();

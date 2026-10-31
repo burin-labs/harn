@@ -164,7 +164,8 @@ pub(super) fn fork_session_checked(
             boundaries,
             calls,
             pending: HashMap::new(),
-            revision: 0,
+            // Inherited calls keep their invocations; new ones must not reuse them.
+            revision,
         })),
     );
     Ok(Outcome::Ready(receipt))
