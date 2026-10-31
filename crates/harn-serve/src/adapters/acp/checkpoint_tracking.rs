@@ -210,6 +210,9 @@ pub(super) fn attribute_tool_execution(
                 Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
             }
         }
+        _ => {
+            ToolExecutionAdmission::Refused(format!("unsupported tool execution stage: {stage:?}"))
+        }
     }
 }
 
