@@ -67,7 +67,11 @@ checkpoint history; it doesn't restore earlier file boundaries. A steer
 inserted into a running turn captures its own boundary immediately before its
 message enters the transcript. If a tool call is still in flight or capture
 otherwise fails, `plan` and `restore` report `capture_failed` for that message.
-The host must bracket tool and shell calls with `call_begin` and `call_end` and
+In an opted-in session the agent loop brackets every admitted tool call with
+`call_begin` and `call_end`, keyed by its tool call ID and recorded with the
+tool's declared side-effect class, so a restore plan names the files each call
+changed. Calls declared `read_only` and calls without an ID are not bracketed.
+A host that executes work outside the agent loop must bracket it itself and
 capture any additional boundaries it needs.
 After a session is reanchored, checkpoint actions other than `drop` return
 `{available: false, reason: "workspace_root_changed"}` while their recorded

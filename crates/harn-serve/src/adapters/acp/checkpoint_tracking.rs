@@ -162,6 +162,31 @@ impl CheckpointTracking {
     }
 }
 
+/// Bracket one admitted tool execution with the session's checkpoint calls, so
+/// a restore plan names the paths that call changed. A session with no captured
+/// boundary, or a call id already in flight, opens no window.
+#[cfg(feature = "hostlib")]
+pub(super) fn attribute_tool_execution(
+    session_id: &str,
+    store_scope: &harn_vm::SessionStoreScope,
+    tool_call_id: &str,
+    side_effect: harn_vm::tool_annotations::SideEffectLevel,
+    stage: harn_vm::bridge::ToolExecutionStage,
+) -> bool {
+    use harn_hostlib::workspace_checkpoint::{self as checkpoint, Outcome};
+    let _scope = store_scope.enter();
+    match stage {
+        harn_vm::bridge::ToolExecutionStage::Begin => matches!(
+            checkpoint::call_begin(session_id, tool_call_id),
+            Ok(Outcome::Ready(_))
+        ),
+        _ => matches!(
+            checkpoint::call_end(session_id, tool_call_id, Some(side_effect)),
+            Ok(Outcome::Ready(_))
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

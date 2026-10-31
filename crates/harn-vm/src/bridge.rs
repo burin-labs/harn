@@ -7,6 +7,7 @@ mod injection_lifecycle;
 mod pending_call;
 mod remind;
 mod response_deadline;
+mod tool_execution;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 pub use control::HostBridgeControlState;
@@ -24,6 +25,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+pub use tool_execution::{ToolExecutionBoundary, ToolExecutionGuard, ToolExecutionStage};
 
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex, Notify};
@@ -103,6 +105,8 @@ pub struct HostBridge {
     queued_transcript_injections: HostBridgeInjectionState,
     /// Host-owned work to perform immediately before a user injection is delivered.
     user_injection_boundary: std::sync::Mutex<Option<UserInjectionBoundary>>,
+    /// Host-owned work around each admitted tool execution.
+    tool_execution_boundary: std::sync::Mutex<Option<ToolExecutionBoundary>>,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
     /// Host-triggered skill-registry invalidation signal. Set when the
@@ -674,6 +678,7 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections,
             user_injection_boundary: std::sync::Mutex::new(None),
+            tool_execution_boundary: std::sync::Mutex::new(None),
             resume_requested,
             skills_reload_requested,
             daemon_idle,
@@ -731,6 +736,7 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: control.queued_transcript_injections,
             user_injection_boundary: std::sync::Mutex::new(None),
+            tool_execution_boundary: std::sync::Mutex::new(None),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),
@@ -758,6 +764,7 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_transcript_injections: HostBridgeInjectionState::default(),
             user_injection_boundary: std::sync::Mutex::new(None),
+            tool_execution_boundary: std::sync::Mutex::new(None),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),

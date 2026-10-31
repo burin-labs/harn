@@ -843,3 +843,95 @@ async fn acp_fork_inherits_independent_workspace_checkpoints() {
     );
     harn_hostlib::workspace_checkpoint::drop_session(&child);
 }
+
+/// A host that opts in gets per-call attribution from the agent loop itself:
+/// it never brackets tool calls, yet the plan names the file a tool wrote.
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn agent_loop_tool_calls_are_attributed_without_host_bracketing() {
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git").arg("-C").arg(&root).args(args).status().unwrap().success());
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(root.join("agent.txt"), "agent original").unwrap();
+        std::fs::write(root.join("seen.txt"), "read only").unwrap();
+        let target = harn_lexer::escape_string_literal(&root.join("agent.txt").to_string_lossy());
+        let pipeline = root.join("test.harn");
+        std::fs::write(&pipeline, format!(r#"import {{ agent_loop }} from "std/agent/loop"
+
+pipeline default(harness: Harness, task: unknown) {{
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "edit", name: "edit", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "look", name: "look", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "done"}})
+  let tools = tool_registry()
+  tools = tool_define(tools, "look", "Look", {{parameters: {{}},
+    annotations: {{kind: "read", side_effect_level: "read_only"}},
+    handler: {{ _args -> "seen" }},
+  }})
+  tools = tool_define(tools, "edit", "Edit", {{parameters: {{}},
+    annotations: {{kind: "edit", side_effect_level: "workspace_write"}},
+    handler: {{ _args ->
+      harness.fs.write_text("{target}", "agent edited")
+      return "edited"
+    }},
+  }})
+  agent_loop(harness, "Edit", nil, {{provider: "mock", tools: tools,
+    tool_format: "native", max_iterations: 3}})
+}}
+"#)).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let config = AcpServerConfig::for_pipeline(pipeline.to_string_lossy().into_owned());
+        let _server = tokio::task::spawn_local(super::super::run_acp_channel_server(config, request_rx, response_tx));
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":1, "method":"session/new",
+            "params":{"cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+        })).unwrap();
+        let created = recv_response_with_id(&mut response_rx, 1).await;
+        let session = created["result"]["sessionId"].as_str().expect("session id").to_string();
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/set_mode",
+            "params":{"sessionId":session, "modeId":"code"},
+        })).unwrap();
+        recv_response_with_id(&mut response_rx, 3).await;
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+            "params":{"sessionId":session, "messageId":"turn-1", "prompt":[{"type":"text", "text":"edit"}]},
+        })).unwrap();
+        let response = harn_clock::test_support::within("tool turn response", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["id"] == 2 {
+                    break message;
+                }
+            }
+        }).await;
+        assert!(response["error"].is_null(), "{response}");
+        assert_eq!(std::fs::read_to_string(root.join("agent.txt")).unwrap(), "agent edited", "{response}");
+
+        let plan = serde_json::to_value(
+            harn_hostlib::workspace_checkpoint::plan(&session, "turn-1").unwrap(),
+        ).unwrap();
+        let planned: Vec<&str> = plan["entries"].as_array().unwrap_or_else(|| panic!("{plan}"))
+            .iter().filter_map(|entry| entry["path"].as_str()).collect();
+        assert_eq!(planned, vec!["agent.txt"], "{plan}");
+
+        let receipt = serde_json::to_value(
+            harn_hostlib::workspace_checkpoint::restore(&session, "turn-1", None).unwrap(),
+        ).unwrap();
+        assert_eq!(receipt["restored"][0]["path"], "agent.txt", "{receipt}");
+        assert_eq!(std::fs::read_to_string(root.join("agent.txt")).unwrap(), "agent original");
+        harn_hostlib::workspace_checkpoint::drop_session(&session);
+    }).await;
+}
