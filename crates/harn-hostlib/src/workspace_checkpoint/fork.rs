@@ -171,6 +171,8 @@ pub(super) fn fork_session_checked(
         // Inherited calls keep their invocations; new ones must not reuse them.
         revision,
         interrupted: None,
+
+        stored_hashes: HashMap::new(),
     };
     if let Err(error) = super::persist::save(target_id, &child) {
         if let Err(cleanup) = stdfs::remove_dir_all(&target_dir) {
