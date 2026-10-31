@@ -440,6 +440,9 @@ impl AcpServer {
         let next_cwd = anchor.primary;
         let next_project_root = session_project_root_for_cwd(&next_cwd);
         let needs_update = match self.sessions.get(session_id) {
+            // The running VM, checkpoints and responder retain the turn's root.
+            // Apply the latest anchor together before the next turn binds them.
+            Some(session) if session.host_bridge.is_some() => return Ok(()),
             Some(session) => session.cwd != next_cwd || session.project_root != next_project_root,
             None => return Err(format!("Unknown session: {session_id}")),
         };
