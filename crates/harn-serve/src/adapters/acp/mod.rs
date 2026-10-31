@@ -741,7 +741,10 @@ impl AcpProfileConfig {
     }
 }
 
+/// Build with [`AcpServerConfig::new`] and the `with_*` methods; new launch
+/// inputs are added as fields without breaking embedders.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct AcpServerConfig {
     /// Trusted host inputs captured before engine startup, never ACP JSON.
     pub launcher_environment: harn_vm::security::LauncherEnvironment,
