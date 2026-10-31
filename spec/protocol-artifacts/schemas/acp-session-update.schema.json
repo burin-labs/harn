@@ -391,7 +391,8 @@
             "agent_loop_protocol_failure",
             "parse_dropped",
             "generic_throw",
-            "managed_spend_paused"
+            "managed_spend_paused",
+            "managed_allowance_unavailable"
           ]
         },
         "category": { "type": "string" },
