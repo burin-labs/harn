@@ -175,9 +175,9 @@ fn disabled_real_dispatch_releases_its_pre_dispatch_admission_hold() {
                         )
                         .unwrap()
                         .expect("the direct OpenAI route must create a real admission hold");
-                        assert!(budget.receipt().unwrap().in_flight_usd > 0);
+                        assert!(budget.receipt().unwrap().in_flight_usd > rust_decimal::Decimal::ZERO);
                         reservation.cancel_before_dispatch().unwrap();
-                        assert_eq!(budget.receipt().unwrap().in_flight_usd, 0);
+                        assert_eq!(budget.receipt().unwrap().in_flight_usd, rust_decimal::Decimal::ZERO);
 
                         let _disabled = crate::llm::test_env::ScopedEnvVar::set(
                             crate::llm::LLM_CALLS_DISABLED_ENV,
@@ -188,8 +188,8 @@ fn disabled_real_dispatch_releases_its_pre_dispatch_admission_hold() {
                             .to_string()
                             .contains(crate::llm::LLM_CALLS_DISABLED_ENV));
                         let receipt = budget.receipt().unwrap();
-                        assert_eq!(receipt.in_flight_usd, 0);
-                        assert_eq!(receipt.uncertain_usd, 0);
+                        assert_eq!(receipt.in_flight_usd, rust_decimal::Decimal::ZERO);
+                        assert_eq!(receipt.uncertain_usd, rust_decimal::Decimal::ZERO);
                     })
                     .await
                     .unwrap();
