@@ -129,6 +129,93 @@ fn conservative_admission_denies_before_http_and_settles_real_usage() {
 }
 
 #[test]
+fn disabled_real_dispatch_releases_its_pre_dispatch_admission_hold() {
+    let _env = env_guard();
+    let _cleanup = Cleanup;
+    crate::llm::cost::reset_cost_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let temp = tempfile::tempdir().unwrap();
+        let quota_path = temp.path().join("disabled-dispatch.sqlite");
+        let quota = MachineSpendQuota::open(
+            &quota_path,
+            "person",
+            MachineSpendPolicy {
+                daily_limit_microusd: Some(100_000_000),
+                monthly_limit_microusd: Some(100_000_000),
+                lifetime_limit_microusd: None,
+            },
+        )
+        .unwrap();
+        let later_quota = MachineSpendQuota::open(
+            temp.path().join("later-install.sqlite"),
+            "other-person",
+            MachineSpendPolicy {
+                daily_limit_microusd: Some(100_000_000),
+                monthly_limit_microusd: Some(100_000_000),
+                lifetime_limit_microusd: None,
+            },
+        )
+        .unwrap();
+        let budget = crate::llm::ConservativeLlmBudget::new(5.0).unwrap();
+        budget
+            .scope(async {
+                quota
+                    .scope(async {
+                        let mut opts = options(5.0, false);
+                        opts.budget = None;
+                        let request = LlmRequestPayload::from(&opts);
+                        let reservation = crate::llm::admission::reserve(
+                            &opts,
+                            &request,
+                            crate::llm::cost_context::LlmCallTokenProjection::for_options(&opts),
+                        )
+                        .unwrap()
+                        .expect("the direct OpenAI route must create a real admission hold");
+                        assert!(budget.receipt().unwrap().in_flight_usd > 0);
+                        reservation.cancel_before_dispatch().unwrap();
+                        assert_eq!(budget.receipt().unwrap().in_flight_usd, 0);
+
+                        let _disabled = crate::llm::test_env::ScopedEnvVar::set(
+                            crate::llm::LLM_CALLS_DISABLED_ENV,
+                            "1",
+                        );
+                        let error = vm_call_llm_full(&opts).await.unwrap_err();
+                        assert!(error
+                            .to_string()
+                            .contains(crate::llm::LLM_CALLS_DISABLED_ENV));
+                        let receipt = budget.receipt().unwrap();
+                        assert_eq!(receipt.in_flight_usd, 0);
+                        assert_eq!(receipt.uncertain_usd, 0);
+                    })
+                    .await
+                    .unwrap();
+
+                // Both rejected calls were canceled, so a later authority can
+                // still be installed on this same execution ledger.
+                later_quota.scope(async {}).await.unwrap();
+            })
+            .await
+            .unwrap();
+        let receipt = quota.receipt().unwrap();
+        assert_eq!(receipt.reserved_microusd, 0);
+        assert_eq!(receipt.lifetime_unsettled_attempts, 0);
+        let connection = rusqlite::Connection::open(quota_path).unwrap();
+        let audit = connection
+            .query_row(
+                "SELECT COUNT(*), SUM(CASE WHEN settled = 0 THEN 1 ELSE 0 END), COALESCE(SUM(actual), 0) FROM spend_attempt WHERE scope = ?1",
+                ["person"],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            )
+            .unwrap();
+        assert_eq!(audit, (2, 0, 0), "zero-dispatch holds remain audited");
+    });
+}
+
+#[test]
 fn conservative_admission_streaming_and_offthread_use_the_same_allowance() {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();

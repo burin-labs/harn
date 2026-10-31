@@ -492,6 +492,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::providers::MockProvider::should_intercept_request(request) {
+        super::admission::preflight(opts, observed.token_projection())?;
         observed.record_provider_dispatch();
         request.emit_reminder_lifecycle();
         let result = mock_llm_response(request)?;
@@ -503,6 +504,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        super::admission::preflight(opts, observed.token_projection())?;
         observed.record_provider_dispatch();
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
@@ -530,9 +532,14 @@ async fn vm_call_llm_full_inner_request(
         ))));
     }
 
-    super::ensure_real_llm_allowed(&request.provider)?;
     let boundary_rule = inference_boundary::preflight_chat(request)?;
     let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
+    if let Err(error) = super::ensure_real_llm_allowed(&request.provider) {
+        if let Some(reservation) = reservation {
+            reservation.cancel_before_dispatch()?;
+        }
+        return Err(error);
+    }
     request.emit_reminder_lifecycle();
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the

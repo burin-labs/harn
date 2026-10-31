@@ -751,7 +751,7 @@ fn visit_payloads(kind: &mut TapeRecordKind, mut visit: impl FnMut(&mut TapePayl
             visit(response_payload);
         }
         TapeRecordKind::ModelJob { event, .. } | TapeRecordKind::SessionControl { event } => {
-            visit(event)
+            visit(event);
         }
         TapeRecordKind::ClockRead { .. }
         | TapeRecordKind::ClockSleep { .. }

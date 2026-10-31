@@ -144,6 +144,12 @@ impl Drop for MonetaryReservation {
 }
 
 impl AttemptReservation {
+    /// Return the hold when a pre-dispatch gate rejects the call. No provider
+    /// request was started, so this is not uncertain usage.
+    pub(crate) fn cancel_before_dispatch(self) -> Result<(), VmError> {
+        self.money.release_before_dispatch()
+    }
+
     pub(crate) fn settle(self, result: &LlmResult) -> Result<(), VmError> {
         if result.served_fast {
             self.money
@@ -186,6 +192,27 @@ impl AttemptReservation {
 }
 
 impl MonetaryReservation {
+    fn release_before_dispatch(mut self) -> Result<(), VmError> {
+        let mut ledger = self
+            .scope
+            .ledger
+            .lock()
+            .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
+        let attempts_started = ledger.attempts_started.checked_sub(1).ok_or_else(|| {
+            error(
+                DenialKind::ScopeUnavailable,
+                "admission reservation has no matching started attempt",
+            )
+        })?;
+        if let Some(durable) = &self.durable {
+            durable.settle(Decimal::ZERO, Some(Decimal::ZERO))?;
+        }
+        ledger.in_flight -= self.bound;
+        ledger.attempts_started = attempts_started;
+        self.pending = false;
+        Ok(())
+    }
+
     /// Fail closed for this execution and, when a machine quota is active,
     /// for every later process sharing it.
     pub(crate) fn retain_contract_violation(self) -> Result<(), VmError> {
@@ -311,10 +338,7 @@ pub(crate) fn reserve(
         .ledger
         .lock()
         .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
-    activate(&mut ledger, opts.budget.as_ref())?;
-    // Latch the execution ceiling even when the adaptive preflight refuses.
-    // Such a refusal precedes transport, so it consumes no reservation.
-    super::cost::check_llm_preflight_budget_for(opts, tokens)?;
+    preflight_locked(&mut ledger, opts, tokens)?;
     // The provider registry marks a self-hosted runtime as a known-zero
     // billing route. It consumes neither the machine allowance nor an
     // uncertain reservation; an unknown paid route still fails closed below.
@@ -345,6 +369,30 @@ pub(crate) fn reserve(
         opts.budget.as_ref().and_then(|b| b.max_cost_usd),
     )?;
     Ok(Some(AttemptReservation { money: hold, bound }))
+}
+
+/// Mock and fake dispatches obey request budgets without monetary or machine holds.
+pub(crate) fn preflight(
+    opts: &LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+) -> Result<(), VmError> {
+    let scope = SCOPE.with(|slot| slot.borrow().clone());
+    let mut ledger = scope
+        .ledger
+        .lock()
+        .map_err(|_| error(DenialKind::ScopeUnavailable, "admission ledger poisoned"))?;
+    preflight_locked(&mut ledger, opts, tokens)
+}
+
+fn preflight_locked(
+    ledger: &mut Ledger,
+    opts: &LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+) -> Result<(), VmError> {
+    activate(ledger, opts.budget.as_ref())?;
+    // Latch the execution ceiling even when adaptive preflight refuses.
+    // Such a refusal precedes transport, so it consumes no reservation.
+    super::cost::check_llm_preflight_budget_for(opts, tokens).map(|_| ())
 }
 
 fn reserve_money(
