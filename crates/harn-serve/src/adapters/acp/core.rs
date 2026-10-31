@@ -40,6 +40,7 @@ impl AcpServer {
         Self {
             client_capabilities: client_capabilities::ClientCapabilities::default(),
             launcher_environment: config.launcher_environment,
+            launcher_session_environment: config.launcher_session_environment,
             descriptor: AdapterDescriptor {
                 id: "acp".to_string(),
                 caller_shape: "agent-session".to_string(),

@@ -822,6 +822,7 @@
   "Enter {env_name} for .env, or leave blank for a placeholder: ": ".env의 {env_name}를 입력하거나, 자리표시자로 비워 두세요: ",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it": "팩할 진입점 `.harn` 파일입니다. 진입점 디렉터리 아래의 import 지시문이 참조하는 전이적 Harn 모듈과 비-Harn 자산은 함께 번들로 묶입니다",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it.\n\nWhen `harn pack` is invoked without a subcommand, this positional argument selects the build path; passing a subcommand (e.g. `harn pack verify <bundle>`) routes to that subcommand instead.": "팩할 진입점 `.harn` 파일입니다. 진입점 디렉터리 아래의 import 지시문이 참조하는 전이적 Harn 모듈과 비-Harn 자산은 함께 번들로 묶입니다.\n\n`harn pack`가 하위 명령 없이 호출되면 이 위치 인수가 빌드 경로를 선택합니다. 하위 명령을 전달하면(예: `harn pack verify <bundle>`) 대신 해당 하위 명령으로 라우팅됩니다.",
+  "Environment policy for a client whose `session/new` names none, such as a standard ACP editor. Without this flag such a request is refused. A policy the client sends always wins": "`session/new`에서 환경 정책을 지정하지 않는 클라이언트(예: 표준 ACP 편집기)에 적용할 환경 정책입니다. 이 플래그가 없으면 그런 요청은 거부됩니다. 클라이언트가 보낸 정책이 항상 우선합니다",
   "Estimated expensive-work cost for budget enforcement": "예산 집행을 위한 예상 고비용 작업 비용",
   "Estimated token count for budget enforcement": "예산 집행을 위한 예상 토큰 수",
   "Eval pack: {eval_path}": "평가 팩: {eval_path}",

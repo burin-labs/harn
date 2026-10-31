@@ -28,17 +28,26 @@ impl AcpServer {
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
         // A malformed config or rejected launch fails the session loudly.
-        let environment_policy =
-            match Self::resolve_session_environment(params, &self.launcher_environment) {
-                Ok(environment) => {
-                    environment.with_host_inference_boundary(self.host_inference_boundary)
-                }
-                Err((message, data)) => {
-                    self.send_error_with_data(id, -32602, &message, data);
-                    return;
-                }
-            };
+        let environment_policy = match Self::resolve_session_environment(
+            params,
+            &self.launcher_environment,
+            self.launcher_session_environment,
+        ) {
+            Ok(environment) => {
+                environment.with_host_inference_boundary(self.host_inference_boundary)
+            }
+            Err((message, data)) => {
+                self.send_error_with_data(id, -32602, &message, data);
+                return;
+            }
+        };
 
+        // Say which policy applied and who chose it, so a launcher-stated
+        // policy is visible to the client that relied on it.
+        let environment_policy_json = serde_json::json!({
+            "kind": environment_policy.kind().as_str(),
+            "source": if params.get("environmentPolicy").is_some() { "client" } else { "launcher" },
+        });
         let session_id = self.next_session_id();
         if let Err(error) = self.insert_session(session_id.clone(), cwd, SessionInfo::default()) {
             self.send_session_open_error(id, &error);
@@ -68,6 +77,7 @@ impl AcpServer {
                 "sessionId": session_id,
                 "session": session,
                 "workspaceCheckpointTracking": workspace_checkpoint,
+                "environmentPolicy": environment_policy_json,
                 "modes": modes::session_mode_state(modes::DEFAULT_MODE_ID),
                 "configOptions": self.config_options_for_session(&session_id, modes::DEFAULT_MODE_ID),
             }),
@@ -118,13 +128,25 @@ impl AcpServer {
     /// three kinds stay reachable and none of them is what happens when a
     /// client says nothing.
     ///
+    /// The one exception is a statement the operator made at launch
+    /// (`launcher_stated`). Standard ACP editors have no way to send this
+    /// extension field, and a launch flag is written down on this side just
+    /// as explicitly, so it cannot drift under anyone. Without it, omission
+    /// is still refused.
+    ///
     /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
     pub(super) fn resolve_session_environment(
         params: &serde_json::Value,
         launcher_environment: &harn_vm::security::LauncherEnvironment,
+        launcher_stated: Option<harn_vm::security::EnvironmentPolicyKind>,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
-            return Err(Self::missing_environment_policy());
+            let Some(kind) = launcher_stated else {
+                return Err(Self::missing_environment_policy());
+            };
+            return launcher_environment
+                .launch(kind, Vec::new())
+                .map_err(|error| (error.to_string(), error.to_json()));
         };
         let config: AcpSessionEnvironmentConfig =
             serde_json::from_value(raw.clone()).map_err(|error| {
@@ -993,6 +1015,7 @@ mod environment_policy_default_tests {
         AcpServer::resolve_session_environment(
             &params,
             &harn_vm::security::LauncherEnvironment::capture(),
+            None,
         )
         .expect("the policy must resolve")
         .kind()
@@ -1013,6 +1036,7 @@ mod environment_policy_default_tests {
         let (message, data) = AcpServer::resolve_session_environment(
             &serde_json::json!({"cwd": "/tmp"}),
             &harn_vm::security::LauncherEnvironment::capture(),
+            None,
         )
         .expect_err("an omitted policy must not resolve to any kind");
         assert_eq!(

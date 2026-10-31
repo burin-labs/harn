@@ -105,6 +105,11 @@ pub(crate) struct ServeAcpArgs {
     /// macOS and Linux.
     #[arg(long = "confine-workspace", value_name = "PATH")]
     pub confine_workspace: Vec<PathBuf>,
+    /// Environment policy for a client whose `session/new` names none, such
+    /// as a standard ACP editor. Without this flag such a request is refused.
+    /// A policy the client sends always wins.
+    #[arg(long = "session-environment", value_enum, value_name = "KIND")]
+    pub session_environment: Option<LaunchSessionEnvironment>,
     /// Static API keys accepted by the ACP authenticate method.
     #[arg(
         hide_env_values = true,
@@ -158,6 +163,25 @@ pub(crate) struct ServeAcpArgs {
     /// waits for `initialize` / `session/new` from the connecting editor
     /// instead of binding to a script up front.
     pub file: Option<String>,
+}
+
+/// The policies an operator can state at launch. `granted` needs a grant set,
+/// which only a client can declare.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum LaunchSessionEnvironment {
+    /// Children see a snapshot of this server's environment.
+    Inherited,
+    /// Children see only non-secret runtime essentials.
+    Isolated,
+}
+
+impl LaunchSessionEnvironment {
+    pub(crate) fn kind(self) -> harn_vm::security::EnvironmentPolicyKind {
+        match self {
+            Self::Inherited => harn_vm::security::EnvironmentPolicyKind::Inherited,
+            Self::Isolated => harn_vm::security::EnvironmentPolicyKind::Isolated,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
