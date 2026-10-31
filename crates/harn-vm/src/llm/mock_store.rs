@@ -105,6 +105,14 @@ impl MockQueue {
         !self.handed_off() && (self.schema_version > 0 || self.count() > 0)
     }
 
+    /// Permanent interception policy, independent of remaining queue entries.
+    pub(crate) fn provider_io(&self) -> super::mock::FixtureProviderIo {
+        super::mock::FixtureProviderIo {
+            cli_replay: self.live_prefix.is_some(),
+            builtin_replay: self.schema_version == 0 || self.live_prefix.is_some(),
+        }
+    }
+
     pub(crate) fn live_after_calls(&self) -> Option<u64> {
         self.live_prefix.map(|prefix| prefix.live_after_calls)
     }

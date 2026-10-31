@@ -114,6 +114,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "provider_capabilities_clear"),
     ("llm", "provider_capabilities_install"),
     ("llm", "provider_catalog"),
+    ("llm", "provider_io_disposition"),
     ("llm", "provider_register"),
     ("llm", "qc_default_model"),
     ("llm", "rate_limit"),

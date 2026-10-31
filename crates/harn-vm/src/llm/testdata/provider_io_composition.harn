@@ -1,0 +1,28 @@
+fn main(harness: Harness) {
+  harness.llm.mock_push_scope()
+  harness.llm.mock_load_jsonl(
+    """{"schemaVersion":1,"strictScopes":true}
+{"id":"permanent","scope":"default","consume":"sticky","text":"BUILTIN"}
+""",
+  )
+  for n in [1, 2, 3] {
+    const d = harness.llm.provider_io_disposition()
+    harness.stdio.println("${d.provider_io}|${d.source}")
+    const provider = if n == 3 {
+      "mc-unsupported-sentinel"
+    } else {
+      "fake"
+    }
+    const r = harness.llm.call(
+      "turn ${n}",
+      nil,
+      {provider: provider, model: "protected-never-live"},
+    )
+    harness.stdio.println(r.text)
+  }
+  harness.llm.mock_pop_scope()
+  const d = harness.llm.provider_io_disposition()
+  harness.stdio.println("${d.provider_io}|${d.source}")
+  const live = harness.llm.call("outside", nil, {provider: "fake", model: "outside-live"})
+  harness.stdio.println(live.text)
+}

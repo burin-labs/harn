@@ -1,0 +1,13 @@
+fn main(harness: Harness) {
+  const receipt = harness.llm.mock_load_jsonl(
+    """{"text":"LEGACY"}
+""",
+  )
+  harness.stdio.println("${receipt.provider_io.cli_replay}|${receipt.provider_io.builtin_replay}")
+  for n in [1, 2] {
+    const d = harness.llm.provider_io_disposition()
+    harness.stdio.println("${d.provider_io}|${d.source}")
+    const r = harness.llm.call("turn ${n}", nil, {provider: "fake", model: "fake-live"})
+    harness.stdio.println(r.text)
+  }
+}

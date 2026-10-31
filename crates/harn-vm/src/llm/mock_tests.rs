@@ -869,3 +869,208 @@ fn replay_without_a_live_prefix_is_unchanged_after_exhaustion() {
     assert_eq!(prefix_marker(&live), None);
     clear_cli_llm_mock_mode();
 }
+
+#[test]
+fn provider_io_disposition_distinguishes_permanent_from_finite_builtin_policy() {
+    reset_llm_mock_state();
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::Possible);
+    push_llm_mock(text_mock("legacy"));
+    assert!(provider_io_disposition().provider_io());
+    let request = request_with_scope("prompt", None);
+    assert_eq!(mock_llm_response(&request).unwrap().text, "legacy");
+    assert!(provider_io_disposition().provider_io());
+    assert!(!crate::llm::providers::MockProvider::should_intercept_request(&request));
+
+    install_builtin_llm_mock_fixture(v1_fixture(
+        true,
+        &[serde_json::json!({"text": "versioned"})],
+    ));
+    let snapshot = builtin_llm_mock_snapshot();
+    let calls = get_llm_mock_calls();
+    for _ in 0..2 {
+        assert_eq!(
+            provider_io_disposition(),
+            ProviderIoDisposition::BuiltinReplay
+        );
+    }
+    assert_eq!(
+        builtin_llm_mock_snapshot(),
+        snapshot,
+        "query must not consume a response"
+    );
+    assert_eq!(
+        get_llm_mock_calls().len(),
+        calls.len(),
+        "query must not record calls"
+    );
+    assert_eq!(mock_llm_response(&request).unwrap().text, "versioned");
+    assert_eq!(
+        provider_io_disposition(),
+        ProviderIoDisposition::BuiltinReplay
+    );
+    let missing = request_with_scope("missing", Some("missing.scope"));
+    assert!(mock_llm_response(&missing).is_err());
+    assert_eq!(
+        provider_io_disposition(),
+        ProviderIoDisposition::BuiltinReplay
+    );
+    assert!(crate::llm::providers::MockProvider::should_intercept_request(&missing));
+
+    install_builtin_llm_mock_fixture(
+        crate::llm::jsonl::parse_llm_mocks_jsonl(LIVE_PREFIX_FIXTURE).unwrap(),
+    );
+    for _ in 0..2 {
+        assert!(
+            provider_io_disposition().provider_io(),
+            "a finite prefix is not permanent protection"
+        );
+        mock_llm_response(&request).unwrap();
+    }
+    assert!(provider_io_disposition().provider_io());
+    assert!(!crate::llm::providers::MockProvider::should_intercept_request(&request));
+    reset_llm_mock_state();
+}
+
+#[test]
+fn provider_io_disposition_covers_cli_exhaustion_composition_and_scope_restoration() {
+    reset_llm_mock_state();
+    install_cli_llm_mocks(vec![text_mock("cli-v0")]);
+    let request = request_with_scope("prompt", None);
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::CliReplay);
+    assert_eq!(mock_llm_response(&request).unwrap().text, "cli-v0");
+    assert!(mock_llm_response(&request).is_err());
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::CliReplay);
+    clear_cli_llm_mock_mode();
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::Possible);
+
+    install_cli_llm_mock_fixture(v1_fixture(true, &[]));
+    let missing = request_with_scope("missing", Some("missing.scope"));
+    assert!(mock_llm_response(&missing).is_err());
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::CliReplay);
+    install_builtin_llm_mock_fixture(
+        crate::llm::jsonl::parse_llm_mocks_jsonl(LIVE_PREFIX_FIXTURE).unwrap(),
+    );
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::CliReplay);
+    clear_cli_llm_mock_mode();
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::Possible);
+
+    install_builtin_llm_mock_fixture(v1_fixture(false, &[]));
+    enable_cli_llm_mock_recording();
+    assert_eq!(
+        provider_io_disposition(),
+        ProviderIoDisposition::BuiltinReplay
+    );
+    install_cli_llm_mock_fixture(
+        crate::llm::jsonl::parse_llm_mocks_jsonl(LIVE_PREFIX_FIXTURE).unwrap(),
+    );
+    assert_eq!(
+        provider_io_disposition(),
+        ProviderIoDisposition::BuiltinReplay
+    );
+    push_llm_mock_scope();
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::Possible);
+    assert!(pop_llm_mock_scope());
+    assert_eq!(
+        provider_io_disposition(),
+        ProviderIoDisposition::BuiltinReplay
+    );
+    clear_cli_llm_mock_mode();
+    reset_llm_mock_state();
+    enable_cli_llm_mock_recording();
+    assert_eq!(provider_io_disposition(), ProviderIoDisposition::Possible);
+    clear_cli_llm_mock_mode();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn public_provider_io_disposition_reaches_dispatch_without_consuming_replay() {
+    use crate::llm::fake::{fake_llm_captured_calls, install_fake_llm_script, FakeLlmScript};
+    let _fake = install_fake_llm_script(FakeLlmScript::new());
+    let source = include_str!("testdata/provider_io_strict_replay.harn");
+    let chunk = crate::compile_source(source).expect("compile public disposition call");
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    let error = tokio::task::LocalSet::new()
+        .run_until(vm.execute(&chunk))
+        .await
+        .expect_err("strict replay exhaustion must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("No llm_mock fixture matched prompt in a strict scope"),
+        "{error}"
+    );
+    assert_eq!(
+        vm.output(),
+        "false|false\nfalse|builtin_replay\nfalse|builtin_replay\nONLY\nfalse|builtin_replay\n"
+    );
+    assert!(
+        fake_llm_captured_calls().is_empty(),
+        "installed fixture, not fake provider, answered"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn public_provider_io_disposition_does_not_certify_legacy_builtin_exhaustion() {
+    use crate::llm::fake::{
+        fake_llm_captured_calls, install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn,
+        FakeStopReason,
+    };
+    let _fake = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+        FakeLlmEvent::Token("LIVE".into()),
+        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+    ])));
+    let source = include_str!("testdata/provider_io_legacy_handoff.harn");
+    let chunk = crate::compile_source(source).expect("compile public legacy disposition call");
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    tokio::task::LocalSet::new()
+        .run_until(vm.execute(&chunk))
+        .await
+        .expect("legacy handoff");
+    assert_eq!(
+        vm.output(),
+        "false|true\ntrue|possible\nLEGACY\ntrue|possible\nLIVE\n"
+    );
+    assert_eq!(
+        fake_llm_captured_calls().len(),
+        1,
+        "only exhausted call reaches fake provider"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn public_provider_io_composition_blocks_dispatch_after_cli_prefix_handoff() {
+    use crate::llm::fake::{
+        fake_llm_captured_calls, install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn,
+        FakeStopReason,
+    };
+    reset_llm_mock_state();
+    let _fake = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+        FakeLlmEvent::Token("OUTSIDE".into()),
+        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+    ])));
+    install_cli_llm_mock_fixture(
+        crate::llm::jsonl::parse_llm_mocks_jsonl(
+            "{\"schemaVersion\":1,\"strictScopes\":false,\"liveAfterCalls\":1}\n\
+         {\"id\":\"prefix\",\"scope\":\"default\",\"consume\":\"once\",\"text\":\"CLI\"}\n",
+        )
+        .expect("CLI prefix fixture"),
+    );
+    let source = include_str!("testdata/provider_io_composition.harn");
+    let chunk = crate::compile_source(source).expect("compile public composition");
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    clear_cli_llm_mock_mode();
+    tokio::task::LocalSet::new()
+        .run_until(vm.execute(&chunk))
+        .await
+        .expect("permanent builtin survives CLI handoff");
+    assert_eq!(vm.output(), "false|builtin_replay\nCLI\nfalse|builtin_replay\nBUILTIN\nfalse|builtin_replay\nBUILTIN\ntrue|possible\nOUTSIDE\n");
+    let dispatched = fake_llm_captured_calls();
+    assert_eq!(
+        dispatched.len(),
+        1,
+        "protected calls cannot reach the provider"
+    );
+    assert_eq!(dispatched[0].model, "outside-live");
+}
