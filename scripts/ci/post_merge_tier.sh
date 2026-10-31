@@ -9,6 +9,15 @@ set -euo pipefail
 : "${EVENT_NAME:?EVENT_NAME is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
+main_full_suite=false
+if [[ "$EVENT_NAME" == workflow_dispatch && "${GITHUB_REF:-}" != refs/heads/main ]]; then
+  echo '::error::Manual full-suite CI requires refs/heads/main.' >&2
+  exit 1
+fi
+if [[ "$EVENT_NAME" == push || "$EVENT_NAME" == workflow_dispatch ]]; then
+  [[ "${GITHUB_REF:-}" != refs/heads/main ]] || main_full_suite=true
+fi
+
 active=false
 if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == merge_group ]]; then
   # The path filter answers exactly `true` or `false`; anything else is an
@@ -68,3 +77,4 @@ if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == merge_group ]]; then
   fi
 fi
 printf 'active=%s\n' "$active" >> "$GITHUB_OUTPUT"
+printf 'main_full_suite=%s\n' "$main_full_suite" >> "$GITHUB_OUTPUT"

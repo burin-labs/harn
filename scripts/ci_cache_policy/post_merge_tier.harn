@@ -38,15 +38,15 @@ const TIER_EXCUSED_RESULTS = [
 ]
 
 /**
- * Jobs that run on main pushes only, whatever the change selects: macOS was
+ * Jobs that run on main full-suite admissions, whatever the change selects: macOS was
  * the last job to finish in about a quarter of full-suite pull request and
- * merge-group runs. The aggregate requires them exactly on a push.
+ * merge-group runs. The aggregate reads the same main admission.
  */
 pub const MAIN_PUSH_ONLY_JOBS: list<string> = ["macos", "macos-lint"]
 
-const MAIN_PUSH_GUARD = "github.event_name == 'push'"
+const MAIN_PUSH_GUARD = "needs.changes.outputs.main_full_suite == 'true'"
 
-const MAIN_PUSH_EXCUSE = "test \"$EVENT_NAME\" != \"push\""
+const MAIN_PUSH_EXCUSE = "test \"$MAIN_FULL_SUITE\" != \"true\""
 
 fn gha(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -108,6 +108,8 @@ pub fn post_merge_tier_errors(workflows: dict) -> list<string> {
   const decision_run = to_string(decision?.run ?? "")
   if trim(to_string(changes?.outputs?.post_merge_tier ?? ""))
     != gha("steps.${TIER_STEP_ID}.outputs.active")
+    || trim(to_string(changes?.outputs?.main_full_suite ?? ""))
+      != gha("steps.${TIER_STEP_ID}.outputs.main_full_suite")
     || trim(to_string(decision?.env?.FULL_SUITE_PATHS ?? ""))
       != gha("steps.surface_filter.outputs.full_suite")
     || trim(to_string(decision?.env?.EVENT_NAME ?? "")) != gha("github.event_name")
@@ -139,7 +141,7 @@ pub fn post_merge_tier_errors(workflows: dict) -> list<string> {
   const status_step = step_by_name(status?.steps ?? [], "Verify required CI jobs")
   const command = to_string(status_step?.run ?? "")
   const env = status_step?.env ?? {}
-  if trim(to_string(env?.EVENT_NAME ?? "")) != gha("github.event_name")
+  if trim(to_string(env?.MAIN_FULL_SUITE ?? "")) != gha("needs.changes.outputs.main_full_suite")
     || !contains(require_call(command, "macos_result"), MAIN_PUSH_EXCUSE) {
     errors = errors + ["ci.yml:ci-status must require macOS on, and only on, main pushes"]
   }
