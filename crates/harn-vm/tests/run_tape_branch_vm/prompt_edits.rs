@@ -417,3 +417,113 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
     assert_eq!(report.live_calls, 0);
     assert_eq!(report.divergence.unwrap().what, "prompt source edit");
 }
+
+#[test]
+fn prompt_edits_refuse_template_syntax_before_creating_branch_state() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    let path = dirs.workspace.join("prompt.harn.prompt");
+    std::fs::write(&path, "Original").unwrap();
+    let source = program(path.to_str().unwrap(), "baseline");
+    assert_eq!(
+        record(&source, &dirs.tapes, &dirs.workspace),
+        "Original\nbaseline\nOriginal\nbaseline\n"
+    );
+    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    for replacement in [
+        "{{ 1 + 1 }}",
+        "{{- 1 + 1 -}}",
+        "{{ include \"other.harn.prompt\" }}",
+        "{{# hidden #}}",
+        "{{ endraw }}{{ 1 + 1 }}",
+        "unmatched {{",
+        "unmatched }}",
+    ] {
+        let edit = edit_for(&tape, "Original", replacement);
+        let state = dirs.markers.join("refused-state");
+        let refusal = start_branch(plan(tape.clone(), &dirs.workspace, &state, edit, 0));
+        assert!(
+            refusal
+                .err()
+                .unwrap()
+                .contains("template syntax delimiters"),
+            "{replacement:?}"
+        );
+        assert!(!state.exists(), "{replacement:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Original");
+    }
+}
+
+#[test]
+fn prompt_edits_refuse_delimiters_formed_at_source_boundaries() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    for (source, replacement) in [
+        ("Original{{ if true }}Tail{{ end }}", "{"),
+        ("{{ if true }}Original{{ end }}", "}"),
+    ] {
+        let dirs = dirs();
+        let path = dirs.workspace.join("prompt.harn.prompt");
+        std::fs::write(&path, source).unwrap();
+        let script = program(path.to_str().unwrap(), "baseline");
+        assert!(record(&script, &dirs.tapes, &dirs.workspace).contains("Original"));
+        let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+        let edit = edit_for(&tape, "Original", replacement);
+        let guard = start_branch(plan(
+            tape,
+            &dirs.workspace,
+            &dirs.markers.join("state"),
+            edit,
+            1,
+        ))
+        .unwrap();
+        let failure = run_in(
+            &program(path.to_str().unwrap(), "fresh"),
+            &dirs.workspace,
+            Some(guard.scope()),
+        )
+        .unwrap_err();
+        assert!(failure.contains("template syntax delimiters"), "{failure}");
+        let report = guard.finish();
+        assert_eq!((report.served_calls, report.live_calls), (1, 0));
+        assert_eq!(report.prompt_edits[0].prepared_renders, 0);
+        assert_eq!(report.divergence.unwrap().what, "prompt source edit");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    }
+}
+
+#[test]
+fn prompt_edits_keep_ordinary_replacements_literal_in_raw_and_normal_text() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    for source in ["Original", "{{ raw }}Original{{ endraw }}"] {
+        let dirs = dirs();
+        let path = dirs.workspace.join("prompt.harn.prompt");
+        std::fs::write(&path, source).unwrap();
+        let script = program(path.to_str().unwrap(), "baseline");
+        assert_eq!(
+            record(&script, &dirs.tapes, &dirs.workspace),
+            "Original\nbaseline\nOriginal\nbaseline\n"
+        );
+        let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+        let edit = edit_for(&tape, "Original", "New {literal} é");
+        let guard = start_branch(plan(
+            tape,
+            &dirs.workspace,
+            &dirs.markers.join("state"),
+            edit,
+            1,
+        ))
+        .unwrap();
+        let output = run_in(
+            &program(path.to_str().unwrap(), "fresh"),
+            &dirs.workspace,
+            Some(guard.scope()),
+        )
+        .unwrap();
+        let report = guard.finish();
+        assert_eq!(report.divergence, None);
+        assert_eq!((report.served_calls, report.live_calls), (1, 1));
+        assert_eq!(report.prompt_edits[0].prepared_renders, 1);
+        assert_eq!(output, "Original\nbaseline\nNew {literal} é\nfresh\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    }
+}

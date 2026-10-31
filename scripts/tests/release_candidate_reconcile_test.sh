@@ -52,13 +52,22 @@ case "$1 $2" in
     pages="${FAKE_BUILD_PAGES:-}"
     [[ -n "$pages" ]] || pages="[${FAKE_BUILDS:-[]}]"
     jq -n --argjson pages "$pages" --arg state "$state" --arg override "${FAKE_BUILD_TOTAL:-}" '[ $pages[] | [.[] | select(.status == $state)] ] as $filtered | (if $override == "" then ($filtered | map(length) | add) else ($override | tonumber) end) as $total | [$filtered[] | {total_count: $total, workflow_runs: .}]' ;;
-  "api repos/o/r/actions/workflows/promote-release.yml/runs?per_page=50")
+  "api repos/o/r/actions/workflows/promote-release.yml/runs?status="*"&per_page=100&page="*)
     unread promotions
-    jq -n --argjson runs "${FAKE_PROMOTIONS:-[]}" '{workflow_runs: $runs}' | jq -r "$4" ;;
-  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&status=success&per_page=30")
+    state="${2#*status=}"; state="${state%%&*}"
+    jq -n --argjson runs "${FAKE_PROMOTIONS:-[]}" --arg state "$state" '$runs|map(select(.status==$state))|{total_count:length,workflow_runs:.}' ;;
+  "api repos/o/r/actions/runs/600")
+    jq -n --argjson runs "$FAKE_PROMOTIONS" '$runs[]|select(.id==600)' ;;
+  "api repos/o/r/actions/runs/600/attempts/1/jobs?per_page=100&page=1")
+    jq -n --argjson runs "$FAKE_PROMOTIONS" '($runs[]|select(.id==600).head_sha) as $sha|{total_count:1,jobs:[{id:601,run_id:600,run_attempt:1,head_sha:$sha,name:"Publish",status:"in_progress",conclusion:null}]}' ;;
+  "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=100&page="*)
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
-    if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then echo 77; fi ;;
-  "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*) echo 1 ;;
+    if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then
+      jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+    else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
+  "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*)
+    sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
+    jq -n --arg sha "$sha" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:77,head_sha:$sha}}]}' ;;
   "api repos/o/r/actions/runs/900/jobs?per_page=100")
     unread jobs
     jq -n --argjson jobs "${FAKE_JOBS:-[]}" --arg override "${FAKE_JOBS_TOTAL:-}" '[{total_count: (if $override == "" then ($jobs | length) else ($override | tonumber) end), jobs: $jobs}]' ;;
@@ -149,7 +158,7 @@ run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$failed_checkout"
 
 # A promotion in flight counts only when its source holds a candidate, and
 # this run never counts itself.
-promotion() { jq -nc --argjson id "$1" --arg sha "$2" '{id: $id, status: "in_progress", display_title: ("Promote release " + $sha)}'; }
+promotion() { jq -nc --argjson id "$1" --arg sha "$2" '{id: $id,run_attempt:1,head_sha:$sha,head_branch:"main",event:"workflow_dispatch",conclusion:null,path:".github/workflows/promote-release.yml",repository:{full_name:"o/r"},head_repository:{full_name:"o/r"}, status: "in_progress", display_title: ("Promote release " + $sha)}'; }
 run "FAKE_PROMOTIONS=[$(promotion 600 "$release_commit")]" "FAKE_CANDIDATE_SHAS=$release_commit"
 [[ $status == 0 && "$(dispatched)" == 0 ]] || fail "a candidate was requested beside a candidate's promotion"
 grep -Fq 'candidate promotions in flight: [600]' "$tmp/out" || fail "the in-flight promotion was not reported"

@@ -52,6 +52,9 @@ pub(super) fn validated_sources(
     tape: &EventTape,
     edits: &[PromptSourceEdit],
 ) -> Result<Sources, String> {
+    // Stored render text may have different bytes and length from its spans.
+    // Apply the same eligibility rule as replay before reading source proofs.
+    super::require_unredacted_branch_payloads(tape)?;
     let mut sources = BTreeMap::new();
     let mut proofs = BTreeSet::new();
     for record in &tape.records {
@@ -98,6 +101,11 @@ pub(super) fn validated_sources(
     for edit in edits {
         if edit.original.is_empty() || edit.original == edit.replacement {
             return Err("a prompt edit must change a nonempty recorded literal".to_string());
+        }
+        if edit.replacement.contains("{{") || edit.replacement.contains("}}") {
+            return Err(
+                "prompt replacements must not contain template syntax delimiters".to_string(),
+            );
         }
         if !identities.insert((&edit.template_uri, edit.line, edit.column)) {
             return Err("multiple prompt edits target the same source position".to_string());

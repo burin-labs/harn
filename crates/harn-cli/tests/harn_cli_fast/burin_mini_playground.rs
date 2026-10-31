@@ -653,7 +653,7 @@ mod stage_summary_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn native_qualification_cannot_accept_an_unavailable_host() {
-        use harn_cli::tests::common::sandbox_host::{
+        use crate::test_util::sandbox_host::{
             native_qualification_profile, worktree_sandbox_for_host,
         };
         use harn_vm::process_sandbox::{

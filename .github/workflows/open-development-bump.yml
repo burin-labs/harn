@@ -54,6 +54,8 @@ on:
         type: string
 
 permissions:
+  actions: read
+  attestations: read
   contents: read
   pull-requests: read
 
@@ -125,7 +127,40 @@ jobs:
 
       - name: Configure isolated Harn build
         if: steps.development.outputs.required == 'true'
-        run: make setup-rust
+        run: make setup-bootstrap
+
+      - name: Install the published paperwork interpreter
+        if: steps.development.outputs.required == 'true'
+        id: published-runtime
+        uses: burin-labs/harn/.github/actions/setup-harn@389a3aeb579e70d73999d7af6eac7b22a30c7808
+        with:
+          version: ${{ steps.development.outputs.published_tag }}
+          cache-dir: ${{ runner.temp }}/paperwork-runtime-cache
+          install-dir: ${{ runner.temp }}/paperwork-runtime-bin
+
+      - name: Authenticate and qualify the paperwork interpreter
+        if: steps.development.outputs.required == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.development.outputs.published_tag }}
+          RUNTIME_RECEIPT: ${{ steps.published-runtime.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RUNTIME_RECEIPT" > "$RUNNER_TEMP/paperwork-runtime-receipt.json"
+          bash scripts/verify_published_harn_runtime.sh \
+            "$RUNNER_TEMP/paperwork-runtime-receipt.json" "$RUNNER_TEMP/paperwork-runtime-cache" \
+            "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" "${RELEASE_TAG#v}" \
+            > "$RUNNER_TEMP/paperwork-runtime-proof.json"
+          harn_bin="$(jq -er '.path' "$RUNNER_TEMP/paperwork-runtime-proof.json")"
+          if "$harn_bin" dump-protocol-artifacts --check; then
+            echo 'Using the verified published interpreter for development paperwork.'
+          else
+            echo 'Current protocol projections need the source-built interpreter.'
+            make setup-rust
+            harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          fi
+          echo "HARN_BIN=$harn_bin" >> "$GITHUB_ENV"
 
       - name: Prepare and open development bump
         if: steps.development.outputs.required == 'true'

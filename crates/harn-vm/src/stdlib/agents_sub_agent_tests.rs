@@ -382,7 +382,10 @@ fn parse_sub_agent_request_anchor_without_parent_passes() {
     let parsed = parse_sub_agent_request(&[request]).unwrap();
     assert_eq!(
         parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-        std::path::PathBuf::from("/workspace/anywhere")
+        crate::workspace_anchor::WorkspaceAnchor::canonicalize_path(std::path::Path::new(
+            "/workspace/anywhere"
+        ))
+        .expect("canonical fixture root")
     );
 }
 

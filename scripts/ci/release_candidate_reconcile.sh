@@ -117,23 +117,14 @@ candidate_ids() {
   printf '%s\n' "$ids"
 }
 in_flight="$(candidate_ids "$build_rows")" || exit 1
-# A candidate's promotion in flight: another promotion run whose source holds
-# a successful candidate. Promotion names each run after its source.
-promoting=""
-promotions="$(gh api "repos/$repository/actions/workflows/promote-release.yml/runs?per_page=50" --jq "
-  .workflow_runs[] | select(.status != \"completed\" and .id != $self_run)
-  | [.id, ((.display_title // \"\") | capture(\"(?<sha>[0-9a-f]{40})\$\").sha // \"\")] | @tsv")" || {
-  echo "::error::Cannot read promotion runs; refusing to treat $tag as idle." >&2
+# The success-only selector remains separate from authenticated archive
+# recovery, whose original consumer may have failed.
+promotion_state="$(node "$script_dir/../lib/release-candidate-state.mjs" promotions "$repository" "$self_run")" || {
+  echo "::error::Promotion state is unmeasured; refusing to treat $tag as idle." >&2
   exit 1
 }
-while IFS=$'\t' read -r run sha; do
-  [[ -n "$run" && -n "$sha" ]] || continue
-  candidate="$(release_candidate_run_id "$repository" "$sha" < /dev/null)" || {
-    echo "::error::Cannot read the candidate behind promotion run $run." >&2
-    exit 1
-  }
-  [[ -z "$candidate" ]] || promoting="${promoting:+$promoting,}$run"
-done <<< "$promotions"
+promoting="$(jq -er 'select(.schema == "harn.release.active_promotions.v1") | .promoting | join(",")' <<< "$promotion_state")" || exit 1
+echo "::notice::Promotion census: $(jq -c '{observed,promoting,recoveries,pending_jobs,bad_jobs}' <<< "$promotion_state")"
 
 age_hours=$(( (now - $(git -C "$source_directory" show -s --format=%ct "$release_commit")) / 3600 ))
 summary="$tag owed since $release_commit (${age_hours}h)"

@@ -70,6 +70,9 @@ Unicode line and column, recorded text, replacement text, and `activation`.
 Admission requires
 that exact literal and location in recorded provenance. Interpolated values and
 partial spans are not source edits.
+Replacement text cannot contain `{{` or `}}`, or form either delimiter against
+adjacent source text. Template expressions, comments, and raw-block terminators
+are refused rather than interpreted as replacement text.
 
 With `Origin`, the template renderer applies edits from the start, including
 values rendered early and sent to a model later. Earlier model requests still
@@ -84,7 +87,9 @@ attributed model call that used any edited literal and its `live_after_calls`
 prefix. Its `first_consumers` list records the first use of every edit in input
 order. Pass that prefix and the same edits to `BranchPlan`. The planner refuses
 unused or unattributed edits, ambiguous overlapping source attribution, and
-malformed source identities. A short render without request attribution is
+malformed source identities. Like replay admission, planning refuses tapes with
+redacted payloads: stored render bytes may no longer match source span offsets.
+A short render without request attribution is
 unavailable for automatic planning, even if the tape recorded its source.
 Recorded renders remain candidates for attribution throughout the run, so a
 value first consumed later or reused after an unrelated call keeps its source.

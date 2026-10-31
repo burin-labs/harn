@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn anchor_json_round_trips() {
-        let anchor = WorkspaceAnchor {
+        let mut anchor = WorkspaceAnchor {
             primary: PathBuf::from("/workspace/main"),
             additional_roots: vec![MountedRoot {
                 path: PathBuf::from("/workspace/lib"),
@@ -300,6 +300,9 @@ mod tests {
             }],
             anchored_at: "2026-05-23T00:00:00Z".to_string(),
         };
+        anchor
+            .canonicalize_roots()
+            .expect("canonical fixture roots");
         let json = anchor.to_json();
         let back = WorkspaceAnchor::from_json(&json).expect("round trip");
         assert_eq!(anchor, back);

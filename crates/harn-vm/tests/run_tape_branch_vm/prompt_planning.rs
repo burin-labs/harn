@@ -256,3 +256,106 @@ fn an_origin_edit_cannot_bypass_verification_with_a_later_boundary() {
         FIRST
     );
 }
+
+#[test]
+fn source_planning_refuses_redacted_offsets_before_accepting_literal_proofs() {
+    use harn_vm::stdlib::template::{PromptSourceSpan, PromptSpanKind};
+
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    for redacted in [false, true] {
+        let dirs = dirs();
+        let target = dirs.workspace.join("redaction.harn.prompt");
+        let template = format!("{{{{ prefix }}}}{FIRST}{{{{ padding }}}}");
+        std::fs::write(&target, &template).unwrap();
+        let prefix = if redacted {
+            "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+        } else {
+            "Public prefix."
+        };
+        let program = format!(
+            r#"
+import {{ with_llm_script }} from "std/testing"
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(harness.llm, [{{text: "baseline", model: "mock"}}], {{ ->
+    const prompt = harness.fs.render_prompt({}, {{prefix: "{prefix}", padding: "{}"}})
+    const response = harness.llm.call(prompt, nil, {{provider: "mock", model: "mock"}})
+    harness.stdio.println(response.text)
+  }})
+}}
+"#,
+            quote(&target),
+            "padding ".repeat(40),
+        );
+        assert_eq!(record(&program, &dirs.tapes, &dirs.workspace), "baseline\n");
+        let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+        let (rendered, spans) = tape
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TapeRecordKind::PromptRender {
+                    rendered, spans, ..
+                } => Some((rendered, spans)),
+                _ => None,
+            })
+            .expect("the real render was recorded");
+        let rendered = tape.resolve_payload(rendered).unwrap();
+        let spans: Vec<PromptSourceSpan> =
+            serde_json::from_slice(&tape.resolve_payload(spans).unwrap()).unwrap();
+        let literal = spans
+            .iter()
+            .find(|span| span.kind == PromptSpanKind::Text)
+            .unwrap();
+        let stored_slice =
+            std::str::from_utf8(&rendered[literal.output_start..literal.output_end]).unwrap();
+        let edit = PromptSourceEdit {
+            template_uri: literal.template_uri.clone(),
+            template_revision: literal.template_revision.clone(),
+            line: literal.template_line,
+            column: literal.template_col,
+            original: FIRST.to_string(),
+            replacement: "Edited instruction.".to_string(),
+            activation: PromptEditActivation::Origin,
+        };
+        let redactions = tape
+            .records
+            .iter()
+            .filter(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction))
+            .count();
+        if redacted {
+            assert!(redactions > 0, "the recording must exercise real redaction");
+            assert_ne!(
+                stored_slice, FIRST,
+                "redaction must shift the literal offsets"
+            );
+            assert!(!String::from_utf8_lossy(&rendered).contains(prefix));
+            let refusal = plan_prompt_branch(&tape, std::slice::from_ref(&edit)).unwrap_err();
+            assert!(refusal.contains("redacted payloads"), "{refusal}");
+            // Previously these shifted bytes could be certified as the source
+            // literal even though they include text from the padding expression.
+            let forged = PromptSourceEdit {
+                original: stored_slice.to_string(),
+                ..edit.clone()
+            };
+            assert_eq!(plan_prompt_branch(&tape, &[forged]).unwrap_err(), refusal);
+            let admission = start_branch(BranchPlan {
+                tape,
+                workspace_root: dirs.workspace.clone(),
+                state_root: dirs.markers.join("redacted-state"),
+                live_after_calls: 0,
+                host_state_roots: Vec::new(),
+                prompt_edits: vec![edit],
+            })
+            .err()
+            .expect("redacted replay must also refuse");
+            assert_eq!(admission, refusal);
+        } else {
+            assert_eq!(redactions, 0);
+            assert_eq!(stored_slice, FIRST);
+            assert_eq!(
+                plan_prompt_branch(&tape, &[edit]).unwrap().first_live_call,
+                1
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), template);
+    }
+}

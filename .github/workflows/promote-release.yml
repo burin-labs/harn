@@ -338,12 +338,29 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-actions: write
           permission-issues: write
+      - name: Mint recovery read authority
+        id: recovery-read
+        if: steps.wake.outputs.required == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
       - name: Keep a candidate in flight while main owes a release
         if: steps.wake.outputs.required == 'true'
         env:
           GH_TOKEN: ${{ steps.reconcile-token.outputs.token }}
           SELF_RUN_ID: ${{ github.run_id }}
           SOURCE_DIRECTORY: .
+          RELEASE_RECOVERY_READ_TOKEN: ${{ steps.recovery-read.outputs.token }}
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
         run: MAIN_SHA="$(git rev-parse HEAD)" bash scripts/ci/release_candidate_reconcile.sh
 
   consumer-rehearsal:
@@ -517,7 +534,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@a3e59dbd5e24191ca1c52579a0b5b9806eda6380
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@ef4578faeb3462013fa74bb3915a455f1172c058
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -661,6 +678,8 @@ jobs:
     needs: [plan, promote]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     permissions:
+      actions: read
+      attestations: read
       contents: read
       pull-requests: read
     uses: ./.github/workflows/open-development-bump.yml

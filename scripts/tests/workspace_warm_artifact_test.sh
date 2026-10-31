@@ -22,6 +22,8 @@ mkdir -p \
   "$tmpdir/target/debug/incremental/foo" \
   "$tmpdir/out"
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
+cp "$repo_root/scripts/tests/fixtures/df-capacity.sh" "$tmpdir/bin/df"
+chmod +x "$tmpdir/bin/df"
 # Keep the shell test on an isolated policy document so knobs stay config, not
 # hardcoded in the assertion surface.
 cp "$repo_root/.github/cache-policy.json" "$tmpdir/cache-policy.json"
@@ -259,6 +261,27 @@ grep -Eq "^${platform}_warm_restore_target_bytes=[1-9][0-9]*$" "$tmpdir/tight.ou
 grep -Eq "^${platform}_warm_restore_headroom_bytes=[1-9][0-9]*$" "$tmpdir/tight.out"
 grep -Fq 'warm artifact needs' "$tmpdir/tight.err"
 test -f "$tmpdir/restored-tight/sentinel"
+
+echo "restore distinguishes measured zero capacity from an unreadable capacity"
+for available in 0 unknown; do
+  if FIXTURE_DF_AVAILABLE_KIB="$available" \
+    run_restore "$tmpdir/out/staging" "$tmpdir/restored-tight" \
+    >"$tmpdir/capacity-$available.out" 2>"$tmpdir/capacity-$available.err"; then
+    echo "expected $available capacity admission to fail" >&2
+    exit 1
+  fi
+  if [[ "$available" == 0 ]]; then
+    grep -Fxq "${platform}_warm_restore_reason=insufficient_space" "$tmpdir/capacity-$available.out"
+    grep -Fxq "${platform}_warm_restore_free_bytes=0" "$tmpdir/capacity-$available.out"
+  else
+    grep -Fq 'could not measure filesystem free bytes' "$tmpdir/capacity-$available.err"
+    if grep -Fq 'warm_restore_free_bytes=0' "$tmpdir/capacity-$available.out"; then
+      echo "unreadable capacity was reported as measured zero" >&2
+      exit 1
+    fi
+  fi
+  test -f "$tmpdir/restored-tight/sentinel"
+done
 
 echo "restore rejects manifests without a typed target footprint"
 rm -rf "$tmpdir/out/missing-footprint"

@@ -188,6 +188,22 @@ fn measurement(bytes: int) -> ReleaseBinarySizeMeasurement {
   }
 }
 
+/**
+ * A measurement built the way the live baseline was, so the live-policy test
+ * survives a refresh that changes the release build identity.
+ */
+fn baseline_measurement(
+  target: ReleaseBinarySizeTargetPolicy,
+  bytes: int,
+) -> ReleaseBinarySizeMeasurement {
+  return {
+    target: target.target,
+    source_sha: "1e5eb3af1bd0f3a5a26e2cb0d7f1b6a6b3f0dd11",
+    bytes: bytes,
+    build_identity: target.baseline.build_identity,
+  }
+}
+
 // --- parse_args -------------------------------------------------------------
 @test
 pipeline test_parse_args_defaults(harness: Harness, task: unknown) {
@@ -386,7 +402,10 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   // that a refresh invalidates. The baseline itself is always ok; the fuse is
   // the only thing that populates `failures`; and the percent boundary is
   // computed from the policy's own threshold.
-  const baseline = evaluate_release_binary_size(target, measurement(target.baseline.bytes))
+  const baseline = evaluate_release_binary_size(
+    target,
+    baseline_measurement(target, target.baseline.bytes),
+  )
   assert_eq(baseline.growth, "ok")
   assert_eq(baseline.failures, [])
   // Ceiling, not floor: the boundary is the FIRST measurement that reaches the
@@ -397,9 +416,10 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   )
   const at_boundary = evaluate_release_binary_size(
     target,
-    measurement(target.baseline.bytes + warn_step),
+    baseline_measurement(target, target.baseline.bytes + warn_step),
   )
-  assert_eq(at_boundary.delta_percent_hundredths, target.growth.warn_percent_hundredths)
+  // Warning needs both thresholds, so whichever binds sets the boundary.
+  assert(at_boundary.delta_percent_hundredths >= target.growth.warn_percent_hundredths)
   assert_eq(at_boundary.growth, "warn")
   assert_eq(at_boundary.failures, [])
   assert_eq(at_boundary.warnings.count, 1)
@@ -407,7 +427,7 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert_eq(at_boundary.fuse, "ok")
   const below_boundary = evaluate_release_binary_size(
     target,
-    measurement(target.baseline.bytes + warn_step - 1),
+    baseline_measurement(target, target.baseline.bytes + warn_step - 1),
   )
   assert_eq(below_boundary.growth, "ok")
   assert_eq(below_boundary.failures, [])
@@ -415,7 +435,7 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   // Only the fuse refuses.
   const over_fuse = evaluate_release_binary_size(
     target,
-    measurement(target.distribution_fuse_bytes + 1),
+    baseline_measurement(target, target.distribution_fuse_bytes + 1),
   )
   assert_eq(over_fuse.fuse, "breached")
   assert_eq(over_fuse.failures.count, 1)

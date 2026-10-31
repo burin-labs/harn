@@ -6,6 +6,33 @@ fn expression(value: string) -> string {
   return "$" + "{{ " + value + " }}"
 }
 
+pipeline test_reconciler_has_separate_read_only_consumer_custody_authority(harness: Harness) {
+  const flow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const steps = flow.jobs.reconcile.steps
+  let readers = 0
+  let guards = 0
+  for step in steps {
+    if step.id == "recovery-read" {
+      readers = readers + 1
+      assert_eq(step.with["permission-actions"], "read")
+      assert_eq(step.with["permission-contents"], "read")
+      assert_eq(step.with["permission-pull-requests"], "read")
+      assert_eq(step.with["permission-issues"], nil)
+      assert(step.with.repositories.contains("secrets.CONSUMER_CANARY_REPOSITORY"))
+    }
+    if step.env != nil && step.env.RELEASE_RECOVERY_READ_TOKEN != nil {
+      guards = guards + 1
+      assert_eq(
+        step.env.RELEASE_RECOVERY_READ_TOKEN,
+        expression("steps.recovery-read.outputs.token"),
+      )
+      assert(step.run.contains("release_candidate_reconcile.sh"))
+    }
+  }
+  assert_eq(readers, 1)
+  assert_eq(guards, 1)
+}
+
 pipeline test_candidate_security_owns_exact_source_admission_before_builds(harness: Harness) {
   const flow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const supply = read_yaml(harness.fs, "../../.github/workflows/supply-chain.yml", nil)

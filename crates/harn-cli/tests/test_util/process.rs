@@ -144,7 +144,7 @@ pub fn command_schema_version(command: &str) -> u32 {
 }
 
 #[cfg(target_os = "macos")]
-pub use harn_cli::tests::common::sandbox_host::unavailable_worktree_sandbox;
+pub use super::sandbox_host::unavailable_worktree_sandbox;
 
 /// Captured result from one real `harn` CLI invocation.
 pub struct HarnCliOutput {

@@ -17,8 +17,8 @@ source "$script_dir/lib/published_release_correction.sh"
 [[ "$expected_source" =~ ^[0-9a-f]{40}$ && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 [[ "$release_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 [[ "$(git rev-parse "refs/tags/v$version^{commit}")" == "$expected_source" ]]
-# This profile is the Linux registry publisher, not source-build freshness or
-# a general installer. Other release consumers retain their existing adapters.
+# This profile authenticates Linux hosted orchestration tools, not source-build
+# freshness or a general installer. Other consumers retain their existing adapters.
 jq -e --arg version "$version" --arg repository "$release_repository" '
   .schema_version == "harn-bootstrap-v1" and .version == $version and
   .target == "x86_64-unknown-linux-gnu" and

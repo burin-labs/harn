@@ -114,17 +114,23 @@ impl PromptEdits {
         }
         let mut result = String::new();
         let mut cursor = 0;
-        for (start, end, index, replacement) in replacements {
-            result.push_str(
+        for &(start, end, _, replacement) in &replacements {
+            append_edit_segment(
+                &mut result,
                 source
                     .get(cursor..start)
                     .expect("validated source boundaries"),
-            );
-            result.push_str(replacement);
+            )?;
+            append_edit_segment(&mut result, replacement)?;
             cursor = end;
+        }
+        append_edit_segment(
+            &mut result,
+            source.get(cursor..).expect("validated source boundary"),
+        )?;
+        for (_, _, index, _) in replacements {
             reports[index].prepared_renders += 1;
         }
-        result.push_str(source.get(cursor..).expect("validated source boundary"));
         Ok(Some(result))
     }
 }
@@ -148,6 +154,19 @@ fn normalize_uri(tape: &EventTape, source_roots: &[super::ReplaySourceRoot], uri
     super::scope::workspace_relative(std::path::Path::new(uri), root)
         .map(|relative| root.join(relative).display().to_string())
         .unwrap_or_else(|| uri.to_string())
+}
+
+fn append_edit_segment(result: &mut String, segment: &str) -> Result<(), String> {
+    if matches!(
+        (result.as_bytes().last(), segment.as_bytes().first()),
+        (Some(b'{'), Some(b'{')) | (Some(b'}'), Some(b'}'))
+    ) {
+        return Err(
+            "prompt replacement forms template syntax delimiters at a source boundary".to_string(),
+        );
+    }
+    result.push_str(segment);
+    Ok(())
 }
 
 fn source_offset(source: &str, wanted_line: usize, wanted_column: usize) -> Option<usize> {
