@@ -51,9 +51,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
       + (values[2] ?? "")
   }
   if locale == "ru" {
-    return "  фактические строки бэкенда: отрисовано=" + (values[0] ?? "") + " обучаемых="
+    return "  фактические строки бэкенда: rendered=" + (values[0] ?? "") + " trainable="
       + (values[1] ?? "")
-      + " сохранение="
+      + " retention="
       + (values[2] ?? "")
   }
   if locale == "zh-Hans" {

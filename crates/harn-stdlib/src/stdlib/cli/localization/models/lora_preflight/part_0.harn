@@ -182,7 +182,7 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + (values[1] ?? "")
   }
   if locale == "ru" {
-    return "  политика страт поведения: " + (values[0] ?? "") + " статус=" + (values[1] ?? "")
+    return "  политика страт поведения: " + (values[0] ?? "") + " status=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  行为层级策略：" + (values[0] ?? "") + " status=" + (values[1] ?? "")
@@ -225,7 +225,7 @@ pub fn message_3(locale: string, values: list<string>) -> string {
       + (values[1] ?? "")
   }
   if locale == "ru" {
-    return "  страты поведения: источник=" + (values[0] ?? "") + " выдано=" + (values[1] ?? "")
+    return "  страты поведения: source=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  行为层级：source=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
