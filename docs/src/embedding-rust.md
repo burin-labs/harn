@@ -19,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.183" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.184" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -64,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.183", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.184", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.183", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.184", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -200,9 +200,9 @@ above; the direct dependencies keep their default features disabled so the
 handoff does not add grammars or native credential-store adapters.
 
 ```toml
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.183", features = ["hostlib"] }
-harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.183", default-features = false }
-harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.183", default-features = false }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.184", features = ["hostlib"] }
+harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.184", default-features = false }
+harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.184", default-features = false }
 ```
 
 The process handoff is available in lean hostlib without additional features.

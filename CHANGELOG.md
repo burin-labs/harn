@@ -9,6 +9,168 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.184
+
+### Breaking
+
+- **Workspace checkpoint receipts name each irreversible effect by its invocation.**
+  `IrreversibleEffect` gains `invocation`, the session revision at which that call
+  began, so two network or desktop-control effects whose provider reused a tool
+  call ID stay distinct. Plan and restore responses carry it next to `call_id`.
+
+  Migration: Rust code that builds `IrreversibleEffect` with a struct literal adds
+  `invocation`. Readers of the plan or restore JSON that key effects by `call_id`
+  should key them by `invocation`; `call_id` remains for correlation.
+- Replay workspaces can now retain their captured seed across owner restarts.
+  `ReplayWorkspace::persist` returns a serializable descriptor, and
+  `restore_saved` acquires an exclusive lease and restores the verified starting
+  tree before returning. Competing owners, changed seeds, and nonprivate saved
+  roots refuse. Interrupted replacements recover through the same restore owner.
+
+  Migration: Rust hosts inspecting `SeedReceipt.schema` now match
+  `SeedSchema::V1`; the JSON value remains `harn.workspace-seed.v1`. Exhaustive
+  `SeedError` matches must handle `InUse`. Keep a workspace handle for the entire
+  execution and child-process lifetime, and save retained descriptors with the
+  owning run's private metadata.
+- `run_tape::plan_prompt_branch` chooses an origin edit's first live model call
+  from recorded prompt-source attribution and reports the first consumer of each
+  edit. Unused, unattributed, or ambiguously sourced edits refuse automatic
+  planning. Rendered values retain their attribution when consumed later.
+
+  Migration:
+
+  Rust and JSON hosts constructing `PromptSourceEdit` must choose `activation`:
+  `Origin` (`origin`) edits source when it is rendered, including before an
+  unaffected recorded request; `AfterPrefix` (`after_prefix`) applies a labeled
+  mid-run intervention after the replayed prefix. Automatic planning accepts
+  origin edits. Prefix request verification remains mandatory for both modes.
+- Prompt source maps retain the real source line and column for literal text,
+  raw blocks, and bare interpolations, including text after whitespace trimming.
+  Each span and its include ancestry carry the source revision so debuggers and
+  recording readers can distinguish the recorded source from later edits.
+  Identical rendered text from different source maps retains distinct recording
+  identities.
+
+  Migration: Rust consumers must replace `Node::Text(text)` with
+  `Node::Text { text, line, col }`, supply `line` and `col` when constructing
+  `Node::LegacyBareInterp`, and populate `PromptSourceSpan::template_revision`
+  with the source content hash. Matchers that do not inspect positions can use
+  `..`. Coordinates are one-based; prompt text syntax is unchanged.
+- Run-tape hosts can declare durable storage outside their workspace. Replay redirects writes under recorded and current
+  host roots into isolated branch state, including hosts that create a new home for each run.
+
+  Migration:
+
+  Rust hosts constructing `TapeWorkspace` must set `state_roots`, and hosts constructing `BranchPlan` must set
+  `host_state_roots`. Use an empty vector when the host has no additional durable roots; otherwise supply its storage
+  directories for that execution.
+- Run-tape branches can apply revision-checked literal prompt edits after their
+  recorded prefix, including included templates and embedded standard-library
+  assets, without changing source files. Branch reports distinguish prepared
+  renders from proven use in a model request and refuse edits never loaded.
+
+  Migration:
+
+  Rust hosts constructing `BranchPlan` must set `prompt_edits`; use an empty vector
+  for an unedited control. `BranchReport` adds `prompt_edits`, containing each
+  source location and its `prepared_renders` count. Consumers must not treat that
+  count as treatment liveness or infer model-quality improvements from one branch.
+- Run-tape version 5 records transcript creation and closure, allowing a served tool dispatch to validate a child created
+  and closed entirely within it. Missing targets, malformed changes, and incomplete lifecycles refuse. Read-only Git
+  conflict and remote-ref queries also reach recorded-command replay.
+
+  Migration:
+
+  Rust consumers match `TranscriptChange::Fields` or `TranscriptChange::Lifecycle` instead of accessing struct fields.
+  Version 4 field-change records retain their existing wire shape and remain readable; consumers must support version 5
+  before reading new recordings with lifecycle records.
+- **The tool-execution boundary now returns a typed admission result.** A
+  boolean could not distinguish an untracked call from a call that must be
+  refused because durable checkpoint tracking failed.
+
+  Migration: update each `ToolExecutionBoundary` callback to return
+  `ToolExecutionAdmission`. Return `Tracked` only after opening the call
+  window, `Untracked` when checkpoint tracking does not apply, and
+  `Refused(detail)` when the call cannot safely proceed.
+
+### Added
+
+- **Opted-in ACP sessions attribute each tool call's file changes automatically.**
+  With `workspaceCheckpoint: true`, the agent loop now brackets every admitted
+  tool call with the checkpoint `call_begin`/`call_end` window, keyed by its tool
+  call ID and recorded with the tool's declared side-effect class. A restore plan
+  for an earlier message names the files those calls changed without the client
+  bracketing calls itself. Read-only calls and calls without an ID are not
+  bracketed.
+- Add `harness.llm.provider_io_disposition()` for the current VM and fixture
+  installation-mode facts in `mock_load_jsonl` receipts, distinguishing persistent
+  offline replay from finite mock prefixes without consuming responses.
+- Hosts can capture a bounded private workspace seed and restore repeated trials at one stable path through
+  `workspace_checkpoint::ReplayWorkspace`. Captures retain ignored files, executable bits, and relative links
+  inside the workspace, and refuse external links, changed seeds, and resource-limit overruns. Offline coding
+  replay uses this shared owner and includes the measured seed identity in each trial's evidence.
+- Run-tape branches serve recorded foreground commands and their workspace effects
+  without executing them again. Unrecorded commands diverge; background commands
+  remain unsupported in replay.
+- Run-tape branches can start live inference at the first model call, allowing
+  first-call prompt edits. The branch still verifies pre-inference operations,
+  requires a recorded baseline call, and reports an incomplete run if inference
+  is never reached.
+- Record completed client inputs alongside full run tapes so a host can reconstruct serial sessions in an isolated workspace.
+  Retained external pipeline packages preserve prompt-edit identities after the original package is removed.
+  Replay refuses incomplete histories, overlapping requests, unsupported controls, and inputs requiring redaction.
+  Run summaries separate replayed calls from fresh inference and preserve unknown costs.
+- **Workspace checkpoints resume safely after a host restart.** Each session
+  records its boundaries, attributed calls, and revision beside its stored
+  files. A tracked tool runs only after an incomplete index is durably written;
+  a restart during that call is refused on resume instead of restoring stale
+  history. Completed calls and restores publish their final timeline before
+  the index becomes complete. Embedders get `workspace_checkpoint::resume`
+  and `workspace_checkpoint::unload`.
+
+### Fixed
+
+- Runtime bump callers can supply their repository's full PR title and explicitly
+  delegate non-package validation without producing a false empty-package test
+  discovery receipt. Package discovery remains strict by default.
+- Development bump preparation reuses the authenticated published interpreter when its protocol generator is compatible.
+  Source compilation remains the fallback, and the updated grammar receipt still requires its source test before shipping.
+- **Linux sandbox expansion-limit errors name the enumerated directory (#10888).** A refusal no longer points at the
+  next denied-path component. The existing 4,096-rule limit and sandbox grants are unchanged.
+- macOS installs from crates.io no longer compile workspace-only sandbox test
+  helpers. Unit and integration tests still share the canonical host assertions.
+- ACP initialization now reports the selected logical model's image, audio, and
+  document capabilities when the request uses a managed gateway. Image support
+  follows the same admission fact used for requests; unknown managed models
+  remain unsupported until their route is known.
+- Mark OpenRouter's explicitly retired MiniMax M3.1 Flash free launch route as
+  deprecated with its October 22 sunset. MiniMax M2 and Qwen Coder Next remain
+  active; their earlier unavailable and rate-limited calls do not prove retirement.
+- Prompt edit planning refuses tapes with redacted payloads, matching replay admission,
+  before interpreting source offsets that may no longer describe the stored text.
+- Agent connection sessions retain their recorded identity during branch replay,
+  so session-dependent reads can verify before inference resumes. Replaying a
+  transcript change for a missing session now reports a divergence instead of
+  silently dropping the change.
+  Branches refuse fresh inference when recorded tool calls or reads remain
+  unconsumed, before entering the live continuation.
+  Tools that contain model calls are explicitly unservable until nested inference
+  has a replay contract; their recorded file effects are not applied.
+- Release reconciliation recognizes an authenticated in-flight consumer repair without starting redundant release builds.
+  Candidate and promotion discovery now require complete bounded inventories.
+- Run-tape replay refuses overlapping tool dispatches whose workspace effects cannot
+  be attributed reliably, before applying their recorded changes.
+- Session spend-limit requests now return an acknowledgement, and reminders accepted before the first turn reach that turn.
+  Replay planning refuses recordings whose prompts ended without normal completion.
+  Recorded and simulated model calls no longer reserve provider spend before replay is checked.
+  Replay completion checks reject explicit agent failures even when the protocol reports `end_turn`.
+- Replay workspace-location reads and resolve recorded filesystem paths into the
+  restored workspace. Refuse mapped paths that escape through symlinks or parent
+  components, and refuse live commands in relocated replay workspaces until a host
+  filesystem namespace can preserve their path semantics.
+- Accept Harn's target-cache collector settings in the runtime environment so host cleanup adapters can use the supported
+  handle probe without triggering an unknown-variable error.
+
 ## v0.10.183
 
 ### Breaking

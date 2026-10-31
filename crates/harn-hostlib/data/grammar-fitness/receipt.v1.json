@@ -17,7 +17,7 @@
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.184-dev"
+        "version": "0.10.184"
       }
     },
     {
@@ -33,7 +33,7 @@
         "checksum": null,
         "name": "harn-grammars",
         "source": "workspace-path",
-        "version": "0.10.184-dev"
+        "version": "0.10.184"
       }
     },
     {
@@ -49,7 +49,7 @@
         "checksum": null,
         "name": "harn-grammars",
         "source": "workspace-path",
-        "version": "0.10.184-dev"
+        "version": "0.10.184"
       }
     },
     {
