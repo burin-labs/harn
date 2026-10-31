@@ -14,7 +14,7 @@ pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
 /// Whether installed replay policy prevents provider I/O even after exhaustion.
 #[harn_builtin(
     exposure = "harness.llm.provider_io_disposition",
-    effects = ["state.read@const=llm-fixture"],
+    effects = [],
     sig = "provider_io_disposition() -> {provider_io: bool, source: \"cli_replay\" | \"builtin_replay\" | \"possible\"}",
     category = "llm.mock"
 )]
