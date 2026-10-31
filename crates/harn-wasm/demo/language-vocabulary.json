@@ -667,6 +667,7 @@
     "provider_capabilities",
     "provider_capabilities_clear",
     "provider_capabilities_install",
+    "provider_io_disposition",
     "provider_register",
     "query_parse",
     "query_stringify",

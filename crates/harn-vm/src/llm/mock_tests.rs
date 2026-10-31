@@ -1079,7 +1079,7 @@ async fn public_provider_io_composition_blocks_dispatch_after_cli_prefix_handoff
     ])));
     install_cli_llm_mock_fixture(
         crate::llm::jsonl::parse_llm_mocks_jsonl(
-            "{\"schemaVersion\":1,\"liveAfterCalls\":1}\n\
+            "{\"schemaVersion\":1,\"strictScopes\":false,\"liveAfterCalls\":1}\n\
          {\"id\":\"prefix\",\"scope\":\"default\",\"consume\":\"once\",\"text\":\"CLI\"}\n",
         )
         .expect("CLI prefix fixture"),
