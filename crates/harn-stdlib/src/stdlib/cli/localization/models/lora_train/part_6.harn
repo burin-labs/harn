@@ -30,7 +30,7 @@ pub fn message_30(locale: string, values: list<string>) -> string {
     return "adaptador de inspeção"
   }
   if locale == "ru" {
-    return "inspect adapter"
+    return "проверить адаптер"
   }
   if locale == "zh-Hans" {
     return "检查适配器"

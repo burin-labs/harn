@@ -108,7 +108,7 @@ pub fn message_17(locale: string, values: list<string>) -> string {
     return "envio ao vivo"
   }
   if locale == "ru" {
-    return "live submit"
+    return "отправка в live-режиме"
   }
   if locale == "zh-Hans" {
     return "实时提交"

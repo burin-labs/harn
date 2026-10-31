@@ -108,7 +108,7 @@ pub fn message_47(locale: string, values: list<string>) -> string {
     return "negativos difíceis"
   }
   if locale == "ru" {
-    return "hard negatives"
+    return "жёсткие негативы"
   }
   if locale == "zh-Hans" {
     return "困难负样本"
@@ -147,7 +147,7 @@ pub fn message_48(locale: string, values: list<string>) -> string {
     return "adaptador de inspeção"
   }
   if locale == "ru" {
-    return "inspect adapter"
+    return "проверить адаптер"
   }
   if locale == "zh-Hans" {
     return "检查适配器"

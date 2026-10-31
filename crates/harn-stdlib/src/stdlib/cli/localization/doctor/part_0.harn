@@ -69,7 +69,7 @@ pub fn message_1(locale: string, values: list<string>) -> string {
     return "--- Capacidades da stdlib ---\n"
   }
   if locale == "ru" {
-    return "--- Stdlib capabilities ---\n"
+    return "--- Возможности Stdlib ---\n"
   }
   if locale == "zh-Hans" {
     return "--- 标准库能力 ---\n"

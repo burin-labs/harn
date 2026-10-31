@@ -284,7 +284,7 @@ pub fn message_8(locale: string, values: list<string>) -> string {
     return "(nenhum modelo compatível com batch corresponde)"
   }
   if locale == "ru" {
-    return "(no batch-capable models match)"
+    return "(нет совпадающих с пакетной обработкой моделей)"
   }
   if locale == "zh-Hans" {
     return "（没有匹配的支持批处理的模型）"
