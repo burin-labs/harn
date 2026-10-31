@@ -69,6 +69,9 @@ spans in the tape. Each edit names the template URI and revision, one-based
 Unicode line and column, recorded text, and replacement text. Admission requires
 that exact literal and location in recorded provenance. Interpolated values and
 partial spans are not source edits.
+Replacement text cannot contain `{{` or `}}`, or form either delimiter against
+adjacent source text. Template expressions, comments, and raw-block terminators
+are refused rather than interpreted as replacement text.
 
 The template renderer applies edits after the selected model prefix has been
 served. Earlier renders retain the original source. Filesystem templates,
