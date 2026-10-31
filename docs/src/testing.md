@@ -563,6 +563,26 @@ header. `harness.llm.mock_load_jsonl` honors the same header and reports
 `live_after_calls` in its receipt, so a host that installs fixtures from its own
 pipeline needs no new flag.
 
+`harness.llm.provider_io_disposition()` returns
+`{provider_io: bool, source: "cli_replay" | "builtin_replay" | "possible"}` without
+consuming a response or changing the call log. `provider_io: false` means the
+current replay policy prevents provider I/O even after exhaustion or a scope
+miss. Pure CLI replay provides this guarantee for both fixture versions; builtin
+fixtures require a versioned header with no `liveAfterCalls`. Headerless builtin
+queues and every live prefix report `possible`, even while responses remain.
+Either persistent interception policy can protect a call when both are installed.
+Recheck after explicitly clearing, replacing, or leaving a mock scope. This is a
+provider-I/O disposition, not a model price or process-cleanup receipt.
+
+The `mock_load_jsonl` receipt also includes
+`provider_io: {cli_replay: bool, builtin_replay: bool}`. These are properties of
+the parsed fixture in the named installation mode, independent of the ambient
+VM policy. Use `cli_replay` to classify a fixture intended for a future child
+invoked with `--llm-mock`; loading it temporarily as a builtin and querying the
+current VM can be masked by a different outer replay policy. A headerless
+fixture reports `{cli_replay: false, builtin_replay: true}`; a versioned fixture
+without a live prefix reports both false; every finite prefix reports both true.
+
 To import an external eval trace into the same fixture format:
 
 ```bash
