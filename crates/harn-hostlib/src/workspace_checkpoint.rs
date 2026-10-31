@@ -173,6 +173,8 @@ struct Boundary {
 #[derive(Clone)]
 struct CallRecord {
     call_id: String,
+    /// The session revision `call_begin` admitted this invocation at.
+    invocation: u64,
     boundary_idx: usize,
     side_effect: Option<SideEffectLevel>,
     scan_errors: usize,
@@ -180,6 +182,7 @@ struct CallRecord {
 }
 
 struct PendingCall {
+    invocation: u64,
     boundary_idx: usize,
     scan: PendingScan,
 }
@@ -476,9 +479,11 @@ pub fn call_begin(
         }
         advance_revision(&mut state, CALL_BEGIN_BUILTIN)?;
         let boundary_idx = state.boundaries.len().saturating_sub(1);
+        let invocation = state.revision;
         state.pending.insert(
             call_id.to_string(),
             PendingCall {
+                invocation,
                 boundary_idx,
                 scan: PendingScan::Beginning,
             },
@@ -518,7 +523,7 @@ pub fn call_end(
     let Some(session) = find_session(session_id) else {
         return Ok(no_checkpoint(session_id));
     };
-    let (root, parents, before, boundary_idx) = {
+    let (root, parents, before, (invocation, boundary_idx)) = {
         let mut state = lock(&session);
         let root = state.root.clone();
         let parents = state.read_parent_ignores;
@@ -547,7 +552,12 @@ pub fn call_end(
             PendingScan::Active(before) => before.clone(),
         };
         pending.scan = PendingScan::Ending;
-        (root, parents, before, pending.boundary_idx)
+        (
+            root,
+            parents,
+            before,
+            (pending.invocation, pending.boundary_idx),
+        )
     };
     #[cfg(all(test, unix))]
     CALL_END_HOOK.with(|slot| {
@@ -594,6 +604,7 @@ pub fn call_end(
     let scan_errors = after.errors + before.errors;
     state.calls.push(CallRecord {
         call_id: call_id.to_string(),
+        invocation,
         boundary_idx,
         side_effect,
         scan_errors,
@@ -943,6 +954,7 @@ fn compute_plan(
             ) {
                 irreversible.push(IrreversibleEffect {
                     call_id: call.call_id.clone(),
+                    invocation: call.invocation,
                     side_effect: level,
                 });
             }

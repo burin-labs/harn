@@ -94,6 +94,10 @@
                 "type": "string",
                 "minLength": 1
               },
+              "invocation": {
+                "type": "integer",
+                "minimum": 1
+              },
               "side_effect": {
                 "enum": [
                   "network",
@@ -103,6 +107,7 @@
             },
             "required": [
               "call_id",
+              "invocation",
               "side_effect"
             ],
             "additionalProperties": false

@@ -141,8 +141,10 @@ return `calls_in_flight` while a checkpointed call has no end receipt.
 skipped, failed, irreversible}`. A write that fails is listed under `failed` and
 the rest of the restore still runs. `restored`, `refused`, and `skipped` are plan entries
 `{path, action, reason?, expected_hash?, found_hash?}`. `irreversible` lists
-`{call_id, side_effect}` for calls after the boundary whose annotation is
-`network` or `desktop_control`; a file restore cannot undo them.
+`{call_id, invocation, side_effect}` for calls after the boundary whose annotation is
+`network` or `desktop_control`; a file restore cannot undo them. A provider can
+reuse a `call_id` in a later turn, so `invocation`, the session revision the call
+began at, is what tells two such effects apart.
 
 ## Known limits
 

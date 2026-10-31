@@ -176,8 +176,11 @@ pub struct PlanEntry {
 /// A call whose effects a file restore cannot undo.
 #[derive(Clone, Debug, Serialize)]
 pub struct IrreversibleEffect {
-    /// Tool call id.
+    /// Tool call id, for correlation. Providers can repeat one across turns.
     pub call_id: String,
+    /// The session revision this invocation began at: distinct for every
+    /// call in the session, so two effects sharing a `call_id` stay apart.
+    pub invocation: u64,
     /// Side-effect class from the tool annotation.
     pub side_effect: SideEffectLevel,
 }

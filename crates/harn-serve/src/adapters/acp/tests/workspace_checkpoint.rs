@@ -868,8 +868,14 @@ pipeline default(harness: Harness, task: unknown) {{
   harness.llm.mock_clear()
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "edit", name: "edit", arguments: {{}}}}]}})
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "look", name: "look", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "net", name: "ping", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "net", name: "ping", arguments: {{}}}}]}})
   harness.llm.mock_enqueue({{text: "done"}})
   let tools = tool_registry()
+  tools = tool_define(tools, "ping", "Ping", {{parameters: {{}},
+    annotations: {{kind: "fetch", side_effect_level: "network"}},
+    handler: {{ _args -> "pong" }},
+  }})
   tools = tool_define(tools, "look", "Look", {{parameters: {{}},
     annotations: {{kind: "read", side_effect_level: "read_only"}},
     handler: {{ _args -> "seen" }},
@@ -882,7 +888,7 @@ pipeline default(harness: Harness, task: unknown) {{
     }},
   }})
   agent_loop(harness, "Edit", nil, {{provider: "mock", tools: tools,
-    tool_format: "native", max_iterations: 3}})
+    tool_format: "native", max_iterations: 5}})
 }}
 "#)).unwrap();
         git(&["add", "-A"]);
@@ -926,6 +932,12 @@ pipeline default(harness: Harness, task: unknown) {{
         let planned: Vec<&str> = plan["entries"].as_array().unwrap_or_else(|| panic!("{plan}"))
             .iter().filter_map(|entry| entry["path"].as_str()).collect();
         assert_eq!(planned, vec!["agent.txt"], "{plan}");
+        // The provider reused `net` across turns; each invocation stays its own effect.
+        let effects = plan["irreversible"].as_array().unwrap_or_else(|| panic!("{plan}"));
+        let invocations: std::collections::BTreeSet<u64> = effects.iter()
+            .filter(|effect| effect["call_id"] == "net" && effect["side_effect"] == "network")
+            .filter_map(|effect| effect["invocation"].as_u64()).collect();
+        assert_eq!(invocations.len(), 2, "{plan}");
 
         let receipt = serde_json::to_value(
             harn_hostlib::workspace_checkpoint::restore(&session, "turn-1", None).unwrap(),

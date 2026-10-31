@@ -345,11 +345,19 @@ fn restore_reports_effects_it_cannot_undo() {
     s.capture("turn-1");
     s.call_with("push-1", Some("network"), || {});
     s.call_with("read-1", Some("network_read"), || {});
+    s.call_with("push-1", Some("network"), || {});
     let receipt = s.restore("turn-1");
-    assert_eq!(
-        receipt["irreversible"],
-        json!([{"call_id": "push-1", "side_effect": "network"}])
+    let effects = receipt["irreversible"].as_array().expect("irreversible");
+    assert_eq!(effects.len(), 2, "{receipt}");
+    for effect in effects {
+        assert_eq!(effect["call_id"], "push-1");
+        assert_eq!(effect["side_effect"], "network");
+    }
+    assert_ne!(
+        effects[0]["invocation"], effects[1]["invocation"],
+        "a reused call id is still two effects: {receipt}"
     );
+    assert!(effects[0]["invocation"].is_u64());
 }
 
 #[test]
