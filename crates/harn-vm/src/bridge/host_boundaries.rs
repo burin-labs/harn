@@ -33,13 +33,31 @@ pub enum ToolExecutionStage {
     End,
 }
 
+/// Admission result for a tool execution tracking boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ToolExecutionAdmission {
+    /// No tracking applies to this call, so it proceeds without a guard.
+    Untracked,
+    /// Tracking durably opened a call window.
+    Tracked,
+    /// Tracking could not safely open a call window, so the handler must not run.
+    Refused(String),
+}
+
 /// Host callback around each admitted tool execution: tool call id, the
-/// tool's declared side-effect class, and the stage. For
-/// [`ToolExecutionStage::Begin`] it returns whether the host began tracking
-/// the call; `End` is sent only for calls it began, so a refused begin never
-/// closes another call's window.
+/// tool's declared side-effect class, and the stage. At `Begin`, `Untracked`
+/// preserves calls outside checkpoint scope, `Tracked` opens a guard, and
+/// `Refused` blocks the handler. `End` is sent only for calls that began as
+/// `Tracked`.
 pub type ToolExecutionBoundary =
-    Arc<dyn Fn(&str, SideEffectLevel, ToolExecutionStage) -> bool + Send + Sync>;
+    Arc<dyn Fn(&str, SideEffectLevel, ToolExecutionStage) -> ToolExecutionAdmission + Send + Sync>;
+
+/// Result of asking the bridge's installed tracking boundary to admit a call.
+pub(crate) enum ToolExecutionStart {
+    Untracked,
+    Tracked(ToolExecutionGuard),
+    Refused(String),
+}
 
 /// The host callbacks installed on one bridge.
 #[derive(Default)]
@@ -58,11 +76,20 @@ pub struct ToolExecutionGuard {
 
 impl Drop for ToolExecutionGuard {
     fn drop(&mut self) {
-        (self.boundary)(
+        if let ToolExecutionAdmission::Refused(detail) = (self.boundary)(
             &self.tool_call_id,
             self.side_effect,
             ToolExecutionStage::End,
-        );
+        ) {
+            // The handler has already finished; this cannot change its
+            // outcome. Keep the tracking failure visible in the host log and
+            // let the host's checkpoint owner refuse later tracked calls.
+            tracing::warn!(
+                tool_call_id = %self.tool_call_id,
+                detail = %detail,
+                "tool completed but checkpoint attribution could not be finalized"
+            );
+        }
     }
 }
 
@@ -108,20 +135,27 @@ impl HostBridge {
         &self,
         tool_call_id: &str,
         side_effect: SideEffectLevel,
-    ) -> Option<ToolExecutionGuard> {
+    ) -> ToolExecutionStart {
         if tool_call_id.is_empty() || side_effect == SideEffectLevel::ReadOnly {
-            return None;
+            return ToolExecutionStart::Untracked;
         }
-        let boundary = self
+        let Some(boundary) = self
             .boundaries
             .tool_execution
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()?;
-        boundary(tool_call_id, side_effect, ToolExecutionStage::Begin).then(|| ToolExecutionGuard {
-            boundary,
-            tool_call_id: tool_call_id.to_string(),
-            side_effect,
-        })
+            .clone()
+        else {
+            return ToolExecutionStart::Untracked;
+        };
+        match boundary(tool_call_id, side_effect, ToolExecutionStage::Begin) {
+            ToolExecutionAdmission::Untracked => ToolExecutionStart::Untracked,
+            ToolExecutionAdmission::Tracked => ToolExecutionStart::Tracked(ToolExecutionGuard {
+                boundary,
+                tool_call_id: tool_call_id.to_string(),
+                side_effect,
+            }),
+            ToolExecutionAdmission::Refused(detail) => ToolExecutionStart::Refused(detail),
+        }
     }
 }

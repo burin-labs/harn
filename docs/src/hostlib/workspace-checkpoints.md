@@ -87,13 +87,23 @@ independent checkpoint state and stored files, so restoring it or closing the
 parent does not change the other branch's history. Forks without this option
 do not copy checkpoints.
 
-Each session records its boundaries, attributed calls, and revision in an
-index beside its stored files, rewritten after every capture, completed call,
-restore, and fork. If a write fails the index is removed, so a later resume
-reports `no_checkpoint` instead of planning from a history missing calls. An
-embedding host calls `workspace_checkpoint::resume(session_id, root)` to load a
-recorded session and `workspace_checkpoint::unload(session_id)` to release one
-from memory while keeping its record.
+Each session records its boundaries, attributed calls, revision, and typed
+complete or incomplete state in one index beside its stored files. A tracked
+tool call is admitted only after the incomplete state is durably written; its
+attribution is recorded before the index becomes complete again. A host restart
+between those writes makes `resume`, `plan`, and `restore` report
+`checkpoint_interrupted` until the checkpoint is dropped. A failed begin write
+refuses the tool before its handler runs. If the index write fails before
+replacement, the prior complete index remains available. If replacement
+occurred but namespace durability could not be confirmed, a cold resume treats
+the visible incomplete index as interrupted. A failed final call or restore
+write keeps the index incomplete and returns the effect receipt with
+`persistence_error`, so a completed workspace mutation is not mistaken for a
+failed one. Embedding hosts use
+`workspace_checkpoint::resume(session_id, root)` to load a complete record and
+`workspace_checkpoint::unload(session_id)` to release it from memory while
+keeping its record. Both the file contents and the namespace replacement must
+be confirmed durable before a tracked tool is allowed to run.
 
 ## What a boundary stores
 
@@ -172,5 +182,5 @@ began at, is what tells two such effects apart.
   staying in the object store. Garbage collection can remove them after the
   index moves on.
 - The index and stored files live under the session's root and are removed by
-  `checkpoint_drop`. A call in flight when the process exits is not recorded,
-  so its edits are not attributed after a resume.
+  `checkpoint_drop`. A call in flight when the process exits cannot be
+  attributed; its incomplete index is refused on restart and must be dropped.

@@ -71,7 +71,9 @@
             "unknown_boundary",
             "incomplete_capture",
             "calls_in_flight",
-            "concurrent_calls"
+            "concurrent_calls",
+            "capture_failed",
+            "checkpoint_interrupted"
           ]
         },
         "detail": {

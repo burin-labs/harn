@@ -12,9 +12,10 @@ pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 pub use control::HostBridgeControlState;
 use control::{handle_cancel_tool_call_notification, DaemonIdleState};
+pub(crate) use host_boundaries::ToolExecutionStart;
 pub use host_boundaries::{
-    ToolExecutionBoundary, ToolExecutionGuard, ToolExecutionStage, UserInjectionBoundary,
-    UserInjectionStage,
+    ToolExecutionAdmission, ToolExecutionBoundary, ToolExecutionGuard, ToolExecutionStage,
+    UserInjectionBoundary, UserInjectionStage,
 };
 pub use injection_lifecycle::UserMessageDeliveryOwner;
 use remind::queued_session_remind_from_params;

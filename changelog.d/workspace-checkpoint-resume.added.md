@@ -1,6 +1,7 @@
-- **Workspace checkpoints survive a host restart.** Each checkpoint session
+- **Workspace checkpoints resume safely after a host restart.** Each session
   records its boundaries, attributed calls, and revision beside its stored
-  files. `session/load` on an opted-in session that the process does not hold
-  resumes that history, so `plan` and `restore` work against boundaries an
-  earlier process captured. Embedders get `workspace_checkpoint::resume` and
-  `workspace_checkpoint::unload`.
+  files. A tracked tool runs only after an incomplete index is durably written;
+  a restart during that call is refused on resume instead of restoring stale
+  history. Completed calls and restores publish their final timeline before
+  the index becomes complete. Embedders get `workspace_checkpoint::resume`
+  and `workspace_checkpoint::unload`.

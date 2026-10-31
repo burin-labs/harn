@@ -56,6 +56,11 @@
         "scan_errors": {
           "type": "integer",
           "minimum": 0
+        },
+        "persistence_error": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The tool completed, but its attribution could not be durably saved; the checkpoint session is unavailable until dropped."
         }
       },
       "required": [

@@ -181,18 +181,35 @@ pub(super) fn attribute_tool_execution(
     tool_call_id: &str,
     side_effect: harn_vm::tool_annotations::SideEffectLevel,
     stage: harn_vm::bridge::ToolExecutionStage,
-) -> bool {
+) -> harn_vm::bridge::ToolExecutionAdmission {
     use harn_hostlib::workspace_checkpoint::{self as checkpoint, Outcome};
+    use harn_vm::bridge::ToolExecutionAdmission;
     let _scope = store_scope.enter();
     match stage {
-        harn_vm::bridge::ToolExecutionStage::Begin => matches!(
-            checkpoint::call_begin(session_id, tool_call_id),
-            Ok(Outcome::Ready(_))
-        ),
-        _ => matches!(
-            checkpoint::call_end(session_id, tool_call_id, Some(side_effect)),
-            Ok(Outcome::Ready(_))
-        ),
+        harn_vm::bridge::ToolExecutionStage::Begin => {
+            match checkpoint::call_begin(session_id, tool_call_id) {
+                Ok(Outcome::Ready(_)) => ToolExecutionAdmission::Tracked,
+                Ok(Outcome::Unavailable(reason)) if reason.reason == "no_checkpoint" => {
+                    ToolExecutionAdmission::Untracked
+                }
+                Ok(Outcome::Unavailable(reason)) => {
+                    ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
+                }
+                Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
+            }
+        }
+        harn_vm::bridge::ToolExecutionStage::End => {
+            match checkpoint::call_end(session_id, tool_call_id, Some(side_effect)) {
+                Ok(Outcome::Ready(receipt)) => match receipt.persistence_error {
+                    Some(error) => ToolExecutionAdmission::Refused(error),
+                    None => ToolExecutionAdmission::Tracked,
+                },
+                Ok(Outcome::Unavailable(reason)) => {
+                    ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
+                }
+                Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
+            }
+        }
     }
 }
 

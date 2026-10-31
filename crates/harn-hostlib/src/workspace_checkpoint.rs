@@ -33,8 +33,10 @@
 //! - Symlinks, files above [`MAX_STORED_FILE_BYTES`], and tracked files matched
 //!   by an ignore rule are outside the index. Dirty symlinks and oversize files
 //!   are reported as skipped at restore time.
-//! - Checkpoint state is in memory; blobs live under
-//!   `.harn/state/checkpoints/<session>/blobs/` and die with the session.
+//! - Complete checkpoint state is indexed under
+//!   `.harn/state/checkpoints/<session>/index.json`; stored file bytes live in
+//!   the adjacent `blobs/` directory. An interrupted call or restore leaves an
+//!   incomplete index that refuses cold resume and must be dropped.
 
 mod anchored_fs;
 mod builtins;
@@ -207,6 +209,9 @@ struct Session {
     calls: Vec<CallRecord>,
     pending: HashMap<String, PendingCall>,
     revision: u64,
+    /// A durable incomplete index means this process cannot safely continue
+    /// checkpoint operations after a mutation whose final receipt was lost.
+    interrupted: Option<String>,
 }
 
 type SharedSession = Arc<Mutex<Session>>;
@@ -421,6 +426,7 @@ pub fn capture_with_writer_policy(
                 calls: Vec::new(),
                 pending: HashMap::new(),
                 revision: 0,
+                interrupted: None,
             }))
         })
         .clone();
@@ -429,6 +435,9 @@ pub fn capture_with_writer_policy(
     let mut state = lock(&session);
     if let Some(detail) = pending_calls_detail(&state) {
         return Ok(unavailable("calls_in_flight", detail));
+    }
+    if let Some(detail) = state.interrupted.as_deref() {
+        return Ok(unavailable("checkpoint_interrupted", detail));
     }
     if receipt.writer_policy != state.writer_policy
         || initial_generation.map_or(!state.boundaries.is_empty(), |generation| {
@@ -459,7 +468,12 @@ pub fn capture_with_writer_policy(
     }
     advance_revision(&mut state, CAPTURE_BUILTIN)?;
     state.boundaries.push(boundary);
-    persist::save(session_id, &state);
+    if let Err(error) = persist::save(session_id, &state) {
+        return Ok(unavailable(
+            "capture_failed",
+            format!("checkpoint index was not durably saved: {error}"),
+        ));
+    }
     Ok(Outcome::Ready(receipt))
 }
 
@@ -475,6 +489,12 @@ pub fn call_begin(
     };
     let (root, parents) = {
         let mut state = lock(&session);
+        if let Some(detail) = state.interrupted.as_deref() {
+            return Ok(unavailable("checkpoint_interrupted", detail));
+        }
+        if state.boundaries.is_empty() {
+            return Ok(no_checkpoint(session_id));
+        }
         if state.pending.contains_key(call_id) {
             return Err(HostlibError::InvalidParameter {
                 builtin: CALL_BEGIN_BUILTIN,
@@ -482,6 +502,7 @@ pub fn call_begin(
                 message: format!("checkpoint call `{call_id}` is already in flight"),
             });
         }
+        let previous_revision = state.revision;
         advance_revision(&mut state, CALL_BEGIN_BUILTIN)?;
         let boundary_idx = state.boundaries.len().saturating_sub(1);
         let invocation = state.revision;
@@ -493,6 +514,14 @@ pub fn call_begin(
                 scan: PendingScan::Beginning,
             },
         );
+        if let Err(error) = persist::save(session_id, &state) {
+            state.pending.remove(call_id);
+            state.revision = previous_revision;
+            return Ok(unavailable(
+                "checkpoint_persist_failed",
+                format!("tool execution was refused before it ran: {error}"),
+            ));
+        }
         (state.root.clone(), state.read_parent_ignores)
     };
     let scan = scan_tree(&root, parents);
@@ -615,12 +644,22 @@ pub fn call_end(
         scan_errors,
         changes: changes.clone(),
     });
-    persist::save(session_id, &state);
+    let persistence_error = persist::save(session_id, &state).err();
+    if let Some(error) = persistence_error.as_deref() {
+        state.interrupted = Some(format!(
+            "checkpoint history is unavailable because the completed tool call could not be durably recorded: {error}"
+        ));
+    } else if state.pending.is_empty() {
+        // A later in-flight call may have completed a previously failed
+        // attribution write. The durable complete index contains both calls.
+        state.interrupted = None;
+    }
     Ok(Outcome::Ready(CallEndReceipt {
         available: true,
         call_id: call_id.to_string(),
         changes,
         scan_errors,
+        persistence_error,
     }))
 }
 
@@ -632,6 +671,9 @@ pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>,
         return Ok(no_checkpoint(session_id));
     };
     let state = lock(&session);
+    if let Some(detail) = state.interrupted.as_deref() {
+        return Ok(unavailable("checkpoint_interrupted", detail));
+    }
     if let Some(detail) = pending_calls_detail(&state) {
         return Ok(unavailable("calls_in_flight", detail));
     }
@@ -715,6 +757,9 @@ pub fn restore_with_confirmations(
         return Ok(no_checkpoint(session_id));
     };
     let mut state = lock(&session);
+    if let Some(detail) = state.interrupted.as_deref() {
+        return Ok(unavailable("checkpoint_interrupted", detail));
+    }
     if let Some(detail) = pending_calls_detail(&state) {
         return Ok(unavailable("calls_in_flight", detail));
     }
@@ -724,8 +769,15 @@ pub fn restore_with_confirmations(
     let Some(planned) = compute_plan(&state, boundary_id, RESTORE_BUILTIN, &confirmations)? else {
         return Ok(unknown_boundary(boundary_id));
     };
+    let previous_revision = state.revision;
     advance_revision(&mut state, RESTORE_BUILTIN)?;
-    persist::save(session_id, &state);
+    if let Err(error) = persist::save_restore_incomplete(session_id, &state) {
+        state.revision = previous_revision;
+        return Ok(unavailable(
+            "checkpoint_persist_failed",
+            format!("restore was refused before it changed the workspace: {error}"),
+        ));
+    }
     let root = state.root.clone();
     let require_no_replace = state.writer_policy == WriterPolicy::RequireKnown;
     let anchor = open_anchor(&root);
@@ -817,6 +869,13 @@ pub fn restore_with_confirmations(
     }
     state.pending.clear();
 
+    let persistence_error = persist::save(session_id, &state).err();
+    if let Some(error) = persistence_error.as_deref() {
+        state.interrupted = Some(format!(
+            "checkpoint history is unavailable because the restore result could not be durably recorded: {error}"
+        ));
+    }
+
     Ok(Outcome::Ready(RestoreReceipt {
         available: true,
         boundary_id: boundary_id.to_string(),
@@ -825,6 +884,7 @@ pub fn restore_with_confirmations(
         skipped,
         failed,
         irreversible: planned.irreversible,
+        persistence_error,
     }))
 }
 

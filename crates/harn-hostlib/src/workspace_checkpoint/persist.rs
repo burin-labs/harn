@@ -2,8 +2,9 @@
 //! host can plan and restore against boundaries an earlier process captured.
 //!
 //! The index is rewritten after every change to boundaries, calls, or the
-//! revision. When a write fails the index is removed: a resumed session must
-//! never plan from a history that is missing calls.
+//! revision. Effectful operations publish an incomplete phase before work and
+//! a complete phase after attribution; failed writes never delete a readable
+//! index and are handled at the operation boundary.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs as stdfs;
@@ -18,14 +19,32 @@ use super::{
     CallRecord, ChangeWriter, Outcome, Session, StoredFile, WriterPolicy,
 };
 use crate::error::HostlibError;
-use crate::fs::atomic_write;
+use harn_vm::atomic_io::{atomic_write_with_durability, AtomicWriteDurability, AtomicWriteReceipt};
 
 const INDEX_FILE: &str = "index.json";
-const SCHEMA: u32 = 1;
+const SCHEMA: u32 = 2;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum IndexPhase {
+    Complete,
+    Incomplete {
+        operation: IncompleteOperation,
+        pending_call_ids: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum IncompleteOperation {
+    ToolExecution,
+    Restore,
+}
 
 #[derive(Serialize, Deserialize)]
 struct Index {
     schema: u32,
+    phase: IndexPhase,
     root: PathBuf,
     writer_policy: WriterPolicy,
     read_parent_ignores: bool,
@@ -66,11 +85,42 @@ fn index_path(root: &Path, session_id: &str) -> PathBuf {
 }
 
 /// Record `state` as `session_id`'s index. Call with the session lock held, so
-/// writes land in revision order.
-pub(super) fn save(session_id: &str, state: &Session) {
+/// writes land in revision order. Callers must treat a failed durability
+/// receipt as failure even if the replacement is readable afterward.
+pub(super) fn save(session_id: &str, state: &Session) -> Result<(), String> {
+    let phase = if state.pending.is_empty() {
+        IndexPhase::Complete
+    } else {
+        IndexPhase::Incomplete {
+            operation: IncompleteOperation::ToolExecution,
+            pending_call_ids: {
+                let mut ids: Vec<_> = state.pending.keys().cloned().collect();
+                ids.sort();
+                ids
+            },
+        }
+    };
+    save_with_phase(session_id, state, phase)
+}
+
+/// Persist a restore's pre-effect interrupted phase before any workspace path
+/// is written. Call with the session lock held.
+pub(super) fn save_restore_incomplete(session_id: &str, state: &Session) -> Result<(), String> {
+    save_with_phase(
+        session_id,
+        state,
+        IndexPhase::Incomplete {
+            operation: IncompleteOperation::Restore,
+            pending_call_ids: Vec::new(),
+        },
+    )
+}
+
+fn save_with_phase(session_id: &str, state: &Session, phase: IndexPhase) -> Result<(), String> {
     let path = index_path(&state.root, session_id);
     let index = Index {
         schema: SCHEMA,
+        phase,
         root: state.root.clone(),
         writer_policy: state.writer_policy,
         read_parent_ignores: state.read_parent_ignores,
@@ -112,17 +162,94 @@ pub(super) fn save(session_id: &str, state: &Session) {
             })
             .collect(),
     };
-    let written = serde_json::to_vec(&index)
-        .map_err(|error| error.to_string())
-        .and_then(|bytes| {
-            if let Some(parent) = path.parent() {
-                stdfs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            atomic_write(&path, &bytes)
-        });
-    if written.is_err() {
-        let _ = stdfs::remove_file(&path);
+    let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
+    if let Some(parent) = path.parent() {
+        stdfs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
+    let receipt = write_index(&path, &bytes)?;
+    if !receipt.file_synced || !receipt.namespace_synced {
+        return Err(format!(
+            "checkpoint index replacement was not durably confirmed (file_synced={}, namespace_synced={})",
+            receipt.file_synced, receipt.namespace_synced
+        ));
+    }
+    Ok(())
+}
+
+fn write_index(path: &Path, bytes: &[u8]) -> Result<AtomicWriteReceipt, String> {
+    #[cfg(test)]
+    if let Some(result) = take_test_write_result(path) {
+        match result {
+            TestWriteResult::Error => {
+                return Err("injected checkpoint index write failure".to_string());
+            }
+            TestWriteResult::MissingNamespaceSync => {
+                // Model a replacement that reached the file but whose
+                // directory durability could not be confirmed afterward.
+                let receipt =
+                    atomic_write_with_durability(path, bytes, AtomicWriteDurability::Flush)
+                        .map_err(|error| error.to_string())?;
+                return Ok(AtomicWriteReceipt {
+                    file_synced: receipt.file_synced,
+                    namespace_synced: false,
+                });
+            }
+        }
+    }
+    atomic_write_with_durability(path, bytes, AtomicWriteDurability::Flush)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) enum TestWriteResult {
+    Error,
+    MissingNamespaceSync,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestWritePlan {
+    writes_before_failure: usize,
+    result: TestWriteResult,
+}
+
+#[cfg(test)]
+static TEST_WRITE_RESULTS: std::sync::OnceLock<Mutex<HashMap<PathBuf, TestWritePlan>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(super) fn fail_write_after(
+    session_id: &str,
+    root: &Path,
+    writes_before_failure: usize,
+    result: TestWriteResult,
+) {
+    TEST_WRITE_RESULTS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("checkpoint test write registry poisoned")
+        .insert(
+            index_path(root, session_id),
+            TestWritePlan {
+                writes_before_failure,
+                result,
+            },
+        );
+}
+
+#[cfg(test)]
+fn take_test_write_result(path: &Path) -> Option<TestWriteResult> {
+    let mut writes = TEST_WRITE_RESULTS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("checkpoint test write registry poisoned");
+    let plan = writes.get_mut(path)?;
+    if plan.writes_before_failure > 0 {
+        plan.writes_before_failure -= 1;
+        return None;
+    }
+    Some(writes.remove(path)?.result)
 }
 
 /// Release `session_id`'s in-memory history, keeping the recorded index for a
@@ -161,6 +288,12 @@ pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, H
     let root = resolve_root(Some(root));
     if let Some(session) = find_session(session_id) {
         let state = lock(&session);
+        if let Some(detail) = state.interrupted.as_deref() {
+            return Ok(super::unavailable("checkpoint_interrupted", detail));
+        }
+        if let Some(detail) = super::pending_calls_detail(&state) {
+            return Ok(super::unavailable("calls_in_flight", detail));
+        }
         if state.root != root {
             return Ok(super::unavailable(
                 "workspace_root_changed",
@@ -194,6 +327,23 @@ pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, H
             "the recorded checkpoint does not belong to this workspace root",
         ));
     }
+    let interrupted = match &index.phase {
+        IndexPhase::Complete => None,
+        IndexPhase::Incomplete {
+            operation,
+            pending_call_ids,
+        } => {
+            let operation = match operation {
+                IncompleteOperation::ToolExecution => "tool execution",
+                IncompleteOperation::Restore => "restore",
+            };
+            Some(format!(
+                "the previous host stopped during {operation}; checkpoint attribution is incomplete ({} pending calls: {})",
+                pending_call_ids.len(),
+                pending_call_ids.join(", ")
+            ))
+        }
+    };
     let calls = index
         .calls
         .into_iter()
@@ -262,6 +412,7 @@ pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, H
         calls,
         pending: HashMap::new(),
         revision: index.revision,
+        interrupted: interrupted.clone(),
     };
     let mut registry = sessions()
         .lock()
@@ -272,6 +423,9 @@ pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, H
         loaded = true;
         Arc::new(Mutex::new(session))
     });
+    if let Some(detail) = interrupted {
+        return Ok(super::unavailable("checkpoint_interrupted", detail));
+    }
     Ok(Outcome::Ready(ResumeReceipt {
         available: true,
         loaded,
