@@ -1,5 +1,7 @@
 //! Seeds declared inside a body: only their scope is rewritten, and any
 //! spelling in that scope the proof cannot bind refuses the whole rename.
+// Fixture sources spell implicit format captures on purpose.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use super::*;
 
@@ -245,8 +247,77 @@ fn a_body_local_seed_refuses_a_shadowing_or_unbound_spelling_in_its_scope() {
             kind: "Function",
             expected: Refused("separate declarations"),
         },
+        // An enum member is an unqualified name inside its enum body.
+        Case {
+            path: "main.ts",
+            source: "export function outer() {\n  const helper = () => 3;\n  enum E { helper = 2, double = helper * 2 }\n  return helper() + E.double;\n}\n",
+            line: 2,
+            kind: "Function",
+            expected: Refused("unresolved binding"),
+        },
+        // A macro defined outside the scope expands to the seed at the call site.
+        Case {
+            path: "src/main.rs",
+            source: "macro_rules! make { () => { Input } }\npub fn outer() {\n    struct Input;\n    let _v = make!();\n}\n",
+            line: 3,
+            kind: "Type",
+            expected: Refused("may expand to it"),
+        },
+        // The same call nested in a std macro's token tree.
+        Case {
+            path: "src/main.rs",
+            source: "macro_rules! make { () => { Input } }\npub fn outer() {\n    struct Input;\n    let _v = vec![make!()];\n}\n",
+            line: 3,
+            kind: "Type",
+            expected: Refused("may expand to it"),
+        },
+        // A format string captures the seed implicitly.
+        Case {
+            path: "src/main.rs",
+            source: "pub fn outer() -> String {\n    fn helper() -> i32 { 1 }\n    let _ = helper();\n    format!(\"{helper:p}\")\n}\n",
+            line: 2,
+            kind: "Function",
+            expected: Refused("may capture `helper` implicitly"),
+        },
     ];
     for case in &cases {
         run_case(case);
     }
+}
+
+#[test]
+fn a_file_level_rust_seed_refuses_an_implicit_format_capture() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("src/main.rs");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let source = "pub fn helper() -> i32 { 1 }\npub fn show() -> String {\n    let _ = helper();\n    format!(\"{helper:p}\")\n}\n";
+    fs::write(&path, source).unwrap();
+    let capability = build_index(dir.path());
+    let symbol = dict(&[
+        ("name", vm_string("helper")),
+        ("path", vm_string("src/main.rs")),
+        ("kind", vm_string("Function")),
+    ]);
+    let result = rename(&capability, symbol, "renamed", "workspace");
+    assert_eq!(
+        s(field(&result, "result")),
+        "ambiguous_symbol",
+        "{result:?}"
+    );
+    assert!(
+        s(field(&result, "details")).contains("may capture `helper` implicitly"),
+        "{result:?}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    // Without the capture the same file renames.
+    let plain = source.replace("format!(\"{helper:p}\")", "String::new()");
+    fs::write(&path, &plain).unwrap();
+    let capability = build_index(dir.path());
+    let symbol = dict(&[
+        ("name", vm_string("helper")),
+        ("path", vm_string("src/main.rs")),
+        ("kind", vm_string("Function")),
+    ]);
+    let result = rename(&capability, symbol, "renamed", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
 }

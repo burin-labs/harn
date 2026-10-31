@@ -68,6 +68,9 @@ pub(super) fn check(
             "receiver and non-declaration bindings require a binding-aware LSP rename".into(),
         );
     }
+    if language == Language::Rust {
+        rust_format_capture(tree.root_node(), source, name, path)?;
+    }
     let defeaters = binding_defeaters(tree, source, language);
     if !defeaters.is_empty() {
         return Err(format!(
@@ -515,6 +518,16 @@ impl Lexical<'_> {
                 "a module nested in the scope of `{name}` in {path} may reference it"
             ));
         }
+        // A user macro's expansion resolves its names at the call site, so a
+        // macro defined elsewhere can name the seed from inside the scope.
+        if language == Language::Rust {
+            if rust_user_macro_call(self.region, source) {
+                return Err(format!(
+                    "a macro invoked in the scope of `{name}` in {path} may expand to it"
+                ));
+            }
+            rust_format_capture(self.region, source, name, path)?;
+        }
         let mut kept = Vec::new();
         for span in targets {
             let node = tree
@@ -548,6 +561,65 @@ impl Lexical<'_> {
     }
 }
 
+/// A macro call in `region` other than an itemless `std` macro, including one
+/// nested in another macro's token tree, where it is only `name !` tokens.
+fn rust_user_macro_call(region: Node<'_>, source: &str) -> bool {
+    let mut stack = vec![region];
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            "macro_invocation" if !rust_itemless_std_macro(node, source) => return true,
+            "!" if node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "token_tree")
+                && node
+                    .prev_sibling()
+                    .is_some_and(|before| before.kind() == "identifier") =>
+            {
+                return true
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    false
+}
+
+/// A format string in a macro argument that captures `name` implicitly, as in
+/// `println!("{name}")`. The capture is invisible to the syntax tree.
+fn rust_format_capture(root: Node<'_>, source: &str, name: &str, path: &str) -> Result<(), String> {
+    let captures = [
+        format!("{{{name}}}"),
+        format!("{{{name}:"),
+        format!("{{{name}="),
+    ];
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "string_literal" | "raw_string_literal")
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "token_tree")
+        {
+            let text = source.get(node.byte_range()).unwrap_or_default();
+            if captures
+                .iter()
+                .any(|capture| text.contains(capture.as_str()))
+            {
+                let at = node.start_position();
+                return Err(format!(
+                    "a format string at {path}:{}:{} may capture `{name}` implicitly",
+                    at.row + 1,
+                    at.column + 1
+                ));
+            }
+            continue;
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    Ok(())
+}
+
 fn nested_module(scope: Node<'_>) -> bool {
     let mut stack = vec![scope];
     while let Some(node) = stack.pop() {
@@ -570,7 +642,11 @@ fn encloses(outer: Node<'_>, inner: Node<'_>) -> bool {
 fn member_name(node: Node<'_>, language: Language) -> bool {
     match language {
         Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
+            // An enum member is also an unqualified name inside its enum body.
             node.kind() == "property_identifier"
+                && !node
+                    .parent()
+                    .is_some_and(|parent| matches!(parent.kind(), "enum_body" | "enum_assignment"))
         }
         Language::Rust => node.kind() == "field_identifier",
         Language::Python => node.parent().is_some_and(|parent| {
