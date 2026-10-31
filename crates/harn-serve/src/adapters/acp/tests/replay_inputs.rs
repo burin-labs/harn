@@ -1,7 +1,7 @@
 use super::*;
 use harn_vm::run_tape::{start_recording, RecordingLevel, TAPE_FILE_NAME};
 use harn_vm::testbench::tape::EventTape;
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[tokio::test(flavor = "current_thread")]
 async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_controls() {
@@ -47,6 +47,25 @@ async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_c
         let replayed = inputs[3].params("/isolated", &sessions).unwrap();
         assert_eq!(replayed["sessionId"], "fresh-session");
         assert_eq!(replayed["prompt"][0]["text"], "turn-3");
+        for stop in [Value::Null, json!("cancelled"), json!("max_tokens")] {
+            let mut incomplete = tape.clone();
+            let mut changed = 0;
+            for record in &mut incomplete.records {
+                let harn_vm::testbench::tape::TapeRecordKind::SessionControl { event } = &mut record.kind else { continue };
+                let mut value: Value = serde_json::from_slice(&tape.resolve_payload(event).unwrap()).unwrap();
+                if value["event"] == "completed" && value["id"] == 3 {
+                    assert_eq!(value["stop_reason"], "end_turn");
+                    value["stop_reason"] = stop.clone();
+                    let text = serde_json::to_string(&value).unwrap();
+                    *event = harn_vm::testbench::tape::TapePayload::Inline {
+                        content_hash: harn_vm::testbench::tape::content_hash(text.as_bytes()), text,
+                    };
+                    changed += 1;
+                }
+            }
+            assert_eq!(changed, 1);
+            assert!(super::super::replay_inputs::replay_requests(&incomplete).unwrap_err().contains("did not complete normally"));
+        }
 
         tx.send(json!({"jsonrpc":"2.0", "id":10, "method":"session/new", "params":{
             "cwd":root.path(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "mcpServers":[]
@@ -74,6 +93,22 @@ async fn recorded_client_inputs_reconstruct_completed_turns_and_refuse_private_c
         sessions.insert(second, "second-replay".into());
         assert_eq!(inputs[5].params("/isolated", &sessions).unwrap()["sessionId"], "second-replay");
         assert_eq!(inputs[3].params("/isolated", &sessions).unwrap()["sessionId"], "fresh-session");
+
+        for (id, method, params) in [
+            (20, "session/set_budget", json!({"sessionId":session, "llm_cost_usd":1.0})),
+            (21, "session/remind", json!({"sessionId":session, "body":"Cite observed evidence.", "mode":"finish_step"})),
+        ] {
+            tx.send(json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params})).unwrap();
+            let response = recv_response_with_id(&mut rx, id).await;
+            assert!(response.get("result").is_some(), "{response}");
+        }
+        let tape = EventTape::load(&tape_dir.join(TAPE_FILE_NAME)).unwrap();
+        let inputs = super::super::replay_inputs::replay_requests(&tape).unwrap();
+        assert_eq!(inputs.len(), 8);
+        assert_eq!(inputs[6].method(), "session/set_budget");
+        assert_eq!(inputs[6].params("/isolated", &sessions).unwrap()["llm_cost_usd"], 1.0);
+        assert_eq!(inputs[7].method(), "session/remind");
+        assert_eq!(inputs[7].params("/isolated", &sessions).unwrap()["body"], "Cite observed evidence.");
 
         tx.send(json!({"jsonrpc":"2.0", "id":4, "method":"session/inputs", "params":{
             "sessionId":session, "command":{"kind":"put", "spec":{"name":"KEY"}, "value":"private-input-canary"}

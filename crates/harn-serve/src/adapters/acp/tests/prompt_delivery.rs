@@ -452,6 +452,30 @@ async fn queued_prompt_captures_its_boundary_when_the_turn_starts() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_reminder_accepted_before_the_first_turn_is_delivered_by_that_turn() {
+    harn_clock::test_support::with_local_tasks(async {
+        let mut h = DeliveryHarness::start().await;
+        h.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":3, "method":"session/remind",
+            "params":{"sessionId":h.session_id, "body":"Remember the startup canary.", "mode":"finish_step"},
+        }));
+        let (_, accepted) = h.reply(3).await;
+        let reminder_id = accepted["result"]["reminderId"].as_str().expect("startup reminder accepted");
+        h.open_gate();
+        h.prompt(4, "tick", None);
+        let (_, terminal) = h.reply(4).await;
+        assert_eq!(terminal["result"]["stopReason"], "end_turn", "{terminal}");
+        let seen = h.finish().await;
+        let delivered: Vec<_> = seen.iter().filter(|message| {
+            message["params"]["update"]["sessionUpdate"] == "reminder_emitted"
+                && message["params"]["update"]["_meta"]["harn"]["reminder"]["reminderId"] == reminder_id
+        }).collect();
+        assert_eq!(delivered.len(), TICKS + 1, "the accepted reminder must reach each model call in the first turn");
+        assert_eq!(delivered[0]["params"]["update"]["_meta"]["harn"]["reminder"]["body"], "Remember the startup canary.");
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn delivery_prompt_to_an_idle_session_starts_a_turn() {
     harn_clock::test_support::with_local_tasks(async {
         let mut h = DeliveryHarness::start().await;

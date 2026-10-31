@@ -23,6 +23,7 @@ enum InputEvent {
         id: Value,
         succeeded: bool,
         session_id: Option<String>,
+        stop_reason: Option<String>,
     },
     Unavailable {
         reason: String,
@@ -108,6 +109,8 @@ pub fn replay_requests(tape: &EventTape) -> Result<Vec<ReplayRequest>, String> {
                     "session/prompt"
                     | "session/set_mode"
                     | "session/set_config_option"
+                    | "session/set_budget"
+                    | "session/remind"
                     | "session/close"
                         if initialized =>
                     {
@@ -142,6 +145,7 @@ pub fn replay_requests(tape: &EventTape) -> Result<Vec<ReplayRequest>, String> {
                 id,
                 succeeded,
                 session_id,
+                stop_reason,
             } => {
                 let Some((expected, mut request)) = pending.take() else {
                     continue;
@@ -152,6 +156,13 @@ pub fn replay_requests(tape: &EventTape) -> Result<Vec<ReplayRequest>, String> {
                 }
                 if !succeeded {
                     return Err("recording includes a failed client request".into());
+                }
+                if request.method == "session/prompt" && stop_reason.as_deref() != Some("end_turn")
+                {
+                    return Err(
+                        "recorded prompt did not complete normally; record a completed baseline"
+                            .into(),
+                    );
                 }
                 if request.method == "session/new" {
                     let session = session_id
@@ -254,6 +265,7 @@ impl InputRecorder {
                             succeeded: frame.get("error").is_none()
                                 && frame.get("result").is_some(),
                             session_id: frame["result"]["sessionId"].as_str().map(str::to_owned),
+                            stop_reason: frame["result"]["stopReason"].as_str().map(str::to_owned),
                         });
                     }
                 }
@@ -276,6 +288,19 @@ fn normalize(method: &str, params: &Value) -> Result<Value, String> {
         "session/close" => &["sessionId"],
         "session/set_mode" => &["sessionId", "modeId"],
         "session/set_config_option" => &["sessionId", "configId", "value"],
+        "session/set_budget" => &["sessionId", "llm_cost_usd", "llm_tokens"],
+        "session/remind" => &[
+            "sessionId",
+            "mode",
+            "id",
+            "body",
+            "tags",
+            "dedupe_key",
+            "ttl_turns",
+            "preserve_on_compact",
+            "propagate",
+            "role_hint",
+        ],
         _ => return Err("recording includes a client operation without a replay schedule".into()),
     };
     let object = params
