@@ -150,6 +150,8 @@ pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 mod toolchain_cache;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use toolchain_cache::process_roots as process_sandbox_developer_toolchain_cache_roots;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod pinned_pnpm;
 pub(crate) mod workspace_env;
 #[cfg(all(test, unix))]
 mod workspace_env_integration;

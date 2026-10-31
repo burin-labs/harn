@@ -494,6 +494,8 @@ pub(crate) fn inject_workspace_process_env(
     inject_jvm_loopback_env(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::swiftpm::inject_env(env, policy);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    super::pinned_pnpm::inject_env(env, policy);
 }
 
 /// The workspace defaults an in-process environment read sees, computed
