@@ -1,6 +1,8 @@
 use super::*;
 use harn_vm::run_tape::PromptSourceEdit;
-use harn_vm::stdlib::template::{PromptSourceSpan, PromptSpanKind};
+use harn_vm::stdlib::template::{
+    render_asset_result, PromptSourceSpan, PromptSpanKind, TemplateAsset,
+};
 use harn_vm::testbench::tape::TapeRecordKind;
 
 fn program(target: &str, answer: &str) -> String {
@@ -243,13 +245,12 @@ fn prompt_edits_apply_to_embedded_assets_from_the_first_live_call() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let dirs = dirs();
     let target = "std/workflow/prompts/verification_context_intro.harn.prompt";
-    let original = include_str!(
-        "../../../harn-stdlib/src/stdlib/workflow/prompts/verification_context_intro.harn.prompt"
-    );
+    let asset = TemplateAsset::render_target(target).unwrap();
+    let original = render_asset_result(&asset, None).unwrap();
     let source = program(target, "baseline");
-    assert!(record(&source, &dirs.tapes, &dirs.workspace).contains(original));
+    assert!(record(&source, &dirs.tapes, &dirs.workspace).contains(original.as_str()));
     let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
-    let edit = edit_for(&tape, original, "Edited embedded guidance.");
+    let edit = edit_for(&tape, &original, "Edited embedded guidance.");
     assert!(edit.template_uri.starts_with("std://"));
     let guard = start_branch(plan(
         tape,
