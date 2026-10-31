@@ -55,6 +55,8 @@ direct_body=$(printf '# Changelog\n\n## Unreleased\n\n- Direct note.\n\n## v1.2.
 [[ "$direct_body" == '- Direct note.' ]] || fail "direct Unreleased note was not extracted"
 
 workflow="$repo_root/.github/workflows/release-pr-drift-check.yml"
+grep -Fq 'types: [opened, reopened, synchronize, edited]' "$workflow" \
+  || fail "release drift gate does not rerun when a PR base is edited"
 [[ $(grep -Fc 'source .github/scripts/release-pr-drift.sh' "$workflow") -eq 2 ]] \
   || fail "workflow does not share ref/extraction policy across both steps"
 [[ $(grep -Fc 'release_pr_target_json' "$workflow") -eq 2 ]] \
