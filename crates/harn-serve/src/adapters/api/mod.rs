@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::adapters::acp::{
-    run_acp_channel_server, AcpJsonRpcError, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
+    run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
 };
 use crate::auth::{AuthPolicy, AuthenticatedPrincipal};
 use crate::permissions::{

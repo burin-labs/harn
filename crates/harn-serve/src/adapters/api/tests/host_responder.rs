@@ -1,4 +1,5 @@
 use super::*;
+use crate::AcpJsonRpcError;
 use std::sync::atomic::AtomicUsize;
 
 struct FixtureHost {

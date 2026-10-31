@@ -348,14 +348,10 @@ impl AcpBridge {
         params: serde_json::Value,
         abort_on_cancel: bool,
     ) -> Result<serde_json::Value, harn_vm::VmError> {
-        if !self.client_capabilities.supports_method(method) {
-            return Err(harn_vm::VmError::Runtime(format!(
-                "ACP client did not advertise support for {method}"
-            )));
-        }
         if abort_on_cancel && self.cancellation.cancelled.load(Ordering::SeqCst) {
             return Err(harn_vm::VmError::Runtime("Cancelled".into()));
         }
+        // The embedder is the host, so what the client advertises is moot.
         if let Some(responder) = self
             .host_responder
             .clone()
@@ -364,6 +360,11 @@ impl AcpBridge {
             return self
                 .answer_in_process(responder, method, params, abort_on_cancel)
                 .await;
+        }
+        if !self.client_capabilities.supports_method(method) {
+            return Err(harn_vm::VmError::Runtime(format!(
+                "ACP client did not advertise support for {method}"
+            )));
         }
 
         let id = self.next_id_counter.fetch_add(1, Ordering::SeqCst);
