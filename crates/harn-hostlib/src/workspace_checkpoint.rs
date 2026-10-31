@@ -39,6 +39,7 @@
 mod anchored_fs;
 mod builtins;
 mod fork;
+mod persist;
 mod receipts;
 mod scan;
 mod seed;
@@ -51,6 +52,7 @@ use builtins::{
     restore_builtin,
 };
 pub use fork::{fork_session, ForkReceipt};
+pub use persist::{resume, unload, ResumeReceipt};
 use receipts::unavailable;
 pub use receipts::{
     AttributedChange, CallBeginReceipt, CallEndReceipt, CaptureReceipt, ChangeWriter,
@@ -457,6 +459,7 @@ pub fn capture_with_writer_policy(
     }
     advance_revision(&mut state, CAPTURE_BUILTIN)?;
     state.boundaries.push(boundary);
+    persist::save(session_id, &state);
     Ok(Outcome::Ready(receipt))
 }
 
@@ -612,6 +615,7 @@ pub fn call_end(
         scan_errors,
         changes: changes.clone(),
     });
+    persist::save(session_id, &state);
     Ok(Outcome::Ready(CallEndReceipt {
         available: true,
         call_id: call_id.to_string(),
@@ -721,6 +725,7 @@ pub fn restore_with_confirmations(
         return Ok(unknown_boundary(boundary_id));
     };
     advance_revision(&mut state, RESTORE_BUILTIN)?;
+    persist::save(session_id, &state);
     let root = state.root.clone();
     let require_no_replace = state.writer_policy == WriterPolicy::RequireKnown;
     let anchor = open_anchor(&root);

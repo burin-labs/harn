@@ -939,6 +939,31 @@ pipeline default(harness: Harness, task: unknown) {{
             .filter_map(|effect| effect["invocation"].as_u64()).collect();
         assert_eq!(invocations.len(), 2, "{plan}");
 
+        // A restarted host holds nothing in memory; loading the session picks
+        // up the recorded boundary and its attributed calls.
+        assert!(harn_hostlib::workspace_checkpoint::unload(&session));
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":4, "method":"session/load",
+            "params":{"sessionId":session, "cwd":root.to_string_lossy(), "environmentPolicy":{"kind":"isolated", "grants":[]}, "workspaceCheckpoint":true},
+        })).unwrap();
+        let loaded = harn_clock::test_support::within("reload response", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["id"] == 4 {
+                    break message;
+                }
+            }
+        }).await;
+        assert!(loaded["error"].is_null(), "{loaded}");
+        request_tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":5, "method":"session/workspace_checkpoint",
+            "params":{"sessionId":session, "action":"plan", "boundaryId":"turn-1"},
+        })).unwrap();
+        let reloaded = recv_response_with_id(&mut response_rx, 5).await;
+        assert_eq!(reloaded["result"], plan, "{reloaded}");
+
         let receipt = serde_json::to_value(
             harn_hostlib::workspace_checkpoint::restore(&session, "turn-1", None).unwrap(),
         ).unwrap();

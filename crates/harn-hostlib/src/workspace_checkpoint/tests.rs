@@ -357,3 +357,53 @@ fn restore_recreates_a_file_with_a_255_byte_name() {
     let restored = stdfs::read_to_string(dir.path().join("sub").join(&leaf)).unwrap();
     assert_eq!(restored, "f original\n");
 }
+
+#[test]
+fn a_restarted_host_resumes_the_history_an_earlier_process_recorded() {
+    let (dir, id) = deleted_in_subdir("resume");
+    let root = dir.path();
+    call_begin(&id, "net").unwrap();
+    call_end(&id, "net", Some(SideEffectLevel::Network)).unwrap();
+    let before = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+    // A new process starts with an empty registry and the files on disk.
+    assert!(unload(&id));
+    assert!(matches!(
+        plan(&id, "turn-1").unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "no_checkpoint"
+    ));
+
+    let resumed = resume(&id, root).unwrap();
+    assert!(
+        matches!(resumed, Outcome::Ready(ref r) if r.loaded && r.boundaries == 1 && r.calls == 2),
+        "{resumed:?}"
+    );
+    assert_eq!(
+        serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap(),
+        before
+    );
+    // The resumed revision keeps later invocations distinct from recorded ones.
+    call_begin(&id, "net").unwrap();
+    call_end(&id, "net", Some(SideEffectLevel::Network)).unwrap();
+    let after = serde_json::to_value(plan(&id, "turn-1").unwrap()).unwrap();
+    let invocations: BTreeSet<u64> = after["irreversible"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|effect| effect["invocation"].as_u64())
+        .collect();
+    assert_eq!(invocations.len(), 2, "{after}");
+
+    let Outcome::Ready(receipt) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore after resume was unavailable");
+    };
+    assert!(receipt.failed.is_empty(), "{receipt:?}");
+    assert_eq!(
+        stdfs::read_to_string(root.join("sub").join("f.txt")).unwrap(),
+        "f original\n"
+    );
+    drop_session(&id);
+    assert!(matches!(
+        resume(&id, root).unwrap(),
+        Outcome::Unavailable(ref why) if why.reason == "no_checkpoint"
+    ));
+}

@@ -154,19 +154,18 @@ pub(super) fn fork_session_checked(
         }
         return Err(backend(FORK)(error));
     }
-    registry.insert(
-        target_id.to_string(),
-        Arc::new(Mutex::new(Session {
-            root,
-            writer_policy,
-            read_parent_ignores,
-            blob_dir: target_blobs,
-            boundaries,
-            calls,
-            pending: HashMap::new(),
-            // Inherited calls keep their invocations; new ones must not reuse them.
-            revision,
-        })),
-    );
+    let child = Session {
+        root,
+        writer_policy,
+        read_parent_ignores,
+        blob_dir: target_blobs,
+        boundaries,
+        calls,
+        pending: HashMap::new(),
+        // Inherited calls keep their invocations; new ones must not reuse them.
+        revision,
+    };
+    super::persist::save(target_id, &child);
+    registry.insert(target_id.to_string(), Arc::new(Mutex::new(child)));
     Ok(Outcome::Ready(receipt))
 }

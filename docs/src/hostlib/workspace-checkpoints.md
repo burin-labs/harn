@@ -62,8 +62,10 @@ field as enabled. Captures can be unavailable without blocking the prompt.
 Query `plan` before offering file restoration; a failed
 capture returns `{available: false, reason: "capture_failed"}` from `plan`
 and `restore`, even if an older boundary used that ID. Loading an already-live
-session cannot change its tracking setting. A cold load starts a new in-memory
-checkpoint history; it doesn't restore earlier file boundaries. A steer
+session cannot change its tracking setting. Loading an opted-in session that
+this process does not hold resumes the checkpoint history an earlier process
+recorded under the session's root, so a restarted host can still plan and
+restore against earlier boundaries. A steer
 inserted into a running turn captures its own boundary immediately before its
 message enters the transcript. If a tool call is still in flight or capture
 otherwise fails, `plan` and `restore` report `capture_failed` for that message.
@@ -83,8 +85,15 @@ the parent's checkpoint history was copied to the new session. An unavailable
 result is explicit and does not prevent the conversation fork. The copy has
 independent checkpoint state and stored files, so restoring it or closing the
 parent does not change the other branch's history. Forks without this option
-do not copy checkpoints. Checkpoint state is still in memory and does not
-survive a server restart.
+do not copy checkpoints.
+
+Each session records its boundaries, attributed calls, and revision in an
+index beside its stored files, rewritten after every capture, completed call,
+restore, and fork. If a write fails the index is removed, so a later resume
+reports `no_checkpoint` instead of planning from a history missing calls. An
+embedding host calls `workspace_checkpoint::resume(session_id, root)` to load a
+recorded session and `workspace_checkpoint::unload(session_id)` to release one
+from memory while keeping its record.
 
 ## What a boundary stores
 
@@ -162,5 +171,6 @@ began at, is what tells two such effects apart.
 - Clean tracked content depends on the git objects for the boundary's index
   staying in the object store. Garbage collection can remove them after the
   index moves on.
-- State is in memory. Stored files live with the session and are removed by
-  `checkpoint_drop`.
+- The index and stored files live under the session's root and are removed by
+  `checkpoint_drop`. A call in flight when the process exits is not recorded,
+  so its edits are not attributed after a resume.
