@@ -11,6 +11,29 @@ pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
     harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
+/// Whether installed replay policy prevents provider I/O even after exhaustion.
+#[harn_builtin(
+    exposure = "harness.llm.provider_io_disposition",
+    effects = [],
+    sig = "provider_io_disposition() -> {provider_io: bool, source: \"cli_replay\" | \"builtin_replay\" | \"possible\"}",
+    category = "llm.mock"
+)]
+fn provider_io_disposition_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "provider_io_disposition expects no arguments".to_string(),
+        ));
+    }
+    let disposition = mock::provider_io_disposition();
+    let mut result = std::collections::BTreeMap::new();
+    result.put_bool("provider_io", disposition.provider_io());
+    result.put_str("source", disposition.source());
+    Ok(VmValue::dict(result))
+}
+
 /// Register a legacy v0 inline LLM mock response for tests.
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -62,6 +85,10 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     let mut result = std::collections::BTreeMap::new();
     result.put_int("schema_version", i64::from(receipt.schema_version));
     result.put_bool("strict_scopes", receipt.strict_scopes);
+    let mut provider_io = std::collections::BTreeMap::new();
+    provider_io.put_bool("cli_replay", receipt.provider_io.cli_replay);
+    provider_io.put_bool("builtin_replay", receipt.provider_io.builtin_replay);
+    result.put("provider_io", VmValue::dict(provider_io));
     if let Some(live_after_calls) = receipt.live_after_calls {
         result.put_int(
             "live_after_calls",
@@ -251,6 +278,52 @@ fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<Vm
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixture_disposition_receipt_is_independent_of_ambient_cli_policy() {
+        mock::reset_llm_mock_state();
+        mock::install_cli_llm_mocks(Vec::new());
+        for (text, cli_replay, builtin_replay) in [
+            ("{\"text\":\"legacy\"}\n", false, true),
+            (
+                "{\"schemaVersion\":1,\"strictScopes\":false}\n",
+                false,
+                false,
+            ),
+            (
+                include_str!("testdata/live_prefix_fixture.jsonl"),
+                true,
+                true,
+            ),
+        ] {
+            mock::push_llm_mock_scope();
+            let receipt = llm_mock_load_jsonl_builtin(&[VmValue::string(text)], &mut String::new())
+                .expect("canonical fixture parses");
+            let VmValue::Dict(receipt) = receipt else {
+                panic!("fixture receipt")
+            };
+            let Some(VmValue::Dict(io)) = receipt.get("provider_io") else {
+                panic!("typed I/O receipt")
+            };
+            assert!(
+                matches!(io.get("cli_replay"), Some(VmValue::Bool(value)) if *value == cli_replay)
+            );
+            assert!(
+                matches!(io.get("builtin_replay"), Some(VmValue::Bool(value)) if *value == builtin_replay)
+            );
+            assert_eq!(
+                mock::provider_io_disposition(),
+                mock::ProviderIoDisposition::CliReplay,
+                "ambient protection must not change the parsed child policy"
+            );
+            assert!(mock::pop_llm_mock_scope());
+        }
+        mock::clear_cli_llm_mock_mode();
+        assert_eq!(
+            mock::provider_io_disposition(),
+            mock::ProviderIoDisposition::Possible
+        );
+    }
 
     fn request(scope: Option<&str>) -> crate::llm::api::LlmRequestPayload {
         let mut options = crate::llm::api::options::base_opts("mock");

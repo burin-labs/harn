@@ -609,7 +609,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:

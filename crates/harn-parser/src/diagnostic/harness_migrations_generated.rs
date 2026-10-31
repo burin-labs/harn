@@ -296,6 +296,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("provider_capabilities", "harness.llm.provider_capabilities"),
     ("provider_capabilities_clear", "harness.llm.provider_capabilities_clear"),
     ("provider_capabilities_install", "harness.llm.provider_capabilities_install"),
+    ("provider_io_disposition", "harness.llm.provider_io_disposition"),
     ("provider_register", "harness.llm.provider_register"),
     ("random_choice", "harness.random.choice"),
     ("random_shuffle", "harness.random.shuffle"),

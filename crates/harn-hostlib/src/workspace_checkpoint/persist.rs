@@ -177,7 +177,7 @@ fn save_with_phase(session_id: &str, state: &Session, phase: IndexPhase) -> Resu
 }
 
 fn write_index(path: &Path, bytes: &[u8]) -> Result<AtomicWriteReceipt, String> {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     if let Some(result) = take_test_write_result(path) {
         match result {
             TestWriteResult::Error => {
@@ -200,25 +200,25 @@ fn write_index(path: &Path, bytes: &[u8]) -> Result<AtomicWriteReceipt, String> 
         .map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[derive(Clone, Copy)]
 pub(super) enum TestWriteResult {
     Error,
     MissingNamespaceSync,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[derive(Clone, Copy)]
 struct TestWritePlan {
     writes_before_failure: usize,
     result: TestWriteResult,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 static TEST_WRITE_RESULTS: std::sync::OnceLock<Mutex<HashMap<PathBuf, TestWritePlan>>> =
     std::sync::OnceLock::new();
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn fail_write_after(
     session_id: &str,
     root: &Path,
@@ -240,7 +240,7 @@ pub(super) fn fail_write_after(
         );
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn take_test_write_result(path: &Path) -> Option<TestWriteResult> {
     let mut writes = TEST_WRITE_RESULTS
         .get_or_init(Default::default)

@@ -273,9 +273,17 @@ pub(crate) struct LlmMockFixtureReceipt {
     pub schema_version: u32,
     pub strict_scopes: bool,
     pub live_after_calls: Option<u64>,
+    pub provider_io: FixtureProviderIo,
     pub count: usize,
     pub scopes: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+/// Possible provider I/O after installing this fixture in either replay owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FixtureProviderIo {
+    pub cli_replay: bool,
+    pub builtin_replay: bool,
 }
 
 /// The highest fixture contract version this build understands.
@@ -480,6 +488,7 @@ pub(crate) fn install_builtin_llm_mock_fixture(fixture: LlmMockFixture) -> LlmMo
         schema_version: queue.schema_version(),
         strict_scopes: queue.strict_scopes(),
         live_after_calls: queue.live_after_calls(),
+        provider_io: queue.provider_io(),
         count: queue.count(),
         scopes: queue.scopes(),
         warnings: queue.warnings().to_vec(),
@@ -540,6 +549,43 @@ pub(crate) fn builtin_llm_mock_snapshot() -> serde_json::Value {
 
 pub fn builtin_llm_mock_active() -> bool {
     with_mock_state(|state| state.builtin_queue.is_active())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderIoDisposition {
+    CliReplay,
+    BuiltinReplay,
+    Possible,
+}
+
+impl ProviderIoDisposition {
+    pub(crate) fn provider_io(self) -> bool {
+        self == Self::Possible
+    }
+
+    pub(crate) fn source(self) -> &'static str {
+        match self {
+            Self::CliReplay => "cli_replay",
+            Self::BuiltinReplay => "builtin_replay",
+            Self::Possible => "possible",
+        }
+    }
+}
+
+/// Match dispatch's CLI-or-builtin interception, excluding finite protection.
+pub(crate) fn provider_io_disposition() -> ProviderIoDisposition {
+    let cli_blocks = current_cli_llm_mock_scope().is_some_and(|scope| {
+        cli_llm_mock_scopes().get(&scope).is_some_and(|state| {
+            state.mode == CliLlmMockMode::Replay && !state.queue.provider_io().cli_replay
+        })
+    });
+    if cli_blocks {
+        ProviderIoDisposition::CliReplay
+    } else if with_mock_state(|state| !state.builtin_queue.provider_io().builtin_replay) {
+        ProviderIoDisposition::BuiltinReplay
+    } else {
+        ProviderIoDisposition::Possible
+    }
 }
 
 /// Whether any LLM mock is serving this call, from either install point.
