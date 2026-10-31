@@ -1,3 +1,2 @@
-- **Linux sandbox expansion-limit errors now identify the directory whose entries were enumerated.** A refusal no
-  longer points at the next denied-path component, and the existing 4,096-rule limit and sandbox grants are
-  unchanged.
+- **Linux sandbox expansion-limit errors name the enumerated directory (#10888).** A refusal no longer points at the
+  next denied-path component. The existing 4,096-rule limit and sandbox grants are unchanged.
