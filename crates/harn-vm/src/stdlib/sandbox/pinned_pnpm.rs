@@ -12,12 +12,16 @@ use crate::orchestration::CapabilityPolicy;
 
 pub(super) fn inject_env(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
     if !policy.sandbox_profile.confines_processes()
-        || super::effective_fallback(policy.sandbox_profile) == super::SandboxFallback::Off
-        || !super::active_backend_available()
+        || super::super::effective_fallback(policy.sandbox_profile)
+            == super::super::SandboxFallback::Off
+        || !super::super::active_backend_available()
     {
         return;
     }
-    let Some(root) = super::normalized_workspace_roots(policy).into_iter().next() else {
+    let Some(root) = super::super::normalized_workspace_roots(policy)
+        .into_iter()
+        .next()
+    else {
         return;
     };
     let inherited = |name: &str| {
