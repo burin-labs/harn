@@ -291,6 +291,10 @@ const COMMAND_TEXT_LIMIT: int = 240
  * value may contain escaped quotes, and an unterminated quote runs to the end),
  * and the token-pattern policy runs last. Redact before clipping: a token cut
  * in half no longer matches its pattern.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
  */
 pub fn pl_redact_command(text: string) -> string {
   const assignments = regex_replace(
@@ -307,6 +311,10 @@ pub fn pl_redact_command(text: string) -> string {
  * Normalize a run's command ledger at the observation boundary: at most the
  * last COMMAND_LEDGER_LIMIT entries, each `{tool, command, exit_code, ok}` with
  * a redacted, length-bounded command. Entries without a command are dropped.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
  */
 pub fn pl_sanitize_command_ledger(ledger: list) -> list {
   let out = []

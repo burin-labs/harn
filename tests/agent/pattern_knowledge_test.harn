@@ -7,12 +7,12 @@ import {
   pattern_learning_observations,
   pattern_learning_observe,
   pattern_learning_pending,
-  pattern_learning_session_transcript,
   pattern_learning_set_enabled,
   pattern_learning_state,
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
 import { pl_redact_command } from "std/agent/pattern_knowledge_persistence"
+import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { session_store_append, session_store_events, session_store_list } from "std/session-store"
 import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 

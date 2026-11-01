@@ -10,8 +10,8 @@ import {
   pattern_learning_import_session_records,
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
-  pattern_learning_session_transcript,
 } from "std/agent/pattern_knowledge"
+import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { tool_registry_from } from "std/tools"
