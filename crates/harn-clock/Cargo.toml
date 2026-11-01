@@ -15,7 +15,7 @@ test-support = []
 
 [dependencies]
 async-trait = "0.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 serde = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
 tokio = { version = "1", features = ["rt", "sync", "time"] }
