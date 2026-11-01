@@ -44,7 +44,10 @@ pipeline test_package_runs_a_step_from_its_directory() {
     ],
   )
   assert_eq(pkg.verify_command, "python3 tools/codegen.py && (cd packages/web && npm test)")
-  assert(pkg.source.contains("\"cwd\":\"packages/web\""), "the tool's plan keeps the step directory")
+  assert(
+    pkg.source.contains("\"cwd\":\"packages/web\""),
+    "the tool's plan keeps the step directory",
+  )
   const escaped = try {
     crystallization_command_sequence_package(
       "web check",
