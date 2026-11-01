@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn complementary_reviewer_requires_text_generation_even_when_decisions_are_cheaper() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "qwen/qwen3.6-35b-a3b".to_string(),
+            author_provider: Some("openrouter".to_string()),
+            intent: ComplementaryReviewerIntent::PlanReview,
+            max_price_multiplier: Some(0.01),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
+        },
+        |_| true,
+    );
+    let config = effective_config();
+    let reviewer = &config.models[&selection.reviewer.id];
+    assert!(
+        reviewer.supports_operation(ModelOperation::TextGeneration),
+        "a prose reviewer must support text generation: {selection:?}"
+    );
+}
+
+#[test]
 fn complementary_reviewer_uses_different_family() {
     let selection = pick_complementary_reviewer_with_availability(
         ComplementaryReviewerOptions {
