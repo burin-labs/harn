@@ -121,6 +121,28 @@ fn cc_record_review(fs: HarnessFs, evidence: list, options: any = nil) {
   fs.write_text(path, json_stringify({evidence_ids: ids[start:len(ids)]}))
 }
 
+/**
+ * True when a session paid a workflow discovery cost the installed library
+ * does not already remove: a command failed, or it ran a command no installed
+ * check runs. A session that only ran installed checks, and passed, teaches
+ * nothing new.
+ */
+fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
+  const checks = installed.map({ entry -> entry.verify_command }).filter({ text -> text != "" })
+    .to_list()
+  for entry in item?.command_ledger ?? [] {
+    if !(entry?.ok ?? false) {
+      return true
+    }
+    const command = cc_text(entry?.command)
+    if command != ""
+      && !checks.any({ check -> cc_runs_declared_check(check, {command: command, cwd: ""}) }) {
+      return true
+    }
+  }
+  return false
+}
+
 fn cc_prompt(evidence: list, pending: list, installed: list = [], declared: list = []) -> dict {
   const cards = cc_evidence_cards(evidence)
   const system = """
@@ -1040,7 +1062,8 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * A host passes `installed` (`[{name, verify_command}]`) so the curator neither
  * proposes nor stages a capability the project already has, and
  * `require_new_evidence: true` to skip the model call entirely when every
- * evidence item was already seen by an earlier review. `declared_checks`
+ * evidence item was already seen by an earlier review, or when every unseen
+ * session only ran installed checks and passed (`no_new_workflow_evidence`). `declared_checks`
  * (`[{intent, command, cwd}]`, the checks the repository states) bound a
  * learned verifier's scope: one that runs none of the declared test checks is rejected.
  *
@@ -1061,10 +1084,18 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
   }
   if options?.require_new_evidence ?? false {
     const reviewed = cc_reviewed_ids(harness.fs, options)
-    if !evidence.any({ item -> !reviewed.contains(cc_text(item?.id)) }) {
+    const unreviewed = evidence.filter({ item -> !reviewed.contains(cc_text(item?.id)) }).to_list()
+    const installed = cc_installed(harness.fs, options)
+    const status = len(unreviewed) == 0
+      ? "no_new_evidence"
+      : unreviewed.any({ item -> cc_shows_new_workflow(item, installed) }) ? "" : "no_new_workflow_evidence"
+    if status != "" {
+      if len(unreviewed) > 0 {
+        cc_record_review(harness.fs, unreviewed, options)
+      }
       return {
         schema: CURATOR_SCHEMA,
-        status: "no_new_evidence",
+        status: status,
         proposals: [],
         proposal_count: 0,
         evidence_count: len(evidence),
