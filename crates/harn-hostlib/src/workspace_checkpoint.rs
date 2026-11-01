@@ -901,19 +901,56 @@ pub fn drop_session(session_id: &str) -> DropReceipt {
         };
     };
     let root = lock(&session).root.clone();
-    match stdfs::remove_dir_all(session_dir(&root, session_id)) {
-        Ok(()) => DropReceipt {
-            dropped: true,
-            error: None,
-        },
+    let dir = session_dir(&root, session_id);
+    let removal = match stdfs::remove_dir_all(&dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => e,
+        _ => {
+            return DropReceipt {
+                dropped: true,
+                error: None,
+            }
+        }
+    };
+    // A partial delete can leave the index behind, and a later load would
+    // resume it. Moving the directory aside needs only its parent writable, and
+    // the index is then gone from the path every load reads.
+    let aside = dir.with_file_name(format!(
+        ".dropped-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos())
+    ));
+    match stdfs::rename(&dir, &aside) {
+        Ok(()) => {
+            let _ = stdfs::remove_dir_all(&aside);
+            DropReceipt {
+                dropped: true,
+                error: None,
+            }
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DropReceipt {
             dropped: true,
             error: None,
         },
-        Err(e) => DropReceipt {
-            dropped: false,
-            error: Some(format!("stored files were not removed: {e}")),
-        },
+        Err(rename) => {
+            let error = format!(
+                "the checkpoint record could not be removed ({removal}) or moved aside ({rename}), so a later load could resume it"
+            );
+            // Keep the session loaded and interrupted: with it gone from memory,
+            // the next call would read as having no checkpoint and run while
+            // the record it should have retired is still on disk.
+            lock(&session).interrupted = Some(error.clone());
+            sessions()
+                .lock()
+                .expect("workspace checkpoint registry poisoned")
+                .entry(session_id.to_string())
+                .or_insert(session);
+            DropReceipt {
+                dropped: false,
+                error: Some(error),
+            }
+        }
     }
 }
 

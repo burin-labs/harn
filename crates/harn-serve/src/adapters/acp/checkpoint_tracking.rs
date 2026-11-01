@@ -197,13 +197,19 @@ pub(super) fn attribute_tool_execution(
             };
             // Tracking is optional; the person's tool call is not. A call that
             // runs untracked makes every earlier boundary unsafe to restore, so
-            // drop them; boundaries captured after this call stay valid.
+            // drop them, on disk too, or a later load would resume them.
+            // Boundaries captured after this call stay valid. Only when the old
+            // record cannot be removed does the call wait, since running it
+            // would leave a restorable boundary that misses its changes.
             let dropped = checkpoint::drop_session(session_id);
+            if let Some(error) = dropped.error {
+                tracing::warn!(session_id, tool_call_id, detail = %failure, "workspace checkpoint tracking failed");
+                return ToolExecutionAdmission::Refused(error);
+            }
             tracing::warn!(
                 session_id,
                 tool_call_id,
                 detail = %failure,
-                drop_error = ?dropped.error,
                 "workspace checkpoint tracking failed; the tool call runs untracked"
             );
             ToolExecutionAdmission::Untracked
@@ -277,18 +283,49 @@ mod tests {
             .parent()
             .unwrap()
             .to_path_buf();
-        // The index can no longer be written, so the call cannot be tracked.
-        std::fs::set_permissions(&session_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let checkpoints = session_dir.parent().unwrap().to_path_buf();
+        let mode = |path: &std::path::Path, bits| {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits)).unwrap();
+        };
+        let begin = |call: &str| {
+            attribute_tool_execution(
+                session,
+                &scope,
+                call,
+                SideEffectLevel::WorkspaceWrite,
+                ToolExecutionStage::Begin,
+            )
+        };
 
-        let admission = attribute_tool_execution(
-            session,
-            &scope,
-            "call-1",
-            SideEffectLevel::WorkspaceWrite,
-            ToolExecutionStage::Begin,
+        // Neither delete nor move-aside can retire the old record, so running
+        // the call would leave a restorable boundary that misses its edit.
+        mode(&session_dir, 0o500);
+        mode(&checkpoints, 0o500);
+        let refused = [begin("call-1"), begin("call-1b")];
+        mode(&checkpoints, 0o700);
+        mode(&session_dir, 0o700);
+        for admission in &refused {
+            assert!(
+                matches!(admission, ToolExecutionAdmission::Refused(detail) if detail.contains("later load could resume")),
+                "a retry must not read as having no checkpoint: {admission:?}"
+            );
+        }
+
+        // The index cannot be written, but its directory can be moved aside:
+        // the call runs untracked and no load can bring the old boundary back.
+        assert!(session_dir.join("index.json").exists() || find_index(&session_dir).is_some());
+        mode(&session_dir, 0o500);
+        assert_eq!(begin("call-2"), ToolExecutionAdmission::Untracked);
+        std::fs::write(root.path().join("edited.txt"), "untracked edit").unwrap();
+        for entry in std::fs::read_dir(&checkpoints).unwrap().flatten() {
+            mode(&entry.path(), 0o700);
+        }
+        assert!(!session_dir.exists(), "the old record left the load path");
+        let resumed = checkpoint::resume(session, root.path()).unwrap();
+        assert!(
+            matches!(&resumed, Outcome::Unavailable(reason) if reason.reason == "no_checkpoint"),
+            "a load must not bring back a boundary from before an untracked call"
         );
-        std::fs::set_permissions(&session_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(admission, ToolExecutionAdmission::Untracked);
         let plan = checkpoint::plan(session, "message-1").unwrap();
         assert!(
             matches!(&plan, Outcome::Unavailable(reason) if reason.reason == "no_checkpoint"),
