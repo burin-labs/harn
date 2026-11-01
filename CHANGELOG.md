@@ -9,6 +9,28 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.185
+
+### Breaking
+
+- `AcpServerConfig` is now `#[non_exhaustive]` and gains the
+  `launcher_session_environment` field, so later launch inputs can be added
+  without another breaking release.
+
+  Migration: Rust embedders that built `AcpServerConfig` with a struct literal
+  must construct it with `AcpServerConfig::new(pipeline)` and the `with_*`
+  builder methods (for example `with_launcher_session_environment`). Reading and
+  assigning public fields is unchanged.
+
+### Added
+
+- **A standard ACP editor can open a session on `harn serve acp`.** The new
+  `--session-environment inherited|isolated` flag states, at launch, the
+  environment policy for a client whose `session/new` names none. Without the
+  flag such a request is still refused with `environment_policy.missing`. A
+  policy the client sends always wins, and the `session/new` result now reports
+  the policy that applied as `environmentPolicy: {kind, source}`.
+
 ## v0.10.184
 
 ### Breaking
