@@ -75,7 +75,7 @@ keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
-jsonschema = { version = "0.58.2", default-features = false }
+jsonschema = { version = "0.60.1", default-features = false }
 rstest = { version = "0.28", default-features = false }
 # One HTTP client and one TLS crypto provider. reqwest's `rustls` feature and
 # rustls's default features both select aws-lc-rs, the provider the runtime
