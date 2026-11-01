@@ -20,7 +20,6 @@ unverified = [
   "cohere",
   "github_models",
   "hunyuan",
-  "hyperbolic",
   "local",
   "parasail",
   "siliconflow",
@@ -65,6 +64,12 @@ provider = "inception"
 checked_on = "2026-10-16"
 fields = ["cache", "stream"]
 sources = ["https://docs.inceptionlabs.ai/api-reference/chat/create-a-chat-completion"]
+
+[[usage_accounting_audit.verified]]
+provider = "hyperbolic"
+checked_on = "2026-11-01"
+fields = ["stream"]
+sources = ["https://www.hyperbolic.ai/docs/inference/text-apis"]
 
 [[usage_accounting_audit.verified]]
 provider = "mistral"
@@ -831,17 +836,16 @@ features = ["native_tools", "reasoning", "vision"]
 method = "GET"
 path = "/models"
 
-# Hyperbolic — OpenAI-compatible inference with documented function calling
-# on current Qwen/Llama coding-agent routes.
+# Hyperbolic text inference uses OpenAI-compatible chat completions.
 [providers.hyperbolic]
-base_url = "https://api.hyperbolic.xyz/v1"
+stream_usage_accounting = true
+base_url = "https://api.hyperbolic.ai/inference/v1"
 base_url_env = "HYPERBOLIC_BASE_URL"
 auth_style = "bearer"
 auth_env = "HYPERBOLIC_API_KEY"
 chat_endpoint = "/chat/completions"
-completion_endpoint = "/completions"
 features = ["native_tools"]
-rate_limits = { rpm = 60, tier = "basic", source_url = "https://www.hyperbolic.ai/docs/inference/text-apis", last_verified = "2026-06-23", notes = "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier." }
+rate_limits = { rpm = 300, tier = "Pro or Organization", source_url = "https://www.hyperbolic.ai/docs/inference/overview", last_verified = "2026-11-01", notes = "Documented per API key; inference requires a Pro account or Organization and a positive credit balance." }
 
 [providers.hyperbolic.healthcheck]
 method = "GET"
