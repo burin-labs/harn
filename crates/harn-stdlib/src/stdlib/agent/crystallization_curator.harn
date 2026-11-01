@@ -706,13 +706,13 @@ fn cc_declared_checks(options: any = nil) -> list {
     if command != "" {
       out = out
         + [
-        {
-          intent: cc_text(item?.intent),
-          command: command,
-          cwd: cc_text(item?.cwd),
-          origin: cc_text(item?.origin),
-        },
-      ]
+          {
+            intent: cc_text(item?.intent),
+            command: command,
+            cwd: cc_text(item?.cwd),
+            origin: cc_text(item?.origin),
+          },
+        ]
     }
   }
   return out
