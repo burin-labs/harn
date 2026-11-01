@@ -1360,5 +1360,8 @@ pub(crate) use prefix::{
 };
 
 #[cfg(test)]
+pub(crate) static TEST_PROCESS_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
 #[path = "run_tape_tests.rs"]
 mod tests;

@@ -245,9 +245,9 @@ pub(in super::super) fn worker_event_snapshot(state: &WorkerState) -> WorkerEven
 }
 
 fn worker_state_dir() -> PathBuf {
-    let dir = std::env::var("HARN_WORKER_STATE_DIR")
+    let dir = crate::stdlib::process::read_env_value("HARN_WORKER_STATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|| {
             let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             crate::runtime_paths::state_root_reference(&base)
                 .join(crate::runtime_paths::WORKERS_DIR)

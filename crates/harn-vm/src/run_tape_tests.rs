@@ -16,7 +16,7 @@ mod store_changes;
 
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
-static PROCESS_LOCK: Mutex<()> = Mutex::new(());
+use super::TEST_PROCESS_LOCK as PROCESS_LOCK;
 
 fn request(text: &str) -> LlmRequestPayload {
     LlmRequestPayload {
