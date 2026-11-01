@@ -163,7 +163,10 @@ fn preflight_reads_only_the_selected_session_environment() {
             for_command: None,
             expose_to: Default::default(),
         }],
-        &|name| std::env::var(name).ok(),
+        &|name| match name {
+            "ZAI_BASE_URL" => Some("https://[invalid-ambient".into()),
+            _ => None,
+        },
     )
     .unwrap();
     crate::security::session_environment::set_session_environment(Some(granted));
