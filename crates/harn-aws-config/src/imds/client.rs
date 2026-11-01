@@ -161,10 +161,6 @@ impl Client {
     ///   .expect("failure communicating with IMDS");
     /// # }
     /// ```
-    #[expect(
-        clippy::result_large_err,
-        reason = "ImdsError mirrors the upstream AWS IMDS client error surface"
-    )]
     pub async fn get(&self, path: impl Into<String>) -> Result<SensitiveString, ImdsError> {
         self.operation
             .invoke(path.into())

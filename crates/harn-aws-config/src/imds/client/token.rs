@@ -149,10 +149,6 @@ impl TokenResolver {
         }
     }
 
-    #[expect(
-        clippy::result_large_err,
-        reason = "ImdsError mirrors the upstream AWS IMDS client error surface"
-    )]
     async fn get_token(
         &self,
         time_source: SharedTimeSource,

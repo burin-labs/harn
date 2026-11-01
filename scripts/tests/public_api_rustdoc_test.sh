@@ -24,6 +24,8 @@ case "$1" in
     ;;
   doc)
     git rev-parse HEAD >> "$TEST_DOC_CALLS"
+    printf '%s %s|%s\n' "$(git rev-parse HEAD)" "${RUSTUP_TOOLCHAIN:-unset}" "${RUSTFLAGS:-}" \
+      >> "$TEST_DOC_TOOLCHAINS"
     mkdir -p "$TEST_TARGET/doc"
     printf '{"api": "alpha"}\n' > "$TEST_TARGET/doc/harn_alpha.json"
     printf '{"api": "beta"}\n' > "$TEST_TARGET/doc/harn_beta.json"
@@ -34,8 +36,14 @@ case "$1" in
   *) exit 2 ;;
 esac
 CARGO
-chmod +x "$tmp/bin/cargo" "$tmp/bin/rustc"
+cat > "$tmp/bin/rustup" <<'RUSTUP'
+#!/usr/bin/env bash
+[[ "$*" == 'show active-toolchain' ]] || exit 2
+printf 'head-toolchain (overridden by rust-toolchain.toml)\n'
+RUSTUP
+chmod +x "$tmp/bin/cargo" "$tmp/bin/rustc" "$tmp/bin/rustup"
 export PATH="$tmp/bin:$PATH" TEST_TARGET="$tmp/target" TEST_DOC_CALLS="$tmp/doc-calls"
+export TEST_DOC_TOOLCHAINS="$tmp/doc-toolchains"
 cd "$tmp/repo"
 git init -q -b main
 git config user.name 'Harn Test'
@@ -59,6 +67,7 @@ head=$(git rev-parse HEAD)
 
 run_gate() {
   : > "$TEST_DOC_CALLS"
+  : > "$TEST_DOC_TOOLCHAINS"
   BASE_SHA="$base" HEAD_SHA=HEAD PUBLIC_API_RUSTDOC_BASELINE="$1" \
     PUBLIC_API_RUSTDOC_OUTPUT="$tmp/output" bash "$gate" rust-api > "$tmp/result" 2>&1
   [[ $(git rev-parse HEAD) == "$head" ]]
@@ -71,6 +80,8 @@ run_gate "$tmp/missing"
 [[ $(wc -l < "$TEST_DOC_CALLS") -eq 2 ]]
 grep -qx "$head" "$TEST_DOC_CALLS"
 grep -qx "$base" "$TEST_DOC_CALLS"
+# A merge base with the same toolchain pin keeps the job's flags and compiler choice.
+grep -qx "$base unset|" "$TEST_DOC_TOOLCHAINS"
 run_gate "$tmp/baseline"
 [[ $(wc -l < "$TEST_DOC_CALLS") -eq 1 ]]
 grep -qx "$head" "$TEST_DOC_CALLS"
@@ -86,4 +97,19 @@ run_gate "$tmp/baseline"
 : > "$tmp/baseline/crates.tsv"
 run_gate "$tmp/baseline"
 [[ $(wc -l < "$TEST_DOC_CALLS") -eq 2 ]]
-echo 'Public API rustdoc: exact reuse avoids baseline compilation; foreign compiler, corrupt files, and empty census rebuild both sides.'
+
+# A toolchain move: the merge base pins an older compiler whose rustdoc JSON
+# format the current side cannot be compared with, so both sides use the job's.
+printf '[toolchain]\nchannel = "old"\n' > rust-toolchain.toml
+git add rust-toolchain.toml
+git commit -qm 'old toolchain'
+base=$(git rev-parse HEAD)
+printf '[toolchain]\nchannel = "new"\n' > rust-toolchain.toml
+git add rust-toolchain.toml
+git commit -qm 'new toolchain'
+head=$(git rev-parse HEAD)
+run_gate "$tmp/missing"
+grep -qx "$base head-toolchain| --cap-lints=warn" "$TEST_DOC_TOOLCHAINS"
+grep -qx "$head unset|" "$TEST_DOC_TOOLCHAINS"
+grep -q 'pins another Rust toolchain; documenting it with head-toolchain' "$tmp/result"
+echo 'Public API rustdoc: exact reuse avoids baseline compilation; foreign compiler, corrupt files, and empty census rebuild both sides; a toolchain move documents the baseline with the current compiler.'
