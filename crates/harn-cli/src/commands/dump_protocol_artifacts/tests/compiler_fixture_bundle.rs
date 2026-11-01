@@ -43,7 +43,7 @@ fn fingerprint(path: &Path) -> u64 {
     let encoded = encoded.trim();
     assert_eq!(encoded.len(), 16, "Cargo library fingerprint width");
     let mut bytes = [0; 8];
-    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         bytes[index] = u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap();
     }
     u64::from_le_bytes(bytes)

@@ -66,7 +66,7 @@ impl Vm {
             || self
                 .interrupt_signal_token
                 .as_ref()
-                .is_some_and(|token| token.lock().ok().is_some_and(|guard| guard.is_some()))
+                .is_some_and(|token| token.lock().is_ok_and(|guard| guard.is_some()))
             || self.is_cancel_requested()
     }
 

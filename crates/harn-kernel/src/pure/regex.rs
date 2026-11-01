@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn flags_and_pattern_size_are_bounded() {
-        assert!(regex_matches("harn", "HARN", "i").unwrap().len() == 1);
+        assert_eq!(regex_matches("harn", "HARN", "i").unwrap().len(), 1);
         assert!(regex_matches("harn", "harn", "q").is_err());
         assert!(regex_matches(&"x".repeat(MAX_REGEX_PATTERN_BYTES + 1), "x", "").is_err());
     }

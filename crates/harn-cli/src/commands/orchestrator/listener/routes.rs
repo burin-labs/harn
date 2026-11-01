@@ -552,6 +552,10 @@ fn tenant_path_prefix(path: &str) -> Option<(String, String)> {
     None
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the axum Response is this helper's early-return rejection"
+)]
 async fn resolve_tenant_request(
     context: &RouteContext,
     path_tenant_id: Option<&str>,

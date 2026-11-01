@@ -111,13 +111,11 @@ fn provider_override_env_present() -> bool {
 }
 
 fn env_has_value(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty())
+    std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
 }
 
 fn env_has_non_auto_value(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
+    std::env::var(name).is_ok_and(|value| {
         let trimmed = value.trim();
         !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("auto")
     })

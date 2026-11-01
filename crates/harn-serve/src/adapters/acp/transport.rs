@@ -101,6 +101,10 @@ async fn acp_websocket_upgrade(
     .await
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the axum Response is this helper's early-return rejection"
+)]
 async fn pre_authenticated_principal(
     auth_policy: &AuthPolicy,
     headers: &HeaderMap,

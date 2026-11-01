@@ -239,7 +239,9 @@ impl TransferableConfinement {
             ));
         }
         let program = seccomp
-            .chunks_exact(SECCOMP_INSTRUCTION_BYTES)
+            .as_chunks::<SECCOMP_INSTRUCTION_BYTES>()
+            .0
+            .iter()
             .map(|chunk| seccompiler::sock_filter {
                 code: u16::from_le_bytes([chunk[0], chunk[1]]),
                 jt: chunk[2],
@@ -844,8 +846,7 @@ fn push_rule_exact(
 
 pub(crate) fn proc_runtime_reads_are_contained() -> bool {
     std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
-        .ok()
-        .is_some_and(|value| yama_scope_contains_process_reads(&value))
+        .is_ok_and(|value| yama_scope_contains_process_reads(&value))
 }
 
 fn yama_scope_contains_process_reads(value: &str) -> bool {

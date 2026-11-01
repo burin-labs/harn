@@ -347,7 +347,7 @@ fn spawn_listener(
                     break;
                 }
                 if active_connections
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                    .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                         (active < MAX_ACTIVE_CONNECTIONS).then_some(active + 1)
                     })
                     .is_err()

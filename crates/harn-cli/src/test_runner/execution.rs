@@ -139,6 +139,10 @@ pub(super) async fn execute_case(
     .result
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the failing TestResult is returned once per fixture, not on a hot path"
+)]
 pub(super) async fn execute_file_fixture(
     case: &TestCase,
     fixture: &super::TestFixture,

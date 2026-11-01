@@ -159,7 +159,8 @@ pub(super) fn schema_type_expr_from_dict(
         TypeExpr::Shape(fields)
     } else if let Some(item_node) = items {
         TypeExpr::List(Box::new(schema_type_expr_from_node(item_node, scope)?))
-    } else if let Some(type_name) = type_name {
+    } else {
+        let type_name = type_name?;
         if type_name == "dict" {
             if let Some(extra_node) = additional_properties {
                 let value_type = match &extra_node.node {
@@ -180,8 +181,6 @@ pub(super) fn schema_type_expr_from_dict(
         } else {
             TypeExpr::Named(type_name)
         }
-    } else {
-        return None;
     };
 
     if nullable {
