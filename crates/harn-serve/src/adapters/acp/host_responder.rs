@@ -27,7 +27,8 @@ pub trait HostResponder: Send + Sync + 'static {
 ///
 /// One server hosts sessions for different workspaces, so a responder is
 /// never shared across roots: the server binds one for each prompt turn from
-/// that session's current root. Implementors may cache by root.
+/// that session's current root. Binding runs on the blocking pool; implementors
+/// may cache by root. Workspace anchor changes take effect on the next turn.
 pub trait HostResponderBinder: Send + Sync + 'static {
     fn bind(&self, session_root: &Path) -> Result<Arc<dyn HostResponder>, String>;
 }

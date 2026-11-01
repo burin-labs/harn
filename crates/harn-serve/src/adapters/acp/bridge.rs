@@ -392,15 +392,7 @@ impl AcpBridge {
             host_call_timeout(method),
         );
         tokio::pin!(timeout_wait);
-        let cancellation = self.cancellation.clone();
-        let wait_cancelled = async move {
-            loop {
-                if cancellation.cancelled.load(Ordering::SeqCst) {
-                    return;
-                }
-                cancellation.notify.notified().await;
-            }
-        };
+        let wait_cancelled = self.cancellation.wait_cancelled();
         tokio::pin!(wait_cancelled);
 
         tokio::select! {
@@ -441,16 +433,16 @@ impl AcpBridge {
         abort_on_cancel: bool,
     ) -> Result<serde_json::Value, harn_vm::VmError> {
         let owned_method = method.to_string();
-        let answer = tokio::task::spawn_blocking(move || responder.respond(&owned_method, &params));
-        let cancellation = self.cancellation.clone();
-        let wait_cancelled = async move {
-            loop {
-                if cancellation.cancelled.load(Ordering::SeqCst) {
-                    return;
-                }
-                cancellation.notify.notified().await;
-            }
-        };
+        let params = Arc::new(params);
+        let responder_params = params.clone();
+        let answer = tokio::task::spawn_blocking(move || {
+            responder.respond(&owned_method, &responder_params)
+        });
+        let timeout_wait = harn_vm::bridge::wait_for_bridge_call_timeout(
+            method,
+            &params,
+            host_call_timeout(method),
+        );
         tokio::select! {
             result = answer => match result {
                 Ok(Ok(value)) => Ok(value),
@@ -462,8 +454,13 @@ impl AcpBridge {
                     "Client error: Embedder host responder failed".into(),
                 )),
             },
-            _ = wait_cancelled, if abort_on_cancel => {
+            () = self.cancellation.wait_cancelled(), if abort_on_cancel => {
                 Err(harn_vm::VmError::Runtime("Cancelled".into()))
+            }
+            timeout = timeout_wait => {
+                Err(harn_vm::VmError::Runtime(format!(
+                    "Client did not respond to '{method}' within {timeout:?}"
+                )))
             }
         }
     }

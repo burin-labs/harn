@@ -129,3 +129,98 @@ async fn disconnect_settles_a_human_call_after_the_deadline_window() {
         .to_string()
         .contains("Client closed connection"));
 }
+
+struct HeldHost {
+    entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl super::super::HostResponder for HeldHost {
+    fn respond(
+        &self,
+        _: &str,
+        _: &serde_json::Value,
+    ) -> Result<serde_json::Value, super::super::AcpJsonRpcError> {
+        self.entered
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .send(())
+            .unwrap();
+        let _ = self.release.lock().unwrap().recv();
+        Ok(serde_json::json!("answer"))
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn in_process_host_deadlines_match_client_deadlines() {
+    use futures::FutureExt;
+    for (method, params, cleanup) in [
+        ("host/capabilities", serde_json::json!({}), false),
+        (
+            "host/call",
+            serde_json::json!({"name":"project.metadata_get"}),
+            false,
+        ),
+        (
+            "host/call",
+            serde_json::json!({"name":"project.metadata_get"}),
+            true,
+        ),
+    ] {
+        let (mut bridge, _rx) = bridge();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        bridge.host_responder = Some(Arc::new(HeldHost {
+            entered: std::sync::Mutex::new(Some(entered_tx)),
+            release: std::sync::Mutex::new(release_rx),
+        }));
+        let call = bridge.call_client_inner(method, params, !cleanup);
+        tokio::pin!(call);
+        tokio::select! {
+            entered = entered_rx => entered.unwrap(),
+            result = &mut call => panic!("host request returned before responder started: {result:?}"),
+        }
+        let timeout = host_call_timeout(method);
+        tokio::time::advance(timeout).await;
+        let result = call.as_mut().now_or_never();
+        // Release even on regression so runtime shutdown cannot hang on the worker.
+        release_tx.send(()).unwrap();
+        let error = result
+            .expect("in-process responder must expire at the client deadline")
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            harn_vm::VmError::Runtime(format!(
+                "Client did not respond to '{method}' within {timeout:?}"
+            ))
+            .to_string()
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn in_process_human_answer_survives_deadline_and_stop_cancels_it() {
+    use futures::FutureExt;
+    let (mut bridge, _rx) = bridge();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    bridge.host_responder = Some(Arc::new(HeldHost {
+        entered: std::sync::Mutex::new(Some(entered_tx)),
+        release: std::sync::Mutex::new(release_rx),
+    }));
+    let call = bridge.call_client("host/call", serde_json::json!({"name":"interaction.ask"}));
+    tokio::pin!(call);
+    tokio::select! {
+        entered = entered_rx => entered.unwrap(),
+        result = &mut call => panic!("human request returned before responder started: {result:?}"),
+    }
+    tokio::time::advance(host_call_timeout("host/call") + Duration::from_secs(1)).await;
+    let premature = call.as_mut().now_or_never();
+    bridge.cancellation.cancel();
+    assert!(premature.is_none(), "human answers must not expire");
+    let result = call.await;
+    release_tx.send(()).unwrap();
+    assert!(result.unwrap_err().to_string().contains("Cancelled"));
+}

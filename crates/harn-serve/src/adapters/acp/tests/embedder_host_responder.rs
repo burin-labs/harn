@@ -6,6 +6,8 @@ use super::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 
+mod hardening;
+
 #[derive(Default)]
 struct Counts {
     capabilities: AtomicUsize,

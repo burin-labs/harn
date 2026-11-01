@@ -263,17 +263,29 @@ impl AcpServer {
                     return;
                 }
             };
-        let host_responder = match self
-            .host_responder
-            .as_ref()
-            .map(|binder| binder.bind(&project_root))
-            .transpose()
-        {
-            Ok(responder) => responder,
-            Err(message) => {
-                self.send_prompt_error(id, &format!("Host responder unavailable: {message}"));
-                return;
+        let host_responder = if let Some(binder) = self.host_responder.clone() {
+            let bind_root = project_root.clone();
+            let binding =
+                async move { tokio::task::spawn_blocking(move || binder.bind(&bind_root)).await };
+            let bound = tokio::select! {
+                biased;
+                () = cancellation.wait_cancelled() => {
+                    self.turn_ended(id, &session_id, reply, cancelled_prompt_result(None));
+                    return;
+                }
+                result = binding => result.unwrap_or_else(|_| {
+                    Err("Embedder host responder binder failed".to_string())
+                }),
+            };
+            match bound {
+                Ok(responder) => Some(responder),
+                Err(message) => {
+                    self.send_prompt_error(id, &format!("Host responder unavailable: {message}"));
+                    return;
+                }
             }
+        } else {
+            None
         };
         let turn_budget = llm_spend
             .lock()
