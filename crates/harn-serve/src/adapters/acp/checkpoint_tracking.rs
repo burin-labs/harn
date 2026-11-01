@@ -8,6 +8,7 @@ struct State {
     ids: HashSet<String>,
     failures: HashMap<String, String>,
     pending: HashSet<String>,
+    capturing: HashSet<String>,
     closed: bool,
     unavailable: bool,
 }
@@ -53,6 +54,9 @@ impl CheckpointTracking {
         if state.unavailable {
             return Err("checkpoint tracking unavailable");
         }
+        if state.capturing.contains(id) {
+            return Ok(Some("checkpoint capture has not finished".to_string()));
+        }
         if state.pending.contains(id) {
             return Ok(Some("message delivery has not finished".to_string()));
         }
@@ -67,6 +71,12 @@ impl CheckpointTracking {
                 ..State::default()
             },
         };
+        for id in std::mem::take(&mut copy.capturing) {
+            copy.failures.insert(
+                id,
+                "checkpoint capture was incomplete when the session forked".to_string(),
+            );
+        }
         if !inherit {
             copy.failures.clear();
             copy.pending.clear();
@@ -142,18 +152,25 @@ impl CheckpointTracking {
         if !already_reserved {
             state.pending.insert(message_id.to_string());
         }
-        let _scope = store_scope.enter();
-        let capture =
-            harn_hostlib::workspace_checkpoint::capture(session_id, message_id, Some(root));
-        let failure = match capture {
-            Ok(harn_hostlib::workspace_checkpoint::Outcome::Ready(_)) => None,
-            Ok(harn_hostlib::workspace_checkpoint::Outcome::Unavailable(reason)) => {
-                Some(format!("{}: {}", reason.reason, reason.detail))
+        // The capture can take seconds; requests on the server thread read
+        // this state meanwhile, so it is not held across the scan.
+        state.capturing.insert(message_id.to_string());
+        drop(state);
+        let failure = {
+            let _scope = store_scope.enter();
+            match harn_hostlib::workspace_checkpoint::capture(session_id, message_id, Some(root)) {
+                Ok(harn_hostlib::workspace_checkpoint::Outcome::Ready(_)) => None,
+                Ok(harn_hostlib::workspace_checkpoint::Outcome::Unavailable(reason)) => {
+                    Some(format!("{}: {}", reason.reason, reason.detail))
+                }
+                Err(error) => Some(error.to_string()),
             }
-            Err(error) => Some(error.to_string()),
         };
-        if let Some(failure) = failure {
-            state.failures.insert(message_id.to_string(), failure);
+        if let Ok(mut state) = self.0.lock() {
+            state.capturing.remove(message_id);
+            if let Some(failure) = failure {
+                state.failures.insert(message_id.to_string(), failure);
+            }
         }
     }
 

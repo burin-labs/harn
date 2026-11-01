@@ -466,11 +466,31 @@ impl AcpServer {
         if checkpoint_reserved {
             if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
                 // A failed capture must not prevent the person's prompt running.
-                self.sessions
+                // The scan runs off this thread so other requests keep moving;
+                // only this turn waits for it.
+                let tracking = self
+                    .sessions
                     .get(&session_id)
                     .expect("admitted session")
                     .checkpoint_tracking
-                    .capture_boundary(&session_id, boundary_id, &cwd, &store_scope, true);
+                    .clone();
+                let (owner_id, boundary, root, scope) = (
+                    session_id.clone(),
+                    boundary_id.to_string(),
+                    cwd.clone(),
+                    store_scope.clone(),
+                );
+                let capture = harn_vm::orchestration::run_blocking_with_ambient({
+                    let tracking = tracking.clone();
+                    move || tracking.capture_boundary(&owner_id, &boundary, &root, &scope, true)
+                })
+                .await;
+                if let Err(error) = capture {
+                    tracking.fail(
+                        boundary_id,
+                        format!("checkpoint capture did not finish: {error}"),
+                    );
+                }
             }
         }
         #[cfg(not(feature = "hostlib"))]

@@ -108,20 +108,23 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
     Box::pin(crate::orchestration::scope_agent_session(
         session_id,
         crate::agent_sessions::scope_current_tool_call(tool_id, async move {
-            // Lives as long as this future, which the caller keeps until the
-            // outcome (a cancelled one included), so the host's attribution
-            // window covers every write the handler committed.
-            let _execution_window = match request.bridge {
+            // Closed after the handler returns, so the host's attribution
+            // window covers every write the handler committed. A cancelled
+            // dispatch drops it instead, which closes it inline.
+            let execution_window = match request.bridge {
                 None => None,
                 Some(bridge) => {
                     let annotations = super::agent_host_primitives::tool_catalog::annotations_for(
                         request.tools,
                         request.tool_name,
                     );
-                    match bridge.begin_tool_execution(
-                        &window_id,
-                        annotations.map_or_else(Default::default, |a| a.side_effect_level),
-                    ) {
+                    match bridge
+                        .begin_tool_execution(
+                            &window_id,
+                            annotations.map_or_else(Default::default, |a| a.side_effect_level),
+                        )
+                        .await
+                    {
                         crate::bridge::ToolExecutionStart::Untracked => None,
                         crate::bridge::ToolExecutionStart::Tracked(guard) => Some(guard),
                         crate::bridge::ToolExecutionStart::Refused(detail) => {
@@ -139,7 +142,7 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
                     }
                 }
             };
-            super::agent_tool_preparation::scope(
+            let outcome = super::agent_tool_preparation::scope(
                 request.prepared_invocation,
                 agent_tools::dispatch_tool_execution_with_mcp(
                     (Some(request.ctx), request.audience),
@@ -152,7 +155,11 @@ pub(super) fn pin_scoped_tool_dispatch<'a>(
                     request.tool_backoff_ms,
                 ),
             )
-            .await
+            .await;
+            if let Some(window) = execution_window {
+                window.finish().await;
+            }
+            outcome
         }),
     ))
 }
