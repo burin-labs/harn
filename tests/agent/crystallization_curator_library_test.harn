@@ -76,7 +76,12 @@ pipeline test_curator_drops_a_proposal_matching_an_installed_capability(harness:
       const fresh = curate_with(
         harness,
         root,
-        [llm_tool_call("submit_crystallization_batch", {proposals: [skill + {name: "lint-widget"}]})],
+        [
+          llm_tool_call(
+            "submit_crystallization_batch",
+            {proposals: [skill + {name: "lint-widget"}]},
+          ),
+        ],
         {installed: [{name: "verify-widget", verify_command: "make check"}]},
       )
       assert_eq(fresh.proposal_count, 1, "a new capability is still staged")

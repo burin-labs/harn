@@ -6,6 +6,7 @@
 // validates the terminal proposal contract and evidence membership.
 import { agent_loop } from "std/agent/loop"
 import {
+  pattern_learning_accepted_skills,
   pattern_learning_curator_evidence,
   pattern_learning_import_session_records,
   pattern_learning_pending,
@@ -618,10 +619,16 @@ fn cc_search_builtins(
   return {success: true, query: query, matches: matches}
 }
 
-/** Host-supplied installed capabilities, normalized to `{name, verify_command}`. */
-fn cc_installed(options: any = nil) -> list {
+/**
+ * The installed library, normalized to `{name, verify_command}`: the host's
+ * installed capabilities plus every accepted skill.
+ */
+fn cc_installed(fs: HarnessFs, options: any = nil) -> list {
   let out = []
-  for item in options?.installed ?? [] {
+  const accepted = pattern_learning_accepted_skills(fs, options).map(
+    { skill -> {name: skill?.name} },
+  )
+  for item in (options?.installed ?? []) + accepted.to_list() {
     const name = cc_text(item?.name)
     if name != "" {
       out = out + [{name: name, verify_command: cc_text(item?.verify_command)}]
@@ -634,12 +641,14 @@ fn cc_installed(options: any = nil) -> list {
 fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
   const name = cc_text(proposal?.name)
   const verify = cc_text(proposal?.artifact?.verify_command)
-  return installed.any({ item -> item.name == name || (verify != "" && item.verify_command == verify) })
+  return installed.any(
+    { item -> item.name == name || (verify != "" && item.verify_command == verify) },
+  )
 }
 
 fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
   let prepared = []
-  const installed = cc_installed(options)
+  const installed = cc_installed(harness.fs, options)
   for proposal in proposals ?? [] {
     if cc_duplicates_installed(proposal, installed) {
       continue
@@ -899,7 +908,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     }
   }
   const pending_before = pattern_learning_pending(harness, options)
-  const prompts = cc_prompt(evidence, pending_before, cc_installed(options))
+  const prompts = cc_prompt(evidence, pending_before, cc_installed(harness.fs, options))
   const route = options?.agent ?? {}
   let agent_options = route
     + {
