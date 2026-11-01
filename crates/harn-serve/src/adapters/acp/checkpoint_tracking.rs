@@ -193,7 +193,10 @@ pub(super) fn attribute_tool_execution(
                     return ToolExecutionAdmission::Untracked
                 }
                 Ok(Outcome::Unavailable(reason)) => format!("{}: {}", reason.reason, reason.detail),
-                Err(error) => error.to_string(),
+                // A rejected request (a call id already in flight, an invalid
+                // id) is the caller's error, not a recording failure: refuse
+                // it and leave the session's history alone.
+                Err(error) => return ToolExecutionAdmission::Refused(error.to_string()),
             };
             // Tracking is optional; the person's tool call is not. A call that
             // runs untracked makes every earlier boundary unsafe to restore, so
@@ -220,6 +223,11 @@ pub(super) fn attribute_tool_execution(
                     Some(error) => ToolExecutionAdmission::Refused(error),
                     None => ToolExecutionAdmission::Tracked,
                 },
+                // Another call's tracking failure dropped the session while
+                // this one ran; its history is gone, so this call is untracked.
+                Ok(Outcome::Unavailable(reason)) if reason.reason == "no_checkpoint" => {
+                    ToolExecutionAdmission::Untracked
+                }
                 Ok(Outcome::Unavailable(reason)) => {
                     ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
                 }
@@ -297,6 +305,14 @@ mod tests {
             )
         };
 
+        // A call id already in flight is the caller's error: it is refused and
+        // the session keeps its history.
+        assert_eq!(begin("call-0"), ToolExecutionAdmission::Tracked);
+        assert!(
+            matches!(begin("call-0"), ToolExecutionAdmission::Refused(detail) if detail.contains("already in flight"))
+        );
+        assert!(checkpoint::root_matches(session, root.path()).is_some());
+
         // Neither delete nor move-aside can retire the old record, so running
         // the call would leave a restorable boundary that misses its edit.
         mode(&session_dir, 0o500);
@@ -321,6 +337,18 @@ mod tests {
             mode(&entry.path(), 0o700);
         }
         assert!(!session_dir.exists(), "the old record left the load path");
+        // The call that was in flight when the session was dropped finishes
+        // untracked, not as a tracking failure.
+        assert_eq!(
+            attribute_tool_execution(
+                session,
+                &scope,
+                "call-0",
+                SideEffectLevel::WorkspaceWrite,
+                ToolExecutionStage::End,
+            ),
+            ToolExecutionAdmission::Untracked
+        );
         let resumed = checkpoint::resume(session, root.path()).unwrap();
         assert!(
             matches!(&resumed, Outcome::Unavailable(reason) if reason.reason == "no_checkpoint"),
