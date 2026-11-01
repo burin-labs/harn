@@ -5,7 +5,8 @@
 //! are served from the recording. The runtime store opens with what the
 //! recorded run opened. Durable state writes land in the branch's own state
 //! root (see `scope`). Reads of the restored workspace, state, host facts and
-//! secrets run. Anything else would act on the world a second time, so it is
+//! secrets run, and so does code-index maintenance of the restored workspace.
+//! Anything else would act on the world a second time, so it is
 //! refused and the branch diverges.
 
 use std::path::{Path, PathBuf};
@@ -54,7 +55,10 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
             }
             EffectKind::Network if reads && gates_own_network_reads(owner) => {}
             EffectKind::State
-                if branch_owns_state(owner) || process_local(effect) || session_entry(owner) => {}
+                if branch_owns_state(owner)
+                    || process_local(effect)
+                    || session_entry(owner)
+                    || workspace_index(owner) => {}
             _ => return Verdict::Refuse(*effect),
         }
     }
@@ -148,6 +152,48 @@ fn session_entry(owner: Owner<'_>) -> bool {
     matches!(owner, Some((CapabilityId::Agent, method)) if SESSION_ENTRY_METHODS.contains(&method))
 }
 
+/// Code-index methods whose state lives in this process's index and in the
+/// snapshot it writes under the indexed root. A branch restores the recorded
+/// workspace at its recorded path, so running them again rebuilds the index
+/// the recording queried, and the index reads that run live in the prefix see
+/// it. Skipping them instead would leave those reads on an empty index.
+/// Absent on purpose: the refactors, which rewrite workspace files.
+pub(super) const WORKSPACE_INDEX_METHODS: &[&str] = &[
+    "add_readonly_roots",
+    "agent_heartbeat",
+    "agent_register",
+    "agent_unregister",
+    "branch_overlay",
+    "lock_release",
+    "lock_try",
+    "rebuild",
+    "reindex_file",
+    "version_record",
+];
+
+fn workspace_index(owner: Owner<'_>) -> bool {
+    matches!(owner, Some((CapabilityId::CodeIndex, method)) if WORKSPACE_INDEX_METHODS.contains(&method))
+}
+
+/// The root a prefix `code_index.rebuild` would index, when it lies outside
+/// the restored workspace. Its snapshot lands under that root, which the
+/// branch did not restore, so the rebuild is refused.
+fn index_root_outside_workspace(owner: Owner<'_>, args: &[VmValue]) -> Option<PathBuf> {
+    if owner != Some((CapabilityId::CodeIndex, "rebuild")) {
+        return None;
+    }
+    let root = args
+        .first()
+        .map(crate::llm::helpers::vm_value_to_json)
+        .and_then(|args| args.get("root")?.as_str().map(PathBuf::from))
+        .or_else(|| std::env::current_dir().ok())?;
+    let branch = super::current_branch()?;
+    let workspace = branch.state().workspace_root.clone();
+    let canonical =
+        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    (!canonical(&root).starts_with(canonical(&workspace))).then_some(root)
+}
+
 /// State that lives only in this process's VM, so rebuilding it during the
 /// prefix touches nothing outside. Fails closed: a target not named here is
 /// refused until someone confirms it does not persist.
@@ -232,6 +278,13 @@ fn serve_read_in_prefix(
 ) -> Option<Result<VmValue, VmError>> {
     if runs_a_process(owner) {
         return None;
+    }
+    if let Some(root) = index_root_outside_workspace(owner, args) {
+        let reason = format!(
+            "it indexes `{}`, outside the restored workspace",
+            root.display()
+        );
+        return refuse_in_prefix(name, &reason).err().map(Err);
     }
     let Some(effects) = effects else {
         return refuse_in_prefix(name, "it declares no effect contract")
