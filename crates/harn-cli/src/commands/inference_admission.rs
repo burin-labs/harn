@@ -1,6 +1,6 @@
 //! The CLI projection of the VM's value-free inference admission preview.
 
-use harn_vm::llm::api::{preview_inference_admission, InferenceAdmissionRequest};
+use harn_vm::llm::api::{preflight_inference_admission, InferenceAdmissionRequest};
 
 use crate::cli::{ProviderAdmissionArgs, ProviderAttestAccountArgs};
 
@@ -8,7 +8,13 @@ pub(crate) fn run(args: ProviderAdmissionArgs) -> Result<(), String> {
     let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let request: InferenceAdmissionRequest = serde_json::from_str(&args.request)
         .map_err(|_| "inference admission request is malformed".to_string())?;
-    let snapshot = preview_inference_admission(&request);
+    let snapshot = match preflight_inference_admission(&request) {
+        Ok(snapshot) => snapshot,
+        Err(reason) => {
+            println!("{}", serde_json::json!({"configuration_error": reason}));
+            return Err(reason.to_string());
+        }
+    };
     let output = serde_json::to_string(&snapshot)
         .map_err(|_| "inference admission snapshot could not be encoded".to_string())?;
     println!("{output}");

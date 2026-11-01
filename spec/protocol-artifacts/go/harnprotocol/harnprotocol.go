@@ -2129,6 +2129,15 @@ type HarnPlanDocument struct {
 	UpdatedAt          string                             `json:"updated_at"`
 }
 
+// HarnProviderEndpointConfigurationError is the named string type for the HarnProviderEndpointConfigurationErrorValues wire vocabulary.
+type HarnProviderEndpointConfigurationError string
+
+// HarnProviderEndpointConfigurationErrorValues enumerates every wire value Harn currently emits for HarnProviderEndpointConfigurationError.
+var HarnProviderEndpointConfigurationErrorValues = []HarnProviderEndpointConfigurationError{
+	"invalid_url",
+	"not_absolute_http",
+}
+
 // HarnMachineSpendPeriod is the named string type for the HarnMachineSpendPeriodValues wire vocabulary.
 type HarnMachineSpendPeriod string
 

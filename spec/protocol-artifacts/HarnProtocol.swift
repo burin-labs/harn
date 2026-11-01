@@ -4988,6 +4988,16 @@ public struct HarnPlanDocument: Codable, Sendable, Equatable {
         case updatedAt = "updated_at"
     }
 }
+public enum HarnProviderEndpointConfigurationError: String, Codable, Sendable, CaseIterable {
+    case invalidUrl = "invalid_url"
+    case notAbsoluteHttp = "not_absolute_http"
+
+    public static let allCases: [Self] = [
+        "invalid_url",
+        "not_absolute_http",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnMachineSpendPeriod: String, Codable, Sendable, CaseIterable {
     case day = "day"
     case month = "month"
