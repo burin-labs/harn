@@ -197,19 +197,10 @@ pub(crate) async fn run_structured_envelope(
     ))
 }
 
-/// Whether a transport error looks like the provider/route REJECTING the
-/// structured-output request itself (a json_schema/json_object `response_format`
-/// an upstream can't honor), as opposed to an unrelated failure. Detected from
-/// the error message because `error_to_category` collapses a provider 400 to the
-/// generic bucket — the discriminating signal (`invalid_request`,
-/// `400 bad request`, `response_format`, `json_schema`) only survives in the
-/// message text relayed from the upstream/router.
+/// Format fallback only applies to invalid requests. Honor the normalized
+/// provider reason so policy, authentication and context refusals do not retry.
 fn is_structured_output_rejection(err: &VmError) -> bool {
-    let message = err.to_string().to_lowercase();
-    message.contains("invalid_request")
-        || message.contains("response_format")
-        || message.contains("json_schema")
-        || (message.contains("400") && message.contains("bad request"))
+    super::api::classify_vm_llm_error(err).reason == super::LlmErrorReason::InvalidRequest
 }
 
 /// Whether this request still asks the provider for native structured output.
