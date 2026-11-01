@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
-use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch};
+use grep_searcher::{
+    BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch,
+};
 use harn_vm::ignore_policy::{self, IgnorePolicy};
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -59,6 +61,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let case_insensitive = optional_bool(BUILTIN, dict, "case_insensitive", false)?;
     let fixed_strings = optional_bool(BUILTIN, dict, "fixed_strings", false)?;
     let include_hidden = optional_bool(BUILTIN, dict, "include_hidden", false)?;
+    let include_binary = optional_bool(BUILTIN, dict, "include_binary", false)?;
     let policy = ignore_policy_arg(dict)?;
     let max_matches = optional_int(BUILTIN, dict, "max_matches", 1000)?;
     let max_line_bytes = optional_int(
@@ -156,15 +159,23 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             context_before,
             remaining: max_matches.saturating_sub(all_rows.len()),
             max_line_bytes,
+            binary: false,
         };
-        let mut searcher = SearcherBuilder::new()
+        let mut builder = SearcherBuilder::new();
+        builder
             .before_context(context_before)
             .after_context(context_after)
-            .line_number(true)
-            .build();
+            .line_number(true);
+        if !include_binary {
+            builder.binary_detection(BinaryDetection::quit(b'\0'));
+        }
+        let mut searcher = builder.build();
         if let Err(err) = searcher.search_path(&matcher, &file_path, &mut sink) {
             // I/O error reading one file — skip it and keep searching.
             let _ = err;
+            continue;
+        }
+        if sink.binary {
             continue;
         }
         truncated |= sink.rows.iter().any(|row| row.truncated);
@@ -382,10 +393,16 @@ struct CollectorSink<'a> {
     context_before: usize,
     remaining: usize,
     max_line_bytes: usize,
+    binary: bool,
 }
 
 impl Sink for CollectorSink<'_> {
     type Error = std::io::Error;
+
+    fn binary_data(&mut self, _searcher: &Searcher, _offset: u64) -> Result<bool, std::io::Error> {
+        self.binary = true;
+        Ok(false)
+    }
 
     fn matched(
         &mut self,

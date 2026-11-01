@@ -33,6 +33,11 @@
     "context_before": { "type": "integer", "minimum": 0, "default": 0 },
     "context_after": { "type": "integer", "minimum": 0, "default": 0 },
     "include_hidden": { "type": "boolean", "default": false },
+    "include_binary": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include files detected as binary using NUL bytes."
+    },
     "ignore_policy": {
       "type": "string",
       "enum": ["none", "builtin", "project"],
