@@ -54,6 +54,8 @@ mod prepared_source_verifier;
 mod process_adoption_e2e;
 mod process_artifact_retention;
 mod process_owner_death_e2e;
+#[cfg(target_os = "linux")]
+mod process_reexec_e2e;
 mod process_sandbox_env_e2e;
 mod process_session_environment;
 mod process_session_handles_e2e;
