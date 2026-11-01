@@ -48,7 +48,9 @@ release_candidate_run_id() {
   node "$reader" successful "$repository" "$sha"
 }
 
-# Validate one measured artifact inventory before source reuse or recovery.
+# Validate one measured artifact inventory before source reuse or recovery. The
+# inventory is `release-candidate-state.mjs artifacts` output: one copy per name,
+# already chosen for the run's latest attempt, so a repeated name here refuses.
 release_candidate_artifacts_complete() {
   local artifacts="${1:?artifact response required}"
   local expected="${2:?expected artifact names required}"

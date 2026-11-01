@@ -363,16 +363,15 @@ release_require_unpublished_retirement() (
   # Bind the canonical retained manifest, rather than inferring a candidate
   # from a green run or from a title. Only this small artifact is downloaded.
   if [[ -z "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
-  artifacts="$(gh api "repos/$repository/actions/runs/$producer/artifacts?name=candidate-manifest-$source")"
-  jq -e --arg name "candidate-manifest-$source" --arg source "$source" --arg producer "$producer" '
-    .total_count == 1 and (.artifacts | length) == 1 and
-    .artifacts[0].name == $name and .artifacts[0].expired == false and
-    (.artifacts[0].id | type == "number" and . > 0) and
-    (.artifacts[0].workflow_run.id | tostring) == $producer and
-    .artifacts[0].workflow_run.head_sha == $source
+  # The shared reader selects the latest attempt's copy, so a rerun manifest job
+  # binds its own upload, and downloads exactly that id under its digest.
+  artifacts="$(node "$RELEASE_VERSION_LIB_DIR/release-candidate-state.mjs" candidate-manifest \
+    "$repository" "$producer" "$source")"
+  jq -e --argjson producer_run "$producer_run" '
+    .run_attempt == $producer_run.run_attempt and (.artifact.id | type == "number" and . > 0)
   ' <<< "$artifacts" >/dev/null
-  gh run download "$producer" --repo "$repository" --name "candidate-manifest-$source" --dir "$scratch/manifest"
-  manifest="$scratch/manifest/candidate-manifest.json"
+  manifest="$scratch/candidate-manifest.json"
+  jq '.manifest' <<< "$artifacts" > "$manifest"
   jq -e --arg repository "$repository" --arg source "$source" --arg producer "$producer" \
     --arg schema "$CANDIDATE_MANIFEST_SCHEMA" --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
     --argjson targets "$(candidate_archive_expected_targets_json)" --argjson producer_run "$producer_run" '

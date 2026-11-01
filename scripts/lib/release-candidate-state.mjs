@@ -6,7 +6,7 @@ import {
   githubArtifactJson, githubChildCensus, githubRecord, githubRunJobs, githubWorkflowRuns,
   observeConsumerTiming, observerConclusionIsKnown, observerContext, observerDeclarationName,
   observerParentRepository, observerParentWorkflows, observerRefusal, observerRunIsLive,
-  observerRunName, qualifyObserverPublisher,
+  observerRunName, qualifyObserverPublisher, runAttemptArtifacts,
 } from './consumer-observer.mjs';
 
 const shaPattern=/^[0-9a-f]{40}$/;
@@ -43,12 +43,31 @@ async function candidates(token,repository,source,fetchRecord){
   return sourceRuns(await githubWorkflowRuns(token,repository,'build-release-binaries.yml',
     {head_sha:source},fetchRecord),source);
 }
+/** The run's artifacts as its latest attempt holds them, one copy per name.
+ * The run record is read after the census, so no listed upload is newer than
+ * `run_attempt`; a caller that qualified another attempt must compare it. */
+export async function latestAttemptArtifacts(token,repository,runId,fetchRecord=fetch,name=null){
+  const artifacts=await githubArtifactCensus(token,repository,runId,fetchRecord,name);
+  const run=await githubRecord(token,repository,runId,fetchRecord);
+  return {run_attempt:run.run_attempt,artifacts:runAttemptArtifacts(artifacts,true)};
+}
+/** The latest attempt's candidate manifest, downloaded by its selected id and digest. */
+export async function candidateManifest(token,repository,runId,source,fetchRecord=fetch){
+  if(!shaPattern.test(source))refuse('source_identity_invalid');
+  const name=`candidate-manifest-${source}`;
+  const latest=await latestAttemptArtifacts(token,repository,runId,fetchRecord,name);
+  const artifact=latest.artifacts.find(item=>item.name===name);
+  if(!artifact||artifact.expired!==false)refuse('candidate_manifest_unmeasured');
+  return {run_attempt:latest.run_attempt,artifact:{id:artifact.id,digest:artifact.digest},
+    manifest:await githubArtifactJson(token,repository,artifact,{runId,headSha:source,name,
+      filename:'candidate-manifest.json'},fetchRecord)};
+}
 async function manifest(token,repository,run,source,fetchRecord){
   const name=`candidate-manifest-${source}`;
-  const artifacts=await githubArtifactCensus(token,repository,String(run.id),fetchRecord,name);
-  const matches=artifacts.filter(artifact=>artifact.name===name);
-  if(matches.length>1) refuse('candidate_manifest_ambiguous');
-  const artifact=matches[0];
+  const latest=await latestAttemptArtifacts(token,repository,String(run.id),fetchRecord,name);
+  // A rerun that began after the listing is not this settled candidate.
+  if(latest.run_attempt!==run.run_attempt)return false;
+  const artifact=latest.artifacts.find(artifact=>artifact.name===name);
   if(!artifact)return false;
   if(typeof artifact.expired!=='boolean'||!Number.isSafeInteger(artifact.size_in_bytes)
     ||artifact.size_in_bytes<1||!/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
@@ -182,9 +201,13 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
     else if(operation==='successful-main-runs')console.log((await successfulCandidateRuns(token,repository,
       sourceOrSelf,ghRead)).filter(run=>run.head_branch==='main').map(run=>String(run.id)).join('\n'));
     else if(operation==='artifacts'){
-      const artifacts=await githubArtifactCensus(token,repository,sourceOrSelf,ghRead);
-      console.log(JSON.stringify({total_count:artifacts.length,artifacts}));
+      const name=process.argv[5]??null;
+      const latest=await latestAttemptArtifacts(token,repository,sourceOrSelf,ghRead,name);
+      console.log(JSON.stringify({run_attempt:latest.run_attempt,total_count:latest.artifacts.length,
+        artifacts:latest.artifacts}));
     }
+    else if(operation==='candidate-manifest')console.log(JSON.stringify(await candidateManifest(token,repository,
+      sourceOrSelf,process.argv[5],ghRead)));
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
       process.env.RELEASE_RECOVERY_READ_TOKEN,repository,sourceOrSelf,{repository:process.env.CANARY_REPOSITORY,
         workflow:`.github/workflows/${process.env.CANARY_WORKFLOW}`},ghRead)));
