@@ -29,6 +29,9 @@ pub fn message_20(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return (values[0] ?? "") + "       blocos: " + (values[1] ?? "") + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "       blocks: " + (values[1] ?? "") + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "       blocks: " + (values[1] ?? "") + "\n"
   }
@@ -63,6 +66,9 @@ pub fn message_21(locale: string, values: list<string>) -> string {
     return (values[0] ?? "") + "       docs: " + (values[1] ?? "") + "\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + "       docs: " + (values[1] ?? "") + "\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + "       docs: " + (values[1] ?? "") + "\n"
   }
   if locale == "zh-Hans" {
@@ -101,6 +107,9 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return (values[0] ?? "") + "       correção: " + (values[1] ?? "") + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "       fix: " + (values[1] ?? "") + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "       fix: " + (values[1] ?? "") + "\n"
   }
@@ -137,6 +146,9 @@ pub fn message_23(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return (values[0] ?? "") + "  sandbox " + (values[1] ?? "") + ": " + (values[2] ?? "") + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + " sandbox: " + (values[2] ?? "") + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  " + (values[1] ?? "") + " sandbox: " + (values[2] ?? "") + "\n"
   }
@@ -172,6 +184,9 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return (values[0] ?? "") + "--- Próxima etapa ---\n"
+  }
+  if locale == "ru" {
+    return (values[0] ?? "") + "--- Следующий шаг ---\n"
   }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "--- 下一步 ---\n"

@@ -19,6 +19,7 @@ test("standalone locale resolution stays aligned with the website and portal", a
     "it-IT",
     "ja-JP",
     "ko-KR",
+    "ru-RU",
     "zh-CN",
     "zh-Hans-CN",
     "zh-Hans-TW",

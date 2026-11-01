@@ -57,6 +57,13 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
+      + (values[3] ?? "")
+      + " reason="
+      + (values[4] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  " + (values[1] ?? "") + ": " + (values[2] ?? "") + " ok="
       + (values[3] ?? "")
@@ -153,6 +160,18 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
+      + " fallback="
+      + (values[3] ?? "")
+      + " native="
+      + (values[4] ?? "")
+      + " text="
+      + (values[5] ?? "")
+      + " streaming_native="
+      + (values[6] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + " " + (values[1] ?? "") + " format=" + (values[2] ?? "")
       + " fallback="
       + (values[3] ?? "")

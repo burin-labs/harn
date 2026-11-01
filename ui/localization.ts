@@ -8,6 +8,7 @@ export const languages = {
   ja: "日本語",
   ko: "한국어",
   "zh-Hans": "简体中文",
+  ru: "Русский",
 } as const
 
 export type Locale = keyof typeof languages

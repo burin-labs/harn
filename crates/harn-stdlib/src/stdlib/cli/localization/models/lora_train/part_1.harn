@@ -50,6 +50,12 @@ pub fn message_5(locale: string, values: list<string>) -> string {
       + " retention="
       + (values[2] ?? "")
   }
+  if locale == "ru" {
+    return "  фактические строки бэкенда: rendered=" + (values[0] ?? "") + " trainable="
+      + (values[1] ?? "")
+      + " retention="
+      + (values[2] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  后端实现行：rendered=" + (values[0] ?? "") + " trainable=" + (values[1] ?? "")
       + " retention="
@@ -91,6 +97,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  resultado do backend: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  результат бэкенда: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  后端结果：" + (values[0] ?? "")
   }
@@ -127,6 +136,9 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  status do backend: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  статус бэкенда: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  后端状态：" + (values[0] ?? "")
   }
@@ -162,6 +174,9 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  contrato: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  контракт: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  合同：" + (values[0] ?? "")
@@ -224,6 +239,13 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  auditoria do conjunto de dados: status=" + (values[0] ?? "") + " rows="
       + (values[1] ?? "")
+      + " invalid_tool_blocks="
+      + (values[2] ?? "")
+      + " parse_errors="
+      + (values[3] ?? "")
+  }
+  if locale == "ru" {
+    return "  аудит датасета: status=" + (values[0] ?? "") + " rows=" + (values[1] ?? "")
       + " invalid_tool_blocks="
       + (values[2] ?? "")
       + " parse_errors="

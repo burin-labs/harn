@@ -9,13 +9,14 @@ import it from "./it.json"
 import ja from "./ja.json"
 import ko from "./ko.json"
 import zhHans from "./zh-Hans.json"
+import ru from "./ru.json"
 
 export type Messages = typeof en
 export type { Locale }
 
 export const DEFAULT_LOCALE: Locale = "en"
 
-export const catalogs: Record<Locale, Messages> = { en, es, fr, de, "pt-BR": ptBR, it, ja, ko, "zh-Hans": zhHans }
+export const catalogs: Record<Locale, Messages> = { en, es, fr, de, "pt-BR": ptBR, it, ja, ko, "zh-Hans": zhHans, ru }
 
 /** Resolve a catalog. Use from non-React modules (metadata, gallery data). */
 export function getMessages(locale: Locale = getLocale()): Messages {

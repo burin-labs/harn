@@ -30,6 +30,7 @@ pub fn generate(manifest: &Path) {
         ("ja", "Japanese"),
         ("ko", "Korean"),
         ("zh-Hans", "SimplifiedChinese"),
+        ("ru", "Russian"),
     ] {
         let path = manifest.join(format!("src/localization/{name}.json"));
         println!("cargo:rerun-if-changed={}", path.display());
@@ -49,7 +50,7 @@ pub fn generate(manifest: &Path) {
     let mut generated = String::from("macro_rules! formatted {\n");
     for key in source.keys() {
         // Keep formatter temporaries outside the calling async state machine.
-        // Nine inline formatting arms otherwise inflate its stack allocation.
+        // Inline formatting arms otherwise inflate its stack allocation.
         writeln!(
             generated,
             "({key:?} $(, $($args:tt)*)?) => {{{{ let __harn_cli_render = || match $crate::localization::selected_locale() {{"

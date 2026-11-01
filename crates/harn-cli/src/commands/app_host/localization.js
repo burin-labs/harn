@@ -75,6 +75,14 @@ const HarnAppLocalization = (() => {
       ready: "已就绪",
       connected: "已连接",
     },
+    ru: {
+      app: "Приложение Harn",
+      sandbox: "Изолированная среда приложения Harn",
+      content: "Содержимое приложения Harn",
+      starting: "Запуск",
+      ready: "Готово",
+      connected: "Подключено",
+    },
   };
 
   /** @typedef {keyof typeof catalogs} Locale */
