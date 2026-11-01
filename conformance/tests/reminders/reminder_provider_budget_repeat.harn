@@ -6,42 +6,40 @@ pipeline main(harness: Harness) {
   harness.agent.clear_reminder_providers()
   harness.agent.register_reminder_provider(
     {
-      id: "large_delta",
+      id: "large_repeat",
       subscribes_to: ["session_idle"],
       evaluate: { _ctx ->
-        return {reminder: {body: long_body, tags: ["large_delta"], dedupe_key: "large_delta"}}
+        return {reminder: {body: long_body, tags: ["large_repeat"], dedupe_key: "large_repeat"}}
       },
     },
   )
-  const delta_session = harness.agent.open("reminder-provider-budget-delta")
-  harness.agent.reset(delta_session)
-  const payload = {session: {id: delta_session}, iteration: 1, wake_interval_ms: 0}
+  const repeat_session = harness.agent.open("reminder-provider-budget-repeat")
+  harness.agent.reset(repeat_session)
+  const payload = {session: {id: repeat_session}, iteration: 1, wake_interval_ms: 0}
   const first = agent_reminder_providers_fire(
     harness.agent,
-    delta_session,
+    repeat_session,
     "session_idle",
     payload,
     {},
   )
   const second = agent_reminder_providers_fire(
     harness.agent,
-    delta_session,
+    repeat_session,
     "session_idle",
     payload,
     {},
   )
-  const delta_events = transcript_events_by_kind(
-    harness.agent.snapshot(delta_session),
+  const repeat_events = transcript_events_by_kind(
+    harness.agent.snapshot(repeat_session),
     "system_reminder",
   )
-  harness.stdio.println(first.reports[0].delta_compressed)
-  harness.stdio.println(first.reports[0].body_bytes == first.reports[0].original_body_bytes)
-  harness.stdio.println(second.reports[0].delta_compressed)
-  harness.stdio.println(second.reports[0].body_bytes < second.reports[0].original_body_bytes)
-  harness.stdio.println(
-    delta_events[0].reminder.body.contains("unchanged from its previous full emission"),
-  )
-  harness.stdio.println(delta_events[0].reminder.tags[1].contains("body_sha256:"))
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.fired_count)
+  harness.stdio.println(second.reports[0].body_bytes == len(long_body))
+  harness.stdio.println(len(repeat_events))
+  harness.stdio.println(repeat_events[0].reminder.body == long_body)
+  harness.stdio.println(repeat_events[0].reminder.tags[1].contains("body_sha256:"))
   harness.agent.clear_reminder_providers()
   harness.agent.register_reminder_provider(
     {
