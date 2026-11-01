@@ -197,6 +197,33 @@ pub fn message_5(locale: string, values: list<string>) -> string {
       + (values[14] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + " " + (values[2] ?? "") + " trust="
+      + (values[3] ?? "")
+      + " trust_reasons="
+      + (values[4] ?? "")
+      + " readiness="
+      + (values[5] ?? "")
+      + " preferred="
+      + (values[6] ?? "")
+      + " parity="
+      + (values[7] ?? "")
+      + " native="
+      + (values[8] ?? "")
+      + " text="
+      + (values[9] ?? "")
+      + " parallel="
+      + (values[10] ?? "")
+      + " batch="
+      + (values[11] ?? "")
+      + " executable="
+      + (values[12] ?? "")
+      + " missing_runner="
+      + (values[13] ?? "")
+      + " cases="
+      + (values[14] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  " + (values[1] ?? "") + " " + (values[2] ?? "") + " trust="
       + (values[3] ?? "")
@@ -295,6 +322,11 @@ pub fn message_6(locale: string, values: list<string>) -> string {
       + (values[3] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "best=" + (values[1] ?? "") + " " + (values[2] ?? "") + " score="
+      + (values[3] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "best=" + (values[1] ?? "") + " " + (values[2] ?? "") + " score="
       + (values[3] ?? "")
@@ -339,6 +371,10 @@ pub fn message_7(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + "catalog=" + (values[1] ?? "") + " schema=" + (values[2] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + "catalog=" + (values[1] ?? "") + " schema=" + (values[2] ?? "")
       + "\n"
   }

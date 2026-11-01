@@ -1,0 +1,58 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  for scenario in [
+    {reason: "managed_allowance_unavailable", terminal_class: "managed_allowance_unavailable"},
+    {reason: "billing_limit", terminal_class: "provider_billing"},
+  ] {
+    const session = "allowance-contract-${harness.random.uuid_v7()}"
+    const remedy =
+      "Your included allowance is used up. Contact support: https://support.example.test"
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      { ->
+        return agent_loop(
+          harness,
+          "Reply briefly.",
+          nil,
+          {
+            session_id: session,
+            provider: "mock",
+            model: "mock",
+            max_iterations: 4,
+            final_wrapup: false,
+            llm_caller: { _call ->
+              return {
+                ok: false,
+                status: "provider_error",
+                stop_reason: "provider_error",
+                error: {
+                  kind: "terminal",
+                  category: "generic",
+                  reason: scenario.reason,
+                  message: remedy,
+                },
+              }
+            },
+          },
+        )
+      },
+    )
+    require captured.result.status == "provider_error", "A refusal cannot become success."
+    require captured.result.terminal_class == scenario.terminal_class,
+      "The typed refusal must keep its owning class."
+    require captured.result.error?.message == remedy, "Retain the service remedy."
+    if scenario.reason == "managed_allowance_unavailable" {
+      contract_effect(harness.stdio, "managed_allowance_stops_with_remedy", true)
+    } else {
+      contract_negative(
+        harness.stdio,
+        "provider_billing_stays_distinct",
+        captured.result.terminal_class == "managed_allowance_unavailable",
+      )
+    }
+  }
+}

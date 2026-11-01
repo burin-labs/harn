@@ -29,6 +29,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  promotion id: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  идентификатор продвижения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  提升 ID: " + (values[0] ?? "")
   }
@@ -65,6 +68,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  recibo: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  квитанция: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  回执: " + (values[0] ?? "")
   }
@@ -100,6 +106,9 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  resultado: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  результат: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  结果: " + (values[0] ?? "")
@@ -179,6 +188,15 @@ pub fn message_8(locale: string, values: list<string>) -> string {
       + " cost_usd="
       + (values[4] ?? "")
   }
+  if locale == "ru" {
+    return "  итого: adapter_passed=" + (values[0] ?? "") + " adapter_failed=" + (values[1] ?? "")
+      + " base_present="
+      + (values[2] ?? "")
+      + " missing="
+      + (values[3] ?? "")
+      + " cost_usd="
+      + (values[4] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  总计：adapter_passed=" + (values[0] ?? "") + " adapter_failed=" + (values[1] ?? "")
       + " base_present="
@@ -226,6 +244,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  recibo de treinamento: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  квитанция обучения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练收据：" + (values[0] ?? "")

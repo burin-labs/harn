@@ -152,6 +152,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "parse_dropped",
   "generic_throw",
   "managed_spend_paused",
+  "managed_allowance_unavailable",
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
 
@@ -230,6 +231,7 @@ export const LLM_ERROR_REASONS = [
   "unknown",
   "policy_denied",
   "managed_spend_paused",
+  "managed_allowance_unavailable",
 ] as const
 export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 

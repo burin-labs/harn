@@ -162,6 +162,28 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + (values[9] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return "план scorecard для вызовов инструментов поставщика: routes=" + (values[0] ?? "")
+      + " unscorecardable_providers="
+      + (values[1] ?? "")
+      + " cases="
+      + (values[2] ?? "")
+      + " required="
+      + (values[3] ?? "")
+      + " executable="
+      + (values[4] ?? "")
+      + " live_tool_probes="
+      + (values[5] ?? "")
+      + " offline_request_checks="
+      + (values[6] ?? "")
+      + " not_applicable="
+      + (values[7] ?? "")
+      + " batch_manifest_requests="
+      + (values[8] ?? "")
+      + " readiness_commands="
+      + (values[9] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return "提供商工具调用记分卡计划：routes=" + (values[0] ?? "") + " unscorecardable_providers="
       + (values[1] ?? "")
@@ -320,6 +342,23 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "scorecard de tool-call do provedor: routes=" + (values[0] ?? "") + " pass="
+      + (values[1] ?? "")
+      + " warn="
+      + (values[2] ?? "")
+      + " fail="
+      + (values[3] ?? "")
+      + " trusted="
+      + (values[4] ?? "")
+      + " needs_review="
+      + (values[5] ?? "")
+      + " quarantined="
+      + (values[6] ?? "")
+      + " format_recommendations="
+      + (values[7] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
+    return "scorecard для вызовов инструментов поставщика: routes=" + (values[0] ?? "") + " pass="
       + (values[1] ?? "")
       + " warn="
       + (values[2] ?? "")
@@ -522,6 +561,27 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + (values[10] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  provider-summary " + (values[1] ?? "") + " routes="
+      + (values[2] ?? "")
+      + " cases="
+      + (values[3] ?? "")
+      + " required="
+      + (values[4] ?? "")
+      + " executable="
+      + (values[5] ?? "")
+      + " live_tool_probes="
+      + (values[6] ?? "")
+      + " offline_request_checks="
+      + (values[7] ?? "")
+      + " readiness_commands="
+      + (values[8] ?? "")
+      + " batch_manifest_requests="
+      + (values[9] ?? "")
+      + " not_applicable="
+      + (values[10] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  提供商摘要 " + (values[1] ?? "") + " routes=" + (values[2] ?? "")
       + " cases="
@@ -662,6 +722,21 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return (values[0] ?? "") + "  não-classificável " + (values[1] ?? "") + " reason="
+      + (values[2] ?? "")
+      + " models="
+      + (values[3] ?? "")
+      + " active_models="
+      + (values[4] ?? "")
+      + " local_runtime="
+      + (values[5] ?? "")
+      + " auth_required="
+      + (values[6] ?? "")
+      + " credential_env_names="
+      + (values[7] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  unscorecardable " + (values[1] ?? "") + " reason="
       + (values[2] ?? "")
       + " models="
       + (values[3] ?? "")
@@ -876,6 +951,33 @@ pub fn message_4(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + "  " + (values[1] ?? "") + " " + (values[2] ?? "") + " score="
+      + (values[3] ?? "")
+      + " status="
+      + (values[4] ?? "")
+      + " trust="
+      + (values[5] ?? "")
+      + " mode="
+      + (values[6] ?? "")
+      + " pass="
+      + (values[7] ?? "")
+      + "/"
+      + (values[8] ?? "")
+      + " parseable="
+      + (values[9] ?? "")
+      + "/"
+      + (values[10] ?? "")
+      + " actionless="
+      + (values[11] ?? "")
+      + " issues="
+      + (values[12] ?? "")
+      + " trust_reasons="
+      + (values[13] ?? "")
+      + " catalog_mismatches="
+      + (values[14] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + "  " + (values[1] ?? "") + " " + (values[2] ?? "") + " score="
       + (values[3] ?? "")
       + " status="

@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Per-machine signal inbox, session registry, and router for delivering alerts to running agent sessions"
 
 [dependencies]
-harn-flock = { path = "../harn-flock", version = "=0.10.184" }
+harn-flock = { path = "../harn-flock", version = "=0.10.185-dev" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"

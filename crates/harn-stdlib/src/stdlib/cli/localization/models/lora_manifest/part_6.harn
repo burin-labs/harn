@@ -29,6 +29,9 @@ pub fn message_30(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return " sha256=" + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return " sha256=" + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return " sha256=" + (values[0] ?? "")
   }
@@ -73,6 +76,10 @@ pub fn message_31(locale: string, values: list<string>) -> string {
     return "Manifesto de LoRA para " + (values[0] ?? "") + " em " + (values[1] ?? "") + " via "
       + (values[2] ?? "")
   }
+  if locale == "ru" {
+    return "Манифест LoRA для " + (values[0] ?? "") + " на " + (values[1] ?? "") + " через "
+      + (values[2] ?? "")
+  }
   if locale == "zh-Hans" {
     return "通过 " + (values[2] ?? "") + " 为 " + (values[1] ?? "") + " 上的 " + (values[0] ?? "")
       + " 提供 LoRA 清单"
@@ -111,6 +118,9 @@ pub fn message_32(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "manifesto de avaliação em lote"
   }
+  if locale == "ru" {
+    return "манифест пакетной оценки"
+  }
   if locale == "zh-Hans" {
     return "批量评估清单"
   }
@@ -147,6 +157,9 @@ pub fn message_33(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "recibos em lote"
   }
+  if locale == "ru" {
+    return "квитанции пакета"
+  }
   if locale == "zh-Hans" {
     return "批量收据"
   }
@@ -182,6 +195,9 @@ pub fn message_34(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "avaliar"
+  }
+  if locale == "ru" {
+    return "eval"
   }
   if locale == "zh-Hans" {
     return "评估"

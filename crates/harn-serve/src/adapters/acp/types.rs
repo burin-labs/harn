@@ -258,6 +258,11 @@ pub enum AcpPromptErrorSchema {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpPromptFailureFacts {
+    /// Boundary-owned explanation and recovery text, separate from diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -357,6 +362,8 @@ impl AcpPromptFailureFacts {
             .unwrap_or_default();
         Self {
             category: string_field("category"),
+            message: string_field("message"),
+            detail: string_field("detail"),
             kind,
             reason: string_field("reason"),
             origin: string_field("origin"),

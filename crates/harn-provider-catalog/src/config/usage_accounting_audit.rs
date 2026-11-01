@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn audit_expires_the_unverified_queue() {
         let config = super::super::embedded_config(None);
-        let validation = validate_usage_accounting_audit(&config, "2026-11-01");
+        let validation = validate_usage_accounting_audit(&config, "2099-01-01");
 
         assert!(validation
             .errors
