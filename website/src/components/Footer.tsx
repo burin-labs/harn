@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router"
 import { Logo } from "./Logo"
 import { useMessages, format } from "../i18n"
+import { CONTRIBUTION_PATH } from "../lib/metadata"
 
 const GITHUB = "https://github.com/burin-labs/harn"
 
@@ -34,7 +35,7 @@ export function Footer() {
           <FooterCol title={t.footer.communityTitle}>
             <FooterExternal href={`${GITHUB}/issues`}>{t.footer.issues}</FooterExternal>
             <FooterExternal href={`${GITHUB}/discussions`}>{t.footer.discussions}</FooterExternal>
-            <FooterLink to="/contributing/preset-hooks.html">{t.footer.contributing}</FooterLink>
+            <FooterLink to={CONTRIBUTION_PATH}>{t.footer.contributing}</FooterLink>
           </FooterCol>
         </div>
         <div className="mt-10 border-t border-border pt-6">
