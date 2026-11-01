@@ -1,4 +1,21 @@
 {
+  "contribute": {
+    "pageTitle": "Mitwirken | {siteName}",
+    "title": "Hilf mit, Harn zu verbessern",
+    "intro": "Teile deine Erkenntnisse, melde ein Problem oder trage zu Code und Dokumentation bei.",
+    "reportTitle": "Ein Problem melden",
+    "reportBody": "Beschreibe, was du erwartet hast, was passiert ist und wie sich das Problem reproduzieren lässt. Entferne Geheimnisse und private Daten vor der Veröffentlichung.",
+    "reportLink": "Ein Issue erstellen",
+    "codeTitle": "Zu Code oder Dokumentation beitragen",
+    "codeBody": "Lies den Beitragsleitfaden, um Harn einzurichten und eine Änderung zur Prüfung vorzubereiten.",
+    "codeLink": "Beitragsleitfaden lesen",
+    "discussTitle": "Deine Erfahrungen teilen",
+    "discussBody": "Stelle eine Frage oder teile in den Community-Diskussionen, wie du Harn nutzt.",
+    "discussLink": "An einer Diskussion teilnehmen",
+    "tipTitle": "Ein freiwilliges Trinkgeld geben",
+    "tipBody": "Wenn Harn dir bereits geholfen hat, kannst du {company} ein einmaliges Trinkgeld geben. Dafür werden keine Waren, Dienstleistungen oder Vorteile gewährt.",
+    "tipLink": "Trinkgeld über Stripe geben"
+  },
   "common": {
     "siteName": "Harn",
     "github": "GitHub",
