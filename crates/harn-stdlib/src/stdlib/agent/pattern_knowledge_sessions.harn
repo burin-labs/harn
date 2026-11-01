@@ -90,12 +90,23 @@ fn pl_command_from_input(input: any) -> string {
   return ""
 }
 
+/** The command a host reports it ran, from the result's command outcome. */
+fn pl_command_from_result(raw_output: any) -> string {
+  const outcome = raw_output?.data?.run_outcome ?? raw_output?.run_outcome
+  return type_of(outcome?.command) == "string" ? pl_text(outcome.command) : ""
+}
+
 /**
  * The commands a run executed, in order, with how each exited. A tool call
- * names its command in `raw_input` (`command` or `argv`); its terminal
- * `tool_call_update` carries the exit code in `health.command_exit_code`.
- * This is what lets a curator see a workflow the agent had to discover the
- * hard way, which a tool-name sequence (`run, run, run`) hides.
+ * names its command in `raw_input` (`command` or `argv`); a host-chosen
+ * command (a verifier the model invoked without arguments) is named by the
+ * result's command outcome instead. The exit code is `health.command_exit_code`;
+ * a command that went to the background (exit still unknown, `command_id`
+ * set) takes its exit from the later update that reports the same
+ * `command_id`, such as a wait. A known exit code decides `ok`, because a
+ * tool call completes normally even when its command fails. This is what lets
+ * a curator see a workflow the agent had to discover the hard way, which a
+ * tool-name sequence (`run, verify, run`) hides.
  *
  * @effects: []
  * @errors: []
@@ -105,26 +116,43 @@ pub fn pl_session_command_ledger(events: list) -> list {
   let order = []
   let commands = {}
   let outcomes = {}
+  let background = {}
   for event in events ?? [] {
     const transcript_event = pl_session_transcript_event(event)
     const kind = pl_text(transcript_event?.kind)
     const metadata = transcript_event?.metadata ?? {}
     const call_id = pl_text(metadata?.tool_call_id)
-    if call_id == "" {
+    if call_id == "" || (kind != "tool_call" && kind != "tool_call_update") {
       continue
     }
-    if kind == "tool_call" || kind == "tool_call_update" {
-      const command = pl_command_from_input(metadata?.raw_input)
-      if command != "" && commands[call_id] == nil {
-        commands = commands + {[call_id]: {tool: pl_text(metadata?.tool_name), command: command}}
-        order = order + [call_id]
+    const health = metadata?.health ?? {}
+    const command_id = pl_text(health?.command_id)
+    const exit_code = health?.command_exit_code
+    const owner = background[command_id]
+    if owner != nil && owner != call_id {
+      // A later update (a wait or poll) settles a backgrounded command.
+      if exit_code != nil {
+        outcomes = outcomes + {[owner]: {exit_code: exit_code, ok: exit_code == 0}}
+        background = background + {[command_id]: nil}
       }
+      continue
+    }
+    let command = pl_command_from_input(metadata?.raw_input)
+    if command == "" && kind == "tool_call_update" {
+      command = pl_command_from_result(metadata?.raw_output)
+    }
+    if command != "" && commands[call_id] == nil {
+      commands = commands + {[call_id]: {tool: pl_text(metadata?.tool_name), command: command}}
+      order = order + [call_id]
     }
     const status = pl_text(metadata?.status)
     if kind == "tool_call_update" && (status == "completed" || status == "failed") {
-      const health = metadata?.health ?? {}
-      outcomes = outcomes
-        + {[call_id]: {exit_code: health?.command_exit_code, ok: status == "completed"}}
+      if exit_code == nil && command_id != "" {
+        background = background + {[command_id]: call_id}
+      } else {
+        const ok = exit_code != nil ? exit_code == 0 : status == "completed"
+        outcomes = outcomes + {[call_id]: {exit_code: exit_code, ok: ok}}
+      }
     }
   }
   return order.filter({ id -> outcomes[id] != nil }).map({ id -> commands[id] + outcomes[id] })

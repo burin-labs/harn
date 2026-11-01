@@ -12,7 +12,10 @@ import {
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
 import { pl_redact_command } from "std/agent/pattern_knowledge_persistence"
-import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
+import {
+  pattern_learning_session_transcript,
+  pl_session_command_ledger,
+} from "std/agent/pattern_knowledge_sessions"
 import { session_store_append, session_store_events, session_store_list } from "std/session-store"
 import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 
@@ -433,6 +436,53 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
       )
       return nil
     },
+  )
+}
+
+fn tool_update(call_id: string, tool: string, health: dict?, raw_input: dict?, command: string?) -> dict {
+  return {
+    payload: {
+      transcript_event: {
+        kind: "tool_call_update",
+        metadata: {
+          tool_call_id: call_id,
+          tool_name: tool,
+          status: "completed",
+          health: health,
+          raw_input: raw_input,
+          raw_output: command == nil ? nil : {data: {run_outcome: {command: command}}},
+        },
+      },
+    },
+  }
+}
+
+/**
+ * Shapes recorded by a real host: a failing command still completes its tool
+ * call, a verifier names its command only in the result, and a backgrounded
+ * verifier is settled by a later wait on the same command id.
+ */
+pipeline test_command_ledger_reads_host_commands_and_settles_background_runs() {
+  const ledger = pl_session_command_ledger(
+    [
+      tool_update(
+        "r1",
+        "run",
+        {command_id: "h1", command_exit_code: 1},
+        {argv: ["python3", "-m", "pytest"]},
+        nil,
+      ),
+      tool_update("v1", "verify", {command_id: "h2", command_exit_code: nil}, nil, "python3 -m pytest"),
+      tool_update("w1", "wait_command", {command_id: "h2", command_exit_code: nil}, nil, nil),
+      tool_update("w2", "wait_command", {command_id: "h2", command_exit_code: 0}, nil, "python3 -m pytest"),
+    ],
+  )
+  assert_eq(
+    ledger,
+    [
+      {tool: "run", command: "python3 -m pytest", exit_code: 1, ok: false},
+      {tool: "verify", command: "python3 -m pytest", exit_code: 0, ok: true},
+    ],
   )
 }
 
