@@ -415,6 +415,8 @@ pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, H
         pending: HashMap::new(),
         revision: index.revision,
         interrupted: interrupted.clone(),
+
+        stored_hashes: HashMap::new(),
     };
     let mut registry = sessions()
         .lock()
