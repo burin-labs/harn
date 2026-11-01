@@ -109,7 +109,7 @@ These examples define breadth, not templates:
 2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
 3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
 
-Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try.
+Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -263,6 +263,228 @@ fn cc_lookup_skill(
     success: result?.success ?? false,
     guide: stdout[0:min(len(stdout), options?.guide_max_bytes ?? 16000)],
     stderr: stderr[0:min(len(stderr), 2000)],
+  }
+}
+
+const COMMAND_SEQUENCE_MAX_STEPS: int = 8
+
+const COMMAND_SEQUENCE_SERVER = """
+import { command_run } from "std/command"
+import { ToolRegistry } from "std/tools"
+
+const STEP_TIMEOUT_MS: int = 300000
+
+const TAIL_LINES: int = 25
+
+/** The repository's working sequence, in the order that works. */
+const STEPS: list = __STEPS__
+
+/**
+ * The steps to run. A non-empty `target` (a repository-relative path such as a
+ * test directory) narrows the final step.
+ */
+pub fn check_plan(target: string) -> list {
+  const clean = target.trim()
+  if clean != "" && (clean.starts_with("/") || clean.contains("..") || !regex_match("^[A-Za-z0-9_./:-]+$", clean)) {
+    throw "target must be a repository-relative path, got: " + clean
+  }
+  let plan = []
+  for index in range(0, len(STEPS)) {
+    const step = STEPS[index]
+    plan = plan + [index == len(STEPS) - 1 && clean != "" ? {label: step.label, argv: step.argv + [clean]} : step]
+  }
+  return plan
+}
+
+fn tail_text(text: string) -> string {
+  const lines = text.split("\n")
+  const start = max(0, len(lines) - TAIL_LINES)
+  return join(lines[start:len(lines)], "\n")
+}
+
+/** Compact receipt: which steps ran, the first failing step, and its output tail. */
+pub fn summarize(steps: list) -> dict {
+  let failed = nil
+  for step in steps {
+    if !step.ok {
+      failed = step
+      break
+    }
+  }
+  const last = len(steps) == 0 ? nil : steps[len(steps) - 1]
+  return {
+    ok: failed == nil && len(steps) > 0,
+    steps: steps.map({ step -> {label: step.label, ok: step.ok, exit_code: step.exit_code} }).to_list(),
+    failed_step: failed?.label,
+    output_tail: tail_text(to_string((failed ?? last)?.output ?? "")),
+  }
+}
+
+/** Runs one step's argv from a directory and returns its process result. */
+pub type StepRunner = fn(list, string) -> dict
+
+/** Run `plan` in order from `cwd`, stopping at the first failing step. */
+pub fn run_plan(run: StepRunner, cwd: string, plan: list) -> dict {
+  let steps = []
+  for step in plan {
+    const result = run(step.argv, cwd)
+    steps = steps + [{label: step.label, ok: result.success, exit_code: result.exit_code, output: result.combined}]
+    if !result.success {
+      break
+    }
+  }
+  return summarize(steps)
+}
+
+/** Return a tool registry containing `__TOOL__`. */
+pub fn tools(harness: Harness, registry: ToolRegistry? = nil) -> ToolRegistry {
+  let reg = registry ?? tool_registry()
+  reg = tool_define(
+    reg,
+    "__TOOL__",
+    __DESCRIPTION__,
+    {
+      parameters: {
+        target: {type: "string", description: "Optional repository-relative path that narrows the final step; empty for everything."},
+      },
+      returns: {type: "object"},
+      annotations: {kind: "execute", side_effect_level: "workspace_write"},
+      handler: { args ->
+        const run = { argv, cwd -> command_run(harness.tools, argv, {cwd: cwd, timeout_ms: STEP_TIMEOUT_MS}) }
+        return run_plan(run, harness.fs.cwd(), check_plan(to_string(args?.target ?? "")))
+      },
+    },
+  )
+  return reg
+}
+
+/** Serve this package's tools over MCP. */
+pipeline default(harness: Harness) {
+  harness.tools.mcp_tools(tools(harness))
+}
+"""
+
+const COMMAND_SEQUENCE_TEST = """
+import { check_plan, run_plan, summarize } from "./server"
+
+pipeline test_plan_keeps_the_learned_order() {
+  assert_eq(check_plan("").map({ step -> step.label }).to_list(), __LABELS__)
+  const narrowed = check_plan("tests/unit")
+  assert_eq(narrowed[len(narrowed) - 1].argv[len(narrowed[len(narrowed) - 1].argv) - 1], "tests/unit")
+}
+
+pipeline test_plan_rejects_a_path_escape() {
+  const escaped = try {
+    check_plan("../outside")
+  }
+  assert(is_err(escaped), "a target must stay inside the repository")
+}
+
+pipeline test_summary_reports_the_first_failing_step() {
+  const receipt = summarize(
+    [
+      {label: "first", ok: true, exit_code: 0, output: "fine"},
+      {label: "second", ok: false, exit_code: 2, output: "broken here"},
+    ],
+  )
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.failed_step, "second")
+  assert_eq(receipt.output_tail, "broken here")
+}
+
+pipeline test_run_stops_at_the_first_failure() {
+  let calls = []
+  const fake = { argv, cwd ->
+    calls = calls + [{argv: argv, cwd: cwd}]
+    const failing = argv[0] == "second"
+    return {success: !failing, exit_code: failing ? 2 : 0, combined: failing ? "stale table" : "fine"}
+  }
+  const receipt = run_plan(
+    fake,
+    "workspace",
+    [
+      {label: "first", argv: ["first", "a"]},
+      {label: "second", argv: ["second"]},
+      {label: "never", argv: ["never"]},
+    ],
+  )
+  assert_eq(calls, [{argv: ["first", "a"], cwd: "workspace"}, {argv: ["second"], cwd: "workspace"}])
+  assert_eq(receipt.steps.map({ step -> step.label }).to_list(), ["first", "second"])
+  assert_eq(receipt.failed_step, "second")
+  assert_eq(receipt.output_tail, "stale table")
+}
+"""
+
+fn cc_shell_word(word: string) -> string {
+  if word != "" && regex_match("^[A-Za-z0-9_./:=@%+-]+$", word) {
+    return word
+  }
+  return "'" + word.replace("'", "'\"'\"'") + "'"
+}
+
+/**
+ * Render a complete, tested MCP tool package that runs a learned command
+ * sequence in order and returns a compact failure receipt, plus the same
+ * sequence as one shell line (`verify_command`) a host may adopt as the
+ * project's verifier. `steps` is `[{label, argv}]`, at most eight steps, each a
+ * fixed argv with repository-relative paths.
+ *
+ * @effects: []
+ * @errors: [invalid_steps]
+ * @api_stability: experimental
+ */
+pub fn crystallization_command_sequence_package(
+  raw_name: string,
+  raw_description: string,
+  raw_steps: list,
+) -> dict {
+  const tool = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw_name))) ?? ""
+  if tool == "" || !regex_match("^[a-z][a-z0-9_]*$", tool) {
+    throw "invalid_steps: name must start with a letter, got: " + cc_text(raw_name)
+  }
+  const description = cc_text(raw_description)
+  if description == "" {
+    throw "invalid_steps: description is required"
+  }
+  if type_of(raw_steps) != "list" || len(raw_steps) == 0
+    || len(raw_steps) > COMMAND_SEQUENCE_MAX_STEPS {
+    throw "invalid_steps: steps must list 1 to ${COMMAND_SEQUENCE_MAX_STEPS} commands"
+  }
+  let steps = []
+  for raw in raw_steps {
+    const label = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw?.label))) ?? ""
+    const argv = raw?.argv
+    if label == "" || type_of(argv) != "list" || len(argv) == 0 {
+      throw "invalid_steps: each step needs a label and a non-empty argv list"
+    }
+    let words = []
+    for word in argv {
+      const text = to_string(word ?? "")
+      if type_of(word) != "string" || text == "" || text.starts_with("/") {
+        throw "invalid_steps: argv entries must be non-empty, repository-relative strings: "
+          + json_stringify(argv)
+      }
+      words = words + [text]
+    }
+    steps = steps + [{label: label, argv: words}]
+  }
+  const labels = steps.map({ step -> step.label }).to_list()
+  const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
+    "__TOOL__",
+    tool,
+  )
+    .replace("__DESCRIPTION__", json_stringify(description))
+  const test_source = COMMAND_SEQUENCE_TEST.replace("__LABELS__", json_stringify(labels))
+  return {
+    entrypoint: "server.harn",
+    tool_names: [tool],
+    source: source.trim() + "\n",
+    test_source: test_source.trim() + "\n",
+    verify_command: join(
+      steps.map({ step -> join(step.argv.map({ word -> cc_shell_word(word) }).to_list(), " ") })
+        .to_list(),
+      " && ",
+    ),
   }
 }
 
@@ -455,10 +677,40 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
       {
         name: "scaffold_harn_tool",
         description:
-          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point from Harn's canonical tool package generator.",
-        parameters: {name: {type: "string"}, description: {type: "string"}},
+          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point. With `steps`, return a complete, tested tool that runs that command sequence in order with failure receipts, plus its `verify_command`.",
+        parameters: {
+          name: {type: "string"},
+          description: {type: "string"},
+          steps: {
+            type: "array",
+            description:
+              "Optional learned command sequence: [{label, argv}] in the order that works, argv as repository-relative words.",
+            items: {
+              type: "object",
+              properties: {label: {type: "string"}, argv: {type: "array", items: {type: "string"}}},
+            },
+          },
+        },
         returns: {type: "object"},
         handler: { args ->
+          if args?.steps != nil {
+            const rendered = try {
+              crystallization_command_sequence_package(
+                to_string(args?.name ?? ""),
+                to_string(args?.description ?? ""),
+                args.steps,
+              )
+            }
+            const result = is_err(rendered) ? {
+              success: false,
+              error: to_string(unwrap_err(rendered)),
+            } : unwrap(rendered) + {success: true}
+            return agent_tool_handler_result(
+              to_string(result),
+              result,
+              result.success ? "ok" : "error",
+            )
+          }
           const result = cc_scaffold_tool(
             {env: harness.env, fs: harness.fs, tools: harness.tools},
             args?.name,
@@ -542,6 +794,11 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
                     tool_names: {type: "array", items: {type: "string"}},
                     source: {type: "string"},
                     test_source: {type: "string"},
+                    verify_command: {
+                      type: "string",
+                      description:
+                        "For a command-sequence tool, the same sequence as one shell line, as scaffold_harn_tool returned it.",
+                    },
                   },
                 },
               },

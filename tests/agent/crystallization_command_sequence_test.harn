@@ -1,0 +1,58 @@
+import { crystallization_command_sequence_package } from "std/agent/crystallization_curator"
+
+const STEPS: list = [
+  {label: "codegen", argv: ["python3", "tools/codegen.py"]},
+  {label: "Build wire", argv: ["python3", "tools/build_wire.py"]},
+  {label: "tests", argv: ["python3", "-m", "pytest", "-q", "-m", "not soak"]},
+]
+
+pipeline test_package_projects_one_sequence_to_a_tool_and_a_shell_line() {
+  const pkg = crystallization_command_sequence_package("Relay check", "Verify like CI.", STEPS)
+  assert_eq(pkg.entrypoint, "server.harn")
+  assert_eq(pkg.tool_names, ["relay_check"])
+  assert_eq(
+    pkg.verify_command,
+    "python3 tools/codegen.py && python3 tools/build_wire.py && python3 -m pytest -q -m 'not soak'",
+  )
+  assert(
+    pkg.source.contains("\"label\":\"build_wire\""),
+    "labels are normalized into the tool's plan",
+  )
+  assert(pkg.source.contains("\"relay_check\""), "the tool is registered under its name")
+  assert(
+    pkg.test_source.contains("[\"codegen\",\"build_wire\",\"tests\"]"),
+    "the test pins the order",
+  )
+}
+
+pipeline test_package_quotes_a_single_quote_for_the_shell() {
+  const pkg = crystallization_command_sequence_package(
+    "say",
+    "Echo a phrase.",
+    [{label: "say", argv: ["echo", "it's done"]}],
+  )
+  assert_eq(pkg.verify_command, "echo 'it'\"'\"'s done'")
+}
+
+pipeline test_package_rejects_machine_paths_and_unbounded_sequences() {
+  const absolute = try {
+    crystallization_command_sequence_package(
+      "check",
+      "Run it.",
+      [{label: "run", argv: ["/usr/local/bin/make", "test"]}],
+    )
+  }
+  assert(is_err(absolute), "a machine-specific absolute path must not become a learned tool")
+  let many = []
+  for index in range(0, 9) {
+    many = many + [{label: "step ${index}", argv: ["make", "step${index}"]}]
+  }
+  const unbounded = try {
+    crystallization_command_sequence_package("check", "Run it.", many)
+  }
+  assert(is_err(unbounded), "a sequence is at most eight steps")
+  const empty = try {
+    crystallization_command_sequence_package("check", "Run it.", [])
+  }
+  assert(is_err(empty), "a sequence needs at least one step")
+}
