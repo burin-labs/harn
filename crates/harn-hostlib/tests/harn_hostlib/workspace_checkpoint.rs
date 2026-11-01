@@ -351,6 +351,33 @@ fn leaving_the_dirty_list_is_a_change_only_when_the_file_changed() {
     assert_eq!(read(root, "b.txt"), "b ready to commit\n");
 }
 
+/// `git status` never checks a file flagged assume-unchanged or
+/// skip-worktree, so the scan must stat those itself.
+#[test]
+fn edits_to_files_git_is_told_not_to_check_are_attributed_and_restored() {
+    let dir = repo();
+    let root = dir.path();
+    git(root, &["update-index", "--assume-unchanged", "a.txt"]);
+    git(root, &["update-index", "--skip-worktree", "b.txt"]);
+    let s = Session::new(root);
+    s.capture("turn-1");
+
+    let attributed = s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited while unchecked\n").unwrap();
+        fs::write(root.join("b.txt"), "b edited while unchecked\n").unwrap();
+    });
+    assert_eq!(
+        change_kinds(&attributed),
+        [
+            ("a.txt".into(), "modified".into()),
+            ("b.txt".into(), "modified".into()),
+        ]
+    );
+    s.restore("turn-1");
+    assert_eq!(read(root, "a.txt"), "a original\n");
+    assert_eq!(read(root, "b.txt"), "b original\n");
+}
+
 /// Per-call cost follows what git lists, not the size of the tree.
 #[test]
 fn a_call_scan_stats_only_the_files_git_lists() {

@@ -113,6 +113,9 @@ be confirmed durable before a tracked tool is allowed to run.
   `git status` lists: changed against HEAD in the index or on disk, or
   untracked and not ignored. It is held in memory as the attribution baseline.
   A file git does not list matches HEAD, so the scan never reads clean files.
+  Files flagged assume-unchanged or skip-worktree (including flags that
+  `core.ignorestat` sets) are stat'd directly, because `git status` does not
+  check them, and the scan's `git status` runs without a filesystem monitor.
 - A git tree written from the index. Clean tracked files resolve from the
   repository's object store.
 - Bytes only for files that differ from the index: modified and untracked
@@ -182,6 +185,8 @@ began at, is what tells two such effects apart.
 - A same-size edit inside one filesystem mtime tick is invisible to the stat
   diff.
 - Symlinks and nested repositories are outside the index.
+- A file that an ignore rule matches and git does not track is outside the
+  index, so an ignored file a call writes is neither attributed nor removed.
 - A directory or file git cannot read makes the scan incomplete: capture is
   unavailable, and a call that ran while it was unreadable cannot be restored.
 - Declared Harn runtime state is not a workspace edit. This includes the

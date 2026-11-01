@@ -116,6 +116,9 @@ pub(super) fn git_scan(root: &Path) -> Result<Scan, GitError> {
     let (listed, unseen) = git_status(
         root,
         &[
+            // A filesystem monitor that missed an event would hide an edit.
+            "-c",
+            "core.fsmonitor=false",
             "status",
             "--porcelain=v2",
             "-z",
@@ -192,6 +195,29 @@ pub(super) fn git_scan(root: &Path) -> Result<Scan, GitError> {
             Err(_) => error_paths.push(path),
         }
     }
+    // `git status` skips files flagged assume-unchanged or skip-worktree
+    // (`core.ignorestat` sets the first on its own), so stat those directly.
+    for path in flagged_paths(root)? {
+        if index.contains_key(&path) || facts.absent.contains(&path) {
+            continue;
+        }
+        let full = root.join(&path);
+        if is_excluded(root, &full, &excluded) {
+            continue;
+        }
+        match fs::symlink_metadata(&full) {
+            Ok(meta) if meta.is_file() => {
+                index.insert(path, stat_entry(&meta));
+            }
+            Ok(_) => {
+                facts.irregular.insert(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                facts.absent.insert(path);
+            }
+            Err(_) => error_paths.push(path),
+        }
+    }
     Ok(Scan {
         index,
         errors: error_paths.len() + usize::from(unlocated_error),
@@ -233,6 +259,20 @@ fn git_status(root: &Path, args: &[&str]) -> Result<(Vec<u8>, Vec<Option<String>
         })
         .collect();
     Ok((output.stdout, unseen))
+}
+
+/// Tracked paths under `root` whose index entry tells git not to check them.
+/// `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree
+/// entries `S`; its paths are relative to `root`.
+fn flagged_paths(root: &Path) -> Result<Vec<String>, GitError> {
+    let listed = git(root, &["ls-files", "-z", "-v", "--", "."])?;
+    Ok(nul_paths(&listed)
+        .filter_map(|record| {
+            let (tag, path) = record.split_once(' ')?;
+            let flagged = tag == "S" || tag.chars().all(|c| c.is_ascii_lowercase());
+            (flagged && !path.ends_with('/')).then(|| path.to_string())
+        })
+        .collect())
 }
 
 fn nul_paths(listed: &[u8]) -> impl Iterator<Item = String> + '_ {
