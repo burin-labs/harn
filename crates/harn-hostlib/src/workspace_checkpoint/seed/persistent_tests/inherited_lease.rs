@@ -25,10 +25,10 @@ fn inherited_lease_case() {
         .set_read_timeout(Some(harn_clock::test_support::HANG_CEILING))
         .unwrap();
     let (mut release, child_release) = UnixStream::pair().unwrap();
-    let child = std::thread::spawn(move || {
+    let child = harn_parser::runtime_stack::spawn(move || {
         let ready_fd = child_ready.as_raw_fd();
         let release_fd = child_release.as_raw_fd();
-        let mut command = std::process::Command::new("/usr/bin/true");
+        let mut command = harn_vm::process_sandbox::session_std_command("/usr/bin/true").unwrap();
         // Only async-signal-safe calls may run between fork and exec.
         unsafe {
             command.pre_exec(move || {

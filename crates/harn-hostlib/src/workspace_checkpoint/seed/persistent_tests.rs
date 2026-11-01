@@ -5,7 +5,7 @@ use std::fs;
 mod inherited_lease;
 
 fn run_isolated(name: &str, case: fn()) {
-    const WORKER: &str = "HARN_SEED_PERSISTENCE_TEST";
+    const WORKER: &str = "HARN_TEST_SEED_PERSISTENCE";
     let test = format!("workspace_checkpoint::seed::persistent_tests::{name}");
     let completed = format!("seed persistence completed: {test}");
     if std::env::var(WORKER).as_deref() == Ok(test.as_str()) {
