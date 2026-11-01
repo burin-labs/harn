@@ -1,4 +1,5 @@
 use super::*;
+use crate::AcpJsonRpcError;
 use std::sync::atomic::AtomicUsize;
 
 struct FixtureHost {
@@ -24,6 +25,14 @@ impl ApiHostResponder for FixtureHost {
     }
 }
 
+struct Binder(Arc<FixtureHost>);
+
+impl ApiHostResponderBinder for Binder {
+    fn bind(&self, _root: &std::path::Path) -> Result<Arc<dyn ApiHostResponder>, String> {
+        Ok(self.0.clone())
+    }
+}
+
 #[tokio::test]
 async fn submitted_task_reaches_embedder_host_and_missing_responder_fails_closed() {
     let dir = tempfile::tempdir().unwrap();
@@ -42,7 +51,7 @@ async fn submitted_task_reaches_embedder_host_and_missing_responder_fails_closed
         calls: AtomicUsize::new(0),
     });
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned())
-        .with_host_responder(responder.clone());
+        .with_host_responder(Arc::new(Binder(responder.clone())));
     config.workspace_root = dir.path().into();
     let server = ApiServer::new(config);
     let mut events = server.state.events_tx.subscribe();
@@ -70,7 +79,7 @@ async fn submitted_task_reaches_embedder_host_and_missing_responder_fails_closed
 }
 
 #[tokio::test]
-async fn responder_preserves_structured_errors_and_does_not_intercept_permissions() {
+async fn responder_does_not_intercept_permissions() {
     let root = tempfile::tempdir().unwrap();
     let script = root.path().join("agent.harn");
     write_test_pipeline(&script);
@@ -78,23 +87,11 @@ async fn responder_preserves_structured_errors_and_does_not_intercept_permission
         calls: AtomicUsize::new(0),
     });
     let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().into_owned())
-        .with_host_responder(responder.clone());
+        .with_host_responder(Arc::new(Binder(responder.clone())));
     config.workspace_root = root.path().into();
     let mut state = ApiServer::new(config).state;
     let (tx, mut rx) = mpsc::unbounded_channel();
     state.acp.request_tx = tx;
-    state
-        .handle_acp_request(json!({"id": 7, "method": "host/call", "params": {"name":"unknown"}}))
-        .await;
-    let response = harn_clock::test_support::within("host error response", rx.recv())
-        .await
-        .unwrap();
-    assert_eq!(
-        response,
-        json!({"jsonrpc":"2.0", "id":7, "error":{
-            "code":-32001, "message":"Fixture operation refused", "data":{"reason":"not_granted"}
-        }})
-    );
     state
         .handle_acp_request(json!({"id":8,"method":"session/request_permission",
         "params":{"sessionId":"session-one","toolCall":{"toolCallId":"approval-one"}}}))

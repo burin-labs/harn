@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::adapters::acp::{
-    run_acp_channel_server, AcpJsonRpcError, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
+    run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
 };
 use crate::auth::{AuthPolicy, AuthenticatedPrincipal};
 use crate::permissions::{
@@ -53,7 +53,9 @@ mod workspaces;
 const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
 pub const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-10-11";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
-pub use host::ApiHostResponder;
+pub use crate::adapters::acp::{
+    HostResponder as ApiHostResponder, HostResponderBinder as ApiHostResponderBinder,
+};
 
 #[derive(Clone, Debug)]
 pub struct ApiHttpServeOptions {
@@ -69,7 +71,7 @@ pub struct ApiServerConfig {
     pub workspace_root: PathBuf,
     default_session_mode: String,
     session_environment: crate::adapters::acp::AcpSessionEnvironmentConfig,
-    host_responder: Option<Arc<dyn ApiHostResponder>>,
+    host_responder: Option<Arc<dyn ApiHostResponderBinder>>,
 }
 
 impl ApiServerConfig {
@@ -94,8 +96,8 @@ impl ApiServerConfig {
         self
     }
 
-    pub fn with_host_responder(mut self, responder: Arc<dyn ApiHostResponder>) -> Self {
-        self.host_responder = Some(responder);
+    pub fn with_host_responder(mut self, binder: Arc<dyn ApiHostResponderBinder>) -> Self {
+        self.host_responder = Some(binder);
         self
     }
 
@@ -131,6 +133,10 @@ pub struct ApiServer {
 impl ApiServer {
     pub fn new(mut config: ApiServerConfig) -> Self {
         config.acp.auth_policy = AuthPolicy::allow_all();
+        // The bridge answers host requests in-process; one owner for both transports.
+        if config.acp.host_responder.is_none() {
+            config.acp.host_responder = config.host_responder.clone();
+        }
         let provider_catalog = ProviderCatalogRuntime {
             llm_config_overrides: config.acp.llm_config_overrides.clone(),
             llm_capability_overrides: config.acp.llm_capability_overrides.clone(),
@@ -160,7 +166,6 @@ impl ApiServer {
             provider_catalog,
             default_session_mode: config.default_session_mode,
             session_environment: config.session_environment,
-            host_responder: config.host_responder,
             event_log,
             event_log_error,
             canonical_sessions,
@@ -215,7 +220,6 @@ struct ApiState {
     provider_catalog: ProviderCatalogRuntime,
     default_session_mode: String,
     session_environment: crate::adapters::acp::AcpSessionEnvironmentConfig,
-    host_responder: Option<Arc<dyn ApiHostResponder>>,
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
     canonical_sessions: Option<crate::sessions::SharedSessionStore>,
@@ -505,8 +509,7 @@ impl ApiState {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         match message.get("method").and_then(Value::as_str) {
             Some(method @ ("host/capabilities" | "host/call")) => {
-                let params = message.get("params").cloned().unwrap_or(Value::Null);
-                self.handle_host_request(id, method.to_owned(), params);
+                self.handle_host_request(id, method.to_owned());
             }
             Some("session/request_permission") => {
                 self.register_permission_request(message);
