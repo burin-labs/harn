@@ -1,6 +1,34 @@
 use super::*;
 use std::fs;
 
+#[cfg(unix)]
+mod inherited_lease;
+
+fn run_isolated(name: &str, case: fn()) {
+    const WORKER: &str = "HARN_SEED_PERSISTENCE_TEST";
+    let test = format!("workspace_checkpoint::seed::persistent_tests::{name}");
+    let completed = format!("seed persistence completed: {test}");
+    if std::env::var(WORKER).as_deref() == Ok(test.as_str()) {
+        case();
+        println!("{completed}");
+        return;
+    }
+    // A neighboring test can fork with our lease open and retain it until exec.
+    // Keep lease ownership in a process that runs only this case.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &test, "--nocapture"])
+        .env(WORKER, &test)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{test}:\n{stdout}\n{stderr}");
+    assert!(
+        stdout.lines().any(|line| line == completed),
+        "case did not complete: {stdout}"
+    );
+}
+
 #[derive(Deserialize, Serialize)]
 struct Invocation {
     saved: SavedReplayWorkspace,
@@ -10,6 +38,13 @@ struct Invocation {
 
 #[test]
 fn saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners() {
+    run_isolated(
+        "saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners",
+        saved_workspace_restarts_case,
+    );
+}
+
+fn saved_workspace_restarts_case() {
     const CHILD: &str = "WORKSPACE_SEED_TEST_SAVED_CHILD";
     const TEST: &str = "workspace_checkpoint::seed::persistent_tests::saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners";
     if let Some(path) = std::env::var_os(CHILD) {
@@ -92,6 +127,13 @@ fn saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners() {
 
 #[test]
 fn saved_seed_tampering_refuses_without_replacing_the_previous_trial() {
+    run_isolated(
+        "saved_seed_tampering_refuses_without_replacing_the_previous_trial",
+        saved_seed_tampering_case,
+    );
+}
+
+fn saved_seed_tampering_case() {
     let source = tempfile::tempdir().unwrap();
     let storage = tempfile::tempdir().unwrap();
     fs::write(source.path().join("file"), "initial").unwrap();
@@ -114,6 +156,13 @@ fn saved_seed_tampering_refuses_without_replacing_the_previous_trial() {
 
 #[test]
 fn saved_restore_recovers_both_interrupted_publish_states() {
+    run_isolated(
+        "saved_restore_recovers_both_interrupted_publish_states",
+        saved_restore_recovers_case,
+    );
+}
+
+fn saved_restore_recovers_case() {
     let source = tempfile::tempdir().unwrap();
     let storage = tempfile::tempdir().unwrap();
     fs::write(source.path().join("file"), "initial").unwrap();
@@ -144,6 +193,14 @@ fn saved_restore_recovers_both_interrupted_publish_states() {
 #[cfg(unix)]
 #[test]
 fn saved_restore_keeps_external_links_and_private_permissions_outside_its_authority() {
+    run_isolated(
+        "saved_restore_keeps_external_links_and_private_permissions_outside_its_authority",
+        saved_restore_keeps_external_links_case,
+    );
+}
+
+#[cfg(unix)]
+fn saved_restore_keeps_external_links_case() {
     use std::os::unix::{fs::symlink, fs::PermissionsExt};
     let source = tempfile::tempdir().unwrap();
     let storage = tempfile::tempdir().unwrap();
