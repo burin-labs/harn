@@ -10,6 +10,7 @@ import copy
 import sys
 from pathlib import Path
 from collections.abc import Mapping
+from dataclasses import MISSING, fields as dataclass_fields, is_dataclass
 
 
 def load_bindings(artifacts: Path):
@@ -60,8 +61,7 @@ def main() -> int:
         pass
     else:
         raise AssertionError("provider usage accepted missing required cache certainty")
-    events = json.loads((artifacts.parents[1] / "conformance" / "protocols" / "fixtures" / "acp" / "agent_event_ext_notifications.valid.json").read_text())
-    host_result = next(event["params"] for event in events["documents"] if event["params"]["kind"] == "host_tool_result")
+    host_result = fixture["hostToolResult"]
     result_fields = hp.HarnAgentEventHostToolResult.__dataclass_fields__
     result = {key: value for key, value in host_result.items() if key in result_fields}
     result["rawOutput"] = None
@@ -74,14 +74,11 @@ def main() -> int:
     else:
         raise AssertionError("typed host result accepted missing required raw output")
     json_null_cases = set()
-    separate_shapes = set()
-    for event in events["documents"]:
-        payload = event["params"]
-        kind = payload["kind"]
-        cls = getattr(hp, "HarnAgentEvent" + "".join(part.capitalize() for part in kind.split("_")), None)
-        if cls is None:
-            separate_shapes.add(kind)
-            continue
+    for kind, payload in [
+        ("host_tool_result", host_result),
+        ("composition_child_call", envelopes["agentEventNotification"]["params"]),
+    ]:
+        cls = getattr(hp, "HarnAgentEvent" + "".join(part.capitalize() for part in kind.split("_")))
         fields = cls.__dataclass_fields__
         typed_payload = {key: value for key, value in payload.items() if key in fields}
         for name, field in fields.items():
@@ -92,7 +89,16 @@ def main() -> int:
             json_null_cases.add((kind, name))
     if ("host_tool_result", "rawOutput") not in json_null_cases:
         raise AssertionError("typed event JSON null census did not reach host output")
-    print(f"typed event required JSON null cases: {len(json_null_cases)}; separate shapes: {sorted(separate_shapes)}")
+    required_json_fields = set()
+    for name, cls in vars(hp).items():
+        if not isinstance(cls, type) or not is_dataclass(cls) or getattr(cls, "to_wire", None) is not hp._HarnDataclass.to_wire:
+            continue
+        for field in dataclass_fields(cls):
+            if field.type == "JsonValue" and field.default is MISSING and field.default_factory is MISSING:
+                required_json_fields.add((name, field.name))
+    if ("HarnAgentEventHostToolResult", "rawOutput") not in required_json_fields:
+        raise AssertionError("required JSON field census did not reach typed host output")
+    print(f"typed event required JSON null cases: {len(json_null_cases)}; required JSON fields using shared writer: {len(required_json_fields)}")
     cases = [
         ("ACPRequest", envelopes["request"], hp.ACPRequest),
         ("ACPResponse", envelopes["response"], hp.ACPResponse),

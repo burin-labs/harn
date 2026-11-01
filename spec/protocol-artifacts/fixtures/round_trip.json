@@ -191,6 +191,29 @@
     "result_readers": [],
     "side_effect_level": "process_exec"
   },
+  "hostToolResult": {
+    "deliveredAtSeam": "immediate",
+    "delivery": "immediate",
+    "durationMs": 12,
+    "error": null,
+    "injectionId": "injection-42",
+    "provenance": {
+      "source": "user_invoked_tool"
+    },
+    "rawInput": {
+      "path": "README.md"
+    },
+    "rawOutput": null,
+    "resultPointer": null,
+    "sanitization": {
+      "action": "passed"
+    },
+    "sequence": 1,
+    "status": "completed",
+    "toolCallId": "tool-42",
+    "toolKind": null,
+    "toolName": "read_file"
+  },
   "mcpDiscoverResult": {
     "_meta": {
       "io.modelcontextprotocol/serverInfo": {

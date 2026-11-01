@@ -462,6 +462,26 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
             },
         }
     });
+    let host_tool_result = serde_json::to_value(
+        harn_serve::adapters::acp::agent_event_payloads::HostToolResult {
+            injection_id: "injection-42".into(),
+            tool_call_id: "tool-42".into(),
+            tool_name: "read_file".into(),
+            tool_kind: None,
+            raw_input: json!({"path": "README.md"}),
+            status: "completed".into(),
+            raw_output: None,
+            result_pointer: None,
+            error: None,
+            duration_ms: Some(12),
+            delivery: json!("immediate"),
+            delivered_at_seam: Some("immediate".into()),
+            sequence: 1,
+            provenance: json!({"source": "user_invoked_tool"}),
+            sanitization: json!({"action": "passed"}),
+        },
+    )
+    .map_err(|error| format!("failed to serialize host-tool result fixture: {error}"))?;
     let tool_call_receipt = json!({
         "schema_version": TOOL_CALL_RECEIPT_SCHEMA_VERSION,
         "session_id": "sess-42",
@@ -617,6 +637,7 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         "sessionRecapAvailability": session_recap_availability,
         "planDocument": super::plan_records::round_trip_fixture()?,
         "providerUsage": super::provider_usage::round_trip_fixtures()?,
+        "hostToolResult": host_tool_result,
     });
 
     serde_json::to_string_pretty(&fixture)
