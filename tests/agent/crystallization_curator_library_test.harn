@@ -59,8 +59,18 @@ pipeline test_curator_skips_without_new_evidence(harness: Harness) {
         {
           require_new_evidence: true,
           evidence: [
-            {id: "run-one", session_id: "", prompt: "Verify the widget package", tool_sequence: ["run"]},
-            {id: "run-two", session_id: "", prompt: "Verify the widget again", tool_sequence: ["run"]},
+            {
+              id: "run-one",
+              session_id: "",
+              prompt: "Verify the widget package",
+              tool_sequence: ["run"],
+            },
+            {
+              id: "run-two",
+              session_id: "",
+              prompt: "Verify the widget again",
+              tool_sequence: ["run"],
+            },
           ],
         },
       )
