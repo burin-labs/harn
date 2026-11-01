@@ -34,6 +34,19 @@ pipeline test_package_quotes_a_single_quote_for_the_shell() {
   assert_eq(pkg.verify_command, "echo 'it'\"'\"'s done'")
 }
 
+pipeline test_package_projects_a_fast_check_beside_the_full_chain() {
+  const full = crystallization_command_sequence_package("Relay check", "Verify like CI.", STEPS)
+  assert_eq(full?.fast_verify_command, nil, "no fast check unless one is learned")
+  const pkg = crystallization_command_sequence_package(
+    "Relay check",
+    "Verify like CI.",
+    STEPS,
+    [{label: "alerts", argv: ["python3", "-m", "pytest", "-q", "tests/alerts"]}],
+  )
+  assert_eq(pkg.fast_verify_command, "python3 -m pytest -q tests/alerts")
+  assert_eq(pkg.verify_command, full.verify_command, "the full chain is unchanged")
+}
+
 pipeline test_package_runs_a_step_from_its_directory() {
   const pkg = crystallization_command_sequence_package(
     "web check",

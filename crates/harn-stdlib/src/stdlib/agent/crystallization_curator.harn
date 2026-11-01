@@ -142,7 +142,7 @@ These examples define breadth, not templates:
 2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
 3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
 
-Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged.
+Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
 
 The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
 
@@ -475,33 +475,11 @@ fn cc_shell_word(word: string) -> string {
   return "'" + word.replace("'", "'\"'\"'") + "'"
 }
 
-/**
- * Render a complete, tested MCP tool package that runs a learned command
- * sequence in order and returns a compact failure receipt, plus the same
- * sequence as one shell line (`verify_command`) a host may adopt as the
- * project's verifier. `steps` is `[{label, argv}]`, at most eight steps, each a
- * fixed argv with repository-relative paths.
- *
- * @effects: []
- * @errors: [invalid_steps]
- * @api_stability: experimental
- */
-pub fn crystallization_command_sequence_package(
-  raw_name: string,
-  raw_description: string,
-  raw_steps: list,
-) -> dict {
-  const tool = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw_name))) ?? ""
-  if tool == "" || !regex_match("^[a-z][a-z0-9_]*$", tool) {
-    throw "invalid_steps: name must start with a letter, got: " + cc_text(raw_name)
-  }
-  const description = cc_text(raw_description)
-  if description == "" {
-    throw "invalid_steps: description is required"
-  }
+/** Validate learned `[{label, argv, cwd?}]` steps: at most eight, repository-relative. */
+fn cc_normalize_steps(raw_steps: list, field: string) -> list {
   if type_of(raw_steps) != "list" || len(raw_steps) == 0
     || len(raw_steps) > COMMAND_SEQUENCE_MAX_STEPS {
-    throw "invalid_steps: steps must list 1 to ${COMMAND_SEQUENCE_MAX_STEPS} commands"
+    throw "invalid_steps: ${field} must list 1 to ${COMMAND_SEQUENCE_MAX_STEPS} commands"
   }
   let steps = []
   for raw in raw_steps {
@@ -527,6 +505,45 @@ pub fn crystallization_command_sequence_package(
     steps = steps
       + [dir == "" ? {label: label, argv: words} : {label: label, argv: words, cwd: dir}]
   }
+  return steps
+}
+
+fn cc_steps_shell(steps: list) -> string {
+  return join(steps.map({ step -> cc_step_shell(step) }).to_list(), " && ")
+}
+
+/**
+ * Render a complete, tested MCP tool package that runs a learned command
+ * sequence in order and returns a compact failure receipt, plus the same
+ * sequence as one shell line (`verify_command`) a host may adopt as the
+ * project's verifier. `steps` is `[{label, argv, cwd?}]`, at most eight steps,
+ * each a fixed argv with repository-relative paths. Optional `fast_steps`, in
+ * the same shape, is the quick check to run while working (for example lint
+ * and the fastest declared tests); it projects to `fast_verify_command` and the
+ * full `steps` stay the check that must pass before finishing.
+ *
+ * @effects: []
+ * @errors: [invalid_steps]
+ * @api_stability: experimental
+ */
+pub fn crystallization_command_sequence_package(
+  raw_name: string,
+  raw_description: string,
+  raw_steps: list,
+  raw_fast_steps: list? = nil,
+) -> dict {
+  const tool = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw_name))) ?? ""
+  if tool == "" || !regex_match("^[a-z][a-z0-9_]*$", tool) {
+    throw "invalid_steps: name must start with a letter, got: " + cc_text(raw_name)
+  }
+  const description = cc_text(raw_description)
+  if description == "" {
+    throw "invalid_steps: description is required"
+  }
+  const steps = cc_normalize_steps(raw_steps, "steps")
+  const fast = raw_fast_steps == nil || len(raw_fast_steps) == 0
+    ? []
+    : cc_normalize_steps(raw_fast_steps, "fast_steps")
   const labels = steps.map({ step -> step.label }).to_list()
   const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
     "__TOOL__",
@@ -534,13 +551,14 @@ pub fn crystallization_command_sequence_package(
   )
     .replace("__DESCRIPTION__", json_stringify(description))
   const test_source = COMMAND_SEQUENCE_TEST.replace("__LABELS__", json_stringify(labels))
-  return {
+  const rendered = {
     entrypoint: "server.harn",
     tool_names: [tool],
     source: source.trim() + "\n",
     test_source: test_source.trim() + "\n",
-    verify_command: join(steps.map({ step -> cc_step_shell(step) }).to_list(), " && "),
+    verify_command: cc_steps_shell(steps),
   }
+  return len(fast) == 0 ? rendered : rendered + {fast_verify_command: cc_steps_shell(fast)}
 }
 
 fn cc_scaffold_tool(
@@ -831,7 +849,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
       {
         name: "scaffold_harn_tool",
         description:
-          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point. With `steps`, return a complete, tested tool that runs that command sequence in order with failure receipts, plus its `verify_command`.",
+          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point. With `steps`, return a complete, tested tool that runs that command sequence in order with failure receipts, plus its `verify_command`; with `fast_steps`, also the quick in-progress check as `fast_verify_command`.",
         parameters: {
           name: {type: "string"},
           description: {type: "string"},
@@ -852,6 +870,19 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
               },
             },
           },
+          fast_steps: {
+            type: "array",
+            description:
+              "Optional quick check to run while working, same shape as steps: lint and the fastest declared tests, never broader than steps.",
+            items: {
+              type: "object",
+              properties: {
+                label: {type: "string"},
+                argv: {type: "array", items: {type: "string"}},
+                cwd: {type: "string"},
+              },
+            },
+          },
         },
         returns: {type: "object"},
         handler: { args ->
@@ -861,6 +892,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
                 to_string(args?.name ?? ""),
                 to_string(args?.description ?? ""),
                 args.steps,
+                args?.fast_steps,
               )
             }
             const result = is_err(rendered) ? {
@@ -960,6 +992,11 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
                       type: "string",
                       description:
                         "For a command-sequence tool, the same sequence as one shell line, as scaffold_harn_tool returned it.",
+                    },
+                    fast_verify_command: {
+                      type: "string",
+                      description:
+                        "For a command-sequence tool with fast_steps, the quick check as scaffold_harn_tool returned it.",
                     },
                   },
                 },
