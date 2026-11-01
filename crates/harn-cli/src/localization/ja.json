@@ -822,6 +822,7 @@
   "Enter {env_name} for .env, or leave blank for a placeholder: ": ".env 用の {env_name} を入力してください。空欄のままにするとプレースホルダーになります: ",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it": "パックする Entrypoint `.harn` ファイル。エントリポイントのディレクトリ配下で import ディレクティブから参照される再帰的な Harn モジュールおよび非 Harn アセットは、それと一緒にバンドルされる",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it.\n\nWhen `harn pack` is invoked without a subcommand, this positional argument selects the build path; passing a subcommand (e.g. `harn pack verify <bundle>`) routes to that subcommand instead.": "パックする Entrypoint `.harn` ファイル。エントリポイントのディレクトリ配下で import ディレクティブから参照される再帰的な Harn モジュールおよび非 Harn アセットは、それと一緒にバンドルされる。\n\n`harn pack` がサブコマンドなしで呼び出された場合、この位置引数がビルドパスを選択します。サブコマンド（例: `harn pack verify <bundle>`）を指定すると、代わりにそのサブコマンドへルーティングされます。",
+  "Environment policy for a client whose `session/new` names none, such as a standard ACP editor. Without this flag such a request is refused. A policy the client sends always wins": "`session/new` で環境ポリシーを指定しないクライアント (標準の ACP エディターなど) に適用する環境ポリシー。このフラグがない場合、そのような要求は拒否されます。クライアントが送信したポリシーが常に優先されます",
   "Estimated expensive-work cost for budget enforcement": "バジェット強制のための推定高コスト作業コスト",
   "Estimated token count for budget enforcement": "バジェット強制のための推定トークン数",
   "Eval pack: {eval_path}": "評価パック: {eval_path}",

@@ -20,7 +20,7 @@ pub(crate) fn selected_locale() -> Locale {
     process_locale()
 }
 
-const CATALOGS: [(&str, &str); 8] = [
+const CATALOGS: [(&str, &str); 9] = [
     ("es", include_str!("localization/es.json")),
     ("fr", include_str!("localization/fr.json")),
     ("de", include_str!("localization/de.json")),
@@ -29,6 +29,7 @@ const CATALOGS: [(&str, &str); 8] = [
     ("ja", include_str!("localization/ja.json")),
     ("ko", include_str!("localization/ko.json")),
     ("zh-Hans", include_str!("localization/zh-Hans.json")),
+    ("ru", include_str!("localization/ru.json")),
 ];
 type Catalog = BTreeMap<String, String>;
 
@@ -244,21 +245,28 @@ mod tests {
 
     #[test]
     fn catalogs_do_not_introduce_unrelated_scripts_into_translated_prose() {
-        let unexpected = |source: &str, translated: &str| {
+        let unexpected = |locale: &str, source: &str, translated: &str| {
             translated.chars().any(|ch| {
                 matches!(ch, '\u{0400}'..='\u{052f}' | '\u{0590}'..='\u{06ff}' | '\u{0900}'..='\u{097f}')
+                    && !(locale == "ru" && matches!(ch, '\u{0400}'..='\u{052f}'))
                     && !source.contains(ch)
             })
         };
-        assert!(unexpected("Allow a provider", "Aplica una अनुमति"));
-        assert!(unexpected("Retry policy", "Política de повторição"));
-        assert!(unexpected("Repeatable", "قابل répétable"));
-        assert!(!unexpected("Example: العربية", "Exemple : العربية"));
+        assert!(unexpected("es", "Allow a provider", "Aplica una अनुमति"));
+        assert!(unexpected(
+            "pt-BR",
+            "Retry policy",
+            "Política de повторição"
+        ));
+        assert!(unexpected("fr", "Repeatable", "قابل répétable"));
+        assert!(!unexpected("fr", "Example: العربية", "Exemple : العربية"));
+        assert!(!unexpected("ru", "Retry", "Повторить"));
+        assert!(unexpected("ru", "Retry", "अनुमति"));
         let source: Catalog = serde_json::from_str(include_str!("localization/en.json")).unwrap();
         for (locale, catalog) in TRANSLATIONS.iter() {
             for (key, text) in catalog {
                 assert!(
-                    !unexpected(&source[key], text),
+                    !unexpected(locale, &source[key], text),
                     "{locale}: unrelated script in {key}"
                 );
             }

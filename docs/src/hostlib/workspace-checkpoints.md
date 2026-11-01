@@ -15,7 +15,7 @@ detail}` from every method, never an empty success.
 | Method | Result |
 |--------|--------|
 | `harness.fs.checkpoint_capture(request)` | Record a boundary. Request: `{session_id, boundary_id, root?}`. |
-| `harness.fs.checkpoint_call_begin(request)` | Stat the tree before a tool or shell call. Request: `{session_id, call_id}`. |
+| `harness.fs.checkpoint_call_begin(request)` | Stat the files git lists as changed before a tool or shell call. Request: `{session_id, call_id}`. |
 | `harness.fs.checkpoint_call_end(request)` | Stat again and attribute each changed path, with its post-call hash, to the call. Request: `{session_id, call_id, side_effect?}`. |
 | `harness.fs.checkpoint_plan(request)` | The restore plan to a boundary, without touching files. Request: `{session_id, boundary_id}`. |
 | `harness.fs.checkpoint_restore(request)` | Execute the plan and return the receipt. Request: `{session_id, boundary_id, paths?}`; `paths` must be non-empty when present, and omitting it restores every attributed path. |
@@ -109,15 +109,25 @@ be confirmed durable before a tracked tool is allowed to run.
 
 ## What a boundary stores
 
-- The stat index (path, size, mtime in nanoseconds, inode) of the non-ignored
-  tree, held in memory as the attribution baseline.
+- The stat index (path, size, mtime in nanoseconds, inode) of every file
+  `git status` lists: changed against HEAD in the index or on disk, or
+  untracked and not ignored. It is held in memory as the attribution baseline.
+  A file git does not list matches HEAD, so the scan never reads clean files.
+  Files flagged assume-unchanged or skip-worktree (including flags that
+  `core.ignorestat` sets) are stat'd directly, because `git status` does not
+  check them, and the scan's `git status` runs without a filesystem monitor.
 - A git tree written from the index. Clean tracked files resolve from the
   repository's object store.
 - Bytes only for files that differ from the index: modified and untracked
   files, content-addressed under `.harn/state/checkpoints/<session>/blobs/`.
   A file above 64 MiB or a dirty symlink is listed as unrestorable.
 
-A scan of about 10,000 files takes roughly 45 ms warm.
+A scan costs about as much as `git status` on the same tree. When HEAD moves
+during a call (a checkout, reset, or commit), the scan also diffs the two HEAD
+commits, so clean files the move rewrote are still attributed. Capture reuses
+the stored hash of a dirty file whose stat is unchanged since the previous
+boundary instead of reading it again. Outside a git worktree, run-tape effect
+scans walk every non-ignored file instead.
 
 ## Restore plan and guard
 
@@ -174,8 +184,11 @@ began at, is what tells two such effects apart.
   post-call hash.
 - A same-size edit inside one filesystem mtime tick is invisible to the stat
   diff.
-- Symlinks, nested repositories, and tracked files that an ignore rule matches
-  are outside the index.
+- Symlinks and nested repositories are outside the index.
+- A file that an ignore rule matches and git does not track is outside the
+  index, so an ignored file a call writes is neither attributed nor removed.
+- A directory or file git cannot read makes the scan incomplete: capture is
+  unavailable, and a call that ran while it was unreadable cannot be restored.
 - Declared Harn runtime state is not a workspace edit. This includes the
   session database and sidecars, writer locks, checkpoints, and scanner state,
   including source-relative state in nested directories. Other `.harn` files

@@ -23,6 +23,7 @@ describe("website languages", () => {
   })
   it("resolves browser region and script tags without claiming Traditional Chinese", () => {
     expect(resolveLocale("es-MX")).toBe("es")
+    expect(resolveLocale("ru-RU")).toBe("ru")
     expect(resolveLocale("pt_BR")).toBe("pt-BR")
     expect(resolveLocale("zh-CN")).toBe("zh-Hans")
     expect(resolveLocale("zh-Hant-TW")).toBeUndefined()

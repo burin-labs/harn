@@ -29,6 +29,9 @@ pub fn message_20(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  base de destino: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  целевая база: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  目标基座: " + (values[0] ?? "")
   }
@@ -68,6 +71,9 @@ pub fn message_21(locale: string, values: list<string>) -> string {
     return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
       + ")"
   }
+  if locale == "ru" {
+    return "  формат инструмента: " + (values[0] ?? "") + " (запрошен " + (values[1] ?? "") + ")"
+  }
   if locale == "zh-Hans" {
     return "  工具格式：" + (values[0] ?? "") + "（请求 " + (values[1] ?? "") + "）"
   }
@@ -103,6 +109,9 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "Exportação de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "Экспорт LoRA для " + (values[0] ?? "") + " через " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 导出 LoRA"
@@ -140,6 +149,9 @@ pub fn message_23(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "manifesto de avaliação em lote"
   }
+  if locale == "ru" {
+    return "манифест пакетной оценки"
+  }
   if locale == "zh-Hans" {
     return "批量评估清单"
   }
@@ -175,6 +187,9 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "recibos em lote"
+  }
+  if locale == "ru" {
+    return "квитанции пакета"
   }
   if locale == "zh-Hans" {
     return "批量收据"

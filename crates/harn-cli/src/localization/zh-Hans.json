@@ -822,6 +822,7 @@
   "Enter {env_name} for .env, or leave blank for a placeholder: ": "输入 {env_name} 作为 .env，或留空以使用占位符： ",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it": "要打包的入口点 `.harn` 文件。通过入口点目录下的导入指令引用的传递性 Harn 模块和非 Harn 资源会与其一起打包",
   "Entrypoint `.harn` file to pack. Transitive Harn modules and non-Harn assets referenced by import directives under the entrypoint's directory are bundled alongside it.\n\nWhen `harn pack` is invoked without a subcommand, this positional argument selects the build path; passing a subcommand (e.g. `harn pack verify <bundle>`) routes to that subcommand instead.": "要打包的入口点 `.harn` 文件。通过入口点目录下的导入指令引用的传递性 Harn 模块和非 Harn 资源会与其一起打包。\n\n当未带子命令调用 `harn pack` 时，此位置参数会选择构建路径；传入子命令（例如 `harn pack verify <bundle>`）则改为路由到该子命令。",
+  "Environment policy for a client whose `session/new` names none, such as a standard ACP editor. Without this flag such a request is refused. A policy the client sends always wins": "为 `session/new` 未指定环境策略的客户端（例如标准 ACP 编辑器）使用的环境策略。没有此标志时，此类请求会被拒绝。客户端发送的策略始终优先",
   "Estimated expensive-work cost for budget enforcement": "用于预算执行的估计高成本工作量",
   "Estimated token count for budget enforcement": "用于预算执行的估计 token 数量",
   "Eval pack: {eval_path}": "评估包：{eval_path}",
