@@ -1,0 +1,46 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
+import { llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+
+/**
+ * A curator run's outcome carries its measured provider ledger, so a host
+ * reports what the review spent instead of an empty usage record.
+ */
+pipeline test_a_curator_run_reports_its_measured_tokens(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const evidence = [
+        {
+          id: "run-one",
+          session_id: "",
+          prompt: "Verify the widget package",
+          tool_sequence: ["run"],
+          observed_at: "2026-08-13T12:00:00Z",
+        },
+      ]
+      const result = with_llm_script(
+        harness.llm,
+        [
+          llm_tool_call("submit_crystallization_batch", {proposals: []})
+            + {input_tokens: 1200, output_tokens: 80, simulated_cost_usd: 0.01},
+        ],
+        { ->
+          crystallization_curate(
+            harness,
+            {
+              project_root: root,
+              memory_root: path_join(root, "memory"),
+              evidence: evidence,
+              now: "2026-08-13T12:05:00Z",
+              agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 2},
+            },
+          )
+        },
+      )
+      assert_eq(result?.usage?.input_tokens, 1200, "the curator outcome reports its input tokens")
+      assert_eq(result?.usage?.output_tokens, 80)
+      assert_eq(result?.usage?.cost_usd, 0.01)
+      return nil
+    },
+  )
+}

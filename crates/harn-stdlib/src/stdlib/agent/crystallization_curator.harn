@@ -6,11 +6,13 @@
 // validates the terminal proposal contract and evidence membership.
 import { agent_loop } from "std/agent/loop"
 import {
+  pattern_learning_accepted_skills,
   pattern_learning_curator_evidence,
   pattern_learning_import_session_records,
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
+import { pl_state_root } from "std/agent/pattern_knowledge_persistence"
 import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
@@ -88,7 +90,65 @@ fn cc_session_ids(evidence: list) -> list {
   return out
 }
 
-fn cc_prompt(evidence: list, pending: list) -> dict {
+const REVIEWED_EVIDENCE_CAP: int = 200
+
+fn cc_review_file(fs: HarnessFs, options: any = nil) -> string {
+  return path_join(pl_state_root(fs, options), "crystallization", "curator-review.json")
+}
+
+/** Evidence ids an earlier review already saw. */
+fn cc_reviewed_ids(fs: HarnessFs, options: any = nil) -> list {
+  const text = try {
+    fs.read_text(cc_review_file(fs, options))
+  } catch {
+    ""
+  }
+  const parsed = text == "" ? nil : json_parse(text)
+  return type_of(parsed?.evidence_ids) == "list" ? parsed.evidence_ids : []
+}
+
+fn cc_record_review(fs: HarnessFs, evidence: list, options: any = nil) {
+  let ids = cc_reviewed_ids(fs, options)
+  for item in evidence {
+    const id = cc_text(item?.id)
+    if id != "" && !ids.contains(id) {
+      ids = ids + [id]
+    }
+  }
+  const start = max(0, len(ids) - REVIEWED_EVIDENCE_CAP)
+  const path = cc_review_file(fs, options)
+  fs.mkdir(dirname(path))
+  fs.write_text(path, json_stringify({evidence_ids: ids[start:len(ids)]}))
+}
+
+/**
+ * True when a session paid a workflow discovery cost the installed library
+ * does not already remove: a command failed, or it ran a command no installed
+ * check runs. A session that only ran installed checks, and passed, teaches
+ * nothing new. A session with no command ledger counts as new.
+ */
+fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
+  const checks = installed.map({ entry -> entry.verify_command }).filter({ text -> text != "" })
+    .to_list()
+  const ledger = item?.command_ledger
+  if type_of(ledger) != "list" {
+    // An unmeasured session is never read as covered.
+    return true
+  }
+  for entry in ledger {
+    if !(entry?.ok ?? false) {
+      return true
+    }
+    const command = cc_text(entry?.command)
+    if command != ""
+      && !checks.any({ check -> cc_runs_declared_check(check, {command: command, cwd: ""}) }) {
+      return true
+    }
+  }
+  return false
+}
+
+fn cc_prompt(evidence: list, pending: list, installed: list = [], declared: list = []) -> dict {
   const cards = cc_evidence_cards(evidence)
   const system = """
 You are Harn's crystallization curator. You inspect completed coding-agent sessions and decide whether repeated or strongly reusable work should become a durable project capability.
@@ -109,7 +169,9 @@ These examples define breadth, not templates:
 2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
 3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
 
-Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try.
+Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
+
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -123,6 +185,16 @@ ${json_stringify(cards)}
 <existing_pending>
 ${json_stringify(pending ?? [])}
 </existing_pending>
+
+<installed_capabilities>
+${json_stringify(installed)}
+</installed_capabilities>
+
+<declared_checks>
+${json_stringify(declared)}
+</declared_checks>
+
+An installed capability already serves future sessions: do not propose it again under any name. Submit zero proposals when the evidence shows nothing beyond the installed and pending library.
 
 Call submit_crystallization_batch when your analysis is complete.
 """
@@ -266,6 +338,257 @@ fn cc_lookup_skill(
   }
 }
 
+const COMMAND_SEQUENCE_MAX_STEPS: int = 8
+
+const COMMAND_SEQUENCE_SERVER = """
+import { command_run } from "std/command"
+import { ToolRegistry } from "std/tools"
+
+const STEP_TIMEOUT_MS: int = 300000
+
+const TAIL_LINES: int = 25
+
+/** The repository's working sequence, in the order that works. */
+const STEPS: list = __STEPS__
+
+/**
+ * The steps to run. A non-empty `target` (a repository-relative path such as a
+ * test directory) narrows the final step.
+ */
+pub fn check_plan(target: string) -> list {
+  const clean = target.trim()
+  if clean != "" && (clean.starts_with("/") || clean.contains("..") || !regex_match("^[A-Za-z0-9_./:-]+$", clean)) {
+    throw "target must be a repository-relative path, got: " + clean
+  }
+  let plan = []
+  for index in range(0, len(STEPS)) {
+    const step = STEPS[index]
+    plan = plan + [index == len(STEPS) - 1 && clean != "" ? {label: step.label, argv: step.argv + [clean]} : step]
+  }
+  return plan
+}
+
+fn tail_text(text: string) -> string {
+  const lines = text.split("\n")
+  const start = max(0, len(lines) - TAIL_LINES)
+  return join(lines[start:len(lines)], "\n")
+}
+
+/** Compact receipt: which steps ran, the first failing step, and its output tail. */
+pub fn summarize(steps: list) -> dict {
+  let failed = nil
+  for step in steps {
+    if !step.ok {
+      failed = step
+      break
+    }
+  }
+  const last = len(steps) == 0 ? nil : steps[len(steps) - 1]
+  return {
+    ok: failed == nil && len(steps) > 0,
+    steps: steps.map({ step -> {label: step.label, ok: step.ok, exit_code: step.exit_code} }).to_list(),
+    failed_step: failed?.label,
+    output_tail: tail_text(to_string((failed ?? last)?.output ?? "")),
+  }
+}
+
+/** Runs one step's argv from a directory and returns its process result. */
+pub type StepRunner = fn(list, string) -> dict
+
+/** Run `plan` in order from `cwd`, stopping at the first failing step. */
+pub fn run_plan(run: StepRunner, cwd: string, plan: list) -> dict {
+  let steps = []
+  for step in plan {
+    const dir = to_string(step?.cwd ?? "")
+    const result = run(step.argv, dir == "" ? cwd : path_join(cwd, dir))
+    steps = steps + [{label: step.label, ok: result.success, exit_code: result.exit_code, output: result.combined}]
+    if !result.success {
+      break
+    }
+  }
+  return summarize(steps)
+}
+
+/** Return a tool registry containing `__TOOL__`. */
+pub fn tools(harness: Harness, registry: ToolRegistry? = nil) -> ToolRegistry {
+  let reg = registry ?? tool_registry()
+  reg = tool_define(
+    reg,
+    "__TOOL__",
+    __DESCRIPTION__,
+    {
+      parameters: {
+        target: {type: "string", description: "Optional repository-relative path that narrows the final step; empty for everything."},
+      },
+      returns: {type: "object"},
+      annotations: {kind: "execute", side_effect_level: "workspace_write"},
+      handler: { args ->
+        const run = { argv, cwd -> command_run(harness.tools, argv, {cwd: cwd, timeout_ms: STEP_TIMEOUT_MS}) }
+        return run_plan(run, harness.fs.cwd(), check_plan(to_string(args?.target ?? "")))
+      },
+    },
+  )
+  return reg
+}
+
+/** Serve this package's tools over MCP. */
+pipeline default(harness: Harness) {
+  harness.tools.mcp_tools(tools(harness))
+}
+"""
+
+const COMMAND_SEQUENCE_TEST = """
+import { check_plan, run_plan, summarize } from "./server"
+
+pipeline test_plan_keeps_the_learned_order() {
+  assert_eq(check_plan("").map({ step -> step.label }).to_list(), __LABELS__)
+  const narrowed = check_plan("tests/unit")
+  assert_eq(narrowed[len(narrowed) - 1].argv[len(narrowed[len(narrowed) - 1].argv) - 1], "tests/unit")
+}
+
+pipeline test_plan_rejects_a_path_escape() {
+  const escaped = try {
+    check_plan("../outside")
+  }
+  assert(is_err(escaped), "a target must stay inside the repository")
+}
+
+pipeline test_summary_reports_the_first_failing_step() {
+  const receipt = summarize(
+    [
+      {label: "first", ok: true, exit_code: 0, output: "fine"},
+      {label: "second", ok: false, exit_code: 2, output: "broken here"},
+    ],
+  )
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.failed_step, "second")
+  assert_eq(receipt.output_tail, "broken here")
+}
+
+pipeline test_run_stops_at_the_first_failure() {
+  let calls = []
+  const fake = { argv, cwd ->
+    calls = calls + [{argv: argv, cwd: cwd}]
+    const failing = argv[0] == "second"
+    return {success: !failing, exit_code: failing ? 2 : 0, combined: failing ? "stale table" : "fine"}
+  }
+  const receipt = run_plan(
+    fake,
+    "workspace",
+    [
+      {label: "first", argv: ["first", "a"]},
+      {label: "second", argv: ["second"]},
+      {label: "never", argv: ["never"]},
+    ],
+  )
+  assert_eq(calls, [{argv: ["first", "a"], cwd: "workspace"}, {argv: ["second"], cwd: "workspace"}])
+  assert_eq(receipt.steps.map({ step -> step.label }).to_list(), ["first", "second"])
+  assert_eq(receipt.failed_step, "second")
+  assert_eq(receipt.output_tail, "stale table")
+}
+"""
+
+/** One step as shell text; a step with a `cwd` runs in a subshell from that directory. */
+fn cc_step_shell(step: dict) -> string {
+  const command = join(step.argv.map({ word -> cc_shell_word(word) }).to_list(), " ")
+  const dir = cc_text(step?.cwd)
+  return dir == "" ? command : "(cd " + cc_shell_word(dir) + " && " + command + ")"
+}
+
+fn cc_shell_word(word: string) -> string {
+  if word != "" && regex_match("^[A-Za-z0-9_./:=@%+-]+$", word) {
+    return word
+  }
+  return "'" + word.replace("'", "'\"'\"'") + "'"
+}
+
+/** Validate learned `[{label, argv, cwd?}]` steps: at most eight, repository-relative. */
+fn cc_normalize_steps(raw_steps: list, field: string) -> list {
+  if type_of(raw_steps) != "list" || len(raw_steps) == 0
+    || len(raw_steps) > COMMAND_SEQUENCE_MAX_STEPS {
+    throw "invalid_steps: ${field} must list 1 to ${COMMAND_SEQUENCE_MAX_STEPS} commands"
+  }
+  let steps = []
+  for raw in raw_steps {
+    const label = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw?.label))) ?? ""
+    const argv = raw?.argv
+    if label == "" || type_of(argv) != "list" || len(argv) == 0 {
+      throw "invalid_steps: each step needs a label and a non-empty argv list"
+    }
+    let words = []
+    for word in argv {
+      const text = to_string(word ?? "")
+      if type_of(word) != "string" || text == "" || text.starts_with("/") {
+        throw "invalid_steps: argv entries must be non-empty, repository-relative strings: "
+          + json_stringify(argv)
+      }
+      words = words + [text]
+    }
+    const dir = cc_text(raw?.cwd)
+    if dir != ""
+      && (dir.starts_with("/") || dir.contains("..") || !regex_match("^[A-Za-z0-9_./-]+$", dir)) {
+      throw "invalid_steps: a step cwd must be a repository-relative directory, got: " + dir
+    }
+    steps = steps
+      + [dir == "" ? {label: label, argv: words} : {label: label, argv: words, cwd: dir}]
+  }
+  return steps
+}
+
+fn cc_steps_shell(steps: list) -> string {
+  return join(steps.map({ step -> cc_step_shell(step) }).to_list(), " && ")
+}
+
+/**
+ * Render a complete, tested MCP tool package that runs a learned command
+ * sequence in order and returns a compact failure receipt, plus the same
+ * sequence as one shell line (`verify_command`) a host may adopt as the
+ * project's verifier. `steps` is `[{label, argv, cwd?}]`, at most eight steps,
+ * each a fixed argv with repository-relative paths. Optional `fast_steps`, in
+ * the same shape, is the quick check to run while working (for example lint
+ * and the fastest declared tests); it projects to `fast_verify_command` and the
+ * full `steps` stay the check that must pass before finishing.
+ *
+ * @effects: []
+ * @errors: [invalid_steps]
+ * @api_stability: experimental
+ */
+pub fn crystallization_command_sequence_package(
+  raw_name: string,
+  raw_description: string,
+  raw_steps: list,
+  raw_fast_steps: list? = nil,
+) -> dict {
+  const tool = regex_replace(r"[^a-z0-9_]+", "_", lowercase(cc_text(raw_name))) ?? ""
+  if tool == "" || !regex_match("^[a-z][a-z0-9_]*$", tool) {
+    throw "invalid_steps: name must start with a letter, got: " + cc_text(raw_name)
+  }
+  const description = cc_text(raw_description)
+  if description == "" {
+    throw "invalid_steps: description is required"
+  }
+  const steps = cc_normalize_steps(raw_steps, "steps")
+  const fast = raw_fast_steps == nil || len(raw_fast_steps) == 0 ? [] : cc_normalize_steps(
+    raw_fast_steps,
+    "fast_steps",
+  )
+  const labels = steps.map({ step -> step.label }).to_list()
+  const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
+    "__TOOL__",
+    tool,
+  )
+    .replace("__DESCRIPTION__", json_stringify(description))
+  const test_source = COMMAND_SEQUENCE_TEST.replace("__LABELS__", json_stringify(labels))
+  const rendered = {
+    entrypoint: "server.harn",
+    tool_names: [tool],
+    source: source.trim() + "\n",
+    test_source: test_source.trim() + "\n",
+    verify_command: cc_steps_shell(steps),
+  }
+  return len(fast) == 0 ? rendered : rendered + {fast_verify_command: cc_steps_shell(fast)}
+}
+
 fn cc_scaffold_tool(
   capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
   raw_name: string?,
@@ -390,12 +713,111 @@ fn cc_search_builtins(
   return {success: true, query: query, matches: matches}
 }
 
+/**
+ * The installed library, normalized to `{name, verify_command}`: the host's
+ * installed capabilities plus every accepted skill.
+ */
+fn cc_installed(fs: HarnessFs, options: any = nil) -> list {
+  let out = []
+  const accepted = pattern_learning_accepted_skills(fs, options).map(
+    { skill -> {name: skill?.name} },
+  )
+  for item in (options?.installed ?? []) + accepted.to_list() {
+    const name = cc_text(item?.name)
+    if name != "" {
+      out = out + [{name: name, verify_command: cc_text(item?.verify_command)}]
+    }
+  }
+  return out
+}
+
+/** A proposal duplicates an installed capability by name or by its verifier line. */
+fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
+  const name = cc_text(proposal?.name)
+  const verify = cc_text(proposal?.artifact?.verify_command)
+  return installed.any(
+    { item -> item.name == name || (verify != "" && item.verify_command == verify) },
+  )
+}
+
+/**
+ * The repository's declared checks, normalized to `{intent, command, cwd, origin}`.
+ * A host passes the checks its project-check resolver chose; learned checks
+ * stay out so the curator never reads its own output back as a declaration.
+ */
+fn cc_declared_checks(options: any = nil) -> list {
+  let out = []
+  for item in options?.declared_checks ?? [] {
+    const command = cc_text(item?.command)
+    if command != "" {
+      out = out
+        + [
+          {
+            intent: cc_text(item?.intent),
+            command: command,
+            cwd: cc_text(item?.cwd),
+            origin: cc_text(item?.origin),
+          },
+        ]
+    }
+  }
+  return out
+}
+
+/**
+ * Shell text as comparable `&&` segments: quotes and subshell parentheses dropped, spaces collapsed.
+ */
+fn cc_command_segments(text: string) -> list {
+  const flat = text.replace("'", "").replace("\"", "").replace("(", "").replace(")", "")
+  return flat.split("&&").map(
+    { part -> join(part.split(" ").filter({ word -> word != "" }).to_list(), " ") },
+  )
+    .filter({ part -> part != "" })
+    .to_list()
+}
+
+/** True when `verify_command` runs `check` word for word, from the check's directory. */
+fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
+  const have = cc_command_segments(verify_command)
+  const dir = check.cwd == "" ? [] : cc_command_segments("cd " + cc_shell_word(check.cwd))
+  const want = dir + cc_command_segments(check.command)
+  for start in range(0, len(have) - len(want) + 1) {
+    if have[start:start + len(want)] == want {
+      const preceded_by_cd = len(dir) == 0 && start > 0 && have[start - 1].starts_with("cd ")
+      if !preceded_by_cd {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * The declared checks a learned verifier must run at least one of: the test
+ * checks, or the verify checks when none is a test.
+ */
+fn cc_required_declared_checks(declared: list) -> list {
+  const tests = declared.filter({ check -> check.intent == "test" }).to_list()
+  return len(tests) > 0 ? tests : declared.filter({ check -> check.intent == "verify" }).to_list()
+}
+
 fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
   let prepared = []
+  const installed = cc_installed(harness.fs, options)
+  const required = cc_required_declared_checks(cc_declared_checks(options))
   for proposal in proposals ?? [] {
+    if cc_duplicates_installed(proposal, installed) {
+      continue
+    }
     if proposal?.kind == "skill" {
       prepared = prepared + [proposal]
       continue
+    }
+    const verify = cc_text(proposal?.artifact?.verify_command)
+    if verify != "" && len(required) > 0
+      && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
+      throw "submit_crystallization_batch: `verify_command` must run a declared test check word for word from its cwd, not a broader command. Declared: "
+        + json_stringify(required)
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
@@ -455,10 +877,62 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
       {
         name: "scaffold_harn_tool",
         description:
-          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point from Harn's canonical tool package generator.",
-        parameters: {name: {type: "string"}, description: {type: "string"}},
+          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point. With `steps`, return a complete, tested tool that runs that command sequence in order with failure receipts, plus its `verify_command`; with `fast_steps`, also the quick in-progress check as `fast_verify_command`.",
+        parameters: {
+          name: {type: "string"},
+          description: {type: "string"},
+          steps: {
+            type: "array",
+            description:
+              "Optional learned command sequence: [{label, argv}] in the order that works, argv as repository-relative words.",
+            items: {
+              type: "object",
+              properties: {
+                label: {type: "string"},
+                argv: {type: "array", items: {type: "string"}},
+                cwd: {
+                  type: "string",
+                  description:
+                    "Repository-relative directory the step runs from; omit for the root.",
+                },
+              },
+            },
+          },
+          fast_steps: {
+            type: "array",
+            description:
+              "Optional quick check to run while working, same shape as steps: lint and the fastest declared tests, never broader than steps.",
+            items: {
+              type: "object",
+              properties: {
+                label: {type: "string"},
+                argv: {type: "array", items: {type: "string"}},
+                cwd: {type: "string"},
+              },
+            },
+          },
+        },
         returns: {type: "object"},
         handler: { args ->
+          if args?.steps != nil {
+            const rendered = try {
+              crystallization_command_sequence_package(
+                to_string(args?.name ?? ""),
+                to_string(args?.description ?? ""),
+                args.steps,
+                args?.fast_steps,
+              )
+            }
+            const result = is_err(rendered) ? {
+              success: false,
+              error: to_string(unwrap_err(rendered)),
+            } : unwrap(rendered) + {success: true}
+            return agent_tool_handler_result(
+              to_string(result),
+              result,
+              result.success ? "ok" : "error",
+            )
+          }
           const result = cc_scaffold_tool(
             {env: harness.env, fs: harness.fs, tools: harness.tools},
             args?.name,
@@ -542,6 +1016,16 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
                     tool_names: {type: "array", items: {type: "string"}},
                     source: {type: "string"},
                     test_source: {type: "string"},
+                    verify_command: {
+                      type: "string",
+                      description:
+                        "For a command-sequence tool, the same sequence as one shell line, as scaffold_harn_tool returned it.",
+                    },
+                    fast_verify_command: {
+                      type: "string",
+                      description:
+                        "For a command-sequence tool with fast_steps, the quick check as scaffold_harn_tool returned it.",
+                    },
                   },
                 },
               },
@@ -577,7 +1061,16 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
 /**
  * Run one bounded agentic crystallization review over recent session evidence.
  * The semantic decision is made by the model; Harn constrains evidence access,
- * proposal shape, cost, iterations, and durable review state.
+ * proposal shape, cost, iterations, and durable review state. `usage` is the
+ * run's physical provider ledger (tokens and cost of every curator call); it is
+ * absent when the session reported none, so a host reads unmeasured, never zero.
+ * A host passes `installed` (`[{name, verify_command}]`) so the curator neither
+ * proposes nor stages a capability the project already has, and
+ * `require_new_evidence: true` to skip the model call entirely when every
+ * evidence item was already seen by an earlier review, or when every unseen
+ * session only ran installed checks and passed (`no_new_workflow_evidence`). `declared_checks`
+ * (`[{intent, command, cwd}]`, the checks the repository states) bound a
+ * learned verifier's scope: one that runs none of the declared test checks is rejected.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
@@ -594,8 +1087,34 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
       session_import: session_import,
     }
   }
+  if options?.require_new_evidence ?? false {
+    const reviewed = cc_reviewed_ids(harness.fs, options)
+    const unreviewed = evidence.filter({ item -> !reviewed.contains(cc_text(item?.id)) }).to_list()
+    const installed = cc_installed(harness.fs, options)
+    const status = len(unreviewed) == 0 ? "no_new_evidence" : unreviewed.any(
+      { item -> cc_shows_new_workflow(item, installed) },
+    ) ? "" : "no_new_workflow_evidence"
+    if status != "" {
+      if len(unreviewed) > 0 {
+        cc_record_review(harness.fs, unreviewed, options)
+      }
+      return {
+        schema: CURATOR_SCHEMA,
+        status: status,
+        proposals: [],
+        proposal_count: 0,
+        evidence_count: len(evidence),
+        session_import: session_import,
+      }
+    }
+  }
   const pending_before = pattern_learning_pending(harness, options)
-  const prompts = cc_prompt(evidence, pending_before)
+  const prompts = cc_prompt(
+    evidence,
+    pending_before,
+    cc_installed(harness.fs, options),
+    cc_declared_checks(options),
+  )
   const route = options?.agent ?? {}
   let agent_options = route
     + {
@@ -625,6 +1144,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     agent_options = agent_options + {ladder: "frugal"}
   }
   const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
+  cc_record_review(harness.fs, evidence, options)
   const pending_after = pattern_learning_pending(harness, options)
   const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
   return {
@@ -635,6 +1155,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     proposal_count: len(proposals),
     proposals: proposals,
     session_import: session_import,
+    usage: result?.physical_usage,
     agent_result: result,
   }
 }

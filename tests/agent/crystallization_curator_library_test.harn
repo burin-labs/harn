@@ -1,0 +1,258 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
+import { llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+
+fn curate_with(harness: Harness, root: string, script: list, extra: dict) -> dict {
+  const evidence = [
+    {
+      id: "run-one",
+      session_id: "",
+      prompt: "Verify the widget package",
+      tool_sequence: ["run"],
+      observed_at: "2026-08-13T12:00:00Z",
+    },
+  ]
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      crystallization_curate(
+        harness,
+        {
+          project_root: root,
+          memory_root: path_join(root, "memory"),
+          session_store_root: root,
+          evidence: evidence,
+          now: "2026-08-13T12:05:00Z",
+          agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 2},
+        }
+          + extra,
+      )
+    },
+  )
+}
+
+fn priced_empty_batch() -> list {
+  return [
+    llm_tool_call("submit_crystallization_batch", {proposals: []})
+      + {input_tokens: 900, output_tokens: 40, simulated_cost_usd: 0.01},
+  ]
+}
+
+/**
+ * A review whose evidence an earlier review already saw makes no model call.
+ * The host imports sessions before the curator runs, so "new" means unreviewed,
+ * not newly imported.
+ */
+pipeline test_curator_skips_without_new_evidence(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const first = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert(first?.usage != nil, "unreviewed evidence is reviewed by the model")
+      const again = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_eq(again.status, "no_new_evidence")
+      assert_eq(again?.usage, nil, "no model call was made")
+      const next = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        {
+          require_new_evidence: true,
+          evidence: [
+            {
+              id: "run-one",
+              session_id: "",
+              prompt: "Verify the widget package",
+              tool_sequence: ["run"],
+            },
+            {
+              id: "run-two",
+              session_id: "",
+              prompt: "Verify the widget again",
+              tool_sequence: ["run"],
+            },
+          ],
+        },
+      )
+      assert(next?.usage != nil, "one unreviewed session is enough for a review")
+      return nil
+    },
+  )
+}
+
+fn session_running(id: string, ledger: list) -> dict {
+  return {
+    id: id,
+    session_id: "",
+    prompt: "Fix the widget",
+    tool_sequence: ["verify"],
+    command_ledger: ledger,
+  }
+}
+
+/** A new session that only ran an installed check, and passed, is not reviewed by a model. */
+pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const library = {
+        require_new_evidence: true,
+        installed: [{name: "verify-widget", verify_command: "make gen && make check"}],
+      }
+      const learned = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s1",
+                [{tool: "verify", command: "make gen && make check", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+      )
+      assert_eq(learned.status, "no_new_workflow_evidence")
+      assert_eq(learned?.usage, nil, "no model call was made")
+      const failed = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s2",
+                [{tool: "verify", command: "make gen && make check", exit_code: 2, ok: false}],
+              ),
+            ],
+          },
+      )
+      assert(failed?.usage != nil, "a failed check is new workflow evidence")
+      const other = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s3",
+                [{tool: "run", command: "make deploy", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+      )
+      assert(other?.usage != nil, "a command no installed check runs is new workflow evidence")
+      return nil
+    },
+  )
+}
+
+/** A proposal that matches an installed capability is not staged again. */
+pipeline test_curator_drops_a_proposal_matching_an_installed_capability(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const skill = {
+        kind: "skill",
+        name: "verify-widget",
+        title: "Verify Widget",
+        description: "Run the widget checks.",
+        when_to_use: "Before merging widget changes.",
+        body: "# Verify Widget\n\nRun the checks.",
+        evidence_ids: ["run-one"],
+      }
+      const result = curate_with(
+        harness,
+        root,
+        [llm_tool_call("submit_crystallization_batch", {proposals: [skill]})],
+        {installed: [{name: "verify-widget", verify_command: "make check"}]},
+      )
+      assert_eq(result.proposal_count, 0, "the installed capability is not proposed again")
+      const fresh = curate_with(
+        harness,
+        root,
+        [
+          llm_tool_call(
+            "submit_crystallization_batch",
+            {proposals: [skill + {name: "lint-widget"}]},
+          ),
+        ],
+        {installed: [{name: "verify-widget", verify_command: "make check"}]},
+      )
+      assert_eq(fresh.proposal_count, 1, "a new capability is still staged")
+      return nil
+    },
+  )
+}
+
+fn verify_tool(verify_command: string) -> dict {
+  return {
+    kind: "harn_tool",
+    name: "verify-widget",
+    title: "Verify Widget",
+    description: "Generate, then run the widget checks.",
+    when_to_use: "Before finishing a widget change.",
+    body: "# Verify Widget\n\nCall the tool.",
+    evidence_ids: ["run-one"],
+    artifact: {
+      entrypoint: "server.harn",
+      tool_names: ["verify_widget"],
+      source: "pipeline main(harness: Harness, task) { }",
+      test_source: "pipeline test_ok(harness: Harness, task) { }",
+      verify_command: verify_command,
+    },
+  }
+}
+
+fn submit_one(proposal: dict) -> list {
+  return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
+}
+
+/** A learned verifier must run a declared test check word for word, never only a broader suite. */
+pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [
+          {intent: "test", command: "python3 -m pytest tests/alerts -m \"not soak\" -q", cwd: ""},
+          {intent: "test", command: "npm test", cwd: "web"},
+        ],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const wider = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("python3 tools/codegen.py && python3 -m pytest tests")),
+        declared,
+      )
+      assert_eq(wider.proposal_count ?? 0, 0, "a verifier running the whole suite is rejected")
+      const wrong_dir = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("python3 tools/codegen.py && npm test")),
+        declared,
+      )
+      assert_eq(
+        wrong_dir.proposal_count ?? 0,
+        0,
+        "a declared check run from the wrong directory is rejected",
+      )
+      const scoped = curate_with(
+        harness,
+        root,
+        submit_one(
+          verify_tool(
+            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q",
+          ),
+        ),
+        declared,
+      )
+      assert_eq(scoped.proposal_count, 1, "codegen composed on top of a declared check is staged")
+      return nil
+    },
+  )
+}

@@ -1,0 +1,2 @@
+`crystallization_curate` accepts `declared_checks`, the checks the repository states, and rejects a learned verifier that does not run every declared test check word for word from its directory. Command-sequence steps take an optional repository-relative `cwd`.
+`scaffold_harn_tool` accepts optional `fast_steps` and returns the quick in-progress check as `fast_verify_command` beside the full `verify_command`.
