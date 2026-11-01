@@ -2353,6 +2353,11 @@ class HarnPlanDocument(_HarnDataclass):
     updated_at: str
 
 
+class HarnProviderEndpointConfigurationError(str, Enum):
+    INVALID_URL = "invalid_url"
+    NOT_ABSOLUTE_HTTP = "not_absolute_http"
+
+
 class HarnMachineSpendPeriod(str, Enum):
     DAY = "day"
     MONTH = "month"
