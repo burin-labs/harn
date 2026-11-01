@@ -1,3 +1,4 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
 import { agent_loop } from "std/agent/loop"
 import { agent_options } from "std/agent/options"
 import {
@@ -11,8 +12,9 @@ import {
   pattern_learning_state,
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
+import { pl_redact_command } from "std/agent/pattern_knowledge_persistence"
 import { session_store_append, session_store_events, session_store_list } from "std/session-store"
-import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
+import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 
 fn append_session_evidence(
   agent: HarnessAgent,
@@ -429,6 +431,110 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
         !json_stringify(transcript).contains("abc123secret"),
         "the drill-down must not leak a credential",
       )
+      return nil
+    },
+  )
+}
+
+pipeline test_command_redaction_removes_whole_quoted_values() {
+  assert_eq(
+    pl_redact_command("DEPLOY_TOKEN=\"two words\" ./deploy --env prod"),
+    "DEPLOY_TOKEN=<redacted> ./deploy --env prod",
+  )
+  assert_eq(
+    pl_redact_command("DEPLOY_TOKEN=\"has \\\"escaped\\\" quotes\" ./deploy"),
+    "DEPLOY_TOKEN=<redacted> ./deploy",
+  )
+  assert_eq(pl_redact_command("DB_PASSWORD='a b c' psql"), "DB_PASSWORD=<redacted> psql")
+  assert_eq(pl_redact_command("API_KEY=\"never closed tail"), "API_KEY=<redacted>")
+  assert_eq(pl_redact_command("password: \"two words\" next"), "password=<redacted> next")
+}
+
+fn append_message(agent: HarnessAgent, root: string, session_id: string, text: string) -> nil {
+  session_store_append(
+    agent,
+    session_id,
+    {transcript_event: {kind: "message", role: "assistant", visibility: "public", text: text}},
+    {root: root, actor: "pattern-learning-test", kind_type: "message"},
+  )
+}
+
+pipeline test_session_transcript_redacts_before_clipping_and_bounds_entries(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const options = {project_root: root, session_store_root: root}
+      // A token that straddles the 600-character clip: cut first, its head no
+      // longer matches the token pattern and would be kept verbatim.
+      const token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+      append_message(harness.agent, root, "session-straddle", "x".repeat(590) + " " + token)
+      const straddle = pattern_learning_session_transcript(
+        harness.agent,
+        "session-straddle",
+        options,
+      )
+      const head = to_string(straddle.entries[0]?.text)
+      assert(len(head) <= 601, "the entry stays bounded")
+      assert(
+        !head.contains("ghp_A1b2"),
+        "a token straddling the clip must not leak its head: ${head}",
+      )
+      for index in range(0, 85) {
+        append_message(harness.agent, root, "session-long", "step ${index}")
+      }
+      const transcript = pattern_learning_session_transcript(harness.agent, "session-long", options)
+      assert_eq(transcript.entry_count, 85)
+      assert_eq(transcript.truncated, true)
+      assert_eq(len(transcript.entries), 80)
+      assert_eq(transcript.entries[0].text, "step 5")
+      assert_eq(transcript.entries[79].text, "step 84")
+      return nil
+    },
+  )
+}
+
+pipeline test_inspect_session_evidence_returns_a_bounded_redacted_transcript(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const session_id = "session-inspected"
+      append_message(harness.agent, root, session_id, "API_KEY=\"two words\" make deploy")
+      for index in range(0, 85) {
+        append_message(harness.agent, root, session_id, "step ${index}")
+      }
+      const evidence = [
+        {
+          id: "run-inspected",
+          session_id: session_id,
+          prompt: "Deploy the service",
+          tool_sequence: ["run"],
+          observed_at: "2026-08-13T12:00:00Z",
+        },
+      ]
+      const result = with_llm_script(
+        harness.llm,
+        [
+          llm_tool_call("inspect_session_evidence", {session_id: session_id}),
+          llm_tool_call("submit_crystallization_batch", {proposals: []}),
+        ],
+        { ->
+          crystallization_curate(
+            harness,
+            {
+              project_root: root,
+              session_store_root: root,
+              memory_root: path_join(root, "memory"),
+              evidence: evidence,
+              now: "2026-08-13T12:05:00Z",
+              agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 3},
+            },
+          )
+        },
+      )
+      const seen = json_stringify(result?.agent_result ?? {})
+      assert(seen.contains("truncated"), "the handler ran and returned the bounded transcript")
+      assert(seen.contains("step 84"), "the handler returned the newest entries")
+      assert(!seen.contains("two words"), "the handler must not return a credential")
       return nil
     },
   )

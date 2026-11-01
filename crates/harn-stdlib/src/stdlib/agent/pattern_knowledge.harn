@@ -281,9 +281,29 @@ const TRANSCRIPT_ENTRY_LIMIT: int = 80
 
 const TRANSCRIPT_TEXT_LIMIT: int = 600
 
-fn pl_clip(text: string, limit: int) -> string {
-  const clean = pl_text(text)
+/** Redact, then bound: clipping first could cut a token below its pattern. */
+fn pl_redacted_clip(text: string, limit: int) -> string {
+  const clean = pl_redact_command(pl_text(text))
   return len(clean) <= limit ? clean : clean[0:limit] + "…"
+}
+
+/** Redact every string inside a tool input before it is serialized. */
+fn pl_redact_value(value: any) -> any {
+  const kind = type_of(value)
+  if kind == "string" {
+    return pl_redact_command(value)
+  }
+  if kind == "list" {
+    return value.map({ item -> pl_redact_value(item) }).to_list()
+  }
+  if kind == "dict" {
+    let out = {}
+    for key in keys(value) {
+      out = out + {[key]: pl_redact_value(value[key])}
+    }
+    return out
+  }
+  return value
 }
 
 /**
@@ -316,7 +336,7 @@ pub fn pattern_learning_session_transcript(
           {
             kind: "message",
             role: pl_text(transcript_event?.role),
-            text: pl_redact_command(pl_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT)),
+            text: pl_redacted_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT),
           },
         ]
     } else if kind == "tool_call" && pl_text(metadata?.tool_name) != "" {
@@ -325,8 +345,9 @@ pub fn pattern_learning_session_transcript(
           {
             kind: "tool_call",
             tool: pl_text(metadata?.tool_name),
-            input: pl_redact_command(
-              pl_clip(json_stringify(metadata?.raw_input ?? {}), TRANSCRIPT_TEXT_LIMIT),
+            input: pl_redacted_clip(
+              json_stringify(pl_redact_value(metadata?.raw_input ?? {})),
+              TRANSCRIPT_TEXT_LIMIT,
             ),
           },
         ]
@@ -335,7 +356,7 @@ pub fn pattern_learning_session_transcript(
         + [
           {
             kind: "tool_result",
-            text: pl_redact_command(pl_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT)),
+            text: pl_redacted_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT),
           },
         ]
     }
