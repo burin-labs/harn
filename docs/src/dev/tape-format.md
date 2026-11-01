@@ -28,7 +28,7 @@ run.tape.cas/      # content-addressed sidecar (BLAKE3 hex names)
   ```json
   {
     "type": "header",
-    "version": 6,
+    "version": 7,
     "harn_version": "0.10.185",
     "started_at_unix_ms": 1700000000000,
     "script_path": "examples/cron-rollup.harn",
@@ -150,6 +150,19 @@ Loading an older tape does not establish that it supports branching. Branch
 admission also requires the current recording metadata and complete evidence
 for the requested prefix; it refuses missing or incompatible evidence.
 
+### Changes from v6 to v7
+
+Reminder retirement adds typed `before_reminders` and `after_reminders` snapshots
+to `tool_call.transcript_changes`. Each snapshot contains sorted, unique
+`revoked_ids` and `expired_ids`. Replay validates the session's current state
+against `before_reminders` before applying file or transcript effects. A change
+can't remove previously retired identities. Successful replay installs
+`after_reminders`, preserving later `already_revoked` and `already_delivered`
+responses. Older tapes remain readable, but exact branching requires a new full
+recording in version 7.
+Recording compares observed retirements with captured changes. A mismatch marks
+the dispatch `unservable`, including retirements outside the captured context.
+
 ### Changes from v5 to v6
 
 Each tool dispatch records `store_changes` as a payload containing ordered
@@ -157,7 +170,7 @@ runtime store operations. An empty list establishes that no operations occurred.
 Missing evidence prevents replay. Store payloads use the same redaction and
 content-addressed storage as tool results. Branch replay updates one store per
 resolved path through its normal writer before continuing execution. Older tapes
-remain readable, but run-tape branches require a new full recording in version 6.
+remain readable; version 6 introduced the store evidence required for branching.
 
 ### Changes from v4 to v5
 

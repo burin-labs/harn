@@ -17,6 +17,7 @@ pub(crate) struct ToolCallRecording {
     args_digest: String,
     after_calls: u64,
     store_mutation_start: u64,
+    reminder_mutation_start: u64,
     watch: EffectWatch,
     pub(crate) transcript_changes: Vec<TranscriptChange>,
     pub(crate) store_changes: Vec<crate::store::StoreChange>,
@@ -40,6 +41,7 @@ pub(crate) fn begin_tool_call(
     let tape = process_tape()?;
     let dispatch = tape.dispatches.begin();
     let store_mutation_start = tape.store_mutations.load(Ordering::SeqCst);
+    let reminder_mutation_start = tape.reminder_mutations.load(Ordering::SeqCst);
     let watch = match (tape.level, &tape.workspace) {
         (RecordingLevel::Full, _) if read_only => EffectWatch::ReadOnly,
         (RecordingLevel::Full, Some(workspace)) => {
@@ -58,6 +60,7 @@ pub(crate) fn begin_tool_call(
         dispatch,
         after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         store_mutation_start,
+        reminder_mutation_start,
         tape,
         call_id: call_id.to_string(),
         tool: tool.to_string(),
@@ -94,6 +97,14 @@ pub(crate) fn note_store_mutation() {
     }
 }
 
+pub(super) fn note_reminder_mutation() {
+    if RECORDING_FULL.load(Ordering::Acquire) {
+        if let Some(tape) = process_tape() {
+            tape.reminder_mutations.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
 pub(crate) fn args_digest(args: &serde_json::Value) -> String {
     content_hash(&crate::canonical_json::to_vec(args))
 }
@@ -112,6 +123,7 @@ pub(crate) fn finish_tool_call(
         args_digest,
         after_calls,
         store_mutation_start,
+        reminder_mutation_start,
         watch,
         transcript_changes,
         store_changes,
@@ -134,6 +146,24 @@ pub(crate) fn finish_tool_call(
         unservable.get_or_insert_with(|| {
             "runtime store mutations occurred outside the recorded dispatch context".to_string()
         });
+    }
+    if full {
+        let observed = tape
+            .reminder_mutations
+            .load(Ordering::SeqCst)
+            .saturating_sub(reminder_mutation_start);
+        let captured = transcript_changes
+            .iter()
+            .filter(|change| matches!(change, TranscriptChange::Reminders { .. }))
+            .count() as u64;
+        if observed != captured {
+            unservable.get_or_insert_with(|| {
+                format!(
+                    "reminder retirement observation mismatch: {observed} mutations and \
+                     {captured} captured changes"
+                )
+            });
+        }
     }
     let mut effects = Vec::new();
     match watch {

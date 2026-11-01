@@ -77,6 +77,7 @@ struct ProcessTape {
     workspace: Option<TapeWorkspace>,
     next_llm_call: AtomicU64,
     store_mutations: AtomicU64,
+    reminder_mutations: AtomicU64,
     prompts: Mutex<prompts::PromptLedger>,
     dispatches: overlap::Dispatches,
 }
@@ -217,6 +218,7 @@ pub fn start_recording(
         workspace,
         next_llm_call: AtomicU64::new(0),
         store_mutations: AtomicU64::new(0),
+        reminder_mutations: AtomicU64::new(0),
         prompts: Mutex::default(),
         dispatches: overlap::Dispatches::default(),
     }));
@@ -716,7 +718,7 @@ pub fn start_branch_with_sources(
     {
         return Err(format!(
             "this tape is format {}; branch replay requires format {} with session lifecycle, \
-             state-location and runtime store evidence; re-record it to branch",
+             reminder state, state-location and runtime store evidence; re-record it to branch",
             tape.header.version,
             crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));
@@ -1326,8 +1328,8 @@ mod transcript;
 pub(crate) use transcript::refuse_dispatch_replay;
 
 pub(crate) use transcript::{
-    apply as apply_transcript_change, note_session_closed, note_session_opened,
-    note_session_store_reset, note_transcript_change,
+    apply as apply_transcript_change, note_reminder_retirement, note_session_closed,
+    note_session_opened, note_session_store_reset, note_transcript_change, ReminderRetirement,
 };
 
 #[path = "run_tape_scope.rs"]

@@ -1,4 +1,4 @@
-//! The transcript changes a recorded tool dispatch makes, and their replay.
+//! Transcript and reminder state changes within a recorded tool dispatch.
 //!
 //! Every session transcript write ends in `SessionState::replace_transcript`,
 //! so noting there tapes hooks, providers, host events, trims and compaction
@@ -8,7 +8,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use crate::testbench::tape::{FieldChange, TranscriptChange, TranscriptLifecycle};
+use crate::testbench::tape::{
+    FieldChange, ReminderStateSnapshot, TranscriptChange, TranscriptLifecycle,
+};
 use crate::value::{DictMap, VmValue};
 
 tokio::task_local! {
@@ -57,6 +59,57 @@ pub(crate) fn refuse_dispatch_replay(reason: &str) {
             .lock()
             .expect("dispatch refusal poisoned")
             .get_or_insert_with(|| reason.to_string());
+    });
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ReminderRetirement {
+    Revoked,
+    Expired,
+}
+
+/// Read the session's state only while a dispatch records its changes.
+pub(crate) fn note_reminder_retirement(
+    session_id: &str,
+    reminder_id: &str,
+    kind: ReminderRetirement,
+    snapshot: impl FnOnce() -> ReminderStateSnapshot,
+) {
+    note_reminder_change(session_id, || {
+        let after_reminders = snapshot();
+        let mut before_reminders = after_reminders.clone();
+        let removed = match kind {
+            ReminderRetirement::Revoked => before_reminders.revoked_ids.remove(reminder_id),
+            ReminderRetirement::Expired => before_reminders.expired_ids.remove(reminder_id),
+        };
+        if !removed {
+            return Err("a recorded reminder retirement lacks its resulting state");
+        }
+        Ok((before_reminders, after_reminders))
+    });
+}
+
+fn note_reminder_change(
+    session_id: &str,
+    snapshots: impl FnOnce() -> Result<(ReminderStateSnapshot, ReminderStateSnapshot), &'static str>,
+) {
+    super::recording::note_reminder_mutation();
+    let _ = DISPATCH_CHANGES.try_with(|frame| {
+        let (before_reminders, after_reminders) = match snapshots() {
+            Ok(states) => states,
+            Err(reason) => {
+                refuse_dispatch_replay(reason);
+                return;
+            }
+        };
+        frame
+            .lock()
+            .expect("transcript frame poisoned")
+            .push(TranscriptChange::Reminders {
+                session_id: session_id.to_string(),
+                before_reminders,
+                after_reminders,
+            });
     });
 }
 
@@ -190,7 +243,7 @@ pub(super) fn validate_lifetimes(changes: &[TranscriptChange]) -> Result<(), Str
                     return Err(format!("recorded close of `{session_id}` has no dispatch-local opening; replay does not retire pre-existing sessions"));
                 }
             }
-            TranscriptChange::Fields { .. } => {}
+            TranscriptChange::Fields { .. } | TranscriptChange::Reminders { .. } => {}
         }
     }
     if !opened.is_empty() {
@@ -208,6 +261,7 @@ pub(super) fn validate_lifetimes(changes: &[TranscriptChange]) -> Result<(), Str
 pub(super) fn preflight(changes: &[TranscriptChange]) -> Result<(), String> {
     validate_lifetimes(changes)?;
     let mut previews = BTreeMap::new();
+    let mut reminders = BTreeMap::<String, ReminderStateSnapshot>::new();
     for change in changes {
         match change {
             TranscriptChange::Lifecycle {
@@ -223,6 +277,7 @@ pub(super) fn preflight(changes: &[TranscriptChange]) -> Result<(), String> {
                     session_id.clone(),
                     crate::schema::json_to_vm_value(transcript),
                 );
+                reminders.insert(session_id.clone(), ReminderStateSnapshot::default());
             }
             TranscriptChange::Fields { session_id, fields } => {
                 let transcript = match previews.entry(session_id.clone()) {
@@ -233,18 +288,38 @@ pub(super) fn preflight(changes: &[TranscriptChange]) -> Result<(), String> {
                 };
                 *transcript = apply(transcript, fields)?;
             }
+            TranscriptChange::Reminders {
+                session_id,
+                before_reminders,
+                after_reminders,
+            } => {
+                before_reminders.validate_successor(after_reminders)?;
+                let current = match reminders.entry(session_id.clone()) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(crate::agent_sessions::replay_reminder_snapshot(session_id)?)
+                    }
+                };
+                if *current != *before_reminders {
+                    return Err(format!(
+                        "recorded reminder state for session `{session_id}` diverged"
+                    ));
+                }
+                *current = after_reminders.clone();
+            }
             TranscriptChange::Lifecycle {
                 session_id,
                 lifecycle: TranscriptLifecycle::Closed,
             } => {
                 previews.remove(session_id);
+                reminders.remove(session_id);
             }
         }
     }
     Ok(())
 }
 
-/// Apply changes validated against the live session table before file effects.
+/// Apply session changes whose targets and initial state passed preflight.
 pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptChange>, String> {
     let mut ephemeral = BTreeMap::new();
     for change in &changes {
@@ -269,6 +344,23 @@ pub(super) fn replay(changes: Vec<TranscriptChange>) -> Result<Vec<TranscriptCha
                 } else {
                     crate::agent_sessions::replay_transcript_change(session_id, fields)?;
                 }
+            }
+            TranscriptChange::Reminders {
+                session_id,
+                before_reminders,
+                after_reminders,
+            } => {
+                // Closed dispatch-local sessions expose no reminder state to the live tail.
+                if !ephemeral.contains_key(session_id) {
+                    crate::agent_sessions::replay_reminder_state(
+                        session_id,
+                        before_reminders,
+                        after_reminders,
+                    )?;
+                }
+                note_reminder_change(session_id, || {
+                    Ok((before_reminders.clone(), after_reminders.clone()))
+                });
             }
             TranscriptChange::Lifecycle {
                 session_id,

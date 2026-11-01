@@ -11,6 +11,9 @@ mod overlap;
 #[path = "run_tape_session_reset_tests.rs"]
 mod session_reset;
 
+#[path = "run_tape_reminder_tests.rs"]
+mod reminders;
+
 #[path = "run_tape_store_tests.rs"]
 mod store_changes;
 
@@ -275,6 +278,16 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
             crate::testbench::tape::FieldChange::Set(serde_json::json!(text)),
         )]),
     });
+    recording
+        .transcript_changes
+        .push(TranscriptChange::Reminders {
+            session_id: "session-1".to_string(),
+            before_reminders: crate::testbench::tape::ReminderStateSnapshot::default(),
+            after_reminders: crate::testbench::tape::ReminderStateSnapshot {
+                revoked_ids: std::iter::once(text.clone()).collect(),
+                expired_ids: Default::default(),
+            },
+        });
     finish_tool_call(recording, Ok(ok(serde_json::json!({"output": text}))));
     cache_lookup(secret, secret, || {
         Ok(Some(serde_json::json!({"result": text})))
@@ -313,6 +326,28 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         .records
         .iter()
         .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction)));
+    assert!(
+        tape.records.iter().any(|record| match &record.kind {
+            TapeRecordKind::ToolCall {
+                transcript_changes, ..
+            } => {
+                transcript_changes.iter().any(|change| match change {
+                    TranscriptChange::Reminders {
+                        after_reminders, ..
+                    } => {
+                        after_reminders.revoked_ids.len() == 1
+                            && after_reminders
+                                .revoked_ids
+                                .iter()
+                                .all(|id| !id.contains(secret))
+                    }
+                    _ => false,
+                })
+            }
+            _ => false,
+        }),
+        "the sanitized reminder state must remain recorded"
+    );
     let result = start_branch(BranchPlan {
         tape,
         live_after_calls: 1,
