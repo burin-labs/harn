@@ -150,6 +150,15 @@ Loading an older tape does not establish that it supports branching. Branch
 admission also requires the current recording metadata and complete evidence
 for the requested prefix; it refuses missing or incompatible evidence.
 
+### Changes from v7 to v8
+
+The recorder marks dispatches that retain session-scoped dynamic permission
+grants as `unservable`. These grants are runtime approval state that a served
+dispatch cannot restore. Earlier writers did not make this check, so a missing
+refusal in an older tape does not establish that its dispatches can be served.
+Older tapes remain inspectable; exact branching requires a new full recording
+in version 8. Once-only grants remain eligible for replay.
+
 ### Changes from v6 to v7
 
 Reminder retirement adds typed `before_reminders` and `after_reminders` snapshots

@@ -718,7 +718,7 @@ pub fn start_branch_with_sources(
     {
         return Err(format!(
             "this tape is format {}; branch replay requires format {} with session lifecycle, \
-             reminder state, state-location and runtime store evidence; re-record it to branch",
+             reminder state, state-location, runtime store evidence and session permission checks; re-record it to branch",
             tape.header.version,
             crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));

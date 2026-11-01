@@ -62,7 +62,8 @@ mod privacy;
 /// Version 5 also records ephemeral transcript creation and closure.
 /// Version 6 records runtime store mutations inside each tool dispatch.
 /// Version 7 records session reminder retirement state inside each dispatch.
-pub const TAPE_FORMAT_VERSION: u32 = 7;
+/// Version 8 requires session permission grant checks for served dispatches.
+pub const TAPE_FORMAT_VERSION: u32 = 8;
 
 /// Retired reminder identities, ordered canonically for recording and replay.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

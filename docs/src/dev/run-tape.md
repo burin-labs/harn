@@ -71,7 +71,9 @@ the recorded initial state before applying effects, then installs the resulting
 state. Later revocation requests retain their `already_revoked` or
 `already_delivered` status. A missing
 or changed initial state makes the dispatch diverge before file or transcript
-effects. Exact branching requires a full tape recorded in format 7.
+effects. Exact branching requires a full tape recorded in format 8, which also
+establishes that session permission grants were checked. Older recordings stay
+inspectable but need to be recorded again for branching.
 
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
 prefix. Filesystem builtins resolve absolute paths under the recorded workspace
@@ -130,6 +132,10 @@ establishes whether an edit improves model behavior.
 - Overlapping dispatches cannot be served because their workspace scans and
   transcript changes do not establish a reproducible order.
 - A dispatch containing nested inference cannot be served.
+- A dispatch that creates or uses a session-scoped dynamic permission grant
+  cannot be served. The grant cache is not portable approval authority, so the
+  branch refuses before replaying the dispatch's effects. Once-only grants do
+  not populate that cache and remain eligible for replay.
 - A failed runtime store write or a store mutation outside the recorded dispatch
   context makes the dispatch unservable.
 - A mismatch between observed reminder retirements and captured changes makes
