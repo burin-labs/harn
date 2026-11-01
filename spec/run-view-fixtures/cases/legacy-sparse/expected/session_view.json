@@ -35,8 +35,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:8f6bbeb43c88d2cfba2e09672e7096c29e258faaf8b7d164c623bcae75982a2a",
-    "projection_id": "session_view:unknown:8f6bbeb43c88"
+    "projection_hash": "sha256:f1258742a3a01d8874ef1b9d8d3d1442b901d3dbb5600efd0b4a46ca218a391b",
+    "projection_id": "session_view:unknown:f1258742a3a0"
   },
   "runs": [
     {
@@ -83,8 +83,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:d766979f03901036e2c3be6d868b03e4f19c2cf1a9ad69c1af4c06b177f7399d",
-        "projection_id": "run_view:run_legacy_sparse:d766979f0390"
+        "projection_hash": "sha256:b9d408a98f6b417f1a7d5a860d0ee1fcd61df4fca29bb5eb81537678e9ee376e",
+        "projection_id": "run_view:run_legacy_sparse:b9d408a98f6b"
       },
       "providers": [],
       "run": {
@@ -123,7 +123,7 @@
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0,
+        "total_duration_ms": null,
         "unpriced_calls": 0,
         "usage_unknown_calls": 0
       },
@@ -153,7 +153,7 @@
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0,
+    "total_duration_ms": null,
     "unpriced_calls": 0,
     "usage_unknown_calls": 0
   }

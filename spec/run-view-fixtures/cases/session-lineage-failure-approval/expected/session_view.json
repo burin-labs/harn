@@ -55,8 +55,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:9ab2ddf88167695c44823c9fba0e5ef3012ac019594315da9e669f3a4bc18024",
-    "projection_id": "session_view:session_lineage:9ab2ddf88167"
+    "projection_hash": "sha256:b9da8791110ab1f07434b20e6dfa015e79dff3a255f40b67dca69c2c2deb15f4",
+    "projection_id": "session_view:session_lineage:b9da8791110a"
   },
   "runs": [
     {
@@ -107,8 +107,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:96351b53f3b5beed666481f6679e79b044d49c5737d79b52f4f156fa5f391904",
-        "projection_id": "run_view:run_lineage_root:96351b53f3b5"
+        "projection_hash": "sha256:922ceba3f8f07ed275567a77c8929e4a9c3c3f6621e169644e5810293091d9ec",
+        "projection_id": "run_view:run_lineage_root:922ceba3f8f0"
       },
       "providers": [],
       "run": {
@@ -166,7 +166,7 @@
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0,
+            "total_duration_ms": null,
             "unpriced_calls": 0,
             "usage_unknown_calls": 0
           },
@@ -190,7 +190,7 @@
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0,
+        "total_duration_ms": null,
         "unpriced_calls": 0,
         "usage_unknown_calls": 0
       },
@@ -240,8 +240,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:eadd3a816b17606b935de1b33f7ffc99521e647dba1e9ef1b1b598bc663e5cc7",
-        "projection_id": "run_view:run_lineage_child:eadd3a816b17"
+        "projection_hash": "sha256:81eb2afe802d7d6c9b423ecf7fa8756f3c24ac3f2107e65bafa8aec1e77b9f9c",
+        "projection_id": "run_view:run_lineage_child:81eb2afe802d"
       },
       "providers": [],
       "run": {
@@ -288,7 +288,7 @@
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0,
+            "total_duration_ms": null,
             "unpriced_calls": 0,
             "usage_unknown_calls": 0
           },
@@ -312,7 +312,7 @@
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0,
+        "total_duration_ms": null,
         "unpriced_calls": 0,
         "usage_unknown_calls": 0
       },
@@ -342,7 +342,7 @@
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0,
+    "total_duration_ms": null,
     "unpriced_calls": 0,
     "usage_unknown_calls": 0
   }
