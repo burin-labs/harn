@@ -584,6 +584,33 @@ export async function githubArtifactCensus(token, repository, runId, fetchRecord
     'artifacts', fetchRecord);
 }
 
+/** The one owner of "which upload of name N belongs to the qualified attempt".
+ * A rerun job uploads its artifact name again and the run census keeps every
+ * attempt's copy. GitHub allocates artifact ids monotonically, so when the
+ * qualified attempt is the run's latest (`latest === true`, measured by the
+ * caller from the run record), the highest id per name is that attempt's copy,
+ * whether its job reran or was carried forward. No clock is consulted: artifact
+ * and runner clocks disagree. For an older attempt, ids cannot say which copy
+ * it made, so a repeated name stays unresolved. Copies that disagree on their
+ * run are never ordered. Unresolved names are omitted, so callers refuse them
+ * as missing; a selected copy is still validated and never falls back. */
+export function runAttemptArtifacts(artifacts, latest) {
+  if (!Array.isArray(artifacts) || artifacts.some(artifact => !Number.isSafeInteger(artifact?.id)
+    || artifact.id < 1 || typeof artifact.name !== 'string' || !artifact.name)) {
+    refuse('artifact_census_unmeasured');
+  }
+  const copies = new Map();
+  for (const artifact of artifacts) copies.set(artifact.name, [...(copies.get(artifact.name) ?? []), artifact]);
+  return [...copies.values()].flatMap(group => {
+    const run = group[0].workflow_run;
+    if (group.length > 1 && (latest !== true || group.some(artifact =>
+      String(artifact.workflow_run?.id) !== String(run?.id) || artifact.workflow_run?.head_sha !== run?.head_sha))) {
+      return [];
+    }
+    return [group.reduce((newest, artifact) => artifact.id > newest.id ? artifact : newest)];
+  });
+}
+
 /** Run names narrow discovery only. The private receipt and fresh run record
  * must still qualify every discovered child before observation or cleanup. */
 export async function githubChildCensus(token, repository, workflow, since, fetchRecord = fetch) {
@@ -666,9 +693,14 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
 }
 
 /** Build evidence belongs to its producing attempt. A new live promotion can
- * measure a repaired consumer without rerunning those immutable archives. */
-export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historical = null) {
+ * measure a repaired consumer without rerunning those immutable archives.
+ * `latestAttempt` is the run's latest attempt, read after the artifact census;
+ * unmeasured (null) keeps a repeated artifact name unresolved. */
+export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historical = null, latestAttempt = null) {
   const {sourceRevision, runId, attempt} = request;
+  if (latestAttempt !== null && !(Number.isSafeInteger(latestAttempt) && latestAttempt >= attempt)) {
+    refuse('archive_producer_identity_unproven');
+  }
   const policyRevision = run?.head_sha;
   const distinctSource = policyRevision !== sourceRevision;
   if (!sha.test(sourceRevision) || !id.test(runId) || !Number.isSafeInteger(attempt) || attempt < 1
@@ -729,19 +761,20 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
     refuse('archive_producer_builds_unproven');
   }
-  const names = [...targets.map(target=>`harn-${target}`),`candidate-manifest-${sourceRevision}`,'harn-release-files'];
-  if (!Array.isArray(artifacts) || names.some(name=>{
-    const matches=artifacts.filter(artifact=>artifact.name===name);
-    const artifact=matches[0];
-    return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
-      || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
+  const manifestName = `candidate-manifest-${sourceRevision}`;
+  const names = [...targets.map(target=>`harn-${target}`),manifestName,'harn-release-files'];
+  const latest = new Map(runAttemptArtifacts(artifacts, latestAttempt===attempt).map(artifact=>[artifact.name,artifact]));
+  if (names.some(name=>{
+    const artifact=latest.get(name);
+    return !artifact || artifact.expired!==false
+      || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
       || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
       || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==policyRevision;
   })) refuse('archive_producer_artifacts_unproven');
+  const manifest = latest.get(manifestName);
   return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
-    proven_artifacts:names.length,manifest:{id:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).id,
-      digest:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).digest},
+    proven_artifacts:names.length,manifest:{id:manifest.id,digest:manifest.digest},
     pending:auditPending?1:0,pending_jobs:auditPending?['Release residual audit']:[],
     failed_jobs:[],next_action:'measure-consumer-repair'};
 }
@@ -750,6 +783,8 @@ export async function githubArchiveProducer(token, request, fetchRecord=fetch, e
   const run=await githubRecord(token,parentRepository,request.runId,fetchRecord,request.attempt);
   const jobs=await githubRunJobs(token,parentRepository,request.runId,request.attempt,fetchRecord);
   const artifacts=await githubArtifactCensus(token,parentRepository,request.runId,fetchRecord);
+  // Read after the census: no upload it holds can come from an attempt newer than this.
+  const latestAttempt=(await githubRecord(token,parentRepository,request.runId,fetchRecord)).run_attempt;
   // The shell contract owns the target list for writers and readers alike.
   const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('./candidate_archive_contract.sh',import.meta.url)),'--targets-json'],
     {encoding:'utf8',timeout:10_000,maxBuffer:16_384}));
@@ -759,13 +794,14 @@ export async function githubArchiveProducer(token, request, fetchRecord=fetch, e
     const response = await githubRead(token,
       `https://api.github.com/repos/${parentRepository}/compare/${request.sourceRevision}...${run.head_sha}`, fetchRecord);
     if (!response.ok) refuse('archive_producer_lineage_read_refused', refusalDiagnostic(response));
-    const manifests = artifacts.filter(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
+    const manifests = runAttemptArtifacts(artifacts, latestAttempt===request.attempt)
+      .filter(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
     if (manifests.length !== 1) refuse('archive_producer_artifacts_unproven');
     historical = {lineage:await response.json(),manifest:await githubArtifactJson(token,parentRepository,manifests[0],{
       runId:request.runId,headSha:run.head_sha,name:manifests[0].name,filename:'candidate-manifest.json',
     },fetchRecord,extract)};
   }
-  return qualifyArchiveProducer(run,jobs,artifacts,request,targets,historical);
+  return qualifyArchiveProducer(run,jobs,artifacts,request,targets,historical,latestAttempt);
 }
 
 /** One authenticated, bounded archive reader for public declarations and

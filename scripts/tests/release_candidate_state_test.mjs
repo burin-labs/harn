@@ -76,7 +76,8 @@ function fixture(changes={}){
     else if(route.endsWith('/900/artifacts'))value={total_count:changes.missingWitness?0:1,
       artifacts:changes.missingWitness?[]:[declaration.artifact]};
     else if(route.endsWith('/42/artifacts')){
-      const rows=endpoint.searchParams.has('name')?artifacts.filter(item=>item.name.startsWith('candidate-manifest-')):artifacts;
+      const census=changes.artifacts??artifacts;
+      const rows=endpoint.searchParams.has('name')?census.filter(item=>item.name.startsWith('candidate-manifest-')):census;
       value={total_count:rows.length,artifacts:rows};
     }else if(route.endsWith('/73/artifacts'))value={total_count:1,artifacts:[ownership.artifact]};
     else if(route.endsWith('/900/attempts/1/jobs'))value={total_count:1,jobs:changes.parentJobs??parentJobs};
@@ -126,6 +127,22 @@ test('ordinary selector remains success-only and measures complete source invent
     assert.equal(await successfulCandidate('public',repository,source,late.read),'42');
     assert.ok(late.calls.some(call=>call.includes('page=2')));
   }finally{late.close();}
+});
+test('a rerun manifest selects the latest attempt copy and never falls back to the stale one',async()=>{
+  const manifestName=`candidate-manifest-${source}`;
+  const stale=artifacts.find(item=>item.name===manifestName);
+  const succeeded={...producer,conclusion:'success'};
+  const select=async(census,producers=[succeeded],latest=succeeded)=>{
+    const data=fixture({producers,artifacts:census,producer:latest});
+    try{return await successfulCandidate('public',repository,source,data.read);}finally{data.close();}
+  };
+  // The earlier attempt's copy has expired; only the rerun's newer upload is usable.
+  assert.equal(await select([{...stale,expired:true},{...stale,id:300}]),'42');
+  assert.equal(await select([{...stale,id:300},{...stale,expired:true}]),'42');
+  // A newest copy that expired leaves no candidate, even beside a usable older copy.
+  assert.equal(await select([stale,{...stale,id:300,expired:true}]),'');
+  // A rerun that began after the listing is not the settled candidate that was listed.
+  assert.equal(await select([stale,{...stale,id:300}],[succeeded],{...succeeded,run_attempt:2}),'');
 });
 test('known successful producer retains ordinary promotion path without private recovery authority',async()=>{
   const data=fixture({producers:[{...producer,conclusion:'success'}],missingWitness:true});
@@ -213,6 +230,8 @@ fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 if(endpoint.pathname.includes('/workflows/')){
   const page=Number(endpoint.searchParams.get('page'));
   console.log(JSON.stringify({total_count:data.runs.length+(data.partial?1:0),workflow_runs:data.runs.slice((page-1)*100,page*100)}));
+}else if(/\\/runs\\/[0-9]+$/.test(endpoint.pathname)){
+  console.log(JSON.stringify(data.runs.find(run=>endpoint.pathname.endsWith('/'+run.id))));
 }else {
   const page=Number(endpoint.searchParams.get('page'));
   console.log(JSON.stringify({total_count:data.available.length+(data.partialArtifacts?1:0),artifacts:data.available.slice((page-1)*100,page*100)}));
@@ -242,5 +261,17 @@ if(endpoint.pathname.includes('/workflows/')){
     assert.equal(unmeasuredBranch.status,1);
     assert.equal(unmeasuredBranch.stdout,'');
     assert.match(unmeasuredBranch.stderr,/source_census_unmeasured/);
+    // A rerun build uploaded harn-a again; the earlier attempt's copy has since expired.
+    const rerun=[...available,{id:500,name:'harn-a',expired:false,size_in_bytes:1}]
+      .map(item=>item.name==='harn-a'&&item.id!==500?{...item,expired:true}:item);
+    fs.writeFileSync(record,JSON.stringify({runs,available:rerun}));
+    const reran=spawnSync('bash',[entry],options);
+    assert.equal(reran.status,0,reran.stderr);
+    assert.equal(reran.stdout.trim(),'42');
+    fs.writeFileSync(record,JSON.stringify({runs,available:rerun.map(item=>item.name==='harn-a'
+      ?{...item,expired:item.id===500}:item)}));
+    const expiredLatest=spawnSync('bash',[entry],options);
+    assert.equal(expiredLatest.status,0,expiredLatest.stderr);
+    assert.equal(expiredLatest.stdout,'');
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });

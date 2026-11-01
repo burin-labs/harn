@@ -11,7 +11,7 @@ sha=8743d2bd57df14eb1a022dec9cb842cbcbd7b568
 jq -n --arg sha "$sha" '{id:4242, repository:{id:1,full_name:"burin-labs/harn"},
   head_repository:{id:1,full_name:"burin-labs/harn"},
   path:".github/workflows/build-release-binaries.yml", status:"completed",
-  conclusion:"success", event:"merge_group", head_sha:$sha}' > "$tmp/run.json"
+  conclusion:"success", event:"merge_group", head_sha:$sha, run_attempt:1}' > "$tmp/run.json"
 jq -n --arg sha "$sha" '{status:"ahead", merge_base_commit:{sha:$sha}}' > "$tmp/compare.json"
 printf '[workspace.package]\nversion = "0.10.159"\n' > "$tmp/Cargo.toml"
 candidate_archive_expected_targets_json | jq --arg sha "$sha" --arg files "$RELEASE_FILES_ARTIFACT" '
@@ -24,7 +24,7 @@ cat > "$tmp/bin/gh" <<'EOF'
 set -euo pipefail
 case "$2" in
   repos/burin-labs/harn/actions/runs/4242) cat "$FIXTURE/run.json" ;;
-  'repos/burin-labs/harn/actions/runs/4242/artifacts?per_page=100') cat "$FIXTURE/artifacts.json" ;;
+  'repos/burin-labs/harn/actions/runs/4242/artifacts?per_page=100&page=1') cat "$FIXTURE/artifacts.json" ;;
   repos/burin-labs/harn/contents/Cargo.toml\?ref=*) cat "$FIXTURE/Cargo.toml" ;;
   repos/burin-labs/harn/compare/*...main) cat "$FIXTURE/compare.json" ;;
   repos/burin-labs/harn/compare/*) cat "$FIXTURE/lineage.json" ;;
@@ -93,6 +93,21 @@ printf 'not json\n' > "$tmp/artifacts.json"
 RECOVERY=true refuse 'malformed manual artifacts'
 : > "$tmp/artifacts.json"
 RECOVERY=true refuse 'empty manual artifacts'
+# A rerun build job uploads its archive again; the census keeps both attempts'
+# copies and the newer id is the latest attempt's. It never falls back.
+linux_archive=harn-x86_64-unknown-linux-gnu
+jq --arg name "$linux_archive" '.artifacts += [.artifacts[] | select(.name == $name) | .id = 900] |
+  .total_count = (.artifacts | length)' "$tmp/good-artifacts.json" > "$tmp/rerun-artifacts.json"
+cp "$tmp/rerun-artifacts.json" "$tmp/artifacts.json"
+RECOVERY=true resolve || fail "rerun manual candidate refused: $(cat "$tmp/log")"
+jq --arg name "$linux_archive" '(.artifacts[] | select(.name == $name and .id != 900)).expired = true' \
+  "$tmp/rerun-artifacts.json" > "$tmp/artifacts.json"
+RECOVERY=true resolve || fail 'rerun candidate with an expired stale copy refused'
+for mutation in '(.artifacts[] | select(.id == 900)).expired = true' \
+  '(.artifacts[] | select(.id == 900)).workflow_run.id = 9999'; do
+  jq "$mutation" "$tmp/rerun-artifacts.json" > "$tmp/artifacts.json"
+  RECOVERY=true refuse "rerun artifacts $mutation"
+done
 cp "$tmp/good-artifacts.json" "$tmp/artifacts.json"
 for mutation in '.conclusion="failure"' '.status="in_progress"' '.event="pull_request"' \
   '.repository.full_name="foreign/repo"' '.head_repository.full_name="fork/harn"' \
@@ -127,8 +142,11 @@ if resolve 4242 abc; then fail 'invalid publication key accepted'; fi
 
 # The archive reader owns the producer census; this fixture checks that the
 # resolver actually calls it before admitting an otherwise failed producer.
-cat > "$tmp/bin/node" <<'EOF'
-#!/usr/bin/env bash
+# The resolver's artifact census still runs through the real shared reader.
+real_node="$(command -v node)"
+printf '#!/usr/bin/env bash\n[[ "$1" != */lib/release-candidate-state.mjs ]] || exec %q "$@"\n' \
+  "$real_node" > "$tmp/bin/node"
+cat >> "$tmp/bin/node" <<'EOF'
 set -euo pipefail
 [[ "$#" == 1 && "$1" == */ci/qualify-release-producer.mjs &&
    "$GITHUB_REPOSITORY" == burin-labs/harn && "$CANDIDATE_RUN_ID" == 4242 &&

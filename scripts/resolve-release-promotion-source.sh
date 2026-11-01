@@ -111,9 +111,12 @@ if [[ "${RECOVERY:-false}" == true && "$(jq -r '.event' <<< "$run")" != push ]];
   fi
   expected="$(candidate_archive_expected_targets_json | jq -c --arg sha "$sha" \
     --arg files "$RELEASE_FILES_ARTIFACT" '[.[] | "harn-" + .] + ["candidate-manifest-" + $sha, $files]')"
-  artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100")"
+  # One copy per name for the run's latest attempt, so a rerun build job's
+  # newer upload replaces the copy its earlier attempt left in the census.
+  artifacts="$(node "$script_dir/lib/release-candidate-state.mjs" artifacts "$repository" "$run_id")"
   if ! release_candidate_artifacts_complete "$artifacts" "$expected" ||
     ! jq -e --argjson run_id "$run_id" --arg sha "$policy_sha" --argjson run "$run" '
+      .run_attempt == $run.run_attempt and
       all(.artifacts[];
         .workflow_run.id == $run_id and .workflow_run.head_sha == $sha and
         .workflow_run.head_branch == "main" and

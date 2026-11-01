@@ -91,7 +91,7 @@ case "$1 $2" in
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
     jq -n --arg sha "$sha" --argjson run "${FAKE_CANDIDATE_RUN-9001}" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:$run,head_sha:$sha}}]}' ;;
   "api "*/actions/runs/*)
-    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
+    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success","run_attempt":1}\n' \
       "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
   "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   "api "*/releases\?per_page=50) [[ "${FAKE_RELEASE:-0}" == 1 ]] && echo true || echo false ;;

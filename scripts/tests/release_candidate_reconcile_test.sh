@@ -65,6 +65,8 @@ case "$1 $2" in
     if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then
       jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
+  "api repos/o/r/actions/runs/77")
+    echo '{"id":77,"status":"completed","conclusion":"success","run_attempt":1}' ;;
   "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
     jq -n --arg sha "$sha" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:77,head_sha:$sha}}]}' ;;

@@ -50,6 +50,39 @@ test('archive readiness is independent of a later consumer failure and requires 
   }
 });
 
+test('a rerun build binds the latest upload of each name and refuses a stale, foreign or expired latest copy',()=>{
+  // Attempt 2 reran the Linux build and its dependent manifest job. The run's census keeps both
+  // attempts' uploads of those names; the higher id is the copy attempt 2 made.
+  const rerunRun={...run,run_attempt:2};
+  const rerunJobs=jobs.map(job=>({...job,run_attempt:2}));
+  const rerunRequest={...request,attempt:2};
+  const manifestName=`candidate-manifest-${source}`;
+  const fresh=[
+    {...artifacts.find(item=>item.name==='harn-x86_64-unknown-linux-gnu'),id:200,digest:`sha256:${'e'.repeat(64)}`},
+    {...artifacts.find(item=>item.name===manifestName),id:201,digest:`sha256:${'f'.repeat(64)}`},
+  ];
+  const qualify=(census,latest=2)=>qualifyArchiveProducer(rerunRun,rerunJobs,census,rerunRequest,targets,null,latest);
+  for(const census of [[...artifacts,...fresh],[...fresh,...artifacts]]) {
+    const proof=qualify(census);
+    assert.equal(proof.verdict,'pass');
+    assert.equal(proof.producer_attempt,2);
+    assert.deepEqual(proof.manifest,{id:201,digest:`sha256:${'f'.repeat(64)}`});
+  }
+  const rerunCensus=[...artifacts,...fresh];
+  // Ids order copies only for the run's latest attempt; an unmeasured or newer latest attempt stays ambiguous.
+  for(const latest of [null,3]) assert.throws(()=>qualify(rerunCensus,latest),/artifacts_unproven/);
+  assert.throws(()=>qualify(rerunCensus,1),/identity_unproven/);
+  assert.equal(qualify(artifacts,3).verdict,'pass');
+  // A newest copy that is unusable never falls back to the stale earlier attempt's copy.
+  for(const change of [{expired:true},{digest:null},{size_in_bytes:0}]) {
+    assert.throws(()=>qualify(rerunCensus.map(item=>item.id===201?{...item,...change}:item)),/artifacts_unproven/);
+  }
+  // Copies of one name that disagree on their run cannot be ordered against each other.
+  assert.throws(()=>qualify(rerunCensus.map(item=>item.id===104?{...item,workflow_run:{id:43,head_sha:source}}:item)),
+    /artifacts_unproven/);
+  assert.throws(()=>qualify(rerunCensus.map(item=>item.id===200?{...item,name:undefined}:item)),/census_unmeasured/);
+});
+
 test('source-specific advisory tracking skips require the actual successful security scan',()=>{
   const scan={id:101,run_id:42,run_attempt:1,head_sha:source,
     name:'Candidate dependency security / cargo-deny',status:'completed',conclusion:'success'};
@@ -110,6 +143,21 @@ test('the owning reader uses the producing attempt and refuses partial authentic
   assert.ok(calls.includes('/repos/burin-labs/harn/actions/runs/42/attempts/1/jobs'));
   await assert.rejects(githubArchiveProducer('fixture-read',request,async(url,options)=>url.includes('/jobs')?
     {ok:true,json:async()=>({total_count:jobs.length+1,jobs})}:read(url,options)),/census_unmeasured/);
+});
+
+test('the owning reader binds a rerun attempt only while it is still the run latest attempt',async()=>{
+  const stale=artifacts.find(item=>item.name===`candidate-manifest-${source}`);
+  const census=[{...stale,id:300,digest:`sha256:${'f'.repeat(64)}`},...artifacts];
+  const rerun=(latest)=>async(url)=>{
+    const route=new URL(url).pathname;
+    const record=route.endsWith('/jobs')?{total_count:jobs.length,jobs:jobs.map(job=>({...job,run_attempt:2}))}
+      :route.endsWith('/artifacts')?{total_count:census.length,artifacts:census}
+        :{...run,run_attempt:route.endsWith('/attempts/2')?2:latest};
+    return {ok:true,json:async()=>record};
+  };
+  const proof=await githubArchiveProducer('fixture-read',{...request,attempt:2},rerun(2));
+  assert.deepEqual(proof.manifest,{id:300,digest:`sha256:${'f'.repeat(64)}`});
+  await assert.rejects(githubArchiveProducer('fixture-read',{...request,attempt:2},rerun(3)),/artifacts_unproven/);
 });
 
 test('historical source admission reads the exact manifest bytes under its main build policy',async()=>{

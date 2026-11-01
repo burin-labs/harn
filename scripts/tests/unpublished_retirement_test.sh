@@ -52,22 +52,35 @@ if [[ "$1 $2" == 'release view' ]]; then
   printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"isPrerelease":false,"publishedAt":"2026-10-03T00:00:00Z"}'
   exit 0
 fi
-if [[ "$1 $2" == 'run download' ]]; then
-  while [[ "$1" != --dir ]]; do shift; done
-  mkdir -p "$2"
-  jq -n --arg source "${RETIRE_SOURCE_SHA}" '
-    {schemaVersion:"burin-labs.candidate_manifest.v1",repository:"example/harn",
-     sourceCommit:$source,runId:"3",runAttempt:"1",artifacts:
-     (["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-apple-darwin",
-       "x86_64-pc-windows-msvc","x86_64-unknown-linux-gnu"] | map({kind:"archive",target:.,
-       sha256:("a" * 64),attestationPredicateType:"https://harnlang.com/attestations/release-archive/v1"}))}
-  ' > "$2/candidate-manifest.json"
-  if [[ "${MUTATION:-}" == manifest_mismatch ]]; then
-    sed 's/"runId": "3"/"runId": "99"/' "$2/candidate-manifest.json" > "$2/changed"
-    mv "$2/changed" "$2/candidate-manifest.json"
+# Manifest archive <id> for this mutation: 41 is the latest upload, 40 an
+# earlier attempt's copy of the same name. Only a usable stale copy is good.
+manifest_zip() {
+  local id="$1" dir="$FIXTURE_ROOT/manifests/${MUTATION:-none}-$1" run_id=3
+  if [[ ! -s "$dir.zip" ]]; then
+    mkdir -p "$dir"
+    [[ "$id" == 41 && "${MUTATION:-}" != manifest_mismatch ]] ||
+      [[ "$id" == 40 && "${MUTATION:-}" == rerun_latest_expired ]] || run_id=99
+    jq -n --arg source "${RETIRE_SOURCE_SHA}" --arg run "$run_id" '
+      {schemaVersion:"burin-labs.candidate_manifest.v1",repository:"example/harn",
+       sourceCommit:$source,runId:$run,runAttempt:"1",artifacts:
+       (["aarch64-apple-darwin","aarch64-unknown-linux-gnu","x86_64-apple-darwin",
+         "x86_64-pc-windows-msvc","x86_64-unknown-linux-gnu"] | map({kind:"archive",target:.,
+         sha256:("a" * 64),attestationPredicateType:"https://harnlang.com/attestations/release-archive/v1"}))}
+    ' > "$dir/candidate-manifest.json"
+    (cd "$dir" && zip -q -X "$dir.zip" candidate-manifest.json)
   fi
-  exit 0
-fi
+  printf '%s\n' "$dir.zip"
+}
+manifest_artifact() {
+  local id="$1" archive digest
+  archive="$(manifest_zip "$id")"
+  if command -v sha256sum >/dev/null 2>&1; then digest="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+  else digest="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"; fi
+  jq -n --argjson id "$id" --arg source "$RETIRE_SOURCE_SHA" --arg digest "sha256:$digest" \
+    --argjson size "$(wc -c < "$archive")" '
+    {id:$id,name:("candidate-manifest-"+$source),expired:false,size_in_bytes:$size,digest:$digest,
+     workflow_run:{id:3,head_sha:$source}}'
+}
 if [[ "$1 $2" == 'pr list' ]]; then exit 0; fi
 if [[ "$1 $2" == 'pr create' ]]; then
   while [[ "$1" != --body-file ]]; do shift; done
@@ -101,10 +114,17 @@ case "${endpoint:?}" in
     [[ "${MUTATION:-}" != source_version_mismatch ]] || { printf '[workspace.package]\nversion = "1.2.5"\n'; exit 0; }
     printf '[workspace.package]\nversion = "1.2.4"\n' ;;
   */actions/runs/3/artifacts\?*)
+    # A partial census (one listed of two counted) never selects a copy.
     count=1; [[ "${MUTATION:-}" != duplicate_manifest ]] || count=2
-    jq -n --arg source "$RETIRE_SOURCE_SHA" --argjson count "$count" '
-      {total_count:$count,artifacts:[{id:41,name:("candidate-manifest-"+$source),expired:false,
-        workflow_run:{id:3,head_sha:$source}}]}' ;;
+    latest="$(manifest_artifact 41)"
+    [[ "${MUTATION:-}" != rerun_latest_expired ]] || latest="$(jq '.expired = true' <<< "$latest")"
+    case "${MUTATION:-}" in
+      rerun_manifest|rerun_latest_expired) census="[$(manifest_artifact 40),$latest]"; count=2 ;;
+      *) census="[$latest]" ;;
+    esac
+    jq -n --argjson count "$count" --argjson census "$census" '{total_count:$count,artifacts:$census}' ;;
+  */actions/artifacts/4[01]/zip)
+    id="${endpoint%/zip}"; cat "$(manifest_zip "${id##*/}")" ;;
   */actions/runs/3)
     sha="$RETIRE_SOURCE_SHA"; [[ "${MUTATION:-}" != producer_wrong_source ]] || sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     conclusion=success
@@ -247,6 +267,10 @@ grep -Fxq required=true "$GITHUB_OUTPUT"
 grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 grep -Fxq published_tag=v1.2.3 "$GITHUB_OUTPUT"
+: > "$GITHUB_OUTPUT"
+MUTATION=rerun_manifest bash "$root/scripts/plan_development_bump.sh" > "$fixture/rerun.log" 2>&1 || {
+  cat "$fixture/rerun.log" >&2; echo 'FAIL: rerun manifest census refused' >&2; exit 1; }
+grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 # The first-run gauntlet leg retires an identity the same way as the linked suite.
 : > "$GITHUB_OUTPUT"
 FAILED_LEG=gauntlet bash "$root/scripts/plan_development_bump.sh" > "$fixture/gauntlet-leg.log"
@@ -258,7 +282,7 @@ PARENT_EVENT=workflow_run bash "$root/scripts/plan_development_bump.sh" > "$fixt
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 for mutation in tags_unreadable known_tag_absent tag_present conflicting_attempt misnamed_attempt merged_closed_attempt foreign_closed_attempt release_unreadable empty_releases \
   release_present live_publisher partial_publishers empty_publishers manifest_mismatch duplicate_manifest \
-  source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event leg_step_mismatch unknown_leg stray_terminal_record; do
+  rerun_latest_expired source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event leg_step_mismatch unknown_leg stray_terminal_record; do
   : > "$GITHUB_OUTPUT"
   if MUTATION="$mutation" bash "$root/scripts/plan_development_bump.sh" > "$fixture/$mutation.log" 2>&1; then
     echo "FAIL: accepted $mutation" >&2; exit 1

@@ -63,6 +63,8 @@ case "$2" in
   */artifacts\?per_page=100\&page=1)
     jq '.artifacts |= (to_entries|map(.value+{id:(.key+1)}))' \
       <<< "${FAKE_SOURCE_ARTIFACTS:?source artifact fixture required}" ;;
+  */actions/runs/"${FAKE_SOURCE_RUN:-none}")
+    jq -n --argjson id "$FAKE_SOURCE_RUN" '{id:$id,status:"completed",conclusion:"success",run_attempt:1}' ;;
   *) exit 2 ;;
 esac
 STUB
