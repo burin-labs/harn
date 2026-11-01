@@ -102,6 +102,15 @@ auth_style = "none"
                 body = body_rx.recv() => body.expect("provider request was reached"),
                 response = &mut prompt => panic!("prompt finished before cancellation: {response}"),
             };
+            let fault =
+                rusqlite::Connection::open(dir.path().join(".harn/session-store.sqlite")).unwrap();
+            fault
+                .execute_batch(
+                    "CREATE TRIGGER reject_reasoning_receipt BEFORE INSERT ON session_events
+                 WHEN NEW.custom_kind='reasoning_receipt'
+                 BEGIN SELECT RAISE(FAIL, 'controlled reasoning receipt failure'); END;",
+                )
+                .unwrap();
             tx.send(json!({
                 "jsonrpc": "2.0", "method": "session/cancel",
                 "params": {"sessionId": session_id},
@@ -126,6 +135,28 @@ auth_style = "none"
     );
     assert_eq!(body["generation_config"]["thinking_level"], "high");
     assert!(body_rx.try_recv().is_err(), "exactly one provider call");
+    if cancelled {
+        let error =
+            harn_vm::agent_sessions::canonical_history_boundaries(&store, dir.path(), &session_id)
+                .await
+                .expect_err("the persistence barrier must observe the failed receipt append");
+        assert!(error
+            .to_string()
+            .contains("controlled reasoning receipt failure"));
+        let pending = store.read(&session_id, ReadRange::default()).await.unwrap();
+        assert!(pending
+            .events
+            .iter()
+            .all(|event| event.kind.discriminator() != "reasoning_receipt"));
+        rusqlite::Connection::open(dir.path().join(".harn/session-store.sqlite"))
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_reasoning_receipt")
+            .unwrap();
+    }
+    // A cancellation reply can precede durable recovery; flush its owning journal.
+    harn_vm::agent_sessions::canonical_history_boundaries(&store, dir.path(), &session_id)
+        .await
+        .expect("commit the provider receipt before reading its durable projection");
     let journal = store.read(&session_id, ReadRange::default()).await.unwrap();
     assert!(
         journal.events.iter().any(|event| {
