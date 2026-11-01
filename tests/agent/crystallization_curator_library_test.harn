@@ -89,3 +89,70 @@ pipeline test_curator_drops_a_proposal_matching_an_installed_capability(harness:
     },
   )
 }
+
+fn verify_tool(verify_command: string) -> dict {
+  return {
+    kind: "harn_tool",
+    name: "verify-widget",
+    title: "Verify Widget",
+    description: "Generate, then run the widget checks.",
+    when_to_use: "Before finishing a widget change.",
+    body: "# Verify Widget\n\nCall the tool.",
+    evidence_ids: ["run-one"],
+    artifact: {
+      entrypoint: "server.harn",
+      tool_names: ["verify_widget"],
+      source: "pipeline main(harness: Harness, task) { }",
+      test_source: "pipeline test_ok(harness: Harness, task) { }",
+      verify_command: verify_command,
+    },
+  }
+}
+
+fn submit_one(proposal: dict) -> list {
+  return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
+}
+
+/** A learned verifier must run every declared test check word for word, never a broader suite. */
+pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [
+          {intent: "test", command: "python3 -m pytest tests/alerts -m \"not soak\" -q", cwd: ""},
+          {intent: "test", command: "npm test", cwd: "web"},
+        ],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const wider = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("python3 tools/codegen.py && python3 -m pytest tests && (cd web && npm test)")),
+        declared,
+      )
+      assert_eq(wider.proposal_count ?? 0, 0, "a verifier running the whole suite is rejected")
+      const wrong_dir = curate_with(
+        harness,
+        root,
+        submit_one(
+          verify_tool("python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && npm test"),
+        ),
+        declared,
+      )
+      assert_eq(wrong_dir.proposal_count ?? 0, 0, "a declared check run from the wrong directory is rejected")
+      const scoped = curate_with(
+        harness,
+        root,
+        submit_one(
+          verify_tool(
+            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && (cd web && npm test)",
+          ),
+        ),
+        declared,
+      )
+      assert_eq(scoped.proposal_count, 1, "codegen composed on top of every declared check is staged")
+      return nil
+    },
+  )
+}

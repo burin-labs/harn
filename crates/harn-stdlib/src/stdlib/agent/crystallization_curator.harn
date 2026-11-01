@@ -89,7 +89,7 @@ fn cc_session_ids(evidence: list) -> list {
   return out
 }
 
-fn cc_prompt(evidence: list, pending: list, installed: list = []) -> dict {
+fn cc_prompt(evidence: list, pending: list, installed: list = [], declared: list = []) -> dict {
   const cards = cc_evidence_cards(evidence)
   const system = """
 You are Harn's crystallization curator. You inspect completed coding-agent sessions and decide whether repeated or strongly reusable work should become a durable project capability.
@@ -112,6 +112,8 @@ These examples define breadth, not templates:
 
 Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged.
 
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep every declared check as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. A submission whose `verify_command` omits a declared check is rejected.
+
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
   const message = """
@@ -128,6 +130,10 @@ ${json_stringify(pending ?? [])}
 <installed_capabilities>
 ${json_stringify(installed)}
 </installed_capabilities>
+
+<declared_checks>
+${json_stringify(declared)}
+</declared_checks>
 
 An installed capability already serves future sessions: do not propose it again under any name. Submit zero proposals when the evidence shows nothing beyond the installed and pending library.
 
@@ -334,7 +340,8 @@ pub type StepRunner = fn(list, string) -> dict
 pub fn run_plan(run: StepRunner, cwd: string, plan: list) -> dict {
   let steps = []
   for step in plan {
-    const result = run(step.argv, cwd)
+    const dir = to_string(step?.cwd ?? "")
+    const result = run(step.argv, dir == "" ? cwd : path_join(cwd, dir))
     steps = steps + [{label: step.label, ok: result.success, exit_code: result.exit_code, output: result.combined}]
     if !result.success {
       break
@@ -422,6 +429,13 @@ pipeline test_run_stops_at_the_first_failure() {
 }
 """
 
+/** One step as shell text; a step with a `cwd` runs in a subshell from that directory. */
+fn cc_step_shell(step: dict) -> string {
+  const command = join(step.argv.map({ word -> cc_shell_word(word) }).to_list(), " ")
+  const dir = cc_text(step?.cwd)
+  return dir == "" ? command : "(cd " + cc_shell_word(dir) + " && " + command + ")"
+}
+
 fn cc_shell_word(word: string) -> string {
   if word != "" && regex_match("^[A-Za-z0-9_./:=@%+-]+$", word) {
     return word
@@ -473,7 +487,11 @@ pub fn crystallization_command_sequence_package(
       }
       words = words + [text]
     }
-    steps = steps + [{label: label, argv: words}]
+    const dir = cc_text(raw?.cwd)
+    if dir != "" && (dir.starts_with("/") || dir.contains("..") || !regex_match("^[A-Za-z0-9_./-]+$", dir)) {
+      throw "invalid_steps: a step cwd must be a repository-relative directory, got: " + dir
+    }
+    steps = steps + [dir == "" ? {label: label, argv: words} : {label: label, argv: words, cwd: dir}]
   }
   const labels = steps.map({ step -> step.label }).to_list()
   const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
@@ -487,11 +505,7 @@ pub fn crystallization_command_sequence_package(
     tool_names: [tool],
     source: source.trim() + "\n",
     test_source: test_source.trim() + "\n",
-    verify_command: join(
-      steps.map({ step -> join(step.argv.map({ word -> cc_shell_word(word) }).to_list(), " ") })
-        .to_list(),
-      " && ",
-    ),
+    verify_command: join(steps.map({ step -> cc_step_shell(step) }).to_list(), " && "),
   }
 }
 
@@ -646,9 +660,56 @@ fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
   )
 }
 
+/**
+ * The repository's declared checks, normalized to `{intent, command, cwd}`.
+ * A host passes the checks its project-check resolver chose; learned checks
+ * stay out so the curator never reads its own output back as a declaration.
+ */
+fn cc_declared_checks(options: any = nil) -> list {
+  let out = []
+  for item in options?.declared_checks ?? [] {
+    const command = cc_text(item?.command)
+    if command != "" {
+      out = out + [{intent: cc_text(item?.intent), command: command, cwd: cc_text(item?.cwd)}]
+    }
+  }
+  return out
+}
+
+/** Shell text as comparable `&&` segments: quotes and subshell parentheses dropped, spaces collapsed. */
+fn cc_command_segments(text: string) -> list {
+  const flat = text.replace("'", "").replace("\"", "").replace("(", "").replace(")", "")
+  return flat.split("&&").map({ part -> join(part.split(" ").filter({ word -> word != "" }).to_list(), " ") })
+    .filter({ part -> part != "" })
+    .to_list()
+}
+
+/** True when `verify_command` runs `check` word for word, from the check's directory. */
+fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
+  const have = cc_command_segments(verify_command)
+  const dir = check.cwd == "" ? [] : cc_command_segments("cd " + cc_shell_word(check.cwd))
+  const want = dir + cc_command_segments(check.command)
+  for start in range(0, len(have) - len(want) + 1) {
+    if have[start:start + len(want)] == want {
+      const preceded_by_cd = len(dir) == 0 && start > 0 && have[start - 1].starts_with("cd ")
+      if !preceded_by_cd {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/** The declared test checks a learned verifier must run; the declared verify check when none is a test. */
+fn cc_required_declared_checks(declared: list) -> list {
+  const tests = declared.filter({ check -> check.intent == "test" }).to_list()
+  return len(tests) > 0 ? tests : declared.filter({ check -> check.intent == "verify" }).to_list()
+}
+
 fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
   let prepared = []
   const installed = cc_installed(harness.fs, options)
+  const required = cc_required_declared_checks(cc_declared_checks(options))
   for proposal in proposals ?? [] {
     if cc_duplicates_installed(proposal, installed) {
       continue
@@ -656,6 +717,13 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
     if proposal?.kind == "skill" {
       prepared = prepared + [proposal]
       continue
+    }
+    const verify = cc_text(proposal?.artifact?.verify_command)
+    const omitted = verify == "" ? [] : required.filter({ check -> !cc_runs_declared_check(verify, check) })
+      .to_list()
+    if len(omitted) > 0 {
+      throw "submit_crystallization_batch: `verify_command` must run every declared check word for word from its cwd, not a broader command. Missing: "
+        + json_stringify(omitted)
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
@@ -725,7 +793,11 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
               "Optional learned command sequence: [{label, argv}] in the order that works, argv as repository-relative words.",
             items: {
               type: "object",
-              properties: {label: {type: "string"}, argv: {type: "array", items: {type: "string"}}},
+              properties: {
+                label: {type: "string"},
+                argv: {type: "array", items: {type: "string"}},
+                cwd: {type: "string", description: "Repository-relative directory the step runs from; omit for the root."},
+              },
             },
           },
         },
@@ -878,7 +950,9 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * A host passes `installed` (`[{name, verify_command}]`) so the curator neither
  * proposes nor stages a capability the project already has, and
  * `require_new_evidence: true` to skip the model call entirely when no new
- * session evidence was imported since the last review.
+ * session evidence was imported since the last review. `declared_checks`
+ * (`[{intent, command, cwd}]`, the checks the repository states) bound a
+ * learned verifier's scope: one that omits a declared test check is rejected.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
@@ -908,7 +982,12 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     }
   }
   const pending_before = pattern_learning_pending(harness, options)
-  const prompts = cc_prompt(evidence, pending_before, cc_installed(harness.fs, options))
+  const prompts = cc_prompt(
+    evidence,
+    pending_before,
+    cc_installed(harness.fs, options),
+    cc_declared_checks(options),
+  )
   const route = options?.agent ?? {}
   let agent_options = route
     + {
