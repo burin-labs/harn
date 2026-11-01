@@ -832,6 +832,66 @@ fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
     assert_eq!(raw, path);
 }
 
+#[test]
+fn a_local_task_writes_branch_state_without_a_child_vm() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = tempfile::tempdir().unwrap();
+    let recording_state = crate::runtime_paths::state_root(recorded.path());
+    let original = recording_state.join(crate::runtime_paths::STORE_FILE);
+    std::fs::create_dir_all(&recording_state).unwrap();
+    std::fs::write(&original, r#"{"original":true}"#).unwrap();
+    {
+        let _guard = record_full(recorded.path());
+        crate::store::StoreState::at_state_root(&recording_state)
+            .set("original".to_string(), serde_json::json!(true))
+            .unwrap();
+        record_llm_call(&request("work"), &result("done", None));
+    }
+    let original_bytes = std::fs::read(&original).unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&recorded.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: recorded.path().to_path_buf(),
+        state_root: state.path().join("branch"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    let branch_scope = guard.scope();
+    harn_clock::test_support::current_thread_runtime().block_on(
+        harn_clock::test_support::with_local_tasks(async {
+            let inherited = {
+                let _inside = branch_scope.enter();
+                crate::orchestration::AmbientExecutionScope::capture_inherited()
+            };
+            assert!(crate::run_tape::state_branch().is_none());
+            crate::task_spawn::spawn_local_in(inherited, async move {
+                tokio::task::yield_now().await;
+                crate::store::StoreState::at_state_root(&recording_state)
+                    .set("child".to_string(), serde_json::json!("written"))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(crate::run_tape::state_branch().is_none());
+        }),
+    );
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    let branch_store: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            state
+                .path()
+                .join("branch")
+                .join(crate::runtime_paths::STORE_FILE),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(branch_store["original"], true);
+    assert_eq!(branch_store["child"], "written");
+}
+
 /// Work that outlives the host's guard, such as lifecycle cleanup finishing
 /// late, serves nothing but still writes only into the branch.
 #[test]
