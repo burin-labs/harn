@@ -751,10 +751,9 @@
       "display_name": "Hyperbolic",
       "classification": "hosted",
       "endpoint": {
-        "base_url": "https://api.hyperbolic.xyz/v1",
+        "base_url": "https://api.hyperbolic.ai/inference/v1",
         "base_url_env": "HYPERBOLIC_BASE_URL",
-        "chat_endpoint": "/chat/completions",
-        "completion_endpoint": "/completions"
+        "chat_endpoint": "/chat/completions"
       },
       "auth": {
         "style": "bearer",
@@ -767,6 +766,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -775,11 +775,11 @@
       ],
       "caveats": [],
       "rate_limits": {
-        "rpm": 60,
-        "tier": "basic",
-        "source_url": "https://www.hyperbolic.ai/docs/inference/text-apis",
-        "last_verified": "2026-06-23",
-        "notes": "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier."
+        "rpm": 300,
+        "tier": "Pro or Organization",
+        "source_url": "https://www.hyperbolic.ai/docs/inference/overview",
+        "last_verified": "2026-11-01",
+        "notes": "Documented per API key; inference requires a Pro account or Organization and a positive credit balance."
       }
     },
     {

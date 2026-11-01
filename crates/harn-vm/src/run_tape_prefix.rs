@@ -405,18 +405,7 @@ pub(crate) fn store_seed(
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         tape.recorder.record(TapeRecordKind::CacheLookup {
             namespace: STORE_SEED_NAMESPACE.to_string(),
-            key: store_identity(
-                path,
-                &tape
-                    .workspace_root()
-                    .map(|root| {
-                        vec![
-                            (crate::runtime_paths::state_root(root), ""),
-                            (root.to_path_buf(), "workspace"),
-                        ]
-                    })
-                    .unwrap_or_default(),
-            ),
+            key: recording_store_identity(path),
             after_calls: tape.next_llm_call.load(Ordering::SeqCst),
             value: contents.as_ref().map(|value| {
                 tape.recorder
@@ -425,6 +414,21 @@ pub(crate) fn store_seed(
         });
     }
     Ok(contents)
+}
+
+pub(crate) fn recording_store_identity(path: &Path) -> String {
+    let tape = process_tape();
+    let roots = tape
+        .as_ref()
+        .and_then(|tape| tape.workspace_root())
+        .map(|root| {
+            vec![
+                (crate::runtime_paths::state_root(root), ""),
+                (root.to_path_buf(), "workspace"),
+            ]
+        })
+        .unwrap_or_default();
+    store_identity(path, &roots)
 }
 
 /// A store's identity across the recorded run and a branch: where it lands

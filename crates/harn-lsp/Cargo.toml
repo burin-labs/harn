@@ -21,21 +21,21 @@ default = ["standalone"]
 standalone = ["dep:harn-stdlib"]
 
 [dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.185-dev", optional = true }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.185-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.185-dev" }
-harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.185-dev" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.185-dev" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.185-dev" }
-harn-ir = { path = "../harn-ir", version = "=0.10.185-dev" }
-harn-lint = { path = "../harn-lint", version = "=0.10.185-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.185-dev" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.185-dev" }
-harn-vm = { path = "../harn-vm", version = "=0.10.185-dev", default-features = false }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.185-dev" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.185", optional = true }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.185" }
+harn-parser = { path = "../harn-parser", version = "=0.10.185" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.185" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.185" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.185" }
+harn-ir = { path = "../harn-ir", version = "=0.10.185" }
+harn-lint = { path = "../harn-lint", version = "=0.10.185" }
+harn-modules = { path = "../harn-modules", version = "=0.10.185" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.185" }
+harn-vm = { path = "../harn-vm", version = "=0.10.185", default-features = false }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.185" }
 # LSP wants the full code-intelligence surface (AST + every grammar family).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.185-dev", default-features = false, features = ["full"] }
-harn-rules = { path = "../harn-rules", version = "=0.10.185-dev" }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.185", default-features = false, features = ["full"] }
+harn-rules = { path = "../harn-rules", version = "=0.10.185" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde = { version = "1", features = ["derive"] }
@@ -45,8 +45,8 @@ line-index = "0.1.2"
 ignore = "0.4"
 
 [dev-dependencies]
-harn-flock = { path = "../harn-flock", version = "=0.10.185-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.185-dev", features = ["bundled-stdlib"] }
+harn-flock = { path = "../harn-flock", version = "=0.10.185" }
+harn-modules = { path = "../harn-modules", version = "=0.10.185", features = ["bundled-stdlib"] }
 tempfile = "3"
 
 [lints]

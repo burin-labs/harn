@@ -13,9 +13,9 @@ pub use account::{
     capture_process_attestations, ProviderAccountAttestation, HOST_ACCOUNT_ATTESTATIONS_ENV,
 };
 pub use admission::{
-    inference_admission_schemas, preview_inference_admission, DataControlsRefusal,
-    InferenceAdmissionRequest, InferenceAdmissionSnapshot, InferenceAdmissionStatus,
-    DATA_CONTROLS_TRAINING_REFUSED_RULE,
+    inference_admission_schemas, preflight_inference_admission, preview_inference_admission,
+    DataControlsRefusal, InferenceAdmissionRequest, InferenceAdmissionSnapshot,
+    InferenceAdmissionStatus, DATA_CONTROLS_TRAINING_REFUSED_RULE,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]

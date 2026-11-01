@@ -15,12 +15,15 @@ include = [
 ]
 
 [dependencies]
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.185-dev" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.185" }
 zstd = { version = "0.14", default-features = false }
 
 # Packs the catalog's files into one archive; see build.rs.
 [build-dependencies]
 zstd = { version = "0.14", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

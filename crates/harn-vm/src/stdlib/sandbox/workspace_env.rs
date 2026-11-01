@@ -5,6 +5,10 @@ use crate::orchestration::CapabilityPolicy;
 
 use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_once};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "pinned_pnpm.rs"]
+mod pinned_pnpm;
+
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 pub(crate) const WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
@@ -494,6 +498,8 @@ pub(crate) fn inject_workspace_process_env(
     inject_jvm_loopback_env(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::swiftpm::inject_env(env, policy);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pinned_pnpm::inject_env(env, policy);
 }
 
 /// The workspace defaults an in-process environment read sees, computed

@@ -31,7 +31,7 @@ structured_output = "native"
 structured_output_mode = "native_json"
 text_tool_wire_format_supported = true
 tool_mode_parity = "unknown"
-tool_mode_parity_notes = "Hyperbolic documents tool calling for selected Qwen/Llama routes; model-specific probes should override this wildcard if needed."
+tool_mode_parity_notes = "Hyperbolic documents tool calling on its text chat endpoint; model-specific probes must establish parity for each route."
 
 [[provider.siliconflow]]
 model_match = "*"

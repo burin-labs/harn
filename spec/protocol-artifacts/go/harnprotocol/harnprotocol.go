@@ -398,6 +398,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"parse_dropped",
 	"generic_throw",
 	"managed_spend_paused",
+	"managed_allowance_unavailable",
 }
 
 // AgentTerminalKind is the named string type for the AgentTerminalKinds wire vocabulary.
@@ -491,6 +492,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"unknown",
 	"policy_denied",
 	"managed_spend_paused",
+	"managed_allowance_unavailable",
 }
 
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
@@ -2127,6 +2129,15 @@ type HarnPlanDocument struct {
 	ResolutionReceipts []HarnPlanCommentResolutionReceipt `json:"resolution_receipts"`
 	CreatedAt          string                             `json:"created_at"`
 	UpdatedAt          string                             `json:"updated_at"`
+}
+
+// HarnProviderEndpointConfigurationError is the named string type for the HarnProviderEndpointConfigurationErrorValues wire vocabulary.
+type HarnProviderEndpointConfigurationError string
+
+// HarnProviderEndpointConfigurationErrorValues enumerates every wire value Harn currently emits for HarnProviderEndpointConfigurationError.
+var HarnProviderEndpointConfigurationErrorValues = []HarnProviderEndpointConfigurationError{
+	"invalid_url",
+	"not_absolute_http",
 }
 
 // HarnMachineSpendPeriod is the named string type for the HarnMachineSpendPeriodValues wire vocabulary.

@@ -471,7 +471,8 @@
       "output_budget_exhausted",
       "unknown",
       "policy_denied",
-      "managed_spend_paused"
+      "managed_spend_paused",
+      "managed_allowance_unavailable"
     ],
     "promptErrorTerminalClasses": [
       "context_overflow",
@@ -487,7 +488,8 @@
       "agent_loop_protocol_failure",
       "parse_dropped",
       "generic_throw",
-      "managed_spend_paused"
+      "managed_spend_paused",
+      "managed_allowance_unavailable"
     ],
     "promptResultExtensionFields": [
       "terminal"
@@ -1045,6 +1047,15 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/provider-endpoint-configuration-error.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm_config",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm_config/provider_def.rs"
     },
     {
       "artifact": "schemas/machine-spend-exhaustion.schema.json",

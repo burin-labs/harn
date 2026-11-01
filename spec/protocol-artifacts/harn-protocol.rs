@@ -2509,6 +2509,8 @@ pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_p
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
 pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
+pub const AGENT_TERMINAL_CLASS_MANAGED_ALLOWANCE_UNAVAILABLE: &str =
+    "managed_allowance_unavailable";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
@@ -2526,6 +2528,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "parse_dropped",
     "generic_throw",
     "managed_spend_paused",
+    "managed_allowance_unavailable",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2587,6 +2590,7 @@ pub enum HarnAgentTerminalClass {
     ParseDropped,
     GenericThrow,
     ManagedSpendPaused,
+    ManagedAllowanceUnavailable,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2609,6 +2613,7 @@ impl HarnAgentTerminalClass {
         Self::ParseDropped,
         Self::GenericThrow,
         Self::ManagedSpendPaused,
+        Self::ManagedAllowanceUnavailable,
     ];
 
     /// The JSON wire string for this value.
@@ -2628,6 +2633,7 @@ impl HarnAgentTerminalClass {
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
             Self::ManagedSpendPaused => "managed_spend_paused",
+            Self::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2649,6 +2655,7 @@ impl HarnAgentTerminalClass {
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
             "managed_spend_paused" => Self::ManagedSpendPaused,
+            "managed_allowance_unavailable" => Self::ManagedAllowanceUnavailable,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -3075,6 +3082,7 @@ pub enum HarnLlmErrorReason {
     Unknown,
     PolicyDenied,
     ManagedSpendPaused,
+    ManagedAllowanceUnavailable,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -3099,6 +3107,7 @@ impl HarnLlmErrorReason {
         Self::Unknown,
         Self::PolicyDenied,
         Self::ManagedSpendPaused,
+        Self::ManagedAllowanceUnavailable,
     ];
 
     /// The JSON wire string for this value.
@@ -3120,6 +3129,7 @@ impl HarnLlmErrorReason {
             Self::Unknown => "unknown",
             Self::PolicyDenied => "policy_denied",
             Self::ManagedSpendPaused => "managed_spend_paused",
+            Self::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3143,6 +3153,7 @@ impl HarnLlmErrorReason {
             "unknown" => Self::Unknown,
             "policy_denied" => Self::PolicyDenied,
             "managed_spend_paused" => Self::ManagedSpendPaused,
+            "managed_allowance_unavailable" => Self::ManagedAllowanceUnavailable,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -4869,6 +4880,64 @@ pub struct HarnPlanDocument {
     pub created_at: String,
     pub updated_at: String,
 }
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnProviderEndpointConfigurationError {
+    InvalidUrl,
+    NotAbsoluteHttp,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnProviderEndpointConfigurationError {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::InvalidUrl, Self::NotAbsoluteHttp];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::InvalidUrl => "invalid_url",
+            Self::NotAbsoluteHttp => "not_absolute_http",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "invalid_url" => Self::InvalidUrl,
+            "not_absolute_http" => Self::NotAbsoluteHttp,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnProviderEndpointConfigurationError {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnProviderEndpointConfigurationError> for String {
+    fn from(value: HarnProviderEndpointConfigurationError) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnProviderEndpointConfigurationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Value-free inference admission vocabulary owned by harn_vm.
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -9,10 +9,10 @@ use crate::value::VmDictExt;
 /// path between the push and host registration has to unwind it. Ownership
 /// transfers to the session through [`Self::into_frame`]; anything else drops
 /// the guard and the frame comes back off the stack.
-struct TranscriptDirScope(Option<crate::llm::agent_observe::TranscriptDirFrame>);
+pub(super) struct TranscriptDirScope(Option<crate::llm::agent_observe::TranscriptDirFrame>);
 
 impl TranscriptDirScope {
-    fn push(dir: Option<&str>) -> Self {
+    pub(super) fn push(dir: Option<&str>) -> Self {
         Self(dir.and_then(crate::llm::agent_observe::push_llm_transcript_dir))
     }
 
@@ -700,6 +700,11 @@ pub(super) async fn host_agent_session_finalize(
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
+    super::message_history::pair_orphaned_tool_use(
+        &session_id,
+        crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+        session.transcript_dir.as_deref(),
+    );
     let phase = live_transcript_journal::flush_terminal(
         &session_id,
         &canonical_status,
