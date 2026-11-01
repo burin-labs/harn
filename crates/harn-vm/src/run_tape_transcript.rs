@@ -48,13 +48,15 @@ pub(super) async fn capture<F: std::future::Future>(
 }
 
 pub(crate) fn note_session_store_reset() {
+    refuse_dispatch_replay("the dispatch resets session runtime state beyond recorded transcripts");
+}
+
+pub(crate) fn refuse_dispatch_replay(reason: &str) {
     let _ = DISPATCH_REFUSAL.try_with(|refusal| {
         refusal
             .lock()
             .expect("dispatch refusal poisoned")
-            .get_or_insert_with(|| {
-                "the dispatch resets session runtime state beyond recorded transcripts".to_string()
-            });
+            .get_or_insert_with(|| reason.to_string());
     });
 }
 

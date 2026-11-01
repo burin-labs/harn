@@ -60,7 +60,8 @@ mod privacy;
 /// where a run tape's recording kept its durable state. Version 4 records
 /// each tool dispatch's transcript changes as typed [`TranscriptChange`]s.
 /// Version 5 also records ephemeral transcript creation and closure.
-pub const TAPE_FORMAT_VERSION: u32 = 5;
+/// Version 6 records runtime store mutations inside each tool dispatch.
+pub const TAPE_FORMAT_VERSION: u32 = 6;
 
 /// Ordered transcript effects within one tool dispatch. Lifecycle records
 /// distinguish a closed ephemeral transcript from an unexpectedly absent target.
@@ -303,6 +304,10 @@ pub enum TapeRecordKind {
         /// instead.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         transcript_changes: Vec<TranscriptChange>,
+        /// Ordered runtime store mutations. Missing means an older recording
+        /// did not measure them, rather than measuring no changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        store_changes: Option<TapePayload>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {
@@ -726,9 +731,13 @@ fn visit_payloads(kind: &mut TapeRecordKind, mut visit: impl FnMut(&mut TapePayl
         }
         TapeRecordKind::DecisionEvaluation { response, .. } => visit(response),
         TapeRecordKind::ToolCall {
-            outcome, effects, ..
+            outcome,
+            effects,
+            store_changes,
+            ..
         } => {
             visit(outcome);
+            store_changes.iter_mut().for_each(&mut visit);
             effects
                 .iter_mut()
                 .filter_map(|effect| effect.content.as_mut())
