@@ -11,7 +11,8 @@
 # partial verified row leaves its omitted field in that queue.
 [usage_accounting_audit]
 reviewed_on = "2026-08-26"
-expires_on = "2026-10-31"
+# Extended on 2026-10-31 from 2026-10-31; the remaining audit is tracked in #7320.
+expires_on = "2026-11-14"
 tracking_issue = 7320
 unverified = [
   "atlas",

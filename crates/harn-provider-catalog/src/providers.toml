@@ -16981,7 +16981,7 @@ zai = "glm-4.6"
 default = "mid"
 
 [usage_accounting_audit]
-expires_on = "2026-10-31"
+expires_on = "2026-11-14"
 reviewed_on = "2026-08-26"
 tracking_issue = 7320
 unverified = [
