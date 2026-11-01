@@ -88,7 +88,7 @@ fn cc_session_ids(evidence: list) -> list {
   return out
 }
 
-fn cc_prompt(evidence: list, pending: list) -> dict {
+fn cc_prompt(evidence: list, pending: list, installed: list = []) -> dict {
   const cards = cc_evidence_cards(evidence)
   const system = """
 You are Harn's crystallization curator. You inspect completed coding-agent sessions and decide whether repeated or strongly reusable work should become a durable project capability.
@@ -123,6 +123,12 @@ ${json_stringify(cards)}
 <existing_pending>
 ${json_stringify(pending ?? [])}
 </existing_pending>
+
+<installed_capabilities>
+${json_stringify(installed)}
+</installed_capabilities>
+
+An installed capability already serves future sessions: do not propose it again under any name. Submit zero proposals when the evidence shows nothing beyond the installed and pending library.
 
 Call submit_crystallization_batch when your analysis is complete.
 """
@@ -612,9 +618,32 @@ fn cc_search_builtins(
   return {success: true, query: query, matches: matches}
 }
 
+/** Host-supplied installed capabilities, normalized to `{name, verify_command}`. */
+fn cc_installed(options: any = nil) -> list {
+  let out = []
+  for item in options?.installed ?? [] {
+    const name = cc_text(item?.name)
+    if name != "" {
+      out = out + [{name: name, verify_command: cc_text(item?.verify_command)}]
+    }
+  }
+  return out
+}
+
+/** A proposal duplicates an installed capability by name or by its verifier line. */
+fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
+  const name = cc_text(proposal?.name)
+  const verify = cc_text(proposal?.artifact?.verify_command)
+  return installed.any({ item -> item.name == name || (verify != "" && item.verify_command == verify) })
+}
+
 fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
   let prepared = []
+  const installed = cc_installed(options)
   for proposal in proposals ?? [] {
+    if cc_duplicates_installed(proposal, installed) {
+      continue
+    }
     if proposal?.kind == "skill" {
       prepared = prepared + [proposal]
       continue
@@ -837,6 +866,10 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * proposal shape, cost, iterations, and durable review state. `usage` is the
  * run's physical provider ledger (tokens and cost of every curator call); it is
  * absent when the session reported none, so a host reads unmeasured, never zero.
+ * A host passes `installed` (`[{name, verify_command}]`) so the curator neither
+ * proposes nor stages a capability the project already has, and
+ * `require_new_evidence: true` to skip the model call entirely when no new
+ * session evidence was imported since the last review.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
@@ -853,8 +886,20 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
       session_import: session_import,
     }
   }
+  if options?.require_new_evidence ?? false {
+    if (session_import?.imported_count ?? 0) == 0 {
+      return {
+        schema: CURATOR_SCHEMA,
+        status: "no_new_evidence",
+        proposals: [],
+        proposal_count: 0,
+        evidence_count: len(evidence),
+        session_import: session_import,
+      }
+    }
+  }
   const pending_before = pattern_learning_pending(harness, options)
-  const prompts = cc_prompt(evidence, pending_before)
+  const prompts = cc_prompt(evidence, pending_before, cc_installed(options))
   const route = options?.agent ?? {}
   let agent_options = route
     + {
