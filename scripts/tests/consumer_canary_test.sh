@@ -151,6 +151,7 @@ respond() {
     "api repos/acme/widget-host") echo main ;;
     "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
     "api repos/acme/widget-host/actions/runs/"*)
+      if [[ "$*" == *"--jq .head_sha"* && -f "$STUB/run-head" ]]; then cat "$STUB/run-head"; return 0; fi
       if [[ "${GH_TOKEN:-}" == fixture-expired ]]; then
         code=401
         echo '{"message":"Bad credentials fixture-private-value"}'
@@ -164,6 +165,7 @@ respond() {
       echo "$*" > "$STUB/dispatched"; echo dispatch >> "$STUB/dispatch-count"; cat "$STUB/dispatch" ;;
     "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || { code=404; return 1; }; cat "$STUB/history" ;;
     "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; jq -r "$4" "$STUB/jobs-${id%/jobs}" ;;
+    "api repos/burin-labs/harn/actions/runs/"*"/artifacts?name=candidate-manifest-"*) jq -r "$4" "$STUB/manifest-artifacts" ;;
     "api repos/acme/harn/git/matching-refs/heads/green") [[ -f "$STUB/green-ref" ]] || exit 1; cat "$STUB/green-ref" ;;
     *) echo "unexpected gh $*" >&2; exit 2 ;;
   esac
@@ -184,7 +186,7 @@ export CANARY_API_BACKOFF_SECONDS=0
 canary() {
   local workspace_version=${2:-1.2.4-dev}
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
-    CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
+    CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION="${CANARY_TEST_SOURCE:-0123456789abcdef0123456789abcdef01234567}" \
     WORKSPACE_VERSION="$workspace_version" CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
     CONSUMER_PULL_REQUEST="${3:-${CONSUMER_PULL_REQUEST:-}}" \
     GITHUB_OUTPUT="$scratch/gho" \
@@ -429,8 +431,126 @@ canary 'Pairs-with: consumer#7' 1.2.4-dev 7
 CONSUMER_PULL_REQUEST=7 refuses pairing_ambiguous 'Pairs-with: consumer#8'
 CONSUMER_PULL_REQUEST=0 refuses pairing_unrecognized
 CONSUMER_PULL_REQUEST=01 refuses pairing_unrecognized
-echo "closed acme/widget-host fix-flag" > "$scratch/pull"
-CONSUMER_PULL_REQUEST=7 refuses paired_pull_not_open
+echo "closed acme/widget-host fix-flag false main" > "$scratch/pull"
+CONSUMER_PULL_REQUEST=7 refuses paired_pull_closed_unmerged
+refuses paired_pull_closed_unmerged 'Pairs-with: consumer#7'
+# A merged pairing's adaptation is on the default branch: rehearse that, and
+# say so by name, rather than refusing or silently falling back.
+echo "closed acme/widget-host fix-flag true main" > "$scratch/pull"
+canary 'Pairs-with: consumer#7'
+grep -q -- '--ref main ' "$scratch/dispatched"
+grep -q 'pairing pull=7 state=merged decision=rehearse_default reason=paired_pull_merged' "$scratch/out"
+grep -q 'ref=default' "$scratch/out"
+echo "closed acme/widget-host fix-flag true release-train" > "$scratch/pull"
+refuses paired_pull_merged_elsewhere 'Pairs-with: consumer#7'
+echo "open acme/widget-host fix-flag false main" > "$scratch/pull"
+
+# A release reads the trailers of every commit it includes, from the previous
+# stable tag through the release commit, so the feature commit that needs the
+# consumer change pairs the release. The rehearsed revision is the release.
+history="$scratch/release-source"
+fixture_commit() {
+  printf '[workspace.package]\nversion = "%s"\n' "$1" > "$history/Cargo.toml"
+  git -C "$history" add Cargo.toml
+  git -C "$history" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false \
+    commit -q --allow-empty -m "$2"
+}
+# fixture_release <trailer for the first feature commit, or empty>
+fixture_release() {
+  rm -rf "$history"
+  git init -q -b main "$history"
+  fixture_commit 1.2.3 'Release v1.2.3'
+  git -C "$history" tag v1.2.3
+  fixture_commit 1.2.4-dev "Remove a flag${1:+$'\n\n'$1}"
+  # A prerelease tag inside the range does not bound it.
+  git -C "$history" tag v1.2.4-rc.1
+  fixture_commit 1.2.4-dev $'Promote a lint to an error\n\nPairs-with: consumer#7'
+  fixture_commit 1.2.4-dev 'Unrelated change'
+  fixture_commit 1.2.4 'Release v1.2.4'
+}
+# range_canary <workspace version> [pull request description]: rehearse the
+# fixture's HEAD, reading pairing from its history.
+range_canary() {
+  local source
+  source=$(git -C "$history" rev-parse HEAD)
+  OBSERVER_CONTEXT=$(jq -c --arg source "$source" '.source_revision = $source' <<< "$OBSERVER_CONTEXT") \
+    CANARY_TEST_SOURCE="$source" CANARY_PAIRING_SOURCE="$history" canary "${2:-}" "$1"
+}
+range_refuses() {
+  local reason=$1
+  shift
+  if range_canary "$@"; then
+    echo "expected refusal $reason, got green" >&2
+    exit 1
+  fi
+  grep -q "reason=$reason" "$scratch/out"
+}
+# Falsifier: the trailer sits on a feature commit, not on the release commit,
+# and still selects its pull request.
+fixture_release ''
+range_canary 1.2.4
+grep -q -- '--ref fix-flag ' "$scratch/dispatched"
+grep -q 'ref=pull-7' "$scratch/out"
+grep -q "pairing range=v1.2.3\.\.$(git -C "$history" rev-parse HEAD) commits=4" "$scratch/out"
+# Falsifier: two distinct pairings in one release refuse, naming both.
+fixture_release 'Pairs-with: consumer#6'
+range_refuses pairing_ambiguous 1.2.4
+grep -q 'reason=pairing_ambiguous pulls=6,7' "$scratch/out"
+# A development source still reads only its own commit.
+fixture_release ''
+git -C "$history" reset -q --hard HEAD~1
+range_canary 1.2.4-dev
+grep -q -- '--ref main ' "$scratch/dispatched"
+# A pull request description replaces the commit history.
+fixture_release ''
+range_canary 1.2.4 'No trailer here'
+grep -q -- '--ref main ' "$scratch/dispatched"
+# A range that cannot be measured refuses instead of reading less.
+git -C "$history" tag -d v1.2.3 > /dev/null
+range_refuses pairing_range_unmeasured 1.2.4
+
+# A release producer's pass is bound to the Harn source, the candidate
+# manifest and the consumer revision its run measured. Promotion re-reads the
+# binding (scripts/tests/release_promotion_plan_test.sh). The file is public:
+# the consumer revision appears only as its digest.
+consumer_revision=$(printf 'c%.0s' {1..40})
+printf '%s\n' "$consumer_revision" > "$scratch/run-head"
+jq -n '{total_count:1,artifacts:[{name:"candidate-manifest-0123456789abcdef0123456789abcdef01234567",
+  expired:false,digest:("sha256:"+("b"*64))}]}' > "$scratch/manifest-artifacts"
+bind() {
+  rm -f "$scratch/binding.json"
+  : > "$scratch/gho"
+  PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host CANARY_RECORD_RUN=42 \
+    SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 CANARY_RELEASE_PRODUCER_RUN_ID=900 \
+    CANARY_RELEASE_PRODUCER_RUN_ATTEMPT=1 CANARY_VERDICT=pass CANARY_PAIRED_PULL=7 CANARY_DECLARED_PULL=7 \
+    CANARY_BINDING_FILE="$scratch/binding.json" GITHUB_OUTPUT="$scratch/gho" "$@" \
+    bash "$root/scripts/ci/consumer_canary.sh" --record > "$scratch/out" 2>&1
+  if grep -qE "widget-host|$consumer_revision" "$scratch/out"; then
+    echo 'binding output names the consumer or its revision' >&2; exit 1
+  fi
+}
+bind env
+jq -e --arg head "$(printf '%s' "$consumer_revision" | shasum -a 256 | cut -d' ' -f1)" '
+  .schema == "harn.release.consumer_rehearsal_binding.v1" and .verdict == "pass" and
+  .source_sha == "0123456789abcdef0123456789abcdef01234567" and .producer_run == "900" and
+  .producer_attempt == 1 and .manifest_digest == ("sha256:" + ("b" * 64)) and .consumer_run == "42" and
+  .consumer_head_sha256 == $head and .consumer_pull == "7" and .declared_pull == "7"
+' "$scratch/binding.json" > /dev/null
+grep -qx "binding=$scratch/binding.json" "$scratch/gho"
+if grep -q "$consumer_revision" "$scratch/binding.json"; then
+  echo 'the public binding recorded the consumer revision itself' >&2; exit 1
+fi
+for unbound in CANARY_VERDICT=fail CANARY_VERDICT= CANARY_RELEASE_PRODUCER_RUN_ID= CANARY_RECORD_RUN=; do
+  bind env "$unbound"
+  if [[ -e "$scratch/binding.json" ]] || grep -q '^binding=' "$scratch/gho"; then
+    echo "an unmeasured pass ($unbound) wrote a binding" >&2; exit 1
+  fi
+  grep -q 'binding=unrecorded' "$scratch/out"
+done
+echo '{"total_count":0,"artifacts":[]}' > "$scratch/manifest-artifacts"
+bind env
+[[ ! -e "$scratch/binding.json" ]]
+grep -q 'binding=unrecorded reason=candidate_manifest_unmeasured' "$scratch/out"
 
 # A pairing it cannot honour fails by name instead of rehearsing the default.
 echo "open someone/fork fix-flag" > "$scratch/pull"

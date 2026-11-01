@@ -2539,6 +2539,15 @@ fn consumer_observer_descriptor_safe(step: dict) -> bool {
       receipt:
         "steps.observe-1.outputs.checkpoint || steps.observe-2.outputs.checkpoint || steps.observe-3.outputs.checkpoint || steps.observe-4.outputs.checkpoint",
     },
+    // canary_bind writes only public identities: the Harn source and archive
+    // digest, the consumer run id the canary prints, pull numbers from public
+    // trailers, and the consumer revision as a digest.
+    {
+      name: "Preserve the release rehearsal binding",
+      condition: "always() && steps.record.outputs.binding != ''",
+      artifact: "consumer-rehearsal-binding-${dollar}{{ github.run_attempt }}",
+      receipt: "steps.record.outputs.binding",
+    },
   ]
   return action_is_pinned(step?.uses ?? "", "actions/upload-artifact")
     && descriptors.any(

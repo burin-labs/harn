@@ -873,7 +873,12 @@ export function consumerPairing(text, requestedPull = '') {
     if(!match) refuse('consumer_pairing_invalid');
     pairs.add(match[1]);
   }
-  if(pairs.size>1) refuse('consumer_pairing_ambiguous');
+  if(pairs.size>1){
+    // Pull numbers are already public in the trailers; naming them says which to reconcile.
+    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
+    error.pulls=[...pairs].sort((left,right)=>Number(left)-Number(right));
+    throw error;
+  }
   return pairs.size===1?[...pairs][0]:null;
 }
 

@@ -19,7 +19,13 @@
 #   Pairs-with: consumer#<pull-request-number>
 #
 # The rehearsal then runs on that pull request's branch instead of the
-# consumer's default branch.
+# consumer's default branch. A release source (a stable workspace version)
+# reads the trailers of every commit it includes, from the previous stable tag
+# through the release commit, so the feature commit that broke the contract
+# pairs the release with it. A paired pull request already merged into the
+# consumer's default branch carries its adaptation there, so the default branch
+# is rehearsed and that decision is logged by name; any other closed pairing
+# refuses.
 #
 # Every input that is missing, and every state that is not a completed
 # success, fails by name. There is no path that reports green without a
@@ -45,7 +51,10 @@
 #   CANARY_WORKFLOW    the consumer's rehearsal workflow file.
 #   SOURCE_REVISION    the commit under test.
 #   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
-#   PAIRING_TEXT       description and commit messages to read trailers from.
+#   PAIRING_TEXT       a pull request description to read trailers from; when
+#                      empty, CANARY_PAIRING_SOURCE supplies commit messages.
+#   CANARY_PAIRING_SOURCE  optional checkout of SOURCE_REVISION with its history
+#                      and tags; a release source reads its whole release range.
 #   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
 #   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
@@ -59,6 +68,10 @@
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
 #                      run concluded; an unmeasured run writes no verdict.
+#
+# `--record` additionally reads CANARY_BINDING_FILE, CANARY_VERDICT,
+# CANARY_PAIRED_PULL and CANARY_DECLARED_PULL: a passing release rehearsal
+# writes the binding that promotion re-reads (see canary_bind).
 set -euo pipefail
 
 # shellcheck source=scripts/lib/release_version.sh
@@ -67,6 +80,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_version.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_policy.sh"
 # shellcheck source=scripts/lib/green_checkpoint.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/sha256.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -256,6 +271,48 @@ canary_record() {
   fi
   printf 'consumer_head=%s\nconsumer_jobs=%s\nconsumer_failures=%s\nreason=%s\n' "$head" "$digest" "$failures" "$reason" >> "$GITHUB_OUTPUT"
   echo "CONSUMER_CANARY recorded run=${run_id:-none} head=${head:+measured} jobs=${digest:+measured} failures=${failures:+measured} reason=${reason:-none}"
+  if [[ -n "${CANARY_BINDING_FILE:-}" ]]; then
+    canary_bind "$repo" "$run_id" "$head"
+  fi
+}
+
+# A release rehearsal's pass is evidence only for what it measured: the exact
+# Harn source, the candidate archives (by their manifest artifact's digest) and
+# the consumer revision its run checked out. Promotion re-reads each one and
+# refuses by name when any moved. This file is public, so the consumer
+# revision is recorded as its sha256 and the consumer run only by its id,
+# which the canary already prints. Anything short of a measured pass of a
+# release producer writes no binding, and promotion refuses its absence.
+canary_bind() {
+  local repo=$1 run_id=$2 head=$3 source=${SOURCE_REVISION:-}
+  local producer=${CANARY_RELEASE_PRODUCER_RUN_ID:-} attempt=${CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:-}
+  local paired=${CANARY_PAIRED_PULL:-} declared=${CANARY_DECLARED_PULL:-} manifest='' head_digest
+  if [[ "${CANARY_VERDICT:-}" != pass || ! "$head" =~ ^[0-9a-f]{40}$ || ! "$source" =~ ^[0-9a-f]{40}$
+        || ! "$run_id" =~ ^[1-9][0-9]*$ || ! "$producer" =~ ^[1-9][0-9]*$ || ! "$attempt" =~ ^[1-9][0-9]*$
+        || ! "$paired" =~ ^([1-9][0-9]*)?$ || ! "$declared" =~ ^([1-9][0-9]*)?$
+        || ! "${GITHUB_REPOSITORY:-}" =~ ^[^/]+/[^/]+$ ]]; then
+    echo "CONSUMER_CANARY binding=unrecorded reason=not_a_measured_release_pass"
+    return 0
+  fi
+  canary_api --optional manifest candidate_manifest_unread "$GITHUB_REPOSITORY" \
+    "repos/$GITHUB_REPOSITORY/actions/runs/$producer/artifacts?name=candidate-manifest-$source" \
+    --jq '[.artifacts[] | select(.expired == false) | .digest] | if length == 1 then .[0] else "" end' || manifest=''
+  if [[ ! "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "CONSUMER_CANARY binding=unrecorded reason=candidate_manifest_unmeasured"
+    return 0
+  fi
+  head_digest=$(sha256_text_hex "$head") || head_digest=''
+  [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 0; }
+  jq -n --arg source "$source" --arg producer "$producer" --argjson attempt "$attempt" \
+    --arg manifest "$manifest" --arg run "$run_id" --arg head "$head_digest" \
+    --arg paired "$paired" --arg declared "$declared" \
+    '{schema:"harn.release.consumer_rehearsal_binding.v1",source_sha:$source,
+      producer_run:$producer,producer_attempt:$attempt,manifest_digest:$manifest,
+      consumer_run:$run,consumer_head_sha256:$head,
+      consumer_pull:(if $paired == "" then null else $paired end),
+      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}' > "$CANARY_BINDING_FILE"
+  echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT"
+  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-$paired}${paired:-default}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher
@@ -264,6 +321,30 @@ canary_read_pairing() {
   local text=$1 reader
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
   CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
+}
+
+# The text whose trailers declare the pairing. A pull request description wins.
+# Otherwise a release source reads every commit it includes, from the previous
+# stable tag through SOURCE_REVISION, because the commit that needs a consumer
+# change is usually a feature commit, not the release commit. Any other source
+# reads its own commit message. A range it cannot measure refuses rather than
+# reading less.
+canary_pairing_text() {
+  local revision=$1 version=$2 source=${CANARY_PAIRING_SOURCE:-} base count
+  CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
+  [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
+  if release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
+    base=$(release_previous_stable_tag "$version" "$source") \
+      || canary_fail pairing_range_unmeasured "version=$version read=previous_stable_tag"
+    count=$(git -C "$source" rev-list --count "$base..$revision" 2> /dev/null) \
+      || canary_fail pairing_range_unmeasured "base=$base"
+    CANARY_PAIRING_TEXT=$(git -C "$source" log --format='%B' "$base..$revision") \
+      || canary_fail pairing_range_unmeasured "base=$base"
+    canary_say "CONSUMER_CANARY pairing range=$base..$revision commits=$count"
+  else
+    CANARY_PAIRING_TEXT=$(git -C "$source" log -1 --format='%B' "$revision" 2> /dev/null) \
+      || canary_fail pairing_source_unreadable
+  fi
 }
 
 canary_dispatch() {
@@ -305,21 +386,34 @@ canary_dispatch() {
   target_version="v$published_version"
 
   local paired ref label=default
-  canary_read_pairing "${PAIRING_TEXT:-}"
+  canary_pairing_text "$revision" "$workspace_version"
+  canary_read_pairing "$CANARY_PAIRING_TEXT"
   paired=$CANARY_PAIRED
-  CANARY_PAIRED_PULL=$paired
+  CANARY_DECLARED_PULL=$paired
   if [[ -n "$paired" ]]; then
-    local pull state head_repo
+    local pull state head_repo merged base default_branch
     label=pull-$paired
     canary_api --detail "pull=$paired" pull paired_pull_unreadable \
-      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/pulls/$paired" --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"'
-    read -r state head_repo ref <<< "$pull"
-    [[ "$state" == open ]] || canary_fail paired_pull_not_open "pull=$paired state=$state"
-    [[ "$head_repo" == "$repo" ]] || canary_fail paired_pull_from_fork "pull=$paired"
+      secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/pulls/$paired" \
+      --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref) \(.merged) \(.base.ref)"'
+    read -r state head_repo ref merged base <<< "$pull"
+    if [[ "$state" == closed && "$merged" == true ]]; then
+      # A merged pairing's adaptation is on the base it merged into. Only the
+      # default branch is what a release meets, so only that base is accepted.
+      canary_api default_branch consumer_unreadable secret:CONSUMER_CANARY_REPOSITORY "repos/$repo" --jq .default_branch
+      [[ -n "$default_branch" && "$base" == "$default_branch" ]] \
+        || canary_fail paired_pull_merged_elsewhere "pull=$paired"
+      canary_say "CONSUMER_CANARY pairing pull=$paired state=merged decision=rehearse_default reason=paired_pull_merged"
+      paired='' ref=$default_branch label=default
+    else
+      [[ "$state" == open ]] || canary_fail paired_pull_closed_unmerged "pull=$paired state=$state"
+      [[ "$head_repo" == "$repo" ]] || canary_fail paired_pull_from_fork "pull=$paired"
+    fi
   else
     canary_api ref consumer_unreadable secret:CONSUMER_CANARY_REPOSITORY "repos/$repo" --jq .default_branch
     [[ -n "$ref" ]] || canary_fail consumer_unreadable "read=consumer_default_branch"
   fi
+  CANARY_PAIRED_PULL=$paired
 
   if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
     [[ -z "$paired" ]] || canary_fail recovered_pairing_unsupported
@@ -605,7 +699,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       CANARY_DISPATCHING=true
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
-      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" "${CANARY_PAIRED_PULL:-}" >> "$GITHUB_OUTPUT"
+      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" \
+        "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" >> "$GITHUB_OUTPUT"
       ;;
     --observe) canary_observe ;;
     --record) canary_record ;;
