@@ -29,6 +29,9 @@ pub fn message_25(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  correção de formato da ferramenta: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  исправление формата инструмента: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  工具格式修正：" + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_26(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "FAIL"
+  }
+  if locale == "ru" {
+    return "СБОЙ"
   }
   if locale == "zh-Hans" {
     return "FAIL"
@@ -102,6 +108,9 @@ pub fn message_27(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "Pré-checagem de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
+  if locale == "ru" {
+    return "Предпроверка LoRA для " + (values[0] ?? "") + " через " + (values[1] ?? "")
+  }
   if locale == "zh-Hans" {
     return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 进行 LoRA 预检"
   }
@@ -138,6 +147,9 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "MIGRATION REVIEW"
   }
+  if locale == "ru" {
+    return "ПРОВЕРКА МИГРАЦИИ"
+  }
   if locale == "zh-Hans" {
     return "MIGRATION REVIEW"
   }
@@ -173,6 +185,9 @@ pub fn message_29(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "PASS"
+  }
+  if locale == "ru" {
+    return "ПРОЙДЕНО"
   }
   if locale == "zh-Hans" {
     return "PASS"
