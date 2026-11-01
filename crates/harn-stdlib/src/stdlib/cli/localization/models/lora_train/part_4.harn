@@ -32,6 +32,9 @@ pub fn message_20(locale: string, values: list<string>) -> string {
     return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
       + ")"
   }
+  if locale == "ru" {
+    return "  формат инструмента: " + (values[0] ?? "") + " (запрошен " + (values[1] ?? "") + ")"
+  }
   if locale == "zh-Hans" {
     return "  工具格式：" + (values[0] ?? "") + "（请求 " + (values[1] ?? "") + "）"
   }
@@ -67,6 +70,9 @@ pub fn message_21(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  treinador: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  тренер: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练器：" + (values[0] ?? "")
@@ -104,6 +110,9 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  precisão da base de treinamento: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  точность базовой модели обучения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  训练基础精度：" + (values[0] ?? "")
   }
@@ -140,6 +149,9 @@ pub fn message_23(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  precisão de computação do treinamento: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  точность вычислений при обучении: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  训练计算精度：" + (values[0] ?? "")
   }
@@ -175,6 +187,9 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  treinamento: " + (values[0] ?? "") + " + " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "  обучение: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练：" + (values[0] ?? "") + " + " + (values[1] ?? "")

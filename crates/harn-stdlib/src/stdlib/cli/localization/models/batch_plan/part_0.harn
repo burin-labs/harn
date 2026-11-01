@@ -29,6 +29,9 @@ pub fn message_0(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  grupos: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  группы: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  分组：" + (values[0] ?? "")
   }
@@ -65,6 +68,9 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  jobs: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  задания: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  作业: " + (values[0] ?? "")
   }
@@ -99,6 +105,9 @@ pub fn message_2(locale: string, values: list<string>) -> string {
     return "  manifest sha256: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
+    return "  manifest sha256: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
     return "  manifest sha256: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
@@ -137,6 +146,9 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  sha256 do recibo: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  sha256 квитанции: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  回执 sha256: " + (values[0] ?? "")
   }
@@ -172,6 +184,9 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  solicitações: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  запросы: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  请求数: " + (values[0] ?? "")
