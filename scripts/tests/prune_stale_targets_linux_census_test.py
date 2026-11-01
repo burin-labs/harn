@@ -79,20 +79,40 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-linux-census-") as temporary:
     require("blocked_named_entries=0" in out, out)
 
     # Negative controls: same-user holders keep the entry.
-    held = entry("held")
-    holder = subprocess.Popen(
-        [sys.executable, "-c", "import sys; f=open(sys.argv[1],'rb'); print('ready',flush=True); sys.stdin.readline()",
-         str(held / "debug" / "artifact")],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    # Each holder learns its path from the environment, so only the /proc
+    # handle scan can see it: an open descriptor, a mapping with its
+    # descriptor closed, and an executable started under another argv[0].
+    holders = {
+        "held": "import os,sys; f=open(os.environ['HARN_GC_TEST_PATH'],'rb')",
+        "mapped": "import mmap,os,sys; f=open(os.environ['HARN_GC_TEST_PATH'],'rb');"
+                  " m=mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ); f.close()",
+    }
+    for name, setup in holders.items():
+        held = entry(name)
+        holder = subprocess.Popen(
+            [sys.executable, "-c", setup + "; print('ready',flush=True); sys.stdin.readline()"],
+            env=dict(os.environ, HARN_GC_TEST_PATH=str(held / "debug" / "artifact")),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            require(holder.stdout.readline().strip() == "ready", f"{name} holder did not start")
+            out = run(name)
+            require(f"keep (live process: {holder.pid})" in out, out)
+            require(held.is_dir(), f"a {name} entry was removed")
+        finally:
+            holder.stdin.write("exit\n")
+            holder.stdin.flush()
+            holder.communicate(timeout=15)
+    running = entry("running")
+    binary = running / "debug" / "sleeper"
+    binary.write_bytes(Path("/bin/sleep").read_bytes())
+    binary.chmod(0o755)
+    sleeper = subprocess.Popen(["sleeper", "300"], executable=str(binary))
     try:
-        require(holder.stdout.readline().strip() == "ready", "reader did not start")
-        out = run("held")
-        require(f"keep (live process: {holder.pid})" in out, out)
-        require(held.is_dir(), "a held entry was removed")
+        out = run("running")
+        require(f"keep (live process: {sleeper.pid})" in out, out)
     finally:
-        holder.stdin.write("exit\n")
-        holder.stdin.flush()
-        holder.communicate(timeout=15)
+        sleeper.kill()
+        sleeper.wait(timeout=15)
 
     resident = entry("resident")
     sitter = subprocess.Popen([sys.executable, "-c", "import sys; print('ready',flush=True); sys.stdin.readline()"],
@@ -123,6 +143,10 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-linux-census-") as temporary:
         fake_proc = root / "lock-proc"
         (fake_proc / "self").mkdir(parents=True)
         (fake_proc / "self" / "status").write_text("Name:\tself\n", encoding="utf-8")
+        # A table that hides other users' processes shows no process 1.
+        out = run("locked", {"HARN_TARGET_GC_PROC_ROOT": str(fake_proc)})
+        require("keep (process ownership unmeasured): locked" in out, "a hidden process table read as measured: " + out)
+        (fake_proc / "1").mkdir()
         out = run("locked", {"HARN_TARGET_GC_PROC_ROOT": str(fake_proc)})
         require("keep (live process: cargo-lock)" in out, out)
     finally:
@@ -135,6 +159,7 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-linux-census-") as temporary:
     # process is out of scope once the entry's ancestors deny it search.
     fake_proc = root / "foreign-proc"
     (fake_proc / "self").mkdir(parents=True)
+    (fake_proc / "1").mkdir()
     (fake_proc / "self" / "status").write_text("Name:\tself\n", encoding="utf-8")
     foreign = fake_proc / "4242"
     (foreign / "fd").mkdir(parents=True)

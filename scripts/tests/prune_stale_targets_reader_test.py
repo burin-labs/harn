@@ -35,12 +35,15 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-reader-") as temporary:
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
         require(holder.stdout is not None and holder.stdout.readline().strip() == "ready", "reader did not start")
-        observed = subprocess.run(["lsof", "-t", "--", str(artifact)],
-                                  capture_output=True, text=True, check=True)
-        require(str(holder.pid) in observed.stdout.splitlines(), "reader was not measured")
-        census = subprocess.run(["lsof", "-n", "-Fpfn"], capture_output=True, text=True)
-        # Linux measures from /proc, which needs no other user's process read.
-        fully_measured = platform.system() == "Linux" or (
+        # Linux measures from /proc, which needs no lsof and no other user's
+        # process read.
+        linux = platform.system() == "Linux"
+        if not linux:
+            observed = subprocess.run(["lsof", "-t", "--", str(artifact)],
+                                      capture_output=True, text=True, check=True)
+            require(str(holder.pid) in observed.stdout.splitlines(), "reader was not measured")
+            census = subprocess.run(["lsof", "-n", "-Fpfn"], capture_output=True, text=True)
+        fully_measured = linux or (
                           census.returncode == 0 and bool(census.stdout) and not census.stderr
                           and "fNOFD\n" not in census.stdout
                           and "Permission denied)" not in census.stdout

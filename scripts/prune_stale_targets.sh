@@ -627,6 +627,12 @@ def reachable(uid, gids, caps):
         return True
     current = "/"
     for part in [p for p in physical.split("/") if p]:
+        # Mode bits cannot rule out a user an access ACL admits.
+        try:
+            if "system.posix_acl_access" in os.listxattr(current):
+                return True
+        except OSError:
+            pass
         mode = os.stat(current)
         if uid == mode.st_uid:
             allowed = mode.st_mode & stat.S_IXUSR
@@ -650,6 +656,9 @@ def effective_caps(path):
 
 own_caps = effective_caps(os.path.join(proc, "self", "status"))
 holders = []
+# A process table that hides other users' processes (hidepid) lists no init.
+if not os.path.isdir(os.path.join(proc, "1")):
+    sys.exit("unmeasured: the process table does not show process 1")
 for name in os.listdir(proc):
     if not name.isdigit():
         continue
@@ -685,6 +694,9 @@ for name in os.listdir(proc):
     except (FileNotFoundError, ProcessLookupError):
         continue
     except PermissionError:
+        if any(inside(path) for path in paths):
+            holders.append(name)
+            continue
         try:
             # The kernel hands a non-dumpable process's files to root.
             protected = os.stat(os.path.join(base, "fd")).st_uid == 0
@@ -768,13 +780,18 @@ entry_live_pids() {
     esac
     is_self_pid "$line" && continue
     printf '%s\n' "$line"
-  done <<< "$(printf '%s\n' "$snapshot" | awk -v d="$dir" '
+  done <<< "$(printf '%s\n' "$snapshot" | awk -v raw="$dir" -v physical="$physical" '
     {
-      i = index($0, d)
-      if (i == 0) next
-      c = substr($0, i + length(d), 1)
-      # Require a boundary so entry "foo" does not match sibling "foo-bar".
-      if (c == "" || c == "/" || c == " " || c == "\t" || c == ":" || c == "\"" || c == "'"'"'") print $1
+      # A command line can name the entry by its lexical or resolved path.
+      paths[1] = raw; paths[2] = physical
+      for (n = 1; n <= 2; n++) {
+        d = paths[n]
+        i = index($0, d)
+        if (i == 0) continue
+        c = substr($0, i + length(d), 1)
+        # Require a boundary so entry "foo" does not match sibling "foo-bar".
+        if (c == "" || c == "/" || c == " " || c == "\t" || c == ":" || c == "\"" || c == "'"'"'") { print $1; next }
+      }
     }')"
 }
 
