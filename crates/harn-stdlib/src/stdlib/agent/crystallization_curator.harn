@@ -541,9 +541,10 @@ pub fn crystallization_command_sequence_package(
     throw "invalid_steps: description is required"
   }
   const steps = cc_normalize_steps(raw_steps, "steps")
-  const fast = raw_fast_steps == nil || len(raw_fast_steps) == 0
-    ? []
-    : cc_normalize_steps(raw_fast_steps, "fast_steps")
+  const fast = raw_fast_steps == nil || len(raw_fast_steps) == 0 ? [] : cc_normalize_steps(
+    raw_fast_steps,
+    "fast_steps",
+  )
   const labels = steps.map({ step -> step.label }).to_list()
   const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
     "__TOOL__",
