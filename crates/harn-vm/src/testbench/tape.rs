@@ -41,7 +41,7 @@
 //! pays nothing.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -61,7 +61,27 @@ mod privacy;
 /// each tool dispatch's transcript changes as typed [`TranscriptChange`]s.
 /// Version 5 also records ephemeral transcript creation and closure.
 /// Version 6 records runtime store mutations inside each tool dispatch.
-pub const TAPE_FORMAT_VERSION: u32 = 6;
+/// Version 7 records session reminder retirement state inside each dispatch.
+pub const TAPE_FORMAT_VERSION: u32 = 7;
+
+/// Retired reminder identities, ordered canonically for recording and replay.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReminderStateSnapshot {
+    pub revoked_ids: BTreeSet<String>,
+    pub expired_ids: BTreeSet<String>,
+}
+
+impl ReminderStateSnapshot {
+    pub(crate) fn validate_successor(&self, after: &Self) -> Result<(), String> {
+        if !self.revoked_ids.is_subset(&after.revoked_ids)
+            || !self.expired_ids.is_subset(&after.expired_ids)
+        {
+            return Err("recorded reminder retirement removes previously retired ids".to_string());
+        }
+        Ok(())
+    }
+}
 
 /// Ordered transcript effects within one tool dispatch. Lifecycle records
 /// distinguish a closed ephemeral transcript from an unexpectedly absent target.
@@ -75,6 +95,11 @@ pub enum TranscriptChange {
     Lifecycle {
         session_id: String,
         lifecycle: TranscriptLifecycle,
+    },
+    Reminders {
+        session_id: String,
+        before_reminders: ReminderStateSnapshot,
+        after_reminders: ReminderStateSnapshot,
     },
 }
 
