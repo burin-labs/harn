@@ -1196,18 +1196,16 @@ pub(super) fn path_outside_workspace(
         .map(|roots| {
             roots
                 .iter()
-                .filter_map(|root| root.as_str().map(normalize_path))
+                .filter_map(|root| root.as_str())
+                .map(WorkspaceRoot::new)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     if roots.is_empty() {
         return false;
     }
-    let cwd = ctx
-        .pointer("/request/cwd")
-        .and_then(|value| value.as_str())
-        .map(normalize_path);
-    if cwd.as_ref().is_some_and(|cwd| !under_any_root(cwd, &roots)) {
+    let cwd = ctx.pointer("/request/cwd").and_then(|value| value.as_str());
+    if cwd.is_some_and(|cwd| !inside_any_root(cwd, &roots)) {
         return true;
     }
     // The shared analysis obtains role-aware operands from the same parser that
@@ -1223,13 +1221,12 @@ pub(super) fn path_outside_workspace(
         {
             continue;
         }
-        let path = normalize_path(&path);
         // A redirect to `/dev/null` or a standard stream names no workspace
         // file, so it is neither inside nor outside one (harn#9655).
-        if crate::workspace_path::is_standard_io_device(&path, false) {
+        if crate::workspace_path::is_standard_io_device(&normalize_path(&path), false) {
             continue;
         }
-        if !under_any_root(&path, &roots) {
+        if !inside_any_root(&path, &roots) {
             return true;
         }
     }
@@ -1286,8 +1283,43 @@ pub(super) fn normalize_path_components(path: &Path) -> PathBuf {
     normalized
 }
 
-pub(super) fn under_any_root(path: &Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| path.starts_with(root))
+/// A workspace root in both the spelling the host declared and the spelling
+/// the filesystem resolves it to.
+///
+/// Hosts and tools disagree about symlinks: an editor may declare a root
+/// through a linked folder (`/tmp/project` on macOS) while `git rev-parse
+/// --show-toplevel` or `pwd -P` reports the resolved target
+/// (`/private/tmp/project`). Both name the same directory.
+pub(super) struct WorkspaceRoot {
+    lexical: PathBuf,
+    resolved: PathBuf,
+}
+
+impl WorkspaceRoot {
+    fn new(root: &str) -> Self {
+        Self {
+            lexical: normalize_path(root),
+            resolved: crate::stdlib::sandbox::paths::normalize_for_policy(Path::new(root)),
+        }
+    }
+}
+
+/// Whether `path` names a location inside a workspace root.
+///
+/// A path is inside when its lexical form sits under a root's lexical form, or
+/// its resolved form sits under a root's resolved form. The second test only
+/// recognizes spellings the first one missed; a path the lexical test already
+/// accepts stays accepted, so resolution can remove a false
+/// `outside_workspace` label but never add one.
+pub(super) fn inside_any_root(path: &str, roots: &[WorkspaceRoot]) -> bool {
+    let lexical = normalize_path(path);
+    if roots.iter().any(|root| lexical.starts_with(&root.lexical)) {
+        return true;
+    }
+    let resolved = crate::stdlib::sandbox::paths::normalize_for_policy(Path::new(path));
+    roots
+        .iter()
+        .any(|root| resolved.starts_with(&root.resolved))
 }
 
 pub(super) fn redact_json_for_llm(value: &JsonValue) -> JsonValue {
