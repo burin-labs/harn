@@ -27,6 +27,18 @@ import {
   pl_unique_record_id,
 } from "std/agent/pattern_knowledge_persistence"
 import {
+  pl_run_has_eligible_natural_terminal,
+  pl_run_observed_at,
+  pl_session_command_ledger,
+  pl_session_prompt,
+  pl_session_run_key,
+  pl_session_runs,
+  pl_session_store_list_options,
+  pl_session_store_options,
+  pl_session_store_values,
+  pl_session_tool_sequence,
+} from "std/agent/pattern_knowledge_sessions"
+import {
   PATTERN_NAMESPACE,
   PATTERN_SCHEMA,
   pl_short_hash,
@@ -41,13 +53,7 @@ import {
 // and render review UI.
 import { write_json } from "std/fs"
 import { memory_forget } from "std/memory"
-import {
-  SessionStoreListOptions,
-  SessionStoreOptions,
-  SessionStoreRead,
-  session_store_events,
-  session_store_list,
-} from "std/session-store"
+import { session_store_events, session_store_list } from "std/session-store"
 
 const OBSERVATION_CAP: int = 500
 
@@ -97,110 +103,6 @@ pub fn pattern_learning_set_enabled(harness: Harness, enabled: bool, options: an
   return pl_replace_state(harness, state + {enabled: enabled}, options)
 }
 
-fn pl_session_store_options(options: any = nil) -> SessionStoreOptions {
-  const root = pl_text(options?.session_store_root)
-  return root == "" ? {} : {root: root}
-}
-
-fn pl_session_store_list_options(limit: int, options: any = nil) -> SessionStoreListOptions {
-  const root = pl_text(options?.session_store_root)
-  return root == "" ? {limit: limit, sort_by: "updated_at", order: "descending"} : {
-    root: root,
-    limit: limit,
-    sort_by: "updated_at",
-    order: "descending",
-  }
-}
-
-fn pl_session_store_values<T>(read: SessionStoreRead<list<T>>) -> list<T> {
-  if read.state == "absent" {
-    return []
-  }
-  return read.value
-}
-
-fn pl_session_event_kind(event: dict) -> string {
-  return pl_text(event?.kind?.type ?? event?.kind?.kind)
-}
-
-fn pl_session_transcript_event(event: dict) -> dict {
-  return event?.payload?.transcript_event ?? {}
-}
-
-fn pl_session_prompt(events: list) -> string {
-  for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    if pl_text(transcript_event?.kind) != "message"
-      || pl_text(transcript_event?.role) != "user"
-      || pl_text(transcript_event?.visibility) != "public" {
-      continue
-    }
-    const prompt = pl_text(transcript_event?.text)
-    if prompt != "" {
-      return prompt
-    }
-  }
-  return ""
-}
-
-fn pl_session_tool_sequence(events: list) -> list {
-  let out = []
-  for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    if pl_session_event_kind(event) != "tool_call"
-      && pl_text(transcript_event?.kind) != "tool_call" {
-      continue
-    }
-    const name = pl_text(transcript_event?.metadata?.tool_name)
-    if name != "" {
-      out = out + [name]
-    }
-  }
-  return pl_sanitize_tool_sequence(out)
-}
-
-fn pl_session_run_id(event: dict) -> string {
-  return pl_text(event?.headers?.run_id)
-}
-
-fn pl_session_run_key(session_id: string, run_id: string) -> string {
-  return session_id + "::" + run_id
-}
-
-fn pl_session_runs(events: list) -> list {
-  let ids = []
-  let grouped = {}
-  for event in events ?? [] {
-    const run_id = pl_session_run_id(event)
-    if run_id == "" {
-      continue
-    }
-    if !ids.contains(run_id) {
-      ids = ids + [run_id]
-    }
-    grouped = grouped + {[run_id]: (grouped[run_id] ?? []) + [event]}
-  }
-  return ids.map({ run_id -> {run_id: run_id, events: grouped[run_id] ?? []} }).to_list()
-}
-
-fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
-  for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    const headers = event?.headers ?? {}
-    if pl_session_event_kind(event) != "agent_run_terminal"
-      && pl_text(transcript_event?.kind)
-        != "agent_run_terminal" {
-      continue
-    }
-    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural"
-      && pl_text(headers["harn.workflow_learning.eligibility"])
-        == "eligible" {
-      return true
-    }
-  }
-  return false
-}
-
 /**
  * Corpus provenance belongs to the producer-owned terminal event for one run,
  * not an inference over its prompt, session id, or tool name. This lets one
@@ -217,14 +119,6 @@ fn pl_observed_evidence_keys(fs: HarnessFs, memory: HarnessMemory, options: any 
     }
   }
   return ids
-}
-
-fn pl_run_observed_at(events: list, fallback: string) -> string {
-  if len(events) == 0 {
-    return fallback
-  }
-  const observed_at = pl_text(events[len(events) - 1]?.ts)
-  return observed_at == "" ? fallback : observed_at
 }
 
 /**
@@ -297,6 +191,7 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
             run_id: run_id,
             prompt: prompt,
             tool_sequence: pl_session_tool_sequence(run_events),
+            command_ledger: pl_session_command_ledger(run_events),
             observed_at: pl_run_observed_at(
               run_events,
               pl_text(session.updated_at) == "" ? pl_now(harness.clock, options) : session

@@ -9,6 +9,7 @@ import {
 // owns state paths, memory projections, and observation normalization; callers
 // retain policy such as curation thresholds and review decisions.
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
+import { redact } from "std/oauth/redaction"
 import { runtime_state_paths_under } from "std/runtime"
 
 // These filenames belong only to the legacy session-store import path used by
@@ -258,6 +259,12 @@ pub fn pl_sanitize_tool_sequence(sequence: list) -> list {
   return out
 }
 
+/**
+ * A secret's whole value: a double-quoted string (escaped quotes allowed), a
+ * single-quoted one, or a bare word. An unterminated quote runs to the end.
+ */
+const PL_SECRET_VALUE: string = r"(?:\x22(?:[^\x22\\]|\\.)*(?:\x22|$)|'[^']*(?:'|$)|\S+)"
+
 pub fn pl_redact_sensitive(text: string) -> string {
   const no_private = regex_replace(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
@@ -266,11 +273,70 @@ pub fn pl_redact_sensitive(text: string) -> string {
   )
     ?? (text ?? "")
   return regex_replace(
-    r"(?i)\b(api[_-]?key|token|secret|password|credential)\b\s*[:=]\s*\S+",
+    r"(?i)\b(api[_-]?key|token|secret|password|credential)\b\s*[:=]\s*" + PL_SECRET_VALUE,
     "$1=<redacted>",
     no_private,
   )
     ?? no_private
+}
+
+const COMMAND_LEDGER_LIMIT: int = 16
+
+const COMMAND_TEXT_LIMIT: int = 240
+
+/**
+ * Scrub a captured command line. Besides the prompt rules, environment
+ * assignments whose name looks like a credential (`OPENAI_API_KEY=...`,
+ * `DB_PASSWORD=...`) lose their whole value, quoted or not (a double-quoted
+ * value may contain escaped quotes, and an unterminated quote runs to the end),
+ * and the token-pattern policy runs last. Redact before clipping: a token cut
+ * in half no longer matches its pattern.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn pl_redact_command(text: string) -> string {
+  const assignments = regex_replace(
+    r"(?i)\b([A-Za-z_][A-Za-z0-9_]*(?:key|token|secret|password|passwd|credential|auth)[A-Za-z0-9_]*)="
+      + PL_SECRET_VALUE,
+    "$1=<redacted>",
+    text ?? "",
+  )
+    ?? (text ?? "")
+  return to_string(redact(pl_redact_sensitive(assignments)))
+}
+
+/**
+ * Normalize a run's command ledger at the observation boundary: at most the
+ * last COMMAND_LEDGER_LIMIT entries, each `{tool, command, exit_code, ok}` with
+ * a redacted, length-bounded command. Entries without a command are dropped.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn pl_sanitize_command_ledger(ledger: list) -> list {
+  let out = []
+  for raw in ledger ?? [] {
+    const command = pl_redact_command(pl_text(raw?.command))
+    if command == "" {
+      continue
+    }
+    const exit_code = raw?.exit_code
+    const code = type_of(exit_code) == "int" ? exit_code : nil
+    out = out
+      + [
+        {
+          tool: pl_slugify(raw?.tool ?? ""),
+          command: command[0:min(len(command), COMMAND_TEXT_LIMIT)],
+          exit_code: code,
+          ok: code == nil ? (raw?.ok ?? false) == true : code == 0,
+        },
+      ]
+  }
+  const start = max(0, len(out) - COMMAND_LEDGER_LIMIT)
+  return out[start:len(out)]
 }
 
 pub fn pl_observation_from_input(
@@ -292,6 +358,7 @@ pub fn pl_observation_from_input(
     evidence_kind: pl_text(input?.evidence_kind ?? input?.evidenceKind),
     prompt: prompt,
     tool_sequence: pl_sanitize_tool_sequence(input?.tool_sequence ?? input?.toolSequence ?? []),
+    command_ledger: pl_sanitize_command_ledger(input?.command_ledger ?? []),
     observed_at: pl_text(input?.observed_at ?? input?.observedAt ?? pl_now(clock, options)),
   }
 }
