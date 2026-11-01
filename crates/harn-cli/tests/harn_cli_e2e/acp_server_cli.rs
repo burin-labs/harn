@@ -90,7 +90,7 @@ preferred_tool_format = "native"
         let frame = client.recv();
         match frame["method"].as_str() {
             Some("host/capabilities") => {
-                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{}}))
+                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{}}));
             }
             Some("host/call") => {
                 assert_eq!(frame["params"]["name"], "process.exec");
