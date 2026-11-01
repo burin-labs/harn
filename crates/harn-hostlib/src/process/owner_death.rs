@@ -61,6 +61,19 @@ mod adopted_children_tests;
 pub const GUARDIAN_ARG: &str = "__harn-process-owner-guardian";
 
 #[cfg(unix)]
+fn reexec_executable() -> io::Result<PathBuf> {
+    // Procfs retains the running image even when an update unlinks its pathname.
+    #[cfg(target_os = "linux")]
+    {
+        Ok(PathBuf::from("/proc/self/exe"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::env::current_exe()
+    }
+}
+
+#[cfg(unix)]
 const MODE_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_MODE";
 #[cfg(unix)]
 const PIPE_MODE: &str = "request-pipe-v1";
@@ -277,7 +290,7 @@ pub(crate) fn prepare_guardian(
             .map_err(ProcessError::Spawn)?;
         request.pinned_verifier_descriptors = pinned.descriptors.numbers();
     }
-    let executable = std::env::current_exe()
+    let executable = reexec_executable()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
     let mut guardian = Command::new(executable);
     match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
@@ -981,7 +994,7 @@ fn run_guardian_reaper() -> ! {
         .ok()
         .and_then(|pid| pid.parse::<libc::pid_t>().ok())
         .unwrap_or_else(|| unsafe { libc::getppid() });
-    let executable = std::env::current_exe().unwrap_or_else(|error| {
+    let executable = reexec_executable().unwrap_or_else(|error| {
         eprintln!("resolve guardian executable: {error}");
         std::process::exit(1);
     });
