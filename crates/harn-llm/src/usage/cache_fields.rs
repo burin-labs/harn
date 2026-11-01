@@ -20,6 +20,7 @@ const WRITE_FIELDS: &[&str] = &[
     "/cache_creation_input_tokens",
     "/prompt_tokens_details/cache_write_tokens",
     "/prompt_tokens_details/cache_creation_input_tokens",
+    "/prompt_tokens_details/created_cache_tokens",
     "/input_tokens_details/cache_write_tokens",
     "/input_tokens_details/cache_creation_input_tokens",
     "/cache/write_input_tokens",
@@ -29,28 +30,58 @@ const WRITE_FIELDS: &[&str] = &[
 /// Top-level members the alias registry reads. A caller holding a large value,
 /// such as a whole LLM result, can convert only these members to JSON.
 pub fn cache_field_roots() -> impl Iterator<Item = &'static str> {
-    READ_FIELDS.iter().chain(WRITE_FIELDS).filter_map(|path| {
-        path.strip_prefix('/')
-            .and_then(|path| path.split('/').next())
-    })
+    std::iter::once("reported_cache").chain(READ_FIELDS.iter().chain(WRITE_FIELDS).filter_map(
+        |path| {
+            path.strip_prefix('/')
+                .and_then(|path| path.split('/').next())
+        },
+    ))
 }
 
 pub fn reported_cache_read_tokens(value: &serde_json::Value) -> Result<Option<i64>, &'static str> {
+    if let Some(measured) = value.get("reported_cache") {
+        return normalized_cache_totals(measured)
+            .map(|totals| totals.and_then(|totals| totals.reported_read_tokens()));
+    }
     reported_counter(value, READ_FIELDS)
 }
 
 pub fn reported_cache_write_tokens(value: &serde_json::Value) -> Result<Option<i64>, &'static str> {
+    if let Some(measured) = value.get("reported_cache") {
+        return normalized_cache_totals(measured)
+            .map(|totals| totals.and_then(|totals| totals.reported_write_tokens()));
+    }
     reported_counter(value, WRITE_FIELDS)
 }
 
-/// Cache counters parsed from one usage object. The counts default to zero for
-/// arithmetic, but `reported` is true only when the response carried at least
-/// one cache counter, so an omitted field never reads as a measured zero.
+fn normalized_cache_totals(
+    value: &serde_json::Value,
+) -> Result<Option<super::ReportedCacheTotals>, &'static str> {
+    let totals: Option<super::ReportedCacheTotals> =
+        serde_json::from_value(value.clone()).map_err(|_| "invalid cache measurements")?;
+    if totals.is_some_and(|totals| {
+        totals.reported_calls < 0
+            || totals.read_reported_calls < 0
+            || totals.write_reported_calls < 0
+            || totals.read_reported_calls > totals.reported_calls
+            || totals.write_reported_calls > totals.reported_calls
+            || totals.read_tokens < 0
+            || totals.write_tokens < 0
+            || (totals.read_reported_calls == 0 && totals.read_tokens != 0)
+            || (totals.write_reported_calls == 0 && totals.write_tokens != 0)
+    }) {
+        return Err("invalid cache measurements");
+    }
+    Ok(totals)
+}
+
+/// Cache counters parsed once, preserving each category's presence alongside
+/// its arithmetic value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CacheCounts {
     pub read_tokens: i64,
     pub write_tokens: i64,
-    pub reported: bool,
+    pub reported: super::ReportedCacheUsage,
 }
 
 pub fn extract_cache_counts(
@@ -61,7 +92,10 @@ pub fn extract_cache_counts(
     Ok(CacheCounts {
         read_tokens: read.unwrap_or(0),
         write_tokens: write.unwrap_or(0),
-        reported: read.is_some() || write.is_some(),
+        reported: super::ReportedCacheUsage {
+            read_tokens: read,
+            write_tokens: write,
+        },
     })
 }
 

@@ -243,6 +243,15 @@ impl Default for LlmResult {
 }
 
 impl LlmResult {
+    pub(crate) fn with_cache_counts(mut self, cache: crate::llm::usage::CacheCounts) -> Self {
+        self.cache_read_tokens = cache.read_tokens;
+        self.cache_write_tokens = cache.write_tokens;
+        self.cache_counts_reported = cache.reported.has_any();
+        self.telemetry.reported_cache_usage =
+            cache.reported.has_any().then(|| Box::new(cache.reported));
+        self
+    }
+
     /// An empty result attributed to `provider` and `model`.
     pub(crate) fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
         Self {

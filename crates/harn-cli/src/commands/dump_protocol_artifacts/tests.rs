@@ -825,6 +825,7 @@ fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts()
         output_tokens: 3,
         cache_read_tokens: 2,
         cache_write_tokens: 0,
+        reported_cache: None,
         provider_call_count: 2,
         unpriced_calls: 1,
         usage_unknown_calls: 1,

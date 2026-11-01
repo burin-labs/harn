@@ -402,6 +402,8 @@ pub(crate) struct KnownMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_counts_reported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reported_cache: Option<harn_llm::usage::ReportedCacheTotals>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<Number>,
     /// Measured subtotal and physical-attempt certainty for this call.
     #[serde(skip_serializing_if = "Option::is_none")]

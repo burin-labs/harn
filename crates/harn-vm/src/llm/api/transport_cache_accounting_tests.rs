@@ -6,13 +6,17 @@ use super::{
 /// OpenAI-compatible success response whose `usage` block reports cached
 /// prompt tokens, as an undeclared provider may return.
 fn spawn_openai_cached_usage_stub() -> LlmStub {
-    spawn_llm_stub("OpenAI-compatible cached-usage stub", |stream| {
+    spawn_openai_usage_stub(Some(serde_json::json!({"cached_tokens": 150})), false)
+}
+
+fn spawn_openai_usage_stub(details: Option<serde_json::Value>, streaming: bool) -> LlmStub {
+    spawn_llm_stub("OpenAI-compatible cached-usage stub", move |stream| {
         use std::io::{Read, Write};
         let mut buf = vec![0u8; 16_384];
         let n = stream.read(&mut buf).expect("read request");
         let request = String::from_utf8_lossy(&buf[..n]);
         assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"));
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "id": "ok",
             "object": "chat.completion",
             "created": 0,
@@ -25,13 +29,30 @@ fn spawn_openai_cached_usage_stub() -> LlmStub {
             "usage": {
                 "prompt_tokens": 200,
                 "completion_tokens": 1,
-                "total_tokens": 201,
-                "prompt_tokens_details": {"cached_tokens": 150}
+                "total_tokens": 201
             }
-        })
-        .to_string();
+        });
+        if let Some(details) = &details {
+            body["usage"]["prompt_tokens_details"] = details.clone();
+        }
+        let (content_type, body) = if streaming {
+            let content = serde_json::json!({
+                "id": "ok", "model": "cached-model",
+                "choices": [{"index": 0, "delta": {"content": "hello"}, "finish_reason": null}]
+            });
+            let finish = serde_json::json!({
+                "id": "ok", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+            });
+            let receipt = serde_json::json!({"id": "ok", "choices": [], "usage": body["usage"]});
+            (
+                "text/event-stream",
+                format!("data: {content}\n\ndata: {finish}\n\ndata: {receipt}\n\ndata: [DONE]\n\n"),
+            )
+        } else {
+            ("application/json", body.to_string())
+        };
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             body.len(),
             body
         );
@@ -39,6 +60,95 @@ fn spawn_openai_cached_usage_stub() -> LlmStub {
             .write_all(response.as_bytes())
             .expect("write response");
     })
+}
+
+#[test]
+fn conditional_cache_receipts_preserve_omission_zero_and_created_tokens() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        for streaming in [false, true] {
+            let call = |details| async move {
+                let server = spawn_openai_usage_stub(details, streaming);
+                let provider = "conditional-cache";
+                let addr = server.addr();
+                install_openai_stub_provider_with_cache_accounting(provider, addr, Some(true));
+                crate::llm_config::set_runtime_provider_endpoint_overrides(
+                    crate::llm_config::RuntimeProviderEndpointOverrides::single(
+                        provider,
+                        format!("http://{addr}/v1"),
+                    )
+                    .expect("valid stub endpoint"),
+                );
+                let mut opts = base_opts(provider);
+                opts.model = "cached-model".into();
+                opts.stream = streaming;
+                opts.cache = false;
+                let result = vm_call_llm_full(&opts).await.expect("provider response");
+                let usage = crate::llm::usage::LlmUsage::from_result(&result);
+                crate::llm_config::clear_user_overrides();
+                crate::llm_config::clear_runtime_provider_endpoint_overrides();
+                drop(server);
+                usage
+            };
+            let omitted = call(None).await;
+            assert_eq!(omitted.input_tokens, 200);
+            assert!(!omitted.cache_counts_present);
+            assert_eq!(omitted.cache_hit_ratio, None);
+            let writes = call(Some(serde_json::json!({
+                "cached_tokens": null, "created_cache_tokens": 25
+            })))
+            .await;
+            assert_eq!(writes.cache_write_tokens, 25);
+            assert_eq!(writes.cache_hit_ratio, None);
+            let normalized = serde_json::to_value(&writes).expect("serialize measured write");
+            let measured = crate::llm::usage::ReportedCacheUsage::from_value(&normalized)
+                .expect("read normalized category measurements");
+            assert_eq!(measured.read_tokens, None);
+            assert_eq!(measured.write_tokens, Some(25));
+            let reads = call(Some(serde_json::json!({"cached_tokens": 150}))).await;
+            let mut totals = crate::llm::usage::ReportedCacheTotals::default();
+            reads.record_cache_into(&mut totals);
+            assert_eq!(totals.reported_read_tokens(), Some(150));
+            assert_eq!(totals.reported_write_tokens(), None);
+            let zero = call(Some(serde_json::json!({
+                "cached_tokens": 0, "created_cache_tokens": 0
+            })))
+            .await;
+            assert!(zero.cache_counts_present);
+            assert_eq!(zero.cache_hit_ratio, Some(0.0));
+            let reported = call(Some(serde_json::json!({
+                "cached_tokens": 150, "created_cache_tokens": 25
+            })))
+            .await;
+            assert_eq!(reported.input_tokens, 200);
+            assert_eq!(reported.cache_read_tokens, 150);
+            assert_eq!(reported.cache_write_tokens, 25);
+            assert!(reported.cache_counts_present);
+            assert_eq!(reported.cache_hit_ratio, Some(0.75));
+            let complete = crate::llm::usage::LlmUsage::aggregate(&[reported.clone(), zero]);
+            assert_eq!(complete.cache_hit_ratio, Some(0.375));
+            let incomplete = crate::llm::usage::LlmUsage::aggregate(&[reported, omitted]);
+            assert_eq!(incomplete.cache_hit_ratio, None);
+            let measured = incomplete
+                .reported_cache
+                .as_deref()
+                .expect("measured subtotal");
+            assert_eq!(measured.reported_read_tokens(), Some(150));
+            assert_eq!(measured.read_reported_calls, 1);
+            assert_eq!(incomplete.provider_call_count, Some(2));
+            let restored: crate::llm::usage::LlmUsage = serde_json::from_value(
+                serde_json::to_value(&incomplete).expect("serialize ledger"),
+            )
+            .expect("restore ledger");
+            assert_eq!(restored, incomplete);
+        }
+    });
 }
 
 /// Pins the tri-state `cache_usage_accounting` contract at the transport

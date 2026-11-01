@@ -984,11 +984,7 @@ impl SessionFold {
         let metadata = record.metadata();
         let input_tokens = integer(&metadata.input_tokens).unwrap_or(0);
         let output_tokens = integer(&metadata.output_tokens).unwrap_or(0);
-        // Only a call that recorded a provider measurement counts; an older
-        // call without the flag carries zeros that were never measured.
-        let cache_reported = metadata.cache_counts_reported == Some(true);
-        let cache_read_tokens = integer(&metadata.cache_read_tokens).unwrap_or(0);
-        let cache_write_tokens = integer(&metadata.cache_write_tokens).unwrap_or(0);
+        let cache = metadata.reported_cache;
         let cost_usd = float(&metadata.cost_usd);
         // New call records carry the physical ledger's certainty directly.
         // Older records carry only a nullable total and accounting status.
@@ -1006,8 +1002,8 @@ impl SessionFold {
             provider: provider.clone(),
             input_tokens,
             output_tokens,
-            cache_read_tokens: cache_reported.then_some(cache_read_tokens),
-            cache_write_tokens: cache_reported.then_some(cache_write_tokens),
+            cache_read_tokens: cache.and_then(|cache| cache.reported_read_tokens()),
+            cache_write_tokens: cache.and_then(|cache| cache.reported_write_tokens()),
             cost_usd: cost_usd.filter(|_| unpriced_calls == 0),
         });
         self.usage.call_count += 1;
@@ -1018,8 +1014,9 @@ impl SessionFold {
         if let Some(cost) = float(&metadata.known_cost_usd).or(cost_usd) {
             self.total_cost += Decimal::from_f64_retain(cost).unwrap_or_default();
         }
-        self.cache
-            .record(cache_reported, cache_read_tokens, cache_write_tokens);
+        if let Some(cache) = cache {
+            self.cache.merge(&cache);
+        }
         let attempts = metadata.provider_attempts.clone().unwrap_or_default();
         // A call recorded before provider attempts existed has no entry. It
         // still made at least one request, so counting 1 keeps the total a

@@ -875,6 +875,11 @@ fn build_mock_result(
         logprobs: mock.logprobs.clone(),
         telemetry: Box::new(ProviderTelemetry {
             effective_reasoning_effort: mock.effective_reasoning_effort.clone(),
+            reported_cache_usage: Some(Box::new(super::usage::ReportedCacheUsage {
+                read_tokens: mock.cache_read_tokens,
+                write_tokens: mock.cache_write_tokens,
+            }))
+            .filter(|usage| usage.has_any()),
             ..ProviderTelemetry::mock_replay(mock.simulated_cost_usd)
         }),
         ..Default::default()
@@ -966,6 +971,10 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
         result.cache_write_tokens = cache_tokens;
     }
     result.cache_counts_reported = true;
+    result.telemetry.reported_cache_usage = Some(Box::new(super::usage::ReportedCacheUsage {
+        read_tokens: Some(result.cache_read_tokens),
+        write_tokens: Some(result.cache_write_tokens),
+    }));
 }
 
 /// Convert a mock's `error` payload into the `VmError` that the

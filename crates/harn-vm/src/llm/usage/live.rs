@@ -20,6 +20,8 @@ pub struct ProviderUsage {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
+    #[serde(default)]
+    pub reported_cache: Option<Box<super::ReportedCacheTotals>>,
     pub provider_call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
@@ -43,6 +45,7 @@ impl ProviderUsage {
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_tokens,
             cache_write_tokens: usage.cache_write_tokens,
+            reported_cache: usage.reported_cache.clone(),
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
