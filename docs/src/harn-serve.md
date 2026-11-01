@@ -106,6 +106,12 @@ scoped grants return `403 unsupported_authorization_policy`. Use a hosted or sit
 authorization owner when you need tenant, scope, or resource restrictions. Health,
 version, OpenAPI, and the API root remain public discovery routes.
 
+Embedded servers may set `ApiServerConfig::with_session_environment` with an
+`AcpSessionEnvironmentConfig` resolved by their trusted host. The declaration
+applies to both new sessions and cold restoration. It defaults to `isolated`
+with no grants; HTTP session requests cannot replace it. Use explicit grants
+with the appropriate audience when a local host supplies provider credentials.
+
 New sessions use ACP `ask` mode unless the server was started with
 `--default-session-mode` or the create request supplies `mode_id`. The accepted
 values are `ask`, `architect`, `code`, and `shadow`; an invalid value is rejected

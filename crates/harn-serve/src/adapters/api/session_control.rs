@@ -4,8 +4,8 @@ use super::*;
 use harn_session_store::task::{TaskSessionDescriptor, TaskSessionUpdate};
 use harn_session_store::{SessionStatus, StoreError, StoreResult};
 
-pub(super) fn environment_policy() -> Value {
-    json!({"kind":harn_vm::security::EnvironmentPolicyKind::Isolated, "grants":[]})
+pub(super) fn environment_policy(state: &ApiState) -> Value {
+    json!(&state.session_environment)
 }
 
 #[derive(Debug)]
@@ -61,7 +61,7 @@ impl ApiState {
             self.acp
                 .call(
                     "session/load",
-                json!({"sessionId":session_id, "cwd":descriptor.workspace_root, "environmentPolicy":environment_policy()}),
+                json!({"sessionId":session_id, "cwd":descriptor.workspace_root, "environmentPolicy":environment_policy(self)}),
                 )
                 .await
             .map_err(|_| SessionControlError::Restore("session/load"))?;

@@ -7,6 +7,7 @@ mod live_controls;
 mod permission_response;
 mod resource_contract;
 mod served_agent_turn;
+mod session_environment;
 mod session_inputs;
 mod session_model_policy;
 mod session_resume;
