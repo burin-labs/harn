@@ -48,6 +48,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_CAPABILITIES_BUILTIN_DEF,
     &HOST_HAS_BUILTIN_DEF,
     &HOST_CALL_BUILTIN_DEF,
+    &HOST_CAPABILITY_TOOL_CALL_BUILTIN_DEF,
     &HOST_TOOL_LIST_BUILTIN_DEF,
     &HOST_TOOL_CALL_BUILTIN_DEF,
 ];
@@ -1113,6 +1114,28 @@ async fn host_call_builtin(
         )));
     }
     dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
+}
+
+/// Dispatch a declared host tool through the same policy-bearing host-call
+/// path, while refusing the standalone fallbacks intended for ordinary scripts.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_capability_tool_call(name: string, args: dict) -> any",
+    kind = "async",
+    category = "host"
+)]
+async fn host_capability_tool_call_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    if !HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().is_some()) {
+        return Err(VmError::CategorizedError {
+            message: "declared host capability needs a host capability adapter".to_string(),
+            category: crate::value::ErrorCategory::ToolRejected,
+        });
+    }
+    host_call_builtin(ctx, args).await
 }
 
 #[harn_builtin(

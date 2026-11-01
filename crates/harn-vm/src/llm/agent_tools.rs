@@ -563,34 +563,61 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 category: ErrorCategory::ToolRejected,
             })
         } else if matches!(declared.as_deref(), Some("host_bridge")) {
-            // Force-route declared host-bridge tools through the bridge
-            // even if a stale `handler` value is present. Without a
-            // bridge, fail clearly instead of silently falling back.
-            let Some(bridge) = bridge else {
-                executor = Some(ToolExecutor::HostBridge);
-                return ToolDispatchOutcome {
-                    handler_outcome: None,
-                    result: Err(VmError::CategorizedError {
-                        message: format!(
-                            "tool '{tool_name}' is declared executor: \"host_bridge\" \
-                             but no host bridge is connected to this environment"
-                        ),
-                        category: ErrorCategory::ToolRejected,
-                    }),
-                    executor,
-                };
-            };
+            // Declared host capabilities use the canonical host-call path so
+            // policy checks and mock/host adapters see the same operation.
             executor = Some(ToolExecutor::HostBridge);
-            match bridge
-                .call(
-                    "builtin_call",
-                    serde_json::json!({
-                        "name": tool_name,
-                        "args": [tool_args],
-                    }),
-                )
-                .await
+            let result = if let Some(binding) =
+                declared_tool_string_field(tools_val, tool_name, "host_capability")
             {
+                let Some(ctx) = ctx else {
+                    return ToolDispatchOutcome {
+                        handler_outcome: None,
+                        result: Err(VmError::CategorizedError {
+                            message: format!("tool '{tool_name}' needs an execution context"),
+                            category: ErrorCategory::ToolRejected,
+                        }),
+                        executor,
+                    };
+                };
+                let args = crate::schema::json_to_vm_value(tool_args);
+                if args.as_dict().is_none() {
+                    return ToolDispatchOutcome {
+                        result: Err(VmError::Runtime(format!(
+                            "tool '{tool_name}' host capability arguments must be an object"
+                        ))),
+                        executor,
+                        handler_outcome: None,
+                    };
+                }
+                ctx.child_vm()
+                    .call_named_builtin(
+                        "__host_capability_tool_call",
+                        vec![VmValue::string(binding), args],
+                    )
+                    .await
+                    .map(|value| super::vm_value_to_json(&value))
+            } else {
+                let Some(bridge) = bridge else {
+                    return ToolDispatchOutcome {
+                        handler_outcome: None,
+                        result: Err(VmError::CategorizedError {
+                            message: format!("tool '{tool_name}' needs a connected host bridge"),
+                            category: ErrorCategory::ToolRejected,
+                        }),
+                        executor,
+                    };
+                };
+                bridge
+                    .call(
+                        "builtin_call",
+                        serde_json::json!({
+                            "name": tool_name,
+                            "args": [tool_args],
+                        }),
+                    )
+                    .await
+            };
+            match result {
                 Err(VmError::CategorizedError {
                     message,
                     category: ErrorCategory::ToolRejected,
@@ -828,6 +855,14 @@ pub(super) fn declared_executor_for_tool(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<String> {
+    declared_tool_string_field(tools_val, tool_name, "executor")
+}
+
+fn declared_tool_string_field(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+    field: &str,
+) -> Option<String> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
         Some(VmValue::List(l)) => l,
@@ -845,7 +880,7 @@ pub(super) fn declared_executor_for_tool(
         if name != tool_name {
             continue;
         }
-        if let Some(VmValue::String(s)) = entry.get("executor") {
+        if let Some(VmValue::String(s)) = entry.get(field) {
             return Some(s.to_string());
         }
         return None;

@@ -10,6 +10,28 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+async fn dispatch_bound_tool(
+    name: &str,
+    args: &serde_json::Value,
+    tools: &VmValue,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+) -> ToolDispatchOutcome {
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    let ctx = crate::vm::AsyncBuiltinCtx::from_vm(vm);
+    dispatch_tool_execution_with_mcp(
+        (Some(&ctx), crate::tool_registry::ToolAudience::Agent),
+        name,
+        args,
+        Some(tools),
+        None,
+        bridge,
+        0,
+        0,
+    )
+    .await
+}
+
 fn embedded_call_repair_result(
     tool_name: &str,
     tool_args: &serde_json::Value,
@@ -597,16 +619,107 @@ async fn dispatch_honors_declared_host_bridge_executor() {
     entry.put_str("executor", "host_bridge");
     entry.put_str("host_capability", "interaction.ask");
     let tools = tools_dict(vec![("ask_user", entry)]);
-    let outcome = dispatch_tool_execution(
+    let outcome = dispatch_bound_tool(
         "ask_user",
         &serde_json::json!({"prompt": "x"}),
-        Some(&tools),
+        &tools,
         Some(&bridge),
-        0,
-        0,
     )
     .await;
     assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
+    assert!(outcome.result.unwrap()["reason"]
+        .as_str()
+        .unwrap()
+        .contains("host capability adapter"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn host_bridge_dispatches_the_declared_capability() {
+    struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+    impl crate::HostCallBridge for CapabilityBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            params: &'a crate::value::DictMap,
+        ) -> crate::HostCallDispatchFuture<'a> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(serde_json::json!({
+                    "name": format!("{capability}.{operation}"),
+                    "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
+                }));
+                Ok(Some(VmValue::string("input requested")))
+            })
+        }
+    }
+    let calls = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let _guard = crate::install_host_call_bridge(Arc::new(CapabilityBridge(Arc::clone(&calls))));
+    let mut entry = crate::value::DictMap::new();
+    entry.put_str("executor", "host_bridge");
+    entry.put_str("host_capability", "session_inputs.request");
+    let tools = tools_dict(vec![("request_session_input", entry)]);
+    let args = serde_json::json!({"name": "SERVICE_KEY"});
+    let outcome = dispatch_bound_tool("request_session_input", &args, &tools, None).await;
+    assert_eq!(
+        outcome.result.unwrap(),
+        serde_json::json!("input requested")
+    );
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["name"], "session_inputs.request");
+    assert_eq!(calls[0]["args"], args);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_process_capability_keeps_command_policy() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CountingBridge(Arc<AtomicUsize>);
+    impl crate::HostCallBridge for CountingBridge {
+        fn dispatch<'a>(
+            &'a self,
+            _capability: &'a str,
+            _operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> crate::HostCallDispatchFuture<'a> {
+            Box::pin(async move {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(VmValue::Nil))
+            })
+        }
+    }
+    crate::orchestration::clear_command_policies();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge(Arc::clone(&calls))));
+    crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
+        tools: vec!["run".to_string()],
+        default_shell_mode: "shell".to_string(),
+        deny_patterns: vec!["cat *".to_string()],
+        ..Default::default()
+    });
+    let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+        Arc::new(Mutex::new(std::collections::HashMap::new())),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Err("unexpected builtin call".to_string())),
+        1,
+    ));
+    let mut entry = crate::value::DictMap::new();
+    entry.put_str("executor", "host_bridge");
+    entry.put_str("host_capability", "process.exec");
+    let tools = tools_dict(vec![("read_via_host", entry)]);
+    let outcome = dispatch_bound_tool(
+        "read_via_host",
+        &serde_json::json!({"mode":"shell", "command":"cat Cargo.toml"}),
+        &tools,
+        Some(&bridge),
+    )
+    .await;
+    crate::orchestration::clear_command_policies();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "denied command reached the host"
+    );
+    assert_eq!(outcome.result.unwrap()["status"], "blocked");
 }
 
 #[tokio::test(flavor = "current_thread")]
