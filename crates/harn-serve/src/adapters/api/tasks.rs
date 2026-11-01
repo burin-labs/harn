@@ -217,7 +217,7 @@ pub(super) async fn submit_task_inner(
         }
         .await;
         let (status, failure) = match result {
-            Ok(_) => (TaskStatus::Completed, None),
+            Ok(response) => prompt_task_outcome(response),
             Err(error) => (
                 TaskStatus::Failed,
                 Some(TaskFailure {
@@ -231,6 +231,47 @@ pub(super) async fn submit_task_inner(
         }
     });
     (StatusCode::ACCEPTED, Json(task.resource())).into_response()
+}
+
+pub(super) fn prompt_task_outcome(response: Value) -> (TaskStatus, Option<TaskFailure>) {
+    use harn_vm::agent_events::AgentLifecycleState;
+
+    let response =
+        match serde_json::from_value::<crate::adapters::acp::AcpSessionPromptResult>(response) {
+            Ok(response) => response,
+            Err(error) => {
+                return (
+                    TaskStatus::Failed,
+                    Some(TaskFailure {
+                        code: "invalid_prompt_outcome".into(),
+                        message: format!("Invalid runtime prompt outcome: {error}"),
+                    }),
+                )
+            }
+        };
+    let Some(terminal) = response.meta.and_then(|meta| meta.harn.terminal) else {
+        return match response.stop_reason.as_str() {
+            "end_turn" => (TaskStatus::Completed, None),
+            "cancelled" => (TaskStatus::Canceled, None),
+            _ => (
+                TaskStatus::Failed,
+                Some(TaskFailure {
+                    code: "unmeasured_prompt_outcome".into(),
+                    message: "Runtime prompt ended without a recognized terminal outcome".into(),
+                }),
+            ),
+        };
+    };
+    let status = match terminal.kind.lifecycle_state() {
+        AgentLifecycleState::Completed => TaskStatus::Completed,
+        AgentLifecycleState::Cancelled | AgentLifecycleState::Stopped => TaskStatus::Canceled,
+        _ => TaskStatus::Failed,
+    };
+    let failure = (status == TaskStatus::Failed).then(|| TaskFailure {
+        code: terminal.kind.as_str().into(),
+        message: terminal.message.unwrap_or(terminal.reason),
+    });
+    (status, failure)
 }
 
 pub(super) async fn list_tasks(
