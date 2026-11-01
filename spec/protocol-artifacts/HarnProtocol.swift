@@ -4458,11 +4458,54 @@ public struct HarnSessionRecapQuery: Codable, Sendable, Equatable {
     public var turnId: String?
     public var fromEventId: Int?
     public var limit: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId
+        case runId
+        case turnId
+        case fromEventId
+        case limit
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try values.decode(String.self, forKey: .sessionId)
+        runId = try values.decode(String?.self, forKey: .runId)
+        turnId = try values.decode(String?.self, forKey: .turnId)
+        fromEventId = try values.decode(Int?.self, forKey: .fromEventId)
+        limit = try values.decode(Int?.self, forKey: .limit)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(sessionId, forKey: .sessionId)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(turnId, forKey: .turnId)
+        try values.encode(fromEventId, forKey: .fromEventId)
+        try values.encode(limit, forKey: .limit)
+    }
 }
 
 public struct HarnSessionRecapCursor: Codable, Sendable, Equatable {
     public var lastEventId: Int?
     public var nextEventId: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case lastEventId
+        case nextEventId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        lastEventId = try values.decode(Int?.self, forKey: .lastEventId)
+        nextEventId = try values.decode(Int?.self, forKey: .nextEventId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(lastEventId, forKey: .lastEventId)
+        try values.encode(nextEventId, forKey: .nextEventId)
+    }
 }
 
 public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable {
@@ -4482,6 +4525,26 @@ public struct HarnSessionRecapSource: Codable, Sendable, Equatable {
     public var firstEventId: Int?
     public var lastEventId: Int?
     public var events: [HarnSessionRecapSourceEvent]
+
+    enum CodingKeys: String, CodingKey {
+        case firstEventId
+        case lastEventId
+        case events
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        firstEventId = try values.decode(Int?.self, forKey: .firstEventId)
+        lastEventId = try values.decode(Int?.self, forKey: .lastEventId)
+        events = try values.decode([HarnSessionRecapSourceEvent].self, forKey: .events)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(firstEventId, forKey: .firstEventId)
+        try values.encode(lastEventId, forKey: .lastEventId)
+        try values.encode(events, forKey: .events)
+    }
 }
 
 public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable {
@@ -4506,6 +4569,44 @@ public struct HarnSessionRecapToolExchange: Codable, Sendable, Equatable {
     public var output: HarnACPValue?
     public var verification: HarnSessionRecapVerificationFact?
     public var sourceEventIds: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case toolCallId
+        case toolName
+        case state
+        case callObserved
+        case resultObserved
+        case input
+        case output
+        case verification
+        case sourceEventIds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        toolCallId = try values.decode(String.self, forKey: .toolCallId)
+        toolName = try values.decode(String?.self, forKey: .toolName)
+        state = try values.decode(HarnSessionRecapToolState.self, forKey: .state)
+        callObserved = try values.decode(Bool.self, forKey: .callObserved)
+        resultObserved = try values.decode(Bool.self, forKey: .resultObserved)
+        input = try values.decode(HarnACPValue?.self, forKey: .input)
+        output = try values.decode(HarnACPValue?.self, forKey: .output)
+        verification = try values.decode(HarnSessionRecapVerificationFact?.self, forKey: .verification)
+        sourceEventIds = try values.decode([Int].self, forKey: .sourceEventIds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(toolCallId, forKey: .toolCallId)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(state, forKey: .state)
+        try values.encode(callObserved, forKey: .callObserved)
+        try values.encode(resultObserved, forKey: .resultObserved)
+        try values.encode(input, forKey: .input)
+        try values.encode(output, forKey: .output)
+        try values.encode(verification, forKey: .verification)
+        try values.encode(sourceEventIds, forKey: .sourceEventIds)
+    }
 }
 
 public struct HarnSessionRecapPlanStep: Codable, Sendable, Equatable {
@@ -4518,6 +4619,26 @@ public struct HarnSessionRecapPlanEventFact: Codable, Sendable, Equatable {
     public var kind: HarnSessionRecapPlanEventKind
     public var eventId: String
     public var inputRevisionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case eventId
+        case inputRevisionId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(HarnSessionRecapPlanEventKind.self, forKey: .kind)
+        eventId = try values.decode(String.self, forKey: .eventId)
+        inputRevisionId = try values.decode(String?.self, forKey: .inputRevisionId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(eventId, forKey: .eventId)
+        try values.encode(inputRevisionId, forKey: .inputRevisionId)
+    }
 }
 
 public struct HarnSessionRecapPlanFact: Codable, Sendable, Equatable {
@@ -4528,12 +4649,64 @@ public struct HarnSessionRecapPlanFact: Codable, Sendable, Equatable {
     public var steps: [HarnSessionRecapPlanStep]
     public var event: HarnSessionRecapPlanEventFact?
     public var sourceEventId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case documentId
+        case revisionId
+        case title
+        case summary
+        case steps
+        case event
+        case sourceEventId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        documentId = try values.decode(String.self, forKey: .documentId)
+        revisionId = try values.decode(String.self, forKey: .revisionId)
+        title = try values.decode(String.self, forKey: .title)
+        summary = try values.decode(String.self, forKey: .summary)
+        steps = try values.decode([HarnSessionRecapPlanStep].self, forKey: .steps)
+        event = try values.decode(HarnSessionRecapPlanEventFact?.self, forKey: .event)
+        sourceEventId = try values.decode(Int.self, forKey: .sourceEventId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(documentId, forKey: .documentId)
+        try values.encode(revisionId, forKey: .revisionId)
+        try values.encode(title, forKey: .title)
+        try values.encode(summary, forKey: .summary)
+        try values.encode(steps, forKey: .steps)
+        try values.encode(event, forKey: .event)
+        try values.encode(sourceEventId, forKey: .sourceEventId)
+    }
 }
 
 public struct HarnSessionRecapProgressEntry: Codable, Sendable, Equatable {
     public var content: String
     public var status: HarnSessionRecapProgressStatus
     public var priority: HarnSessionRecapProgressPriority?
+
+    enum CodingKeys: String, CodingKey {
+        case content
+        case status
+        case priority
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        content = try values.decode(String.self, forKey: .content)
+        status = try values.decode(HarnSessionRecapProgressStatus.self, forKey: .status)
+        priority = try values.decode(HarnSessionRecapProgressPriority?.self, forKey: .priority)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(content, forKey: .content)
+        try values.encode(status, forKey: .status)
+        try values.encode(priority, forKey: .priority)
+    }
 }
 
 public struct HarnSessionRecapProgressFact: Codable, Sendable, Equatable {
@@ -4541,6 +4714,29 @@ public struct HarnSessionRecapProgressFact: Codable, Sendable, Equatable {
     public var entries: [HarnSessionRecapProgressEntry]
     public var replace: Bool
     public var sourceEventId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case entries
+        case replace
+        case sourceEventId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        message = try values.decode(String?.self, forKey: .message)
+        entries = try values.decode([HarnSessionRecapProgressEntry].self, forKey: .entries)
+        replace = try values.decode(Bool.self, forKey: .replace)
+        sourceEventId = try values.decode(Int.self, forKey: .sourceEventId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(message, forKey: .message)
+        try values.encode(entries, forKey: .entries)
+        try values.encode(replace, forKey: .replace)
+        try values.encode(sourceEventId, forKey: .sourceEventId)
+    }
 }
 
 public struct HarnSessionRecapTerminalFact: Codable, Sendable, Equatable {
@@ -4551,6 +4747,38 @@ public struct HarnSessionRecapTerminalFact: Codable, Sendable, Equatable {
     public var owner: String?
     public var reason: String?
     public var sourceEventId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case finalStatus
+        case stopReason
+        case kind
+        case owner
+        case reason
+        case sourceEventId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(HarnSessionRecapCompletionState.self, forKey: .state)
+        finalStatus = try values.decode(String?.self, forKey: .finalStatus)
+        stopReason = try values.decode(String?.self, forKey: .stopReason)
+        kind = try values.decode(String?.self, forKey: .kind)
+        owner = try values.decode(String?.self, forKey: .owner)
+        reason = try values.decode(String?.self, forKey: .reason)
+        sourceEventId = try values.decode(Int.self, forKey: .sourceEventId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(state, forKey: .state)
+        try values.encode(finalStatus, forKey: .finalStatus)
+        try values.encode(stopReason, forKey: .stopReason)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(owner, forKey: .owner)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(sourceEventId, forKey: .sourceEventId)
+    }
 }
 
 public struct HarnSessionRecapIteration: Codable, Sendable, Equatable {
@@ -4561,6 +4789,38 @@ public struct HarnSessionRecapIteration: Codable, Sendable, Equatable {
     public var plans: [HarnSessionRecapPlanFact]
     public var progress: [HarnSessionRecapProgressFact]
     public var sourceEventIds: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case state
+        case assistantText
+        case tools
+        case plans
+        case progress
+        case sourceEventIds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int?.self, forKey: .iteration)
+        state = try values.decode(HarnSessionRecapCompletionState.self, forKey: .state)
+        assistantText = try values.decode([HarnSessionRecapTextFact].self, forKey: .assistantText)
+        tools = try values.decode([HarnSessionRecapToolExchange].self, forKey: .tools)
+        plans = try values.decode([HarnSessionRecapPlanFact].self, forKey: .plans)
+        progress = try values.decode([HarnSessionRecapProgressFact].self, forKey: .progress)
+        sourceEventIds = try values.decode([Int].self, forKey: .sourceEventIds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(state, forKey: .state)
+        try values.encode(assistantText, forKey: .assistantText)
+        try values.encode(tools, forKey: .tools)
+        try values.encode(plans, forKey: .plans)
+        try values.encode(progress, forKey: .progress)
+        try values.encode(sourceEventIds, forKey: .sourceEventIds)
+    }
 }
 
 public struct HarnSessionPromptTurnRecap: Codable, Sendable, Equatable {
@@ -4571,6 +4831,38 @@ public struct HarnSessionPromptTurnRecap: Codable, Sendable, Equatable {
     public var iterations: [HarnSessionRecapIteration]
     public var terminal: HarnSessionRecapTerminalFact?
     public var sourceEventIds: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case turnId
+        case runId
+        case state
+        case prompts
+        case iterations
+        case terminal
+        case sourceEventIds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        turnId = try values.decode(String.self, forKey: .turnId)
+        runId = try values.decode(String.self, forKey: .runId)
+        state = try values.decode(HarnSessionRecapCompletionState.self, forKey: .state)
+        prompts = try values.decode([HarnSessionRecapTextFact].self, forKey: .prompts)
+        iterations = try values.decode([HarnSessionRecapIteration].self, forKey: .iterations)
+        terminal = try values.decode(HarnSessionRecapTerminalFact?.self, forKey: .terminal)
+        sourceEventIds = try values.decode([Int].self, forKey: .sourceEventIds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(turnId, forKey: .turnId)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(state, forKey: .state)
+        try values.encode(prompts, forKey: .prompts)
+        try values.encode(iterations, forKey: .iterations)
+        try values.encode(terminal, forKey: .terminal)
+        try values.encode(sourceEventIds, forKey: .sourceEventIds)
+    }
 }
 
 public struct HarnSessionRecapSnapshot: Codable, Sendable, Equatable {
@@ -4838,6 +5130,29 @@ public struct HarnPlanStep: Codable, Sendable, Equatable {
     public var content: String
     public var status: String
     public var priority: HarnACPValue?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case status
+        case priority
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        content = try values.decode(String.self, forKey: .content)
+        status = try values.decode(String.self, forKey: .status)
+        priority = try values.decode(HarnACPValue?.self, forKey: .priority)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(content, forKey: .content)
+        try values.encode(status, forKey: .status)
+        try values.encode(priority, forKey: .priority)
+    }
 }
 
 public struct HarnPlanApproval: Codable, Sendable, Equatable {
@@ -5223,6 +5538,40 @@ public struct HarnProviderUsage: Codable, Sendable, Equatable {
         case costUsd = "cost_usd"
         case reportedCache = "reported_cache"
     }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try values.decode(String.self, forKey: .runId)
+        parentSessionId = try values.decode(String.self, forKey: .parentSessionId)
+        lineageKnown = try values.decode(Bool.self, forKey: .lineageKnown)
+        inputTokens = try values.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try values.decode(Int.self, forKey: .outputTokens)
+        cacheReadTokens = try values.decode(Int.self, forKey: .cacheReadTokens)
+        cacheWriteTokens = try values.decode(Int.self, forKey: .cacheWriteTokens)
+        providerCallCount = try values.decode(Int.self, forKey: .providerCallCount)
+        unpricedCalls = try values.decode(Int.self, forKey: .unpricedCalls)
+        usageUnknownCalls = try values.decode(Int.self, forKey: .usageUnknownCalls)
+        knownCostUsd = try values.decode(Double.self, forKey: .knownCostUsd)
+        costUsd = try values.decode(Double?.self, forKey: .costUsd)
+        reportedCache = try values.decode(HarnReportedCacheTotals?.self, forKey: .reportedCache)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(parentSessionId, forKey: .parentSessionId)
+        try values.encode(lineageKnown, forKey: .lineageKnown)
+        try values.encode(inputTokens, forKey: .inputTokens)
+        try values.encode(outputTokens, forKey: .outputTokens)
+        try values.encode(cacheReadTokens, forKey: .cacheReadTokens)
+        try values.encode(cacheWriteTokens, forKey: .cacheWriteTokens)
+        try values.encode(providerCallCount, forKey: .providerCallCount)
+        try values.encode(unpricedCalls, forKey: .unpricedCalls)
+        try values.encode(usageUnknownCalls, forKey: .usageUnknownCalls)
+        try values.encode(knownCostUsd, forKey: .knownCostUsd)
+        try values.encode(costUsd, forKey: .costUsd)
+        try values.encode(reportedCache, forKey: .reportedCache)
+    }
 }
 
 public struct HarnReportedCacheTotals: Codable, Sendable, Equatable {
@@ -5287,6 +5636,32 @@ public struct HarnAgentEventAnchorChanged: Codable, Sendable, Equatable {
     public var carryTranscript: Bool
     public var compacted: Bool
     public var reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case previous
+        case current
+        case carryTranscript
+        case compacted
+        case reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        previous = try values.decode(HarnACPValue.self, forKey: .previous)
+        current = try values.decode(HarnACPValue.self, forKey: .current)
+        carryTranscript = try values.decode(Bool.self, forKey: .carryTranscript)
+        compacted = try values.decode(Bool.self, forKey: .compacted)
+        reason = try values.decode(String?.self, forKey: .reason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(previous, forKey: .previous)
+        try values.encode(current, forKey: .current)
+        try values.encode(carryTranscript, forKey: .carryTranscript)
+        try values.encode(compacted, forKey: .compacted)
+        try values.encode(reason, forKey: .reason)
+    }
 }
 
 public struct HarnAgentEventBoundaryFailure: Codable, Sendable, Equatable {
@@ -5340,6 +5715,32 @@ public struct HarnAgentEventCodeLibrarianQueryNlFallback: Codable, Sendable, Equ
     public var mctsExpansions: Int
     public var resultCount: Int
     public var text: String
+
+    enum CodingKeys: String, CodingKey {
+        case attemptedCypher
+        case mctsDepth
+        case mctsExpansions
+        case resultCount
+        case text
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attemptedCypher = try values.decode(String?.self, forKey: .attemptedCypher)
+        mctsDepth = try values.decode(Int.self, forKey: .mctsDepth)
+        mctsExpansions = try values.decode(Int.self, forKey: .mctsExpansions)
+        resultCount = try values.decode(Int.self, forKey: .resultCount)
+        text = try values.decode(String.self, forKey: .text)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(attemptedCypher, forKey: .attemptedCypher)
+        try values.encode(mctsDepth, forKey: .mctsDepth)
+        try values.encode(mctsExpansions, forKey: .mctsExpansions)
+        try values.encode(resultCount, forKey: .resultCount)
+        try values.encode(text, forKey: .text)
+    }
 }
 
 public struct HarnAgentEventCompassRoutingDecision: Codable, Sendable, Equatable {
@@ -5376,6 +5777,50 @@ public struct HarnAgentEventCompositionChildResult: Codable, Sendable, Equatable
     public var executor: HarnACPValue
     public var durationMs: Int?
     public var executionDurationMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case runId
+        case toolCallId
+        case toolName
+        case operationIndex
+        case status
+        case rawOutput
+        case error
+        case errorCategory
+        case executor
+        case durationMs
+        case executionDurationMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try values.decode(String.self, forKey: .runId)
+        toolCallId = try values.decode(String.self, forKey: .toolCallId)
+        toolName = try values.decode(String.self, forKey: .toolName)
+        operationIndex = try values.decode(Int.self, forKey: .operationIndex)
+        status = try values.decode(String.self, forKey: .status)
+        rawOutput = try values.decode(HarnACPValue.self, forKey: .rawOutput)
+        error = try values.decode(String?.self, forKey: .error)
+        errorCategory = try values.decode(String?.self, forKey: .errorCategory)
+        executor = try values.decode(HarnACPValue.self, forKey: .executor)
+        durationMs = try values.decode(Int?.self, forKey: .durationMs)
+        executionDurationMs = try values.decode(Int?.self, forKey: .executionDurationMs)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(toolCallId, forKey: .toolCallId)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(operationIndex, forKey: .operationIndex)
+        try values.encode(status, forKey: .status)
+        try values.encode(rawOutput, forKey: .rawOutput)
+        try values.encode(error, forKey: .error)
+        try values.encode(errorCategory, forKey: .errorCategory)
+        try values.encode(executor, forKey: .executor)
+        try values.encode(durationMs, forKey: .durationMs)
+        try values.encode(executionDurationMs, forKey: .executionDurationMs)
+    }
 }
 
 public struct HarnAgentEventCompositionError: Codable, Sendable, Equatable {
@@ -5392,6 +5837,56 @@ public struct HarnAgentEventCompositionError: Codable, Sendable, Equatable {
     public var error: String?
     public var durationMs: Int?
     public var metadata: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case runId
+        case language
+        case snippetHash
+        case bindingManifestHash
+        case requestedSideEffectCeiling
+        case stdout
+        case stderr
+        case artifacts
+        case result
+        case failureCategory
+        case error
+        case durationMs
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try values.decode(String.self, forKey: .runId)
+        language = try values.decode(String.self, forKey: .language)
+        snippetHash = try values.decode(String.self, forKey: .snippetHash)
+        bindingManifestHash = try values.decode(String.self, forKey: .bindingManifestHash)
+        requestedSideEffectCeiling = try values.decode(String.self, forKey: .requestedSideEffectCeiling)
+        stdout = try values.decode(String?.self, forKey: .stdout)
+        stderr = try values.decode(String?.self, forKey: .stderr)
+        artifacts = try values.decode([HarnACPValue].self, forKey: .artifacts)
+        result = try values.decode(HarnACPValue.self, forKey: .result)
+        failureCategory = try values.decode(String?.self, forKey: .failureCategory)
+        error = try values.decode(String?.self, forKey: .error)
+        durationMs = try values.decode(Int?.self, forKey: .durationMs)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(language, forKey: .language)
+        try values.encode(snippetHash, forKey: .snippetHash)
+        try values.encode(bindingManifestHash, forKey: .bindingManifestHash)
+        try values.encode(requestedSideEffectCeiling, forKey: .requestedSideEffectCeiling)
+        try values.encode(stdout, forKey: .stdout)
+        try values.encode(stderr, forKey: .stderr)
+        try values.encode(artifacts, forKey: .artifacts)
+        try values.encode(result, forKey: .result)
+        try values.encode(failureCategory, forKey: .failureCategory)
+        try values.encode(error, forKey: .error)
+        try values.encode(durationMs, forKey: .durationMs)
+        try values.encode(metadata, forKey: .metadata)
+    }
 }
 
 public struct HarnAgentEventCompositionFinish: Codable, Sendable, Equatable {
@@ -5408,6 +5903,56 @@ public struct HarnAgentEventCompositionFinish: Codable, Sendable, Equatable {
     public var error: String?
     public var durationMs: Int?
     public var metadata: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case runId
+        case language
+        case snippetHash
+        case bindingManifestHash
+        case requestedSideEffectCeiling
+        case stdout
+        case stderr
+        case artifacts
+        case result
+        case failureCategory
+        case error
+        case durationMs
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try values.decode(String.self, forKey: .runId)
+        language = try values.decode(String.self, forKey: .language)
+        snippetHash = try values.decode(String.self, forKey: .snippetHash)
+        bindingManifestHash = try values.decode(String.self, forKey: .bindingManifestHash)
+        requestedSideEffectCeiling = try values.decode(String.self, forKey: .requestedSideEffectCeiling)
+        stdout = try values.decode(String?.self, forKey: .stdout)
+        stderr = try values.decode(String?.self, forKey: .stderr)
+        artifacts = try values.decode([HarnACPValue].self, forKey: .artifacts)
+        result = try values.decode(HarnACPValue.self, forKey: .result)
+        failureCategory = try values.decode(String?.self, forKey: .failureCategory)
+        error = try values.decode(String?.self, forKey: .error)
+        durationMs = try values.decode(Int?.self, forKey: .durationMs)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(language, forKey: .language)
+        try values.encode(snippetHash, forKey: .snippetHash)
+        try values.encode(bindingManifestHash, forKey: .bindingManifestHash)
+        try values.encode(requestedSideEffectCeiling, forKey: .requestedSideEffectCeiling)
+        try values.encode(stdout, forKey: .stdout)
+        try values.encode(stderr, forKey: .stderr)
+        try values.encode(artifacts, forKey: .artifacts)
+        try values.encode(result, forKey: .result)
+        try values.encode(failureCategory, forKey: .failureCategory)
+        try values.encode(error, forKey: .error)
+        try values.encode(durationMs, forKey: .durationMs)
+        try values.encode(metadata, forKey: .metadata)
+    }
 }
 
 public struct HarnAgentEventCompositionStart: Codable, Sendable, Equatable {
@@ -5424,6 +5969,56 @@ public struct HarnAgentEventCompositionStart: Codable, Sendable, Equatable {
     public var error: String?
     public var durationMs: Int?
     public var metadata: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case runId
+        case language
+        case snippetHash
+        case bindingManifestHash
+        case requestedSideEffectCeiling
+        case stdout
+        case stderr
+        case artifacts
+        case result
+        case failureCategory
+        case error
+        case durationMs
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try values.decode(String.self, forKey: .runId)
+        language = try values.decode(String.self, forKey: .language)
+        snippetHash = try values.decode(String.self, forKey: .snippetHash)
+        bindingManifestHash = try values.decode(String.self, forKey: .bindingManifestHash)
+        requestedSideEffectCeiling = try values.decode(String.self, forKey: .requestedSideEffectCeiling)
+        stdout = try values.decode(String?.self, forKey: .stdout)
+        stderr = try values.decode(String?.self, forKey: .stderr)
+        artifacts = try values.decode([HarnACPValue].self, forKey: .artifacts)
+        result = try values.decode(HarnACPValue.self, forKey: .result)
+        failureCategory = try values.decode(String?.self, forKey: .failureCategory)
+        error = try values.decode(String?.self, forKey: .error)
+        durationMs = try values.decode(Int?.self, forKey: .durationMs)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(language, forKey: .language)
+        try values.encode(snippetHash, forKey: .snippetHash)
+        try values.encode(bindingManifestHash, forKey: .bindingManifestHash)
+        try values.encode(requestedSideEffectCeiling, forKey: .requestedSideEffectCeiling)
+        try values.encode(stdout, forKey: .stdout)
+        try values.encode(stderr, forKey: .stderr)
+        try values.encode(artifacts, forKey: .artifacts)
+        try values.encode(result, forKey: .result)
+        try values.encode(failureCategory, forKey: .failureCategory)
+        try values.encode(error, forKey: .error)
+        try values.encode(durationMs, forKey: .durationMs)
+        try values.encode(metadata, forKey: .metadata)
+    }
 }
 
 public struct HarnAgentEventControlOutcome: Codable, Sendable, Equatable {
@@ -5467,6 +6062,35 @@ public struct HarnAgentEventFinalWrapup: Codable, Sendable, Equatable {
     public var hostDirective: Bool
     public var terminalKind: String
     public var unconsumedToolCall: HarnAgentEventFinalWrapupUnconsumedToolCall?
+
+    enum CodingKeys: String, CodingKey {
+        case finalStatus
+        case stopReason
+        case iteration
+        case hostDirective
+        case terminalKind
+        case unconsumedToolCall
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        finalStatus = try values.decode(String.self, forKey: .finalStatus)
+        stopReason = try values.decode(String.self, forKey: .stopReason)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        hostDirective = try values.decode(Bool.self, forKey: .hostDirective)
+        terminalKind = try values.decode(String.self, forKey: .terminalKind)
+        unconsumedToolCall = try values.decode(HarnAgentEventFinalWrapupUnconsumedToolCall?.self, forKey: .unconsumedToolCall)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(finalStatus, forKey: .finalStatus)
+        try values.encode(stopReason, forKey: .stopReason)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(hostDirective, forKey: .hostDirective)
+        try values.encode(terminalKind, forKey: .terminalKind)
+        try values.encode(unconsumedToolCall, forKey: .unconsumedToolCall)
+    }
 }
 
 public struct HarnAgentEventHostAttachment: Codable, Sendable, Equatable {
@@ -5484,6 +6108,59 @@ public struct HarnAgentEventHostAttachment: Codable, Sendable, Equatable {
     public var sequence: Int
     public var provenance: HarnACPValue
     public var sanitization: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case injectionId
+        case mediaType
+        case flavor
+        case artifactPointer
+        case sha256
+        case sizeBytes
+        case rendered
+        case description
+        case descriptionModel
+        case delivery
+        case deliveredAtSeam
+        case sequence
+        case provenance
+        case sanitization
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        injectionId = try values.decode(String.self, forKey: .injectionId)
+        mediaType = try values.decode(String.self, forKey: .mediaType)
+        flavor = try values.decode(HarnACPValue.self, forKey: .flavor)
+        artifactPointer = try values.decode(String.self, forKey: .artifactPointer)
+        sha256 = try values.decode(String.self, forKey: .sha256)
+        sizeBytes = try values.decode(Int.self, forKey: .sizeBytes)
+        rendered = try values.decode(HarnACPValue.self, forKey: .rendered)
+        description = try values.decode(String?.self, forKey: .description)
+        descriptionModel = try values.decode(String?.self, forKey: .descriptionModel)
+        delivery = try values.decode(HarnACPValue.self, forKey: .delivery)
+        deliveredAtSeam = try values.decode(String?.self, forKey: .deliveredAtSeam)
+        sequence = try values.decode(Int.self, forKey: .sequence)
+        provenance = try values.decode(HarnACPValue.self, forKey: .provenance)
+        sanitization = try values.decode(HarnACPValue.self, forKey: .sanitization)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(injectionId, forKey: .injectionId)
+        try values.encode(mediaType, forKey: .mediaType)
+        try values.encode(flavor, forKey: .flavor)
+        try values.encode(artifactPointer, forKey: .artifactPointer)
+        try values.encode(sha256, forKey: .sha256)
+        try values.encode(sizeBytes, forKey: .sizeBytes)
+        try values.encode(rendered, forKey: .rendered)
+        try values.encode(description, forKey: .description)
+        try values.encode(descriptionModel, forKey: .descriptionModel)
+        try values.encode(delivery, forKey: .delivery)
+        try values.encode(deliveredAtSeam, forKey: .deliveredAtSeam)
+        try values.encode(sequence, forKey: .sequence)
+        try values.encode(provenance, forKey: .provenance)
+        try values.encode(sanitization, forKey: .sanitization)
+    }
 }
 
 public struct HarnAgentEventHostToolResult: Codable, Sendable, Equatable {
@@ -5502,6 +6179,62 @@ public struct HarnAgentEventHostToolResult: Codable, Sendable, Equatable {
     public var sequence: Int
     public var provenance: HarnACPValue
     public var sanitization: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case injectionId
+        case toolCallId
+        case toolName
+        case toolKind
+        case rawInput
+        case status
+        case rawOutput
+        case resultPointer
+        case error
+        case durationMs
+        case delivery
+        case deliveredAtSeam
+        case sequence
+        case provenance
+        case sanitization
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        injectionId = try values.decode(String.self, forKey: .injectionId)
+        toolCallId = try values.decode(String.self, forKey: .toolCallId)
+        toolName = try values.decode(String.self, forKey: .toolName)
+        toolKind = try values.decode(HarnACPValue.self, forKey: .toolKind)
+        rawInput = try values.decode(HarnACPValue.self, forKey: .rawInput)
+        status = try values.decode(String.self, forKey: .status)
+        rawOutput = try values.decode(HarnACPValue.self, forKey: .rawOutput)
+        resultPointer = try values.decode(String?.self, forKey: .resultPointer)
+        error = try values.decode(String?.self, forKey: .error)
+        durationMs = try values.decode(Int?.self, forKey: .durationMs)
+        delivery = try values.decode(HarnACPValue.self, forKey: .delivery)
+        deliveredAtSeam = try values.decode(String?.self, forKey: .deliveredAtSeam)
+        sequence = try values.decode(Int.self, forKey: .sequence)
+        provenance = try values.decode(HarnACPValue.self, forKey: .provenance)
+        sanitization = try values.decode(HarnACPValue.self, forKey: .sanitization)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(injectionId, forKey: .injectionId)
+        try values.encode(toolCallId, forKey: .toolCallId)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(toolKind, forKey: .toolKind)
+        try values.encode(rawInput, forKey: .rawInput)
+        try values.encode(status, forKey: .status)
+        try values.encode(rawOutput, forKey: .rawOutput)
+        try values.encode(resultPointer, forKey: .resultPointer)
+        try values.encode(error, forKey: .error)
+        try values.encode(durationMs, forKey: .durationMs)
+        try values.encode(delivery, forKey: .delivery)
+        try values.encode(deliveredAtSeam, forKey: .deliveredAtSeam)
+        try values.encode(sequence, forKey: .sequence)
+        try values.encode(provenance, forKey: .provenance)
+        try values.encode(sanitization, forKey: .sanitization)
+    }
 }
 
 public struct HarnAgentEventInputGuardrailVerdict: Codable, Sendable, Equatable {
@@ -5514,6 +6247,44 @@ public struct HarnAgentEventInputGuardrailVerdict: Codable, Sendable, Equatable 
     public var classifierKind: String?
     public var model: String?
     public var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case tripwire
+        case reason
+        case label
+        case confidence
+        case confidenceThreshold
+        case classifierKind
+        case model
+        case error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        tripwire = try values.decode(Bool.self, forKey: .tripwire)
+        reason = try values.decode(String.self, forKey: .reason)
+        label = try values.decode(String.self, forKey: .label)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        confidenceThreshold = try values.decode(Double.self, forKey: .confidenceThreshold)
+        classifierKind = try values.decode(String?.self, forKey: .classifierKind)
+        model = try values.decode(String?.self, forKey: .model)
+        error = try values.decode(String?.self, forKey: .error)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(tripwire, forKey: .tripwire)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(label, forKey: .label)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(confidenceThreshold, forKey: .confidenceThreshold)
+        try values.encode(classifierKind, forKey: .classifierKind)
+        try values.encode(model, forKey: .model)
+        try values.encode(error, forKey: .error)
+    }
 }
 
 public struct HarnAgentEventIterationEnd: Codable, Sendable, Equatable {
@@ -5546,11 +6317,93 @@ public struct HarnAgentEventJudgeDecision: Codable, Sendable, Equatable {
     public var judgeOutcome: String?
     public var terminalEvidencePreserved: Bool?
     public var requirementReport: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case verdict
+        case reasoning
+        case nextStep
+        case judgeDurationMs
+        case source
+        case trigger
+        case reason
+        case confirm
+        case convertedFrom
+        case escalationRecommended
+        case escalationTarget
+        case judgeVerdict
+        case override
+        case gapClass
+        case judgeOutcome
+        case terminalEvidencePreserved
+        case requirementReport
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        verdict = try values.decode(String.self, forKey: .verdict)
+        reasoning = try values.decode(String.self, forKey: .reasoning)
+        nextStep = try values.decode(String?.self, forKey: .nextStep)
+        judgeDurationMs = try values.decode(Int.self, forKey: .judgeDurationMs)
+        source = try values.decode(String?.self, forKey: .source)
+        trigger = try values.decode(String?.self, forKey: .trigger)
+        reason = try values.decode(String?.self, forKey: .reason)
+        confirm = try values.decode(Bool?.self, forKey: .confirm)
+        convertedFrom = try values.decode(String?.self, forKey: .convertedFrom)
+        escalationRecommended = try values.decode(Bool?.self, forKey: .escalationRecommended)
+        escalationTarget = try values.decode(String?.self, forKey: .escalationTarget)
+        judgeVerdict = try values.decode(String?.self, forKey: .judgeVerdict)
+        override = try values.decode(HarnACPValue.self, forKey: .override)
+        gapClass = try values.decode(String?.self, forKey: .gapClass)
+        judgeOutcome = try values.decode(String?.self, forKey: .judgeOutcome)
+        terminalEvidencePreserved = try values.decode(Bool?.self, forKey: .terminalEvidencePreserved)
+        requirementReport = try values.decode(HarnACPValue.self, forKey: .requirementReport)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(verdict, forKey: .verdict)
+        try values.encode(reasoning, forKey: .reasoning)
+        try values.encode(nextStep, forKey: .nextStep)
+        try values.encode(judgeDurationMs, forKey: .judgeDurationMs)
+        try values.encode(source, forKey: .source)
+        try values.encode(trigger, forKey: .trigger)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(confirm, forKey: .confirm)
+        try values.encode(convertedFrom, forKey: .convertedFrom)
+        try values.encode(escalationRecommended, forKey: .escalationRecommended)
+        try values.encode(escalationTarget, forKey: .escalationTarget)
+        try values.encode(judgeVerdict, forKey: .judgeVerdict)
+        try values.encode(override, forKey: .override)
+        try values.encode(gapClass, forKey: .gapClass)
+        try values.encode(judgeOutcome, forKey: .judgeOutcome)
+        try values.encode(terminalEvidencePreserved, forKey: .terminalEvidencePreserved)
+        try values.encode(requirementReport, forKey: .requirementReport)
+    }
 }
 
 public struct HarnAgentEventJudgeStarted: Codable, Sendable, Equatable {
     public var iteration: Int
     public var trigger: String?
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case trigger
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        trigger = try values.decode(String?.self, forKey: .trigger)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(trigger, forKey: .trigger)
+    }
 }
 
 public struct HarnAgentEventLoopCheckpoint: Codable, Sendable, Equatable {
@@ -5581,11 +6434,48 @@ public struct HarnAgentEventMcpAuthRequired: Codable, Sendable, Equatable {
     public var server: String
     public var resource: String
     public var scope: String?
+
+    enum CodingKeys: String, CodingKey {
+        case server
+        case resource
+        case scope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        server = try values.decode(String.self, forKey: .server)
+        resource = try values.decode(String.self, forKey: .resource)
+        scope = try values.decode(String?.self, forKey: .scope)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(server, forKey: .server)
+        try values.encode(resource, forKey: .resource)
+        try values.encode(scope, forKey: .scope)
+    }
 }
 
 public struct HarnAgentEventMcpCatalogChanged: Codable, Sendable, Equatable {
     public var server: String?
     public var reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case server
+        case reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        server = try values.decode(String?.self, forKey: .server)
+        reason = try values.decode(String.self, forKey: .reason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(server, forKey: .server)
+        try values.encode(reason, forKey: .reason)
+    }
 }
 
 public struct HarnAgentEventMcpNotification: Codable, Sendable, Equatable {
@@ -5607,6 +6497,50 @@ public struct HarnAgentEventMissingToolCallVerdict: Codable, Sendable, Equatable
     public var classifierKind: String?
     public var model: String?
     public var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case action
+        case originalAction
+        case toolName
+        case confidence
+        case confidenceThreshold
+        case evidence
+        case language
+        case classifierKind
+        case model
+        case error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        action = try values.decode(String.self, forKey: .action)
+        originalAction = try values.decode(String.self, forKey: .originalAction)
+        toolName = try values.decode(String.self, forKey: .toolName)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        confidenceThreshold = try values.decode(Double.self, forKey: .confidenceThreshold)
+        evidence = try values.decode(String.self, forKey: .evidence)
+        language = try values.decode(String?.self, forKey: .language)
+        classifierKind = try values.decode(String?.self, forKey: .classifierKind)
+        model = try values.decode(String?.self, forKey: .model)
+        error = try values.decode(String?.self, forKey: .error)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(action, forKey: .action)
+        try values.encode(originalAction, forKey: .originalAction)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(confidenceThreshold, forKey: .confidenceThreshold)
+        try values.encode(evidence, forKey: .evidence)
+        try values.encode(language, forKey: .language)
+        try values.encode(classifierKind, forKey: .classifierKind)
+        try values.encode(model, forKey: .model)
+        try values.encode(error, forKey: .error)
+    }
 }
 
 public struct HarnAgentEventModelJob: Codable, Sendable, Equatable {
@@ -5628,6 +6562,29 @@ public struct HarnAgentEventProgressReported: Codable, Sendable, Equatable {
     public var entries: HarnACPValue
     public var replace: Bool
     public var metadata: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case entries
+        case replace
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        message = try values.decode(String?.self, forKey: .message)
+        entries = try values.decode(HarnACPValue.self, forKey: .entries)
+        replace = try values.decode(Bool.self, forKey: .replace)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(message, forKey: .message)
+        try values.encode(entries, forKey: .entries)
+        try values.encode(replace, forKey: .replace)
+        try values.encode(metadata, forKey: .metadata)
+    }
 }
 
 public struct HarnAgentEventProviderUsage: Codable, Sendable, Equatable {
@@ -5650,6 +6607,32 @@ public struct HarnAgentEventPurposeLabel: Codable, Sendable, Equatable {
     public var iteration: Int?
     public var toolCallIds: [String]
     public var toolCallCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case label
+        case source
+        case iteration
+        case toolCallIds
+        case toolCallCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        label = try values.decode(String.self, forKey: .label)
+        source = try values.decode(String.self, forKey: .source)
+        iteration = try values.decode(Int?.self, forKey: .iteration)
+        toolCallIds = try values.decode([String].self, forKey: .toolCallIds)
+        toolCallCount = try values.decode(Int?.self, forKey: .toolCallCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(label, forKey: .label)
+        try values.encode(source, forKey: .source)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(toolCallIds, forKey: .toolCallIds)
+        try values.encode(toolCallCount, forKey: .toolCallCount)
+    }
 }
 
 public struct HarnAgentEventRepairOutputContractApplied: Codable, Sendable, Equatable {
@@ -5665,6 +6648,38 @@ public struct HarnAgentEventRequireSuccessfulToolsViolation: Codable, Sendable, 
     public var redactedSummary: String
     public var recurrenceHints: [String]
     public var metadata: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case violationKind
+        case source
+        case actor
+        case runId
+        case redactedSummary
+        case recurrenceHints
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        violationKind = try values.decode(String.self, forKey: .violationKind)
+        source = try values.decode(String.self, forKey: .source)
+        actor = try values.decode(String?.self, forKey: .actor)
+        runId = try values.decode(String?.self, forKey: .runId)
+        redactedSummary = try values.decode(String.self, forKey: .redactedSummary)
+        recurrenceHints = try values.decode([String].self, forKey: .recurrenceHints)
+        metadata = try values.decode(HarnACPValue.self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(violationKind, forKey: .violationKind)
+        try values.encode(source, forKey: .source)
+        try values.encode(actor, forKey: .actor)
+        try values.encode(runId, forKey: .runId)
+        try values.encode(redactedSummary, forKey: .redactedSummary)
+        try values.encode(recurrenceHints, forKey: .recurrenceHints)
+        try values.encode(metadata, forKey: .metadata)
+    }
 }
 
 public struct HarnAgentEventScopeClassifierVerdict: Codable, Sendable, Equatable {
@@ -5678,6 +6693,47 @@ public struct HarnAgentEventScopeClassifierVerdict: Codable, Sendable, Equatable
     public var classifierKind: String?
     public var model: String?
     public var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case label
+        case originalLabel
+        case confidence
+        case confidenceThreshold
+        case evidence
+        case skipMainTurn
+        case classifierKind
+        case model
+        case error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        label = try values.decode(String.self, forKey: .label)
+        originalLabel = try values.decode(String.self, forKey: .originalLabel)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        confidenceThreshold = try values.decode(Double.self, forKey: .confidenceThreshold)
+        evidence = try values.decode(String.self, forKey: .evidence)
+        skipMainTurn = try values.decode(Bool.self, forKey: .skipMainTurn)
+        classifierKind = try values.decode(String?.self, forKey: .classifierKind)
+        model = try values.decode(String?.self, forKey: .model)
+        error = try values.decode(String?.self, forKey: .error)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(label, forKey: .label)
+        try values.encode(originalLabel, forKey: .originalLabel)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(confidenceThreshold, forKey: .confidenceThreshold)
+        try values.encode(evidence, forKey: .evidence)
+        try values.encode(skipMainTurn, forKey: .skipMainTurn)
+        try values.encode(classifierKind, forKey: .classifierKind)
+        try values.encode(model, forKey: .model)
+        try values.encode(error, forKey: .error)
+    }
 }
 
 public struct HarnAgentEventSelfConsistencyTie: Codable, Sendable, Equatable {
@@ -5711,6 +6767,71 @@ public struct HarnAgentEventStepJudgeDecision: Codable, Sendable, Equatable {
     public var costUsd: Double
     public var provider: String
     public var model: String
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case verdict
+        case reasoning
+        case critique
+        case confidence
+        case judgeDurationMs
+        case vetoed
+        case skipped
+        case reason
+        case judgeError
+        case unavailableReason
+        case unavailableCount
+        case onVeto
+        case inputTokens
+        case outputTokens
+        case costUsd
+        case provider
+        case model
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        verdict = try values.decode(String.self, forKey: .verdict)
+        reasoning = try values.decode(String.self, forKey: .reasoning)
+        critique = try values.decode(String.self, forKey: .critique)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        judgeDurationMs = try values.decode(Int.self, forKey: .judgeDurationMs)
+        vetoed = try values.decode(Bool.self, forKey: .vetoed)
+        skipped = try values.decode(Bool.self, forKey: .skipped)
+        reason = try values.decode(String?.self, forKey: .reason)
+        judgeError = try values.decode(Bool.self, forKey: .judgeError)
+        unavailableReason = try values.decode(String?.self, forKey: .unavailableReason)
+        unavailableCount = try values.decode(Int.self, forKey: .unavailableCount)
+        onVeto = try values.decode(String.self, forKey: .onVeto)
+        inputTokens = try values.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try values.decode(Int.self, forKey: .outputTokens)
+        costUsd = try values.decode(Double.self, forKey: .costUsd)
+        provider = try values.decode(String.self, forKey: .provider)
+        model = try values.decode(String.self, forKey: .model)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(verdict, forKey: .verdict)
+        try values.encode(reasoning, forKey: .reasoning)
+        try values.encode(critique, forKey: .critique)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(judgeDurationMs, forKey: .judgeDurationMs)
+        try values.encode(vetoed, forKey: .vetoed)
+        try values.encode(skipped, forKey: .skipped)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(judgeError, forKey: .judgeError)
+        try values.encode(unavailableReason, forKey: .unavailableReason)
+        try values.encode(unavailableCount, forKey: .unavailableCount)
+        try values.encode(onVeto, forKey: .onVeto)
+        try values.encode(inputTokens, forKey: .inputTokens)
+        try values.encode(outputTokens, forKey: .outputTokens)
+        try values.encode(costUsd, forKey: .costUsd)
+        try values.encode(provider, forKey: .provider)
+        try values.encode(model, forKey: .model)
+    }
 }
 
 public struct HarnAgentEventStructuralValidatorDecision: Codable, Sendable, Equatable {
@@ -5724,6 +6845,47 @@ public struct HarnAgentEventStructuralValidatorDecision: Codable, Sendable, Equa
     public var onFailure: String
     public var attempts: Int
     public var maxAttempts: Int
+
+    enum CodingKeys: String, CodingKey {
+        case iteration
+        case rule
+        case diagnostic
+        case recommendedAction
+        case vetoed
+        case skipped
+        case reason
+        case onFailure
+        case attempts
+        case maxAttempts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        iteration = try values.decode(Int.self, forKey: .iteration)
+        rule = try values.decode(String.self, forKey: .rule)
+        diagnostic = try values.decode(String.self, forKey: .diagnostic)
+        recommendedAction = try values.decode(String.self, forKey: .recommendedAction)
+        vetoed = try values.decode(Bool.self, forKey: .vetoed)
+        skipped = try values.decode(Bool.self, forKey: .skipped)
+        reason = try values.decode(String?.self, forKey: .reason)
+        onFailure = try values.decode(String.self, forKey: .onFailure)
+        attempts = try values.decode(Int.self, forKey: .attempts)
+        maxAttempts = try values.decode(Int.self, forKey: .maxAttempts)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iteration, forKey: .iteration)
+        try values.encode(rule, forKey: .rule)
+        try values.encode(diagnostic, forKey: .diagnostic)
+        try values.encode(recommendedAction, forKey: .recommendedAction)
+        try values.encode(vetoed, forKey: .vetoed)
+        try values.encode(skipped, forKey: .skipped)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(onFailure, forKey: .onFailure)
+        try values.encode(attempts, forKey: .attempts)
+        try values.encode(maxAttempts, forKey: .maxAttempts)
+    }
 }
 
 public struct HarnAgentEventSubagentJoin: Codable, Sendable, Equatable {
@@ -5740,6 +6902,56 @@ public struct HarnAgentEventSubagentJoin: Codable, Sendable, Equatable {
     public var resultProcessingStartedAtMs: Int?
     public var resultProcessingCompletedAtMs: Int?
     public var resultProcessingMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case parentSessionId
+        case parentRunId
+        case childSessionId
+        case childRunId
+        case workerId
+        case completedAtMs
+        case joinedAtMs
+        case collectionLagMs
+        case waitStartedAtMs
+        case waitMs
+        case resultProcessingStartedAtMs
+        case resultProcessingCompletedAtMs
+        case resultProcessingMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        parentSessionId = try values.decode(String.self, forKey: .parentSessionId)
+        parentRunId = try values.decode(String.self, forKey: .parentRunId)
+        childSessionId = try values.decode(String.self, forKey: .childSessionId)
+        childRunId = try values.decode(String.self, forKey: .childRunId)
+        workerId = try values.decode(String.self, forKey: .workerId)
+        completedAtMs = try values.decode(Int.self, forKey: .completedAtMs)
+        joinedAtMs = try values.decode(Int.self, forKey: .joinedAtMs)
+        collectionLagMs = try values.decode(Int.self, forKey: .collectionLagMs)
+        waitStartedAtMs = try values.decode(Int?.self, forKey: .waitStartedAtMs)
+        waitMs = try values.decode(Int?.self, forKey: .waitMs)
+        resultProcessingStartedAtMs = try values.decode(Int?.self, forKey: .resultProcessingStartedAtMs)
+        resultProcessingCompletedAtMs = try values.decode(Int?.self, forKey: .resultProcessingCompletedAtMs)
+        resultProcessingMs = try values.decode(Int?.self, forKey: .resultProcessingMs)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(parentSessionId, forKey: .parentSessionId)
+        try values.encode(parentRunId, forKey: .parentRunId)
+        try values.encode(childSessionId, forKey: .childSessionId)
+        try values.encode(childRunId, forKey: .childRunId)
+        try values.encode(workerId, forKey: .workerId)
+        try values.encode(completedAtMs, forKey: .completedAtMs)
+        try values.encode(joinedAtMs, forKey: .joinedAtMs)
+        try values.encode(collectionLagMs, forKey: .collectionLagMs)
+        try values.encode(waitStartedAtMs, forKey: .waitStartedAtMs)
+        try values.encode(waitMs, forKey: .waitMs)
+        try values.encode(resultProcessingStartedAtMs, forKey: .resultProcessingStartedAtMs)
+        try values.encode(resultProcessingCompletedAtMs, forKey: .resultProcessingCompletedAtMs)
+        try values.encode(resultProcessingMs, forKey: .resultProcessingMs)
+    }
 }
 
 public struct HarnAgentEventSubagentStop: Codable, Sendable, Equatable {
@@ -5755,6 +6967,53 @@ public struct HarnAgentEventSubagentStop: Codable, Sendable, Equatable {
     public var cancellation: HarnACPValue
     public var timeout: HarnACPValue
     public var completedAtMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case parentRunId
+        case childRunId
+        case parentSessionId
+        case childSessionId
+        case terminalStatus
+        case terminalClass
+        case reason
+        case resultRef
+        case receiptRef
+        case cancellation
+        case timeout
+        case completedAtMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        parentRunId = try values.decode(String.self, forKey: .parentRunId)
+        childRunId = try values.decode(String.self, forKey: .childRunId)
+        parentSessionId = try values.decode(String?.self, forKey: .parentSessionId)
+        childSessionId = try values.decode(String?.self, forKey: .childSessionId)
+        terminalStatus = try values.decode(String.self, forKey: .terminalStatus)
+        terminalClass = try values.decode(String.self, forKey: .terminalClass)
+        reason = try values.decode(String.self, forKey: .reason)
+        resultRef = try values.decode(String?.self, forKey: .resultRef)
+        receiptRef = try values.decode(String?.self, forKey: .receiptRef)
+        cancellation = try values.decode(HarnACPValue.self, forKey: .cancellation)
+        timeout = try values.decode(HarnACPValue.self, forKey: .timeout)
+        completedAtMs = try values.decode(Int.self, forKey: .completedAtMs)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(parentRunId, forKey: .parentRunId)
+        try values.encode(childRunId, forKey: .childRunId)
+        try values.encode(parentSessionId, forKey: .parentSessionId)
+        try values.encode(childSessionId, forKey: .childSessionId)
+        try values.encode(terminalStatus, forKey: .terminalStatus)
+        try values.encode(terminalClass, forKey: .terminalClass)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(resultRef, forKey: .resultRef)
+        try values.encode(receiptRef, forKey: .receiptRef)
+        try values.encode(cancellation, forKey: .cancellation)
+        try values.encode(timeout, forKey: .timeout)
+        try values.encode(completedAtMs, forKey: .completedAtMs)
+    }
 }
 
 public struct HarnAgentEventToolBatchDisposition: Codable, Sendable, Equatable {

@@ -277,7 +277,9 @@ impl Record {
                 Target::Python => out.push_str(&format!(
                     "    {}: {kind}{}\n",
                     field.wire_name,
-                    if !closed && !field.required {
+                    if field.required && matches!(field.kind, FieldKind::Nullable(_)) {
+                        " = field(metadata={\"harn_required_nullable\": True})"
+                    } else if !closed && !field.required {
                         " = None"
                     } else {
                         ""
@@ -291,8 +293,10 @@ impl Record {
                 )),
             }
         }
+        // Custom view bodies promote fields for in-memory defaults, not wire
+        // presence, and own their decoding policy.
         let explicit_swift_nulls = matches!(target, Target::Swift)
-            && preserve_wire_presence
+            && swift_body.is_none()
             && self
                 .fields
                 .iter()
@@ -337,7 +341,7 @@ impl Record {
         // when its optional JSON fields were tightened. The encoder below
         // stayed, so the artifact still wrote every key while no longer
         // refusing a frame that omitted one.
-        if explicit_swift_nulls || explicit_swift_presence {
+        if (explicit_swift_nulls || explicit_swift_presence) && swift_body.is_none() {
             out.push_str("\n    public init(from decoder: Decoder) throws {\n        let values = try decoder.container(keyedBy: CodingKeys.self)\n");
             for field in &self.fields {
                 let name = camel_ident(&field.wire_name);

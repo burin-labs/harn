@@ -616,6 +616,7 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         "toolCallReceipt": tool_call_receipt,
         "sessionRecapAvailability": session_recap_availability,
         "planDocument": super::plan_records::round_trip_fixture()?,
+        "providerUsage": super::provider_usage::round_trip_fixtures()?,
     });
 
     serde_json::to_string_pretty(&fixture)

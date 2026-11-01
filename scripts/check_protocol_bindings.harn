@@ -43,6 +43,23 @@ def main() -> int:
         )
 
     envelopes = fixture["envelopes"]
+    provider_usage = fixture["providerUsage"]
+    if not {"HarnProviderUsage", "HarnReportedCacheTotals"}.issubset(hp.__all__):
+        raise AssertionError("provider usage types are missing from package exports")
+    if len(provider_usage) != 3 or provider_usage[0]["reported_cache"] is not None:
+        raise AssertionError("provider usage unknown/zero/partial fixture is missing")
+    for payload in provider_usage:
+        assert_round_trip("HarnProviderUsage", payload, hp.HarnProviderUsage.from_wire(payload).to_wire())
+        notification = {"jsonrpc": "2.0", "method": "fixture/usage", "params": payload}
+        assert_round_trip("provider usage JSON envelope", notification, hp.ACPNotification.from_wire(notification).to_wire())
+    missing_cache = dict(provider_usage[0])
+    del missing_cache["reported_cache"]
+    try:
+        hp.HarnProviderUsage.from_wire(missing_cache)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("provider usage accepted missing required cache certainty")
     cases = [
         ("ACPRequest", envelopes["request"], hp.ACPRequest),
         ("ACPResponse", envelopes["response"], hp.ACPResponse),
