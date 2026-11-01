@@ -782,7 +782,6 @@ unverified = [
     "deepinfra",
     "flexai",
     "friendli",
-    "github_models",
     "huggingface",
     "hunyuan",
     "hyperbolic",
@@ -16068,19 +16067,6 @@ value = false
 method = "GET"
 path = "/v1beta/models"
 
-[providers.github_models]
-auth_env = "GITHUB_MODELS_TOKEN"
-auth_style = "bearer"
-base_url = "https://models.github.ai/inference"
-base_url_env = "GITHUB_MODELS_BASE_URL"
-chat_endpoint = "/chat/completions"
-completion_endpoint = "/completions"
-features = ["native_tools"]
-
-[providers.github_models.healthcheck]
-method = "GET"
-url = "https://models.github.ai/catalog/models"
-
 [providers.groq]
 auth_env = "GROQ_API_KEY"
 auth_style = "bearer"
@@ -16988,7 +16974,6 @@ unverified = [
     "atlas",
     "cloudflare_ai_gateway",
     "cohere",
-    "github_models",
     "hunyuan",
     "hyperbolic",
     "local",

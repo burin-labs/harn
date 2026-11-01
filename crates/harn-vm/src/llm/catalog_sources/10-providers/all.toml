@@ -18,7 +18,6 @@ unverified = [
   "atlas",
   "cloudflare_ai_gateway",
   "cohere",
-  "github_models",
   "hunyuan",
   "hyperbolic",
   "local",
@@ -905,20 +904,6 @@ features = ["native_tools", "reasoning"]
 [providers.atlas.healthcheck]
 method = "GET"
 path = "/models"
-
-# GitHub Models — OpenAI-compatible inference over GitHub's model catalog.
-[providers.github_models]
-base_url = "https://models.github.ai/inference"
-base_url_env = "GITHUB_MODELS_BASE_URL"
-auth_style = "bearer"
-auth_env = "GITHUB_MODELS_TOKEN"
-chat_endpoint = "/chat/completions"
-completion_endpoint = "/completions"
-features = ["native_tools"]
-
-[providers.github_models.healthcheck]
-method = "GET"
-url = "https://models.github.ai/catalog/models"
 
 # Vercel AI Gateway — one OpenAI-compatible endpoint for providers routed
 # through a Vercel project.

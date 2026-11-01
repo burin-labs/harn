@@ -36,7 +36,6 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | Fireworks | `fireworks` | `FIREWORKS_API_KEY` |
 | Flexai | `flexai` | `FLEXAI_API_KEY` |
 | Friendli | `friendli` | `FRIENDLI_API_KEY` or `FRIENDLI_TOKEN` |
-| Github Models | `github_models` | `GITHUB_MODELS_TOKEN` |
 | Huggingface | `huggingface` | `HF_TOKEN` or `HUGGINGFACE_API_KEY` |
 | Hunyuan | `hunyuan` | `HUNYUAN_API_KEY` or `TENCENT_HUNYUAN_API_KEY` |
 | Hyperbolic | `hyperbolic` | `HYPERBOLIC_API_KEY` |
@@ -83,7 +82,6 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
-| `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.8-27b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |

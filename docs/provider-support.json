@@ -183,15 +183,6 @@
       "auth_style": "bearer"
     },
     {
-      "id": "github_models",
-      "display_name": "Github Models",
-      "featured": false,
-      "env": [
-        "GITHUB_MODELS_TOKEN"
-      ],
-      "auth_style": "bearer"
-    },
-    {
       "id": "huggingface",
       "display_name": "Huggingface",
       "featured": false,
@@ -1329,56 +1320,6 @@
       "mcp_notes": [
         "MCP tools are regular Harn runtime tools before they become Gemini function declarations."
       ],
-      "local_setup_notes": []
-    },
-    {
-      "id": "github_models",
-      "display_name": "Github Models",
-      "catalog_provider": "github_models",
-      "endpoint_style": "OpenAI-compatible chat completions",
-      "classification": "hosted",
-      "auth_env": [
-        "GITHUB_MODELS_TOKEN"
-      ],
-      "recommended": {
-        "selector": "github_models",
-        "provider": "github_models",
-        "model": "*",
-        "display_name": null,
-        "tool_format": "text",
-        "harn_options": [
-          "provider = \"github_models\""
-        ]
-      },
-      "capabilities": {
-        "native_tools": false,
-        "text_tools": true,
-        "preferred_tool_format": "auto",
-        "tool_mode_parity": "unknown",
-        "structured_output_transport": "none",
-        "structured_output_mode": "none",
-        "streaming": true,
-        "reasoning_knobs": [],
-        "prompt_or_context_cache": false,
-        "batch_api": false,
-        "batch_discount_percent": null,
-        "serving_tiers": [],
-        "usage_accounting_confidence": "provider_default"
-      },
-      "empirical": {
-        "status": "not_recorded",
-        "sources": [],
-        "total_runs": 0,
-        "passed_runs": 0,
-        "failed_runs": 0,
-        "skipped_runs": 0,
-        "best_tool_format": null,
-        "native_text_parity": null,
-        "evidence": []
-      },
-      "notes": [],
-      "caveats": [],
-      "mcp_notes": [],
       "local_setup_notes": []
     },
     {
