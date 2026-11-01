@@ -125,12 +125,17 @@ fn cc_record_review(fs: HarnessFs, evidence: list, options: any = nil) {
  * True when a session paid a workflow discovery cost the installed library
  * does not already remove: a command failed, or it ran a command no installed
  * check runs. A session that only ran installed checks, and passed, teaches
- * nothing new.
+ * nothing new. A session with no command ledger counts as new.
  */
 fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
   const checks = installed.map({ entry -> entry.verify_command }).filter({ text -> text != "" })
     .to_list()
-  for entry in item?.command_ledger ?? [] {
+  const ledger = item?.command_ledger
+  if type_of(ledger) != "list" {
+    // An unmeasured session is never read as covered.
+    return true
+  }
+  for entry in ledger {
     if !(entry?.ok ?? false) {
       return true
     }
@@ -1086,9 +1091,9 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     const reviewed = cc_reviewed_ids(harness.fs, options)
     const unreviewed = evidence.filter({ item -> !reviewed.contains(cc_text(item?.id)) }).to_list()
     const installed = cc_installed(harness.fs, options)
-    const status = len(unreviewed) == 0
-      ? "no_new_evidence"
-      : unreviewed.any({ item -> cc_shows_new_workflow(item, installed) }) ? "" : "no_new_workflow_evidence"
+    const status = len(unreviewed) == 0 ? "no_new_evidence" : unreviewed.any(
+      { item -> cc_shows_new_workflow(item, installed) },
+    ) ? "" : "no_new_workflow_evidence"
     if status != "" {
       if len(unreviewed) > 0 {
         cc_record_review(harness.fs, unreviewed, options)

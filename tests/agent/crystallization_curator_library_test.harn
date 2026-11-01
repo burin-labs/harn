@@ -81,7 +81,13 @@ pipeline test_curator_skips_without_new_evidence(harness: Harness) {
 }
 
 fn session_running(id: string, ledger: list) -> dict {
-  return {id: id, session_id: "", prompt: "Fix the widget", tool_sequence: ["verify"], command_ledger: ledger}
+  return {
+    id: id,
+    session_id: "",
+    prompt: "Fix the widget",
+    tool_sequence: ["verify"],
+    command_ledger: ledger,
+  }
 }
 
 /** A new session that only ran an installed check, and passed, is not reviewed by a model. */
@@ -99,8 +105,13 @@ pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Ha
         priced_empty_batch(),
         library
           + {
-          evidence: [session_running("s1", [{tool: "verify", command: "make gen && make check", exit_code: 0, ok: true}])],
-        },
+            evidence: [
+              session_running(
+                "s1",
+                [{tool: "verify", command: "make gen && make check", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
       )
       assert_eq(learned.status, "no_new_workflow_evidence")
       assert_eq(learned?.usage, nil, "no model call was made")
@@ -110,8 +121,13 @@ pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Ha
         priced_empty_batch(),
         library
           + {
-          evidence: [session_running("s2", [{tool: "verify", command: "make gen && make check", exit_code: 2, ok: false}])],
-        },
+            evidence: [
+              session_running(
+                "s2",
+                [{tool: "verify", command: "make gen && make check", exit_code: 2, ok: false}],
+              ),
+            ],
+          },
       )
       assert(failed?.usage != nil, "a failed check is new workflow evidence")
       const other = curate_with(
@@ -119,7 +135,14 @@ pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Ha
         root,
         priced_empty_batch(),
         library
-          + {evidence: [session_running("s3", [{tool: "run", command: "make deploy", exit_code: 0, ok: true}])]},
+          + {
+            evidence: [
+              session_running(
+                "s3",
+                [{tool: "run", command: "make deploy", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
       )
       assert(other?.usage != nil, "a command no installed check runs is new workflow evidence")
       return nil
