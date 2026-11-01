@@ -4353,6 +4353,7 @@ name = "harn-stdlib"
 version = "0.10.185-dev"
 dependencies = [
  "harn-stdlib-catalog",
+ "tempfile",
  "zstd",
 ]
 
