@@ -44,6 +44,9 @@ RUSTUP
 chmod +x "$tmp/bin/cargo" "$tmp/bin/rustc" "$tmp/bin/rustup"
 export PATH="$tmp/bin:$PATH" TEST_TARGET="$tmp/target" TEST_DOC_CALLS="$tmp/doc-calls"
 export TEST_DOC_TOOLCHAINS="$tmp/doc-toolchains"
+# CI jobs export RUSTFLAGS (and may export RUSTUP_TOOLCHAIN); the recorded
+# flags below assert only what the gate itself adds.
+unset RUSTFLAGS RUSTUP_TOOLCHAIN
 cd "$tmp/repo"
 git init -q -b main
 git config user.name 'Harn Test'
