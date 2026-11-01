@@ -1,5 +1,22 @@
 [
   {
+    "default": "false",
+    "evidence": "The normalized purpose-label configuration defaults to every tool batch unless first_only is explicitly selected.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.first_only",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "reader": "__purpose_label_instruction"
+      }
+    ],
+    "reason": "Retain the public option while its delivery behavior is evaluated.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "system",
     "evidence": "purpose_labels.agent_purpose_label_config selects the default delivery channel. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",

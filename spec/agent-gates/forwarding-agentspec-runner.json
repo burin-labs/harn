@@ -1292,7 +1292,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "__purpose_label_arm(harness.agent, session, opts)",
+    "expression": "__purpose_label_arm(harness.agent, session, opts, iteration_index)",
     "owner": "__purpose_label_arm",
     "evidence": "Consumer __purpose_label_arm.opts in crates/harn-stdlib/src/stdlib/agent/loop_purpose_labels.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -1300,6 +1300,20 @@
         "scope": "AgentSpec",
         "function": "__purpose_label_arm",
         "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls, turn_opts)",
+    "owner": "__purpose_label_publish",
+    "evidence": "Consumer __purpose_label_publish.options in the loop purpose-label module is an audited AgentSpec binding.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__purpose_label_publish",
+        "parameter": "options"
       }
     ]
   },

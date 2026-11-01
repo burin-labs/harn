@@ -55,6 +55,10 @@
         "reader": "__purpose_label_arm"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_purpose_labels.harn",
+        "reader": "__purpose_label_publish"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
         "reader": "__agent_loop_turn_setup"
       }

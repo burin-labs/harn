@@ -870,6 +870,10 @@
         "name": "opts"
       },
       {
+        "function": "__purpose_label_publish",
+        "name": "options"
+      },
+      {
         "function": "__required_tools_text_completion",
         "name": "opts"
       },
