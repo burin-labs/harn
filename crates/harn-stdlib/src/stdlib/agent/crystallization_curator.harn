@@ -834,7 +834,9 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
 /**
  * Run one bounded agentic crystallization review over recent session evidence.
  * The semantic decision is made by the model; Harn constrains evidence access,
- * proposal shape, cost, iterations, and durable review state.
+ * proposal shape, cost, iterations, and durable review state. `usage` is the
+ * run's physical provider ledger (tokens and cost of every curator call); it is
+ * absent when the session reported none, so a host reads unmeasured, never zero.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
@@ -892,6 +894,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     proposal_count: len(proposals),
     proposals: proposals,
     session_import: session_import,
+    usage: result?.physical_usage,
     agent_result: result,
   }
 }
