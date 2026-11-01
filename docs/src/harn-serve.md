@@ -598,7 +598,9 @@ Mapping:
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
 - the `_harn/providerCatalog` extension method returns the same normalized
-  provider catalog v8 artifact shape as Harn's checked-in catalog
+  provider catalog artifact shape as Harn's checked-in catalog, including the
+  source project's provider and capability overrides. Reading this catalog does
+  not install execution dependencies; those are validated when a prompt runs
 - each `session/prompt` exposes `prompt` as the text-only prompt string,
   `runtime_prompt_content()` from `std/runtime` as typed, normalized Harn
   content blocks. The legacy `prompt_content` and `prompt_messages` globals

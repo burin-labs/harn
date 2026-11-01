@@ -206,7 +206,8 @@ impl AcpWebSocketHub {
             pipeline,
             harn_serve::AuthPolicy::allow_all(),
             self.host_inference_boundary,
-        );
+        )
+        .map_err(OrchestratorError::Serve)?;
         let worker_id = uuid::Uuid::new_v4().to_string();
         let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
         let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
