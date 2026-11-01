@@ -398,6 +398,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"parse_dropped",
 	"generic_throw",
 	"managed_spend_paused",
+	"managed_allowance_unavailable",
 }
 
 // AgentTerminalKind is the named string type for the AgentTerminalKinds wire vocabulary.
@@ -491,6 +492,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"unknown",
 	"policy_denied",
 	"managed_spend_paused",
+	"managed_allowance_unavailable",
 }
 
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.

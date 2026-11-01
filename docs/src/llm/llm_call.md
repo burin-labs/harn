@@ -1159,6 +1159,22 @@ Import `std/llm/budget` for reusable helpers such as
 (`cl100k_base`, `o200k_base`, etc.) and whether the count is exact or an
 approximation.
 
+## Managed service allowances
+
+A registry-declared managed transport can refuse its caller's included allowance
+with `reason: "managed_allowance_unavailable"`. This is terminal, including when
+the service responds with HTTP 429 or labels the response transient. The runtime
+does not retry it. A caller's included allowance is distinct from a provider
+account billing failure (`billing_limit`) and a service-wide spending pause
+(`managed_spend_paused`). Ordinary provider transports cannot claim the managed
+allowance reason.
+
+For this refusal, the service's bounded, redacted explanation stays in `message`;
+the HTTP or streaming diagnostic stays in `detail`. Terminal checkpoints and ACP
+prompt-error facts preserve both fields. Hosts can display the service's contact
+or recovery instructions for the typed allowance class without parsing error
+text or telling the caller to fund a provider account.
+
 ## Testing with mock LLM responses
 
 The `mock` provider returns deterministic responses without API keys.
