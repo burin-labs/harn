@@ -16,6 +16,7 @@ mod task_event_identity;
 mod task_input;
 mod task_preparation;
 mod task_retry;
+mod task_terminal;
 
 struct Request;
 

@@ -86,6 +86,13 @@ harn serve api --api-key "$HARN_KEY" agent.harn
 harn serve api --default-session-mode code agent.harn
 ```
 
+Task status follows the runtime's typed terminal outcome. Provider and runtime
+failures produce `FAILED` with the runtime diagnostic in `failure`; policy stops
+and cancellation produce `CANCELED`. An unsupported suspended outcome fails
+with its runtime diagnostic rather than reporting completed work.
+A successful prompt RPC alone does not establish successful agent work. Plain
+pipelines without an agent terminal still complete on a normal `end_turn`.
+
 Behavior today:
 
 - serves `GET /openapi.json`, `GET /health`, `GET /version`, and `/v1/*`
