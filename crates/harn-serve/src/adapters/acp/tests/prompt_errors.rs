@@ -59,6 +59,7 @@ fn assert_prompt_error_data_with_category(
     code: i64,
     terminal_class: &str,
     category: &str,
+    message: &str,
 ) {
     assert_eq!(response["error"]["code"], code);
     assert_eq!(
@@ -67,6 +68,7 @@ fn assert_prompt_error_data_with_category(
             "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
             "terminalClass": terminal_class,
             "category": category,
+            "message": message,
         })
     );
 }
@@ -186,7 +188,7 @@ async fn execution_error_preserves_structured_class_over_misleading_prose() {
             }
 
             let response = prompt_response.expect("session/prompt response");
-            assert_prompt_error_data_with_category(&response, -32000, "tool_policy_rejected", "tool_rejected");
+            assert_prompt_error_data_with_category(&response, -32000, "tool_policy_rejected", "tool_rejected", "provider rate limit 429 in /tmp/run-429/result");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         }).await;
@@ -226,7 +228,7 @@ async fn execution_error_projects_resource_contention_as_typed_data() {
             }
 
             let response = prompt_response.expect("session/prompt response");
-            assert_prompt_error_data_with_category(&response, -32000, "resource_busy", "resource_busy");
+            assert_prompt_error_data_with_category(&response, -32000, "resource_busy", "resource_busy", "session_store: database is locked");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         }).await;

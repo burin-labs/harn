@@ -122,8 +122,10 @@ use usage_accounting::{resolve_call_accounting, SessionUsageTotals};
 pub(crate) use tool_result_messages::record_tool_results_for_test;
 use tool_result_messages::{
     assistant_tool_use_blocks, paired_tool_result_ids, screenshots_from_tool_result,
-    synthesize_orphan_tool_results, tool_result_message, ToolResultMessageInput,
+    ToolResultMessageInput,
 };
+#[cfg(test)]
+use tool_result_messages::{synthesize_orphan_tool_results, tool_result_message};
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -1128,9 +1130,9 @@ fn host_agent_session_record_tool_results_builtin(
         // Carry computer-use screenshots back as provider image content blocks.
         let screenshots = screenshots_from_tool_result(result);
         let transcript_data = tool_result_messages::transcript_tool_result_data(result);
-        let message_index = crate::agent_sessions::inject_message(
+        tool_result_messages::append_tool_result(
             &session_id,
-            tool_result_message(ToolResultMessageInput {
+            ToolResultMessageInput {
                 channel: tool_channel,
                 name: &name,
                 tool_call_id: &tool_call_id,
@@ -1139,17 +1141,9 @@ fn host_agent_session_record_tool_results_builtin(
                 screenshots: &screenshots,
                 data: transcript_data.as_ref(),
                 origin: ToolResultOrigin::Dispatch,
-            }),
-        )
-        .map_err(VmError::Runtime)?;
-        crate::llm::pairing_receipts::emit_tool_result_receipt(
-            &session_id,
-            message_index,
-            &tool_call_id,
-            &name,
-            ok,
+            },
             &tool_format,
-        );
+        )?;
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
         session.successful_tools.extend(successful);

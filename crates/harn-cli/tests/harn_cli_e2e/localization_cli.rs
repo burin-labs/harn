@@ -20,6 +20,7 @@ fn localized_scaffolds_preserve_source_and_literal_project_names() {
         ("it", include_str!("../../src/localization/it.json")),
         ("ja", include_str!("../../src/localization/ja.json")),
         ("ko", include_str!("../../src/localization/ko.json")),
+        ("ru", include_str!("../../src/localization/ru.json")),
         (
             "zh-Hans",
             include_str!("../../src/localization/zh-Hans.json"),
@@ -67,7 +68,7 @@ fn localized_scaffolds_preserve_source_and_literal_project_names() {
     }
 }
 
-const LOCALES: [(&str, &str); 9] = [
+const LOCALES: [(&str, &str); 10] = [
     ("en_US.UTF-8", "Usage"),
     ("es_ES.UTF-8", "Uso"),
     ("fr_CA.UTF-8", "Utilisation"),
@@ -77,6 +78,7 @@ const LOCALES: [(&str, &str); 9] = [
     ("ja_JP.UTF-8", "使い方"),
     ("ko_KR.UTF-8", "사용법"),
     ("zh_CN.UTF-8", "用法"),
+    ("ru_RU.UTF-8", "Использование"),
 ];
 
 #[test]
@@ -137,8 +139,7 @@ fn run(locale: &str, arguments: &[&str]) -> Output {
         .expect("run localized CLI")
 }
 
-#[test]
-fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
+fn check_localized_doctor(locale: &str) {
     let report = run("en", &["doctor", "--no-network", "--json"]);
     let parsed: serde_json::Value =
         serde_json::from_slice(&report.stdout).expect("actual doctor JSON report");
@@ -148,7 +149,7 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
         .is_empty());
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../harn-stdlib/src/stdlib/cli/doctor.harn");
-    for (locale, _) in LOCALES {
+    {
         let output = run(locale, &["doctor", "--no-network"]);
         assert!(!output.stdout.is_empty(), "{locale}: {output:?}");
         let normalized =
@@ -162,6 +163,7 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
             "ja" => include_str!("../../src/localization/ja.json"),
             "ko" => include_str!("../../src/localization/ko.json"),
             "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+            "ru" => include_str!("../../src/localization/ru.json"),
             _ => include_str!("../../src/localization/en.json"),
         })
         .unwrap();
@@ -171,6 +173,13 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
             "--- Providers ---\n",
             "--- Summary ---\n",
         ] {
+            if normalized.id() != "en" {
+                assert_ne!(
+                    catalog[key].as_str().unwrap(),
+                    key,
+                    "{locale}: untranslated doctor section"
+                );
+            }
             assert!(
                 text.contains(catalog[key].as_str().unwrap()),
                 "{locale}: {text}"
@@ -230,6 +239,25 @@ fn doctor_scripts_localize_human_sections_and_preserve_nonempty_json() {
             "{locale}: nonempty JSON projection changed; {output:?}"
         );
     }
+}
+
+macro_rules! doctor_locale_tests {
+    ($($name:ident => $index:expr),+ $(,)?) => {
+        $(#[test]
+        fn $name() {
+            check_localized_doctor(LOCALES[$index].0);
+        })+
+    };
+}
+
+doctor_locale_tests! {
+    doctor_en => 0, doctor_es => 1, doctor_fr => 2, doctor_de => 3,
+    doctor_pt_br => 4, doctor_it => 5, doctor_ja => 6, doctor_ko => 7,
+    doctor_zh_hans => 8, doctor_ru => 9,
+}
+
+#[test]
+fn doctor_json_requires_exact_flag_and_interpolation_preserves_literals() {
     let temporary = tempfile::tempdir().unwrap();
     let non_json = harn_e2e_command()
         .env("LC_ALL", "fr")
@@ -366,6 +394,7 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
         ("ja", "ja"),
         ("ko", "ko"),
         ("zh_CN", "zh-Hans"),
+        ("ru_RU", "ru"),
     ] {
         let output = run(locale, &["usage", "--project", project]);
         assert!(output.status.success(), "{locale}: {output:?}");
@@ -383,6 +412,7 @@ fn command_results_use_selected_language_while_json_and_csv_stay_canonical() {
                     "ja" => include_str!("../../src/localization/ja.json"),
                     "ko" => include_str!("../../src/localization/ko.json"),
                     "zh-Hans" => include_str!("../../src/localization/zh-Hans.json"),
+                    "ru" => include_str!("../../src/localization/ru.json"),
                     _ => unreachable!(),
                 })
                 .unwrap();

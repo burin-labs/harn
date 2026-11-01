@@ -285,6 +285,7 @@ pub(crate) fn emit_tool_result_receipt(
     tool_name: &str,
     ok: bool,
     tool_format: &str,
+    origin: ToolResultOrigin,
 ) {
     let mut fields = serde_json::Map::new();
     fields.insert(
@@ -300,6 +301,9 @@ pub(crate) fn emit_tool_result_receipt(
     fields.insert("tool_name".to_string(), serde_json::json!(tool_name));
     fields.insert("ok".to_string(), serde_json::json!(ok));
     fields.insert("tool_format".to_string(), serde_json::json!(tool_format));
+    if !origin.is_dispatch() {
+        fields.insert("origin".to_string(), serde_json::json!(origin));
+    }
     crate::llm::append_observability_sidecar_entry("tool_result", fields);
 }
 

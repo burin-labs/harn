@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router"
 import { nav, meta } from "virtual:harn-docs"
 import type { PageData } from "../../vite-plugins/content"
 import { pageMetaForDoc } from "../lib/metadata"
+import { usePageMetadata } from "../hooks/usePageMetadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
 import { useMermaid } from "../hooks/useMermaid"
 import { useComparisonMatrix } from "../hooks/useComparisonMatrix"
@@ -26,9 +27,7 @@ export function DocPage({ slug }: { slug: string }) {
   useComparisonMatrix(contentRef, page?.slug ?? null)
   useHeadingAnchors(contentRef, page?.slug ?? null)
 
-  useEffect(() => {
-    document.title = pageMetaForDoc(docMeta).title
-  }, [docMeta])
+  usePageMetadata((locale) => pageMetaForDoc(docMeta, locale))
 
   useEffect(() => {
     let cancelled = false

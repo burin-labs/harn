@@ -105,11 +105,7 @@ pub(super) async fn create_session(State(state): State<ApiState>, body: Bytes) -
             "session/new",
             json!({
                 "cwd": workspace_root,
-                // Stated rather than left to the server's default. This is the
-                // hosted surface: its sessions never had the launcher's
-                // environment, so naming `isolated` records the behaviour that
-                // was already true instead of choosing a new one.
-                "environmentPolicy": session_control::environment_policy(),
+                "environmentPolicy": session_control::environment_policy(&state),
             }),
         )
         .await

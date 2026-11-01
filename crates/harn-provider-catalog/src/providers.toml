@@ -16145,22 +16145,22 @@ path = "/models"
 [providers.hyperbolic]
 auth_env = "HYPERBOLIC_API_KEY"
 auth_style = "bearer"
-base_url = "https://api.hyperbolic.xyz/v1"
+base_url = "https://api.hyperbolic.ai/inference/v1"
 base_url_env = "HYPERBOLIC_BASE_URL"
 chat_endpoint = "/chat/completions"
-completion_endpoint = "/completions"
 features = ["native_tools"]
+stream_usage_accounting = true
 
 [providers.hyperbolic.healthcheck]
 method = "GET"
 path = "/models"
 
 [providers.hyperbolic.rate_limits]
-last_verified = "2026-06-23"
-notes = "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier."
-rpm = 60
-source_url = "https://www.hyperbolic.ai/docs/inference/text-apis"
-tier = "basic"
+last_verified = "2026-11-01"
+notes = "Documented per API key; inference requires a Pro account or Organization and a positive credit balance."
+rpm = 300
+source_url = "https://www.hyperbolic.ai/docs/inference/overview"
+tier = "Pro or Organization"
 
 [providers.inception]
 auth_env = "INCEPTION_API_KEY"
@@ -16981,7 +16981,7 @@ zai = "glm-4.6"
 default = "mid"
 
 [usage_accounting_audit]
-expires_on = "2026-10-31"
+expires_on = "2026-11-14"
 reviewed_on = "2026-08-26"
 tracking_issue = 7320
 unverified = [
@@ -16990,7 +16990,6 @@ unverified = [
     "cohere",
     "github_models",
     "hunyuan",
-    "hyperbolic",
     "local",
     "parasail",
     "siliconflow",
@@ -17061,6 +17060,12 @@ fields = [
 ]
 provider = "inception"
 sources = ["https://docs.inceptionlabs.ai/api-reference/chat/create-a-chat-completion"]
+
+[[usage_accounting_audit.verified]]
+checked_on = "2026-11-01"
+fields = ["stream"]
+provider = "hyperbolic"
+sources = ["https://www.hyperbolic.ai/docs/inference/text-apis"]
 
 [[usage_accounting_audit.verified]]
 checked_on = "2026-10-16"

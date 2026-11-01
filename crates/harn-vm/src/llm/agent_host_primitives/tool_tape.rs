@@ -130,9 +130,10 @@ fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -
     let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
     match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
-        ToolServe::Served(recorded, changes) => {
+        ToolServe::Served(recorded, changes, store_changes) => {
             if let Some(mut recording) = recording {
                 recording.transcript_changes = changes;
+                recording.store_changes = store_changes;
                 crate::run_tape::finish_tool_call(recording, Ok(recorded.clone()));
             }
             Taped::Served(result_from_recorded(recorded))

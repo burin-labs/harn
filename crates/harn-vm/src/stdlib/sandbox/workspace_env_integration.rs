@@ -805,3 +805,60 @@ fn os_sandbox_still_denies_writes_outside_the_workspace() {
     assert!(result.is_err(), "outside-home write unexpectedly succeeded");
     assert!(!denied.exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_confined_child_runs_the_installed_pinned_pnpm_without_the_registry() {
+    use std::os::unix::fs::PermissionsExt;
+    let workspace = tempfile::tempdir().unwrap();
+    let installed = tempfile::tempdir().unwrap();
+    let launcher = |dir: &Path, marker: &str| {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join("pnpm");
+        std::fs::write(&path, format!("#!/bin/sh\necho {marker}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let outer = installed.path().join("outer");
+    launcher(&outer, "OUTER-PNPM");
+    launcher(
+        &installed.path().join(".tools/pnpm/9.9.9/bin"),
+        "PINNED-PNPM",
+    );
+    let home = installed.path().display().to_string();
+    let _guard = enter_policy_with_environment(
+        workspace.path(),
+        isolated_environment([
+            ("PNPM_HOME".to_string(), home.clone()),
+            (
+                "PATH".to_string(),
+                format!("{}:/usr/bin:/bin", outer.display()),
+            ),
+        ]),
+    );
+    let mut policy = crate::orchestration::current_execution_policy().unwrap();
+    pop_execution_policy();
+    policy.process_sandbox.read_roots.push(home);
+    push_execution_policy(policy);
+    let pnpm_for = |pin: &str| {
+        std::fs::write(
+            workspace.path().join("package.json"),
+            format!("{{\"packageManager\": \"pnpm@{pin}+sha512.abc\"}}"),
+        )
+        .unwrap();
+        command_output(
+            "/bin/sh",
+            &["-c".to_string(), "pnpm".to_string()],
+            &ProcessCommandConfig {
+                cwd: Some(workspace.path().to_path_buf()),
+                ..Default::default()
+            },
+        )
+    };
+    let pinned = pnpm_for("9.9.9");
+    if crate::sandbox_host::assert_unavailable_result(&pinned) {
+        return;
+    }
+    assert_eq!(pinned.unwrap().stdout, b"PINNED-PNPM\n");
+    // A pin that is not installed leaves the search path alone.
+    assert_eq!(pnpm_for("9.9.8").unwrap().stdout, b"OUTER-PNPM\n");
+}

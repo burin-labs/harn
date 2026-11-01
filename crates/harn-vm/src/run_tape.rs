@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::api::{LlmRequestPayload, LlmResult};
 use crate::testbench::tape::{
-    content_hash, EventTape, FileEffect, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
+    content_hash, EventTape, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
     TranscriptChange,
 };
 
@@ -76,6 +76,8 @@ struct ProcessTape {
     level: RecordingLevel,
     workspace: Option<TapeWorkspace>,
     next_llm_call: AtomicU64,
+    store_mutations: AtomicU64,
+    reminder_mutations: AtomicU64,
     prompts: Mutex<prompts::PromptLedger>,
     dispatches: overlap::Dispatches,
 }
@@ -215,6 +217,8 @@ pub fn start_recording(
         level,
         workspace,
         next_llm_call: AtomicU64::new(0),
+        store_mutations: AtomicU64::new(0),
+        reminder_mutations: AtomicU64::new(0),
         prompts: Mutex::default(),
         dispatches: overlap::Dispatches::default(),
     }));
@@ -461,170 +465,12 @@ pub enum RecordedToolResult {
     Runtime { message: String },
 }
 
-/// An in-flight tool call on the recording side.
-pub(crate) struct ToolCallRecording {
-    tape: Arc<ProcessTape>,
-    dispatch: overlap::Dispatch,
-    call_id: String,
-    tool: String,
-    args_digest: String,
-    after_calls: u64,
-    watch: EffectWatch,
-    pub(crate) transcript_changes: Vec<TranscriptChange>,
-    unservable: Option<String>,
-}
-
-enum EffectWatch {
-    Scanned(String),
-    ReadOnly,
-    Unobserved,
-}
-
-/// Begin recording a tool call. `None` when no run tape is recording. A tool
-/// declared read-only skips the two workspace scans; its effect set is empty.
-pub(crate) fn begin_tool_call(
-    call_id: &str,
-    tool: &str,
-    args: &serde_json::Value,
-    read_only: bool,
-) -> Option<ToolCallRecording> {
-    let tape = process_tape()?;
-    let dispatch = tape.dispatches.begin();
-    let watch = match (tape.level, &tape.workspace) {
-        (RecordingLevel::Full, _) if read_only => EffectWatch::ReadOnly,
-        (RecordingLevel::Full, Some(workspace)) => {
-            static NEXT_SCAN: AtomicU64 = AtomicU64::new(0);
-            let key = if call_id.is_empty() {
-                format!("script-run#{}", NEXT_SCAN.fetch_add(1, Ordering::Relaxed))
-            } else {
-                call_id.to_string()
-            };
-            workspace.observer.begin(&workspace.root, &key);
-            EffectWatch::Scanned(key)
-        }
-        _ => EffectWatch::Unobserved,
-    };
-    Some(ToolCallRecording {
-        dispatch,
-        after_calls: tape.next_llm_call.load(Ordering::SeqCst),
-        tape,
-        call_id: call_id.to_string(),
-        tool: tool.to_string(),
-        args_digest: args_digest(args),
-        watch,
-        transcript_changes: Vec::new(),
-        unservable: None,
-    })
-}
-
-/// Run a live tool dispatch, keeping each transcript change it makes on
-/// `recording`.
-pub(crate) async fn capture_transcript_changes<F: std::future::Future>(
-    recording: &mut Option<ToolCallRecording>,
-    live: F,
-) -> F::Output {
-    let Some(recording) = recording.as_mut() else {
-        return live.await;
-    };
-    let (output, changes, unservable) = transcript::capture(live).await;
-    recording.transcript_changes = changes;
-    recording.unservable = unservable;
-    output
-}
-
-pub(crate) fn args_digest(args: &serde_json::Value) -> String {
-    content_hash(&crate::canonical_json::to_vec(args))
-}
-
-/// Finish recording a tool call. `Err` names why the dispatch result has no
-/// faithful recorded shape; a branch then refuses to serve the call.
-pub(crate) fn finish_tool_call(
-    recording: ToolCallRecording,
-    outcome: Result<RecordedToolResult, String>,
-) {
-    let ToolCallRecording {
-        tape,
-        dispatch,
-        call_id,
-        tool,
-        args_digest,
-        after_calls,
-        watch,
-        transcript_changes,
-        unservable,
-    } = recording;
-    let recorder = &tape.recorder;
-    let full = tape.level == RecordingLevel::Full;
-    let mut unservable = if full {
-        unservable.or_else(|| transcript::validate_lifetimes(&transcript_changes).err())
-    } else {
-        None
-    };
-    let mut effects = Vec::new();
-    match watch {
-        EffectWatch::Scanned(key) => {
-            let workspace = tape.workspace.as_ref().expect("a scan implies a workspace");
-            let scan = workspace.observer.end(&workspace.root, &key);
-            if scan.incomplete {
-                unservable = Some("the file-effect scan was incomplete".to_string());
-            }
-            for (path, content) in scan.changes {
-                if content.as_ref().is_some_and(|bytes| {
-                    let text = String::from_utf8_lossy(bytes);
-                    crate::redact::current_policy().redact_string(&text) != text
-                }) {
-                    record_payload_redaction();
-                    unservable = Some("a file effect contains redacted data".to_string());
-                    continue;
-                }
-                effects.push(FileEffect {
-                    path,
-                    content: content.map(|bytes| recorder.payload_cas(bytes)),
-                });
-            }
-        }
-        EffectWatch::ReadOnly => {}
-        EffectWatch::Unobserved if full => {
-            unservable = Some("no workspace effect observer was installed".to_string());
-        }
-        EffectWatch::Unobserved => {}
-    }
-    if dispatch.overlapped() {
-        unservable.get_or_insert_with(|| {
-            "overlapping tool dispatches have ambiguous effects and cannot be replayed".to_string()
-        });
-    }
-    if tape.next_llm_call.load(Ordering::SeqCst) != after_calls {
-        unservable.get_or_insert_with(|| {
-            "model calls occurred during the tool dispatch; nested inference cannot be replayed"
-                .to_string()
-        });
-    }
-    let outcome_bytes = match &outcome {
-        Ok(outcome) if full => serde_json::to_vec(outcome).unwrap_or_default(),
-        Ok(_) => Vec::new(),
-        // A metadata tape keeps no tool text, error text included.
-        Err(reason) if full => {
-            unservable.get_or_insert_with(|| reason.clone());
-            Vec::new()
-        }
-        Err(_) => {
-            unservable.get_or_insert_with(|| "unrecordable result".to_string());
-            Vec::new()
-        }
-    };
-    let outcome = recorder.payload_from_bytes(outcome_bytes);
-    recorder.record(TapeRecordKind::ToolCall {
-        call_id,
-        tool,
-        args_digest,
-        after_calls,
-        outcome,
-        effects,
-        unservable,
-        transcript_changes: if full { transcript_changes } else { Vec::new() },
-    });
-}
+#[path = "run_tape_recording.rs"]
+mod recording;
+pub(crate) use recording::{
+    args_digest, begin_tool_call, capture_transcript_changes, finish_tool_call,
+    note_store_mutation, ToolCallRecording,
+};
 
 // ---------------------------------------------------------------------------
 // Branch replay
@@ -695,6 +541,7 @@ struct RecordedTool {
     effects: Vec<(String, Option<Vec<u8>>)>,
     unservable: Option<String>,
     transcript_changes: Vec<TranscriptChange>,
+    store_changes: Vec<crate::store::StoreChange>,
 }
 
 struct PrefixTool {
@@ -718,6 +565,7 @@ struct BranchState {
     recorded_keys: BTreeSet<(String, String)>,
     /// Each runtime store's contents when the recorded run opened it.
     store_seeds: BTreeMap<String, Option<serde_json::Value>>,
+    runtime_stores: crate::store::BranchStores,
     /// Set by the first live model call; nothing is served after it.
     live: bool,
     workspace_root: PathBuf,
@@ -869,8 +717,8 @@ pub fn start_branch_with_sources(
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
     {
         return Err(format!(
-            "this tape is format {}; branch replay requires format {} with session lifecycle \
-             and state-location evidence; re-record it to branch",
+            "this tape is format {}; branch replay requires format {} with session lifecycle, \
+             reminder state, state-location, runtime store evidence and session permission checks; re-record it to branch",
             tape.header.version,
             crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));
@@ -965,6 +813,7 @@ pub fn start_branch_with_sources(
                 effects,
                 unservable,
                 transcript_changes,
+                store_changes,
             } if *after_calls <= k => {
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
@@ -976,6 +825,18 @@ pub fn start_branch_with_sources(
                     )
                 };
                 let mut resolved = Vec::new();
+                let mut unservable = unservable.clone();
+                let store_changes = match store_changes {
+                    Some(payload) => {
+                        crate::store::decode_dispatch(&tape.resolve_payload(payload)?)?
+                    }
+                    None => {
+                        unservable.get_or_insert_with(|| {
+                            "the recording did not measure runtime store changes".to_string()
+                        });
+                        Vec::new()
+                    }
+                };
                 for effect in effects {
                     let content = match &effect.content {
                         Some(payload) => Some(tape.resolve_payload(payload)?),
@@ -990,8 +851,9 @@ pub fn start_branch_with_sources(
                         args_digest: args_digest.clone(),
                         outcome,
                         effects: resolved,
-                        unservable: unservable.clone(),
+                        unservable,
                         transcript_changes: transcript_changes.clone(),
+                        store_changes,
                     },
                     used: false,
                 });
@@ -1037,6 +899,7 @@ pub fn start_branch_with_sources(
         cache_lookups,
         recorded_keys,
         store_seeds,
+        runtime_stores: crate::store::BranchStores::default(),
         live: false,
         workspace_root,
         report: BranchReport {
@@ -1339,7 +1202,11 @@ pub(crate) enum ToolServe {
     Live,
     /// Served from the recording, its effects and transcript changes applied.
     /// Carries the changes, for the branch's own tape.
-    Served(RecordedToolResult, Vec<TranscriptChange>),
+    Served(
+        RecordedToolResult,
+        Vec<TranscriptChange>,
+        Vec<crate::store::StoreChange>,
+    ),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
 }
@@ -1406,6 +1273,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     };
     let effects = recorded.effects.clone();
     let changes = recorded.transcript_changes.clone();
+    let store_changes = recorded.store_changes.clone();
     if let Err(error) = transcript::preflight(&changes) {
         return diverge(state, "transcript change", error);
     }
@@ -1418,6 +1286,10 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     }
     // Injecting reaches the session table, which may read the branch.
     drop(guard);
+    if let Err(error) = crate::store::replay_dispatch(&store_changes) {
+        let branch = branch.expect("a served call has a branch");
+        return diverge(&mut branch.state(), "runtime store change", error);
+    }
     match transcript::replay(changes) {
         Ok(changes) => {
             branch
@@ -1425,7 +1297,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
                 .state()
                 .report
                 .served_tool_calls += 1;
-            ToolServe::Served(outcome, changes)
+            ToolServe::Served(outcome, changes, store_changes)
         }
         Err(error) => {
             let branch = branch.expect("a served call has a branch");
@@ -1453,9 +1325,11 @@ mod prompts;
 
 #[path = "run_tape_transcript.rs"]
 mod transcript;
+pub(crate) use transcript::refuse_dispatch_replay;
+
 pub(crate) use transcript::{
-    apply as apply_transcript_change, note_session_closed, note_session_opened,
-    note_session_store_reset, note_transcript_change,
+    apply as apply_transcript_change, note_reminder_retirement, note_session_closed,
+    note_session_opened, note_session_store_reset, note_transcript_change, ReminderRetirement,
 };
 
 #[path = "run_tape_scope.rs"]
@@ -1483,9 +1357,12 @@ pub use prompt_plan::{plan_prompt_branch, PromptBranchPoint};
 #[path = "run_tape_overlap.rs"]
 mod overlap;
 pub(crate) use prefix::{
-    prefix_active, record_read, records_reads, refuse_in_prefix, serve_read, store_seed,
-    taped_random, taping, Owner,
+    prefix_active, record_read, recording_store_identity, records_reads, refuse_in_prefix,
+    serve_read, store_seed, taped_random, taping, Owner,
 };
+
+#[cfg(test)]
+pub(crate) static TEST_PROCESS_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 #[path = "run_tape_tests.rs"]

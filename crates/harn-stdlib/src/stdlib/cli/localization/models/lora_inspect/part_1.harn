@@ -29,6 +29,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  flag de rank de LoRA do catálogo: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  флаг ранга catalog LoRA: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  目录 LoRA rank 标志：" + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  manifesto do contrato: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  манифест контракта: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  合约清单：" + (values[0] ?? "")
@@ -143,6 +149,15 @@ pub fn message_7(locale: string, values: list<string>) -> string {
       + " modules_to_save="
       + (values[4] ?? "")
   }
+  if locale == "ru" {
+    return "  маршрут контракта: base=" + (values[0] ?? "") + " provider=" + (values[1] ?? "")
+      + " tool_format="
+      + (values[2] ?? "")
+      + " adapter="
+      + (values[3] ?? "")
+      + " modules_to_save="
+      + (values[4] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  合同路由：base=" + (values[0] ?? "") + " provider=" + (values[1] ?? "")
       + " tool_format="
@@ -191,6 +206,9 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  status do contrato: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  статус контракта: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  合同状态：" + (values[0] ?? "")
   }
@@ -226,6 +244,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  contrato: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  контракт: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  合同：" + (values[0] ?? "")

@@ -78,6 +78,13 @@ impl SessionState {
         Ok(())
     }
 
+    pub(super) fn reminder_state_snapshot(&self) -> crate::testbench::tape::ReminderStateSnapshot {
+        crate::testbench::tape::ReminderStateSnapshot {
+            revoked_ids: self.revoked_reminder_ids.iter().cloned().collect(),
+            expired_ids: self.expired_reminder_ids.iter().cloned().collect(),
+        }
+    }
+
     /// Reject mutations once this run has queued its terminal boundary.
     /// The journal remains installed through recap projection so same-session
     /// admission stays closed, but it is sealed against work that could be

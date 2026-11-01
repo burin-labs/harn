@@ -11,9 +11,15 @@ mod overlap;
 #[path = "run_tape_session_reset_tests.rs"]
 mod session_reset;
 
+#[path = "run_tape_reminder_tests.rs"]
+mod reminders;
+
+#[path = "run_tape_store_tests.rs"]
+mod store_changes;
+
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
-static PROCESS_LOCK: Mutex<()> = Mutex::new(());
+use super::TEST_PROCESS_LOCK as PROCESS_LOCK;
 
 fn request(text: &str) -> LlmRequestPayload {
     LlmRequestPayload {
@@ -184,7 +190,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     // The tool named by the served response returns its recorded result and
     // writes its recorded effect into the branch workspace without running.
     match serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"})) {
-        ToolServe::Served(outcome, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
+        ToolServe::Served(outcome, _, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
         _ => panic!("expected a served tool call"),
     }
     assert_eq!(
@@ -258,6 +264,13 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     record_llm_call(&request(&text), &result(&text, None));
     let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
         .expect("active tape recording");
+    recording.store_changes = crate::store::decode_dispatch(
+        &serde_json::to_vec(&serde_json::json!([{
+            "store": "store.json", "operation": {"kind": "set", "entry": {"sensitive": text}}
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
     recording.transcript_changes.push(TranscriptChange::Fields {
         session_id: "session-1".to_string(),
         fields: BTreeMap::from([(
@@ -265,6 +278,16 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
             crate::testbench::tape::FieldChange::Set(serde_json::json!(text)),
         )]),
     });
+    recording
+        .transcript_changes
+        .push(TranscriptChange::Reminders {
+            session_id: "session-1".to_string(),
+            before_reminders: crate::testbench::tape::ReminderStateSnapshot::default(),
+            after_reminders: crate::testbench::tape::ReminderStateSnapshot {
+                revoked_ids: std::iter::once(text.clone()).collect(),
+                expired_ids: Default::default(),
+            },
+        });
     finish_tool_call(recording, Ok(ok(serde_json::json!({"output": text}))));
     cache_lookup(secret, secret, || {
         Ok(Some(serde_json::json!({"result": text})))
@@ -303,6 +326,28 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         .records
         .iter()
         .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction)));
+    assert!(
+        tape.records.iter().any(|record| match &record.kind {
+            TapeRecordKind::ToolCall {
+                transcript_changes, ..
+            } => {
+                transcript_changes.iter().any(|change| match change {
+                    TranscriptChange::Reminders {
+                        after_reminders, ..
+                    } => {
+                        after_reminders.revoked_ids.len() == 1
+                            && after_reminders
+                                .revoked_ids
+                                .iter()
+                                .all(|id| !id.contains(secret))
+                    }
+                    _ => false,
+                })
+            }
+            _ => false,
+        }),
+        "the sanitized reminder state must remain recorded"
+    );
     let result = start_branch(BranchPlan {
         tape,
         live_after_calls: 1,
@@ -820,6 +865,66 @@ fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
         .join()
         .unwrap();
     assert_eq!(raw, path);
+}
+
+#[test]
+fn a_local_task_writes_branch_state_without_a_child_vm() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = tempfile::tempdir().unwrap();
+    let recording_state = crate::runtime_paths::state_root(recorded.path());
+    let original = recording_state.join(crate::runtime_paths::STORE_FILE);
+    std::fs::create_dir_all(&recording_state).unwrap();
+    std::fs::write(&original, r#"{"original":true}"#).unwrap();
+    {
+        let _guard = record_full(recorded.path());
+        crate::store::StoreState::at_state_root(&recording_state)
+            .set("original".to_string(), serde_json::json!(true))
+            .unwrap();
+        record_llm_call(&request("work"), &result("done", None));
+    }
+    let original_bytes = std::fs::read(&original).unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&recorded.path().join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: recorded.path().to_path_buf(),
+        state_root: state.path().join("branch"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    let branch_scope = guard.scope();
+    harn_clock::test_support::current_thread_runtime().block_on(
+        harn_clock::test_support::with_local_tasks(async {
+            let inherited = {
+                let _inside = branch_scope.enter();
+                crate::orchestration::AmbientExecutionScope::capture_inherited()
+            };
+            assert!(crate::run_tape::state_branch().is_none());
+            crate::task_spawn::spawn_local_in(inherited, async move {
+                tokio::task::yield_now().await;
+                crate::store::StoreState::at_state_root(&recording_state)
+                    .set("child".to_string(), serde_json::json!("written"))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(crate::run_tape::state_branch().is_none());
+        }),
+    );
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    let branch_store: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            state
+                .path()
+                .join("branch")
+                .join(crate::runtime_paths::STORE_FILE),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(branch_store["original"], true);
+    assert_eq!(branch_store["child"], "written");
 }
 
 /// Work that outlives the host's guard, such as lifecycle cleanup finishing

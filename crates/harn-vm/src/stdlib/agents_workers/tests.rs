@@ -96,6 +96,157 @@ fn temp_snapshot_path() -> (std::path::PathBuf, String) {
 }
 
 #[test]
+fn worker_snapshot_round_trips_in_the_session_environment_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("session-workers");
+    let root_string = root.to_string_lossy().into_owned();
+    let environment =
+        crate::security::LauncherEnvironment::from_snapshot(std::collections::BTreeMap::from([(
+            "HARN_WORKER_STATE_DIR".to_string(),
+            root_string.clone(),
+        )]))
+        .launch(
+            crate::security::EnvironmentPolicyKind::Inherited,
+            Vec::new(),
+        )
+        .unwrap();
+    let _environment =
+        crate::security::session_environment::declare_session_environment_if_absent(environment);
+    assert_eq!(
+        crate::stdlib::process::read_env_value("HARN_WORKER_STATE_DIR"),
+        Some(root_string)
+    );
+
+    let snapshot_path = super::bridge::worker_snapshot_path("worker_test");
+    assert_eq!(
+        std::path::Path::new(&snapshot_path),
+        root.join("worker_test.json")
+    );
+    let state = minimal_worker_state(
+        WorkerConfig::Workflow {
+            graph: Box::new(crate::orchestration::WorkflowGraph::default()),
+            artifacts: Vec::new(),
+            options: crate::value::DictMap::new(),
+        },
+        snapshot_path.clone(),
+    );
+    super::config::persist_worker_state_snapshot(&state).unwrap();
+    let loaded = super::config::load_worker_state_snapshot(&snapshot_path).unwrap();
+    assert_eq!(loaded.id, state.id);
+    assert_eq!(loaded.snapshot_path, snapshot_path);
+}
+
+#[test]
+fn worker_snapshot_uses_the_branch_mapped_execution_environment_root() {
+    use crate::run_tape::{
+        BranchPlan, EffectScan, RecordingLevel, TapeWorkspace, ToolEffectObserver,
+    };
+
+    struct NoToolCalls;
+    impl ToolEffectObserver for NoToolCalls {
+        fn begin(&self, _: &std::path::Path, _: &str) {
+            panic!("this recording contains no tool calls");
+        }
+        fn end(&self, _: &std::path::Path, _: &str) -> EffectScan {
+            panic!("this recording contains no tool calls");
+        }
+    }
+
+    let _lock = crate::run_tape::TEST_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    futures::executor::block_on(crate::orchestration::scope_inline_subtask(async {
+        let dir = tempfile::tempdir().unwrap();
+        let recorded = dir.path().join("recorded");
+        std::fs::create_dir(&recorded).unwrap();
+        let recording = crate::run_tape::start_recording(
+            &recorded,
+            RecordingLevel::Full,
+            Some(TapeWorkspace {
+                root: recorded.clone(),
+                observer: Box::new(NoToolCalls),
+                state_roots: Vec::new(),
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        crate::run_tape::record_llm_call(
+            &crate::llm::api::LlmRequestPayload {
+                provider: "anthropic".to_string(),
+                model: "model-a".to_string(),
+                messages: vec![serde_json::json!({"role": "user", "content": "read"})],
+                ..Default::default()
+            },
+            &crate::llm::api::LlmResult::default(),
+        );
+        assert_eq!(recording.error(), None);
+        drop(recording);
+
+        let branch_root = dir.path().join("branch-state");
+        let workspace = dir.path().join("branch-workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let branch = crate::run_tape::start_branch(BranchPlan {
+            tape: crate::testbench::tape::EventTape::load(
+                &recorded.join(crate::run_tape::TAPE_FILE_NAME),
+            )
+            .unwrap(),
+            live_after_calls: 1,
+            workspace_root: workspace,
+            state_root: branch_root.clone(),
+            host_state_roots: Vec::new(),
+            prompt_edits: Vec::new(),
+        })
+        .unwrap();
+        let _scope = branch.scope().enter();
+        let host_root = dir.path().join("host-state");
+        let host_workers = host_root.join("mapped-workers");
+        crate::orchestration::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                env: std::collections::BTreeMap::from([
+                    (
+                        "HARN_SESSION_STORE_ROOT".to_string(),
+                        host_root.to_string_lossy().into_owned(),
+                    ),
+                    (
+                        "HARN_WORKER_STATE_DIR".to_string(),
+                        host_workers.to_string_lossy().into_owned(),
+                    ),
+                ]),
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            crate::stdlib::process::read_env_value("HARN_WORKER_STATE_DIR"),
+            Some(host_workers.to_string_lossy().into_owned())
+        );
+        let snapshot_path = super::bridge::worker_snapshot_path("worker_test");
+        assert_eq!(
+            std::path::Path::new(&snapshot_path),
+            branch_root
+                .canonicalize()
+                .unwrap()
+                .join("mapped-workers/worker_test.json")
+        );
+        let state = minimal_worker_state(
+            WorkerConfig::Workflow {
+                graph: Box::new(crate::orchestration::WorkflowGraph::default()),
+                artifacts: Vec::new(),
+                options: crate::value::DictMap::new(),
+            },
+            snapshot_path.clone(),
+        );
+        super::config::persist_worker_state_snapshot(&state).unwrap();
+        let loaded = super::config::load_worker_state_snapshot(&snapshot_path).unwrap();
+        assert_eq!(loaded.id, state.id);
+        assert_eq!(loaded.snapshot_path, snapshot_path);
+        assert!(
+            !host_root.exists(),
+            "branch must leave the host state untouched"
+        );
+    }));
+}
+
+#[test]
 fn persist_worker_snapshot_rejects_closure_in_workflow_options() {
     // A closure in user-provided workflow options used to persist as a
     // display-string and rehydrate as a plain string — a latent type error
