@@ -141,7 +141,7 @@ fn submit_one(proposal: dict) -> list {
   return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
 }
 
-/** A learned verifier must run every declared test check word for word, never a broader suite. */
+/** A learned verifier must run a declared test check word for word, never only a broader suite. */
 pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: Harness) {
   with_temp_dir(
     harness.fs,
@@ -158,7 +158,7 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
         root,
         submit_one(
           verify_tool(
-            "python3 tools/codegen.py && python3 -m pytest tests && (cd web && npm test)",
+            "python3 tools/codegen.py && python3 -m pytest tests",
           ),
         ),
         declared,
@@ -169,7 +169,7 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
         root,
         submit_one(
           verify_tool(
-            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && npm test",
+            "python3 tools/codegen.py && npm test",
           ),
         ),
         declared,
@@ -184,7 +184,7 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
         root,
         submit_one(
           verify_tool(
-            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && (cd web && npm test)",
+            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q",
           ),
         ),
         declared,
@@ -192,7 +192,7 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
       assert_eq(
         scoped.proposal_count,
         1,
-        "codegen composed on top of every declared check is staged",
+        "codegen composed on top of a declared check is staged",
       )
       return nil
     },

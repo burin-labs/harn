@@ -144,7 +144,7 @@ These examples define breadth, not templates:
 
 Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged.
 
-The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep every declared check as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. A submission whose `verify_command` omits a declared check is rejected.
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -695,7 +695,7 @@ fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
 }
 
 /**
- * The repository's declared checks, normalized to `{intent, command, cwd}`.
+ * The repository's declared checks, normalized to `{intent, command, cwd, origin}`.
  * A host passes the checks its project-check resolver chose; learned checks
  * stay out so the curator never reads its own output back as a declaration.
  */
@@ -704,7 +704,15 @@ fn cc_declared_checks(options: any = nil) -> list {
   for item in options?.declared_checks ?? [] {
     const command = cc_text(item?.command)
     if command != "" {
-      out = out + [{intent: cc_text(item?.intent), command: command, cwd: cc_text(item?.cwd)}]
+      out = out
+        + [
+        {
+          intent: cc_text(item?.intent),
+          command: command,
+          cwd: cc_text(item?.cwd),
+          origin: cc_text(item?.origin),
+        },
+      ]
     }
   }
   return out
@@ -739,7 +747,8 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
 }
 
 /**
- * The declared test checks a learned verifier must run; the declared verify check when none is a test.
+ * The declared checks a learned verifier must run at least one of: the test
+ * checks, or the verify checks when none is a test.
  */
 fn cc_required_declared_checks(declared: list) -> list {
   const tests = declared.filter({ check -> check.intent == "test" }).to_list()
@@ -759,13 +768,10 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
       continue
     }
     const verify = cc_text(proposal?.artifact?.verify_command)
-    const omitted = verify == "" ? [] : required.filter(
-      { check -> !cc_runs_declared_check(verify, check) },
-    )
-      .to_list()
-    if len(omitted) > 0 {
-      throw "submit_crystallization_batch: `verify_command` must run every declared check word for word from its cwd, not a broader command. Missing: "
-        + json_stringify(omitted)
+    if verify != "" && len(required) > 0
+      && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
+      throw "submit_crystallization_batch: `verify_command` must run a declared test check word for word from its cwd, not a broader command. Declared: "
+        + json_stringify(required)
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
@@ -998,7 +1004,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * `require_new_evidence: true` to skip the model call entirely when every
  * evidence item was already seen by an earlier review. `declared_checks`
  * (`[{intent, command, cwd}]`, the checks the repository states) bound a
- * learned verifier's scope: one that omits a declared test check is rejected.
+ * learned verifier's scope: one that runs none of the declared test checks is rejected.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
