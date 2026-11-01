@@ -31,22 +31,40 @@ fn curate_with(harness: Harness, root: string, script: list, extra: dict) -> dic
   )
 }
 
-/** A review with no newly imported session evidence makes no model call. */
+fn priced_empty_batch() -> list {
+  return [
+    llm_tool_call("submit_crystallization_batch", {proposals: []})
+      + {input_tokens: 900, output_tokens: 40, simulated_cost_usd: 0.01},
+  ]
+}
+
+/**
+ * A review whose evidence an earlier review already saw makes no model call.
+ * The host imports sessions before the curator runs, so "new" means unreviewed,
+ * not newly imported.
+ */
 pipeline test_curator_skips_without_new_evidence(harness: Harness) {
   with_temp_dir(
     harness.fs,
     { root ->
-      const result = curate_with(
+      const first = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert(first?.usage != nil, "unreviewed evidence is reviewed by the model")
+      const again = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_eq(again.status, "no_new_evidence")
+      assert_eq(again?.usage, nil, "no model call was made")
+      const next = curate_with(
         harness,
         root,
-        [
-          llm_tool_call("submit_crystallization_batch", {proposals: []})
-            + {input_tokens: 900, output_tokens: 40, simulated_cost_usd: 0.01},
-        ],
-        {require_new_evidence: true},
+        priced_empty_batch(),
+        {
+          require_new_evidence: true,
+          evidence: [
+            {id: "run-one", session_id: "", prompt: "Verify the widget package", tool_sequence: ["run"]},
+            {id: "run-two", session_id: "", prompt: "Verify the widget again", tool_sequence: ["run"]},
+          ],
+        },
       )
-      assert_eq(result.status, "no_new_evidence")
-      assert_eq(result?.usage, nil, "no model call was made")
+      assert(next?.usage != nil, "one unreviewed session is enough for a review")
       return nil
     },
   )

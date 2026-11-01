@@ -12,6 +12,7 @@ import {
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
+import { pl_state_root } from "std/agent/pattern_knowledge_persistence"
 import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
@@ -87,6 +88,37 @@ fn cc_session_ids(evidence: list) -> list {
     }
   }
   return out
+}
+
+const REVIEWED_EVIDENCE_CAP: int = 200
+
+fn cc_review_file(fs: HarnessFs, options: any = nil) -> string {
+  return path_join(pl_state_root(fs, options), "crystallization", "curator-review.json")
+}
+
+/** Evidence ids an earlier review already saw. */
+fn cc_reviewed_ids(fs: HarnessFs, options: any = nil) -> list {
+  const text = try {
+    fs.read_text(cc_review_file(fs, options))
+  } catch {
+    ""
+  }
+  const parsed = text == "" ? nil : json_parse(text)
+  return type_of(parsed?.evidence_ids) == "list" ? parsed.evidence_ids : []
+}
+
+fn cc_record_review(fs: HarnessFs, evidence: list, options: any = nil) {
+  let ids = cc_reviewed_ids(fs, options)
+  for item in evidence {
+    const id = cc_text(item?.id)
+    if id != "" && !ids.contains(id) {
+      ids = ids + [id]
+    }
+  }
+  const start = max(0, len(ids) - REVIEWED_EVIDENCE_CAP)
+  const path = cc_review_file(fs, options)
+  fs.mkdir(dirname(path))
+  fs.write_text(path, json_stringify({evidence_ids: ids[start:len(ids)]}))
 }
 
 fn cc_prompt(evidence: list, pending: list, installed: list = [], declared: list = []) -> dict {
@@ -963,8 +995,8 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * absent when the session reported none, so a host reads unmeasured, never zero.
  * A host passes `installed` (`[{name, verify_command}]`) so the curator neither
  * proposes nor stages a capability the project already has, and
- * `require_new_evidence: true` to skip the model call entirely when no new
- * session evidence was imported since the last review. `declared_checks`
+ * `require_new_evidence: true` to skip the model call entirely when every
+ * evidence item was already seen by an earlier review. `declared_checks`
  * (`[{intent, command, cwd}]`, the checks the repository states) bound a
  * learned verifier's scope: one that omits a declared test check is rejected.
  *
@@ -984,7 +1016,8 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     }
   }
   if options?.require_new_evidence ?? false {
-    if (session_import?.imported_count ?? 0) == 0 {
+    const reviewed = cc_reviewed_ids(harness.fs, options)
+    if !evidence.any({ item -> !reviewed.contains(cc_text(item?.id)) }) {
       return {
         schema: CURATOR_SCHEMA,
         status: "no_new_evidence",
@@ -1031,6 +1064,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     agent_options = agent_options + {ladder: "frugal"}
   }
   const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
+  cc_record_review(harness.fs, evidence, options)
   const pending_after = pattern_learning_pending(harness, options)
   const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
   return {
