@@ -1,0 +1,1 @@
+`crystallization_curate` accepts `declared_checks`, the checks the repository states, and rejects a learned verifier that does not run every declared test check word for word from its directory. Command-sequence steps take an optional repository-relative `cwd`.

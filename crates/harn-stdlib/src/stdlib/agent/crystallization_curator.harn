@@ -488,10 +488,12 @@ pub fn crystallization_command_sequence_package(
       words = words + [text]
     }
     const dir = cc_text(raw?.cwd)
-    if dir != "" && (dir.starts_with("/") || dir.contains("..") || !regex_match("^[A-Za-z0-9_./-]+$", dir)) {
+    if dir != ""
+      && (dir.starts_with("/") || dir.contains("..") || !regex_match("^[A-Za-z0-9_./-]+$", dir)) {
       throw "invalid_steps: a step cwd must be a repository-relative directory, got: " + dir
     }
-    steps = steps + [dir == "" ? {label: label, argv: words} : {label: label, argv: words, cwd: dir}]
+    steps = steps
+      + [dir == "" ? {label: label, argv: words} : {label: label, argv: words, cwd: dir}]
   }
   const labels = steps.map({ step -> step.label }).to_list()
   const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
@@ -676,10 +678,14 @@ fn cc_declared_checks(options: any = nil) -> list {
   return out
 }
 
-/** Shell text as comparable `&&` segments: quotes and subshell parentheses dropped, spaces collapsed. */
+/**
+ * Shell text as comparable `&&` segments: quotes and subshell parentheses dropped, spaces collapsed.
+ */
 fn cc_command_segments(text: string) -> list {
   const flat = text.replace("'", "").replace("\"", "").replace("(", "").replace(")", "")
-  return flat.split("&&").map({ part -> join(part.split(" ").filter({ word -> word != "" }).to_list(), " ") })
+  return flat.split("&&").map(
+    { part -> join(part.split(" ").filter({ word -> word != "" }).to_list(), " ") },
+  )
     .filter({ part -> part != "" })
     .to_list()
 }
@@ -700,7 +706,9 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   return false
 }
 
-/** The declared test checks a learned verifier must run; the declared verify check when none is a test. */
+/**
+ * The declared test checks a learned verifier must run; the declared verify check when none is a test.
+ */
 fn cc_required_declared_checks(declared: list) -> list {
   const tests = declared.filter({ check -> check.intent == "test" }).to_list()
   return len(tests) > 0 ? tests : declared.filter({ check -> check.intent == "verify" }).to_list()
@@ -719,7 +727,9 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
       continue
     }
     const verify = cc_text(proposal?.artifact?.verify_command)
-    const omitted = verify == "" ? [] : required.filter({ check -> !cc_runs_declared_check(verify, check) })
+    const omitted = verify == "" ? [] : required.filter(
+      { check -> !cc_runs_declared_check(verify, check) },
+    )
       .to_list()
     if len(omitted) > 0 {
       throw "submit_crystallization_batch: `verify_command` must run every declared check word for word from its cwd, not a broader command. Missing: "
@@ -796,7 +806,11 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
               properties: {
                 label: {type: "string"},
                 argv: {type: "array", items: {type: "string"}},
-                cwd: {type: "string", description: "Repository-relative directory the step runs from; omit for the root."},
+                cwd: {
+                  type: "string",
+                  description:
+                    "Repository-relative directory the step runs from; omit for the root.",
+                },
               },
             },
           },

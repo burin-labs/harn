@@ -128,7 +128,11 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
       const wider = curate_with(
         harness,
         root,
-        submit_one(verify_tool("python3 tools/codegen.py && python3 -m pytest tests && (cd web && npm test)")),
+        submit_one(
+          verify_tool(
+            "python3 tools/codegen.py && python3 -m pytest tests && (cd web && npm test)",
+          ),
+        ),
         declared,
       )
       assert_eq(wider.proposal_count ?? 0, 0, "a verifier running the whole suite is rejected")
@@ -136,11 +140,17 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
         harness,
         root,
         submit_one(
-          verify_tool("python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && npm test"),
+          verify_tool(
+            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q && npm test",
+          ),
         ),
         declared,
       )
-      assert_eq(wrong_dir.proposal_count ?? 0, 0, "a declared check run from the wrong directory is rejected")
+      assert_eq(
+        wrong_dir.proposal_count ?? 0,
+        0,
+        "a declared check run from the wrong directory is rejected",
+      )
       const scoped = curate_with(
         harness,
         root,
@@ -151,7 +161,11 @@ pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: 
         ),
         declared,
       )
-      assert_eq(scoped.proposal_count, 1, "codegen composed on top of every declared check is staged")
+      assert_eq(
+        scoped.proposal_count,
+        1,
+        "codegen composed on top of every declared check is staged",
+      )
       return nil
     },
   )

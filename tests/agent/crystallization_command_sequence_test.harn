@@ -34,6 +34,27 @@ pipeline test_package_quotes_a_single_quote_for_the_shell() {
   assert_eq(pkg.verify_command, "echo 'it'\"'\"'s done'")
 }
 
+pipeline test_package_runs_a_step_from_its_directory() {
+  const pkg = crystallization_command_sequence_package(
+    "web check",
+    "Generate, then test the web package.",
+    [
+      {label: "codegen", argv: ["python3", "tools/codegen.py"]},
+      {label: "web", argv: ["npm", "test"], cwd: "packages/web"},
+    ],
+  )
+  assert_eq(pkg.verify_command, "python3 tools/codegen.py && (cd packages/web && npm test)")
+  assert(pkg.source.contains("\"cwd\":\"packages/web\""), "the tool's plan keeps the step directory")
+  const escaped = try {
+    crystallization_command_sequence_package(
+      "web check",
+      "Escape.",
+      [{label: "web", argv: ["npm", "test"], cwd: "../other"}],
+    )
+  }
+  assert(is_err(escaped), "a step directory must stay inside the repository")
+}
+
 pipeline test_package_rejects_machine_paths_and_unbounded_sequences() {
   const absolute = try {
     crystallization_command_sequence_package(
