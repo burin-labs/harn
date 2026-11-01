@@ -1168,12 +1168,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn concurrent_prompt_turns_keep_their_own_llm_budget_and_session_spend() {
         use std::future::Future;
-        use std::task::{Context, Poll, Wake, Waker};
-
-        struct NoopWake;
-        impl Wake for NoopWake {
-            fn wake(self: std::sync::Arc<Self>) {}
-        }
+        use std::task::{Context, Poll, Waker};
 
         async fn turn(scope: &ModePolicyScope, max: f64, seed: f64, tokens: u64) {
             scope
@@ -1197,8 +1192,7 @@ mod tests {
         let second = ModePolicyScope::new("code", &AcpSandboxConfig::default());
         let mut first_turn = Box::pin(turn(&first, 1.0, 0.25, 10));
         let mut second_turn = Box::pin(turn(&second, 2.0, 0.5, 20));
-        let waker = Waker::from(std::sync::Arc::new(NoopWake));
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(Waker::noop());
         assert!(first_turn.as_mut().poll(&mut cx).is_pending());
         assert!(second_turn.as_mut().poll(&mut cx).is_pending());
         assert_eq!(first_turn.as_mut().poll(&mut cx), Poll::Ready(()));

@@ -66,7 +66,7 @@ resolver = "2"
 [workspace.package]
 version = "0.10.185"
 edition = "2021"
-rust-version = "1.95"
+rust-version = "1.99"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn"
 homepage = "https://harnlang.com/"
@@ -190,6 +190,8 @@ single_option_map = "allow"          # `.map().is_some()` is sometimes clearer
 unnecessary_wraps = "allow"          # changing a fn signature is often invasive
 unreadable_literal = "allow"         # stylistic
 unused_async = "allow"               # API ergonomics — async is often contractual
+unused_async_trait_impl = "allow"    # the trait's async signature is the contract
+assert_is_empty = "allow"            # `assert!(x.is_empty())` is the house test idiom
 useless_let_if_seq = "allow"         # stylistic
 trait_duplication_in_bounds = "allow"# derive macros generate duplicate bounds
 case_sensitive_file_extension_comparisons = "allow"

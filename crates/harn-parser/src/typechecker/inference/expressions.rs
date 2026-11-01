@@ -897,12 +897,10 @@ impl TypeChecker {
                         } else {
                             return None;
                         }
-                    } else if let Some(member_type) =
-                        self.infer_property_type_from_type(member, property, scope, optional)
-                    {
-                        inferred.push(member_type);
                     } else {
-                        return None;
+                        inferred.push(
+                            self.infer_property_type_from_type(member, property, scope, optional)?,
+                        );
                     }
                 }
                 (!inferred.is_empty()).then(|| simplify_union(inferred))
@@ -1012,12 +1010,9 @@ impl TypeChecker {
                         } else {
                             return None;
                         }
-                    } else if let Some(member_type) =
-                        self.subscript_slot_type(member, index, scope, optional, mode)
-                    {
-                        inferred.push(member_type);
                     } else {
-                        return None;
+                        inferred
+                            .push(self.subscript_slot_type(member, index, scope, optional, mode)?);
                     }
                 }
                 (!inferred.is_empty()).then(|| simplify_union(inferred))

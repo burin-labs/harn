@@ -234,10 +234,7 @@ impl TypeChecker {
         }
         // A body that can fall through implicitly returns its trailing value.
         if !self.body_cannot_fall_through(body, &scope) {
-            match self.infer_block_type(body, &scope).into_inferred() {
-                Some(ty) => returns.push(ty),
-                None => return None,
-            }
+            returns.push(self.infer_block_type(body, &scope).into_inferred()?);
         }
         (!returns.is_empty()).then(|| simplify_union(returns))
     }

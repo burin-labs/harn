@@ -202,7 +202,7 @@ async fn call_harness_fs_method(
             return Ok(path_value(&path));
         }
         "project_root" => {
-            return Ok(vm.project_root().map(&path_value).unwrap_or(VmValue::Nil));
+            return Ok(vm.project_root().map(path_value).unwrap_or(VmValue::Nil));
         }
         "workspace_root" => {
             let path = std::env::current_dir()

@@ -84,8 +84,8 @@ pub(super) fn capture(cwd: &Path, env: &BTreeMap<String, String>) -> Option<Inpu
             paths.insert(wrapper.to_path_buf());
         } else if wrapper.components().count() > 1 {
             paths.insert(base.join(wrapper));
-        } else if let Some(path) = value("PATH") {
-            for directory in std::env::split_paths(path) {
+        } else {
+            for directory in std::env::split_paths(value("PATH")?) {
                 let directory = if directory.is_absolute() {
                     directory
                 } else {
@@ -101,8 +101,6 @@ pub(super) fn capture(cwd: &Path, env: &BTreeMap<String, String>) -> Option<Inpu
                     paths.insert(directory.join(format!("{}{extension}", wrapper.display())));
                 }
             }
-        } else {
-            return None;
         }
     }
     Some(Inputs(

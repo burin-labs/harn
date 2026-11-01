@@ -521,7 +521,7 @@ fn allow_unsigned_for_url(url: &str) -> bool {
     ) {
         return true;
     }
-    url::Url::parse(url).ok().is_some_and(|parsed| {
+    url::Url::parse(url).is_ok_and(|parsed| {
         matches!(
             parsed.host_str(),
             Some("localhost") | Some("127.0.0.1") | Some("::1")

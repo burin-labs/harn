@@ -406,8 +406,7 @@ pub fn llm_pricing_per_1k(provider: &str, model: &str) -> Option<(f64, f64)> {
 
 pub(crate) fn llm_calls_disabled() -> bool {
     std::env::var(LLM_CALLS_DISABLED_ENV)
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
 }
 
 pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value::VmError> {

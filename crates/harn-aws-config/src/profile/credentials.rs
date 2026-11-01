@@ -185,11 +185,11 @@ impl ProfileFileCredentialsProvider {
                                 }
                                 ProfileFileError::MissingProfile { .. }
                                 | ProfileFileError::TokenProviderConfig { .. } => {
-                                    Err(CredentialsError::not_loaded(format!("{}", &err)))
+                                    Err(CredentialsError::not_loaded(format!("{}", err)))
                                 }
                                 _ => Err(CredentialsError::invalid_configuration(format!(
                                     "ProfileFile provider could not be built: {}",
-                                    &err
+                                    err
                                 ))),
                             },
                         }

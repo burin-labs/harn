@@ -209,6 +209,10 @@ fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the axum Response is this helper's early-return rejection"
+)]
 async fn authorize_http_request(
     state: &HttpState,
     method: &str,
@@ -260,6 +264,10 @@ async fn authorize_http_request(
     Ok(false)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the axum Response is this helper's early-return rejection"
+)]
 async fn authorize_configured_api_key(
     state: &HttpState,
     method: &str,

@@ -860,10 +860,8 @@ pub(super) fn file_part_from_artifact(artifact: &JsonValue, kind: &str) -> Optio
     let mut file = json!({});
     if let Some(bytes) = bytes {
         file["bytes"] = JsonValue::String(bytes);
-    } else if let Some(uri) = uri {
-        file["uri"] = JsonValue::String(uri);
     } else {
-        return None;
+        file["uri"] = JsonValue::String(uri?);
     }
     file["mimeType"] = JsonValue::String(
         data.and_then(|data| data.get("mimeType").or_else(|| data.get("mime_type")))

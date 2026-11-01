@@ -163,7 +163,7 @@ impl fmt::Display for InvalidEndpointMode {
         write!(
             f,
             "`{}` is not a valid endpoint mode. Valid values are [`IPv4`, `IPv6`]",
-            &self.mode
+            self.mode
         )
     }
 }
