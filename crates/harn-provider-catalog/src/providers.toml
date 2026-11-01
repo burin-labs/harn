@@ -2088,6 +2088,23 @@ cache_read_per_mtok = 0.15
 input_per_mtok = 1.25
 output_per_mtok = 4.25
 
+[[models."accounts/fireworks/models/muse-spark-open".serving_tiers]]
+cost_multiplier = 1.5
+economics = "premium"
+id = "priority"
+label = "Priority"
+mode = "synchronous"
+status = "ga"
+
+[models."accounts/fireworks/models/muse-spark-open".serving_tiers.pricing]
+cache_read_per_mtok = 0.225
+input_per_mtok = 1.875
+output_per_mtok = 6.375
+
+[models."accounts/fireworks/models/muse-spark-open".serving_tiers.request]
+param = "service_tier"
+value = "priority"
+
 [models."accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"]
 api_dialect = "openai_chat"
 availability = "dedicated"
@@ -9624,7 +9641,7 @@ tier = "small"
 [models."ibm-granite/granite-4.2-8b".pricing]
 cache_read_per_mtok = 0.015
 input_per_mtok = 0.06
-output_per_mtok = 0.25
+output_per_mtok = 0.15
 
 [models."inception/mercury-2.5"]
 availability = "unknown"
@@ -9672,7 +9689,7 @@ capabilities = [
     "thinking",
     "prompt_caching",
 ]
-context_window = 262144
+context_window = 1000000
 family = "inclusionai-ling"
 lineage = "inclusionai-ling-3"
 name = "Ling 3.1 Flash (OpenRouter)"
@@ -11401,6 +11418,8 @@ capabilities = [
     "thinking",
 ]
 context_window = 262144
+deprecated = true
+deprecation_note = "Free route no longer listed at https://openrouter.ai/api/v1/models (verified 2026-11-01); historical pricing retained."
 name = "Nemotron 3 Super 120B A12B Free (via OpenRouter)"
 open_weight = false
 provider = "openrouter"
@@ -12661,7 +12680,7 @@ tier = "small"
 wire_model = "cloudflare/clef"
 
 [models."openrouter/cloudflare/clef".pricing]
-input_per_mtok = 0.042
+input_per_mtok = 0.24
 output_per_mtok = 0.0
 
 [models."openrouter/cloudflare/clef-flash"]
@@ -15315,9 +15334,9 @@ parameter_count_b = 320.0
 source_url = "https://openrouter.ai/api/v1/models"
 
 [models."z-ai/glm-5.3-flash".pricing]
-cache_read_per_mtok = 0.03
-input_per_mtok = 0.15
-output_per_mtok = 0.5
+cache_read_per_mtok = 0.0113
+input_per_mtok = 0.0113
+output_per_mtok = 0.1707
 
 [models."z-ai/glm-5.3-flashx"]
 capabilities = [
@@ -15566,32 +15585,24 @@ decision = "eligible"
 schema = "harn.automatic_model_eligibility.v1"
 
 [[presentation.variants.balanced.automatic_eligibility.receipts]]
-harn_version = "v0.10.0"
-kind = "meter_holdout"
-observed_at = "2026-07-08"
-passed = 80
-source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout"
-trials = 100
-
-[[presentation.variants.balanced.automatic_eligibility.receipts]]
-harn_version = "v0.10.0"
+harn_version = "v0.10.185-dev"
 kind = "tool_call_fidelity"
-observed_at = "2026-07-08"
-passed = 97
-source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|outcome_kind_counts.tool_call_format_parse_loop"
-trials = 100
+observed_at = "2026-11-01"
+passed = 5
+source = "burin-labs/harn:docs/evidence/2026-11-01-default-model.json#trials"
+trials = 5
 
 [[presentation.variants.balanced.automatic_eligibility.receipts]]
-harn_version = "v0.10.0"
+harn_version = "v0.10.185-dev"
 kind = "provider_health"
-observed_at = "2026-07-08"
-passed = 99
-source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|timeouts+harness_error_count"
-trials = 100
+observed_at = "2026-11-01"
+passed = 8
+source = "burin-labs/harn:docs/evidence/2026-11-01-default-model.json#trials.usage.provider_call_attempts"
+trials = 8
 
 [presentation.variants.balanced.selector]
 kind = "alias"
-name = "fw-gpt-oss-120b"
+name = "sol"
 
 [presentation.variants.cheap]
 description = "Lowest known hosted input-plus-output token price."

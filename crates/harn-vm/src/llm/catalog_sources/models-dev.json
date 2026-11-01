@@ -1,7 +1,7 @@
 {
   "schema": "harn.models-dev.v1",
   "source_url": "https://models.dev/experimental/v2.0/api.json",
-  "upstream_sha256": "25c6da90daed8d9c3e5610dffb2ce21a38c66ae172fa1d1621577a17d32ace42",
+  "upstream_sha256": "208b0702f446829d36d16310208442e26b592961f5b11cefac306e592b4a125b",
   "models": {
     "alibaba": {
       "qwen3-coder-plus": {
@@ -602,19 +602,6 @@
         "open_weights": false
       },
       "accounts/fireworks/models/muse-spark-open": {
-        "cost": {
-          "text": {
-            "input": {
-              "cache": {
-                "read": 0.15
-              },
-              "price": 1.25
-            },
-            "output": {
-              "price": 4.25
-            }
-          }
-        },
         "limit": {
           "context": 1048576,
           "output": 131072
@@ -1527,7 +1514,7 @@
         "cost": {
           "text": {
             "input": {
-              "price": 0.042
+              "price": 0.24
             },
             "output": {
               "price": 0
@@ -1597,7 +1584,7 @@
       "deepseek/deepseek-v3.2": {
         "limit": {
           "context": 163840,
-          "output": 65536
+          "output": 147456
         },
         "name": "DeepSeek V3.2",
         "open_weights": true
@@ -1612,21 +1599,21 @@
       "deepseek/deepseek-v4-flash-0731": {
         "limit": {
           "context": 1048576,
-          "output": 131072
+          "output": 943718
         },
         "open_weights": true
       },
       "deepseek/deepseek-v4-pro": {
         "limit": {
           "context": 1048576,
-          "output": 384000
+          "output": 393216
         },
         "open_weights": true
       },
       "deepseek/deepseek-v4-pro-0813": {
         "limit": {
           "context": 1048576,
-          "output": 393216
+          "output": 943718
         },
         "open_weights": true
       },
@@ -1756,7 +1743,7 @@
               "price": 0.06
             },
             "output": {
-              "price": 0.25
+              "price": 0.15
             }
           }
         },
@@ -1826,8 +1813,8 @@
           }
         },
         "limit": {
-          "context": 262144,
-          "output": 235929
+          "context": 1000000,
+          "output": 262144
         },
         "open_weights": true
       },
@@ -1925,7 +1912,7 @@
         },
         "limit": {
           "context": 1048576,
-          "output": 943718
+          "output": 131072
         },
         "open_weights": true,
         "release_date": "2026-10-15"
@@ -1973,7 +1960,7 @@
       "minimax/minimax-m2.5": {
         "limit": {
           "context": 204800,
-          "output": 131072
+          "output": 32768
         },
         "open_weights": true
       },
@@ -2156,22 +2143,6 @@
             },
             "output": {
               "price": 0.25
-            }
-          }
-        },
-        "limit": {
-          "context": 262144,
-          "output": 235929
-        }
-      },
-      "nvidia/nemotron-3-super-120b-a12b:free": {
-        "cost": {
-          "text": {
-            "input": {
-              "price": 0
-            },
-            "output": {
-              "price": 0
             }
           }
         },
@@ -2597,7 +2568,7 @@
         },
         "limit": {
           "context": 1048576,
-          "output": 909000
+          "output": 131072
         },
         "open_weights": true
       },
@@ -3053,18 +3024,18 @@
           "text": {
             "input": {
               "cache": {
-                "read": 0.03
+                "read": 0.0113
               },
-              "price": 0.15
+              "price": 0.0113
             },
             "output": {
-              "price": 0.5
+              "price": 0.1707
             }
           }
         },
         "limit": {
           "context": 1048576,
-          "output": 943717
+          "output": 131072
         },
         "open_weights": true
       },
@@ -3595,7 +3566,7 @@
       "deepseek/deepseek-v4.1-flash-1017": {
         "limit": {
           "context": 1048576,
-          "output": 1048576
+          "output": 262144
         },
         "open_weights": true
       },

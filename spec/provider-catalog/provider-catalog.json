@@ -11635,6 +11635,26 @@
         "tool_use",
         "reasoning",
         "long_context"
+      ],
+      "serving_tiers": [
+        {
+          "id": "priority",
+          "label": "Priority",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "service_tier",
+            "value": "priority"
+          },
+          "cost_multiplier": 1.5,
+          "status": "ga",
+          "pricing": {
+            "input_per_mtok": 1.875,
+            "output_per_mtok": 6.375,
+            "cache_read_per_mtok": 0.225,
+            "cache_write_per_mtok": null
+          }
+        }
       ]
     },
     {
@@ -26610,7 +26630,7 @@
       "prompt_cache": false,
       "pricing": {
         "input_per_mtok": 0.06,
-        "output_per_mtok": 0.25,
+        "output_per_mtok": 0.15,
         "cache_read_per_mtok": 0.015,
         "cache_write_per_mtok": null
       },
@@ -26781,7 +26801,7 @@
       "display_name": "Ling 3.1 Flash",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 262144,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text"
@@ -28607,7 +28627,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Free route no longer listed at https://openrouter.ai/api/v1/models (verified 2026-11-01); historical pricing retained."
       },
       "availability": "serverless",
       "quality_tags": [
@@ -31094,7 +31115,7 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.042,
+        "input_per_mtok": 0.24,
         "output_per_mtok": 0.0,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
@@ -35593,9 +35614,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.15,
-        "output_per_mtok": 0.5,
-        "cache_read_per_mtok": 0.03,
+        "input_per_mtok": 0.0113,
+        "output_per_mtok": 0.1707,
+        "cache_read_per_mtok": 0.0113,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -43752,36 +43773,28 @@
       "id": "balanced",
       "label": "Balanced",
       "description": "Default cost and capability trade-off for everyday work.",
-      "model_id": "accounts/fireworks/models/gpt-oss-120b",
-      "provider": "fireworks",
-      "source": "alias:fw-gpt-oss-120b",
+      "model_id": "gpt-6.1-sol",
+      "provider": "openai",
+      "source": "alias:sol",
       "automatic_eligibility": {
         "schema": "harn.automatic_model_eligibility.v1",
         "decision": "eligible",
         "receipts": [
           {
-            "kind": "meter_holdout",
-            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout",
-            "observed_at": "2026-07-08",
-            "harn_version": "v0.10.0",
-            "passed": 80,
-            "trials": 100
-          },
-          {
             "kind": "tool_call_fidelity",
-            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|outcome_kind_counts.tool_call_format_parse_loop",
-            "observed_at": "2026-07-08",
-            "harn_version": "v0.10.0",
-            "passed": 97,
-            "trials": 100
+            "source": "burin-labs/harn:docs/evidence/2026-11-01-default-model.json#trials",
+            "observed_at": "2026-11-01",
+            "harn_version": "v0.10.185-dev",
+            "passed": 5,
+            "trials": 5
           },
           {
             "kind": "provider_health",
-            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|timeouts+harness_error_count",
-            "observed_at": "2026-07-08",
-            "harn_version": "v0.10.0",
-            "passed": 99,
-            "trials": 100
+            "source": "burin-labs/harn:docs/evidence/2026-11-01-default-model.json#trials.usage.provider_call_attempts",
+            "observed_at": "2026-11-01",
+            "harn_version": "v0.10.185-dev",
+            "passed": 8,
+            "trials": 8
           }
         ]
       }
@@ -48389,24 +48402,6 @@
         "thinking",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "openrouter",
-      "model": "nvidia/nemotron-3-super-120b-a12b:free",
-      "base_url": "https://openrouter.ai/api/v1",
-      "secret_env": "OPENROUTER_API_KEY",
-      "label": "Nemotron 3 Super 120B A12B Free (via OpenRouter)",
-      "family": "openrouter",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
       ]
     },
     {

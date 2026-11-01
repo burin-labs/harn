@@ -430,7 +430,11 @@ quality_tags = ["free_tier", "avoid_reviewer"]
 # "0 endpoints out of 1 requested are available matching your guardrail
 # restrictions and data policy ... Free model training violation (account
 # settings)" (provider contract probe run 37030330916, re-checked 2026-10-02).
-models_dev = {provider = "openrouter", model = "nvidia/nemotron-3-super-120b-a12b:free", fields = ["context_window", "pricing"]}
+# Deprecated routes retain historical facts without an upstream binding.
+deprecated = true
+deprecation_note = "Free route no longer listed at https://openrouter.ai/api/v1/models (verified 2026-11-01); historical pricing retained."
+context_window = 262144
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
 
 [models."nvidia/nemotron-3-super-120b-a12b:free".data_controls]
 training_default = "trains"

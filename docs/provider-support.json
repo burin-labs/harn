@@ -1106,7 +1106,23 @@
         "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
-        "serving_tiers": [],
+        "serving_tiers": [
+          {
+            "id": "priority",
+            "mode": "synchronous",
+            "economics": "premium",
+            "request_param": "service_tier",
+            "request_value": "priority",
+            "discount_percent": null,
+            "cost_multiplier": 1.5,
+            "status": "ga",
+            "latency": null,
+            "reliability": null,
+            "suitable_workloads": [],
+            "unsuitable_workloads": [],
+            "note": null
+          }
+        ],
         "usage_accounting_confidence": "high"
       },
       "empirical": {

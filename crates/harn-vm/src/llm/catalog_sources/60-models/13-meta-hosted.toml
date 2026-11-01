@@ -34,7 +34,12 @@ lineage = "meta-muse-spark"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
 tier = "frontier"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
-models_dev = {provider = "fireworks-ai", model = "accounts/fireworks/models/muse-spark-open", fields = ["context_window", "open_weight", "pricing"]}
+# Curated pricing preserves service-tier multipliers that the source importer
+# cannot represent.
+# https://docs.fireworks.ai/serverless/pricing (verified 2026-11-01).
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+serving_tiers = [{ id = "priority", label = "Priority", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 1.5, status = "ga", pricing = { input_per_mtok = 1.875, output_per_mtok = 6.375, cache_read_per_mtok = 0.225 } }]
+models_dev = {provider = "fireworks-ai", model = "accounts/fireworks/models/muse-spark-open", fields = ["context_window", "open_weight"]}
 
 [models."together/meta-models/Muse-Spark-Open-816B-A42B"]
 name = "Muse Spark Open (Together)"

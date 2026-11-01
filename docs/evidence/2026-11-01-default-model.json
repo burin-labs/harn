@@ -1,0 +1,843 @@
+{
+  "schema": "harn.default-model-review.v1",
+  "observed_at": "2026-11-01",
+  "harn_revision": "4713dc560c0c50d0e5fcb6d9a81ca3c0c4b4de05",
+  "model": "gpt-6.1-sol",
+  "provider": "openai",
+  "reasoning_effort": "medium",
+  "scope": "Production-shaped Burin headless smoke checks; not a holdout or comparative quality estimate. Selection is an editorial default informed by current provider documentation and these integration checks.",
+  "decision": {
+    "selected": "GPT-6.1 Sol, medium effort, standard service",
+    "reason": "Current coding-oriented model with documented balanced positioning, native Responses tools, vision, a 1.05M context window, and $2 input / $10 output per million tokens through 272K input. Cached reads cost $0.10; long-context requests cost more. All three integration tasks completed, including read, edit, read-back and grouped reads.",
+    "alternatives": [
+      {"model": "Claude Sonnet 5.5", "assessment": "Strong alternative at the same $2/$10 standard token rates and $0.10 cache reads. Anthropic reports strong terminal coding results and recommends lower effort for cost efficiency. Different vendor harness benchmark scores do not establish a Burin-specific winner."},
+      {"model": "DeepSeek V4.1 Flash", "assessment": "Budget choice: current deepseek-flash alias serves 1017, with $0.30/$1.20 peak and half-price off-peak text rates. Lower token cost alone does not establish lower cost per correct Burin task; no paired quality evaluation was run."},
+      {"model": "Gemini 3.8 Flash", "assessment": "Fast coding-oriented alternative with $0.75/$3.75 introductory input/output pricing through December 31. The introductory period makes present token prices a weaker durable default criterion."},
+      {"model": "GPT-6 Luna", "assessment": "Keep as the fast, low-cost option rather than the balanced default. The user's successful repository-summary session is useful dogfood evidence, but does not test sustained coding or recovery."}
+    ],
+    "limitations": "Smoke checks establish integration, not comparative reliability. The edit task's canonical completion was unverified despite a successful read-back; that result is preserved below. No user-selected model settings should be overwritten."
+  },
+  "sources": [
+    "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+    "https://www.anthropic.com/claude-sonnet-5-5",
+    "https://api-docs.deepseek.com/quick_start/pricing/",
+    "https://ai.google.dev/gemini-api/docs/pricing",
+    "https://docs.fireworks.ai/updates/changelog"
+  ],
+  "trials": [
+    {
+      "task": "Use a file-reading tool to read README.md. Reply with the verification code from that file. Do not guess or run shell commands.",
+      "assistant_text": "PLUM-4826",
+      "tool_calls": [
+        "look"
+      ],
+      "tool_call_events": [
+        {
+          "tool_call_id": "call_hWhC1QgPYCtJoMmibNIZqqRF",
+          "tool_name": "look",
+          "status": "pending",
+          "event": "tool_call",
+          "raw_input": {
+            "direction": "imports",
+            "file": "README.md",
+            "folder": "",
+            "intent": "read",
+            "limit": 20,
+            "offset": 1,
+            "query": "",
+            "reason": "Read the verification code directly from README.md as requested.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_hWhC1QgPYCtJoMmibNIZqqRF",
+          "tool_name": "look",
+          "status": "in_progress",
+          "event": "tool_call_update",
+          "raw_input": {
+            "direction": "imports",
+            "file": "README.md",
+            "folder": "",
+            "intent": "read",
+            "limit": 20,
+            "offset": 1,
+            "query": "",
+            "reason": "Read the verification code directly from README.md as requested.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_hWhC1QgPYCtJoMmibNIZqqRF",
+          "tool_name": "look",
+          "status": "completed",
+          "event": "tool_call_update",
+          "raw_output": {
+            "data": {
+              "dispatch_status": "completed"
+            },
+            "ok": true,
+            "outcome": "ok",
+            "schema": "harn.agent_tool_handler_result.v2",
+            "text": "1\tThe orchard project grows plums. Its verification code is PLUM-4826."
+          }
+        }
+      ],
+      "completed": true,
+      "completion": "complete",
+      "usage": {
+        "cost_and_token_coverage": "iteration_events_only",
+        "input_tokens": 10544,
+        "output_tokens": 241,
+        "cache_read_tokens": 3680,
+        "cache_write_tokens": 6855,
+        "cost_usd": 0.019933500000000003,
+        "known_cost_usd": 0.019933500000000003,
+        "llm_calls": 2,
+        "llm_call_attempts": 2,
+        "iteration_attempts": 2,
+        "wall_clock_ms": 15317,
+        "ttft_ms": 12647,
+        "inference_speed": [
+          {
+            "call_id": "01a19524-4082-751c-b39d-a06639ebf910",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": null,
+            "output_tokens": 176,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19524-58c0-741b-97f0-2312d9212584",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1805,
+            "output_tokens": 56,
+            "output_tokens_per_second": 74.7,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19524-68e0-74c1-bb1e-4c2e289ddae6",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 956,
+            "output_tokens": 9,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          }
+        ],
+        "provider_call_attempts": [
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 1,
+            "attempt": 1
+          },
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 2,
+            "attempt": 1
+          }
+        ],
+        "total_known_cost_usd": 0.019933500000000003,
+        "total_cost_usd": 0.019933500000000003,
+        "requested_models": [
+          "gpt-6.1-sol"
+        ]
+      },
+      "reasoning_effort": {
+        "schema": "burin.reasoning_effort_receipt.v1",
+        "requested": {
+          "source": "model_default",
+          "level": null
+        },
+        "calls": [
+          {
+            "index": 0,
+            "call_id": "01a19524-4082-751c-b39d-a06639ebf910",
+            "call_role": "burin.classify.task_intent",
+            "call_stage": null,
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_compat",
+            "resolved_mode": "effort",
+            "resolved_level": "low",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning_effort",
+            "sent_value": "low",
+            "candidate_fields": [
+              "reasoning",
+              "reasoning_effort",
+              "thinking"
+            ]
+          },
+          {
+            "index": 1,
+            "call_id": "01a19524-58c0-741b-97f0-2312d9212584",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 2,
+            "call_id": "01a19524-68e0-74c1-bb1e-4c2e289ddae6",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          }
+        ],
+        "gaps": []
+      },
+      "harn_run_record_path": "/tmp/burin-default-model-probe/.harn-runs/01a19524-3482-749f-8704-82c6a4422028.json"
+    },
+    {
+      "task": "Read README.md using a tool, create result.txt containing only its verification code, then read result.txt using a tool to verify your edit. Do not run shell commands.",
+      "assistant_text": "Created `result.txt` containing only `PLUM-4826` from `README.md` and verified it by reading it back with a tool. No shell commands were run.",
+      "tool_calls": [
+        "look",
+        "edit",
+        "look"
+      ],
+      "tool_call_events": [
+        {
+          "tool_call_id": "call_Z3BXVeOrQvxwIh91CuwA03nL",
+          "tool_name": "look",
+          "status": "pending",
+          "event": "tool_call",
+          "raw_input": {
+            "direction": "imports",
+            "file": "README.md",
+            "folder": "",
+            "intent": "read",
+            "limit": 20,
+            "offset": 1,
+            "query": "",
+            "reason": "Read the verification code as requested.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_Z3BXVeOrQvxwIh91CuwA03nL",
+          "tool_name": "look",
+          "status": "in_progress",
+          "event": "tool_call_update",
+          "raw_input": {
+            "direction": "imports",
+            "file": "README.md",
+            "folder": "",
+            "intent": "read",
+            "limit": 20,
+            "offset": 1,
+            "query": "",
+            "reason": "Read the verification code as requested.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_Z3BXVeOrQvxwIh91CuwA03nL",
+          "tool_name": "look",
+          "status": "completed",
+          "event": "tool_call_update",
+          "raw_output": {
+            "data": {
+              "dispatch_status": "completed"
+            },
+            "ok": true,
+            "outcome": "ok",
+            "schema": "harn.agent_tool_handler_result.v2",
+            "text": "1\tThe orchard project grows plums. Its verification code is PLUM-4826."
+          }
+        },
+        {
+          "tool_call_id": "call_lUabGpBaAZYLR2kfh7IeZ3Xy",
+          "tool_name": "edit",
+          "status": "pending",
+          "event": "tool_call",
+          "raw_input": {
+            "action": "create",
+            "content": "PLUM-4826",
+            "path": "result.txt",
+            "reason": "Create the result containing only the verification code from README.md."
+          }
+        },
+        {
+          "tool_call_id": "call_lUabGpBaAZYLR2kfh7IeZ3Xy",
+          "tool_name": "edit",
+          "status": "in_progress",
+          "event": "tool_call_update",
+          "raw_input": {
+            "action": "create",
+            "content": "PLUM-4826",
+            "path": "result.txt",
+            "reason": "Create the result containing only the verification code from README.md."
+          }
+        },
+        {
+          "tool_call_id": "call_lUabGpBaAZYLR2kfh7IeZ3Xy",
+          "tool_name": "edit",
+          "status": "completed",
+          "event": "tool_call_update",
+          "raw_output": {
+            "data": {
+              "changed_paths": [
+                "result.txt"
+              ],
+              "diagnostics_error_count": null,
+              "edit_outcome": {
+                "edit_status": "applied_clean",
+                "mutation_status": "applied",
+                "post_edit_check": {
+                  "blocking_diagnostics": false,
+                  "diff_sanity_advisory": false,
+                  "needs_next_turn_before_verify": false,
+                  "schema": "burin.post_edit_check.v1",
+                  "status": "unchecked"
+                },
+                "post_edit_check_status": "unchecked",
+                "rejection_class": "none",
+                "schema": "burin.tool_edit_outcome.v1"
+              },
+              "mutation_status": "applied"
+            },
+            "ok": true,
+            "outcome": "ok",
+            "schema": "harn.agent_tool_handler_result.v2",
+            "text": "Created result.txt\n\n## Post-edit state: result.txt (1 lines, 9 bytes)\nUse `look({ file: \"result.txt\", query: <actual symbol name from the current outline>, intent: \"full_text\" })` for one symbol's exact source if you need symbol-level source for another edit.\n## Coverage: unavailable\nNote: no semantic, type, or even syntax checker was available on this host \u2014 a clean result here does NOT prove type-correctness. Run the project's build/tests via run(...) to confirm before relying on this edit."
+          }
+        },
+        {
+          "tool_call_id": "call_7tBR2j9nMj9qYqvVdYniVGAX",
+          "tool_name": "look",
+          "status": "pending",
+          "event": "tool_call",
+          "raw_input": {
+            "direction": "imports",
+            "file": "result.txt",
+            "folder": "",
+            "intent": "read",
+            "limit": 10,
+            "offset": 1,
+            "query": "",
+            "reason": "Read back result.txt to verify it contains only the README verification code.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_7tBR2j9nMj9qYqvVdYniVGAX",
+          "tool_name": "look",
+          "status": "in_progress",
+          "event": "tool_call_update",
+          "raw_input": {
+            "direction": "imports",
+            "file": "result.txt",
+            "folder": "",
+            "intent": "read",
+            "limit": 10,
+            "offset": 1,
+            "query": "",
+            "reason": "Read back result.txt to verify it contains only the README verification code.",
+            "since": 0
+          }
+        },
+        {
+          "tool_call_id": "call_7tBR2j9nMj9qYqvVdYniVGAX",
+          "tool_name": "look",
+          "status": "completed",
+          "event": "tool_call_update",
+          "raw_output": {
+            "data": {
+              "dispatch_status": "completed"
+            },
+            "ok": true,
+            "outcome": "ok",
+            "schema": "harn.agent_tool_handler_result.v2",
+            "text": "1\tPLUM-4826"
+          }
+        }
+      ],
+      "completed": true,
+      "completion": "unverified",
+      "usage": {
+        "cost_and_token_coverage": "iteration_events_only",
+        "input_tokens": 33763,
+        "output_tokens": 572,
+        "cache_read_tokens": 22585,
+        "cache_write_tokens": 11163,
+        "cost_usd": 0.035916,
+        "known_cost_usd": 0.035916,
+        "llm_calls": 4,
+        "llm_call_attempts": 4,
+        "iteration_attempts": 4,
+        "wall_clock_ms": 33555,
+        "ttft_ms": 13665,
+        "inference_speed": [
+          {
+            "call_id": "01a19524-fc6a-735b-ac66-4bbed169d151",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": null,
+            "output_tokens": 331,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-1f98-70b7-879c-8e79662d8828",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1420,
+            "output_tokens": 51,
+            "output_tokens_per_second": 78.8,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-355c-7226-8296-8f40eec1def2",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1186,
+            "output_tokens": 45,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-457d-7639-9a76-1422fb1ca551",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1575,
+            "output_tokens": 58,
+            "output_tokens_per_second": 107.1,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-582e-74b9-b40c-92459edb8239",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1938,
+            "output_tokens": 87,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-6d90-7729-891b-2fd8d4b37b51",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1616,
+            "output_tokens": 80,
+            "output_tokens_per_second": 109.8,
+            "token_source": "provider"
+          }
+        ],
+        "provider_call_attempts": [
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 1,
+            "attempt": 1
+          },
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 2,
+            "attempt": 1
+          },
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 3,
+            "attempt": 1
+          },
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 4,
+            "attempt": 1
+          }
+        ],
+        "total_known_cost_usd": 0.035916,
+        "total_cost_usd": 0.035916,
+        "requested_models": [
+          "gpt-6.1-sol"
+        ]
+      },
+      "reasoning_effort": {
+        "schema": "burin.reasoning_effort_receipt.v1",
+        "requested": {
+          "source": "model_default",
+          "level": null
+        },
+        "calls": [
+          {
+            "index": 0,
+            "call_id": "01a19524-fc6a-735b-ac66-4bbed169d151",
+            "call_role": "burin.classify.task_intent",
+            "call_stage": null,
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_compat",
+            "resolved_mode": "effort",
+            "resolved_level": "low",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning_effort",
+            "sent_value": "low",
+            "candidate_fields": [
+              "reasoning",
+              "reasoning_effort",
+              "thinking"
+            ]
+          },
+          {
+            "index": 1,
+            "call_id": "01a19525-1f98-70b7-879c-8e79662d8828",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 2,
+            "call_id": "01a19525-355c-7226-8296-8f40eec1def2",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 3,
+            "call_id": "01a19525-457d-7639-9a76-1422fb1ca551",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 4,
+            "call_id": "01a19525-582e-74b9-b40c-92459edb8239",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 5,
+            "call_id": "01a19525-6d90-7729-891b-2fd8d4b37b51",
+            "call_role": "completion.judge",
+            "call_stage": "verify",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_compat",
+            "resolved_mode": "disabled",
+            "resolved_level": null,
+            "resolved_budget_tokens": null,
+            "sent_status": "omitted",
+            "sent_field": null,
+            "sent_value": null,
+            "candidate_fields": [
+              "reasoning",
+              "reasoning_effort",
+              "thinking"
+            ]
+          }
+        ],
+        "gaps": []
+      },
+      "harn_run_record_path": "/tmp/burin-default-model-probe/.harn-runs/01a19524-f4c1-73ed-aa12-220fad9080d7.json"
+    },
+    {
+      "task": "Use a file-reading tool to read README.md and result.txt. Confirm whether the verification code in result.txt matches README.md. Report the exact code and both filenames. Do not edit files or run shell commands.",
+      "assistant_text": "The verification code in `result.txt` matches `README.md` exactly: **PLUM-4826**.",
+      "tool_calls": [
+        "bundle"
+      ],
+      "tool_call_events": [
+        {
+          "tool_call_id": "call_Xt8Qer09Dn8h5P6lH1UcYvk0",
+          "tool_name": "bundle",
+          "status": "pending",
+          "event": "tool_call",
+          "raw_input": {
+            "ops": [
+              {
+                "args": {
+                  "file": "README.md",
+                  "intent": "read",
+                  "limit": 20,
+                  "offset": 1
+                },
+                "call_id": "readme",
+                "tool": "look"
+              },
+              {
+                "args": {
+                  "file": "result.txt",
+                  "intent": "read",
+                  "limit": 20,
+                  "offset": 1
+                },
+                "call_id": "result",
+                "tool": "look"
+              }
+            ],
+            "reason": "Read both requested files to compare their exact verification codes."
+          }
+        },
+        {
+          "tool_call_id": "call_Xt8Qer09Dn8h5P6lH1UcYvk0",
+          "tool_name": "bundle",
+          "status": "in_progress",
+          "event": "tool_call_update",
+          "raw_input": {
+            "ops": [
+              {
+                "args": {
+                  "file": "README.md",
+                  "intent": "read",
+                  "limit": 20,
+                  "offset": 1
+                },
+                "call_id": "readme",
+                "tool": "look"
+              },
+              {
+                "args": {
+                  "file": "result.txt",
+                  "intent": "read",
+                  "limit": 20,
+                  "offset": 1
+                },
+                "call_id": "result",
+                "tool": "look"
+              }
+            ],
+            "reason": "Read both requested files to compare their exact verification codes."
+          }
+        },
+        {
+          "tool_call_id": "call_Xt8Qer09Dn8h5P6lH1UcYvk0",
+          "tool_name": "bundle",
+          "status": "completed",
+          "event": "tool_call_update",
+          "raw_output": "\u2500\u2500 readme \u2500\u2500\n1\tThe orchard project grows plums. Its verification code is PLUM-4826.\n\n\u2500\u2500 result \u2500\u2500\n1\tPLUM-4826"
+        }
+      ],
+      "completed": true,
+      "completion": "complete",
+      "usage": {
+        "cost_and_token_coverage": "iteration_events_only",
+        "input_tokens": 10701,
+        "output_tokens": 294,
+        "cache_read_tokens": 3724,
+        "cache_write_tokens": 6968,
+        "cost_usd": 0.020750400000000002,
+        "known_cost_usd": 0.020750400000000002,
+        "llm_calls": 2,
+        "llm_call_attempts": 2,
+        "iteration_attempts": 2,
+        "wall_clock_ms": 12254,
+        "ttft_ms": 9447,
+        "inference_speed": [
+          {
+            "call_id": "01a19525-d3f2-757f-a9e0-74ae7e2c949c",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": null,
+            "output_tokens": 178,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-e834-745f-967c-295e10ce1363",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 1049,
+            "output_tokens": 89,
+            "output_tokens_per_second": 145.5,
+            "token_source": "provider"
+          },
+          {
+            "call_id": "01a19525-f3e4-74cc-9cfe-7bca554b3ac7",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "time_to_first_token_ms": 958,
+            "output_tokens": 27,
+            "output_tokens_per_second": null,
+            "token_source": "provider"
+          }
+        ],
+        "provider_call_attempts": [
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 1,
+            "attempt": 1
+          },
+          {
+            "requested_provider": "openai",
+            "requested_model": "gpt-6.1-sol",
+            "status": "ok",
+            "iteration": 2,
+            "attempt": 1
+          }
+        ],
+        "total_known_cost_usd": 0.020750400000000002,
+        "total_cost_usd": 0.020750400000000002,
+        "requested_models": [
+          "gpt-6.1-sol"
+        ]
+      },
+      "reasoning_effort": {
+        "schema": "burin.reasoning_effort_receipt.v1",
+        "requested": {
+          "source": "model_default",
+          "level": null
+        },
+        "calls": [
+          {
+            "index": 0,
+            "call_id": "01a19525-d3f2-757f-a9e0-74ae7e2c949c",
+            "call_role": "burin.classify.task_intent",
+            "call_stage": null,
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_compat",
+            "resolved_mode": "effort",
+            "resolved_level": "low",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning_effort",
+            "sent_value": "low",
+            "candidate_fields": [
+              "reasoning",
+              "reasoning_effort",
+              "thinking"
+            ]
+          },
+          {
+            "index": 1,
+            "call_id": "01a19525-e834-745f-967c-295e10ce1363",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          },
+          {
+            "index": 2,
+            "call_id": "01a19525-f3e4-74cc-9cfe-7bca554b3ac7",
+            "call_role": "agent.main",
+            "call_stage": "work",
+            "provider": "openai",
+            "model": "gpt-6.1-sol",
+            "wire_dialect": "openai_responses",
+            "resolved_mode": "effort",
+            "resolved_level": "medium",
+            "resolved_budget_tokens": null,
+            "sent_status": "carried",
+            "sent_field": "reasoning",
+            "sent_value": {
+              "effort": "medium"
+            },
+            "candidate_fields": [
+              "reasoning"
+            ]
+          }
+        ],
+        "gaps": []
+      },
+      "harn_run_record_path": "/tmp/burin-default-model-probe/.harn-runs/01a19525-cc2a-7376-b1d9-48dc56744bb0.json"
+    }
+  ]
+}
