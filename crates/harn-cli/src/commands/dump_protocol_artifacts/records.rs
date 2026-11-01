@@ -277,7 +277,9 @@ impl Record {
                 Target::Python => out.push_str(&format!(
                     "    {}: {kind}{}\n",
                     field.wire_name,
-                    if field.required && matches!(field.kind, FieldKind::Nullable(_)) {
+                    if field.required
+                        && matches!(field.kind, FieldKind::Nullable(_) | FieldKind::Json)
+                    {
                         " = field(metadata={\"harn_required_nullable\": True})"
                     } else if !closed && !field.required {
                         " = None"

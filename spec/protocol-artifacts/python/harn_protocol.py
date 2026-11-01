@@ -1467,9 +1467,9 @@ class MCPPrompt(_HarnDataclass):
 class ACPArtifactUpdateMetaHarn(_HarnDataclass):
     artifactId: str
     title: Optional[str] = field(metadata={"harn_required_nullable": True})
-    spec: JsonValue
-    metadata: JsonValue
-    provenance: JsonValue
+    spec: JsonValue = field(metadata={"harn_required_nullable": True})
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
+    provenance: JsonValue = field(metadata={"harn_required_nullable": True})
     fallback: Optional[str] = None
     kind: Optional[str] = None
     mimeType: Optional[str] = None
@@ -1534,7 +1534,7 @@ class ACPHandoffUpdate(_HarnDataclass):
 class ACPHitlRequestUpdateMetaHarn(_HarnDataclass):
     requestId: str
     kind: str
-    payload: JsonValue
+    payload: JsonValue = field(metadata={"harn_required_nullable": True})
     replayed: Optional[bool] = None
 
 @dataclass
@@ -1550,7 +1550,7 @@ class ACPHitlRequestUpdate(_HarnDataclass):
 class ACPHitlResolvedUpdateMetaHarn(_HarnDataclass):
     requestId: str
     kind: str
-    outcome: JsonValue
+    outcome: JsonValue = field(metadata={"harn_required_nullable": True})
     replayed: Optional[bool] = None
 
 @dataclass
@@ -1588,7 +1588,7 @@ class ACPInferenceSpeedUpdate(_HarnDataclass):
 @dataclass
 class ACPLiveSessionClientUpdateMetaHarn(_HarnDataclass):
     action: str
-    state: JsonValue
+    state: JsonValue = field(metadata={"harn_required_nullable": True})
     replayed: Optional[bool] = None
 
 @dataclass
@@ -1767,7 +1767,7 @@ class ACPStateUpdate(_HarnDataclass):
 class ACPToolSearchQueryUpdateMetaHarn(_HarnDataclass):
     toolUseId: str
     name: str
-    query: JsonValue
+    query: JsonValue = field(metadata={"harn_required_nullable": True})
     mode: Optional[str] = None
     replayed: Optional[bool] = None
     strategy: Optional[str] = None
@@ -1816,10 +1816,10 @@ class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
     estimatedTokensAfter: int
     instructionMode: Optional[str] = field(metadata={"harn_required_nullable": True})
     instructionSource: Optional[str] = field(metadata={"harn_required_nullable": True})
-    compactionPolicy: JsonValue
-    recap: JsonValue
-    sourceMeasurement: JsonValue
-    classification: JsonValue
+    compactionPolicy: JsonValue = field(metadata={"harn_required_nullable": True})
+    recap: JsonValue = field(metadata={"harn_required_nullable": True})
+    sourceMeasurement: JsonValue = field(metadata={"harn_required_nullable": True})
+    classification: JsonValue = field(metadata={"harn_required_nullable": True})
     replayed: Optional[bool] = None
 
 @dataclass
@@ -1860,7 +1860,7 @@ class ACPWorkerUpdateMetaHarn(_HarnDataclass):
     event: str
     status: str
     terminal: bool
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
     audit: Optional[JsonValue] = None
     replayed: Optional[bool] = None
     workerMode: Optional[str] = None
@@ -2513,12 +2513,12 @@ class HarnAgentsEventProjection(_HarnDataclass):
 class HarnAgentEventAgentScratchpadReorganization(_HarnDataclass):
     iteration: int
     status: str
-    details: JsonValue
+    details: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventAnchorChanged(_HarnDataclass):
-    previous: JsonValue
-    current: JsonValue
+    previous: JsonValue = field(metadata={"harn_required_nullable": True})
+    current: JsonValue = field(metadata={"harn_required_nullable": True})
     carryTranscript: bool
     compacted: bool
     reason: Optional[str] = field(metadata={"harn_required_nullable": True})
@@ -2593,10 +2593,10 @@ class HarnAgentEventCompositionChildCall(_HarnDataclass):
     toolCallId: str
     toolName: str
     operationIndex: int
-    annotations: JsonValue
+    annotations: JsonValue = field(metadata={"harn_required_nullable": True})
     requestedSideEffectLevel: str
-    policyContext: JsonValue
-    rawInput: JsonValue
+    policyContext: JsonValue = field(metadata={"harn_required_nullable": True})
+    rawInput: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventCompositionChildResult(_HarnDataclass):
@@ -2605,10 +2605,10 @@ class HarnAgentEventCompositionChildResult(_HarnDataclass):
     toolName: str
     operationIndex: int
     status: str
-    rawOutput: JsonValue
+    rawOutput: JsonValue = field(metadata={"harn_required_nullable": True})
     error: Optional[str] = field(metadata={"harn_required_nullable": True})
     errorCategory: Optional[str] = field(metadata={"harn_required_nullable": True})
-    executor: JsonValue
+    executor: JsonValue = field(metadata={"harn_required_nullable": True})
     durationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
     executionDurationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
 
@@ -2622,11 +2622,11 @@ class HarnAgentEventCompositionError(_HarnDataclass):
     stdout: Optional[str] = field(metadata={"harn_required_nullable": True})
     stderr: Optional[str] = field(metadata={"harn_required_nullable": True})
     artifacts: List[JsonValue]
-    result: JsonValue
+    result: JsonValue = field(metadata={"harn_required_nullable": True})
     failureCategory: Optional[str] = field(metadata={"harn_required_nullable": True})
     error: Optional[str] = field(metadata={"harn_required_nullable": True})
     durationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventCompositionFinish(_HarnDataclass):
@@ -2638,11 +2638,11 @@ class HarnAgentEventCompositionFinish(_HarnDataclass):
     stdout: Optional[str] = field(metadata={"harn_required_nullable": True})
     stderr: Optional[str] = field(metadata={"harn_required_nullable": True})
     artifacts: List[JsonValue]
-    result: JsonValue
+    result: JsonValue = field(metadata={"harn_required_nullable": True})
     failureCategory: Optional[str] = field(metadata={"harn_required_nullable": True})
     error: Optional[str] = field(metadata={"harn_required_nullable": True})
     durationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventCompositionStart(_HarnDataclass):
@@ -2654,11 +2654,11 @@ class HarnAgentEventCompositionStart(_HarnDataclass):
     stdout: Optional[str] = field(metadata={"harn_required_nullable": True})
     stderr: Optional[str] = field(metadata={"harn_required_nullable": True})
     artifacts: List[JsonValue]
-    result: JsonValue
+    result: JsonValue = field(metadata={"harn_required_nullable": True})
     failureCategory: Optional[str] = field(metadata={"harn_required_nullable": True})
     error: Optional[str] = field(metadata={"harn_required_nullable": True})
     durationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventControlOutcome(_HarnDataclass):
@@ -2666,8 +2666,8 @@ class HarnAgentEventControlOutcome(_HarnDataclass):
     method: str
     outcome: str
     status: str
-    actor: JsonValue
-    target: JsonValue
+    actor: JsonValue = field(metadata={"harn_required_nullable": True})
+    target: JsonValue = field(metadata={"harn_required_nullable": True})
     metadata: Optional[JsonValue] = None
     reason: Optional[str] = None
 
@@ -2707,36 +2707,36 @@ class HarnAgentEventFinalWrapup(_HarnDataclass):
 class HarnAgentEventHostAttachment(_HarnDataclass):
     injectionId: str
     mediaType: str
-    flavor: JsonValue
+    flavor: JsonValue = field(metadata={"harn_required_nullable": True})
     artifactPointer: str
     sha256: str
     sizeBytes: int
-    rendered: JsonValue
+    rendered: JsonValue = field(metadata={"harn_required_nullable": True})
     description: Optional[str] = field(metadata={"harn_required_nullable": True})
     descriptionModel: Optional[str] = field(metadata={"harn_required_nullable": True})
-    delivery: JsonValue
+    delivery: JsonValue = field(metadata={"harn_required_nullable": True})
     deliveredAtSeam: Optional[str] = field(metadata={"harn_required_nullable": True})
     sequence: int
-    provenance: JsonValue
-    sanitization: JsonValue
+    provenance: JsonValue = field(metadata={"harn_required_nullable": True})
+    sanitization: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventHostToolResult(_HarnDataclass):
     injectionId: str
     toolCallId: str
     toolName: str
-    toolKind: JsonValue
-    rawInput: JsonValue
+    toolKind: JsonValue = field(metadata={"harn_required_nullable": True})
+    rawInput: JsonValue = field(metadata={"harn_required_nullable": True})
     status: str
-    rawOutput: JsonValue
+    rawOutput: JsonValue = field(metadata={"harn_required_nullable": True})
     resultPointer: Optional[str] = field(metadata={"harn_required_nullable": True})
     error: Optional[str] = field(metadata={"harn_required_nullable": True})
     durationMs: Optional[int] = field(metadata={"harn_required_nullable": True})
-    delivery: JsonValue
+    delivery: JsonValue = field(metadata={"harn_required_nullable": True})
     deliveredAtSeam: Optional[str] = field(metadata={"harn_required_nullable": True})
     sequence: int
-    provenance: JsonValue
-    sanitization: JsonValue
+    provenance: JsonValue = field(metadata={"harn_required_nullable": True})
+    sanitization: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventInputGuardrailVerdict(_HarnDataclass):
@@ -2753,7 +2753,7 @@ class HarnAgentEventInputGuardrailVerdict(_HarnDataclass):
 @dataclass
 class HarnAgentEventIterationEnd(_HarnDataclass):
     iteration: int
-    iterationInfo: JsonValue
+    iterationInfo: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventIterationStart(_HarnDataclass):
@@ -2776,11 +2776,11 @@ class HarnAgentEventJudgeDecision(_HarnDataclass):
     escalationRecommended: Optional[bool] = field(metadata={"harn_required_nullable": True})
     escalationTarget: Optional[str] = field(metadata={"harn_required_nullable": True})
     judgeVerdict: Optional[str] = field(metadata={"harn_required_nullable": True})
-    override: JsonValue
+    override: JsonValue = field(metadata={"harn_required_nullable": True})
     gapClass: Optional[str] = field(metadata={"harn_required_nullable": True})
     judgeOutcome: Optional[str] = field(metadata={"harn_required_nullable": True})
     terminalEvidencePreserved: Optional[bool] = field(metadata={"harn_required_nullable": True})
-    requirementReport: JsonValue
+    requirementReport: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventJudgeStarted(_HarnDataclass):
@@ -2827,7 +2827,7 @@ class HarnAgentEventMcpNotification(_HarnDataclass):
     server: str
     method: str
     direction: str
-    params: JsonValue
+    params: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventMissingToolCallVerdict(_HarnDataclass):
@@ -2845,11 +2845,11 @@ class HarnAgentEventMissingToolCallVerdict(_HarnDataclass):
 
 @dataclass
 class HarnAgentEventModelJob(_HarnDataclass):
-    event: JsonValue
+    event: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventOrchestrationDecision(_HarnDataclass):
-    decision: JsonValue
+    decision: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventPackThinkingStripped(_HarnDataclass):
@@ -2860,16 +2860,16 @@ class HarnAgentEventPackThinkingStripped(_HarnDataclass):
 @dataclass
 class HarnAgentEventProgressReported(_HarnDataclass):
     message: Optional[str] = field(metadata={"harn_required_nullable": True})
-    entries: JsonValue
+    entries: JsonValue = field(metadata={"harn_required_nullable": True})
     replace: bool
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventProviderUsage(_HarnDataclass):
     call_id: str
     provider: str
     model: str
-    run_usage: JsonValue
+    run_usage: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventPurposeLabel(_HarnDataclass):
@@ -2892,7 +2892,7 @@ class HarnAgentEventRequireSuccessfulToolsViolation(_HarnDataclass):
     runId: Optional[str] = field(metadata={"harn_required_nullable": True})
     redactedSummary: str
     recurrenceHints: List[str]
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventScopeClassifierVerdict(_HarnDataclass):
@@ -2911,13 +2911,13 @@ class HarnAgentEventScopeClassifierVerdict(_HarnDataclass):
 class HarnAgentEventSelfConsistencyTie(_HarnDataclass):
     answer: str
     total: int
-    distribution: JsonValue
+    distribution: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventSessionClosed(_HarnDataclass):
     reason: str
     status: str
-    metadata: JsonValue
+    metadata: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventStepJudgeDecision(_HarnDataclass):
@@ -2980,19 +2980,19 @@ class HarnAgentEventSubagentStop(_HarnDataclass):
     reason: str
     resultRef: Optional[str] = field(metadata={"harn_required_nullable": True})
     receiptRef: Optional[str] = field(metadata={"harn_required_nullable": True})
-    cancellation: JsonValue
-    timeout: JsonValue
+    cancellation: JsonValue = field(metadata={"harn_required_nullable": True})
+    timeout: JsonValue = field(metadata={"harn_required_nullable": True})
     completedAtMs: int
 
 @dataclass
 class HarnAgentEventToolBatchDisposition(_HarnDataclass):
-    receipt: JsonValue
+    receipt: JsonValue = field(metadata={"harn_required_nullable": True})
 
 @dataclass
 class HarnAgentEventToolCallAudit(_HarnDataclass):
     toolCallId: str
     toolName: str
-    audit: JsonValue
+    audit: JsonValue = field(metadata={"harn_required_nullable": True})
     receipt: Optional[JsonValue] = None
 
 @dataclass
@@ -3015,4 +3015,4 @@ class HarnAgentEventTurnPhaseChanged(_HarnDataclass):
 
 @dataclass
 class HarnAgentEventTypedCheckpoint(_HarnDataclass):
-    checkpoint: JsonValue
+    checkpoint: JsonValue = field(metadata={"harn_required_nullable": True})
