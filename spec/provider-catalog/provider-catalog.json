@@ -1,6 +1,6 @@
 {
-  "schema_version": 15,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v15.json",
+  "schema_version": 16,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v16.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -43939,6 +43939,67 @@
             "variant": "astra"
           }
         }
+      ]
+    }
+  ],
+  "quick_models": [
+    {
+      "id": "gpt-6.1-sol",
+      "model_ids": [
+        "gpt-6.1-sol",
+        "openai/gpt-6.1-sol"
+      ]
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "model_ids": [
+        "gpt-6.1-terra",
+        "openai/gpt-6.1-terra",
+        "vercel/openai/gpt-6.1-terra"
+      ]
+    },
+    {
+      "id": "gpt-6-luna",
+      "model_ids": [
+        "gpt-6-luna",
+        "openai/gpt-6-luna"
+      ]
+    },
+    {
+      "id": "claude-opus-5-5",
+      "model_ids": [
+        "claude-opus-5-5",
+        "anthropic/claude-opus-5.5"
+      ]
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "model_ids": [
+        "claude-sonnet-5-5",
+        "anthropic/claude-sonnet-5.5"
+      ]
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "model_ids": [
+        "claude-haiku-5-5",
+        "anthropic/claude-haiku-5.5"
+      ]
+    },
+    {
+      "id": "gemma-4-26b-a4b-it",
+      "model_ids": [
+        "models/gemma-4-26b-a4b-it",
+        "google/gemma-4-26b-a4b-it",
+        "gemma-4-26b-a4b-it"
+      ]
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "model_ids": [
+        "qwen/qwen3.6-35b-a3b",
+        "dashscope/qwen3.6-35b-a3b",
+        "qwen3.6-35b-a3b"
       ]
     }
   ],

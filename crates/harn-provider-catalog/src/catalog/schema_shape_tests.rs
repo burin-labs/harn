@@ -27,6 +27,11 @@ const MODEL_FIELDS_V14: &str = "
     wire_model
 ";
 
+const ROOT_FIELDS_V16: &str = "
+    aliases families generated_by models portal_defaults providers qc_defaults quick_models
+    routing_routes schema schema_version variants
+";
+
 fn fields(value: &Value) -> Result<BTreeSet<String>, String> {
     Ok(value
         .as_object()
@@ -39,6 +44,7 @@ fn fields(value: &Value) -> Result<BTreeSet<String>, String> {
 fn pinned_fields(version: u64) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let (root, model) = match version {
         14 | 15 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
+        16 => (ROOT_FIELDS_V16, MODEL_FIELDS_V14),
         other => {
             return Err(format!(
                 "catalog schema version {other} has no field-set pin"

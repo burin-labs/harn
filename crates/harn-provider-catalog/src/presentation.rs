@@ -27,11 +27,24 @@ pub struct PresentationConfig {
     /// one owner and one place to change.
     #[serde(default)]
     pub featured_providers: Vec<String>,
+    /// Ordered model identities for a compact picker; hosts filter by readiness.
+    #[serde(default)]
+    pub quick_models: Vec<QuickModelDef>,
+}
+
+/// Equivalent concrete model routes shown as one picker choice.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct QuickModelDef {
+    pub id: String,
+    pub model_ids: Vec<String>,
 }
 
 impl PresentationConfig {
     pub fn is_empty(&self) -> bool {
-        self.variants.is_empty() && self.families.is_empty() && self.featured_providers.is_empty()
+        self.variants.is_empty()
+            && self.families.is_empty()
+            && self.featured_providers.is_empty()
+            && self.quick_models.is_empty()
     }
 }
 

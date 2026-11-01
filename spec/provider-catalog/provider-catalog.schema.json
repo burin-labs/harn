@@ -2170,7 +2170,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v15.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v16.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -2213,6 +2213,32 @@
       },
       "type": "object"
     },
+    "quick_models": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "model_ids"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "routing_routes": {
       "items": {
         "$ref": "#/$defs/routing_route"
@@ -2220,10 +2246,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v15.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v16.json"
     },
     "schema_version": {
-      "const": 15
+      "const": 16
     },
     "variants": {
       "items": {
@@ -2241,6 +2267,7 @@
     "aliases",
     "variants",
     "families",
+    "quick_models",
     "qc_defaults"
   ],
   "title": "Harn provider catalog",

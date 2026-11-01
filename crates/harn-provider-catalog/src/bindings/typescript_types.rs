@@ -13,9 +13,15 @@ pub(super) const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalo
   aliases: HarnCatalogAlias[]
   variants: HarnCatalogVariant[]
   families: HarnCatalogModelFamily[]
+  quick_models: HarnQuickModel[]
   routing_routes?: HarnCatalogRoutingRoute[]
   qc_defaults: Record<string, string>
   portal_defaults?: Record<string, HarnCatalogPortalDefault>
+}
+
+export interface HarnQuickModel {
+  id: string
+  model_ids: string[]
 }
 
 export interface HarnCatalogPortalDefault {

@@ -13,6 +13,7 @@ pub(super) const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codab
     public let aliases: [HarnCatalogAlias]
     public let variants: [HarnCatalogVariant]
     public let families: [HarnCatalogModelFamily]
+    public let quickModels: [HarnQuickModel]
     public let routingRoutes: [HarnCatalogRoutingRoute]?
     public let qcDefaults: [String: String]
     public let portalDefaults: [String: HarnCatalogPortalDefault]?
@@ -26,9 +27,20 @@ pub(super) const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codab
         case aliases
         case variants
         case families
+        case quickModels = "quick_models"
         case routingRoutes = "routing_routes"
         case qcDefaults = "qc_defaults"
         case portalDefaults = "portal_defaults"
+    }
+}
+
+public struct HarnQuickModel: Codable, Sendable, Equatable {
+    public let id: String
+    public let modelIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case modelIds = "model_ids"
     }
 }
 

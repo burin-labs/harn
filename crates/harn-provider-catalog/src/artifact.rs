@@ -20,6 +20,7 @@ pub struct ProviderCatalogArtifact {
     pub aliases: Vec<CatalogAlias>,
     pub variants: Vec<CatalogVariant>,
     pub families: Vec<CatalogModelFamily>,
+    pub quick_models: Vec<llm_config::QuickModelDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing_routes: Vec<CatalogRoutingRoute>,
     pub qc_defaults: BTreeMap<String, String>,

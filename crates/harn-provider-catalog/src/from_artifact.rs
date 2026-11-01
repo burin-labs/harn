@@ -105,6 +105,7 @@ pub fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::P
             // list means "keep the local one" at merge time. Serving a remote
             // catalog must not silently retire the local setup guidance.
             featured_providers: Vec::new(),
+            quick_models: artifact.quick_models.clone(),
         },
         ..llm_config::ProvidersConfig::default()
     }

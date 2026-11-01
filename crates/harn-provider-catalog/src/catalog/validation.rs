@@ -79,6 +79,26 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         result.errors.push("catalog has no models".to_string());
     }
 
+    let mut quick_ids = BTreeSet::new();
+    for quick in &artifact.quick_models {
+        if quick.id.trim().is_empty() || !quick_ids.insert(&quick.id) || quick.model_ids.is_empty()
+        {
+            result.errors.push(format!(
+                "quick model {} must have a unique id and routes",
+                quick.id
+            ));
+        }
+        let mut routes = BTreeSet::new();
+        for id in &quick.model_ids {
+            if !routes.insert(id) || !artifact.models.iter().any(|model| &model.id == id) {
+                result.errors.push(format!(
+                    "quick model {} has a duplicate or unknown route {id}",
+                    quick.id
+                ));
+            }
+        }
+    }
+
     let provider_ids: BTreeSet<_> = artifact.providers.iter().map(|p| p.id.as_str()).collect();
     for provider in &artifact.providers {
         if provider.id.trim().is_empty() {

@@ -16,7 +16,7 @@ pub fn schema_value() -> Value {
         "$id": PROVIDER_CATALOG_SCHEMA_ID,
         "title": "Harn provider catalog",
         "type": "object",
-        "required": ["schema_version", "schema", "generated_by", "providers", "models", "aliases", "variants", "families", "qc_defaults"],
+        "required": ["schema_version", "schema", "generated_by", "providers", "models", "aliases", "variants", "families", "quick_models", "qc_defaults"],
         "properties": {
             "schema_version": {"const": PROVIDER_CATALOG_SCHEMA_VERSION},
             "schema": {"const": PROVIDER_CATALOG_SCHEMA_ID},
@@ -26,6 +26,7 @@ pub fn schema_value() -> Value {
             "aliases": {"type": "array", "items": {"$ref": "#/$defs/alias"}},
             "variants": {"type": "array", "items": {"$ref": "#/$defs/variant"}},
             "families": {"type": "array", "items": {"$ref": "#/$defs/model_family"}},
+            "quick_models": {"type": "array", "items": {"type": "object", "required": ["id", "model_ids"], "properties": {"id": {"type": "string", "minLength": 1}, "model_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}, "additionalProperties": false}},
             "routing_routes": {"type": "array", "items": {"$ref": "#/$defs/routing_route"}},
             "qc_defaults": {"type": "object", "additionalProperties": {"type": "string"}},
             "portal_defaults": portal_defaults_property()

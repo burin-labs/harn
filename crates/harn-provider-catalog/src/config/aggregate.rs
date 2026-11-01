@@ -321,6 +321,11 @@ impl ProvidersConfig {
                 .featured_providers
                 .clone_from(&overlay.presentation.featured_providers);
         }
+        if !overlay.presentation.quick_models.is_empty() {
+            self.presentation
+                .quick_models
+                .clone_from(&overlay.presentation.quick_models);
+        }
     }
 }
 

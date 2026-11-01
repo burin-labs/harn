@@ -46,6 +46,8 @@ mod portal_default_tests;
 #[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
+mod quick_pick_tests;
+#[cfg(test)]
 mod refresh_tests;
 #[cfg(test)]
 mod retirement_tests;
@@ -114,6 +116,21 @@ pub(crate) fn project(
     let variants = catalog_variants(&models, &aliases, &config.presentation.variants);
     let families = catalog_families(config, &models, &suppressed);
     let routing_routes = catalog_routing_routes(&models, &providers);
+    let quick_models = config
+        .presentation
+        .quick_models
+        .iter()
+        .filter_map(|quick| {
+            let mut quick = quick.clone();
+            quick.model_ids.retain(|id| {
+                config
+                    .models
+                    .get(id)
+                    .is_none_or(|model| !is_suppressed(&suppressed, &model.provider, id))
+            });
+            (!quick.model_ids.is_empty()).then_some(quick)
+        })
+        .collect();
 
     ProviderCatalogArtifact {
         schema_version: PROVIDER_CATALOG_SCHEMA_VERSION,
@@ -124,6 +141,7 @@ pub(crate) fn project(
         aliases,
         variants,
         families,
+        quick_models,
         routing_routes,
         qc_defaults: config.qc_defaults.clone(),
         portal_defaults: config
