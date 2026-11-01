@@ -26,10 +26,10 @@ import { agent_emit_event } from "std/agent/state"
 pub type PurposeLabelDelivery = "system" | "nudge" | "prefill"
 
 /** Caller-facing options for declared purpose labels. */
-pub type PurposeLabelOptions = {enabled?: bool, max_chars?: int, delivery?: PurposeLabelDelivery}
+pub type PurposeLabelOptions = {enabled?: bool, max_chars?: int, delivery?: PurposeLabelDelivery, first_only?: bool}
 
 /** Normalized purpose-label policy. */
-pub type PurposeLabelConfig = {enabled: bool, max_chars: int, delivery: PurposeLabelDelivery}
+pub type PurposeLabelConfig = {enabled: bool, max_chars: int, delivery: PurposeLabelDelivery, first_only: bool}
 
 /** The literal an assistant turn is started at under `prefill` delivery. */
 pub const PURPOSE_LABEL_PREFILL: string = "<purpose>"
@@ -69,6 +69,7 @@ pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
     enabled: false,
     max_chars: PURPOSE_LABEL_DEFAULT_MAX_CHARS,
     delivery: "system",
+    first_only: false,
   }
   if value == nil {
     return defaults
@@ -92,10 +93,15 @@ pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
     throw "agent_loop: purpose_labels.delivery must be system, nudge, or prefill; got "
       + to_string(delivery)
   }
+  const first_only = value?.first_only
+  if first_only != nil && type_of(first_only) != "bool" {
+    throw "agent_loop: purpose_labels.first_only must be a bool; got " + type_of(first_only)
+  }
   return {
     enabled: enabled ?? true,
     max_chars: max_chars ?? defaults.max_chars,
     delivery: delivery ?? defaults.delivery,
+    first_only: first_only ?? false,
   }
 }
 
@@ -165,6 +171,13 @@ pub fn agent_purpose_label_prompt_fragment(config: PurposeLabelConfig) -> string
  * @errors: []
  */
 fn __purpose_label_instruction(config: PurposeLabelConfig) -> string {
+  if config.first_only {
+    return "FIRST TOOL UPDATE. Before the first batch of tools, give the user one short sentence about what you will do next, on its own line in this form:\n"
+      + "<purpose>I'll inspect the project.</purpose>\n"
+      + "Include the update and the work calls in the same response, without an extra turn. "
+      + "Do not add a purpose tag to later batches; answer directly when no tools are needed. "
+      + "Keep the sentence under " + to_string(config.max_chars) + " characters."
+  }
   return "PURPOSE HEADINGS. Every message in which you call tools MUST begin "
     + "with a purpose heading on its own first line, in exactly this form:\n"
     + "<purpose>Searching for GitHub issues</purpose>\n"

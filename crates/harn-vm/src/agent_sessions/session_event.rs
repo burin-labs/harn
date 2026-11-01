@@ -137,12 +137,13 @@ pub(crate) enum TranscriptKind {
     PlanDocument,
     AssistantPublication,
     ProgressReported,
+    PurposeLabel,
     TurnPhaseChanged,
     Other(String),
 }
 
 impl TranscriptKind {
-    const NAMED: [(Self, &'static str); 17] = [
+    const NAMED: [(Self, &'static str); 18] = [
         (Self::Message, "message"),
         (Self::LlmCall, "llm_call"),
         (Self::ToolCall, "tool_call"),
@@ -159,6 +160,7 @@ impl TranscriptKind {
         (Self::PlanDocument, "plan_document"),
         (Self::AssistantPublication, "assistant_publication"),
         (Self::ProgressReported, "progress_reported"),
+        (Self::PurposeLabel, "purpose_label"),
         (Self::TurnPhaseChanged, "turn_phase_changed"),
     ];
 

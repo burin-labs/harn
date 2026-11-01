@@ -283,7 +283,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         if len(tool_calls) > 0 {
           terminal_assessment = nil
         }
-        __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls)
+        __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls, turn_opts)
         const parse_feedback = __agent_loop_record_parse_feedback(
           harness,
           session.session_id,

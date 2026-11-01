@@ -198,6 +198,65 @@ fn progress() -> AppendEvent {
     )
 }
 
+#[tokio::test]
+async fn recap_preserves_declared_tool_purpose_without_exposing_private_drafts() {
+    let store = MemorySessionStore::default();
+    create_session(&store, "purpose-session").await;
+    let declared = identified(
+        custom("purpose_label"),
+        transcript(
+            "purpose_label",
+            "assistant",
+            "internal",
+            "",
+            json!({
+                "label": "I'll inspect the project.", "source": "declared", "iteration": 1,
+                "private_reasoning": "not for the reader"
+            }),
+        ),
+    );
+    let inferred = identified(
+        custom("purpose_label"),
+        transcript(
+            "purpose_label",
+            "assistant",
+            "internal",
+            "",
+            json!({
+                "label": "A guessed reason", "source": "inferred", "iteration": 1
+            }),
+        ),
+    );
+    for event in [
+        user("Inspect the project"),
+        iteration_boundary(1, "iteration_start"),
+        declared,
+        inferred,
+        assistant("private draft", "private"),
+        tool_call("tool-1"),
+        tool_result("tool-1"),
+        iteration_boundary(1, "iteration_end"),
+        terminal(),
+    ] {
+        store.append("purpose-session", event).await.unwrap();
+    }
+    let recap = query_session_recap(&store, SessionRecapQuery::for_session("purpose-session"))
+        .await
+        .unwrap()
+        .unwrap();
+    let progress = &recap.turns[0].iterations[0].progress;
+    assert_eq!(progress.len(), 1);
+    assert_eq!(
+        progress[0].message.as_deref(),
+        Some("I'll inspect the project.")
+    );
+    assert!(progress[0].entries.is_empty());
+    let rendered = serde_json::to_string(&recap).unwrap();
+    assert!(!rendered.contains("private draft"));
+    assert!(!rendered.contains("not for the reader"));
+    assert!(!rendered.contains("A guessed reason"));
+}
+
 fn terminal_secret() -> String {
     format!(
         "{}_{}",

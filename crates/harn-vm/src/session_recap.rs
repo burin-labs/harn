@@ -558,6 +558,8 @@ impl<'a> RecapProjector<'a> {
             self.absorb_plan(turn_index, event, &record);
         } else if record.kind() == Some(&TranscriptKind::ProgressReported) {
             self.absorb_progress(turn_index, event, &record);
+        } else if record.kind() == Some(&TranscriptKind::PurposeLabel) {
+            self.absorb_purpose_label(turn_index, event, &record);
         } else if record.kind() == Some(&TranscriptKind::AgentRunTerminal) {
             self.absorb_terminal(turn_index, event, &record);
         }
@@ -910,6 +912,37 @@ impl<'a> RecapProjector<'a> {
         self.mark_segment_event(turn_index, segment_index, event.event_id);
     }
 
+    fn absorb_purpose_label(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let metadata = record.transcript_event.metadata_json();
+        if metadata.get("source").and_then(serde_json::Value::as_str) != Some("declared") {
+            return;
+        }
+        let Some(label) = metadata
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        else {
+            return;
+        };
+        let message = self.policy.redact_string(label).into_owned();
+        let segment_index = self.current_segment(turn_index);
+        self.turns[turn_index].recap.iterations[segment_index]
+            .progress
+            .push(RecapProgressFact {
+                message: Some(message),
+                entries: Vec::new(),
+                replace: false,
+                source_event_id: event.event_id,
+            });
+        self.mark_segment_event(turn_index, segment_index, event.event_id);
+    }
+
     fn absorb_terminal(
         &mut self,
         turn_index: usize,
@@ -998,6 +1031,7 @@ fn is_recap_event(event: &StoredEvent, record: &TranscriptRecord) -> bool {
                 | TranscriptKind::IterationEnd
                 | TranscriptKind::AssistantPublication
                 | TranscriptKind::ProgressReported
+                | TranscriptKind::PurposeLabel
                 | TranscriptKind::AgentRunTerminal
         )
     )
