@@ -26,7 +26,16 @@ pub(super) fn operation() -> OperationGuard {
     OPERATION_HOLD.with(|hold| {
         let mut hold = hold.borrow_mut();
         if hold.0 == 0 {
-            hold.1 = Some(RETIREMENT.read().unwrap_or_else(|e| e.into_inner()));
+            let shared = match RETIREMENT.try_read() {
+                Ok(shared) => shared,
+                Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    #[cfg(all(test, unix))]
+                    super::tests::gate_wait_hook();
+                    RETIREMENT.read().unwrap_or_else(|e| e.into_inner())
+                }
+            };
+            hold.1 = Some(shared);
         }
         hold.0 += 1;
     });

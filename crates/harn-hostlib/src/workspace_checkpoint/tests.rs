@@ -26,16 +26,34 @@ pub(super) fn retirement_hook() {
     });
 }
 
+thread_local! {
+    static GATE_WAIT_HOOK: std::cell::RefCell<Option<RetirementHook>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs on an operation's thread when it finds a retirement holding the gate.
+pub(super) fn gate_wait_hook() {
+    GATE_WAIT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
+}
+
+#[derive(Debug, PartialEq)]
+enum LoaderEvent {
+    WaitingForRetirement,
+    Finished,
+}
+
 #[test]
 fn a_load_during_retirement_waits_and_finds_no_checkpoint() {
     use std::sync::mpsc::channel;
-    use std::time::Duration;
 
     let (dir, id) = deleted_in_subdir("retiring");
     let root = dir.path().to_path_buf();
     let (held_tx, held_rx) = channel();
     let (release_tx, release_rx) = channel::<()>();
-    let (loaded_tx, loaded_rx) = channel();
+    let (events_tx, events_rx) = channel();
     harn_parser::runtime_stack::scope(|scope| {
         let retiring_id = &id;
         let retiring = scope.spawn(move || {
@@ -56,18 +74,28 @@ fn a_load_during_retirement_waits_and_finds_no_checkpoint() {
         );
         let (loader_id, loader_root) = (&id, &root);
         let loader = scope.spawn(move || {
+            let waiting = events_tx.clone();
+            GATE_WAIT_HOOK.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    let _ = waiting.send(LoaderEvent::WaitingForRetirement);
+                }));
+            });
             let outcomes = [
                 serde_json::to_value(persist::resume(loader_id, loader_root).unwrap()).unwrap(),
                 serde_json::to_value(call_begin(loader_id, "late").unwrap()).unwrap(),
                 serde_json::to_value(plan(loader_id, "turn-1").unwrap()).unwrap(),
             ];
-            loaded_tx.send(()).unwrap();
+            GATE_WAIT_HOOK.with(|slot| *slot.borrow_mut() = None);
+            events_tx.send(LoaderEvent::Finished).unwrap();
             outcomes
         });
-        let ran_during_retirement = loaded_rx.recv_timeout(Duration::from_millis(300)).is_ok();
+        // The first thing the loader reports is either that it found the
+        // retirement holding the gate, or that it already finished.
+        let first = events_rx.recv().unwrap();
         release_tx.send(()).unwrap();
-        assert!(
-            !ran_during_retirement,
+        assert_eq!(
+            first,
+            LoaderEvent::WaitingForRetirement,
             "a load, call admission or plan ran while the session was being retired"
         );
         assert!(retiring.join().unwrap().dropped);
