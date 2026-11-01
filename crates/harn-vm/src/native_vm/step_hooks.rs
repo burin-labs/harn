@@ -156,7 +156,9 @@ pub(super) async fn before(
             None,
         );
         let handler = hook.resolve(vm).await?;
-        let raw = invoke(vm, &handler, HookEvent::PreStep, next).await?;
+        let raw = hook
+            .scope(invoke(vm, &handler, HookEvent::PreStep, next))
+            .await?;
         args = pre_result(raw, args, &definition.name)?;
     }
     // Manifest handlers may register more hooks, so select these afterward.
@@ -209,7 +211,8 @@ pub(super) async fn finish(
             );
             let handler = hook.resolve(vm).await?;
             current = post_result(
-                invoke(vm, &handler, HookEvent::PostStep, next).await?,
+                hook.scope(invoke(vm, &handler, HookEvent::PostStep, next))
+                    .await?,
                 current,
             )?;
         }
