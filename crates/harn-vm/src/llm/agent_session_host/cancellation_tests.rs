@@ -1134,7 +1134,10 @@ fn cancelled_nested_guard_does_not_pop_callers_policy() {
 async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     crate::agent_sessions::reset_session_store();
     let root = tempfile::tempdir().expect("temp root");
+    let raw = tempfile::tempdir().expect("raw transcript");
+    crate::llm::push_llm_transcript_dir(raw.path().to_str().expect("utf8"));
     let session_id = "cancelled-mid-tool";
+    let _current = crate::agent_sessions::enter_current_session(session_id.to_owned());
     let mut options = crate::value::DictMap::new();
     options.put_str("root", root.path().to_string_lossy().as_ref());
     let prepared = crate::agent_session_journal::prepare(
@@ -1148,6 +1151,13 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     crate::llm::agent_session_host::seed_host_session_provider_model(session_id, "mock", "fixture");
+    super::super::AGENT_HOST_SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .get_mut(session_id)
+            .unwrap()
+            .transcript_dir = Some(raw.path().to_str().expect("utf8").to_owned());
+    });
     for message in [
         json!({"role": "user", "content": "run the slow command"}),
         json!({"role": "assistant", "content": "", "tool_calls": [
@@ -1161,9 +1171,53 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
         .expect("enqueue transcript mutation");
     }
 
+    crate::llm::pairing_receipts::emit_tool_call_receipts(&[crate::schema::json_to_vm_value(
+        &json!({"id":"call_stopped","name":"run","arguments":{}}),
+    )]);
+    crate::llm::pop_llm_transcript_dir();
     super::abandon_agent_session(session_id)
         .await
         .expect("abandonment");
+    super::abandon_agent_session(session_id)
+        .await
+        .expect("repeated abandonment");
+    let receipts = std::fs::read_to_string(raw.path().join("llm_transcript.jsonl"))
+        .expect("read raw transcript")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid raw event"))
+        .collect::<Vec<_>>();
+    let calls = receipts
+        .iter()
+        .filter(|event| event["type"] == "tool_call")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        1,
+        "known call receipt proves the raw sink is active: {receipts:#?}"
+    );
+    assert_eq!(calls[0]["assistant_message_index"], 1);
+    let results = receipts
+        .iter()
+        .filter(|event| event["type"] == "tool_result")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results.len(),
+        1,
+        "each cancelled call gets one result receipt: {receipts:#?}"
+    );
+    assert_eq!(results[0]["call_id"], "call_stopped");
+    assert_eq!(results[0]["tool_name"], "run");
+    assert_eq!(results[0]["message_index"], 2);
+    assert_eq!(results[0]["ok"], false);
+    assert_eq!(results[0]["origin"], "harness_repair");
+    let repair = receipts
+        .iter()
+        .find(|event| {
+            event["type"] == "message" && event["message"]["_harn"]["origin"] == "harness_repair"
+        })
+        .expect("the raw receipt must bind to the actual repair message");
+    assert_eq!(repair["message_index"], results[0]["message_index"]);
+    assert_eq!(repair["message"]["tool_call_id"], results[0]["call_id"]);
 
     let store = crate::stdlib::session_store::open_canonical_agent_session(
         &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),

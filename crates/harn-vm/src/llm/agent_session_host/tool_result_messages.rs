@@ -155,6 +155,29 @@ pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue 
     )
 }
 
+/// Publish the receipt only after injection returns the actual message index.
+/// Dispatch and harness repair share this boundary so neither can leave the
+/// raw transcript without the result already present in session history.
+pub(super) fn append_tool_result(
+    session_id: &str,
+    input: ToolResultMessageInput<'_>,
+    tool_format: &str,
+) -> Result<usize, crate::value::VmError> {
+    let (id, name, ok, origin) = (input.tool_call_id, input.name, input.ok, input.origin);
+    let index = crate::agent_sessions::inject_message(session_id, tool_result_message(input))
+        .map_err(crate::value::VmError::Runtime)?;
+    crate::llm::pairing_receipts::emit_tool_result_receipt(
+        session_id,
+        index,
+        id,
+        name,
+        ok,
+        tool_format,
+        origin,
+    );
+    Ok(index)
+}
+
 /// The canonical failed result the harness writes for a native call it answers
 /// itself, marked `HarnessRepair` so completion authorities never read it as
 /// the tool's own outcome.
@@ -343,16 +366,14 @@ pub(super) fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::
 /// keep calls inline in `content`. An orphan here is therefore native by
 /// definition. Its result must stay native even when the primary session's
 /// format lock is text; the active provider lowers the canonical pair later.
+#[cfg(test)]
 pub(super) fn synthesize_orphan_tool_results(
     last_assistant: &VmValue,
     feedback: &str,
     already_paired: &std::collections::BTreeSet<String>,
 ) -> Vec<VmValue> {
     let mut out = Vec::new();
-    for block in assistant_tool_use_blocks(last_assistant) {
-        if !block.id.is_empty() && already_paired.contains(&block.id) {
-            continue;
-        }
+    for block in orphan_tool_uses(last_assistant, already_paired) {
         out.push(tool_result_message(ToolResultMessageInput {
             // The orphaned block is a structured native tool_use; its result
             // must ride the provider's native tool-result role, not the
@@ -373,4 +394,14 @@ pub(super) fn synthesize_orphan_tool_results(
         }));
     }
     out
+}
+
+pub(super) fn orphan_tool_uses(
+    last_assistant: &VmValue,
+    already_paired: &std::collections::BTreeSet<String>,
+) -> Vec<AssistantToolUse> {
+    assistant_tool_use_blocks(last_assistant)
+        .into_iter()
+        .filter(|block| block.id.is_empty() || !already_paired.contains(&block.id))
+        .collect()
 }

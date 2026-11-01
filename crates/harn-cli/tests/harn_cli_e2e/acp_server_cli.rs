@@ -23,6 +23,137 @@ fn lock_acp_cli_tests() -> MutexGuard<'static, ()> {
         .unwrap()
 }
 
+#[test]
+fn acp_cancel_pairs_the_pending_host_call_in_the_raw_transcript() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "cancel.harn",
+        r#"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+struct CommandOutcome { success: bool }
+pipeline main(harness: Harness) {
+  harness.llm.provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "native-fixture-*"
+native_tools = true
+preferred_tool_format = "native"
+""",
+  )
+  defer { harness.llm.provider_capabilities_clear() }
+  const sid = harness.agent.current_id()
+  guard sid != nil else { throw "ACP session is required" }
+  const tools = tool_define(tool_registry(), "slow_command", "Run the command", {
+    handler: { _args ->
+      const result = harness.process.run({program: "pending-host-command", args: []})
+      return CommandOutcome {success: result.success}
+    },
+    parameters: {}, returns: {type: "object"},
+    annotations: {kind: "read", side_effect_level: "read_only"},
+  })
+  return with_llm_script(harness.llm, [
+    llm_tool_call("slow_command", {}, "call_cancelled"), llm_text("Done."),
+  ], { ->
+    return agent_loop(harness, prompt, "Run the command once.", {
+      provider: "testcatalog", model: "native-fixture-route", tool_format: "native",
+      tools: tools, allowed_tools: ["slow_command"], max_iterations: 3,
+      session_id: sid, root: ".", llm_transcript_dir: "raw",
+    })
+  })
+}
+"#,
+    );
+    let mut client = spawn_acp(&temp, "cancel.harn");
+    send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    let (_, created) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0","id":2,"method":"session/new",
+            "params":{"cwd":temp.path(),"environmentPolicy":{"kind":"isolated","grants":[]}}
+        }),
+    );
+    let session = created["result"]["sessionId"]
+        .as_str()
+        .expect("session created");
+    select_code_mode(&mut client, session);
+    client.send(&json!({"jsonrpc":"2.0","id":3,"method":"session/prompt",
+        "params":{"sessionId":session,"prompt":[{"type":"text","text":"Run the command."}]}}));
+    // Wait for the real host operation. No timer or fabricated result decides
+    // whether cancellation reached the call that the transcript must answer.
+    loop {
+        let frame = client.recv();
+        match frame["method"].as_str() {
+            Some("host/capabilities") => {
+                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{}}))
+            }
+            Some("host/call") => {
+                assert_eq!(frame["params"]["name"], "process.exec");
+                assert_eq!(
+                    frame["params"]["args"]["argv"],
+                    json!(["pending-host-command"])
+                );
+                break;
+            }
+            _ => assert_ne!(
+                frame["id"], 3,
+                "prompt ended before host operation: {frame}"
+            ),
+        }
+    }
+    client.send(&json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":session}}));
+    loop {
+        let frame = client.recv();
+        if frame["id"] == 3 {
+            assert!(frame["error"].is_null(), "{frame}");
+            assert_eq!(frame["result"]["stopReason"], "cancelled");
+            break;
+        }
+    }
+    client.shutdown_expect_success();
+    let events: Vec<JsonValue> = fs::read_to_string(temp.path().join("raw/llm_transcript.jsonl"))
+        .expect("read raw transcript")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("valid raw event"))
+        .collect();
+    let calls: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "tool_call")
+        .collect();
+    let results: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "tool_result")
+        .collect();
+    assert_eq!(calls.len(), 1, "the call must reach dispatch: {events:#?}");
+    assert_eq!(calls[0]["call_id"], "call_cancelled");
+    assert_eq!(
+        results.len(),
+        1,
+        "one result must answer the cancelled call: {events:#?}"
+    );
+    assert_eq!(results[0]["call_id"], calls[0]["call_id"]);
+    assert_eq!(results[0]["tool_name"], "slow_command");
+    assert_eq!(results[0]["ok"], false);
+    assert_eq!(results[0]["origin"], "harness_repair");
+    let repair = events
+        .iter()
+        .find(|event| {
+            event["type"] == "message" && event["message"]["_harn"]["origin"] == "harness_repair"
+        })
+        .expect("raw repair message must exist beside its receipt");
+    assert_eq!(repair["message_index"], results[0]["message_index"]);
+    assert_eq!(repair["message"]["tool_call_id"], results[0]["call_id"]);
+    assert!(
+        results[0]["message_index"].as_u64().unwrap()
+            > calls[0]["assistant_message_index"].as_u64().unwrap()
+    );
+}
+
 fn write_fixture(temp: &TempDir) {
     write_file(
         temp.path(),

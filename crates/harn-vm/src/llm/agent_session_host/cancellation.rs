@@ -236,6 +236,15 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     if !has_host_session && !crate::agent_sessions::has_journal(session_id) {
         return Ok(());
     }
+    // Cancellation can run after the original execution scope has unwound.
+    // Bind repair messages and receipts to the retained session's raw sink.
+    let transcript_dir = super::AGENT_HOST_SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(session_id)
+            .and_then(|session| session.transcript_dir.clone())
+    });
+    let _transcript_scope = super::lifecycle::TranscriptDirScope::push(transcript_dir.as_deref());
 
     // Terminalize through the same durable journal as ordinary finalization.
     // On failure, retain both owners so explicit cancellation can be retried.

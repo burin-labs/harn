@@ -309,10 +309,24 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
         return 0;
     };
     let already_paired = paired_tool_result_ids(&messages);
-    let synthetic = synthesize_orphan_tool_results(last, feedback, &already_paired);
     let mut repaired = 0;
-    for message in synthetic {
-        if crate::agent_sessions::inject_message(session_id, message).is_ok() {
+    for block in tool_result_messages::orphan_tool_uses(last, &already_paired) {
+        if tool_result_messages::append_tool_result(
+            session_id,
+            ToolResultMessageInput {
+                channel: crate::llm_config::ToolFormatChannel::Native,
+                name: &block.name,
+                tool_call_id: &block.id,
+                observation: feedback,
+                ok: false,
+                screenshots: &[],
+                data: None,
+                origin: ToolResultOrigin::HarnessRepair,
+            },
+            "native",
+        )
+        .is_ok()
+        {
             repaired += 1;
         }
     }
