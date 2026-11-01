@@ -7,6 +7,84 @@ use super::super::*;
 use super::support::*;
 
 #[tokio::test]
+async fn provider_message_arguments_define_tool_fixture_identity() {
+    let store = MemorySessionStore::default();
+    let session = store.create(CreateSession::default()).await.unwrap();
+    let first_args = json!({"command": "printf alpha", "cwd": "."});
+    let second_args = json!({"command": "printf beta", "cwd": "."});
+    for (call_id, args) in [("first", &first_args), ("second", &second_args)] {
+        let mut provider_message = AppendEvent::new(
+            harn_session_store::SessionEventKind::ToolCall,
+            json!({
+                "record": "transcript",
+                "transcript_event": {
+                    "kind": "message", "role": "assistant", "text": "", "visibility": "internal"
+                },
+                "raw_message": {
+                    "role": "assistant", "content": "",
+                    "tool_calls": [{"id": call_id, "name": "run", "arguments": args}]
+                }
+            }),
+        );
+        provider_message
+            .headers
+            .insert("tool_call_id".into(), call_id.into());
+        store.append(&session.id, provider_message).await.unwrap();
+        store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    harn_session_store::SessionEventKind::ToolCall,
+                    json!({"transcript_event": {
+                        "kind": "tool_call", "role": "assistant", "visibility": "internal",
+                        "metadata": {"tool_call_id": call_id, "tool_name": "run", "raw_input": args}
+                    }}),
+                ),
+            )
+            .await
+            .unwrap();
+        store
+            .append(&session.id, tool_result(call_id, "command output"))
+            .await
+            .unwrap();
+    }
+    store.append(&session.id, AppendEvent::new(
+        harn_session_store::SessionEventKind::ToolCall,
+        json!({"transcript_event": {
+            "kind": "tool_call", "role": "assistant", "visibility": "internal",
+            "metadata": {"tool_call_id": "metadata-only", "tool_name": "run", "raw_input": first_args}
+        }}),
+    )).await.unwrap();
+    let run = project_run_record_from_session(&store, &session.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        run.tool_recordings.len(),
+        3,
+        "provider and execution rows join by identity"
+    );
+    let first = &run.tool_recordings[0];
+    let second = &run.tool_recordings[1];
+    let metadata_only = &run.tool_recordings[2];
+    assert_eq!(
+        first.args_hash,
+        crate::orchestration::records::types::tool_fixture_hash("run", &first_args)
+    );
+    assert_eq!(
+        second.args_hash,
+        crate::orchestration::records::types::tool_fixture_hash("run", &second_args)
+    );
+    assert_ne!(
+        first.args_hash, second.args_hash,
+        "different commands must not share a null-input hash"
+    );
+    assert_eq!(
+        first.args_hash, metadata_only.args_hash,
+        "equal arguments retain the same fixture identity across journal shapes"
+    );
+}
+
+#[tokio::test]
 async fn tool_results_join_by_the_journals_canonical_identity() {
     let store = MemorySessionStore::default();
     let meta = store
