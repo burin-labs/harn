@@ -33,8 +33,8 @@ fn inherited_lease_case() {
         unsafe {
             command.pre_exec(move || {
                 let mut byte = 1u8;
-                if libc::write(ready_fd, (&byte as *const u8).cast(), 1) != 1
-                    || libc::read(release_fd, (&mut byte as *mut u8).cast(), 1) != 1
+                if libc::write(ready_fd, (&raw const byte).cast(), 1) != 1
+                    || libc::read(release_fd, (&raw mut byte).cast(), 1) != 1
                 {
                     libc::_exit(101);
                 }
