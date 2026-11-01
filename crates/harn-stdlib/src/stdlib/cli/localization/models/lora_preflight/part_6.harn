@@ -29,6 +29,9 @@ pub fn message_30(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "erros"
   }
+  if locale == "ru" {
+    return "ошибки"
+  }
   if locale == "zh-Hans" {
     return "错误"
   }
@@ -65,6 +68,9 @@ pub fn message_31(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "IDs de registros não classificados"
   }
+  if locale == "ru" {
+    return "неотнесённые идентификаторы записей"
+  }
   if locale == "zh-Hans" {
     return "未分类记录 ID"
   }
@@ -100,6 +106,9 @@ pub fn message_32(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "avisos"
+  }
+  if locale == "ru" {
+    return "предупреждения"
   }
   if locale == "zh-Hans" {
     return "警告"
