@@ -4,7 +4,10 @@
 // and command evidence a run produced, and the curator's bounded transcript
 // drill-down. The canonical session store owns the events; this module only
 // projects them, redacting before it bounds.
-import { pl_redact_command, pl_sanitize_tool_sequence } from "std/agent/pattern_knowledge_persistence"
+import {
+  pl_redact_command,
+  pl_sanitize_tool_sequence,
+} from "std/agent/pattern_knowledge_persistence"
 import { pl_text } from "std/agent/pattern_knowledge_values"
 import {
   SessionStoreListOptions,
@@ -169,7 +172,6 @@ pub fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
   }
   return false
 }
-
 
 pub fn pl_run_observed_at(events: list, fallback: string) -> string {
   if len(events) == 0 {
