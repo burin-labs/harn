@@ -284,7 +284,14 @@ pub(super) fn trailing_assistant_has_native_tool_use(session_id: &str) -> bool {
 /// is not an assistant turn, carries no structured tool_use (e.g. a homogeneous
 /// text-format run keeps calls inline in `content`), or every block already has
 /// a paired result — so this is a strict no-op for runs that already converge.
-pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize {
+pub(super) fn pair_orphaned_tool_use(
+    session_id: &str,
+    feedback: &str,
+    transcript_dir: Option<&str>,
+) -> usize {
+    // Repair is synchronous, so this route cannot remain installed while a
+    // terminal flush yields to another cleanup on the shared worker thread.
+    let _transcript_scope = super::lifecycle::TranscriptDirScope::push(transcript_dir);
     let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
         return 0;
     };
@@ -359,7 +366,7 @@ fn host_agent_session_pair_orphaned_tool_use_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let feedback = args.get(1).map(|v| v.display()).unwrap_or_default();
-    let repaired = pair_orphaned_tool_use(&session_id, &feedback);
+    let repaired = pair_orphaned_tool_use(&session_id, &feedback, None);
     Ok(VmValue::Int(repaired as i64))
 }
 

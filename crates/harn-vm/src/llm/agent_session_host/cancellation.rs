@@ -244,7 +244,6 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
             .get(session_id)
             .and_then(|session| session.transcript_dir.clone())
     });
-    let _transcript_scope = super::lifecycle::TranscriptDirScope::push(transcript_dir.as_deref());
 
     // Terminalize through the same durable journal as ordinary finalization.
     // On failure, retain both owners so explicit cancellation can be retried.
@@ -262,6 +261,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     super::message_history::pair_orphaned_tool_use(
         session_id,
         crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+        transcript_dir.as_deref(),
     );
     if crate::agent_sessions::has_journal(session_id) {
         let provider_call_count = super::AGENT_HOST_SESSIONS.with(|sessions| {

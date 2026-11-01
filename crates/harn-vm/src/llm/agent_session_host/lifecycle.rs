@@ -491,7 +491,6 @@ pub(super) async fn host_agent_session_finalize(
     let adaptive_budget = opt_json(&status_dict, "adaptive_budget");
 
     let session = finalization.session_mut();
-    let _transcript_scope = TranscriptDirScope::push(session.transcript_dir.as_deref());
 
     // Promote model-less success before the terminal marker so the durable
     // descriptor matches the returned terminal result.
@@ -704,6 +703,7 @@ pub(super) async fn host_agent_session_finalize(
     super::message_history::pair_orphaned_tool_use(
         &session_id,
         crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
+        session.transcript_dir.as_deref(),
     );
     let phase = live_transcript_journal::flush_terminal(
         &session_id,
