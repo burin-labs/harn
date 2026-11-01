@@ -160,11 +160,25 @@ jobs:
           path: release-source
           fetch-depth: 0
           persist-credentials: false
+      - name: Mint consumer revision read authority
+        id: consumer-read
+        if: needs.resolve.outputs.standalone_harn != 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
 
       - name: Decide from the version
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          CONSUMER_READ_TOKEN: ${{ steps.consumer-read.outputs.token }}
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           HEAD_SHA: ${{ needs.resolve.outputs.source_sha }}
           REQUIRES_ATTACHED_CONSUMER: ${{ needs.resolve.outputs.requires_attached_consumer }}
           REQUIRES_CONSUMER_REPAIR: ${{ needs.resolve.outputs.requires_consumer_repair }}
@@ -281,9 +295,12 @@ jobs:
                 exit 1
               fi
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
+              release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
             fi
           else
             release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
+            # The pass must still describe this source, these archives and the consumer revision.
+            release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
           fi
           echo "::notice::Promoting $tag from build run $candidate_run at $HEAD_SHA."
           {
@@ -482,6 +499,33 @@ jobs:
           CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
         run: node scripts/ci/consumer-observer-read-parent.mjs
+      # The source wait above can outlast a consumer change, so the producer's
+      # pass is re-read against the consumer revision just before publication.
+      - name: Mint consumer revision read authority
+        if: needs.plan.outputs.standalone_harn != 'true' && needs.plan.outputs.requires_rehearsal == 'false' && needs.plan.outputs.requires_attached_consumer != 'true'
+        id: binding-read
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Re-read the producer rehearsal binding
+        if: needs.plan.outputs.standalone_harn != 'true' && needs.plan.outputs.requires_rehearsal == 'false' && needs.plan.outputs.requires_attached_consumer != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONSUMER_READ_TOKEN: ${{ steps.binding-read.outputs.token }}
+          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          CANDIDATE_RUN_ID: ${{ needs.plan.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_consumer_verdict.sh
+          source scripts/lib/release_consumer_verdict.sh
+          release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA"
       - name: Require the owning rehearsal result
         if: needs.plan.outputs.standalone_harn != 'true'
         id: authorize

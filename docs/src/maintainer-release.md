@@ -181,13 +181,27 @@ Follow the runs for that commit in
    it and still runs every required product check. Rehearsals without archives
    keep their source or pull-request CLI path. This installation permission
    does not replace the terminal consumer verdict or publication checks.
+   The rehearsal reads `Pairs-with: consumer#N` trailers from every commit
+   between the previous stable tag and the release commit, so a feature
+   commit's pairing selects that consumer pull request without a manual
+   repair. Two distinct pairings refuse and name both pulls. A paired pull
+   already merged into the consumer's default branch rehearses that branch and
+   logs `decision=rehearse_default`; a pull closed without merging refuses.
+   A passing rehearsal uploads `consumer-rehearsal-binding-<attempt>`, which
+   records the source SHA, producer run, candidate manifest digest, consumer
+   run, rehearsed pull, and a digest of the consumer revision it tested.
 3. `promote-release.yml` starts after every successful main run of the
    producer, whatever event started it. When the run's source declares a
    stable version whose transition its first-parent history proves, it finds
    the successful candidate run at that source, waits up to 90 minutes for
    `green` to contain the source, and verifies the manifest, digests, and
    attestations. A version already published from another candidate is a
-   no-op. It also requires successful full-suite main-push
+   no-op. Planning and authorization each re-read the candidate's rehearsal
+   binding and refuse by name when it doesn't describe this source, run, and
+   manifest digest, when a paired pull's head moved or the pull closed, or when
+   the tested consumer revision is no longer in the default branch's history.
+   A default branch that advanced past the tested revision is logged, not
+   refused. It also requires successful full-suite main-push
    CI at the release commit, including every deferred test family. It waits
    for an active run; missing or failed proof blocks publication. It creates
    the tag and GitHub release using those files. After qualification and before
@@ -301,6 +315,11 @@ release publishes.
   may be evicted independently.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Promotion refused a stale rehearsal binding: for `consumer_pull_head_moved`,
+  dispatch the explicit repair below with `-f consumer_pull_request=N`; it
+  measures the pull's current head against the original archives. For
+  `consumer_pull_merged_since_rehearsal`, `consumer_default_diverged`, or a
+  mismatched source, producer, or manifest, request a new source candidate.
 - Candidate succeeded but no completed main run started promotion: dispatch the
   existing promoter on main with that certified candidate's run ID and source:
   `gh workflow run promote-release.yml --repo burin-labs/harn --ref main -f candidate_run_id=RUN_ID -f candidate_sha=FULL_SHA`.
