@@ -60,9 +60,11 @@ describe("documentation assets in the real Vite dev server", () => {
     expect(cached.status).toBe(304)
   })
 
-  it("preserves the default allowed workspace and adds only the docs source tree", () => {
+  it("preserves the default workspace and allows the shared website sources", () => {
     expect(server.config.server.fs.allow).toContain(searchForWorkspaceRoot(websiteRoot))
     expect(server.config.server.fs.allow).toContain(join(REPO_ROOT, "docs/src"))
+    expect(server.config.server.fs.allow).toContain(join(REPO_ROOT, "ui"))
+    expect(server.config.server.fs.allow).toContain(join(REPO_ROOT, "crates/harn-cli/assets/demo"))
     expect(server.config.server.fs.allow).not.toContain(REPO_ROOT)
     expect(server.config.server.fs.allow).not.toContain(outside)
   })

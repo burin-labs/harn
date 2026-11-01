@@ -24,7 +24,11 @@ export function getMessages(locale: Locale = getLocale()): Messages {
 }
 
 export function useMessages(): Messages {
-  return getMessages(useSyncExternalStore(subscribeLocale, getLocale, getServerLocale))
+  return getMessages(useLocale())
+}
+
+export function useLocale(): Locale {
+  return useSyncExternalStore(subscribeLocale, getLocale, getServerLocale)
 }
 
 /** Fill `{name}` placeholders in a message template. */
