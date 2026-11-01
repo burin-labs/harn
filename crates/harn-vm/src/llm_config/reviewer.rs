@@ -365,6 +365,7 @@ fn reviewer_score(
 fn eligible_reviewer_model(model: &ModelDef) -> bool {
     !model.deprecated
         && model.availability == ModelAvailability::Serverless
+        && model.supports_operation(ModelOperation::TextGeneration)
         && !model.quality_tags.iter().any(|tag| tag == "avoid_reviewer")
 }
 

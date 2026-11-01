@@ -434,7 +434,12 @@ fn probe_api_key(
 }
 
 fn missing_key_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::string(message))
+    VmError::Thrown(VmValue::dict([
+        ("message", VmValue::string(message)),
+        ("terminal_class", VmValue::string("provider_misconfigured")),
+        ("category", VmValue::string("auth")),
+        ("origin", VmValue::string("local")),
+    ]))
 }
 
 fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> {
@@ -549,6 +554,47 @@ pub fn no_credentials_message() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credential_resolution_errors_keep_provider_auth_classification() {
+        let error = super::missing_key_error(
+            "Failed to resolve API key secret reference from OPENAI_API_KEY: keyring unavailable"
+                .into(),
+        );
+        let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+            panic!("credential errors must carry typed recovery facts");
+        };
+        assert_eq!(
+            fields
+                .get("terminal_class")
+                .map(crate::value::VmValue::display)
+                .as_deref(),
+            Some("provider_misconfigured")
+        );
+        assert_eq!(
+            fields
+                .get("origin")
+                .map(crate::value::VmValue::display)
+                .as_deref(),
+            Some("local")
+        );
+    }
+
+    #[test]
+    fn missing_secret_reference_remains_actionable_at_the_terminal_boundary() {
+        let _guard = crate::llm::env_guard();
+        let _chain = ScopedEnv::set("HARN_SECRET_PROVIDERS", "env");
+        let error =
+            resolve_auth_env_value("OPENAI_API_KEY", "harn-secret://missing-fixture/no-key")
+                .expect_err("missing reference must fail before dispatch");
+        let projected = crate::llm::call::build_llm_error_dict(&error, "openai", "fixture-model");
+        let facts = crate::llm::vm_value_to_json(&projected);
+        assert_eq!(facts["origin"], "local");
+        assert_eq!(
+            crate::llm::agent_terminal_class("exception", "exception", Some(&facts)),
+            Some(crate::llm::AgentTerminalClass::ProviderMisconfigured)
+        );
+        assert!(!facts.to_string().contains("sk-secret"));
+    }
     use super::*;
 
     struct ScopedEnv {
