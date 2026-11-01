@@ -24,7 +24,8 @@ pub(crate) use dispatch_test_scope::ToolInterceptionScope;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
 pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
 use reminder_spec::parse_reminder_spec;
-use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks};
+pub use vm_entry::VmLifecycleHookInvocation;
+use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks, VmLifecycleHookRegistration};
 
 tokio::task_local! {
     static HOOK_REMINDER_REPORTS_TASK: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>;
@@ -468,44 +469,6 @@ struct RuntimeHook {
     event: HookEvent,
     matcher: PatternMatcher,
     handler: RuntimeHookHandler,
-}
-
-#[derive(Clone, Debug)]
-pub struct VmLifecycleHookInvocation {
-    callable: crate::value::VmCallable,
-    tool_scope: crate::tool_handler_scope::CallbackScope,
-    pub handler_name: String,
-}
-
-impl VmLifecycleHookInvocation {
-    pub(crate) fn scope<F: std::future::Future>(
-        &self,
-        future: F,
-    ) -> std::pin::Pin<Box<impl std::future::Future<Output = F::Output>>> {
-        self.tool_scope.scope(future)
-    }
-
-    /// Resolve this invocation's handler closure against `vm`, loading the
-    /// handler's module on demand for a lazy manifest hook (a cache hit
-    /// when `vm` already imported the graph).
-    pub async fn resolve(&self, vm: &mut crate::vm::Vm) -> Result<Arc<VmClosure>, VmError> {
-        self.tool_scope
-            .scope(vm.resolve_callable(&self.callable))
-            .await
-            .map_err(|error| {
-                VmError::Runtime(format!(
-                    "failed to resolve lifecycle hook '{}': {error}",
-                    self.handler_name
-                ))
-            })
-    }
-}
-
-#[derive(Clone, Debug)]
-struct VmLifecycleHookRegistration {
-    handler_name: String,
-    callable: crate::value::VmCallable,
-    tool_scope: crate::tool_handler_scope::CallbackScope,
 }
 
 thread_local! {

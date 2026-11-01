@@ -1,5 +1,43 @@
 use super::*;
 
+#[derive(Clone, Debug)]
+pub struct VmLifecycleHookInvocation {
+    pub(super) callable: crate::value::VmCallable,
+    pub(super) tool_scope: crate::tool_handler_scope::CallbackScope,
+    pub handler_name: String,
+}
+
+impl VmLifecycleHookInvocation {
+    pub(crate) fn scope<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = F::Output>>> {
+        self.tool_scope.scope(future)
+    }
+
+    /// Resolve this invocation's handler closure against `vm`, loading the
+    /// handler's module on demand for a lazy manifest hook (a cache hit
+    /// when `vm` already imported the graph).
+    pub async fn resolve(&self, vm: &mut crate::vm::Vm) -> Result<Arc<VmClosure>, VmError> {
+        self.tool_scope
+            .scope(vm.resolve_callable(&self.callable))
+            .await
+            .map_err(|error| {
+                VmError::Runtime(format!(
+                    "failed to resolve lifecycle hook '{}': {error}",
+                    self.handler_name
+                ))
+            })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct VmLifecycleHookRegistration {
+    pub(super) handler_name: String,
+    pub(super) callable: crate::value::VmCallable,
+    pub(super) tool_scope: crate::tool_handler_scope::CallbackScope,
+}
+
 /// Invoke a VM-backed hook handler against a child of the firing VM.
 pub(super) async fn invoke_vm_hook_handler(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
