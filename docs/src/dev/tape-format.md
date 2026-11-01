@@ -28,8 +28,8 @@ run.tape.cas/      # content-addressed sidecar (BLAKE3 hex names)
   ```json
   {
     "type": "header",
-    "version": 5,
-    "harn_version": "0.10.182",
+    "version": 6,
+    "harn_version": "0.10.185",
     "started_at_unix_ms": 1700000000000,
     "script_path": "examples/cron-rollup.harn",
     "argv": ["--mode=daily"]
@@ -58,7 +58,7 @@ optional — tapes that never spilled a payload have no sidecar.
 
 ## Record kinds
 
-The current schema (`version = 5`) emits the kinds below. Unknown
+The current schema (`version = 6`) emits the kinds below. Unknown
 record kinds in newer tapes deserialize as `unknown` so older
 fidelity checkers still produce a structured report.
 
@@ -69,7 +69,7 @@ fidelity checkers still produce a structured report.
 | `llm_call` | `request_digest`, `response`, optional `call_index`, `request`, `messages`, `attribution` | LLM provider interception |
 | `cache_lookup` | `namespace`, `key`, `after_calls`, optional `value` | Persistent model-cache lookup |
 | `prompt_render` | `render_id`, `template_uri`, `rendered`, `spans` | Prompt rendering and source attribution |
-| `tool_call` | `call_id`, `tool`, `args_digest`, `after_calls`, `outcome`, `effects`, `transcript_changes`, optional `unservable` | Recorded tool dispatch |
+| `tool_call` | `call_id`, `tool`, `args_digest`, `after_calls`, `outcome`, `effects`, `transcript_changes`, optional `store_changes`, optional `unservable` | Recorded tool dispatch |
 | `decision_evaluation` | `request_digest`, `response` | Typed evaluation request and receipt |
 | `payload_redaction` | none | A full run payload required credential redaction |
 | `file_read` | `path`, `content_hash`, `len_bytes` | `harness.fs.read_text(...)` builtins |
@@ -78,6 +78,10 @@ fidelity checkers still produce a structured report.
 | `process_spawn` | `program`, `args`, `cwd`, `exit_code`, `duration_ms`, `stdout_payload`, `stderr_payload` | Sandboxed subprocess invocation |
 | `mcp_json_rpc` | `server`, `method`, digests, latency, redacted request/response payloads | MCP client exchanges |
 | `model_job` | `job_id`, `request_id`, `backend`, `state`, `event_kind`, event payload, `asset_digests` | Asynchronous model-job lifecycle events and output-asset lineage |
+
+`tool_call.store_changes` is a payload containing ordered runtime store set,
+delete, and clear operations. An empty list measures no operations; a missing
+field means they weren't measured and prevents serving that tool call.
 
 Every record carries the wrapping fields:
 
@@ -145,6 +149,15 @@ The header's `version` integer gates compatibility:
 Loading an older tape does not establish that it supports branching. Branch
 admission also requires the current recording metadata and complete evidence
 for the requested prefix; it refuses missing or incompatible evidence.
+
+### Changes from v5 to v6
+
+Each tool dispatch records `store_changes` as a payload containing ordered
+runtime store operations. An empty list establishes that no operations occurred.
+Missing evidence prevents replay. Store payloads use the same redaction and
+content-addressed storage as tool results. Branch replay updates one store per
+resolved path through its normal writer before continuing execution. Older tapes
+remain readable, but run-tape branches require a new full recording in version 6.
 
 ### Changes from v4 to v5
 

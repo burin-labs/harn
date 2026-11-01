@@ -11,6 +11,9 @@ mod overlap;
 #[path = "run_tape_session_reset_tests.rs"]
 mod session_reset;
 
+#[path = "run_tape_store_tests.rs"]
+mod store_changes;
+
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
 static PROCESS_LOCK: Mutex<()> = Mutex::new(());
@@ -184,7 +187,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     // The tool named by the served response returns its recorded result and
     // writes its recorded effect into the branch workspace without running.
     match serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"})) {
-        ToolServe::Served(outcome, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
+        ToolServe::Served(outcome, _, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
         _ => panic!("expected a served tool call"),
     }
     assert_eq!(
@@ -258,6 +261,13 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     record_llm_call(&request(&text), &result(&text, None));
     let mut recording = begin_tool_call("secret-tool", "write", &serde_json::json!({}), false)
         .expect("active tape recording");
+    recording.store_changes = crate::store::decode_dispatch(
+        &serde_json::to_vec(&serde_json::json!([{
+            "store": "store.json", "operation": {"kind": "set", "entry": {"sensitive": text}}
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
     recording.transcript_changes.push(TranscriptChange::Fields {
         session_id: "session-1".to_string(),
         fields: BTreeMap::from([(

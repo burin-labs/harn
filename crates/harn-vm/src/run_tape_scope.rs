@@ -93,6 +93,10 @@ impl BranchHandle {
         &self.state_root
     }
 
+    pub(crate) fn runtime_store(&self, path: PathBuf) -> crate::store::SharedStore {
+        self.state().runtime_stores.at(path)
+    }
+
     /// Resolve a physical branch asset back to the recorded source identity.
     pub(super) fn prompt_uri(&self, uri: &str) -> String {
         let path = Path::new(uri);

@@ -56,6 +56,15 @@ A refused dispatch is not counted as served.
 Tape version 5 carries these lifecycle records. Field-change records retain their
 version 4 shape, so existing recordings remain readable by the new runtime.
 
+A served dispatch also replays recorded runtime store set, delete, and clear
+operations in order. They update the branch's store through the normal store
+writer before execution continues. VMs sharing that store use one branch-owned
+state, so later writes retain the replayed values. The recording's store file
+isn't changed. Store values use the tape's normal payload redaction and storage.
+Older tool records without `store_changes` remain readable, but can't be served
+because they don't establish which store operations occurred. Record a new full
+tape to replay those tools.
+
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
 prefix. Filesystem builtins resolve absolute paths under the recorded workspace
 into the restored workspace before applying normal permission checks. A mapped
@@ -113,6 +122,8 @@ establishes whether an edit improves model behavior.
 - Overlapping dispatches cannot be served because their workspace scans and
   transcript changes do not establish a reproducible order.
 - A dispatch containing nested inference cannot be served.
+- A failed runtime store write or a store mutation outside the recorded dispatch
+  context makes the dispatch unservable.
 - Redacted payloads, incomplete file-effect observations, and unconsumed prefix
   operations prevent an exact replay.
 - Only observed workspace changes are reapplied. External effects from the
