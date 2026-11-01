@@ -2264,18 +2264,27 @@ type HarnACPPromptCorrelation struct {
 	MessageID *string `json:"messageId,omitempty"`
 }
 type HarnProviderUsage struct {
-	RunID             string   `json:"run_id"`
-	ParentSessionID   string   `json:"parent_session_id"`
-	LineageKnown      bool     `json:"lineage_known"`
-	InputTokens       int64    `json:"input_tokens"`
-	OutputTokens      int64    `json:"output_tokens"`
-	CacheReadTokens   int64    `json:"cache_read_tokens"`
-	CacheWriteTokens  int64    `json:"cache_write_tokens"`
-	ProviderCallCount int64    `json:"provider_call_count"`
-	UnpricedCalls     int64    `json:"unpriced_calls"`
-	UsageUnknownCalls int64    `json:"usage_unknown_calls"`
-	KnownCostUsd      float64  `json:"known_cost_usd"`
-	CostUsd           *float64 `json:"cost_usd"`
+	RunID             string                   `json:"run_id"`
+	ParentSessionID   string                   `json:"parent_session_id"`
+	LineageKnown      bool                     `json:"lineage_known"`
+	InputTokens       int64                    `json:"input_tokens"`
+	OutputTokens      int64                    `json:"output_tokens"`
+	CacheReadTokens   int64                    `json:"cache_read_tokens"`
+	CacheWriteTokens  int64                    `json:"cache_write_tokens"`
+	ProviderCallCount int64                    `json:"provider_call_count"`
+	UnpricedCalls     int64                    `json:"unpriced_calls"`
+	UsageUnknownCalls int64                    `json:"usage_unknown_calls"`
+	KnownCostUsd      float64                  `json:"known_cost_usd"`
+	CostUsd           *float64                 `json:"cost_usd"`
+	ReportedCache     *HarnReportedCacheTotals `json:"reported_cache"`
+}
+
+type HarnReportedCacheTotals struct {
+	ReportedCalls      int64 `json:"reported_calls"`
+	ReadReportedCalls  int64 `json:"read_reported_calls"`
+	WriteReportedCalls int64 `json:"write_reported_calls"`
+	ReadTokens         int64 `json:"read_tokens"`
+	WriteTokens        int64 `json:"write_tokens"`
 }
 type HarnAgentsTaskStatus string
 

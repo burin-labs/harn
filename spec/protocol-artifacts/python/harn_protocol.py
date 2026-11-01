@@ -2468,6 +2468,15 @@ class HarnProviderUsage(_HarnDataclass):
     usage_unknown_calls: int
     known_cost_usd: float
     cost_usd: Optional[float]
+    reported_cache: Optional[HarnReportedCacheTotals]
+
+@dataclass
+class HarnReportedCacheTotals(_HarnDataclass):
+    reported_calls: int
+    read_reported_calls: int
+    write_reported_calls: int
+    read_tokens: int
+    write_tokens: int
 
 
 

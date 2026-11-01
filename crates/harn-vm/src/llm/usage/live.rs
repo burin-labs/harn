@@ -60,13 +60,14 @@ impl ProviderUsage {
 pub fn provider_usage_schema() -> serde_json::Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(ProviderUsage))
         .expect("provider usage schema serializes");
-    // Serde always emits this nullable field. Keep it present when generated
-    // clients encode an unpriced ledger.
+    // Serde always emits these nullable fields, including unknown measurements.
     let required = schema["required"]
         .as_array_mut()
         .expect("provider usage has required fields");
-    if !required.iter().any(|field| field == "cost_usd") {
-        required.push("cost_usd".into());
+    for field in ["cost_usd", "reported_cache"] {
+        if !required.iter().any(|required| required == field) {
+            required.push(field.into());
+        }
     }
     schema
 }

@@ -5401,6 +5401,16 @@ pub struct HarnProviderUsage {
     pub usage_unknown_calls: i64,
     pub known_cost_usd: serde_json::Number,
     pub cost_usd: Option<serde_json::Number>,
+    pub reported_cache: Option<HarnReportedCacheTotals>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnReportedCacheTotals {
+    pub reported_calls: i64,
+    pub read_reported_calls: i64,
+    pub write_reported_calls: i64,
+    pub read_tokens: i64,
+    pub write_tokens: i64,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

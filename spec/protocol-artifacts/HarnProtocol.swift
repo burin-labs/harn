@@ -5206,6 +5206,7 @@ public struct HarnProviderUsage: Codable, Sendable, Equatable {
     public let usageUnknownCalls: Int
     public let knownCostUsd: Double
     public let costUsd: Double?
+    public let reportedCache: HarnReportedCacheTotals?
 
     enum CodingKeys: String, CodingKey {
         case runId = "run_id"
@@ -5220,6 +5221,23 @@ public struct HarnProviderUsage: Codable, Sendable, Equatable {
         case usageUnknownCalls = "usage_unknown_calls"
         case knownCostUsd = "known_cost_usd"
         case costUsd = "cost_usd"
+        case reportedCache = "reported_cache"
+    }
+}
+
+public struct HarnReportedCacheTotals: Codable, Sendable, Equatable {
+    public let reportedCalls: Int
+    public let readReportedCalls: Int
+    public let writeReportedCalls: Int
+    public let readTokens: Int
+    public let writeTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case reportedCalls = "reported_calls"
+        case readReportedCalls = "read_reported_calls"
+        case writeReportedCalls = "write_reported_calls"
+        case readTokens = "read_tokens"
+        case writeTokens = "write_tokens"
     }
 }
 

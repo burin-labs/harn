@@ -15,7 +15,6 @@ reviewed_on = "2026-08-26"
 expires_on = "2026-11-14"
 tracking_issue = 7320
 unverified = [
-  "atlas",
   "cloudflare_ai_gateway",
   "cohere",
   "github_models",
@@ -170,6 +169,12 @@ sources = [
   "https://console.groq.com/docs/prompt-caching",
   "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
 ]
+
+[[usage_accounting_audit.verified]]
+provider = "atlas"
+checked_on = "2026-11-01"
+fields = ["stream"]
+sources = ["https://www.atlascloud.ai/docs/en/llm-protocols"]
 
 [[usage_accounting_audit.verified]]
 provider = "hunyuan"
@@ -897,6 +902,7 @@ path = "/models"
 # Atlas Cloud — OpenAI-compatible coding-plan/provider surface that overlaps
 # GLM, Kimi, DeepSeek, Qwen, and MiniMax families.
 [providers.atlas]
+stream_usage_accounting = true
 base_url = "https://api.atlascloud.ai/v1"
 base_url_env = "ATLAS_BASE_URL"
 auth_style = "bearer"

@@ -15716,6 +15716,7 @@ features = [
     "native_tools",
     "reasoning",
 ]
+stream_usage_accounting = true
 
 [providers.atlas.healthcheck]
 method = "GET"
@@ -16137,6 +16138,7 @@ base_url_env = "HUNYUAN_BASE_URL"
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
 features = ["native_tools"]
+stream_usage_accounting = true
 
 [providers.hunyuan.healthcheck]
 method = "GET"
@@ -16830,6 +16832,7 @@ training_default = "does_not_train"
 auth_style = "none"
 base_url = "http://localhost:8000"
 base_url_env = "VLLM_BASE_URL"
+cache_usage_accounting = true
 chat_endpoint = "/v1/chat/completions"
 completion_endpoint = "/v1/completions"
 cost_per_1k_in = 0.0
@@ -16985,11 +16988,9 @@ expires_on = "2026-11-14"
 reviewed_on = "2026-08-26"
 tracking_issue = 7320
 unverified = [
-    "atlas",
     "cloudflare_ai_gateway",
     "cohere",
     "github_models",
-    "hunyuan",
     "hyperbolic",
     "local",
     "parasail",
@@ -17128,13 +17129,13 @@ sources = [
 ]
 
 [[usage_accounting_audit.verified]]
-checked_on = "2026-10-16"
-fields = ["stream"]
-provider = "vllm"
-sources = [
-    "https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/chat_completion/serving.py",
-    "https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/api_utils.py",
+checked_on = "2026-11-01"
+fields = [
+    "cache",
+    "stream",
 ]
+provider = "vllm"
+sources = ["https://github.com/vllm-project/vllm/blob/3a90cc6fd0504b52bf47d58e8d70cff4b03f2c19/vllm/entrypoints/openai/chat_completion/serving.py"]
 
 [[usage_accounting_audit.verified]]
 checked_on = "2026-10-16"
@@ -17213,6 +17214,18 @@ sources = [
     "https://console.groq.com/docs/prompt-caching",
     "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
 ]
+
+[[usage_accounting_audit.verified]]
+checked_on = "2026-11-01"
+fields = ["stream"]
+provider = "atlas"
+sources = ["https://www.atlascloud.ai/docs/en/llm-protocols"]
+
+[[usage_accounting_audit.verified]]
+checked_on = "2026-11-01"
+fields = ["stream"]
+provider = "hunyuan"
+sources = ["https://cloud.tencent.com/document/product/1729/111007"]
 
 [[usage_accounting_audit.verified]]
 checked_on = "2026-10-16"

@@ -5,7 +5,10 @@ use super::schema_records::SchemaRecords;
 
 pub(super) fn append(out: &mut String, target: Target) {
     let schema = harn_vm::llm::usage::provider_usage_schema();
-    let names = [("", "HarnProviderUsage".to_owned())];
+    let names = [
+        ("", "HarnProviderUsage".to_owned()),
+        ("ReportedCacheTotals", "HarnReportedCacheTotals".to_owned()),
+    ];
     let records = SchemaRecords {
         schema: &schema,
         names: &names,
