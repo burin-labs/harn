@@ -12,6 +12,120 @@ thread_local! {
     static CAPTURE_HOOK: std::cell::RefCell<Option<CaptureHook>> = const { std::cell::RefCell::new(None) };
 }
 
+type RetirementHook = Box<dyn Fn()>;
+
+thread_local! {
+    static RETIREMENT_HOOK: std::cell::RefCell<Option<RetirementHook>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn retirement_hook() {
+    RETIREMENT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
+}
+
+thread_local! {
+    static GATE_WAIT_HOOK: std::cell::RefCell<Option<RetirementHook>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs on an operation's thread when it finds a retirement holding the gate.
+pub(super) fn gate_wait_hook() {
+    GATE_WAIT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow().as_ref() {
+            hook();
+        }
+    });
+}
+
+#[derive(Debug, PartialEq)]
+enum LoaderEvent {
+    WaitingForRetirement,
+    Finished,
+}
+
+#[test]
+fn a_load_during_retirement_waits_and_finds_no_checkpoint() {
+    use std::sync::mpsc::channel;
+
+    let (dir, id) = deleted_in_subdir("retiring");
+    let root = dir.path().to_path_buf();
+    let (held_tx, held_rx) = channel();
+    let (release_tx, release_rx) = channel::<()>();
+    let (events_tx, events_rx) = channel();
+    harn_parser::runtime_stack::scope(|scope| {
+        let retiring_id = &id;
+        let retiring = scope.spawn(move || {
+            RETIREMENT_HOOK.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    held_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                }));
+            });
+            let receipt = drop_session(retiring_id);
+            RETIREMENT_HOOK.with(|slot| *slot.borrow_mut() = None);
+            receipt
+        });
+        held_rx.recv().unwrap();
+        assert!(
+            session_dir(&root, &id).exists(),
+            "the record must still be on disk while retirement is held"
+        );
+        let (loader_id, loader_root) = (&id, &root);
+        let loader = scope.spawn(move || {
+            let waiting = events_tx.clone();
+            GATE_WAIT_HOOK.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    let _ = waiting.send(LoaderEvent::WaitingForRetirement);
+                }));
+            });
+            let outcomes = [
+                serde_json::to_value(persist::resume(loader_id, loader_root).unwrap()).unwrap(),
+                serde_json::to_value(call_begin(loader_id, "late").unwrap()).unwrap(),
+                serde_json::to_value(plan(loader_id, "turn-1").unwrap()).unwrap(),
+            ];
+            GATE_WAIT_HOOK.with(|slot| *slot.borrow_mut() = None);
+            events_tx.send(LoaderEvent::Finished).unwrap();
+            outcomes
+        });
+        // The first thing the loader reports is either that it found the
+        // retirement holding the gate, or that it already finished.
+        let first = events_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            first,
+            LoaderEvent::WaitingForRetirement,
+            "a load, call admission or plan ran while the session was being retired"
+        );
+        assert!(retiring.join().unwrap().dropped);
+        for outcome in loader.join().unwrap() {
+            assert_eq!(outcome["reason"], "no_checkpoint", "{outcome}");
+        }
+    });
+    assert!(find_session(&id).is_none());
+    assert!(!session_dir(&root, &id).exists());
+}
+
+#[test]
+fn a_drop_from_inside_a_checkpoint_operation_is_refused() {
+    let (dir, id) = deleted_in_subdir("drop-inside");
+    let hook_id = id.clone();
+    CALL_BEGIN_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            let receipt = drop_session(&hook_id);
+            assert!(!receipt.dropped);
+            assert!(receipt.error.is_some());
+        }));
+    });
+    call_begin(&id, "tool-2").unwrap();
+    CALL_BEGIN_HOOK.with(|slot| *slot.borrow_mut() = None);
+    call_end(&id, "tool-2", None).unwrap();
+    assert!(find_session(&id).is_some());
+    assert!(drop_session(&id).dropped);
+    assert!(!session_dir(dir.path(), &id).exists());
+}
+
 pub(super) fn capture_hook(stage: CaptureStage) {
     CAPTURE_HOOK.with(|slot| {
         if let Some(hook) = slot.borrow().as_ref() {

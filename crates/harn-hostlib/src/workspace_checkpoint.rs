@@ -43,6 +43,7 @@ mod builtins;
 mod fork;
 mod persist;
 mod receipts;
+mod retire;
 mod scan;
 mod seed;
 mod tape_effects;
@@ -61,6 +62,8 @@ pub use receipts::{
     ConfirmedPath, DropReceipt, IrreversibleEffect, ObservedFileState, Outcome, PlanEntry,
     PlanReceipt, RestoreReceipt, Unavailable, WriterPolicy,
 };
+pub use retire::drop_session;
+use retire::operation;
 #[cfg(all(test, unix))]
 use scan::scan_tree_with_exclusions;
 use scan::{rescan, scan_tree, ScanChange};
@@ -252,6 +255,7 @@ fn lock(session: &SharedSession) -> std::sync::MutexGuard<'_, Session> {
 
 /// Whether a captured session still belongs to the requested workspace root.
 pub fn root_matches(session_id: &str, root: &Path) -> Option<bool> {
+    let _operation = operation();
     find_session(session_id).map(|session| lock(&session).root == resolve_root(Some(root)))
 }
 
@@ -288,6 +292,7 @@ pub fn capture_with_writer_policy(
     root: Option<&Path>,
     requested_policy: Option<WriterPolicy>,
 ) -> Result<Outcome<CaptureReceipt>, HostlibError> {
+    let _operation = operation();
     let fail = backend(CAPTURE_BUILTIN);
     validate_session_id(CAPTURE_BUILTIN, session_id)?;
     require_non_empty(CAPTURE_BUILTIN, "boundary_id", boundary_id)?;
@@ -507,6 +512,7 @@ pub fn call_begin(
     session_id: &str,
     call_id: &str,
 ) -> Result<Outcome<CallBeginReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(CALL_BEGIN_BUILTIN, session_id)?;
     require_non_empty(CALL_BEGIN_BUILTIN, "call_id", call_id)?;
     let Some(session) = find_session(session_id) else {
@@ -544,7 +550,7 @@ pub fn call_begin(
             state.revision = previous_revision;
             return Ok(unavailable(
                 "checkpoint_persist_failed",
-                format!("tool execution was refused before it ran: {error}"),
+                format!("the tool call could not be recorded before it ran: {error}"),
             ));
         }
         (state.root.clone(), state.read_parent_ignores)
@@ -577,6 +583,7 @@ pub fn call_end(
     call_id: &str,
     side_effect: Option<SideEffectLevel>,
 ) -> Result<Outcome<CallEndReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(CALL_END_BUILTIN, session_id)?;
     require_non_empty(CALL_END_BUILTIN, "call_id", call_id)?;
     let Some(session) = find_session(session_id) else {
@@ -690,6 +697,7 @@ pub fn call_end(
 
 /// Compute the restore plan to a boundary without touching the workspace.
 pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(PLAN_BUILTIN, session_id)?;
     require_non_empty(PLAN_BUILTIN, "boundary_id", boundary_id)?;
     let Some(session) = find_session(session_id) else {
@@ -735,6 +743,7 @@ pub fn restore_with_confirmations(
     only_paths: Option<&[String]>,
     confirmed_paths: &[ConfirmedPath],
 ) -> Result<Outcome<RestoreReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(RESTORE_BUILTIN, session_id)?;
     require_non_empty(RESTORE_BUILTIN, "boundary_id", boundary_id)?;
     if only_paths.is_some_and(<[String]>::is_empty) {
@@ -911,35 +920,6 @@ pub fn restore_with_confirmations(
         irreversible: planned.irreversible,
         persistence_error,
     }))
-}
-
-/// Drop a session's checkpoint state and stored blobs.
-pub fn drop_session(session_id: &str) -> DropReceipt {
-    let removed = sessions()
-        .lock()
-        .expect("workspace checkpoint registry poisoned")
-        .remove(session_id);
-    let Some(session) = removed else {
-        return DropReceipt {
-            dropped: false,
-            error: None,
-        };
-    };
-    let root = lock(&session).root.clone();
-    match stdfs::remove_dir_all(session_dir(&root, session_id)) {
-        Ok(()) => DropReceipt {
-            dropped: true,
-            error: None,
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DropReceipt {
-            dropped: true,
-            error: None,
-        },
-        Err(e) => DropReceipt {
-            dropped: false,
-            error: Some(format!("stored files were not removed: {e}")),
-        },
-    }
 }
 
 // ---------------------------------------------------------------------------

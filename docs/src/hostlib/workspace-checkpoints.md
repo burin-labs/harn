@@ -61,6 +61,14 @@ hostlib rejects `true`. A fork inherits this setting. A repeated `messageId`
 is rejected in an opted-in session. The session response confirms the
 setting in `workspaceCheckpointTracking`; clients must not treat a missing
 field as enabled. Captures can be unavailable without blocking the prompt.
+When a tool call cannot be tracked (`call_begin` is unavailable, for example
+after a failed index write), the server drops the session's checkpoints and
+runs the call untracked. Earlier boundaries then plan as `no_checkpoint`;
+later prompts capture new ones. The one exception: when the checkpoint record
+can be neither deleted nor moved aside, the call is refused, because a later
+load could otherwise resume history that never saw it. Loads, captures and
+call admissions wait while a session's record is being dropped, so none of
+them can resume or replace the history being retired.
 Query `plan` before offering file restoration; a failed
 capture returns `{available: false, reason: "capture_failed"}` from `plan`
 and `restore`, even if an older boundary used that ID. Loading an already-live
