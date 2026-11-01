@@ -64,11 +64,12 @@ fn a_load_during_retirement_waits_and_finds_no_checkpoint() {
             loaded_tx.send(()).unwrap();
             outcomes
         });
+        let ran_during_retirement = loaded_rx.recv_timeout(Duration::from_millis(300)).is_ok();
+        release_tx.send(()).unwrap();
         assert!(
-            loaded_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            !ran_during_retirement,
             "a load, call admission or plan ran while the session was being retired"
         );
-        release_tx.send(()).unwrap();
         assert!(retiring.join().unwrap().dropped);
         for outcome in loader.join().unwrap() {
             assert_eq!(outcome["reason"], "no_checkpoint", "{outcome}");
