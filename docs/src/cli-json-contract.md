@@ -394,28 +394,34 @@ replay oracle's verdict on its two recorded executions and declared
 the same replayable run-record shape from the SQLite EventLog
 `observability.agent_events.<id>` topic.
 
-A run record is checked against the replay fixture it recorded. A run
-record that recorded none is checked against an empty fixture, so it
-fails: no verdict compares a run with a fixture derived from that run.
-`harn eval` follows the same rule and refuses a file whose `_type` is not
-`"run_record"`.
+A run record is checked against the replay fixture it carries. A run
+record that carries none is checked against an empty fixture, so it
+fails. A fixture whose `source_run_id` is the run's own `id` was recorded
+from that run when Harn saved it: it is the reference for other runs of
+the workflow, and checking the run it came from reports `checked: false`
+instead of a pass. `harn eval`, eval suites, eval packs and the
+`run_record_eval` builtins follow the same rules, and `harn eval` refuses
+a file whose `_type` is not `"run_record"`.
 
 `fixture.expectations_compared` counts the comparisons the verdict made.
 For a run record that is each recorded expectation: the run status and,
 per stage, each field the assertion sets. For a replay trace it is each
 value compared between the two canonical executions, once, with
-allowlisted fields excluded and counting stopped at the first divergence.
+`run_id` and allowlisted fields excluded and counting stopped at the first divergence.
 `fixture.pass` is true only when that count is above zero and every
 comparison matched, so a fixture that asserts nothing fails instead of
 passing. An offline coding replay reports `expectations_compared` at the
 top of its payload, the fewest comparisons any run made, and fails when
 it is zero.
 
-`fixture.checked` is false for `--session-id`: the run is rebuilt from
-the session's own events, so there is nothing independent to check it
-against. The verdict then reads `rebuilt, not checked`, `pass` is false,
-`expectations_compared` is zero, and success depends only on loading and,
-with `--runs N`, determinism.
+`fixture.checked` is false when nothing independent of the run was
+compared: for `--session-id`, whose run is rebuilt from the session's own
+events, and for a run record checked against the fixture recorded from
+it. The verdict then reads `not checked`, `pass` is false and
+`expectations_compared` is zero. A single replay read with no verdict
+fails with `ok: false`, `error.code: "replay_not_checked"` and exit code 2.
+It succeeds only when the read made another real comparison: a
+`--counterfactual` plan, or the determinism comparison of `--runs N`.
 
 The default `--runs 1` response keeps the original single `ReplayReport`
 payload. When `--runs N` is greater than one, the response keeps

@@ -41,10 +41,32 @@ pipeline main(harness: Harness) {
       ],
     },
   )
+  const good_replay = harness.obs.run_record(
+    {
+      _type: "run_record",
+      id: "run_good_replay",
+      workflow_id: "wf",
+      workflow_name: "demo",
+      task: "demo",
+      status: "completed",
+      started_at: "1",
+      stages: [
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "completed",
+          outcome: "success",
+          started_at: "1",
+        },
+      ],
+    },
+  )
   const fixture = run_record_fixture(good)
+  const own = run_record_eval(good, fixture)
   const suite = run_record_eval_suite(
     [
-      {run: good, fixture: fixture, path: "good.json"},
+      {run: good_replay, fixture: fixture, path: "good.json"},
       {run: bad, fixture: fixture, path: "bad.json"},
     ],
   )
@@ -54,4 +76,5 @@ pipeline main(harness: Harness) {
   harness.stdio.println(len(suite?.cases) == 2)
   harness.stdio.println(diff?.status_changed)
   harness.stdio.println(len(diff?.stage_diffs) == 1)
+  harness.stdio.println(!own?.checked && !own?.pass)
 }

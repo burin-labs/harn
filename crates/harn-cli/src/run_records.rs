@@ -251,7 +251,7 @@ pub(crate) fn inspect_run_record(path: &str, compare: Option<&str>) {
         if run.replay_fixture.is_some() {
             "embedded"
         } else {
-            "derived"
+            "none"
         }
     );
     for stage in &run.stages {

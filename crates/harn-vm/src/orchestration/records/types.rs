@@ -218,6 +218,10 @@ pub struct ReplayStageAssertion {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ReplayEvalReport {
+    /// False when the fixture was recorded from the run being evaluated, so it
+    /// is no independent check of that run. `pass` is then false: a run is
+    /// never reported as passing a comparison with itself.
+    pub checked: bool,
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,

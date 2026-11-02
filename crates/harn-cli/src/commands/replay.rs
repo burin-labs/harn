@@ -14,6 +14,9 @@ use crate::cli::ReplayArgs;
 use crate::json_envelope::{self, JsonEnvelope};
 
 pub(crate) const REPLAY_SCHEMA_VERSION: u32 = 1;
+/// Exit code of a single replay read that compared nothing independent of the
+/// run, so it neither passed nor failed.
+const NO_VERDICT_EXIT: i32 = 2;
 
 pub(crate) fn json_schema() -> JsonValue {
     json!({
@@ -140,9 +143,11 @@ pub(crate) struct ReplayTransition {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayFixtureResult {
-    /// False when the source has no expectations independent of the run, as
-    /// for a session rebuilt from its own events. Nothing is compared, `pass`
-    /// is false, and the replay's verdict rests on loading and determinism.
+    /// False when the source has no expectations independent of the run: a
+    /// session rebuilt from its own events, or a run record whose fixture was
+    /// recorded from that same run. Nothing is compared and `pass` is false.
+    /// A single replay then has no verdict and fails with exit code 2; with
+    /// `--runs N` the determinism comparison decides.
     pub checked: bool,
     /// True only when every recorded expectation matched and at least one was
     /// compared: a fixture that asserts nothing never passes.
@@ -155,7 +160,7 @@ pub(crate) struct ReplayFixtureResult {
 impl ReplayFixtureResult {
     fn from_eval(report: &harn_vm::orchestration::ReplayEvalReport) -> Self {
         Self {
-            checked: true,
+            checked: report.checked,
             pass: report.pass,
             failures: report.failures.clone(),
             stage_count: report.stage_count,
@@ -163,25 +168,37 @@ impl ReplayFixtureResult {
         }
     }
 
-    fn not_checked(stage_count: usize) -> Self {
+    fn not_checked(stage_count: usize, reason: &str) -> Self {
         Self {
             checked: false,
             pass: false,
-            failures: Vec::new(),
+            failures: vec![reason.to_string()],
             stage_count,
             expectations_compared: 0,
         }
     }
 
-    /// Whether this verdict lets the replay succeed: a checked fixture must
-    /// pass, and an unchecked one claims nothing either way.
-    fn holds(&self) -> bool {
-        !self.checked || self.pass
+    /// A checked fixture whose comparison failed. An unchecked one is no
+    /// failure, and never a pass.
+    fn failed(&self) -> bool {
+        self.checked && !self.pass
+    }
+
+    /// Exit code for a single replay read: 0 pass, 1 fail, 2 no verdict. An
+    /// unchecked fixture still succeeds when the read made another real
+    /// comparison, such as a counterfactual plan against the workspace.
+    fn exit_code(&self, compared_elsewhere: bool) -> i32 {
+        match (self.checked, self.pass) {
+            (false, _) if compared_elsewhere => 0,
+            (false, _) => NO_VERDICT_EXIT,
+            (true, true) => 0,
+            (true, false) => 1,
+        }
     }
 
     fn label(&self) -> &'static str {
         match (self.checked, self.pass) {
-            (false, _) => "rebuilt, not checked",
+            (false, _) => "not checked",
             (true, true) => "PASS",
             (true, false) => "FAIL",
         }
@@ -388,8 +405,11 @@ fn run_json(source: ReplaySource, runs: usize) -> i32 {
             .into_iter()
             .next()
             .expect("execute_runs returns one execution for runs=1");
+        let exit = execution
+            .report
+            .fixture
+            .exit_code(execution.report.counterfactual.is_some());
         let envelope = envelope_for_report(execution.report);
-        let exit = i32::from(!envelope.ok);
         println!("{}", json_envelope::to_string_pretty(&envelope));
         return exit;
     }
@@ -403,7 +423,7 @@ fn run_json(source: ReplaySource, runs: usize) -> i32 {
         .iter()
         .map(|execution| execution.event_sequence.clone())
         .collect::<Vec<_>>();
-    let fixture_failed = reports.iter().any(|report| !report.fixture.holds());
+    let fixture_failed = reports.iter().any(|report| report.fixture.failed());
     let ok = !fixture_failed && determinism.pass;
     let error = if ok {
         None
@@ -477,7 +497,7 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         let determinism = determinism_summary(&source, &executions);
         let fixture_failed = executions
             .iter()
-            .any(|execution| !execution.report.fixture.holds());
+            .any(|execution| execution.report.fixture.failed());
         println!(
             "{}",
             crate::localization::formatted!(
@@ -491,7 +511,10 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         }
         return i32::from(fixture_failed || !determinism.pass);
     }
-    i32::from(!executions[0].report.fixture.holds())
+    executions[0]
+        .report
+        .fixture
+        .exit_code(counterfactual.is_some())
 }
 
 fn evaluate_counterfactual(
@@ -665,8 +688,13 @@ fn execute_session_replay(
         })?;
     // The run is rebuilt from the session's own events, so there is nothing
     // independent to check it against.
-    let report =
-        replay_report_with_fixture(&run, ReplayFixtureResult::not_checked(run.stages.len()));
+    let report = replay_report_with_fixture(
+        &run,
+        ReplayFixtureResult::not_checked(
+            run.stages.len(),
+            "the run is rebuilt from the session's own events, so nothing independent checks it",
+        ),
+    );
     let raw_events = events
         .iter()
         .map(|entry| {
@@ -784,20 +812,31 @@ fn replay_report_with_fixture(
 }
 
 fn envelope_for_report(payload: ReplayReport) -> JsonEnvelope<ReplayReport> {
-    if payload.fixture.holds() {
-        JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload)
-    } else {
-        JsonEnvelope {
-            schema_version: REPLAY_SCHEMA_VERSION,
-            ok: false,
-            data: Some(payload),
-            error: Some(json_envelope::JsonError {
-                code: "replay_fixture_failed".to_string(),
-                message: "embedded replay fixture did not pass".to_string(),
-                details: serde_json::Value::Null,
-            }),
-            warnings: Vec::new(),
+    let compared_elsewhere = payload.counterfactual.is_some();
+    let (code, message) = match (payload.fixture.checked, payload.fixture.pass) {
+        (true, true) => return JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload),
+        (false, _) if compared_elsewhere => {
+            return JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload)
         }
+        (true, false) => (
+            "replay_fixture_failed",
+            "embedded replay fixture did not pass",
+        ),
+        (false, _) => (
+            "replay_not_checked",
+            "nothing independent of this run was compared, so the replay has no verdict",
+        ),
+    };
+    JsonEnvelope {
+        schema_version: REPLAY_SCHEMA_VERSION,
+        ok: false,
+        data: Some(payload),
+        error: Some(json_envelope::JsonError {
+            code: code.to_string(),
+            message: message.to_string(),
+            details: serde_json::Value::Null,
+        }),
+        warnings: Vec::new(),
     }
 }
 

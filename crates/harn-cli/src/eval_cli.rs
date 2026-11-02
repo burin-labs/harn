@@ -176,7 +176,14 @@ pub(crate) fn eval_run_record(
     let run = load_run_record_or_exit(&paths[0]);
     let fixture = harn_vm::orchestration::recorded_replay_fixture(&run);
     let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
-    println!("{}", if report.pass { "PASS" } else { "FAIL" });
+    println!(
+        "{}",
+        match (report.checked, report.pass) {
+            (false, _) => "NOT CHECKED",
+            (true, true) => "PASS",
+            (true, false) => "FAIL",
+        }
+    );
     println!("Stages: {}", report.stage_count);
     println!("Expectations compared: {}", report.expectations_compared);
     if let Some(compare_path) = compare {

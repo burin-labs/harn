@@ -206,9 +206,9 @@ pub fn run_replay_oracle_trace(
     })
 }
 
-/// Count the values the oracle compares. Each allowlist rule is applied with
-/// the default placeholder, whatever replacement it declares, so a replaced
-/// section is recognizable and contributes nothing to the count.
+/// Count the values the oracle compares, leaving out the run id. Each
+/// allowlist rule is applied with the default placeholder, whatever replacement
+/// it declares, so a replaced section is recognizable and counts nothing.
 fn compared_value_count(trace: &ReplayOracleTrace) -> Result<usize, ReplayOracleError> {
     let placeholders = trace
         .allowlist
@@ -218,8 +218,14 @@ fn compared_value_count(trace: &ReplayOracleTrace) -> Result<usize, ReplayOracle
             ..rule.clone()
         })
         .collect::<Vec<_>>();
-    let first = canonicalize_run(&trace.first_run, &placeholders)?;
-    let second = canonicalize_run(&trace.second_run, &placeholders)?;
+    let mut first = canonicalize_run(&trace.first_run, &placeholders)?;
+    let mut second = canonicalize_run(&trace.second_run, &placeholders)?;
+    // The run id names an execution; it is not recorded behavior.
+    for run in [&mut first, &mut second] {
+        if let Some(map) = run.as_object_mut() {
+            map.remove("run_id");
+        }
+    }
     Ok(compared_values_at(&first, &second).0)
 }
 

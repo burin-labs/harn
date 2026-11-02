@@ -143,12 +143,15 @@ pub(super) fn friction_suggestion_options(
     }
 }
 
+/// Apply the thresholds that are set and return how many were checked.
 pub(super) fn apply_eval_pack_thresholds(
     run: &RunRecord,
     thresholds: &super::super::types::EvalPackThresholds,
     failures: &mut Vec<String>,
-) {
+) -> usize {
+    let mut checked = 0;
     if let Some(max_stage_count) = thresholds.max_stage_count {
+        checked += 1;
         if run.stages.len() > max_stage_count {
             failures.push(format!(
                 "stage count {} exceeds threshold {}",
@@ -158,6 +161,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_latency_ms) = thresholds.max_latency_ms {
+        checked += 1;
         let actual = run
             .usage
             .as_ref()
@@ -170,6 +174,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_cost_usd) = thresholds.max_cost_usd {
+        checked += 1;
         match run.usage.as_ref().and_then(|usage| usage.cost_usd) {
             Some(actual) if actual > max_cost_usd => failures.push(format!(
                 "cost ${actual:.6} exceeds threshold ${max_cost_usd:.6}"
@@ -179,6 +184,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_tokens) = thresholds.max_tokens {
+        checked += 1;
         let actual = run
             .usage
             .as_ref()
@@ -190,6 +196,7 @@ pub(super) fn apply_eval_pack_thresholds(
             ));
         }
     }
+    checked
 }
 
 pub(super) fn apply_eval_pack_rubric(
@@ -443,9 +450,48 @@ pub fn recorded_replay_fixture(run: &RunRecord) -> ReplayFixture {
     run.replay_fixture.clone().unwrap_or_default()
 }
 
-/// Evaluate a run against a fixture. `pass` means every recorded expectation
-/// matched and at least one was compared.
+/// Failure every evaluator reports when a fixture was recorded from the very
+/// run it is asked to check.
+pub const RECORDED_FROM_THIS_RUN: &str =
+    "the fixture was recorded from this run, so it cannot check it; evaluate another run against it";
+
+/// Failures a case's fixture contributes when the case may also be checked by
+/// other means (rubrics, thresholds, a baseline). A case that names no fixture
+/// falls back to the one its run carries, and that fallback counts only when it
+/// independently compared something: a run's self-recorded fixture never fails
+/// or passes a case that is checked another way. With no other check at all,
+/// the fixture's failures stand, so the case still never passes vacuously.
+pub(super) fn case_fixture_failures(
+    declared: bool,
+    eval: &ReplayEvalReport,
+    other_checks: usize,
+) -> Vec<String> {
+    if declared || (eval.checked && eval.expectations_compared > 0) || other_checks == 0 {
+        eval.failures.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether a fixture was recorded from `run` itself. Such a fixture is the
+/// reference for other runs of the same workflow, never evidence about `run`.
+/// A fixture with no source run is hand-written and so independent.
+pub fn fixture_recorded_from_run(run: &RunRecord, fixture: &ReplayFixture) -> bool {
+    !fixture.source_run_id.is_empty() && fixture.source_run_id == run.id
+}
+
+/// Evaluate a run against a fixture. `pass` means the fixture is independent of
+/// the run, every recorded expectation matched, and at least one was compared.
 pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
+    if fixture_recorded_from_run(run, fixture) {
+        return ReplayEvalReport {
+            checked: false,
+            pass: false,
+            failures: vec![RECORDED_FROM_THIS_RUN.to_string()],
+            stage_count: run.stages.len(),
+            expectations_compared: 0,
+        };
+    }
     let mut report = if fixture.eval_kind.as_deref() == Some("clarifying_question") {
         evaluate_clarifying_question(run, fixture)
     } else {
@@ -523,6 +569,7 @@ fn evaluate_stage_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEva
     }
 
     ReplayEvalReport {
+        checked: true,
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
@@ -613,6 +660,7 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
     }
 
     ReplayEvalReport {
+        checked: true,
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),

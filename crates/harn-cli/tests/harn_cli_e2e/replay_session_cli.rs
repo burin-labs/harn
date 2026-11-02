@@ -103,7 +103,7 @@ fn write_failing_run_record(path: &std::path::Path) {
         "replay_fixture": {
             "_type": "replay_fixture",
             "id": "fixture-expects-completed",
-            "source_run_id": "run-failing-fixture",
+            "source_run_id": "run-reference",
             "workflow_id": "replay-fixture-exit",
             "workflow_name": "Replay fixture exit",
             "created_at": "2026-05-26T00:00:01.000Z",
@@ -255,12 +255,29 @@ fn replay_session_id_reads_events_db_and_compares_runs() {
         ])
         .output()
         .expect("spawn harn replay --session-id");
-    assert!(human.status.success());
+    // One read compares nothing, so it has no verdict: never a pass.
+    assert_eq!(human.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&human.stdout);
     assert!(
-        stdout.contains("Embedded replay fixture: rebuilt, not checked"),
+        stdout.contains("Embedded replay fixture: not checked"),
         "{stdout}"
     );
+
+    let single = harn_e2e_command()
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --session-id --json");
+    assert_eq!(single.status.code(), Some(2));
+    let single = stdout_json(&single);
+    assert_eq!(single["ok"], false);
+    assert_eq!(single["error"]["code"], "replay_not_checked");
 }
 
 #[test]
@@ -871,6 +888,54 @@ fn replay_and_eval_fail_a_run_record_that_recorded_no_fixture() {
     assert!(!eval.status.success(), "harn eval passed: {stdout}");
     assert!(stdout.contains("Expectations compared: 0"), "{stdout}");
     assert!(stdout.contains("nothing was compared"), "{stdout}");
+}
+
+/// A fixture Harn records when it saves a run is the reference for other runs
+/// of that workflow. Checked against the run it was recorded from it can only
+/// match, so replay and eval report no verdict instead of a pass.
+#[test]
+fn a_fixture_recorded_from_the_run_never_passes_that_run() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let record = |id: &str| {
+        json!({
+            "_type": "run_record",
+            "id": id,
+            "workflow_id": "wf",
+            "status": "completed",
+            "replay_fixture": {
+                "_type": "replay_fixture",
+                "id": "fixture-from-run-a",
+                "source_run_id": "run-a",
+                "workflow_id": "wf",
+                "expected_status": "completed",
+                "stage_assertions": []
+            }
+        })
+    };
+    let own = temp.path().join("run-a.json");
+    std::fs::write(&own, serde_json::to_vec(&record("run-a")).unwrap()).unwrap();
+    let (status, parsed) = replay_fixture_json(&own);
+    assert_eq!(status.code(), Some(2), "{parsed}");
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["error"]["code"], "replay_not_checked");
+    assert_eq!(parsed["data"]["fixture"]["checked"], false);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+    let eval = harn_e2e_command()
+        .args(["eval", own.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    let stdout = String::from_utf8_lossy(&eval.stdout);
+    assert!(!eval.status.success(), "{stdout}");
+    assert!(stdout.contains("NOT CHECKED"), "{stdout}");
+    assert!(stdout.contains("recorded from this run"), "{stdout}");
+
+    // The same fixture checks a different run of the workflow.
+    let other = temp.path().join("run-b.json");
+    std::fs::write(&other, serde_json::to_vec(&record("run-b")).unwrap()).unwrap();
+    let (status, parsed) = replay_fixture_json(&other);
+    assert!(status.success(), "{parsed}");
+    assert_eq!(parsed["data"]["fixture"]["checked"], true);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 1);
 }
 
 #[test]
