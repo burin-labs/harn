@@ -1,0 +1,58 @@
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+/**
+ * A repeat of an unchanged emission in a later turn renews the held copy's
+ * TTL without sending it again; a repeat that changes any declared field,
+ * here its TTL or its tags, is sent again.
+ */
+pipeline main(harness: Harness) {
+  const provide = { ttl, tags ->
+    harness.agent.clear_reminder_providers()
+    harness.agent.register_reminder_provider(
+      {
+        id: "steady",
+        subscribes_to: ["session_idle"],
+        evaluate: { _ctx ->
+          return {
+            reminder: {
+              body: "keep the plan current",
+              tags: tags,
+              dedupe_key: "steady",
+              ttl_turns: ttl,
+            },
+          }
+        },
+      },
+    )
+  }
+  const session = harness.agent.open("reminder-provider-repeat-renews")
+  harness.agent.reset(session)
+  const payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0}
+  const fire = { ->
+    agent_reminder_providers_fire(harness.agent, session, "session_idle", payload, {})
+  }
+  const held = { -> transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder") }
+  provide(2, ["steady"])
+  const first = fire()
+  harness.stdio.println(first.fired_count)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 1)
+  harness.stdio.println(held()[0].reminder.ttl_turns)
+  const repeat = fire()
+  harness.stdio.println(repeat.fired_count)
+  harness.stdio.println(repeat.skipped_reports[0].reason)
+  harness.stdio.println(repeat.skipped_reports[0].reminder_id == first.reports[0].reminder_id)
+  harness.stdio.println(held()[0].reminder.ttl_turns)
+  // Without the renewal this post-turn would expire the copy.
+  agent_session_apply_reminder_post_turn(harness.agent, session, 2)
+  harness.stdio.println(len(held()))
+  provide(3, ["steady"])
+  harness.stdio.println(fire().fired_count)
+  provide(3, ["steady", "urgent"])
+  harness.stdio.println(fire().fired_count)
+  harness.stdio.println(len(held()))
+  harness.stdio.println(held()[0].reminder.body)
+  harness.agent.clear_reminder_providers()
+}

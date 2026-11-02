@@ -11,6 +11,7 @@ use crate::value::VmError;
 const DEFAULT_REMINDER_ITERATION_BUDGET_BYTES: usize = 16 * 1024;
 const MIN_REMINDER_ITERATION_BUDGET_BYTES: usize = 256;
 pub(crate) const REMINDER_BODY_HASH_TAG_PREFIX: &str = "body_sha256:";
+const REMINDER_EMISSION_HASH_TAG_PREFIX: &str = "emission_sha256:";
 
 pub(crate) struct ReminderIterationState {
     reports: Vec<JsonValue>,
@@ -114,7 +115,9 @@ fn reminder_iteration_summary_payload(
             untagged_count += 1;
         }
         for tag in &reminder.tags {
-            if tag.starts_with(REMINDER_BODY_HASH_TAG_PREFIX) {
+            if tag.starts_with(REMINDER_BODY_HASH_TAG_PREFIX)
+                || tag.starts_with(REMINDER_EMISSION_HASH_TAG_PREFIX)
+            {
                 continue;
             }
             by_tag.entry(tag.clone()).or_default().observe(reminder);
@@ -170,6 +173,7 @@ impl PreparedReminder {
 enum ReminderIterationDecision {
     Inject(PreparedReminder),
     Skip(JsonValue),
+    Fail(String),
 }
 
 enum ReminderInjectionDecision {
@@ -204,6 +208,7 @@ fn prepare_and_inject_reminder(
             skipped_reports.push(skipped);
             Ok(0)
         }
+        ReminderIterationDecision::Fail(error) => Err(VmError::Runtime(error)),
     }
 }
 
@@ -246,23 +251,37 @@ fn prepare_reminder_for_iteration(
 ) -> ReminderIterationDecision {
     let body_hash = reminder_body_hash(&reminder.body);
     attach_body_hash_tag(&mut reminder, &body_hash);
+    attach_emission_hash_tag(&mut reminder);
     let body_bytes = reminder.body.len();
-    // A non-durable reminder whose unchanged body is still in the session is
-    // already in front of the model, so it is not sent again. Compaction and
-    // TTL expiry remove it, and the next emission then carries the full body.
-    // Durable reminders are retained at injection instead.
+    // A non-durable emission identical to a copy the session still holds is
+    // already in front of the model. That copy's TTL restarts and nothing is
+    // sent. Compaction and TTL expiry remove the copy, and the next emission
+    // then carries the full body. Durable reminders are retained at injection.
     if !reminder.preserve_on_compact {
-        if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
-            if session_holds_reminder_body(session_id, dedupe_key, &body_hash) {
+        let emission_tag = reminder
+            .tags
+            .iter()
+            .find(|tag| tag.starts_with(REMINDER_EMISSION_HASH_TAG_PREFIX))
+            .cloned()
+            .unwrap_or_default();
+        match crate::agent_sessions::renew_unchanged_provider_reminder(
+            session_id,
+            &reminder,
+            &emission_tag,
+        ) {
+            Ok(Some(reminder_id)) => {
                 return ReminderIterationDecision::Skip(serde_json::json!({
                     "provider": provider_id,
                     "reason": "unchanged_in_context",
+                    "reminder_id": reminder_id,
                     "body_bytes": body_bytes,
                     "body_sha256": body_hash,
-                    "dedupe_key": dedupe_key,
+                    "dedupe_key": &reminder.dedupe_key,
                     "tags": &reminder.tags,
                 }));
             }
+            Ok(None) => {}
+            Err(error) => return ReminderIterationDecision::Fail(error),
         }
     }
     if body_bytes > remaining_budget_bytes {
@@ -318,28 +337,25 @@ fn attach_body_hash_tag(reminder: &mut ReminderSpec, body_hash: &str) {
         .push(format!("{REMINDER_BODY_HASH_TAG_PREFIX}{body_hash}"));
 }
 
-fn session_holds_reminder_body(session_id: &str, dedupe_key: &str, body_hash: &str) -> bool {
-    let expected_tag = format!("{REMINDER_BODY_HASH_TAG_PREFIX}{body_hash}");
-    let Some(snapshot) = crate::agent_sessions::snapshot(session_id) else {
-        return false;
-    };
-    let Some(events) = snapshot
-        .as_dict()
-        .and_then(|dict| dict.get("events"))
-        .and_then(|events| match events {
-            crate::value::VmValue::List(events) => Some(events),
-            _ => None,
-        })
-    else {
-        return false;
-    };
-    events.iter().any(|event| {
-        let Some(existing) = crate::llm::helpers::reminder_from_event(event) else {
-            return false;
-        };
-        existing.dedupe_key.as_deref() == Some(dedupe_key)
-            && existing.tags.iter().any(|tag| tag == &expected_tag)
-    })
+/// Tag the reminder with a digest of every field it declares, so a repeat
+/// that changes only its authority, TTL or tags is not taken for unchanged.
+fn attach_emission_hash_tag(reminder: &mut ReminderSpec) {
+    use sha2::Digest as _;
+
+    reminder
+        .tags
+        .retain(|tag| !tag.starts_with(REMINDER_EMISSION_HASH_TAG_PREFIX));
+    let mut declared = reminder.clone();
+    declared.id = String::new();
+    declared.fired_at_turn = 0;
+    declared.tags.sort();
+    let encoded = serde_json::to_vec(&declared).unwrap_or_default();
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&encoded);
+    reminder.tags.push(format!(
+        "{REMINDER_EMISSION_HASH_TAG_PREFIX}{}",
+        hex::encode(hasher.finalize())
+    ));
 }
 
 fn json_i64(value: &JsonValue, key: &str) -> Option<i64> {
