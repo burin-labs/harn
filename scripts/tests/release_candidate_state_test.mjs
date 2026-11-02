@@ -43,7 +43,8 @@ const parentJobs=[{id:901,run_id:900,run_attempt:1,head_sha:policy,name:'Consume
 function fixture(changes={}){
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-recovery-state-'));
   const metadata=(id,name,runId,sha,value)=>{
-    const filename=id===500?'consumer-observer.json':`consumer-observer-${context.dispatch_nonce}.json`;
+    const filename=id===500?'consumer-observer.json':id===502?'candidate-manifest.json':
+      `consumer-observer-${context.dispatch_nonce}.json`;
     const input=path.join(scratch,filename),zip=path.join(scratch,`${id}.zip`);
     fs.writeFileSync(input,JSON.stringify(value));
     execFileSync('zip',['-j',zip,input]);
@@ -51,7 +52,10 @@ function fixture(changes={}){
     return {bytes,artifact:{id,name,expired:false,size_in_bytes:bytes.length,
       digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:runId,head_sha:sha}}};
   };
-  const binding=archiveProducerBinding(qualifyArchiveProducer(producer,jobs,artifacts,
+  const manifest=metadata(502,`candidate-manifest-${source}`,42,source,
+    {schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,runId:'42',runAttempt:'1'});
+  const measured=artifacts.map(item=>item.name===manifest.artifact.name?manifest.artifact:item);
+  const binding=archiveProducerBinding(qualifyArchiveProducer(producer,jobs,measured,
     {sourceRevision:source,runId:'42',attempt:1},targets));
   const expected={...consumer,runId:'73',attempt:1,headSha:head,sourceRevision:source,producerBinding:binding};
   const receipt=admitChild(context,parent,expected,child,{inputs:{observer:JSON.stringify(context),
@@ -64,7 +68,8 @@ function fixture(changes={}){
     const endpoint=new URL(url),route=endpoint.pathname;
     calls.push(route+endpoint.search);
     let value;
-    if(route.endsWith('/zip'))return new Response(route.includes('/500/')?declaration.bytes:ownership.bytes);
+    if(route.endsWith('/zip'))return new Response(route.includes('/500/')?declaration.bytes:
+      route.includes('/502/')?manifest.bytes:ownership.bytes);
     if(route.includes('/workflows/promote-release.yml/runs')){
       const rows=endpoint.searchParams.get('status')==='in_progress'?(changes.promotions??[parent]):[];
       const page=Number(endpoint.searchParams.get('page'));
@@ -76,7 +81,7 @@ function fixture(changes={}){
     else if(route.endsWith('/900/artifacts'))value={total_count:changes.missingWitness?0:1,
       artifacts:changes.missingWitness?[]:[declaration.artifact]};
     else if(route.endsWith('/42/artifacts')){
-      const rows=endpoint.searchParams.has('name')?artifacts.filter(item=>item.name.startsWith('candidate-manifest-')):artifacts;
+      const rows=endpoint.searchParams.has('name')?measured.filter(item=>item.name.startsWith('candidate-manifest-')):measured;
       value={total_count:rows.length,artifacts:rows};
     }else if(route.endsWith('/73/artifacts'))value={total_count:1,artifacts:[ownership.artifact]};
     else if(route.endsWith('/900/attempts/1/jobs'))value={total_count:1,jobs:changes.parentJobs??parentJobs};
@@ -90,7 +95,8 @@ function fixture(changes={}){
       parentReads++;
       value=changes.finalParent&&parentReads>1?changes.finalParent:changes.parent??parent;
     }
-    else if(/\/runs\/42(?:\/attempts\/1)?$/.test(route))value=changes.producer??producer;
+    else if(/\/runs\/42(?:\/attempts\/1)?$/.test(route))value=changes.producer??
+      changes.producers?.find(item=>item.id===42)??producer;
     else if(route.endsWith('/runs/73'))value=changes.child??child;
     else throw Error(`Unexpected fixture route ${route}`);
     return new Response(JSON.stringify(value));
@@ -195,6 +201,14 @@ test('gh read transport preserves ZIP bytes and refuses mutation',async()=>{
     await assert.rejects(ghRead('https://api.github.com/repos/acme/test',{method:'POST'}),/read_endpoint_invalid/);
   }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
 });
+test('unbound run and artifact CLI selectors cannot be used for release decisions',()=>{
+  const reader=fileURLToPath(new URL('../lib/release-candidate-state.mjs',import.meta.url));
+  for(const operation of ['successful-main-runs','artifacts']){
+    const result=spawnSync(process.execPath,[reader,operation,repository,source],{encoding:'utf8'});
+    assert.notEqual(result.status,0);
+    assert.match(result.stderr,/operation_invalid/);
+  }
+});
 test('actual source reuse measures run and artifact page two and refuses either partial inventory',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-source-reuse-'));
   try{
@@ -203,7 +217,18 @@ test('actual source reuse measures run and artifact page two and refuses either 
     const record=path.join(scratch,'fixture.json'),calls=path.join(scratch,'calls');
     const available=[...Array.from({length:100},(_,index)=>`other-${index}`),
       'harn-a','harn-b',`candidate-manifest-${source}`,'harn-release-files']
-      .map((name,index)=>({id:index+1,name,expired:false,size_in_bytes:1}));
+      .map((name,index)=>({id:index+1,name,expired:false,size_in_bytes:1,
+        digest:`sha256:${'d'.repeat(64)}`,workflow_run:{id:42,head_sha:source}}));
+    const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,
+      runId:'42',runAttempt:'1',artifacts:['a','b'].map(target=>({kind:'archive',target,
+        artifact:`harn-${target}`,sha256:'d'.repeat(64)}))};
+    manifest.artifacts.push({kind:'notes',artifact:'harn-release-files',sha256:'e'.repeat(64)});
+    const manifestPath=path.join(scratch,'candidate-manifest.json'),archive=path.join(scratch,'manifest.zip');
+    fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+    execFileSync('zip',['-j',archive,manifestPath]);
+    const bytes=fs.readFileSync(archive),entry=available.find(item=>item.name===`candidate-manifest-${source}`);
+    entry.size_in_bytes=bytes.length;
+    entry.digest=`sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:false}));
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
@@ -213,34 +238,185 @@ fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 if(endpoint.pathname.includes('/workflows/')){
   const page=Number(endpoint.searchParams.get('page'));
   console.log(JSON.stringify({total_count:data.runs.length+(data.partial?1:0),workflow_runs:data.runs.slice((page-1)*100,page*100)}));
-}else {
+}else if(endpoint.pathname.endsWith('/runs/42')){
+  console.log(JSON.stringify(data.runs.at(-1)));
+}else if(endpoint.pathname.endsWith('/runs/42/attempts/1')){
+  console.log(JSON.stringify(data.runs.at(-1)));
+}else if(endpoint.pathname.endsWith('/attempts/1/jobs')){
+  const jobs=['Build a','Build b','Assemble candidate manifest'].map((name,index)=>({id:500+index,name,
+    run_id:42,run_attempt:1,head_sha:'${source}',status:'completed',conclusion:'success'}));
+  console.log(JSON.stringify({total_count:jobs.length,jobs}));
+}else if(endpoint.pathname.endsWith('/artifacts/103/zip')){
+  process.stdout.write(fs.readFileSync(process.env.MANIFEST_ZIP));
+}else if(endpoint.pathname.endsWith('/artifacts')){
   const page=Number(endpoint.searchParams.get('page'));
   console.log(JSON.stringify({total_count:data.available.length+(data.partialArtifacts?1:0),artifacts:data.available.slice((page-1)*100,page*100)}));
-}
+}else process.exit(1);
 `,{mode:0o700});
-    const entry=path.join(scratch,'reuse.sh');
-    fs.writeFileSync(entry,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_candidate_run.sh',import.meta.url))}'\nsource_candidate_live_run_id burin-labs/harn '${source}' '[{"target":"a"},{"target":"b"}]'\n`);
+    const script=path.join(scratch,'reuse.sh');
+    fs.writeFileSync(script,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_candidate_run.sh',import.meta.url))}'\nsource_candidate_live_run_id burin-labs/harn '${source}' '[{"target":"a"},{"target":"b"}]'\n`);
     const options={encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,
-      FIXTURE:record,CALLS:calls,GH_TOKEN:'fixture-read'}};
-    const admitted=spawnSync('bash',[entry],options);
+      FIXTURE:record,CALLS:calls,MANIFEST_ZIP:archive,GH_TOKEN:'fixture-read'}};
+    const admitted=spawnSync('bash',[script],options);
     assert.equal(admitted.status,0,admitted.stderr);
     assert.equal(admitted.stdout.trim(),'42');
     assert.match(fs.readFileSync(calls,'utf8'),/page=2/);
     assert.match(fs.readFileSync(calls,'utf8'),/\/runs\/42\/artifacts\?per_page=100&page=2/);
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:true}));
-    const partial=spawnSync('bash',[entry],options);
+    const partial=spawnSync('bash',[script],options);
     assert.equal(partial.status,1);
     assert.equal(partial.stdout,'');
     assert.match(partial.stderr,/census_unmeasured/);
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:false,partialArtifacts:true}));
-    const partialArtifacts=spawnSync('bash',[entry],options);
+    const partialArtifacts=spawnSync('bash',[script],options);
     assert.equal(partialArtifacts.status,1);
     assert.equal(partialArtifacts.stdout,'');
     assert.match(partialArtifacts.stderr,/census_unmeasured/);
     fs.writeFileSync(record,JSON.stringify({runs:runs.map(row=>({...row,head_branch:undefined})),available}));
-    const unmeasuredBranch=spawnSync('bash',[entry],options);
+    const unmeasuredBranch=spawnSync('bash',[script],options);
     assert.equal(unmeasuredBranch.status,1);
     assert.equal(unmeasuredBranch.stdout,'');
     assert.match(unmeasuredBranch.stderr,/source_census_unmeasured/);
+  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
+test('source reuse binds a complete artifact census to one settled producer attempt',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-source-reuse-attempt-'));
+  try{
+    const calls=path.join(scratch,'calls');
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+import fs from 'node:fs';
+const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
+fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
+const source='${source}';
+const listed={id:42,run_attempt:1,event:process.env.SCENARIO==='scheduled'?'schedule':'push',
+  head_branch:'main',head_sha:source,status:'completed',conclusion:'success',
+  path:'.github/workflows/build-release-binaries.yml',repository:{full_name:'burin-labs/harn'},
+  head_repository:{full_name:'burin-labs/harn'}};
+if(endpoint.pathname.includes('/workflows/')) console.log(JSON.stringify({total_count:1,workflow_runs:[listed]}));
+else if(endpoint.pathname.endsWith('/artifacts')) {
+  const names=['harn-a','candidate-manifest-'+source,'harn-release-files'];
+  const artifacts=names.map((name,index)=>({id:100+index,name,expired:false,size_in_bytes:100,
+    digest:'sha256:'+'d'.repeat(64),workflow_run:{id:42,head_sha:source}}));
+  artifacts[1].digest=process.env.MANIFEST_DIGEST;
+  artifacts[1].size_in_bytes=Number(process.env.MANIFEST_SIZE);
+  if(process.env.SCENARIO==='duplicate') artifacts.push({...artifacts[0],id:103});
+  if(process.env.SCENARIO==='foreign') artifacts[0].workflow_run.id=99;
+  if(process.env.SCENARIO==='changed_artifact'&&previous.includes('/runs/42/artifacts?')) artifacts[0].id=104;
+  console.log(JSON.stringify({total_count:artifacts.length+(process.env.SCENARIO==='partial'?1:0),artifacts}));
+} else if(endpoint.pathname.endsWith('/artifacts/101/zip')) {
+  process.stdout.write(fs.readFileSync(process.env.MANIFEST_ZIP));
+} else if(endpoint.pathname.endsWith('/attempts/1/jobs')) {
+  const jobs=['Build a','Assemble candidate manifest'].map((name,index)=>({id:500+index,name,run_id:42,
+    run_attempt:1,head_sha:source,status:'completed',conclusion:'success'}));
+  if(process.env.SCENARIO==='missing_job') jobs.pop();
+  if(process.env.SCENARIO==='duplicate_job') jobs.push({...jobs[0],id:503,conclusion:'failure'});
+  console.log(JSON.stringify({total_count:jobs.length,jobs}));
+} else if(endpoint.pathname.endsWith('/runs/42/attempts/1')) {
+  console.log(JSON.stringify(process.env.SCENARIO==='attempt_mismatch'?{...listed,conclusion:'failure'}:listed));
+} else if(endpoint.pathname.endsWith('/runs/42')) {
+  const changed=process.env.SCENARIO==='early_change'||
+    (process.env.SCENARIO==='late_change'&&previous.includes('/runs/42\\n'));
+  console.log(JSON.stringify(changed?{...listed,run_attempt:2,status:'in_progress',conclusion:null}:listed));
+} else process.exit(1);
+`,{mode:0o700});
+    const entry=path.join(scratch,'reuse.sh');
+    fs.writeFileSync(entry,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_candidate_run.sh',import.meta.url))}'\nsource_candidate_live_run_id burin-labs/harn '${source}' '[{"target":"a"}]'\n`);
+    for(const scenario of ['good','scheduled','early_change','late_change','duplicate','foreign','partial','missing_job',
+      'manifest_attempt','manifest_source','attempt_mismatch','extra_archive','duplicate_job','changed_artifact']){
+      fs.writeFileSync(calls,'');
+      const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,
+        runId:'42',runAttempt:scenario==='manifest_attempt'?'2':'1',artifacts:[
+          {kind:'archive',target:'a',artifact:'harn-a',sha256:'d'.repeat(64)},
+          {kind:'notes',artifact:'harn-release-files',sha256:'e'.repeat(64)}]};
+      if(scenario==='manifest_source')manifest.sourceCommit='f'.repeat(40);
+      if(scenario==='extra_archive')manifest.artifacts.push({kind:'archive',target:'a',artifact:'other',sha256:'d'.repeat(64)});
+      const archive=path.join(scratch,'manifest.zip');
+      fs.writeFileSync(path.join(scratch,'candidate-manifest.json'),JSON.stringify(manifest));
+      fs.rmSync(archive,{force:true});
+      execFileSync('zip',['-q','-X',archive,'candidate-manifest.json'],{cwd:scratch});
+      const bytes=fs.readFileSync(archive);
+      const result=spawnSync('bash',[entry],{encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,
+        CALLS:calls,SCENARIO:scenario,GH_TOKEN:'fixture-read',MANIFEST_ZIP:archive,
+        MANIFEST_SIZE:String(bytes.length),MANIFEST_DIGEST:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}});
+      if(scenario==='good'||scenario==='scheduled'){
+        assert.equal(result.status,0,result.stderr);
+        assert.equal(result.stdout.trim(),'42');
+      }else{
+        assert.notEqual(result.status,0,`${scenario} must refuse rather than schedule a new build`);
+        assert.equal(result.stdout.trim(),'');
+      }
+    }
+  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
+test('promotion binds rehearsal and manifest to the same settled attempt',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-rehearsal-attempt-'));
+  try{
+    const calls=path.join(scratch,'calls');
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+import fs from 'node:fs';
+const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
+fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
+const source='${source}',head='${head}';
+const run={id:42,run_attempt:1,head_sha:source,status:'completed',conclusion:'success',event:'push',
+  path:'.github/workflows/build-release-binaries.yml',repository:{full_name:'burin-labs/harn'},
+  head_repository:{full_name:'burin-labs/harn'}};
+if(endpoint.pathname.includes('/acme/widget-host')){
+  if(endpoint.pathname.endsWith('/actions/runs/77'))console.log(head);
+  else if(endpoint.pathname.includes('/compare/'))console.log('identical 0');
+  else console.log('main');
+}else if(endpoint.pathname.endsWith('/runs/42/attempts/1'))console.log(JSON.stringify(run));
+else if(endpoint.pathname.endsWith('/runs/42/attempts/1/jobs')){
+  const job={id:600,name:'Consumer release rehearsal / Consumer canary',run_id:42,run_attempt:1,
+    head_sha:source,status:'completed',conclusion:process.env.SCENARIO==='job_failure'?'failure':'success'};
+  console.log(JSON.stringify({total_count:1,jobs:[job]}));
+}
+else if(endpoint.pathname.endsWith('/runs/42')){
+  const n=previous.split('/runs/42\\n').length-1;
+  const changed=(process.env.SCENARIO==='changed'&&n>=1)||
+    (process.env.SCENARIO==='changed_after_consumer'&&n>=2);
+  console.log(JSON.stringify(changed?{...run,run_attempt:2,status:'in_progress',conclusion:null}:run));
+}else if(endpoint.pathname.endsWith('/runs/42/artifacts')){
+  const artifacts=['candidate-manifest-'+source,'consumer-rehearsal-binding-1'].map((name,index)=>({
+    id:100+index,name,expired:false,size_in_bytes:Number(index?process.env.BINDING_SIZE:process.env.MANIFEST_SIZE),
+    digest:index?process.env.BINDING_DIGEST:process.env.MANIFEST_DIGEST,workflow_run:{id:42,head_sha:source}}));
+  if(process.env.SCENARIO==='duplicate')artifacts.push({...artifacts[1],id:102});
+  if(process.env.SCENARIO==='wrong_name')artifacts[1].name='consumer-rehearsal-binding-2';
+  if(process.env.SCENARIO==='bad_digest')artifacts[0].digest='sha256:'+'a'.repeat(64);
+  console.log(JSON.stringify({total_count:artifacts.length+(process.env.SCENARIO==='partial'?1:0),artifacts}));
+}else if(endpoint.pathname.endsWith('/artifacts/100/zip'))process.stdout.write(fs.readFileSync(process.env.MANIFEST_ZIP));
+else if(endpoint.pathname.endsWith('/artifacts/101/zip'))process.stdout.write(fs.readFileSync(process.env.BINDING_ZIP));
+else process.exit(1);
+`,{mode:0o700});
+    const script=path.join(scratch,'binding.sh');
+    fs.writeFileSync(script,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_consumer_verdict.sh',import.meta.url))}'\nrelease_require_rehearsal_binding burin-labs/harn 42 '${source}'\n`);
+    for(const scenario of ['good','partial','duplicate','wrong_name','wrong_attempt','manifest_attempt',
+      'wrong_manifest','changed','changed_after_consumer','job_failure','bad_digest']){
+      fs.writeFileSync(calls,'');
+      const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,
+        runId:'42',runAttempt:scenario==='manifest_attempt'?'2':'1',artifacts:[]};
+      const manifestFile=path.join(scratch,'candidate-manifest.json'),manifestZip=path.join(scratch,'manifest.zip');
+      fs.writeFileSync(manifestFile,JSON.stringify(manifest));fs.rmSync(manifestZip,{force:true});
+      execFileSync('zip',['-q','-X',manifestZip,'candidate-manifest.json'],{cwd:scratch});
+      const manifestBytes=fs.readFileSync(manifestZip),manifestDigest=`sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`;
+      const binding={schema:'harn.release.consumer_rehearsal_binding.v1',verdict:'pass',source_sha:source,
+        producer_run:'42',producer_attempt:scenario==='wrong_attempt'?2:1,
+        manifest_digest:scenario==='wrong_manifest'?`sha256:${'f'.repeat(64)}`:manifestDigest,
+        consumer_run:'77',consumer_head_sha256:createHash('sha256').update(head).digest('hex'),consumer_pull:null};
+      const bindingFile=path.join(scratch,'consumer-rehearsal-binding.json'),bindingZip=path.join(scratch,'binding.zip');
+      fs.writeFileSync(bindingFile,JSON.stringify(binding));fs.rmSync(bindingZip,{force:true});
+      execFileSync('zip',['-q','-X',bindingZip,'consumer-rehearsal-binding.json'],{cwd:scratch});
+      const bindingBytes=fs.readFileSync(bindingZip);
+      const result=spawnSync('bash',[script],{encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,
+        CALLS:calls,SCENARIO:scenario,GH_TOKEN:'fixture-read',CANARY_REPOSITORY:'acme/widget-host',
+        CONSUMER_READ_TOKEN:'fixture-consumer',MANIFEST_ZIP:manifestZip,MANIFEST_SIZE:String(manifestBytes.length),
+        MANIFEST_DIGEST:manifestDigest,BINDING_ZIP:bindingZip,BINDING_SIZE:String(bindingBytes.length),
+        BINDING_DIGEST:`sha256:${createHash('sha256').update(bindingBytes).digest('hex')}`}});
+      if(scenario==='good')assert.equal(result.status,0,result.stderr);
+      else assert.notEqual(result.status,0,`${scenario} accepted: ${result.stderr}`);
+    }
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });
