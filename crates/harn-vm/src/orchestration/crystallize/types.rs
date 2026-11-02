@@ -94,6 +94,7 @@ pub struct CrystallizationAction {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct CrystallizationSideEffect {
     pub kind: String,
     pub target: String,
@@ -104,6 +105,7 @@ pub struct CrystallizationSideEffect {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct CrystallizationApproval {
     pub prompt: Option<String>,
     pub approver: Option<String>,
@@ -134,6 +136,7 @@ pub struct CrystallizationUsage {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(schemars::JsonSchema)]
 pub enum SegmentKind {
     #[default]
     Deterministic,
@@ -205,6 +208,7 @@ pub struct PromotionMetadata {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct PromotionCriteria {
     pub min_examples: usize,
     pub min_confidence: f64,
@@ -218,6 +222,7 @@ pub struct PromotionCriteria {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(schemars::JsonSchema)]
 pub enum PromotionStatus {
     #[default]
     Blocked,
@@ -227,6 +232,7 @@ pub enum PromotionStatus {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct PromotionDivergenceRecord {
     pub trace_id: String,
     pub path: Option<String>,
@@ -237,6 +243,7 @@ pub struct PromotionDivergenceRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct PromotionApprovalRecord {
     pub actor: String,
     pub decision: String,
@@ -246,6 +253,7 @@ pub struct PromotionApprovalRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct SavingsEstimate {
     pub model_calls_avoided: i64,
     pub input_tokens_avoided: i64,
@@ -258,6 +266,7 @@ pub struct SavingsEstimate {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ShadowTraceResult {
     pub trace_id: String,
     pub source_hash: String,
@@ -269,6 +278,7 @@ pub struct ShadowTraceResult {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ShadowRunReport {
     pub pass: bool,
     pub compared_traces: usize,

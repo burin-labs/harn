@@ -1119,6 +1119,16 @@
         "schemaVersion": "harn-tools/2.0"
       },
       "source": "crates/harn-vm/src/tool_registry/contract.rs"
+    },
+    {
+      "artifact": "crystallization-bundle.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::orchestration::CrystallizationBundleManifest",
+        "schema": "harn.crystallization.candidate.bundle",
+        "schema_version": 2
+      },
+      "source": "crates/harn-vm/src/orchestration/crystallize/bundle.rs"
     }
   ]
 }

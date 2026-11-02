@@ -6083,3 +6083,958 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         try container.encode(fields)
     }
 }
+
+public enum HarnCrystallizationKind: String, Codable, Sendable, Equatable { case candidate, planOnly = "plan_only", rejected }
+public enum HarnCrystallizationPromotionStatus: String, Codable, Sendable, Equatable { case blocked, needsApproval = "needs_approval", ready }
+public enum HarnCrystallizationReplayExpectation: String, Codable, Sendable, Equatable { case match, drift }
+public enum HarnCrystallizationSegmentKind: String, Codable, Sendable, Equatable { case deterministic, fuzzy }
+public struct HarnCrystallizationCandidateBundle: Codable, Sendable, Equatable {
+    public var schema: String
+    public var schemaVersion: Int
+    public var generatedAt: String
+    public var generator: HarnCrystallizationGenerator
+    public var kind: HarnCrystallizationKind
+    public var candidateId: String
+    public var externalKey: String
+    public var title: String
+    public var team: String?
+    public var repo: String?
+    public var riskLevel: String
+    public var workflow: HarnCrystallizationWorkflowRef
+    public var sourceTraceHashes: [String]
+    public var sourceTraces: [HarnCrystallizationSourceTrace]
+    public var deterministicSteps: [HarnCrystallizationStep]
+    public var fuzzySteps: [HarnCrystallizationStep]
+    public var sideEffects: [HarnCrystallizationSideEffect]
+    public var capabilities: [String]
+    public var requiredSecrets: [String]
+    public var savings: HarnCrystallizationSavingsEstimate
+    public var shadow: HarnCrystallizationShadowRunReport
+    public var evalPack: HarnCrystallizationEvalPackRef?
+    public var skill: HarnCrystallizationSkillRef?
+    public var fixtures: [HarnCrystallizationFixtureRef]
+    public var promotion: HarnCrystallizationPromotion
+    public var redaction: HarnCrystallizationRedactionSummary
+    public var confidence: Double
+    public var rejectionReasons: [String]
+    public var warnings: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case schemaVersion = "schema_version"
+        case generatedAt = "generated_at"
+        case generator
+        case kind
+        case candidateId = "candidate_id"
+        case externalKey = "external_key"
+        case title
+        case team
+        case repo
+        case riskLevel = "risk_level"
+        case workflow
+        case sourceTraceHashes = "source_trace_hashes"
+        case sourceTraces = "source_traces"
+        case deterministicSteps = "deterministic_steps"
+        case fuzzySteps = "fuzzy_steps"
+        case sideEffects = "side_effects"
+        case capabilities
+        case requiredSecrets = "required_secrets"
+        case savings
+        case shadow
+        case evalPack = "eval_pack"
+        case skill
+        case fixtures
+        case promotion
+        case redaction
+        case confidence
+        case rejectionReasons = "rejection_reasons"
+        case warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try values.decode(String.self, forKey: .schema)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        generatedAt = try values.decode(String.self, forKey: .generatedAt)
+        generator = try values.decode(HarnCrystallizationGenerator.self, forKey: .generator)
+        kind = try values.decode(HarnCrystallizationKind.self, forKey: .kind)
+        candidateId = try values.decode(String.self, forKey: .candidateId)
+        externalKey = try values.decode(String.self, forKey: .externalKey)
+        title = try values.decode(String.self, forKey: .title)
+        team = try values.decode(String?.self, forKey: .team)
+        repo = try values.decode(String?.self, forKey: .repo)
+        riskLevel = try values.decode(String.self, forKey: .riskLevel)
+        workflow = try values.decode(HarnCrystallizationWorkflowRef.self, forKey: .workflow)
+        sourceTraceHashes = try values.decode([String].self, forKey: .sourceTraceHashes)
+        sourceTraces = try values.decode([HarnCrystallizationSourceTrace].self, forKey: .sourceTraces)
+        deterministicSteps = try values.decode([HarnCrystallizationStep].self, forKey: .deterministicSteps)
+        fuzzySteps = try values.decode([HarnCrystallizationStep].self, forKey: .fuzzySteps)
+        sideEffects = try values.decode([HarnCrystallizationSideEffect].self, forKey: .sideEffects)
+        capabilities = try values.decode([String].self, forKey: .capabilities)
+        requiredSecrets = try values.decode([String].self, forKey: .requiredSecrets)
+        savings = try values.decode(HarnCrystallizationSavingsEstimate.self, forKey: .savings)
+        shadow = try values.decode(HarnCrystallizationShadowRunReport.self, forKey: .shadow)
+        evalPack = try values.decode(HarnCrystallizationEvalPackRef?.self, forKey: .evalPack)
+        skill = try values.decode(HarnCrystallizationSkillRef?.self, forKey: .skill)
+        fixtures = try values.decode([HarnCrystallizationFixtureRef].self, forKey: .fixtures)
+        promotion = try values.decode(HarnCrystallizationPromotion.self, forKey: .promotion)
+        redaction = try values.decode(HarnCrystallizationRedactionSummary.self, forKey: .redaction)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        rejectionReasons = try values.decode([String].self, forKey: .rejectionReasons)
+        warnings = try values.decode([String].self, forKey: .warnings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schema, forKey: .schema)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(generatedAt, forKey: .generatedAt)
+        try values.encode(generator, forKey: .generator)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(candidateId, forKey: .candidateId)
+        try values.encode(externalKey, forKey: .externalKey)
+        try values.encode(title, forKey: .title)
+        try values.encode(team, forKey: .team)
+        try values.encode(repo, forKey: .repo)
+        try values.encode(riskLevel, forKey: .riskLevel)
+        try values.encode(workflow, forKey: .workflow)
+        try values.encode(sourceTraceHashes, forKey: .sourceTraceHashes)
+        try values.encode(sourceTraces, forKey: .sourceTraces)
+        try values.encode(deterministicSteps, forKey: .deterministicSteps)
+        try values.encode(fuzzySteps, forKey: .fuzzySteps)
+        try values.encode(sideEffects, forKey: .sideEffects)
+        try values.encode(capabilities, forKey: .capabilities)
+        try values.encode(requiredSecrets, forKey: .requiredSecrets)
+        try values.encode(savings, forKey: .savings)
+        try values.encode(shadow, forKey: .shadow)
+        try values.encode(evalPack, forKey: .evalPack)
+        try values.encode(skill, forKey: .skill)
+        try values.encode(fixtures, forKey: .fixtures)
+        try values.encode(promotion, forKey: .promotion)
+        try values.encode(redaction, forKey: .redaction)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(rejectionReasons, forKey: .rejectionReasons)
+        try values.encode(warnings, forKey: .warnings)
+    }
+
+    public init(schema: String, schemaVersion: Int, generatedAt: String, generator: HarnCrystallizationGenerator, kind: HarnCrystallizationKind, candidateId: String, externalKey: String, title: String, team: String? = nil, repo: String? = nil, riskLevel: String, workflow: HarnCrystallizationWorkflowRef, sourceTraceHashes: [String], sourceTraces: [HarnCrystallizationSourceTrace], deterministicSteps: [HarnCrystallizationStep], fuzzySteps: [HarnCrystallizationStep], sideEffects: [HarnCrystallizationSideEffect], capabilities: [String], requiredSecrets: [String], savings: HarnCrystallizationSavingsEstimate, shadow: HarnCrystallizationShadowRunReport, evalPack: HarnCrystallizationEvalPackRef? = nil, skill: HarnCrystallizationSkillRef? = nil, fixtures: [HarnCrystallizationFixtureRef], promotion: HarnCrystallizationPromotion, redaction: HarnCrystallizationRedactionSummary, confidence: Double, rejectionReasons: [String], warnings: [String]) {
+        self.schema = schema
+        self.schemaVersion = schemaVersion
+        self.generatedAt = generatedAt
+        self.generator = generator
+        self.kind = kind
+        self.candidateId = candidateId
+        self.externalKey = externalKey
+        self.title = title
+        self.team = team
+        self.repo = repo
+        self.riskLevel = riskLevel
+        self.workflow = workflow
+        self.sourceTraceHashes = sourceTraceHashes
+        self.sourceTraces = sourceTraces
+        self.deterministicSteps = deterministicSteps
+        self.fuzzySteps = fuzzySteps
+        self.sideEffects = sideEffects
+        self.capabilities = capabilities
+        self.requiredSecrets = requiredSecrets
+        self.savings = savings
+        self.shadow = shadow
+        self.evalPack = evalPack
+        self.skill = skill
+        self.fixtures = fixtures
+        self.promotion = promotion
+        self.redaction = redaction
+        self.confidence = confidence
+        self.rejectionReasons = rejectionReasons
+        self.warnings = warnings
+    }
+}
+
+public struct HarnCrystallizationEvalPackRef: Codable, Sendable, Equatable {
+    public var path: String
+    public var link: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case link
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        path = try values.decode(String.self, forKey: .path)
+        link = try values.decode(String?.self, forKey: .link)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(path, forKey: .path)
+        try values.encode(link, forKey: .link)
+    }
+
+    public init(path: String, link: String? = nil) {
+        self.path = path
+        self.link = link
+    }
+}
+
+public struct HarnCrystallizationFixtureRef: Codable, Sendable, Equatable {
+    public var path: String
+    public var traceId: String
+    public var sourceHash: String
+    public var redacted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case traceId = "trace_id"
+        case sourceHash = "source_hash"
+        case redacted
+    }
+
+    public init(path: String, traceId: String, sourceHash: String, redacted: Bool) {
+        self.path = path
+        self.traceId = traceId
+        self.sourceHash = sourceHash
+        self.redacted = redacted
+    }
+}
+
+public struct HarnCrystallizationGenerator: Codable, Sendable, Equatable {
+    public var tool: String
+    public var version: String
+
+    enum CodingKeys: String, CodingKey {
+        case tool
+        case version
+    }
+
+    public init(tool: String, version: String) {
+        self.tool = tool
+        self.version = version
+    }
+}
+
+public struct HarnCrystallizationPromotion: Codable, Sendable, Equatable {
+    public var owner: String?
+    public var approver: String?
+    public var author: String?
+    public var rolloutPolicy: String
+    public var rollbackTarget: String?
+    public var createdAt: String
+    public var workflowVersion: String
+    public var packageName: String
+    public var sampleCount: Int
+    public var confidence: Double
+    public var shadowSuccessCount: Int
+    public var shadowFailureCount: Int
+    public var divergenceHistory: [HarnCrystallizationPromotionDivergenceRecord]
+    public var approvalHistory: [HarnCrystallizationPromotionApprovalRecord]
+    public var criteria: HarnCrystallizationPromotionCriteria
+    public var estimatedTimeTokenSavings: HarnCrystallizationSavingsEstimate
+
+    enum CodingKeys: String, CodingKey {
+        case owner
+        case approver
+        case author
+        case rolloutPolicy = "rollout_policy"
+        case rollbackTarget = "rollback_target"
+        case createdAt = "created_at"
+        case workflowVersion = "workflow_version"
+        case packageName = "package_name"
+        case sampleCount = "sample_count"
+        case confidence
+        case shadowSuccessCount = "shadow_success_count"
+        case shadowFailureCount = "shadow_failure_count"
+        case divergenceHistory = "divergence_history"
+        case approvalHistory = "approval_history"
+        case criteria
+        case estimatedTimeTokenSavings = "estimated_time_token_savings"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        owner = try values.decode(String?.self, forKey: .owner)
+        approver = try values.decode(String?.self, forKey: .approver)
+        author = try values.decode(String?.self, forKey: .author)
+        rolloutPolicy = try values.decode(String.self, forKey: .rolloutPolicy)
+        rollbackTarget = try values.decode(String?.self, forKey: .rollbackTarget)
+        createdAt = try values.decode(String.self, forKey: .createdAt)
+        workflowVersion = try values.decode(String.self, forKey: .workflowVersion)
+        packageName = try values.decode(String.self, forKey: .packageName)
+        sampleCount = try values.decode(Int.self, forKey: .sampleCount)
+        confidence = try values.decode(Double.self, forKey: .confidence)
+        shadowSuccessCount = try values.decode(Int.self, forKey: .shadowSuccessCount)
+        shadowFailureCount = try values.decode(Int.self, forKey: .shadowFailureCount)
+        divergenceHistory = try values.decode([HarnCrystallizationPromotionDivergenceRecord].self, forKey: .divergenceHistory)
+        approvalHistory = try values.decode([HarnCrystallizationPromotionApprovalRecord].self, forKey: .approvalHistory)
+        criteria = try values.decode(HarnCrystallizationPromotionCriteria.self, forKey: .criteria)
+        estimatedTimeTokenSavings = try values.decode(HarnCrystallizationSavingsEstimate.self, forKey: .estimatedTimeTokenSavings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(owner, forKey: .owner)
+        try values.encode(approver, forKey: .approver)
+        try values.encode(author, forKey: .author)
+        try values.encode(rolloutPolicy, forKey: .rolloutPolicy)
+        try values.encode(rollbackTarget, forKey: .rollbackTarget)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(workflowVersion, forKey: .workflowVersion)
+        try values.encode(packageName, forKey: .packageName)
+        try values.encode(sampleCount, forKey: .sampleCount)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encode(shadowSuccessCount, forKey: .shadowSuccessCount)
+        try values.encode(shadowFailureCount, forKey: .shadowFailureCount)
+        try values.encode(divergenceHistory, forKey: .divergenceHistory)
+        try values.encode(approvalHistory, forKey: .approvalHistory)
+        try values.encode(criteria, forKey: .criteria)
+        try values.encode(estimatedTimeTokenSavings, forKey: .estimatedTimeTokenSavings)
+    }
+
+    public init(owner: String? = nil, approver: String? = nil, author: String? = nil, rolloutPolicy: String, rollbackTarget: String? = nil, createdAt: String, workflowVersion: String, packageName: String, sampleCount: Int, confidence: Double, shadowSuccessCount: Int, shadowFailureCount: Int, divergenceHistory: [HarnCrystallizationPromotionDivergenceRecord], approvalHistory: [HarnCrystallizationPromotionApprovalRecord], criteria: HarnCrystallizationPromotionCriteria, estimatedTimeTokenSavings: HarnCrystallizationSavingsEstimate) {
+        self.owner = owner
+        self.approver = approver
+        self.author = author
+        self.rolloutPolicy = rolloutPolicy
+        self.rollbackTarget = rollbackTarget
+        self.createdAt = createdAt
+        self.workflowVersion = workflowVersion
+        self.packageName = packageName
+        self.sampleCount = sampleCount
+        self.confidence = confidence
+        self.shadowSuccessCount = shadowSuccessCount
+        self.shadowFailureCount = shadowFailureCount
+        self.divergenceHistory = divergenceHistory
+        self.approvalHistory = approvalHistory
+        self.criteria = criteria
+        self.estimatedTimeTokenSavings = estimatedTimeTokenSavings
+    }
+}
+
+public struct HarnCrystallizationRedactionSummary: Codable, Sendable, Equatable {
+    public var applied: Bool
+    public var rules: [String]
+    public var summary: String
+    public var fixtureCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case applied
+        case rules
+        case summary
+        case fixtureCount = "fixture_count"
+    }
+
+    public init(applied: Bool, rules: [String], summary: String, fixtureCount: Int) {
+        self.applied = applied
+        self.rules = rules
+        self.summary = summary
+        self.fixtureCount = fixtureCount
+    }
+}
+
+public struct HarnCrystallizationSkillRef: Codable, Sendable, Equatable {
+    public var path: String
+    public var gateReceiptPath: String
+    public var name: String
+    public var skillCandidateId: String
+    public var workflowCandidateId: String
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case gateReceiptPath = "gate_receipt_path"
+        case name
+        case skillCandidateId = "skill_candidate_id"
+        case workflowCandidateId = "workflow_candidate_id"
+    }
+
+    public init(path: String, gateReceiptPath: String, name: String, skillCandidateId: String, workflowCandidateId: String) {
+        self.path = path
+        self.gateReceiptPath = gateReceiptPath
+        self.name = name
+        self.skillCandidateId = skillCandidateId
+        self.workflowCandidateId = workflowCandidateId
+    }
+}
+
+public struct HarnCrystallizationSourceTrace: Codable, Sendable, Equatable {
+    public var traceId: String
+    public var sourceHash: String
+    public var sourceUrl: String?
+    public var sourceReceiptId: String?
+    public var fixturePath: String?
+    public var executionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case traceId = "trace_id"
+        case sourceHash = "source_hash"
+        case sourceUrl = "source_url"
+        case sourceReceiptId = "source_receipt_id"
+        case fixturePath = "fixture_path"
+        case executionId = "execution_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        traceId = try values.decode(String.self, forKey: .traceId)
+        sourceHash = try values.decode(String.self, forKey: .sourceHash)
+        sourceUrl = try values.decode(String?.self, forKey: .sourceUrl)
+        sourceReceiptId = try values.decode(String?.self, forKey: .sourceReceiptId)
+        fixturePath = try values.decode(String?.self, forKey: .fixturePath)
+        executionId = try values.decodeIfPresent(String.self, forKey: .executionId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(traceId, forKey: .traceId)
+        try values.encode(sourceHash, forKey: .sourceHash)
+        try values.encode(sourceUrl, forKey: .sourceUrl)
+        try values.encode(sourceReceiptId, forKey: .sourceReceiptId)
+        try values.encode(fixturePath, forKey: .fixturePath)
+        try values.encodeIfPresent(executionId, forKey: .executionId)
+    }
+
+    public init(traceId: String, sourceHash: String, sourceUrl: String? = nil, sourceReceiptId: String? = nil, fixturePath: String? = nil, executionId: String? = nil) {
+        self.traceId = traceId
+        self.sourceHash = sourceHash
+        self.sourceUrl = sourceUrl
+        self.sourceReceiptId = sourceReceiptId
+        self.fixturePath = fixturePath
+        self.executionId = executionId
+    }
+}
+
+public struct HarnCrystallizationStep: Codable, Sendable, Equatable {
+    public var index: Int
+    public var kind: String
+    public var name: String
+    public var segment: HarnCrystallizationSegmentKind
+    public var parameterRefs: [String]
+    public var sideEffectsKnown: Bool
+    public var sideEffects: [HarnCrystallizationSideEffect]
+    public var capabilities: [String]
+    public var requiredSecrets: [String]
+    public var approval: HarnCrystallizationApproval?
+    public var reviewNotes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case index
+        case kind
+        case name
+        case segment
+        case parameterRefs = "parameter_refs"
+        case sideEffectsKnown = "side_effects_known"
+        case sideEffects = "side_effects"
+        case capabilities
+        case requiredSecrets = "required_secrets"
+        case approval
+        case reviewNotes = "review_notes"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        index = try values.decode(Int.self, forKey: .index)
+        kind = try values.decode(String.self, forKey: .kind)
+        name = try values.decode(String.self, forKey: .name)
+        segment = try values.decode(HarnCrystallizationSegmentKind.self, forKey: .segment)
+        parameterRefs = try values.decode([String].self, forKey: .parameterRefs)
+        sideEffectsKnown = try values.decode(Bool.self, forKey: .sideEffectsKnown)
+        sideEffects = try values.decode([HarnCrystallizationSideEffect].self, forKey: .sideEffects)
+        capabilities = try values.decode([String].self, forKey: .capabilities)
+        requiredSecrets = try values.decode([String].self, forKey: .requiredSecrets)
+        approval = try values.decode(HarnCrystallizationApproval?.self, forKey: .approval)
+        reviewNotes = try values.decode([String].self, forKey: .reviewNotes)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(index, forKey: .index)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(name, forKey: .name)
+        try values.encode(segment, forKey: .segment)
+        try values.encode(parameterRefs, forKey: .parameterRefs)
+        try values.encode(sideEffectsKnown, forKey: .sideEffectsKnown)
+        try values.encode(sideEffects, forKey: .sideEffects)
+        try values.encode(capabilities, forKey: .capabilities)
+        try values.encode(requiredSecrets, forKey: .requiredSecrets)
+        try values.encode(approval, forKey: .approval)
+        try values.encode(reviewNotes, forKey: .reviewNotes)
+    }
+
+    public init(index: Int, kind: String, name: String, segment: HarnCrystallizationSegmentKind, parameterRefs: [String], sideEffectsKnown: Bool, sideEffects: [HarnCrystallizationSideEffect], capabilities: [String], requiredSecrets: [String], approval: HarnCrystallizationApproval? = nil, reviewNotes: [String]) {
+        self.index = index
+        self.kind = kind
+        self.name = name
+        self.segment = segment
+        self.parameterRefs = parameterRefs
+        self.sideEffectsKnown = sideEffectsKnown
+        self.sideEffects = sideEffects
+        self.capabilities = capabilities
+        self.requiredSecrets = requiredSecrets
+        self.approval = approval
+        self.reviewNotes = reviewNotes
+    }
+}
+
+public struct HarnCrystallizationWorkflowRef: Codable, Sendable, Equatable {
+    public var path: String
+    public var name: String
+    public var packageName: String
+    public var packageVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case name
+        case packageName = "package_name"
+        case packageVersion = "package_version"
+    }
+
+    public init(path: String, name: String, packageName: String, packageVersion: String) {
+        self.path = path
+        self.name = name
+        self.packageName = packageName
+        self.packageVersion = packageVersion
+    }
+}
+
+public struct HarnCrystallizationApproval: Codable, Sendable, Equatable {
+    public var prompt: String?
+    public var approver: String?
+    public var required: Bool
+    public var boundary: String?
+
+    enum CodingKeys: String, CodingKey {
+        case prompt
+        case approver
+        case required
+        case boundary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        prompt = try values.decode(String?.self, forKey: .prompt)
+        approver = try values.decode(String?.self, forKey: .approver)
+        required = try values.decode(Bool.self, forKey: .required)
+        boundary = try values.decode(String?.self, forKey: .boundary)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(prompt, forKey: .prompt)
+        try values.encode(approver, forKey: .approver)
+        try values.encode(required, forKey: .required)
+        try values.encode(boundary, forKey: .boundary)
+    }
+
+    public init(prompt: String? = nil, approver: String? = nil, required: Bool, boundary: String? = nil) {
+        self.prompt = prompt
+        self.approver = approver
+        self.required = required
+        self.boundary = boundary
+    }
+}
+
+public struct HarnCrystallizationSideEffect: Codable, Sendable, Equatable {
+    public var kind: String
+    public var target: String
+    public var capability: String?
+    public var mutation: String?
+    public var metadata: [String: HarnACPValue]
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case target
+        case capability
+        case mutation
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(String.self, forKey: .kind)
+        target = try values.decode(String.self, forKey: .target)
+        capability = try values.decode(String?.self, forKey: .capability)
+        mutation = try values.decode(String?.self, forKey: .mutation)
+        metadata = try values.decode([String: HarnACPValue].self, forKey: .metadata)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(target, forKey: .target)
+        try values.encode(capability, forKey: .capability)
+        try values.encode(mutation, forKey: .mutation)
+        try values.encode(metadata, forKey: .metadata)
+    }
+
+    public init(kind: String, target: String, capability: String? = nil, mutation: String? = nil, metadata: [String: HarnACPValue]) {
+        self.kind = kind
+        self.target = target
+        self.capability = capability
+        self.mutation = mutation
+        self.metadata = metadata
+    }
+}
+
+public struct HarnCrystallizationPromotionApprovalRecord: Codable, Sendable, Equatable {
+    public var actor: String
+    public var decision: String
+    public var recordedAt: String
+    public var reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case actor
+        case decision
+        case recordedAt = "recorded_at"
+        case reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        actor = try values.decode(String.self, forKey: .actor)
+        decision = try values.decode(String.self, forKey: .decision)
+        recordedAt = try values.decode(String.self, forKey: .recordedAt)
+        reason = try values.decode(String?.self, forKey: .reason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(actor, forKey: .actor)
+        try values.encode(decision, forKey: .decision)
+        try values.encode(recordedAt, forKey: .recordedAt)
+        try values.encode(reason, forKey: .reason)
+    }
+
+    public init(actor: String, decision: String, recordedAt: String, reason: String? = nil) {
+        self.actor = actor
+        self.decision = decision
+        self.recordedAt = recordedAt
+        self.reason = reason
+    }
+}
+
+public struct HarnCrystallizationPromotionCriteria: Codable, Sendable, Equatable {
+    public var minExamples: Int
+    public var minConfidence: Double
+    public var requiresShadowPass: Bool
+    public var requiresNoRejections: Bool
+    public var requiresHumanApproval: Bool
+    public var approvalReason: String?
+    public var status: HarnCrystallizationPromotionStatus
+    public var reasons: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case minExamples = "min_examples"
+        case minConfidence = "min_confidence"
+        case requiresShadowPass = "requires_shadow_pass"
+        case requiresNoRejections = "requires_no_rejections"
+        case requiresHumanApproval = "requires_human_approval"
+        case approvalReason = "approval_reason"
+        case status
+        case reasons
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        minExamples = try values.decode(Int.self, forKey: .minExamples)
+        minConfidence = try values.decode(Double.self, forKey: .minConfidence)
+        requiresShadowPass = try values.decode(Bool.self, forKey: .requiresShadowPass)
+        requiresNoRejections = try values.decode(Bool.self, forKey: .requiresNoRejections)
+        requiresHumanApproval = try values.decode(Bool.self, forKey: .requiresHumanApproval)
+        approvalReason = try values.decode(String?.self, forKey: .approvalReason)
+        status = try values.decode(HarnCrystallizationPromotionStatus.self, forKey: .status)
+        reasons = try values.decode([String].self, forKey: .reasons)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(minExamples, forKey: .minExamples)
+        try values.encode(minConfidence, forKey: .minConfidence)
+        try values.encode(requiresShadowPass, forKey: .requiresShadowPass)
+        try values.encode(requiresNoRejections, forKey: .requiresNoRejections)
+        try values.encode(requiresHumanApproval, forKey: .requiresHumanApproval)
+        try values.encode(approvalReason, forKey: .approvalReason)
+        try values.encode(status, forKey: .status)
+        try values.encode(reasons, forKey: .reasons)
+    }
+
+    public init(minExamples: Int, minConfidence: Double, requiresShadowPass: Bool, requiresNoRejections: Bool, requiresHumanApproval: Bool, approvalReason: String? = nil, status: HarnCrystallizationPromotionStatus, reasons: [String]) {
+        self.minExamples = minExamples
+        self.minConfidence = minConfidence
+        self.requiresShadowPass = requiresShadowPass
+        self.requiresNoRejections = requiresNoRejections
+        self.requiresHumanApproval = requiresHumanApproval
+        self.approvalReason = approvalReason
+        self.status = status
+        self.reasons = reasons
+    }
+}
+
+public struct HarnCrystallizationPromotionDivergenceRecord: Codable, Sendable, Equatable {
+    public var traceId: String
+    public var path: String?
+    public var message: String
+    public var left: HarnACPValue
+    public var right: HarnACPValue
+
+    enum CodingKeys: String, CodingKey {
+        case traceId = "trace_id"
+        case path
+        case message
+        case left
+        case right
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        traceId = try values.decode(String.self, forKey: .traceId)
+        path = try values.decode(String?.self, forKey: .path)
+        message = try values.decode(String.self, forKey: .message)
+        left = try values.decode(HarnACPValue.self, forKey: .left)
+        right = try values.decode(HarnACPValue.self, forKey: .right)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(traceId, forKey: .traceId)
+        try values.encode(path, forKey: .path)
+        try values.encode(message, forKey: .message)
+        try values.encode(left, forKey: .left)
+        try values.encode(right, forKey: .right)
+    }
+
+    public init(traceId: String, path: String? = nil, message: String, left: HarnACPValue, right: HarnACPValue) {
+        self.traceId = traceId
+        self.path = path
+        self.message = message
+        self.left = left
+        self.right = right
+    }
+}
+
+public struct HarnCrystallizationReplayDivergence: Codable, Sendable, Equatable {
+    public var path: String
+    public var left: HarnACPValue
+    public var right: HarnACPValue
+    public var message: String
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case left
+        case right
+        case message
+    }
+
+    public init(path: String, left: HarnACPValue, right: HarnACPValue, message: String) {
+        self.path = path
+        self.left = left
+        self.right = right
+        self.message = message
+    }
+}
+
+public struct HarnCrystallizationReplayOracleReport: Codable, Sendable, Equatable {
+    public var name: String
+    public var expectation: HarnCrystallizationReplayExpectation
+    public var passed: Bool
+    public var firstRunCounts: HarnCrystallizationReplayTraceRunCounts
+    public var secondRunCounts: HarnCrystallizationReplayTraceRunCounts
+    public var protocolFixtureRefs: [String]
+    public var divergence: HarnCrystallizationReplayDivergence?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case expectation
+        case passed
+        case firstRunCounts = "first_run_counts"
+        case secondRunCounts = "second_run_counts"
+        case protocolFixtureRefs = "protocol_fixture_refs"
+        case divergence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        expectation = try values.decode(HarnCrystallizationReplayExpectation.self, forKey: .expectation)
+        passed = try values.decode(Bool.self, forKey: .passed)
+        firstRunCounts = try values.decode(HarnCrystallizationReplayTraceRunCounts.self, forKey: .firstRunCounts)
+        secondRunCounts = try values.decode(HarnCrystallizationReplayTraceRunCounts.self, forKey: .secondRunCounts)
+        protocolFixtureRefs = try values.decode([String].self, forKey: .protocolFixtureRefs)
+        divergence = try values.decode(HarnCrystallizationReplayDivergence?.self, forKey: .divergence)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(name, forKey: .name)
+        try values.encode(expectation, forKey: .expectation)
+        try values.encode(passed, forKey: .passed)
+        try values.encode(firstRunCounts, forKey: .firstRunCounts)
+        try values.encode(secondRunCounts, forKey: .secondRunCounts)
+        try values.encode(protocolFixtureRefs, forKey: .protocolFixtureRefs)
+        try values.encode(divergence, forKey: .divergence)
+    }
+
+    public init(name: String, expectation: HarnCrystallizationReplayExpectation, passed: Bool, firstRunCounts: HarnCrystallizationReplayTraceRunCounts, secondRunCounts: HarnCrystallizationReplayTraceRunCounts, protocolFixtureRefs: [String], divergence: HarnCrystallizationReplayDivergence? = nil) {
+        self.name = name
+        self.expectation = expectation
+        self.passed = passed
+        self.firstRunCounts = firstRunCounts
+        self.secondRunCounts = secondRunCounts
+        self.protocolFixtureRefs = protocolFixtureRefs
+        self.divergence = divergence
+    }
+}
+
+public struct HarnCrystallizationReplayTraceRunCounts: Codable, Sendable, Equatable {
+    public var eventLogEntries: Int
+    public var triggerFirings: Int
+    public var llmInteractions: Int
+    public var protocolInteractions: Int
+    public var approvalInteractions: Int
+    public var effectReceipts: Int
+    public var personaRuntimeStates: Int
+    public var agentTranscriptDeltas: Int
+    public var finalArtifacts: Int
+    public var policyDecisions: Int
+    public var channelReceipts: Int
+    public var lifecycleReceipts: Int
+
+    enum CodingKeys: String, CodingKey {
+        case eventLogEntries = "event_log_entries"
+        case triggerFirings = "trigger_firings"
+        case llmInteractions = "llm_interactions"
+        case protocolInteractions = "protocol_interactions"
+        case approvalInteractions = "approval_interactions"
+        case effectReceipts = "effect_receipts"
+        case personaRuntimeStates = "persona_runtime_states"
+        case agentTranscriptDeltas = "agent_transcript_deltas"
+        case finalArtifacts = "final_artifacts"
+        case policyDecisions = "policy_decisions"
+        case channelReceipts = "channel_receipts"
+        case lifecycleReceipts = "lifecycle_receipts"
+    }
+
+    public init(eventLogEntries: Int, triggerFirings: Int, llmInteractions: Int, protocolInteractions: Int, approvalInteractions: Int, effectReceipts: Int, personaRuntimeStates: Int, agentTranscriptDeltas: Int, finalArtifacts: Int, policyDecisions: Int, channelReceipts: Int, lifecycleReceipts: Int) {
+        self.eventLogEntries = eventLogEntries
+        self.triggerFirings = triggerFirings
+        self.llmInteractions = llmInteractions
+        self.protocolInteractions = protocolInteractions
+        self.approvalInteractions = approvalInteractions
+        self.effectReceipts = effectReceipts
+        self.personaRuntimeStates = personaRuntimeStates
+        self.agentTranscriptDeltas = agentTranscriptDeltas
+        self.finalArtifacts = finalArtifacts
+        self.policyDecisions = policyDecisions
+        self.channelReceipts = channelReceipts
+        self.lifecycleReceipts = lifecycleReceipts
+    }
+}
+
+public struct HarnCrystallizationSavingsEstimate: Codable, Sendable, Equatable {
+    public var modelCallsAvoided: Int
+    public var inputTokensAvoided: Int
+    public var outputTokensAvoided: Int
+    public var estimatedCostUsdAvoided: Double
+    public var wallMsAvoided: Int
+    public var cpuRuntimeCostUsd: Double
+    public var remainingModelCalls: Int
+
+    enum CodingKeys: String, CodingKey {
+        case modelCallsAvoided = "model_calls_avoided"
+        case inputTokensAvoided = "input_tokens_avoided"
+        case outputTokensAvoided = "output_tokens_avoided"
+        case estimatedCostUsdAvoided = "estimated_cost_usd_avoided"
+        case wallMsAvoided = "wall_ms_avoided"
+        case cpuRuntimeCostUsd = "cpu_runtime_cost_usd"
+        case remainingModelCalls = "remaining_model_calls"
+    }
+
+    public init(modelCallsAvoided: Int, inputTokensAvoided: Int, outputTokensAvoided: Int, estimatedCostUsdAvoided: Double, wallMsAvoided: Int, cpuRuntimeCostUsd: Double, remainingModelCalls: Int) {
+        self.modelCallsAvoided = modelCallsAvoided
+        self.inputTokensAvoided = inputTokensAvoided
+        self.outputTokensAvoided = outputTokensAvoided
+        self.estimatedCostUsdAvoided = estimatedCostUsdAvoided
+        self.wallMsAvoided = wallMsAvoided
+        self.cpuRuntimeCostUsd = cpuRuntimeCostUsd
+        self.remainingModelCalls = remainingModelCalls
+    }
+}
+
+public struct HarnCrystallizationShadowRunReport: Codable, Sendable, Equatable {
+    public var pass: Bool
+    public var comparedTraces: Int
+    public var failures: [String]
+    public var traces: [HarnCrystallizationShadowTraceResult]
+
+    enum CodingKeys: String, CodingKey {
+        case pass
+        case comparedTraces = "compared_traces"
+        case failures
+        case traces
+    }
+
+    public init(pass: Bool, comparedTraces: Int, failures: [String], traces: [HarnCrystallizationShadowTraceResult]) {
+        self.pass = pass
+        self.comparedTraces = comparedTraces
+        self.failures = failures
+        self.traces = traces
+    }
+}
+
+public struct HarnCrystallizationShadowTraceResult: Codable, Sendable, Equatable {
+    public var traceId: String
+    public var sourceHash: String
+    public var pass: Bool
+    public var details: [String]
+    public var comparedReceipts: Int
+    public var replayOracle: HarnCrystallizationReplayOracleReport?
+
+    enum CodingKeys: String, CodingKey {
+        case traceId = "trace_id"
+        case sourceHash = "source_hash"
+        case pass
+        case details
+        case comparedReceipts = "compared_receipts"
+        case replayOracle = "replay_oracle"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        traceId = try values.decode(String.self, forKey: .traceId)
+        sourceHash = try values.decode(String.self, forKey: .sourceHash)
+        pass = try values.decode(Bool.self, forKey: .pass)
+        details = try values.decode([String].self, forKey: .details)
+        comparedReceipts = try values.decode(Int.self, forKey: .comparedReceipts)
+        replayOracle = try values.decode(HarnCrystallizationReplayOracleReport?.self, forKey: .replayOracle)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(traceId, forKey: .traceId)
+        try values.encode(sourceHash, forKey: .sourceHash)
+        try values.encode(pass, forKey: .pass)
+        try values.encode(details, forKey: .details)
+        try values.encode(comparedReceipts, forKey: .comparedReceipts)
+        try values.encode(replayOracle, forKey: .replayOracle)
+    }
+
+    public init(traceId: String, sourceHash: String, pass: Bool, details: [String], comparedReceipts: Int, replayOracle: HarnCrystallizationReplayOracleReport? = nil) {
+        self.traceId = traceId
+        self.sourceHash = sourceHash
+        self.pass = pass
+        self.details = details
+        self.comparedReceipts = comparedReceipts
+        self.replayOracle = replayOracle
+    }
+}
+
+public enum HarnCrystallizationBundleFormat {
+    public static let evalPackFile = "harn.eval.toml"
+    public static let fixturesDir = "fixtures"
+    public static let manifestFile = "candidate.json"
+    public static let reportFile = "report.json"
+    public static let schemaIdentifier = "harn.crystallization.candidate.bundle"
+    public static let schemaVersion = 2
+    public static let skillDir = "skill"
+    public static let skillFile = "SKILL.md"
+    public static let skillGateFile = "gate.json"
+    public static let workflowFile = "workflow.harn"
+}

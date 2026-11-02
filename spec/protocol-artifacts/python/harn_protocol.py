@@ -1037,8 +1037,8 @@ _T = TypeVar("_T", bound="_HarnDataclass")
 class _HarnDataclass:
     """Mixin providing wire-faithful ``to_wire`` / ``from_wire`` helpers.
 
-    ``to_wire`` strips fields that are ``None`` so the JSON envelope stays
-    minimal and matches what the Rust adapters emit. ``from_wire`` accepts a
+    ``to_wire`` strips absent optional fields and preserves required nulls
+    declared by a generated schema. ``from_wire`` accepts a
     decoded JSON object plus any unknown extension fields, ignoring keys
     that the static schema does not yet know about so additive enum or
     struct extensions stay forward-compatible.
@@ -1048,21 +1048,28 @@ class _HarnDataclass:
     def from_wire(cls: Type[_T], data: Mapping[str, Any]) -> _T:
         if not isinstance(data, Mapping):
             raise TypeError(f"{cls.__name__}.from_wire expected a mapping, got {type(data).__name__}")
-        accepted = {f.name for f in fields(cls)}  # type: ignore[arg-type]
-        kwargs = {key: value for key, value in data.items() if key in accepted}
+        accepted = {f.metadata.get("wire_name", f.name): f.name for f in fields(cls)}  # type: ignore[arg-type]
+        kwargs = {accepted[key]: value for key, value in data.items() if key in accepted}
         return cls(**kwargs)
 
     def to_wire(self) -> JsonObject:
         if not is_dataclass(self):
             raise TypeError("to_wire requires a dataclass instance")
-        return _strip_none(asdict(self))
+        return _strip_none(self)
 
 
-def _strip_none(value: Any) -> Any:
+def _strip_none(value: Any, preserve_dict_nulls: bool = False) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        required = getattr(type(value), "__harn_required_fields__", frozenset())
+        return {
+            f.metadata.get("wire_name", f.name): _strip_none(getattr(value, f.name), preserve_dict_nulls or bool(required))
+            for f in fields(value)
+            if getattr(value, f.name) is not None or f.metadata.get("wire_name", f.name) in required
+        }
     if isinstance(value, dict):
-        return {key: _strip_none(item) for key, item in value.items() if item is not None}
+        return {key: _strip_none(item, preserve_dict_nulls) for key, item in value.items() if item is not None or preserve_dict_nulls}
     if isinstance(value, list):
-        return [_strip_none(item) for item in value]
+        return [_strip_none(item, preserve_dict_nulls) for item in value]
     if isinstance(value, Enum):
         return value.value
     return value
@@ -3007,3 +3014,281 @@ class HarnAgentEventTurnPhaseChanged(_HarnDataclass):
 @dataclass
 class HarnAgentEventTypedCheckpoint(_HarnDataclass):
     checkpoint: JsonValue
+
+
+
+class HarnCrystallizationKind(str, Enum):
+    CANDIDATE = "candidate"
+    PLAN_ONLY = "plan_only"
+    REJECTED = "rejected"
+
+
+class HarnCrystallizationPromotionStatus(str, Enum):
+    BLOCKED = "blocked"
+    NEEDS_APPROVAL = "needs_approval"
+    READY = "ready"
+
+
+class HarnCrystallizationReplayExpectation(str, Enum):
+    MATCH = "match"
+    DRIFT = "drift"
+
+
+class HarnCrystallizationSegmentKind(str, Enum):
+    DETERMINISTIC = "deterministic"
+    FUZZY = "fuzzy"
+@dataclass
+class HarnCrystallizationCandidateBundle(_HarnDataclass):
+    schema: str
+    schema_version: int
+    generated_at: str
+    generator: HarnCrystallizationGenerator
+    kind: HarnCrystallizationKind
+    candidate_id: str
+    external_key: str
+    title: str
+    team: Optional[str]
+    repo: Optional[str]
+    risk_level: str
+    workflow: HarnCrystallizationWorkflowRef
+    source_trace_hashes: List[str]
+    source_traces: List[HarnCrystallizationSourceTrace]
+    deterministic_steps: List[HarnCrystallizationStep]
+    fuzzy_steps: List[HarnCrystallizationStep]
+    side_effects: List[HarnCrystallizationSideEffect]
+    capabilities: List[str]
+    required_secrets: List[str]
+    savings: HarnCrystallizationSavingsEstimate
+    shadow: HarnCrystallizationShadowRunReport
+    eval_pack: Optional[HarnCrystallizationEvalPackRef]
+    skill: Optional[HarnCrystallizationSkillRef]
+    fixtures: List[HarnCrystallizationFixtureRef]
+    promotion: HarnCrystallizationPromotion
+    redaction: HarnCrystallizationRedactionSummary
+    confidence: float
+    rejection_reasons: List[str]
+    warnings: List[str]
+
+HarnCrystallizationCandidateBundle.__harn_required_fields__ = frozenset(["schema", "schema_version", "generated_at", "generator", "kind", "candidate_id", "external_key", "title", "team", "repo", "risk_level", "workflow", "source_trace_hashes", "source_traces", "deterministic_steps", "fuzzy_steps", "side_effects", "capabilities", "required_secrets", "savings", "shadow", "eval_pack", "skill", "fixtures", "promotion", "redaction", "confidence", "rejection_reasons", "warnings"])
+
+@dataclass
+class HarnCrystallizationEvalPackRef(_HarnDataclass):
+    path: str
+    link: Optional[str]
+
+HarnCrystallizationEvalPackRef.__harn_required_fields__ = frozenset(["path", "link"])
+
+@dataclass
+class HarnCrystallizationFixtureRef(_HarnDataclass):
+    path: str
+    trace_id: str
+    source_hash: str
+    redacted: bool
+
+HarnCrystallizationFixtureRef.__harn_required_fields__ = frozenset(["path", "trace_id", "source_hash", "redacted"])
+
+@dataclass
+class HarnCrystallizationGenerator(_HarnDataclass):
+    tool: str
+    version: str
+
+HarnCrystallizationGenerator.__harn_required_fields__ = frozenset(["tool", "version"])
+
+@dataclass
+class HarnCrystallizationPromotion(_HarnDataclass):
+    owner: Optional[str]
+    approver: Optional[str]
+    author: Optional[str]
+    rollout_policy: str
+    rollback_target: Optional[str]
+    created_at: str
+    workflow_version: str
+    package_name: str
+    sample_count: int
+    confidence: float
+    shadow_success_count: int
+    shadow_failure_count: int
+    divergence_history: List[HarnCrystallizationPromotionDivergenceRecord]
+    approval_history: List[HarnCrystallizationPromotionApprovalRecord]
+    criteria: HarnCrystallizationPromotionCriteria
+    estimated_time_token_savings: HarnCrystallizationSavingsEstimate
+
+HarnCrystallizationPromotion.__harn_required_fields__ = frozenset(["owner", "approver", "author", "rollout_policy", "rollback_target", "created_at", "workflow_version", "package_name", "sample_count", "confidence", "shadow_success_count", "shadow_failure_count", "divergence_history", "approval_history", "criteria", "estimated_time_token_savings"])
+
+@dataclass
+class HarnCrystallizationRedactionSummary(_HarnDataclass):
+    applied: bool
+    rules: List[str]
+    summary: str
+    fixture_count: int
+
+HarnCrystallizationRedactionSummary.__harn_required_fields__ = frozenset(["applied", "rules", "summary", "fixture_count"])
+
+@dataclass
+class HarnCrystallizationSkillRef(_HarnDataclass):
+    path: str
+    gate_receipt_path: str
+    name: str
+    skill_candidate_id: str
+    workflow_candidate_id: str
+
+HarnCrystallizationSkillRef.__harn_required_fields__ = frozenset(["path", "gate_receipt_path", "name", "skill_candidate_id", "workflow_candidate_id"])
+
+@dataclass
+class HarnCrystallizationSourceTrace(_HarnDataclass):
+    trace_id: str
+    source_hash: str
+    source_url: Optional[str]
+    source_receipt_id: Optional[str]
+    fixture_path: Optional[str]
+    execution_id: Optional[str] = None
+
+HarnCrystallizationSourceTrace.__harn_required_fields__ = frozenset(["trace_id", "source_hash", "source_url", "source_receipt_id", "fixture_path"])
+
+@dataclass
+class HarnCrystallizationStep(_HarnDataclass):
+    index: int
+    kind: str
+    name: str
+    segment: HarnCrystallizationSegmentKind
+    parameter_refs: List[str]
+    side_effects_known: bool
+    side_effects: List[HarnCrystallizationSideEffect]
+    capabilities: List[str]
+    required_secrets: List[str]
+    approval: Optional[HarnCrystallizationApproval]
+    review_notes: List[str]
+
+HarnCrystallizationStep.__harn_required_fields__ = frozenset(["index", "kind", "name", "segment", "parameter_refs", "side_effects_known", "side_effects", "capabilities", "required_secrets", "approval", "review_notes"])
+
+@dataclass
+class HarnCrystallizationWorkflowRef(_HarnDataclass):
+    path: str
+    name: str
+    package_name: str
+    package_version: str
+
+HarnCrystallizationWorkflowRef.__harn_required_fields__ = frozenset(["path", "name", "package_name", "package_version"])
+
+@dataclass
+class HarnCrystallizationApproval(_HarnDataclass):
+    prompt: Optional[str]
+    approver: Optional[str]
+    required: bool
+    boundary: Optional[str]
+
+HarnCrystallizationApproval.__harn_required_fields__ = frozenset(["prompt", "approver", "required", "boundary"])
+
+@dataclass
+class HarnCrystallizationSideEffect(_HarnDataclass):
+    kind: str
+    target: str
+    capability: Optional[str]
+    mutation: Optional[str]
+    metadata: Dict[str, JsonValue]
+
+HarnCrystallizationSideEffect.__harn_required_fields__ = frozenset(["kind", "target", "capability", "mutation", "metadata"])
+
+@dataclass
+class HarnCrystallizationPromotionApprovalRecord(_HarnDataclass):
+    actor: str
+    decision: str
+    recorded_at: str
+    reason: Optional[str]
+
+HarnCrystallizationPromotionApprovalRecord.__harn_required_fields__ = frozenset(["actor", "decision", "recorded_at", "reason"])
+
+@dataclass
+class HarnCrystallizationPromotionCriteria(_HarnDataclass):
+    min_examples: int
+    min_confidence: float
+    requires_shadow_pass: bool
+    requires_no_rejections: bool
+    requires_human_approval: bool
+    approval_reason: Optional[str]
+    status: HarnCrystallizationPromotionStatus
+    reasons: List[str]
+
+HarnCrystallizationPromotionCriteria.__harn_required_fields__ = frozenset(["min_examples", "min_confidence", "requires_shadow_pass", "requires_no_rejections", "requires_human_approval", "approval_reason", "status", "reasons"])
+
+@dataclass
+class HarnCrystallizationPromotionDivergenceRecord(_HarnDataclass):
+    trace_id: str
+    path: Optional[str]
+    message: str
+    left: JsonValue
+    right: JsonValue
+
+HarnCrystallizationPromotionDivergenceRecord.__harn_required_fields__ = frozenset(["trace_id", "path", "message", "left", "right"])
+
+@dataclass
+class HarnCrystallizationReplayDivergence(_HarnDataclass):
+    path: str
+    left: JsonValue
+    right: JsonValue
+    message: str
+
+HarnCrystallizationReplayDivergence.__harn_required_fields__ = frozenset(["path", "left", "right", "message"])
+
+@dataclass
+class HarnCrystallizationReplayOracleReport(_HarnDataclass):
+    name: str
+    expectation: HarnCrystallizationReplayExpectation
+    passed: bool
+    first_run_counts: HarnCrystallizationReplayTraceRunCounts
+    second_run_counts: HarnCrystallizationReplayTraceRunCounts
+    protocol_fixture_refs: List[str]
+    divergence: Optional[HarnCrystallizationReplayDivergence]
+
+HarnCrystallizationReplayOracleReport.__harn_required_fields__ = frozenset(["name", "expectation", "passed", "first_run_counts", "second_run_counts", "protocol_fixture_refs", "divergence"])
+
+@dataclass
+class HarnCrystallizationReplayTraceRunCounts(_HarnDataclass):
+    event_log_entries: int
+    trigger_firings: int
+    llm_interactions: int
+    protocol_interactions: int
+    approval_interactions: int
+    effect_receipts: int
+    persona_runtime_states: int
+    agent_transcript_deltas: int
+    final_artifacts: int
+    policy_decisions: int
+    channel_receipts: int
+    lifecycle_receipts: int
+
+HarnCrystallizationReplayTraceRunCounts.__harn_required_fields__ = frozenset(["event_log_entries", "trigger_firings", "llm_interactions", "protocol_interactions", "approval_interactions", "effect_receipts", "persona_runtime_states", "agent_transcript_deltas", "final_artifacts", "policy_decisions", "channel_receipts", "lifecycle_receipts"])
+
+@dataclass
+class HarnCrystallizationSavingsEstimate(_HarnDataclass):
+    model_calls_avoided: int
+    input_tokens_avoided: int
+    output_tokens_avoided: int
+    estimated_cost_usd_avoided: float
+    wall_ms_avoided: int
+    cpu_runtime_cost_usd: float
+    remaining_model_calls: int
+
+HarnCrystallizationSavingsEstimate.__harn_required_fields__ = frozenset(["model_calls_avoided", "input_tokens_avoided", "output_tokens_avoided", "estimated_cost_usd_avoided", "wall_ms_avoided", "cpu_runtime_cost_usd", "remaining_model_calls"])
+
+@dataclass
+class HarnCrystallizationShadowRunReport(_HarnDataclass):
+    pass_: bool = field(metadata={"wire_name": "pass"})
+    compared_traces: int
+    failures: List[str]
+    traces: List[HarnCrystallizationShadowTraceResult]
+
+HarnCrystallizationShadowRunReport.__harn_required_fields__ = frozenset(["pass", "compared_traces", "failures", "traces"])
+
+@dataclass
+class HarnCrystallizationShadowTraceResult(_HarnDataclass):
+    trace_id: str
+    source_hash: str
+    pass_: bool = field(metadata={"wire_name": "pass"})
+    details: List[str]
+    compared_receipts: int
+    replay_oracle: Optional[HarnCrystallizationReplayOracleReport]
+
+HarnCrystallizationShadowTraceResult.__harn_required_fields__ = frozenset(["trace_id", "source_hash", "pass", "details", "compared_receipts", "replay_oracle"])
+
+__all__.extend(["HarnCrystallizationCandidateBundle", "HarnCrystallizationEvalPackRef", "HarnCrystallizationFixtureRef", "HarnCrystallizationGenerator", "HarnCrystallizationPromotion", "HarnCrystallizationRedactionSummary", "HarnCrystallizationSkillRef", "HarnCrystallizationSourceTrace", "HarnCrystallizationStep", "HarnCrystallizationWorkflowRef", "HarnCrystallizationApproval", "HarnCrystallizationSideEffect", "HarnCrystallizationPromotionApprovalRecord", "HarnCrystallizationPromotionCriteria", "HarnCrystallizationPromotionDivergenceRecord", "HarnCrystallizationReplayDivergence", "HarnCrystallizationReplayOracleReport", "HarnCrystallizationReplayTraceRunCounts", "HarnCrystallizationSavingsEstimate", "HarnCrystallizationShadowRunReport", "HarnCrystallizationShadowTraceResult", "HarnCrystallizationKind", "HarnCrystallizationPromotionStatus", "HarnCrystallizationReplayExpectation", "HarnCrystallizationSegmentKind"])
