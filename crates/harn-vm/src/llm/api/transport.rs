@@ -598,6 +598,7 @@ async fn vm_call_llm_api_with_body_inner(
     if dialect.is_ollama_openai_compat() {
         DialectContract::project_ollama_openai_request(&mut body);
     }
+    let mut thinking_binding = false;
     if stream_protocol == StreamProtocol::AnthropicSse {
         crate::llm::providers::anthropic::reconcile_request_body(
             &mut body,
@@ -606,6 +607,8 @@ async fn vm_call_llm_api_with_body_inner(
             &opts.thinking,
             opts.provider_contract_probe,
         );
+        thinking_binding =
+            crate::llm::providers::anthropic::prepare_thinking_binding(&mut body, provider, model);
     }
     if provider == "openrouter"
         && (body.get("response_format").is_some() || body.get("top_k").is_some())
@@ -649,8 +652,15 @@ async fn vm_call_llm_api_with_body_inner(
     for (name, value) in &data_controls.headers {
         req = req.header(name.as_str(), value.as_str());
     }
-    if stream_protocol == StreamProtocol::AnthropicSse && !opts.anthropic_beta_features.is_empty() {
-        req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
+    if stream_protocol == StreamProtocol::AnthropicSse {
+        let mut features = opts.anthropic_beta_features.clone();
+        let binding = crate::llm::providers::anthropic::ANTHROPIC_THINKING_BINDING_BETA;
+        if thinking_binding && !features.iter().any(|feature| feature == binding) {
+            features.push(binding.to_owned());
+        }
+        if !features.is_empty() {
+            req = req.header("anthropic-beta", features.join(","));
+        }
     }
 
     if use_stream_transport {

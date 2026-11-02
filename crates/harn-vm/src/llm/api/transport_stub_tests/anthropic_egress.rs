@@ -6,6 +6,50 @@ use super::{
 };
 
 #[test]
+fn changed_prefix_can_continue_signed_anthropic_reasoning() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let server = spawn_anthropic_stub_with_request_capture(captured.clone());
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.providers.insert("anthropic".into(), crate::llm_config::ProviderDef {
+            base_url: format!("http://{}", server.addr()), auth_style: "none".into(),
+            auth_env: crate::llm_config::AuthEnv::None,
+            extra_headers: std::collections::BTreeMap::from([("anthropic-version".into(), "2023-06-01".into())]),
+            chat_endpoint: "/messages".into(), ..Default::default()
+        });
+        crate::llm_config::set_user_overrides(Some(overlay));
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-haiku-5-5".into();
+        opts.stream = false;
+        opts.thinking = super::ThinkingConfig::Effort { level: crate::llm::api::ReasoningEffort::Medium };
+        opts.output_format = super::super::OutputFormat::Text;
+        opts.output_schema = None;
+        opts.native_tools = None;
+        opts.tool_choice = None;
+        opts.provider_overrides = None;
+        opts.messages = vec![serde_json::json!({"role":"user", "content":"first"}),
+            serde_json::json!({"role":"assistant", "content":[{"type":"thinking", "thinking":"reason", "signature":"signed"}, {"type":"text", "text":"answer"}]}),
+            serde_json::json!({"role":"user", "content":"next"})];
+        vm_call_llm_full(&opts).await.expect("stubbed response");
+        crate::llm_config::clear_user_overrides();
+        drop(server);
+        let request = captured.lock().unwrap().clone().unwrap();
+        let (headers, raw_body) = request.split_once("\r\n\r\n").unwrap();
+        let body: serde_json::Value = serde_json::from_str(raw_body).unwrap();
+        assert!(headers.to_ascii_lowercase().contains("thinking-binding-controls-2026-08-01"));
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["thinking"]["block_binding"]["prefix_mismatch_behavior"], "drop_block");
+        assert_eq!(body["messages"][1]["content"][0]["signature"], "signed");
+    });
+}
+
+#[test]
 fn override_cannot_restore_unsupported_prefill_at_egress() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
