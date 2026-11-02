@@ -15,7 +15,7 @@ import {
 import { pl_state_root } from "std/agent/pattern_knowledge_persistence"
 import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { command_run } from "std/command"
+import { command_run, command_sequence_plan } from "std/command"
 import { tool_registry_from } from "std/tools"
 
 const CURATOR_SCHEMA = "harn.crystallization.curator.v1"
@@ -766,29 +766,20 @@ fn cc_declared_checks(options: any = nil) -> list {
   return out
 }
 
-/**
- * Shell text as comparable `&&` segments: quotes and subshell parentheses dropped, spaces collapsed.
- */
-fn cc_command_segments(text: string) -> list {
-  const flat = text.replace("'", "").replace("\"", "").replace("(", "").replace(")", "")
-  return flat.split("&&").map(
-    { part -> join(part.split(" ").filter({ word -> word != "" }).to_list(), " ") },
-  )
-    .filter({ part -> part != "" })
-    .to_list()
-}
-
-/** True when `verify_command` runs `check` word for word, from the check's directory. */
+/** Match literal argv and directory scopes from the owning shell planner. */
 fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
-  const have = cc_command_segments(verify_command)
-  const dir = check.cwd == "" ? [] : cc_command_segments("cd " + cc_shell_word(check.cwd))
-  const want = dir + cc_command_segments(check.command)
+  const observed = command_sequence_plan(verify_command)
+  const declared = command_sequence_plan(check.command, check.cwd)
+  if observed.status != "measured" || declared.status != "measured"
+    || len(observed.steps) == 0
+    || len(declared.steps) == 0 {
+    return false
+  }
+  const have = observed.steps
+  const want = declared.steps
   for start in range(0, len(have) - len(want) + 1) {
     if have[start:start + len(want)] == want {
-      const preceded_by_cd = len(dir) == 0 && start > 0 && have[start - 1].starts_with("cd ")
-      if !preceded_by_cd {
-        return true
-      }
+      return true
     }
   }
   return false
@@ -1146,7 +1137,9 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     agent_options = agent_options + {ladder: "frugal"}
   }
   const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
-  cc_record_review(harness.fs, evidence, options)
+  if (result?.tools?.successful ?? []).contains("submit_crystallization_batch") {
+    cc_record_review(harness.fs, evidence, options)
+  }
   const pending_after = pattern_learning_pending(harness, options)
   const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
   return {

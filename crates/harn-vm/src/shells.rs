@@ -8,7 +8,8 @@ use crate::value::{VmError, VmValue};
 
 mod command_plan;
 pub use command_plan::{
-    plan_invocation, plan_posix_command, shell_startup_entry_may_change_lookup, CommandPlan,
+    plan_invocation, plan_posix_command, plan_posix_sequence,
+    shell_startup_entry_may_change_lookup, CommandPlan,
 };
 
 thread_local! {

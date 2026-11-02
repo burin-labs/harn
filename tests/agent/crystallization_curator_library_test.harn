@@ -38,6 +38,31 @@ fn priced_empty_batch() -> list {
   ]
 }
 
+/** An interrupted review can be retried; only a successful batch consumes evidence. */
+pipeline test_curator_retries_evidence_after_an_incomplete_review(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const first = curate_with(
+        harness,
+        root,
+        [{text: "I have not submitted a batch."}, {text: "I still have no batch."}],
+        {require_new_evidence: true},
+      )
+      assert_ne(first.status, "natural", "the first review did not submit a batch")
+      assert_eq(first.agent_result.tools.successful, [], "no submission succeeded")
+      const second = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_ne(second.status, "no_new_evidence", "an incomplete review must not consume evidence")
+      assert(second?.usage != nil, "the second review actually reached the model fixture")
+      assert(second.agent_result.tools.successful.contains("submit_crystallization_batch"))
+      const third = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_eq(third.status, "no_new_evidence", "a successful review consumes the evidence")
+      assert_eq(third?.usage, nil, "completed evidence is not reviewed again")
+      return nil
+    },
+  )
+}
+
 /**
  * A review whose evidence an earlier review already saw makes no model call.
  * The host imports sessions before the curator runs, so "new" means unreviewed,
@@ -209,6 +234,68 @@ fn verify_tool(verify_command: string) -> dict {
 
 fn submit_one(proposal: dict) -> list {
   return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
+}
+
+/** Printed commands and shell control flow cannot substitute for a declared check. */
+pipeline test_curator_rejects_printed_checks_and_unknown_shell_context(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [{intent: "test", command: "make check", cwd: ""}],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      for command in [
+        "printf '%s' 'before && make check && after'",
+        "python3 -c 'print(\"before && make check && after\")'",
+        "make check &",
+        "exit 0 && make check",
+      ] {
+        const result = curate_with(harness, root, submit_one(verify_tool(command)), declared)
+        assert_eq(result.proposal_count ?? 0, 0, "not a root declared check: " + command)
+      }
+      return nil
+    },
+  )
+}
+
+/** Directory changes persist across prerequisites and end at the subshell boundary. */
+pipeline test_curator_matches_the_effective_check_directory(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [{intent: "test", command: "make check", cwd: ""}],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const wrong = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("cd web && python3 tools/codegen.py && make check")),
+        declared,
+      )
+      assert_eq(wrong.proposal_count ?? 0, 0, "an earlier cd still changes the check directory")
+      const restored = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("(cd web && npm test) && make check")),
+        declared,
+      )
+      assert_eq(restored.proposal_count, 1, "the subshell restores the root check directory")
+      const web = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("cd web && python3 codegen.py && npm test") + {name: "verify-web"}),
+        declared + {declared_checks: [{intent: "test", command: "npm test", cwd: "web"}]},
+      )
+      assert_eq(web.proposal_count, 2, "both correctly scoped proposals remain staged")
+      assert(
+        web.proposals.any({ proposal -> proposal.name == "verify-web" }),
+        "an earlier cd still applies after a prerequisite",
+      )
+      return nil
+    },
+  )
 }
 
 /** A learned verifier must run a declared test check word for word, never only a broader suite. */

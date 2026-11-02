@@ -32,6 +32,7 @@ pub mod asset_paths;
 mod bytes;
 pub mod clock;
 pub mod collections;
+mod command_plan;
 mod concurrency;
 mod connectors;
 mod crypto;

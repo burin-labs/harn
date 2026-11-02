@@ -21,6 +21,26 @@ import {
 } from "std/command/shell"
 import { command_step_ref_impl } from "std/command/step_ref"
 
+/** A literal command and its effective repository-relative working directory. */
+pub type CommandSequenceStep = {argv: list<string>, cwd: string}
+
+/** An unavailable shell observation never counts as an empty successful plan. */
+pub type CommandSequencePlan = {status: "measured" | "unmeasured", steps: list<CommandSequenceStep>}
+
+/**
+ * Observe literal POSIX commands joined with `&&`, including relative `cd`
+ * and subshell directory scopes. Quoted operators remain argument text.
+ * Dynamic shell syntax, redirects, other control flow, stateful builtins,
+ * path escapes and empty sequences are unmeasured. This never runs commands
+ * and does not grant execution authority or prove an exit status.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_sequence_plan(source: string, cwd: string = "") -> CommandSequencePlan {
+  return __command_sequence_plan(source, cwd)
+}
+
 /** One output-match, exit, or timeout event for a background command. */
 pub type CommandOutputMatch = {
   status: "matched" | "exited" | "timed_out",
