@@ -163,11 +163,13 @@ pipeline test_publication_receives_the_qualified_manifest_identity(harness: Harn
   assert_eq(len(bindings), 1)
   const binding = bindings[0]
   assert(binding.run.contains("release_require_rehearsal_binding"))
-  assert(binding.run.contains("expected_attempt="))
-  assert(binding.run.contains("expected_manifest_id="))
-  assert(binding.run.contains("expected_manifest_digest="))
+  assert(binding.run.contains("release_write_producer_identity"))
   for name in ["expected_attempt", "expected_manifest_id", "expected_manifest_digest"] {
-    assert_eq(job.outputs[name], expression("steps.producer-binding.outputs." + name))
+    assert_eq(
+      job.outputs[name],
+      expression("steps.producer-binding.outputs." + name + " || needs.plan.outputs." + name),
+    )
+    assert_eq(workflow.jobs.plan.outputs[name], expression("steps.plan.outputs." + name))
   }
   const call = workflow.jobs.promote
   assert_eq(call.with["expected-attempt"], expression("needs.authorize.outputs.expected_attempt"))
