@@ -102,6 +102,18 @@ impl PromptExecutionOwner {
 }
 
 impl PromptCancellation {
+    pub(super) async fn wait_cancelled(&self) {
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.cancelled.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     pub(super) fn cancel(&self) -> bool {
         let newly_cancelled = !self.cancelled.swap(true, Ordering::SeqCst);
         self.notify.notify_waiters();
