@@ -114,28 +114,9 @@ release_require_rehearsal_binding() (
   set -euo pipefail
   repository="${1:?repository required}" run_id="${2:?candidate run required}" sha="${3:?candidate commit required}"
   consumer=${CANARY_REPOSITORY:-} consumer_token=${CONSUMER_READ_TOKEN:-}
-  artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100" 2>/dev/null)" ||
-    release_binding_refusal rehearsal_binding_unreadable "run=$run_id" || exit 1
-  selected="$(jq -ce --arg run "$run_id" '
-    if (.total_count | type) != "number" or .total_count > 100 or (.artifacts | type) != "array"
-    then error("partial artifact census") else . end |
-    [.artifacts[] | select((.name | type) == "string" and (.name | test("^consumer-rehearsal-binding-[1-9][0-9]*$")))] |
-    if length == 0 then error("no binding") else . end |
-    max_by(.name | ltrimstr("consumer-rehearsal-binding-") | tonumber) |
-    select(.expired == false and (.workflow_run.id | tostring) == $run and
-      (.id | type) == "number" and (.digest | type) == "string" and (.digest | test("^sha256:[0-9a-f]{64}$")))
-  ' <<< "$artifacts")" ||
-    release_binding_refusal rehearsal_binding_missing "run=$run_id recovery=request_a_new_release_candidate" || exit 1
-  manifest="$(jq -er --arg name "candidate-manifest-$sha" --arg run "$run_id" '
-    [.artifacts[] | select(.name == $name and .expired == false and (.workflow_run.id | tostring) == $run) | .digest] |
-    if length == 1 and (.[0] | test("^sha256:[0-9a-f]{64}$")) then .[0] else error("manifest") end
-  ' <<< "$artifacts")" || release_binding_refusal candidate_manifest_unmeasured "run=$run_id" || exit 1
-  dir="$(mktemp -d)"
-  trap 'rm -rf "$dir"' EXIT
-  gh api "repos/$repository/actions/artifacts/$(jq -r .id <<< "$selected")/zip" > "$dir/binding.zip" 2>/dev/null &&
-    [[ "sha256:$(sha256_file_hex "$dir/binding.zip")" == "$(jq -r .digest <<< "$selected")" ]] &&
-    binding="$(unzip -p "$dir/binding.zip" consumer-rehearsal-binding.json 2>/dev/null)" ||
-    release_binding_refusal rehearsal_binding_unreadable "run=$run_id" || exit 1
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-candidate-state.mjs"
+  binding="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" ||
+    release_binding_refusal rehearsal_binding_unmeasured "run=$run_id" || exit 1
   jq -e '
     .schema == "harn.release.consumer_rehearsal_binding.v1" and .verdict == "pass" and
     (.source_sha | type == "string" and test("^[0-9a-f]{40}$")) and
@@ -151,8 +132,7 @@ release_require_rehearsal_binding() (
     release_binding_refusal rehearsal_source_mismatch "rehearsed=$(field source_sha) promoted=$sha" || exit 1
   [[ "$(field producer_run)" == "$run_id" ]] ||
     release_binding_refusal rehearsal_producer_mismatch "rehearsed=$(field producer_run) promoted=$run_id" || exit 1
-  [[ "$(field manifest_digest)" == "$manifest" ]] ||
-    release_binding_refusal rehearsal_archive_mismatch "run=$run_id" || exit 1
+  manifest="$(field manifest_digest)"
   [[ "$consumer" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && -n "$consumer_token" ]] ||
     release_binding_refusal consumer_read_authority_missing || exit 1
   consumer_read() { GH_TOKEN="$consumer_token" gh api "repos/$consumer$1" --jq "$2" 2>/dev/null; }
@@ -187,6 +167,9 @@ release_require_rehearsal_binding() (
       *) release_binding_refusal consumer_default_diverged "status=${status:-unreported}" || exit 1 ;;
     esac
   fi
+  binding_after="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" &&
+    [[ "$binding_after" == "$binding" ]] ||
+    release_binding_refusal rehearsal_binding_changed "run=$run_id" || exit 1
   echo "Consumer rehearsal binding source=$sha producer=$run_id manifest=$manifest consumer_run=$(field consumer_run) $decision" >&2
 )
 
