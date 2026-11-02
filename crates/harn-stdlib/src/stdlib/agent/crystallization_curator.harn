@@ -363,7 +363,7 @@ pub fn check_plan(target: string) -> list {
   let plan = []
   for index in range(0, len(STEPS)) {
     const step = STEPS[index]
-    plan = plan + [index == len(STEPS) - 1 && clean != "" ? {label: step.label, argv: step.argv + [clean]} : step]
+    plan = plan + [index == len(STEPS) - 1 && clean != "" ? step + {argv: step.argv + [clean]} : step]
   }
   return plan
 }
@@ -441,8 +441,10 @@ const COMMAND_SEQUENCE_TEST = """
 import { check_plan, run_plan, summarize } from "./server"
 
 pipeline test_plan_keeps_the_learned_order() {
-  assert_eq(check_plan("").map({ step -> step.label }).to_list(), __LABELS__)
+  const original = check_plan("")
+  assert_eq(original.map({ step -> step.label }).to_list(), __LABELS__)
   const narrowed = check_plan("tests/unit")
+  assert_eq(narrowed[len(narrowed) - 1]?.cwd, original[len(original) - 1]?.cwd, "narrowing must preserve the final step directory")
   assert_eq(narrowed[len(narrowed) - 1].argv[len(narrowed[len(narrowed) - 1].argv) - 1], "tests/unit")
 }
 
