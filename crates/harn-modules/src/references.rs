@@ -152,6 +152,17 @@ pub fn index_references(
     };
 
     for (file, parsed) in sources {
+        // The graph is immutable for this pass, so repeated lookups of the
+        // same name in this file resolve identically, including misses.
+        let mut definitions: HashMap<String, Option<DefSite>> = HashMap::new();
+        let mut definition_of = |name: &str| {
+            if let Some(definition) = definitions.get(name) {
+                return definition.clone();
+            }
+            let definition = graph.definition_of(file, name);
+            definitions.insert(name.to_owned(), definition.clone());
+            definition
+        };
         let lexical = resolved_identifier_bindings(&[], &parsed.program);
         let tokens = Lexer::new(&parsed.source)
             .tokenize()
@@ -163,8 +174,7 @@ pub fn index_references(
         let mut lexical_defs: HashMap<BindingId, DefSite> = HashMap::new();
         for binding in lexical.values() {
             lexical_defs.entry(binding.clone()).or_insert_with(|| {
-                graph
-                    .definition_of(file, &binding.name)
+                definition_of(&binding.name)
                     .filter(|def| {
                         def.file == *file
                             && def.span.start == binding.declaration_start
@@ -207,7 +217,7 @@ pub fn index_references(
                 let def = lexical
                     .get(&(broad_span.start, broad_span.end))
                     .and_then(|binding| lexical_defs.get(binding).cloned())
-                    .or_else(|| graph.definition_of(file, name));
+                    .or_else(|| definition_of(name));
                 if let (Some(def), Some(span)) = (
                     def,
                     identifier_span(&tokens, name, broad_span.start, broad_span.end),
