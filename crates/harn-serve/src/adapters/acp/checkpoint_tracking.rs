@@ -187,16 +187,35 @@ pub(super) fn attribute_tool_execution(
     let _scope = store_scope.enter();
     match stage {
         harn_vm::bridge::ToolExecutionStage::Begin => {
-            match checkpoint::call_begin(session_id, tool_call_id) {
-                Ok(Outcome::Ready(_)) => ToolExecutionAdmission::Tracked,
+            let failure = match checkpoint::call_begin(session_id, tool_call_id) {
+                Ok(Outcome::Ready(_)) => return ToolExecutionAdmission::Tracked,
                 Ok(Outcome::Unavailable(reason)) if reason.reason == "no_checkpoint" => {
-                    ToolExecutionAdmission::Untracked
+                    return ToolExecutionAdmission::Untracked
                 }
-                Ok(Outcome::Unavailable(reason)) => {
-                    ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
-                }
-                Err(error) => ToolExecutionAdmission::Refused(error.to_string()),
+                Ok(Outcome::Unavailable(reason)) => format!("{}: {}", reason.reason, reason.detail),
+                // A rejected request (a call id already in flight, an invalid
+                // id) is the caller's error, not a recording failure: refuse
+                // it and leave the session's history alone.
+                Err(error) => return ToolExecutionAdmission::Refused(error.to_string()),
+            };
+            // Tracking is optional; the person's tool call is not. A call that
+            // runs untracked makes every earlier boundary unsafe to restore, so
+            // drop them, on disk too, or a later load would resume them.
+            // Boundaries captured after this call stay valid. Only when the old
+            // record cannot be removed does the call wait, since running it
+            // would leave a restorable boundary that misses its changes.
+            let dropped = checkpoint::drop_session(session_id);
+            if let Some(error) = dropped.error {
+                tracing::warn!(session_id, tool_call_id, detail = %failure, "workspace checkpoint tracking failed");
+                return ToolExecutionAdmission::Refused(error);
             }
+            tracing::warn!(
+                session_id,
+                tool_call_id,
+                detail = %failure,
+                "workspace checkpoint tracking failed; the tool call runs untracked"
+            );
+            ToolExecutionAdmission::Untracked
         }
         harn_vm::bridge::ToolExecutionStage::End => {
             match checkpoint::call_end(session_id, tool_call_id, Some(side_effect)) {
@@ -204,6 +223,11 @@ pub(super) fn attribute_tool_execution(
                     Some(error) => ToolExecutionAdmission::Refused(error),
                     None => ToolExecutionAdmission::Tracked,
                 },
+                // Another call's tracking failure dropped the session while
+                // this one ran; its history is gone, so this call is untracked.
+                Ok(Outcome::Unavailable(reason)) if reason.reason == "no_checkpoint" => {
+                    ToolExecutionAdmission::Untracked
+                }
                 Ok(Outcome::Unavailable(reason)) => {
                     ToolExecutionAdmission::Refused(format!("{}: {}", reason.reason, reason.detail))
                 }
@@ -219,6 +243,123 @@ pub(super) fn attribute_tool_execution(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "hostlib", unix))]
+    fn find_index(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+        std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                find_index(&path)
+            } else {
+                (path.file_name()? == "index.json").then_some(path)
+            }
+        })
+    }
+
+    #[cfg(all(feature = "hostlib", unix))]
+    #[test]
+    fn a_tool_call_runs_when_checkpoint_tracking_cannot_record_it() {
+        use harn_hostlib::workspace_checkpoint::{self as checkpoint, Outcome};
+        use harn_vm::bridge::{ToolExecutionAdmission, ToolExecutionStage};
+        use harn_vm::tool_annotations::SideEffectLevel;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        for args in [
+            &["init", "-q"][..],
+            &["commit", "-q", "--allow-empty", "-m", "base"],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .current_dir(root.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        let scope = harn_vm::SessionStoreScope::resolve(
+            root.path(),
+            &harn_vm::security::LauncherEnvironment::from_snapshot(Default::default()),
+        )
+        .unwrap();
+        let session = "tracking-fails-open";
+        let _entered = scope.enter();
+        let captured = checkpoint::capture(session, "message-1", Some(root.path())).unwrap();
+        assert!(matches!(captured, Outcome::Ready(_)));
+        let session_dir = find_index(root.path())
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let checkpoints = session_dir.parent().unwrap().to_path_buf();
+        let mode = |path: &std::path::Path, bits| {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits)).unwrap();
+        };
+        let begin = |call: &str| {
+            attribute_tool_execution(
+                session,
+                &scope,
+                call,
+                SideEffectLevel::WorkspaceWrite,
+                ToolExecutionStage::Begin,
+            )
+        };
+
+        // A call id already in flight is the caller's error: it is refused and
+        // the session keeps its history.
+        assert_eq!(begin("call-0"), ToolExecutionAdmission::Tracked);
+        assert!(
+            matches!(begin("call-0"), ToolExecutionAdmission::Refused(detail) if detail.contains("already in flight"))
+        );
+        assert!(checkpoint::root_matches(session, root.path()).is_some());
+
+        // Neither delete nor move-aside can retire the old record, so running
+        // the call would leave a restorable boundary that misses its edit.
+        mode(&session_dir, 0o500);
+        mode(&checkpoints, 0o500);
+        let refused = [begin("call-1"), begin("call-1b")];
+        mode(&checkpoints, 0o700);
+        mode(&session_dir, 0o700);
+        for admission in &refused {
+            assert!(
+                matches!(admission, ToolExecutionAdmission::Refused(detail) if detail.contains("later load could resume")),
+                "a retry must not read as having no checkpoint: {admission:?}"
+            );
+        }
+
+        // The index cannot be written, but its directory can be moved aside:
+        // the call runs untracked and no load can bring the old boundary back.
+        assert!(session_dir.join("index.json").exists() || find_index(&session_dir).is_some());
+        mode(&session_dir, 0o500);
+        assert_eq!(begin("call-2"), ToolExecutionAdmission::Untracked);
+        std::fs::write(root.path().join("edited.txt"), "untracked edit").unwrap();
+        for entry in std::fs::read_dir(&checkpoints).unwrap().flatten() {
+            mode(&entry.path(), 0o700);
+        }
+        assert!(!session_dir.exists(), "the old record left the load path");
+        // The call that was in flight when the session was dropped finishes
+        // untracked, not as a tracking failure.
+        assert_eq!(
+            attribute_tool_execution(
+                session,
+                &scope,
+                "call-0",
+                SideEffectLevel::WorkspaceWrite,
+                ToolExecutionStage::End,
+            ),
+            ToolExecutionAdmission::Untracked
+        );
+        let resumed = checkpoint::resume(session, root.path()).unwrap();
+        assert!(
+            matches!(&resumed, Outcome::Unavailable(reason) if reason.reason == "no_checkpoint"),
+            "a load must not bring back a boundary from before an untracked call"
+        );
+        let plan = checkpoint::plan(session, "message-1").unwrap();
+        assert!(
+            matches!(&plan, Outcome::Unavailable(reason) if reason.reason == "no_checkpoint"),
+            "a boundary from before an untracked call must not be restorable"
+        );
+    }
 
     #[test]
     fn fork_does_not_promote_an_incomplete_delivery_to_a_valid_boundary() {

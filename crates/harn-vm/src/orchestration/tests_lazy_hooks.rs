@@ -45,8 +45,11 @@ async fn registered_host_hook_reaches_bridge_without_granting_the_tool_host_auth
     std::fs::write(
         &module,
         r#"
-pub fn handle(_harness: Harness, _event: dict) {
+pub fn handle(_harness: Harness, event: dict) {
   const response = host_call("runtime.execute_hook", {event: "PostToolUse"})
+  if event?.tool?.name == "fail" {
+    throw "hook failed"
+  }
   return {result: response.text}
 }
 "#,
@@ -83,15 +86,27 @@ pub fn handle(_harness: Harness, _event: dict) {
         HookEvent::PostToolUse,
         "*",
         "handle",
-        LazyVmCallable::new(module, "handle"),
+        LazyVmCallable::new(module.clone(), "handle"),
     );
     let ctx = AsyncBuiltinCtx::for_test(vm);
-    let result =
-        run_post_tool_hooks_with_ctx(Some(&ctx), "look", &serde_json::json!({}), "original")
-            .await
-            .expect("runtime-selected hook reaches host despite tool ceiling");
+    let result = crate::tool_handler_scope::scope(async {
+        let result =
+            run_post_tool_hooks_with_ctx(Some(&ctx), "look", &serde_json::json!({}), "original")
+                .await?;
+        assert!(crate::tool_handler_scope::is_active());
+        let failed =
+            run_post_tool_hooks_with_ctx(Some(&ctx), "fail", &serde_json::json!({}), "original")
+                .await
+                .expect_err("hook failure propagates");
+        assert!(failed.to_string().contains("hook failed"), "{failed}");
+        assert!(crate::tool_handler_scope::is_active());
+        Ok::<_, crate::VmError>(result)
+    })
+    .await
+    .expect("runtime-selected hook reaches host despite the parent tool scope and ceiling");
+    assert!(!crate::tool_handler_scope::is_active());
     assert_eq!(result.text, "host-hook:original");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 
     let mut child = ctx.child_vm();
     let denied = child
@@ -114,7 +129,96 @@ pub fn handle(_harness: Harness, _event: dict) {
             "{denied}"
         );
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    // A tool cannot acquire host authority by registering a hook and firing it
+    // after its own handler scope has ended.
+    for lazy in [false, true] {
+        clear_runtime_hooks();
+        crate::tool_handler_scope::scope(async {
+            if lazy {
+                register_vm_hook_lazy(
+                    HookEvent::PostToolUse,
+                    "*",
+                    "handle",
+                    LazyVmCallable::new(module.clone(), "handle"),
+                );
+            } else {
+                crate::orchestration::register_vm_hook(
+                    HookEvent::PostToolUse,
+                    "*",
+                    "handle",
+                    handle.clone(),
+                );
+            }
+        })
+        .await;
+        let denied =
+            run_post_tool_hooks_with_ctx(Some(&ctx), "look", &serde_json::json!({}), "original")
+                .await
+                .expect_err("tool-registered hook retains the tool's host restriction");
+        assert!(
+            denied
+                .to_string()
+                .contains("unavailable inside a tool handler"),
+            "lazy={lazy}: {denied}"
+        );
+        assert!(!crate::tool_handler_scope::is_active());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+    // Lazy module initialization executes under the same captured restriction
+    // as the callback body, including when the module was never loaded before.
+    for restricted in [false, true] {
+        clear_runtime_hooks();
+        let lazy_module = dir.path().join(format!("initializer-{restricted}.harn"));
+        std::fs::write(
+            &lazy_module,
+            r#"
+const initial = host_call("runtime.execute_hook", {event: "PostToolUse"})
+pub fn handle(_harness: Harness, _event: dict) {
+  return {result: initial.text}
+}
+"#,
+        )
+        .expect("write lazy initializer");
+        let register = async {
+            register_vm_hook_lazy(
+                HookEvent::PostToolUse,
+                "*",
+                "handle",
+                LazyVmCallable::new(lazy_module, "handle"),
+            );
+        };
+        if restricted {
+            crate::tool_handler_scope::scope(register).await;
+        } else {
+            register.await;
+        }
+        let result = crate::tool_handler_scope::scope(run_post_tool_hooks_with_ctx(
+            Some(&ctx),
+            "look",
+            &serde_json::json!({}),
+            "original",
+        ))
+        .await;
+        if restricted {
+            let denied = result.expect_err("tool-registered module initializer stays restricted");
+            assert!(
+                denied
+                    .to_string()
+                    .contains("unavailable inside a tool handler"),
+                "{denied}"
+            );
+        } else {
+            assert_eq!(
+                result
+                    .expect("entry-registered initializer reaches host")
+                    .text,
+                "host-hook:original"
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert!(!crate::tool_handler_scope::is_active());
+    }
     pop_execution_policy();
     clear_runtime_hooks();
 }

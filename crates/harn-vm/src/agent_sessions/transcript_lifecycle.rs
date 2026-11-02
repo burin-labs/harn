@@ -31,6 +31,43 @@ pub(crate) fn replay_transcript_change(
     })
 }
 
+pub(crate) fn replay_reminder_snapshot(
+    id: &str,
+) -> Result<crate::testbench::tape::ReminderStateSnapshot, String> {
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions
+            .get(id)
+            .ok_or_else(|| format!("recorded reminder target session `{id}` is not open"))?;
+        state.ensure_run_accepts_mutation("replay_reminder_state")?;
+        Ok(state.reminder_state_snapshot())
+    })
+}
+
+pub(crate) fn replay_reminder_state(
+    id: &str,
+    before: &crate::testbench::tape::ReminderStateSnapshot,
+    after: &crate::testbench::tape::ReminderStateSnapshot,
+) -> Result<(), String> {
+    before.validate_successor(after)?;
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("recorded reminder target session `{id}` is not open"))?;
+        state.ensure_run_accepts_mutation("replay_reminder_state")?;
+        if state.reminder_state_snapshot() != *before {
+            return Err(format!(
+                "recorded reminder state for session `{id}` diverged"
+            ));
+        }
+        state.revoked_reminder_ids = after.revoked_ids.iter().cloned().collect();
+        state.expired_reminder_ids = after.expired_ids.iter().cloned().collect();
+        state.touch();
+        Ok(())
+    })
+}
+
 /// Append a transcript event to the session without mutating its message list.
 /// Used for orchestration-side lineage events (sub-agent spawn/completion,
 /// workflow hooks, etc.) that should survive persistence and replay without
@@ -603,7 +640,14 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
                 apply_transcript_with_budget(state, next, "apply_reminder_post_turn")?;
             }
             for reminder in &report.expired {
-                state.expired_reminder_ids.insert(reminder.id.clone());
+                if state.expired_reminder_ids.insert(reminder.id.clone()) {
+                    crate::run_tape::note_reminder_retirement(
+                        id,
+                        &reminder.id,
+                        crate::run_tape::ReminderRetirement::Expired,
+                        || state.reminder_state_snapshot(),
+                    );
+                }
             }
             state.touch();
         }
@@ -822,7 +866,14 @@ pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, Stri
             let mut next = dict;
             next.put("events", VmValue::list(events));
             apply_transcript_with_budget(state, VmValue::dict(next), "revoke_reminder")?;
-            state.revoked_reminder_ids.insert(reminder_id.to_string());
+            if state.revoked_reminder_ids.insert(reminder_id.to_string()) {
+                crate::run_tape::note_reminder_retirement(
+                    id,
+                    reminder_id,
+                    crate::run_tape::ReminderRetirement::Revoked,
+                    || state.reminder_state_snapshot(),
+                );
+            }
             state.touch();
             return Ok("revoked");
         }

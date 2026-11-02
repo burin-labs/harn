@@ -37,6 +37,13 @@ mod prompt_planning;
 #[path = "run_tape_branch_vm/review_cases.rs"]
 mod review_cases;
 
+#[path = "run_tape_branch_vm/store_effects.rs"]
+mod store_effects;
+use store_effects::mark_script;
+
+#[path = "run_tape_branch_vm/permissions.rs"]
+mod permissions;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;
@@ -66,16 +73,16 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
 /// confinement. These tests replay process runs rather than confine them,
 /// and hosted macOS runners refuse sandbox-exec (SIP allows unrestricted
 /// DTrace), so the default profile would reject every recorded exec there.
-fn enter_run(root: &Path) {
+fn enter_run(workspace: &Path, write_root: &Path) {
     harn_vm::stdlib::process::set_thread_execution_context(Some(
         harn_vm::orchestration::RunExecutionRecord {
-            cwd: Some(root.display().to_string()),
-            project_root: Some(root.display().to_string()),
+            cwd: Some(workspace.display().to_string()),
+            project_root: Some(workspace.display().to_string()),
             ..Default::default()
         },
     ));
     harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
-        workspace_roots: vec![root.display().to_string()],
+        workspace_roots: vec![write_root.display().to_string()],
         sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
         ..Default::default()
     });
@@ -115,7 +122,7 @@ fn run_at(
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
-            enter_run(&root);
+            enter_run(&workspace, &root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -310,135 +317,19 @@ fn dirs() -> Dirs {
     }
 }
 
-/// One `mark` tool call, then done: the hook and the tool's exec each touch a
-/// marker, and the tool writes the store.
-fn mark_script(hook_marker: &Path, exec_marker: &Path) -> String {
-    format!(
-        r#"
-import {{ agent_loop }} from "std/agent/loop"
-import {{ llm_text, with_llm_script }} from "std/testing"
-
-pipeline main(harness: Harness, task: unknown) {{
-  const id = harness.random.uuid()
-  const now = harness.clock.now_ms()
-  harness.runtime.store_set("script_key", id)
-  harness.tools.clear_hooks()
-  harness.tools.register_hook(
-    {{
-      pattern: "mark",
-      pre: {{ _event ->
-        harness.fs.write_text({hook_marker}, "hook ran")
-        return nil
-      }},
-    }},
-  )
-  let tools = tool_define(
-    tool_registry(),
-    "mark",
-    "Touch the exec marker and write the store.",
-    {{
-      parameters: {{}},
-      handler: {{ _args ->
-        harness.process.run({{program: "touch", args: [{exec_marker}]}})
-        harness.runtime.store_set("tool_key", "tool ran")
-        return "marked"
-      }},
-    }},
-  )
-  const result = with_llm_script(
-    harness.llm,
-    [
-      {{tool_calls: [{{id: "mark-1", name: "mark", arguments: {{}}}}]}},
-      llm_text("<user_response>Marked.</user_response><done>##DONE##</done>"),
-    ],
-    {{ ->
-      return agent_loop(
-        harness,
-        "mark run " + id + " at " + to_string(now),
-        nil,
-        {{
-          provider: "mock",
-          tools: tools,
-          tool_format: "native",
-          max_iterations: 3,
-          loop_until_done: true,
-          // Completion is not under test: a deterministic yes keeps the
-          // terminal status independent of the runner's verifier facts.
-          verify_completion: {{ _payload -> return true }},
-          session_id: "branch-" + id,
-        }},
-      )
-    }},
-  )
-  harness.tools.clear_hooks()
-  harness.runtime.store_set("after_key", result.status)
-  harness.stdio.log(result.status)
-}}
-"#,
-        hook_marker = quote(hook_marker),
-        exec_marker = quote(exec_marker),
-    )
+#[test]
+fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
+    store_effects::assert_served_tool_store(2);
 }
 
 #[test]
-fn a_branch_prefix_serves_exec_store_write_and_hook_without_running_them() {
-    let _serial = SERIAL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dirs = dirs();
-    let hook_marker = dirs.markers.join("hook-marker");
-    let exec_marker = dirs.markers.join("exec-marker");
-    let source = mark_script(&hook_marker, &exec_marker);
+fn served_tool_store_writes_reach_the_live_tail() {
+    store_effects::assert_served_tool_store(1);
+}
 
-    let recorded = record(&source, &dirs.tapes, &dirs.workspace);
-    assert!(
-        recorded.contains("[harn] done"),
-        "recorded output: {recorded}\ntool calls: {}",
-        recorded_tool_calls(&dirs.tapes)
-    );
-    let store_path = harn_vm::runtime_paths::store_path(&dirs.workspace);
-    assert!(
-        hook_marker.exists(),
-        "the recorded run ran the pre-tool hook"
-    );
-    assert!(exec_marker.exists(), "the recorded run ran the tool's exec");
-    let store: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&store_path).unwrap()).unwrap();
-    assert_eq!(store["tool_key"], "tool ran", "store: {store}");
-    assert!(store["script_key"].is_string(), "store: {store}");
-
-    remove_marker(&hook_marker, &dirs.tapes);
-    remove_marker(&exec_marker, &dirs.tapes);
-    let sentinel = "{\"sentinel\": true}";
-    std::fs::write(&store_path, sentinel).unwrap();
-
-    let Branched {
-        output,
-        report,
-        state,
-    } = branch(&source, &dirs.tapes, &dirs.workspace, 2);
-    let output = output.expect("the branched run succeeds");
-    assert!(output.contains("[harn] done"), "branch output: {output}");
-    assert_eq!(report.divergence, None, "report: {report:?}");
-    assert_eq!(report.served_calls, 2, "report: {report:?}");
-    assert_eq!(report.served_tool_calls, 1, "report: {report:?}");
-    assert!(
-        report.served_reads >= 2,
-        "uuid and clock served: {report:?}"
-    );
-    assert_eq!(report.live_calls, 0, "report: {report:?}");
-    assert!(!hook_marker.exists(), "the branch ran the pre-tool hook");
-    assert!(!exec_marker.exists(), "the branch ran the tool's exec");
-    assert_eq!(
-        std::fs::read_to_string(&store_path).unwrap(),
-        sentinel,
-        "the branch wrote the recording's store file"
-    );
-    let branch_store = store_at(&state);
-    assert_eq!(
-        branch_store["script_key"], store["script_key"],
-        "the prefix rebuilt the store in the branch's root: {branch_store}"
-    );
+#[test]
+fn served_tool_store_clear_and_delete_preserve_subsequent_live_writes() {
+    store_effects::assert_clear_and_delete();
 }
 
 /// The live tail answers from the mock script where the recording left off:
@@ -963,7 +854,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root);
+            enter_run(root, root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_persistent_state_builtins_at_root(
@@ -1072,7 +963,7 @@ pipeline main(harness: Harness, task: unknown) {{
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root);
+            enter_run(root, root);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);

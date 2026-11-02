@@ -30,3 +30,19 @@ sha256_file_hex() {
   fi
   printf '%s\n' "$digest"
 }
+
+# sha256_text_hex TEXT: print the lowercase hex sha256 of TEXT's exact bytes.
+sha256_text_hex() {
+  local text="${1?sha256_text_hex requires text}" line digest
+  if command -v sha256sum >/dev/null 2>&1; then
+    line="$(printf '%s' "$text" | sha256sum)" || return 1
+  elif command -v shasum >/dev/null 2>&1; then
+    line="$(printf '%s' "$text" | shasum -a 256)" || return 1
+  else
+    echo "error: sha256_text_hex: neither sha256sum nor shasum is available" >&2
+    return 1
+  fi
+  digest="${line%% *}"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$digest"
+}
