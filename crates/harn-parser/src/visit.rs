@@ -68,7 +68,8 @@ pub fn walk_program_interpolated(
     program: &[SNode],
     visitor: &mut impl FnMut(&SNode),
 ) {
-    walk_interpolated(source, program, visitor, |node| node);
+    let mut coordinates = None;
+    walk_interpolated(source, program, visitor, |node| node, &mut coordinates);
 }
 
 /// Walk executable children and string interpolation, excluding attribute metadata.
@@ -77,16 +78,22 @@ pub fn walk_program_unattributed_interpolated(
     program: &[SNode],
     visitor: &mut impl FnMut(&SNode),
 ) {
-    walk_interpolated(source, program, visitor, |node| {
-        crate::ast::peel_attributes(node).1
-    });
+    let mut coordinates = None;
+    walk_interpolated(
+        source,
+        program,
+        visitor,
+        |node| crate::ast::peel_attributes(node).1,
+        &mut coordinates,
+    );
 }
 
-fn walk_interpolated(
-    source: &str,
+fn walk_interpolated<'source>(
+    source: &'source str,
     program: &[SNode],
     visitor: &mut impl FnMut(&SNode),
     project: fn(&SNode) -> &SNode,
+    coordinates: &mut Option<crate::interpolation::SourceCoordinates<'source>>,
 ) {
     let mut holes = Vec::new();
     let mut stack = Vec::with_capacity(program.len());
@@ -108,12 +115,20 @@ fn walk_interpolated(
     // Recurse: an interpolation inside an interpolation is rare but legal, and
     // stopping at one level would restore the same unsoundness one layer down.
     while let Some((text, line, column)) = holes.pop() {
+        let indexed =
+            coordinates.get_or_insert_with(|| crate::interpolation::SourceCoordinates::new(source));
         let Some(expression) =
-            crate::interpolation::parse_expression(Some(source), &text, line, column)
+            crate::interpolation::parse_expression_indexed(indexed, &text, line, column)
         else {
             continue;
         };
-        walk_interpolated(source, std::slice::from_ref(&expression), visitor, project);
+        walk_interpolated(
+            source,
+            std::slice::from_ref(&expression),
+            visitor,
+            project,
+            coordinates,
+        );
     }
 }
 
@@ -557,6 +572,31 @@ mod tests {
 
     fn dummy(node: Node) -> SNode {
         spanned(node, Span::dummy())
+    }
+
+    #[test]
+    fn interpolated_walk_preserves_nested_unicode_source_spans() {
+        let source = "let value = 1\r\nlet text = \"pré ${\"inner ${value}\"}\"\n";
+        let tokens = harn_lexer::Lexer::new(source).tokenize().unwrap();
+        let program = crate::Parser::new(tokens).parse().unwrap();
+        let expected = source.rfind("value").unwrap();
+
+        for unattributed in [false, true] {
+            let mut spans = Vec::new();
+            let mut collect = |node: &SNode| {
+                if matches!(&node.node, Node::Identifier(name) if name == "value") {
+                    spans.push(node.span);
+                }
+            };
+            if unattributed {
+                walk_program_unattributed_interpolated(source, &program, &mut collect);
+            } else {
+                walk_program_interpolated(source, &program, &mut collect);
+            }
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].start, expected);
+            assert_eq!(source.get(spans[0].start..spans[0].end), Some("value"));
+        }
     }
 
     #[test]

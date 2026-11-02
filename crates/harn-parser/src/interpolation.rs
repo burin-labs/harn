@@ -11,6 +11,48 @@ use harn_lexer::Lexer;
 use crate::operators::OperatorGrammar;
 use crate::{Parser, SNode};
 
+/// Reuse line boundaries when resolving several positions in one source file.
+pub(crate) struct SourceCoordinates<'a> {
+    source: &'a str,
+    line_starts: Vec<usize>,
+}
+
+impl<'a> SourceCoordinates<'a> {
+    pub(crate) fn new(source: &'a str) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(source.match_indices('\n').map(|(offset, _)| offset + 1));
+        Self {
+            source,
+            line_starts,
+        }
+    }
+
+    fn offset(&self, line: usize, column: usize) -> Option<usize> {
+        let index = line.checked_sub(1)?;
+        let start = *self.line_starts.get(index)?;
+        let end = self
+            .line_starts
+            .get(index + 1)
+            .map_or(self.source.len(), |next| next - 1);
+        let text = self.source.get(start..end)?;
+        harn_lexer::byte_offset_for_position(text, 1, column).map(|offset| start + offset)
+    }
+}
+
+/// Parse a hole using line boundaries shared with the containing file's walk.
+pub(crate) fn parse_expression_indexed(
+    coordinates: &SourceCoordinates<'_>,
+    segment: &str,
+    line: usize,
+    column: usize,
+) -> Option<SNode> {
+    let offset = coordinates.offset(line, column).unwrap_or_default();
+    parse_with_lexer(
+        Lexer::with_position_and_offset(segment, line, column, offset),
+        OperatorGrammar::CURRENT,
+    )
+}
+
 /// Parse one `${...}` hole into an expression whose spans address `source`.
 ///
 /// `segment`, `line`, and `column` come from a
@@ -36,7 +78,11 @@ pub fn parse_expression_with_grammar(
     line: usize,
     column: usize,
 ) -> Option<SNode> {
-    Parser::new(lexer(source, segment, line, column).tokenize().ok()?)
+    parse_with_lexer(lexer(source, segment, line, column), grammar)
+}
+
+fn parse_with_lexer(mut lexer: Lexer<'_>, grammar: OperatorGrammar) -> Option<SNode> {
+    Parser::new(lexer.tokenize().ok()?)
         .with_operator_grammar(grammar)
         .parse_single_expression()
         .ok()
@@ -59,6 +105,22 @@ pub fn lexer<'seg>(
 mod tests {
     use super::*;
     use crate::Node;
+
+    #[test]
+    fn indexed_positions_match_lexer_coordinates() {
+        for source in ["", "x", "\n", "éα\r\nβ x\n", "hello\nworld\n\nlast"] {
+            let coordinates = SourceCoordinates::new(source);
+            for line in 0..=source.lines().count() + 2 {
+                for column in 0..=source.len() + 2 {
+                    assert_eq!(
+                        coordinates.offset(line, column),
+                        harn_lexer::byte_offset_for_position(source, line, column),
+                        "source={source:?} line={line} column={column}",
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     #[expect(
