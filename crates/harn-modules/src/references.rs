@@ -111,32 +111,6 @@ impl ReferenceIndex {
         sort_edges(&mut edges);
         edges
     }
-
-    /// The first use in each source file for each resolved definition.
-    ///
-    /// Use this for file-level graphs that discard occurrence locations. A
-    /// positional consumer, such as find-references, must use `edges` instead.
-    pub fn file_edges(&self) -> Vec<ReferenceEdge> {
-        let mut edges = Vec::new();
-        for (key, refs) in &self.by_def {
-            // `index_references` sorts each definition's uses by file and
-            // position, so the first occurrence represents that file.
-            let mut previous_file: Option<&std::path::Path> = None;
-            for site in refs {
-                if previous_file == Some(site.file.as_path()) {
-                    continue;
-                }
-                previous_file = Some(site.file.as_path());
-                edges.push(ReferenceEdge {
-                    from: site.clone(),
-                    to_file: key.file.clone(),
-                    to_name: key.name.clone(),
-                });
-            }
-        }
-        sort_edges(&mut edges);
-        edges
-    }
 }
 
 fn sort_edges(edges: &mut [ReferenceEdge]) {
@@ -181,6 +155,75 @@ pub fn index_references(
         site_defs: Vec::new(),
     };
 
+    walk_resolved_references(graph, sources, |def, site| {
+        insert_reference(&mut index, def, site);
+    });
+
+    for refs in index.by_def.values_mut() {
+        refs.sort_by(|left, right| {
+            left.file
+                .cmp(&right.file)
+                .then_with(|| left.span.start.cmp(&right.span.start))
+        });
+        refs.dedup_by(|left, right| {
+            left.file == right.file
+                && left.span.start == right.span.start
+                && left.name == right.name
+        });
+    }
+    index.site_defs.sort_by(|(left, _), (right, _)| {
+        left.file
+            .cmp(&right.file)
+            .then_with(|| left.span.start.cmp(&right.span.start))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    index
+        .site_defs
+        .dedup_by(|(left, left_key), (right, right_key)| {
+            left.file == right.file
+                && left.span == right.span
+                && left.name == right.name
+                && left_key == right_key
+        });
+
+    index
+}
+
+/// Resolve the same references as the positional index, retaining only the
+/// first occurrence per source file and definition for file-level graphs.
+pub fn file_reference_edges(
+    graph: &ModuleGraph,
+    sources: &HashMap<PathBuf, ParsedModuleSource>,
+) -> Vec<ReferenceEdge> {
+    let mut targets: HashMap<(PathBuf, DefKey), RefSite> = HashMap::new();
+    walk_resolved_references(graph, sources, |def, site| {
+        let key = (site.file.clone(), DefKey::from_def(&def));
+        targets
+            .entry(key)
+            .and_modify(|first| {
+                if site.span.start < first.span.start {
+                    *first = site.clone();
+                }
+            })
+            .or_insert(site);
+    });
+    let mut edges: Vec<_> = targets
+        .into_iter()
+        .map(|((_, key), from)| ReferenceEdge {
+            from,
+            to_file: key.file,
+            to_name: key.name,
+        })
+        .collect();
+    sort_edges(&mut edges);
+    edges
+}
+
+fn walk_resolved_references(
+    graph: &ModuleGraph,
+    sources: &HashMap<PathBuf, ParsedModuleSource>,
+    mut visit: impl FnMut(DefSite, RefSite),
+) {
     for (file, parsed) in sources {
         // The graph is immutable for this pass, so repeated lookups of the
         // same name in this file resolve identically, including misses.
@@ -237,8 +280,7 @@ pub fn index_references(
                 binding.declaration_end,
                 None,
             ) {
-                insert_reference(
-                    &mut index,
+                visit(
                     def.clone(),
                     RefSite {
                         file: file.clone(),
@@ -266,8 +308,7 @@ pub fn index_references(
                         Some((broad_span.line, broad_span.column)),
                     ),
                 ) {
-                    insert_reference(
-                        &mut index,
+                    visit(
                         def,
                         RefSite {
                             file: file.clone(),
@@ -279,35 +320,6 @@ pub fn index_references(
             }
         });
     }
-
-    for refs in index.by_def.values_mut() {
-        refs.sort_by(|left, right| {
-            left.file
-                .cmp(&right.file)
-                .then_with(|| left.span.start.cmp(&right.span.start))
-        });
-        refs.dedup_by(|left, right| {
-            left.file == right.file
-                && left.span.start == right.span.start
-                && left.name == right.name
-        });
-    }
-    index.site_defs.sort_by(|(left, _), (right, _)| {
-        left.file
-            .cmp(&right.file)
-            .then_with(|| left.span.start.cmp(&right.span.start))
-            .then_with(|| left.name.cmp(&right.name))
-    });
-    index
-        .site_defs
-        .dedup_by(|(left, left_key), (right, right_key)| {
-            left.file == right.file
-                && left.span == right.span
-                && left.name == right.name
-                && left_key == right_key
-        });
-
-    index
 }
 
 fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -25,13 +24,10 @@ fn resolve(input: &HarnReferenceInput) -> Result<Vec<ResolvedHarnReference>, Str
         &input.files,
         (!input.source_overrides.is_empty()).then_some(&input.source_overrides),
     );
-    let unsaved: HashSet<_> = input.source_overrides.keys().cloned().collect();
-    let index = harn_modules::index_references(&build.graph, &build.parsed_sources, &unsaved);
     // The host index contains workspace files only. References to the
     // standard library or other external modules have no graph endpoint here;
     // omit those edges without discarding the workspace references.
-    let references = index
-        .file_edges()
+    let references = harn_modules::file_reference_edges(&build.graph, &build.parsed_sources)
         .into_iter()
         .filter_map(|edge| {
             Some(ResolvedHarnReference {
@@ -55,6 +51,7 @@ mod tests {
     use super::*;
     use harn_hostlib::{BuiltinRegistry, HostlibCapability};
     use harn_vm::VmValue;
+    use std::collections::HashSet;
     use std::fs;
 
     #[test]
@@ -68,7 +65,7 @@ mod tests {
         fs::write(&c, "pub fn other() { 2 }\n").unwrap();
         fs::write(
             &b,
-            "import { run } from \"./a\"\nimport { other } from \"./c\"\nfn use_it() {\n  run()\n  run()\n  other()\n}\n",
+            "import { other } from \"./c\"\nimport { run } from \"./a\"\nfn use_it() {\n  other()\n  run()\n  run()\n}\n",
         )
         .unwrap();
         let files = vec![a, b, c];
@@ -113,6 +110,13 @@ mod tests {
         assert_eq!(count("b.harn", "a.harn", "run"), 1);
         assert_eq!(count("b.harn", "c.harn", "other"), 1);
         assert_eq!(count("b.harn", "c.harn", "run"), 0);
+        let position = |to: &str| {
+            references
+                .iter()
+                .position(|edge| edge.from_path == "b.harn" && edge.to_path == to)
+                .unwrap()
+        };
+        assert!(position("c.harn") < position("a.harn"));
     }
 
     #[test]

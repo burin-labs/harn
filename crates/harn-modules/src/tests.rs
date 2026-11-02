@@ -1279,6 +1279,22 @@ fn interpolation_references_preserve_imports_and_lexical_shadowing() {
     let build =
         build_for_reference_index(&[exported.clone(), importer.clone(), shadow.clone()], None);
     let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let project = |edges: Vec<ReferenceEdge>| {
+        let mut seen = HashSet::new();
+        edges
+            .into_iter()
+            .filter_map(|edge| {
+                let target = (edge.from.file, edge.to_file, edge.to_name);
+                seen.insert(target.clone()).then_some(target)
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = project(index.edges());
+    let actual = project(file_reference_edges(&build.graph, &build.parsed_sources));
+    assert_eq!(
+        actual, expected,
+        "file-level and positional resolution must agree"
+    );
     let exported = canonical_path(&exported);
     let importer = canonical_path(&importer);
     let shadow = canonical_path(&shadow);
