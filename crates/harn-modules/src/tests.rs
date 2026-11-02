@@ -1271,8 +1271,7 @@ fn interpolation_references_preserve_imports_and_lexical_shadowing() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
-    let importer_source =
-        "import { run } from \"./exported\"\nfn helper() { \"résultat ${run()}\" }\n";
+    let importer_source = "import { run } from \"./exported\"\r\nfn helper() { \"résultat ${run()} ${\"nested ${run()}\"}\" }\n";
     let shadow_source =
         "import { run } from \"./exported\"\nfn helper() { let run = 2; \"${run}\" }\n";
     let importer = write_file(root, "importer.harn", importer_source);
@@ -1283,11 +1282,14 @@ fn interpolation_references_preserve_imports_and_lexical_shadowing() {
     let exported = canonical_path(&exported);
     let importer = canonical_path(&importer);
     let shadow = canonical_path(&shadow);
-    let imported_use = importer_source.rfind("run").unwrap();
+    let imported_uses: Vec<_> = importer_source
+        .match_indices("run()")
+        .map(|(start, _)| start)
+        .collect();
     let shadow_use = shadow_source.rfind("run").unwrap();
 
     let imported = index
-        .definition_at(&importer, "run", imported_use)
+        .definition_at(&importer, "run", imported_uses[0])
         .expect("imported call in interpolation");
     assert_eq!(imported.file, exported);
     let local = index
@@ -1295,9 +1297,11 @@ fn interpolation_references_preserve_imports_and_lexical_shadowing() {
         .expect("local use in interpolation");
     assert_eq!(local.file, shadow);
     let uses = index.references_to(&imported);
-    assert!(uses
-        .iter()
-        .any(|site| site.file == importer && site.span.start == imported_use));
+    for imported_use in imported_uses {
+        assert!(uses
+            .iter()
+            .any(|site| site.file == importer && site.span.start == imported_use));
+    }
     assert!(!uses.iter().any(|site| site.file == shadow));
 }
 
