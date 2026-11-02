@@ -774,7 +774,7 @@ async function githubArtifactPayload(token, repository, artifact, expected, fetc
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|consumer-rehearsal-binding|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
