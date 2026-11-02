@@ -706,6 +706,7 @@
   "Effort rungs to try": "Rungs de esforço a tentar",
   "Embedded canonical skills ({}):": "Habilidades canônicas incorporadas ({0}):",
   "Embedded replay fixture: {}": "Fixture de repetição incorporado: {0}",
+  "Expectations compared: {}": "Expectativas comparadas: {0}",
   "Emit CSV rows instead of the text table": "Emitir linhas CSV em vez da tabela de texto",
   "Emit JSON": "Emitir JSON",
   "Emit JSON instead of a human table": "Emitir JSON em vez de uma tabela para humanos",

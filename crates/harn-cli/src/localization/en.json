@@ -857,6 +857,7 @@
   "Exit non-zero when readiness checks fail": "Exit non-zero when readiness checks fail",
   "Exit non-zero when required probe evidence is missing or failing": "Exit non-zero when required probe evidence is missing or failing",
   "Expand a `.harnpack` bundle into a directory containing `harnpack.json` plus the archive payload entries. Intended for audit/debug workflows and tests that need to inspect or mutate a bundle without depending on host `tar`/`zstd` binaries": "Expand a `.harnpack` bundle into a directory containing `harnpack.json` plus the archive payload entries. Intended for audit/debug workflows and tests that need to inspect or mutate a bundle without depending on host `tar`/`zstd` binaries",
+  "Expectations compared: {}": "Expectations compared: {0}",
   "Expected source tool-call body format (`json`, `text`, or `auto`)": "Expected source tool-call body format (`json`, `text`, or `auto`)",
   "Expected trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint": "Expected trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint",
   "Expire the signal if it is still fired after this long, e.g. `4h`": "Expire the signal if it is still fired after this long, e.g. `4h`",

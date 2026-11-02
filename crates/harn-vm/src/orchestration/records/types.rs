@@ -221,6 +221,9 @@ pub struct ReplayEvalReport {
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+    /// Recorded expectations the evaluation actually compared. Zero means the
+    /// fixture asserted nothing, so `pass` carries no evidence.
+    pub expectations_compared: usize,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

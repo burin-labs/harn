@@ -706,6 +706,7 @@
   "Effort rungs to try": "要尝试的努力档位",
   "Embedded canonical skills ({}):": "嵌入的规范技能（{0}）：",
   "Embedded replay fixture: {}": "嵌入的回放 fixture：{0}",
+  "Expectations compared: {}": "已比较的预期：{0}",
   "Emit CSV rows instead of the text table": "输出 CSV 行，而不是文本表格",
   "Emit JSON": "输出 JSON",
   "Emit JSON instead of a human table": "输出 JSON，而不是人类可读表格",

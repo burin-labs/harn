@@ -706,6 +706,7 @@
   "Effort rungs to try": "試行する努力レベル",
   "Embedded canonical skills ({}):": "組み込みの canonical skills ({0}):",
   "Embedded replay fixture: {}": "組み込みのリプレイ用フィクスチャ: {0}",
+  "Expectations compared: {}": "比較した期待値: {0}",
   "Emit CSV rows instead of the text table": "テキスト表の代わりに CSV 行を出力する",
   "Emit JSON": "JSON を出力する",
   "Emit JSON instead of a human table": "人間向けの表の代わりに JSON を出力する",

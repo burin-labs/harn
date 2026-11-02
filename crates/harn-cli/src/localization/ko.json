@@ -706,6 +706,7 @@
   "Effort rungs to try": "시도할 노력 단계",
   "Embedded canonical skills ({}):": "임베디드 정규화된 스킬 ({0}):",
   "Embedded replay fixture: {}": "임베디드 재생 픽스처: {0}",
+  "Expectations compared: {}": "비교한 기대값: {0}",
   "Emit CSV rows instead of the text table": "텍스트 표 대신 CSV 행을 출력함",
   "Emit JSON": "JSON를 출력함",
   "Emit JSON instead of a human table": "사람이 읽는 표 대신 JSON를 출력함",

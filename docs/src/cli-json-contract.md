@@ -385,10 +385,19 @@ ranges are inclusive, one-based physical line numbers.
 
 Loads a persisted run record and emits a structured per-stage summary
 plus the embedded replay-fixture verdict. `harn replay --fixture <path>`
-accepts either a run record or a `harn.orchestration.replay_trace.v1`
-fixture. `harn replay --session-id <id> --events-db <path>` reconstructs
+accepts a run record (`_type: "run_record"`), a
+`harn.orchestration.replay_trace.v1` trace, or an offline coding replay
+fixture, and refuses any other file. A replay trace's verdict is the
+replay oracle's verdict on its two recorded executions and declared
+`expect`, the same as `harn orchestrator replay-oracle`.
+`harn replay --session-id <id> --events-db <path>` reconstructs
 the same replayable run-record shape from the SQLite EventLog
 `observability.agent_events.<id>` topic.
+
+`fixture.expectations_compared` counts the recorded expectations the
+verdict compared. `fixture.pass` is true only when that count is above
+zero and every expectation matched, so a fixture that asserts nothing
+fails instead of passing.
 
 The default `--runs 1` response keeps the original single `ReplayReport`
 payload. When `--runs N` is greater than one, the response keeps

@@ -441,6 +441,7 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         return evaluate_clarifying_question(run, fixture);
     }
     let mut failures = Vec::new();
+    let mut expectations_compared = status_expectation_count(fixture);
     if run.status != fixture.expected_status {
         failures.push(format!(
             "run status mismatch: expected {}, got {}",
@@ -451,9 +452,15 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         run.stages.iter().map(|s| (s.node_id.as_str(), s)).collect();
     for assertion in &fixture.stage_assertions {
         let Some(stage) = stages_by_id.get(assertion.node_id.as_str()) else {
+            expectations_compared += 1;
             failures.push(format!("missing stage {}", assertion.node_id));
             continue;
         };
+        // Status, outcome and branch, then each required artifact kind and the
+        // visible-text snippet when the assertion records one.
+        expectations_compared += 3
+            + assertion.required_artifact_kinds.len()
+            + usize::from(assertion.visible_text_contains.is_some());
         if stage.status != assertion.expected_status {
             failures.push(format!(
                 "stage {} status mismatch: expected {}, got {}",
@@ -499,6 +506,7 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
 }
 
@@ -566,13 +574,14 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
         matches_expected && has_required_terms && avoids_forbidden_terms
     });
 
-    if !questions.is_empty()
-        && (!normalized_accepted.is_empty()
-            || normalized_expected.is_some()
-            || !required_terms.is_empty()
-            || !forbidden_terms.is_empty())
-        && !matched
-    {
+    let has_text_spec = !normalized_accepted.is_empty()
+        || normalized_expected.is_some()
+        || !required_terms.is_empty()
+        || !forbidden_terms.is_empty();
+    // The question-count bounds are always compared; the status and text checks
+    // count only when the fixture records them.
+    let expectations_compared = status_expectation_count(fixture) + 2 + usize::from(has_text_spec);
+    if !questions.is_empty() && has_text_spec && !matched {
         failures.push(format!(
             "no clarifying question matched fixture; actual questions: {}",
             questions
@@ -587,7 +596,14 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
+}
+
+/// An empty `expected_status` records no expectation: comparing it against an
+/// empty run status would pass without checking anything.
+fn status_expectation_count(fixture: &ReplayFixture) -> usize {
+    usize::from(!fixture.expected_status.is_empty())
 }
 
 pub fn evaluate_run_suite(

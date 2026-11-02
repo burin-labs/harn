@@ -694,6 +694,118 @@ fn replay_fixture_runs_use_oracle_allowlist() {
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
 }
 
+fn replay_oracle_fixtures(dir: &str) -> Vec<std::path::PathBuf> {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle")
+        .join(dir);
+    let mut paths = std::fs::read_dir(&root)
+        .expect("read replay oracle fixtures")
+        .map(|entry| entry.expect("fixture entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "no replay oracle fixtures under {}",
+        root.display()
+    );
+    paths
+}
+
+fn replay_fixture_json(path: &std::path::Path) -> (std::process::ExitStatus, serde_json::Value) {
+    let out = harn_e2e_command()
+        .args(["replay", "--fixture", path.to_str().unwrap(), "--json"])
+        .output()
+        .expect("spawn harn replay --fixture");
+    (out.status, stdout_json(&out))
+}
+
+/// The replay oracle's own negative controls must fail `replay --fixture` too:
+/// one replay run used to compare a recorded execution against itself and pass.
+#[test]
+fn replay_fixture_fails_every_oracle_mutation() {
+    for path in replay_oracle_fixtures("mutations") {
+        let (status, parsed) = replay_fixture_json(&path);
+        assert!(
+            !status.success(),
+            "{} passed replay --fixture",
+            path.display()
+        );
+        assert_eq!(parsed["ok"], false, "{}", path.display());
+        assert_eq!(parsed["error"]["code"], "replay_fixture_failed");
+        assert!(
+            parsed["data"]["fixture"]["expectations_compared"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(!parsed["data"]["fixture"]["failures"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let human = harn_e2e_command()
+            .args(["replay", "--fixture", path.to_str().unwrap()])
+            .output()
+            .expect("spawn harn replay --fixture");
+        assert!(
+            !human.status.success(),
+            "{} passed in human mode",
+            path.display()
+        );
+        let stdout = String::from_utf8_lossy(&human.stdout);
+        assert!(stdout.contains("Embedded replay fixture: FAIL"), "{stdout}");
+        assert!(stdout.contains("Expectations compared: "), "{stdout}");
+    }
+}
+
+#[test]
+fn replay_fixture_passes_every_valid_oracle_trace_with_expectations_compared() {
+    for path in replay_oracle_fixtures("fixtures") {
+        let (status, parsed) = replay_fixture_json(&path);
+        assert!(status.success(), "{} failed: {parsed}", path.display());
+        assert!(
+            parsed["data"]["fixture"]["expectations_compared"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+}
+
+#[test]
+fn replay_fixture_refuses_a_file_it_cannot_check() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("unknown.json");
+    std::fs::write(&path, b"{}").expect("write unknown fixture");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(
+        !status.success(),
+        "an untyped JSON object passed replay --fixture"
+    );
+    assert_eq!(parsed["ok"], false);
+    assert!(parsed["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not a fixture harn replay can check"));
+}
+
+#[test]
+fn replay_run_record_with_no_expectations_does_not_pass() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("run.json");
+    let run = json!({
+        "_type": "run_record",
+        "id": "run-no-expectations",
+        "replay_fixture": {"_type": "replay_fixture", "id": "empty", "expected_status": "", "stage_assertions": []}
+    });
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).expect("write run record");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(!status.success(), "a fixture that asserts nothing passed");
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+    assert_eq!(parsed["data"]["fixture"]["pass"], false);
+}
+
 fn offline_coding_fixture(
     verify_argv: Vec<String>,
     include_finish: bool,

@@ -706,6 +706,7 @@
   "Effort rungs to try": "Échelons d’effort à essayer",
   "Embedded canonical skills ({}):": "Compétences canoniques intégrées ({0}) :",
   "Embedded replay fixture: {}": "Fixture de relecture intégrée : {0}",
+  "Expectations compared: {}": "Attentes comparées : {0}",
   "Emit CSV rows instead of the text table": "Émettre des lignes CSV au lieu du tableau textuel",
   "Emit JSON": "Émettre JSON",
   "Emit JSON instead of a human table": "Émettre JSON au lieu d’un tableau lisible par l’humain",

@@ -33,7 +33,15 @@ pub(crate) fn json_schema() -> JsonValue {
                             "run_id": {"type": "string"},
                             "execution_id": {"type": "string"},
                             "status": {"type": "string"},
-                            "fixture": {"type": "object"}
+                            "fixture": {
+                                "type": "object",
+                                "required": ["pass", "failures", "expectations_compared"],
+                                "properties": {
+                                    "pass": {"type": "boolean"},
+                                    "failures": {"type": "array", "items": {"type": "string"}},
+                                    "expectations_compared": {"type": "integer", "minimum": 0}
+                                }
+                            }
                         }
                     },
                     {
@@ -130,9 +138,27 @@ pub(crate) struct ReplayTransition {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayFixtureResult {
+    /// True only when every recorded expectation matched and at least one was
+    /// compared: a fixture that asserts nothing never passes.
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+    pub expectations_compared: usize,
+}
+
+impl ReplayFixtureResult {
+    fn new(matched: bool, mut failures: Vec<String>, stage_count: usize, compared: usize) -> Self {
+        if compared == 0 {
+            failures
+                .push("the fixture records no expectations, so nothing was compared".to_string());
+        }
+        Self {
+            pass: matched && compared > 0,
+            failures,
+            stage_count,
+            expectations_compared: compared,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -527,6 +553,18 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
 fn execute_run_record(path: &Path) -> Result<ReplayExecution, String> {
     let run = harn_vm::orchestration::load_run_record(path)
         .map_err(|error| format!("failed to load run record {}: {error}", path.display()))?;
+    // Any JSON object deserializes into a defaulted run record, so the type tag is
+    // what tells a run record apart from a file this command cannot check.
+    if run.type_name != "run_record" {
+        return Err(format!(
+            "{} is not a fixture harn replay can check (its _type is {:?}). It reads a run \
+             record (_type \"run_record\"), a replay trace ({}), or an offline coding replay \
+             fixture.",
+            path.display(),
+            run.type_name,
+            harn_vm::REPLAY_TRACE_SCHEMA_VERSION
+        ));
+    }
     if run.evidence.execution_id.is_some() {
         harn_vm::orchestration::validate_execution_evidence(&run.evidence)
             .map_err(|error| format!("run record has invalid execution evidence: {error}"))?;
@@ -640,7 +678,7 @@ fn execute_replay_trace(
     } else {
         trace.second_run.clone()
     };
-    let fixture = trace_fixture_result(trace, &trace_run)?;
+    let fixture = trace_fixture_result(trace)?;
     let report = ReplayReport {
         run_id: trace_run.run_id.clone(),
         execution_id: None,
@@ -704,11 +742,12 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
         stages,
         transitions,
         transcript_event_count,
-        fixture: ReplayFixtureResult {
-            pass: report.pass,
-            failures: report.failures.clone(),
-            stage_count: report.stage_count,
-        },
+        fixture: ReplayFixtureResult::new(
+            report.pass,
+            report.failures.clone(),
+            report.stage_count,
+            report.expectations_compared,
+        ),
         counterfactual: None,
     }
 }
@@ -786,6 +825,13 @@ fn print_report_human(report: &ReplayReport) {
             if report.fixture.pass { "PASS" } else { "FAIL" }
         )
     );
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Expectations compared: {}",
+            report.fixture.expectations_compared
+        )
+    );
     for failure in &report.fixture.failures {
         println!(
             "{}",
@@ -811,31 +857,44 @@ fn print_report_human(report: &ReplayReport) {
     }
 }
 
-fn trace_fixture_result(
-    trace: &ReplayOracleTrace,
-    trace_run: &ReplayTraceRun,
-) -> Result<ReplayFixtureResult, String> {
-    let oracle = ReplayOracleTrace {
-        name: format!("{} replay fixture", trace.name),
-        expect: ReplayExpectation::Match,
-        protocol_fixture_refs: trace.protocol_fixture_refs.clone(),
-        allowlist: trace.allowlist.clone(),
-        first_run: trace.first_run.clone(),
-        second_run: trace_run.clone(),
-        ..ReplayOracleTrace::default()
-    };
-    let report = harn_vm::run_replay_oracle_trace(&oracle)
+/// A replay trace records two executions and whether they must match or drift.
+/// Its verdict is the oracle's verdict on that whole recording, the same one
+/// `harn orchestrator replay-oracle` gives, so no replay run can compare a
+/// recorded execution against itself.
+fn trace_fixture_result(trace: &ReplayOracleTrace) -> Result<ReplayFixtureResult, String> {
+    let report = harn_vm::run_replay_oracle_trace(trace)
         .map_err(|error| format!("failed to evaluate replay trace: {error}"))?;
-    let failures = report
-        .divergence
-        .as_ref()
-        .map(|divergence| vec![divergence.message.clone()])
-        .unwrap_or_default();
-    Ok(ReplayFixtureResult {
-        pass: report.passed,
+    let mut failures = Vec::new();
+    match (&report.divergence, report.expectation) {
+        (Some(divergence), ReplayExpectation::Match) => failures.push(divergence.message.clone()),
+        (None, ReplayExpectation::Drift) => {
+            failures.push("the trace expects the executions to drift, but they match".to_string());
+        }
+        _ => {}
+    }
+    let compared =
+        trace_entry_count(&report.first_run_counts) + trace_entry_count(&report.second_run_counts);
+    Ok(ReplayFixtureResult::new(
+        report.passed,
         failures,
-        stage_count: 0,
-    })
+        0,
+        compared,
+    ))
+}
+
+fn trace_entry_count(counts: &harn_vm::orchestration::ReplayTraceRunCounts) -> usize {
+    counts.event_log_entries
+        + counts.trigger_firings
+        + counts.llm_interactions
+        + counts.protocol_interactions
+        + counts.approval_interactions
+        + counts.effect_receipts
+        + counts.persona_runtime_states
+        + counts.agent_transcript_deltas
+        + counts.final_artifacts
+        + counts.policy_decisions
+        + counts.channel_receipts
+        + counts.lifecycle_receipts
 }
 
 fn determinism_summary(
