@@ -14,6 +14,9 @@ mod session_reset;
 #[path = "run_tape_reminder_tests.rs"]
 mod reminders;
 
+#[path = "run_tape_host_effect_tests.rs"]
+mod host_effects;
+
 #[path = "run_tape_store_tests.rs"]
 mod store_changes;
 
