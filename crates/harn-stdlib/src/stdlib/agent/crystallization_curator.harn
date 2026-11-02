@@ -11,6 +11,7 @@ import {
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
+import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { tool_registry_from } from "std/tools"
@@ -67,6 +68,7 @@ fn cc_evidence_cards(evidence: list) -> list {
         session_id: item?.session_id,
         prompt: item?.prompt,
         tool_sequence: item?.tool_sequence ?? [],
+        commands: item?.command_ledger ?? [],
         observed_at: item?.observed_at,
         outcome: item?.outcome,
       }
@@ -106,6 +108,8 @@ These examples define breadth, not templates:
 1. Repeated package verification may become verify_package(package): one MCP tool that runs the repository's typecheck, tests, and lint with failure receipts. The insight is the verified contract, not argv-position extraction.
 2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
 3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
+
+Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -415,8 +419,8 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         returns: {type: "object"},
         handler: { args ->
           const session_id = cc_allowed_session(args, allowed_sessions)
-          const result = harness.agent.snapshot(session_id)
-          return agent_tool_handler_result(to_string(result), result)
+          const result = pattern_learning_session_transcript(harness.agent, session_id, options)
+          return agent_tool_handler_result(json_stringify(result), result)
         },
         annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "read_only"},
       },
