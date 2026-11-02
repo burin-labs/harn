@@ -1267,6 +1267,41 @@ fn same_named_symbols_in_different_modules_do_not_collapse() {
 }
 
 #[test]
+fn interpolation_references_preserve_imports_and_lexical_shadowing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    let importer_source =
+        "import { run } from \"./exported\"\nfn helper() { \"résultat ${run()}\" }\n";
+    let shadow_source =
+        "import { run } from \"./exported\"\nfn helper() { let run = 2; \"${run}\" }\n";
+    let importer = write_file(root, "importer.harn", importer_source);
+    let shadow = write_file(root, "shadow.harn", shadow_source);
+    let build =
+        build_for_reference_index(&[exported.clone(), importer.clone(), shadow.clone()], None);
+    let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let shadow = canonical_path(&shadow);
+    let imported_use = importer_source.rfind("run").unwrap();
+    let shadow_use = shadow_source.rfind("run").unwrap();
+
+    let imported = index
+        .definition_at(&importer, "run", imported_use)
+        .expect("imported call in interpolation");
+    assert_eq!(imported.file, exported);
+    let local = index
+        .definition_at(&shadow, "run", shadow_use)
+        .expect("local use in interpolation");
+    assert_eq!(local.file, shadow);
+    let uses = index.references_to(&imported);
+    assert!(uses
+        .iter()
+        .any(|site| site.file == importer && site.span.start == imported_use));
+    assert!(!uses.iter().any(|site| site.file == shadow));
+}
+
+#[test]
 fn lexical_shadow_does_not_resolve_to_same_named_import() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
