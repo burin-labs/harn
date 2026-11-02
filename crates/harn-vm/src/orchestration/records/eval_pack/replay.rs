@@ -441,6 +441,7 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         return evaluate_clarifying_question(run, fixture);
     }
     let mut failures = Vec::new();
+    let mut expectations_compared = 1;
     if run.status != fixture.expected_status {
         failures.push(format!(
             "run status mismatch: expected {}, got {}",
@@ -450,10 +451,12 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
     let stages_by_id: BTreeMap<&str, &RunStageRecord> =
         run.stages.iter().map(|s| (s.node_id.as_str(), s)).collect();
     for assertion in &fixture.stage_assertions {
+        expectations_compared += 1;
         let Some(stage) = stages_by_id.get(assertion.node_id.as_str()) else {
             failures.push(format!("missing stage {}", assertion.node_id));
             continue;
         };
+        expectations_compared += 3;
         if stage.status != assertion.expected_status {
             failures.push(format!(
                 "stage {} status mismatch: expected {}, got {}",
@@ -473,6 +476,7 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
             ));
         }
         for required_kind in &assertion.required_artifact_kinds {
+            expectations_compared += 1;
             if !stage
                 .artifacts
                 .iter()
@@ -485,6 +489,7 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
             }
         }
         if let Some(snippet) = &assertion.visible_text_contains {
+            expectations_compared += 1;
             let actual = stage.visible_text.clone().unwrap_or_default();
             if !actual.contains(snippet) {
                 failures.push(format!(
@@ -499,11 +504,13 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
 }
 
 fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
     let mut failures = Vec::new();
+    let mut expectations_compared = 3;
     let spec = fixture.clarifying_question.clone().unwrap_or_default();
     let min_questions = clarifying_min_questions(&spec);
     let max_questions = clarifying_max_questions(&spec);
@@ -571,22 +578,25 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
             || normalized_expected.is_some()
             || !required_terms.is_empty()
             || !forbidden_terms.is_empty())
-        && !matched
     {
-        failures.push(format!(
-            "no clarifying question matched fixture; actual questions: {}",
-            questions
-                .iter()
-                .map(|question| format!("{:?}", question.prompt))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+        expectations_compared += 1;
+        if !matched {
+            failures.push(format!(
+                "no clarifying question matched fixture; actual questions: {}",
+                questions
+                    .iter()
+                    .map(|question| format!("{:?}", question.prompt))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
 
     ReplayEvalReport {
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
 }
 

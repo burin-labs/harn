@@ -1,4 +1,21 @@
 {
+  "contribute": {
+    "pageTitle": "プロジェクトへの参加 | {siteName}",
+    "title": "Harn の改善にご協力ください",
+    "intro": "学んだことの共有、問題の報告、コードやドキュメントの改善で参加できます。",
+    "reportTitle": "問題を報告する",
+    "reportBody": "期待した結果、実際に起きたこと、再現手順をお知らせください。投稿前に秘密情報や個人情報を削除してください。",
+    "reportLink": "Issue を作成する",
+    "codeTitle": "コードやドキュメントを改善する",
+    "codeBody": "貢献ガイドを読み、Harn の開発環境を整えて、レビューを受ける変更を準備してください。",
+    "codeLink": "貢献ガイドを読む",
+    "discussTitle": "経験を共有する",
+    "discussBody": "コミュニティのディスカッションで質問したり、Harn の活用方法を共有したりできます。",
+    "discussLink": "ディスカッションに参加する",
+    "tipTitle": "任意でチップを送る",
+    "tipBody": "Harn がすでに役に立った場合は、{company} に一度限りのチップを送ることができます。対価として商品、サービス、特典は提供されません。",
+    "tipLink": "Stripe でチップを送る"
+  },
   "common": {
     "siteName": "Harn",
     "github": "GitHub",

@@ -27,29 +27,27 @@ fn resolve(input: &HarnReferenceInput) -> Result<Vec<ResolvedHarnReference>, Str
     );
     let unsaved: HashSet<_> = input.source_overrides.keys().cloned().collect();
     let index = harn_modules::index_references(&build.graph, &build.parsed_sources, &unsaved);
-    index
+    // The host index contains workspace files only. References to the
+    // standard library or other external modules have no graph endpoint here;
+    // omit those edges without discarding the workspace references.
+    let references = index
         .edges()
         .into_iter()
-        .map(|edge| {
-            Ok(ResolvedHarnReference {
+        .filter_map(|edge| {
+            Some(ResolvedHarnReference {
                 from_path: relative(&input.root, &edge.from.file)?,
                 to_path: relative(&input.root, &edge.to_file)?,
                 to_name: edge.to_name,
             })
         })
-        .collect()
+        .collect();
+    Ok(references)
 }
 
-fn relative(root: &Path, path: &Path) -> Result<String, String> {
+fn relative(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root)
+        .ok()
         .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .map_err(|_| {
-            format!(
-                "resolved Harn reference path {} is outside workspace {}",
-                path.display(),
-                root.display()
-            )
-        })
 }
 
 #[cfg(test)]
@@ -58,6 +56,31 @@ mod tests {
     use harn_hostlib::{BuiltinRegistry, HostlibCapability};
     use harn_vm::VmValue;
     use std::fs;
+
+    #[test]
+    fn standard_library_references_do_not_discard_workspace_edges() {
+        harn_stdlib::install().expect("the host installs its standard library");
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("local.harn"), "pub fn local() { 1 }\n").unwrap();
+        fs::write(
+            dir.path().join("use.harn"),
+            "import { local } from \"./local\"\nimport { help_requested } from \"std/cli/argparse\"\nfn use_it() { help_requested([]); local() }\n",
+        )
+        .unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        let files = vec![root.join("local.harn"), root.join("use.harn")];
+        let edges = resolve(&HarnReferenceInput {
+            root,
+            files,
+            source_overrides: Default::default(),
+        })
+        .expect("external references must not discard workspace references");
+
+        assert!(edges.iter().any(|edge| {
+            edge.from_path == "use.harn" && edge.to_path == "local.harn" && edge.to_name == "local"
+        }));
+        assert!(edges.iter().all(|edge| !edge.to_path.starts_with("<std>")));
+    }
 
     #[test]
     fn shared_resolver_preserves_ownership_and_lexical_shadowing() {

@@ -744,46 +744,52 @@ impl SymbolGraph {
     /// rebuilds, editor reindexes, and branch overlays must remove stale
     /// answers rather than accumulate them.
     pub fn replace_harn_references(&mut self, references: &[ResolvedHarnReference]) {
-        let harn_modules: BTreeSet<NodeId> = self
-            .store
+        let wanted_sources: HashSet<&str> = references
             .iter()
-            .filter(|node| node.kind == NodeKind::Module && node.language == "harn")
-            .map(|node| node.id)
+            .map(|reference| reference.from_path.as_str())
             .collect();
+        let wanted_targets: HashSet<(&str, &str)> = references
+            .iter()
+            .map(|reference| (reference.to_path.as_str(), reference.to_name.as_str()))
+            .collect();
+        let mut harn_modules = BTreeSet::new();
+        let mut sources = HashMap::new();
+        let mut targets: HashMap<Arc<str>, HashMap<String, Vec<NodeId>>> = HashMap::new();
+        for node in self.store.iter() {
+            if node.kind == NodeKind::Module && node.language == "harn" {
+                harn_modules.insert(node.id);
+                if wanted_sources.contains(node.path.as_ref()) {
+                    sources.entry(Arc::clone(&node.path)).or_insert(node.id);
+                }
+            } else if node.kind != NodeKind::Module {
+                let key = (node.path.as_ref(), node.name.as_str());
+                if wanted_targets.contains(&key) {
+                    targets
+                        .entry(Arc::clone(&node.path))
+                        .or_default()
+                        .entry(node.name.clone())
+                        .or_default()
+                        .push(node.id);
+                }
+            }
+        }
         for module in &harn_modules {
             self.drop_out_edges(*module, EdgeKind::Refs);
         }
 
+        let mut seen = HashSet::new();
         for reference in references {
-            let Some(from) = self
-                .store
-                .iter()
-                .find(|node| {
-                    node.kind == NodeKind::Module
-                        && node.language == "harn"
-                        && *node.path == *reference.from_path
-                })
-                .map(|node| node.id)
-            else {
+            let Some(&from) = sources.get(reference.from_path.as_str()) else {
                 continue;
             };
-            let targets: Vec<NodeId> = self
-                .store
-                .iter()
-                .filter(|node| {
-                    *node.path == *reference.to_path
-                        && node.name == reference.to_name
-                        && node.kind != NodeKind::Module
-                })
-                .map(|node| node.id)
-                .collect();
-            for target in targets {
-                let duplicate = self
-                    .outgoing(from)
-                    .iter()
-                    .any(|edge| edge.kind == EdgeKind::Refs && edge.to == target);
-                if !duplicate {
-                    self.add_edge(from, target, EdgeKind::Refs);
+            if let Some(matches) = targets
+                .get(reference.to_path.as_str())
+                .and_then(|names| names.get(reference.to_name.as_str()))
+            {
+                for &target in matches {
+                    if seen.insert((from, target)) {
+                        self.add_edge(from, target, EdgeKind::Refs);
+                    }
                 }
             }
         }

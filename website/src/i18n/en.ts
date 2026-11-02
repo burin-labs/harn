@@ -1,5 +1,5 @@
 // English message catalog: the single source of every user-facing string on
-// harnlang.com. Add a sibling locale file (e.g. `fr.ts`) with the same shape and
+// harnlang.com. Add a sibling locale file (e.g. `fr.json`) with the same shape and
 // register it in `index.ts` to localize the site; nothing else needs to change.
 //
 // Conventions:
@@ -7,6 +7,8 @@
 //   - `{name}` placeholders are filled with `format()` from `index.ts`.
 //   - Code identifiers, CLI commands, URLs, and file paths are NOT here. They
 //     are not translatable content and live with their structural data.
+export const CONTRIBUTION_COMPANY = "Burin Labs, LLC"
+
 export const en = {
   common: {
     siteName: "Harn",
@@ -81,6 +83,24 @@ export const en = {
     discussions: "Discussions",
     contributing: "Contributing",
     copyright: "© {year} Burin Labs. Harn is open source.",
+  },
+
+  contribute: {
+    pageTitle: "Contribute | {siteName}",
+    title: "Help improve Harn",
+    intro: "Share what you learn, report a problem, or contribute code and documentation.",
+    reportTitle: "Report a problem",
+    reportBody: "Tell us what you expected, what happened, and how to reproduce it. Remove secrets and private data before posting.",
+    reportLink: "Open an issue",
+    codeTitle: "Contribute code or documentation",
+    codeBody: "Read the contribution guide to set up Harn and prepare a change for review.",
+    codeLink: "Read the contribution guide",
+    discussTitle: "Share your experience",
+    discussBody: "Ask a question or share how you use Harn in the community discussions.",
+    discussLink: "Join a discussion",
+    tipTitle: "Leave an optional tip",
+    tipBody: "If Harn has already been useful to you, you can leave a one-time tip to {company}. No goods, services, or benefits are provided in return.",
+    tipLink: "Leave a tip with Stripe",
   },
 
   notFound: {
