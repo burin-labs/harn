@@ -97,6 +97,16 @@ async function candidateManifest(token,repository,runId,source,snapshot,fetchRec
   return {artifact,manifest};
 }
 
+/** Capture the exact completed producer before a fresh consumer rehearsal. */
+export async function qualifiedProducerIdentity(token,repository,runId,source,fetchRecord=fetch){
+  if(!shaPattern.test(source))refuse('source_identity_invalid');
+  const snapshot=await settledProducer(token,repository,runId,source,fetchRecord);
+  if(snapshot.run.head_branch!=='main')refuse('source_candidate_identity_unmeasured');
+  const {artifact}=await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
+  await snapshot.recheck();
+  return {producer_attempt:snapshot.run.run_attempt,manifest_id:artifact.id,manifest_digest:artifact.digest};
+}
+
 /** Source reuse is a decision about one settled producer attempt, not a run ID. */
 export async function reusableSourceCandidate(token,repository,source,targets,fetchRecord=fetch){
   if(!Array.isArray(targets)||targets.length===0||new Set(targets).size!==targets.length
@@ -302,6 +312,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
       }
       console.log(await reusableSourceCandidate(token,repository,sourceOrSelf,matrix.map(row=>row.target),ghRead));
     }
+    else if(operation==='producer-identity')console.log(JSON.stringify(await qualifiedProducerIdentity(token,repository,
+      sourceOrSelf,process.argv[5],ghRead)));
     else if(operation==='rehearsal-binding')console.log(JSON.stringify(await rehearsalBinding(token,repository,
       sourceOrSelf,process.argv[5],ghRead)));
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
