@@ -152,6 +152,17 @@ pub fn index_references(
     };
 
     for (file, parsed) in sources {
+        // The graph is immutable for this pass, so repeated lookups of the
+        // same name in this file resolve identically, including misses.
+        let mut definitions: HashMap<String, Option<DefSite>> = HashMap::new();
+        let mut definition_of = |name: &str| {
+            if let Some(definition) = definitions.get(name) {
+                return definition.clone();
+            }
+            let definition = graph.definition_of(file, name);
+            definitions.insert(name.to_owned(), definition.clone());
+            definition
+        };
         let lexical = resolved_identifier_bindings(&[], &parsed.program);
         let tokens = Lexer::new(&parsed.source)
             .tokenize()
@@ -163,8 +174,7 @@ pub fn index_references(
         let mut lexical_defs: HashMap<BindingId, DefSite> = HashMap::new();
         for binding in lexical.values() {
             lexical_defs.entry(binding.clone()).or_insert_with(|| {
-                graph
-                    .definition_of(file, &binding.name)
+                definition_of(&binding.name)
                     .filter(|def| {
                         def.file == *file
                             && def.span.start == binding.declaration_start
@@ -207,7 +217,7 @@ pub fn index_references(
                 let def = lexical
                     .get(&(broad_span.start, broad_span.end))
                     .and_then(|binding| lexical_defs.get(binding).cloned())
-                    .or_else(|| graph.definition_of(file, name));
+                    .or_else(|| definition_of(name));
                 if let (Some(def), Some(span)) = (
                     def,
                     identifier_span(&tokens, name, broad_span.start, broad_span.end),
@@ -268,14 +278,20 @@ fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {
 }
 
 fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Option<Span> {
-    tokens.iter().find_map(|token| match &token.kind {
-        TokenKind::Identifier(found)
-            if found == name && token.span.start >= start && token.span.end <= end =>
-        {
-            Some(token.span)
-        }
-        _ => None,
-    })
+    // Lexer tokens are emitted in source order. Skip tokens before the
+    // requested range instead of rescanning the file for every identifier.
+    let first = tokens.partition_point(|token| token.span.start < start);
+    tokens[first..]
+        .iter()
+        .take_while(|token| token.span.start <= end)
+        .find_map(|token| match &token.kind {
+            TokenKind::Identifier(found)
+                if found == name && token.span.start >= start && token.span.end <= end =>
+            {
+                Some(token.span)
+            }
+            _ => None,
+        })
 }
 
 fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
@@ -293,5 +309,40 @@ fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
         | Node::OverrideDecl { name, .. } => vec![(name.as_str(), node.span)],
         Node::EvalPackDecl { binding_name, .. } => vec![(binding_name.as_str(), node.span)],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod identifier_span_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_lookup_matches_linear_lookup_for_all_source_ranges() {
+        let source = "let alpha = 1\nlet βeta = alpha + alpha\nlet text = \"hello {alpha}\"\n";
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        assert!(tokens
+            .windows(2)
+            .all(|pair| pair[0].span.start <= pair[1].span.start));
+        for start in 0..=source.len() {
+            for end in start..=source.len() {
+                for name in ["alpha", "βeta", "text", "absent"] {
+                    let expected = tokens.iter().find_map(|token| match &token.kind {
+                        TokenKind::Identifier(found)
+                            if found == name
+                                && token.span.start >= start
+                                && token.span.end <= end =>
+                        {
+                            Some(token.span)
+                        }
+                        _ => None,
+                    });
+                    assert_eq!(
+                        identifier_span(&tokens, name, start, end),
+                        expected,
+                        "{name} in {start}..{end}"
+                    );
+                }
+            }
+        }
     }
 }
