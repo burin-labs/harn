@@ -263,6 +263,18 @@ impl AcpServer {
                     return;
                 }
             };
+        let host_responder = match self
+            .host_responder
+            .as_ref()
+            .map(|binder| binder.bind(&project_root))
+            .transpose()
+        {
+            Ok(responder) => responder,
+            Err(message) => {
+                self.send_prompt_error(id, &format!("Host responder unavailable: {message}"));
+                return;
+            }
+        };
         let turn_budget = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -504,6 +516,7 @@ impl AcpServer {
             cancellation: cancellation.clone(),
             script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+            host_responder,
         });
         let host_bridge = Arc::new(
             harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
