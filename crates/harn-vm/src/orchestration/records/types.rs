@@ -945,6 +945,27 @@ pub struct RunRecord {
     pub persisted_path: Option<String>,
 }
 
+impl RunRecord {
+    /// Session projections identify facts their durable source cannot recover.
+    pub fn measured_llm_duration_ms(&self) -> Option<i64> {
+        let duration = self.usage.as_ref()?.total_duration_ms;
+        if duration < 0 {
+            return None;
+        }
+        if let Some(projection) = self.metadata.get("projected_from") {
+            let unavailable = projection.get("not_recoverable_from_session")?.as_array()?;
+            if unavailable.iter().any(|field| {
+                field
+                    .as_str()
+                    .is_none_or(|field| field == "usage.total_duration_ms")
+            }) {
+                return None;
+            }
+        }
+        Some(duration)
+    }
+}
+
 pub use super::tool_call::{ToolCallRecord, ToolCallRecordStatus};
 
 /// Hash a tool invocation for fixture lookup (name + canonical args JSON).
@@ -990,6 +1011,15 @@ pub struct RunTraceSpanRecord {
     /// persisted before this field existed still load.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl RunTraceSpanRecord {
+    pub fn measured_duration_ms(&self) -> Option<u64> {
+        match self.metadata.get("duration_available") {
+            None | Some(serde_json::Value::Bool(true)) => Some(self.duration_ms),
+            _ => None,
+        }
+    }
 }
 
 impl From<&crate::tracing::Span> for RunTraceSpanRecord {

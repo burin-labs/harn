@@ -422,11 +422,14 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
         TEXT_LIMIT,
     )
     .or_else(|| public_assistant_transcript_text(run.transcript.as_ref(), &policy));
-    let usage = run
+    let mut usage = run
         .usage
         .as_ref()
         .map(RunViewUsage::from)
         .unwrap_or_else(|| usage_from_stages(&stages));
+    if run.usage.is_some() {
+        usage.total_duration_ms = run.measured_llm_duration_ms();
+    }
     let mut view = RunView {
         schema: RUN_VIEW_SCHEMA.to_string(),
         schema_version: RUN_VIEW_SCHEMA_VERSION,
@@ -515,7 +518,7 @@ pub fn build_session_view_from_run_views(
         .session_id
         .clone()
         .or_else(|| runs.iter().find_map(|run| run.run.session_id.clone()));
-    let mut usage = RunViewUsage::default();
+    let usage = RunViewUsage::aggregate(runs.iter().map(|run| &run.usage));
     let mut pending = RunViewPendingState::default();
     let mut failure = None;
     let mut started_at = options.started_at.clone();
@@ -523,7 +526,6 @@ pub fn build_session_view_from_run_views(
     let history = runs
         .iter()
         .map(|run| {
-            usage.add_usage(&run.usage);
             pending.nodes.extend(run.pending.nodes.clone());
             pending.approvals.extend(run.pending.approvals.clone());
             pending.auth.extend(run.pending.auth.clone());
@@ -996,11 +998,7 @@ fn failed_status(value: &str) -> bool {
 }
 
 fn usage_from_stages(stages: &[RunViewStage]) -> RunViewUsage {
-    let mut usage = RunViewUsage::default();
-    for stage in stages {
-        usage.add_usage(&stage.usage);
-    }
-    usage
+    RunViewUsage::aggregate(stages.iter().map(|stage| &stage.usage))
 }
 
 fn run_duration_ms(run: &RunRecord) -> Option<u64> {
@@ -1296,3 +1294,7 @@ fn hash_suffix(hash: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "view/latency_tests.rs"]
+mod latency_tests;
