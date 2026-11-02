@@ -35,6 +35,7 @@ pub mod collections;
 mod command_plan;
 mod concurrency;
 mod connectors;
+pub(crate) mod consent;
 mod crypto;
 pub mod datetime;
 pub(crate) use datetime::date_dict_from_millis;

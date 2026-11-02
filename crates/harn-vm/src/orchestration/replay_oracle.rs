@@ -35,6 +35,7 @@ impl Default for ReplayOracleTrace {
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(schemars::JsonSchema)]
 pub enum ReplayExpectation {
     #[default]
     Match,
@@ -100,6 +101,7 @@ impl ReplayTraceRun {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ReplayTraceRunCounts {
     pub event_log_entries: usize,
     pub trigger_firings: usize,
@@ -118,6 +120,7 @@ pub struct ReplayTraceRunCounts {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ReplayOracleReport {
     pub name: String,
     pub expectation: ReplayExpectation,
@@ -142,7 +145,7 @@ impl Default for ReplayOracleReport {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct ReplayDivergence {
     pub path: String,
     pub left: JsonValue,

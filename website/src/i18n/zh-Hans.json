@@ -1,4 +1,21 @@
 {
+  "contribute": {
+    "pageTitle": "参与贡献 | {siteName}",
+    "title": "帮助改进 Harn",
+    "intro": "分享经验、报告问题，或参与代码和文档的改进。",
+    "reportTitle": "报告问题",
+    "reportBody": "请说明预期结果、实际情况和复现步骤。发布前请删除密钥等秘密信息及私人数据。",
+    "reportLink": "提交问题",
+    "codeTitle": "贡献代码或文档",
+    "codeBody": "阅读贡献指南，配置 Harn 开发环境并准备要提交审核的更改。",
+    "codeLink": "阅读贡献指南",
+    "discussTitle": "分享使用经验",
+    "discussBody": "在社区讨论中提问，或分享你使用 Harn 的方法。",
+    "discussLink": "参与讨论",
+    "tipTitle": "自愿打赏",
+    "tipBody": "如果 Harn 已经对你有所帮助，你可以向 {company} 进行一次性打赏。打赏不提供任何商品、服务或权益作为回报。",
+    "tipLink": "通过 Stripe 打赏"
+  },
   "common": {
     "siteName": "Harn",
     "github": "GitHub",
