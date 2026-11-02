@@ -1,4 +1,5 @@
-A repeated reminder provider emission now carries its full body every time. The model no longer sees a
-"Reminder `<key>` is unchanged from its previous full emission" pointer with a body hash, which it could
-repeat back to the user. Provider fire reports drop the `delta_compressed` and `original_body_bytes`
-fields; `body_bytes` is always the full body size.
+A reminder provider that emits an unchanged non-durable reminder while the earlier copy is still in the
+session now sends nothing, and reports the skip with reason `unchanged_in_context`. It used to send a
+"Reminder `<key>` is unchanged from its previous full emission" pointer with a body hash, which models
+repeated back to people. Once compaction or TTL expiry removes the earlier copy, the next emission carries
+the full body. Fire reports drop the `delta_compressed` and `original_body_bytes` fields.

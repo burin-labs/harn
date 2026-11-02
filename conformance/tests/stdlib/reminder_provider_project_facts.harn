@@ -110,8 +110,8 @@ pipeline default(harness: Harness) {
     refresh_opts,
   )
   harness.stdio.println(refresh.fired_count)
-  harness.stdio.println(refresh.reports[0].deduped_count)
-  harness.stdio.println(refresh.reports[0].provider)
+  harness.stdio.println(refresh.skipped_reports[0].reason)
+  harness.stdio.println(refresh.skipped_reports[0].provider)
   const post_turn = agent_session_apply_reminder_post_turn(harness.agent, session, 3)
   const after_post = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(post_turn.expired_count)

@@ -1,4 +1,4 @@
-//! Per-iteration reminder budgeting and receipts.
+//! Per-iteration reminder budgeting, repeat suppression, and receipts.
 
 use std::collections::BTreeMap;
 
@@ -185,7 +185,8 @@ fn prepare_and_inject_reminder(
     reports: &mut Vec<JsonValue>,
     skipped_reports: &mut Vec<JsonValue>,
 ) -> Result<usize, VmError> {
-    match prepare_reminder_for_iteration(provider_id, reminder, remaining_budget_bytes) {
+    match prepare_reminder_for_iteration(session_id, provider_id, reminder, remaining_budget_bytes)
+    {
         ReminderIterationDecision::Inject(prepared) => {
             let body_bytes = prepared.body_bytes();
             match inject_report(session_id, provider_id, prepared)? {
@@ -238,6 +239,7 @@ fn inject_report(
 }
 
 fn prepare_reminder_for_iteration(
+    session_id: &str,
     provider_id: &str,
     mut reminder: ReminderSpec,
     remaining_budget_bytes: usize,
@@ -245,6 +247,24 @@ fn prepare_reminder_for_iteration(
     let body_hash = reminder_body_hash(&reminder.body);
     attach_body_hash_tag(&mut reminder, &body_hash);
     let body_bytes = reminder.body.len();
+    // A non-durable reminder whose unchanged body is still in the session is
+    // already in front of the model, so it is not sent again. Compaction and
+    // TTL expiry remove it, and the next emission then carries the full body.
+    // Durable reminders are retained at injection instead.
+    if !reminder.preserve_on_compact {
+        if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
+            if session_holds_reminder_body(session_id, dedupe_key, &body_hash) {
+                return ReminderIterationDecision::Skip(serde_json::json!({
+                    "provider": provider_id,
+                    "reason": "unchanged_in_context",
+                    "body_bytes": body_bytes,
+                    "body_sha256": body_hash,
+                    "dedupe_key": dedupe_key,
+                    "tags": &reminder.tags,
+                }));
+            }
+        }
+    }
     if body_bytes > remaining_budget_bytes {
         return ReminderIterationDecision::Skip(serde_json::json!({
             "provider": provider_id,
@@ -296,6 +316,30 @@ fn attach_body_hash_tag(reminder: &mut ReminderSpec, body_hash: &str) {
     reminder
         .tags
         .push(format!("{REMINDER_BODY_HASH_TAG_PREFIX}{body_hash}"));
+}
+
+fn session_holds_reminder_body(session_id: &str, dedupe_key: &str, body_hash: &str) -> bool {
+    let expected_tag = format!("{REMINDER_BODY_HASH_TAG_PREFIX}{body_hash}");
+    let Some(snapshot) = crate::agent_sessions::snapshot(session_id) else {
+        return false;
+    };
+    let Some(events) = snapshot
+        .as_dict()
+        .and_then(|dict| dict.get("events"))
+        .and_then(|events| match events {
+            crate::value::VmValue::List(events) => Some(events),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+    events.iter().any(|event| {
+        let Some(existing) = crate::llm::helpers::reminder_from_event(event) else {
+            return false;
+        };
+        existing.dedupe_key.as_deref() == Some(dedupe_key)
+            && existing.tags.iter().any(|tag| tag == &expected_tag)
+    })
 }
 
 fn json_i64(value: &JsonValue, key: &str) -> Option<i64> {
