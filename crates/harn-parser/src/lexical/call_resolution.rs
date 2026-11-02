@@ -7,6 +7,37 @@ use super::{
     MatchPatternCatalog, Scope,
 };
 
+impl LexicalAnalysis<'_> {
+    pub(super) fn walk_interpolated_segments(
+        &mut self,
+        segments: &[harn_lexer::StringSegment],
+        scopes: &[Scope],
+        inside_nested_callable: bool,
+        owner: &BindingOwner,
+    ) {
+        let Some(source) = self.source else {
+            return;
+        };
+        for segment in segments {
+            let harn_lexer::StringSegment::Expression(expression, line, column) = segment else {
+                continue;
+            };
+            let coordinates = self
+                .coordinates
+                .get_or_insert_with(|| crate::interpolation::SourceCoordinates::new(source));
+            let Some(expression) = crate::interpolation::parse_expression_indexed(
+                coordinates,
+                expression,
+                *line,
+                *column,
+            ) else {
+                continue;
+            };
+            self.walk_node(&expression, scopes, inside_nested_callable, owner);
+        }
+    }
+}
+
 /// Build the enum catalog with declarations imported into module scope.
 /// Local declarations are registered last because they shadow imported types.
 pub fn module_match_pattern_catalog_with_visible(

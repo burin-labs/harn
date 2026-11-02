@@ -684,27 +684,7 @@ impl<'source> LexicalAnalysis<'source> {
                 }
             }
             Node::InterpolatedString(segments) => {
-                let Some(source) = self.source else {
-                    return;
-                };
-                for segment in segments {
-                    let harn_lexer::StringSegment::Expression(expression, line, column) = segment
-                    else {
-                        continue;
-                    };
-                    let coordinates = self.coordinates.get_or_insert_with(|| {
-                        crate::interpolation::SourceCoordinates::new(source)
-                    });
-                    let Some(expression) = crate::interpolation::parse_expression_indexed(
-                        coordinates,
-                        expression,
-                        *line,
-                        *column,
-                    ) else {
-                        continue;
-                    };
-                    self.walk_node(&expression, scopes, inside_nested_callable, owner);
-                }
+                self.walk_interpolated_segments(segments, scopes, inside_nested_callable, owner);
             }
             _ => self.walk_children(node, scopes, inside_nested_callable, owner),
         }
@@ -992,24 +972,6 @@ mod tests {
     use crate::ast::{DictEntry, MatchArm, SelectCase};
 
     use super::*;
-
-    #[test]
-    fn source_aware_bindings_cover_nested_interpolations() {
-        let source = "fn helper() {\r\n  let value = 1\n  \"pré ${\"inner ${value}\"}\"\n}\n";
-        let tokens = harn_lexer::Lexer::new(source).tokenize().unwrap();
-        let program = crate::Parser::new(tokens).parse().unwrap();
-        let bindings = resolved_identifier_bindings_with_source(
-            &[],
-            &program,
-            Some(source),
-            &MatchPatternCatalog::default(),
-        );
-        let use_start = source.rfind("value").unwrap();
-        let binding = bindings
-            .get(&(use_start, use_start + "value".len()))
-            .expect("nested interpolation resolves the local binding");
-        assert_eq!(binding.name, "value");
-    }
 
     fn node(offset: usize, node: Node) -> SNode {
         SNode::new(node, Span::with_offsets(offset, offset + 1, 1, offset + 1))

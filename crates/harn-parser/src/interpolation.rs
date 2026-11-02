@@ -123,6 +123,24 @@ mod tests {
     }
 
     #[test]
+    fn source_aware_bindings_cover_nested_interpolations() {
+        let source = "fn helper() {\r\n  let value = 1\n  \"pré ${\"inner ${value}\"}\"\n}\n";
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let program = Parser::new(tokens).parse().unwrap();
+        let bindings = crate::lexical::resolved_identifier_bindings_with_source(
+            &[],
+            &program,
+            Some(source),
+            &crate::lexical::MatchPatternCatalog::default(),
+        );
+        let use_start = source.rfind("value").unwrap();
+        let binding = bindings
+            .get(&(use_start, use_start + "value".len()))
+            .expect("nested interpolation resolves the local binding");
+        assert_eq!(binding.name, "value");
+    }
+
+    #[test]
     #[expect(
         clippy::string_slice,
         reason = "expression spans come from the lexer and lie on char boundaries"
