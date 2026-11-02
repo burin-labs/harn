@@ -383,7 +383,7 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
         session_id,
         run_id,
         "c2",
-        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=abc123secret python3 -m pytest -m \"not slow\" -q",
+        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=\"abc123\"'secret' DB_PASSWORD='alpha'\\''beta' python3 -m pytest -m \"not slow\" -q",
         0,
       )
       session_store_append(
@@ -410,7 +410,7 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
       assert_eq(ledger[1]?.ok, true)
       assert_eq(
         ledger[1]?.command,
-        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=<redacted> python3 -m pytest -m \"not slow\" -q",
+        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=<redacted> DB_PASSWORD=<redacted> python3 -m pytest -m \"not slow\" -q",
       )
       assert(
         !ledger[1]?.command.contains("abc123secret"),
@@ -431,6 +431,16 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
         !json_stringify(transcript).contains("abc123secret"),
         "the drill-down must not leak a credential",
       )
+      for fragment in ["abc123", "secret", "alpha", "beta"] {
+        assert(
+          !json_stringify(ledger).contains(fragment),
+          "the persisted ledger must redact every segment",
+        )
+        assert(
+          !json_stringify(transcript).contains(fragment),
+          "the drill-down must redact every segment",
+        )
+      }
       return nil
     },
   )
@@ -448,6 +458,23 @@ pipeline test_command_redaction_removes_whole_quoted_values() {
   assert_eq(pl_redact_command("DB_PASSWORD='a b c' psql"), "DB_PASSWORD=<redacted> psql")
   assert_eq(pl_redact_command("API_KEY=\"never closed tail"), "API_KEY=<redacted>")
   assert_eq(pl_redact_command("password: \"two words\" next"), "password=<redacted> next")
+  assert_eq(
+    pl_redact_command("DB_PASSWORD='alpha'\\''beta' ./deploy"),
+    "DB_PASSWORD=<redacted> ./deploy",
+  )
+  assert_eq(
+    pl_redact_command("DB_PASSWORD=\"alpha\"' beta' ./deploy"),
+    "DB_PASSWORD=<redacted> ./deploy",
+  )
+  assert_eq(pl_redact_command("TOKEN=bare' quoted'\\ tail command"), "TOKEN=<redacted> command")
+  assert_eq(pl_redact_command("TOKEN=$(printf 'opaque secret') command"), "TOKEN=<redacted>")
+  assert_eq(
+    pl_redact_command("TOKEN=\"prefix$(printf \"nested secret\")\" command"),
+    "TOKEN=<redacted>",
+  )
+  assert_eq(pl_redact_command("TOKEN=`printf 'opaque secret'` command"), "TOKEN=<redacted>")
+  assert_eq(pl_redact_command("TOKEN='literal$dollar' command"), "TOKEN=<redacted> command")
+  assert_eq(pl_redact_command("API_KEY=\"never closed tail\\"), "API_KEY=<redacted>")
 }
 
 fn append_message(agent: HarnessAgent, root: string, session_id: string, text: string) -> nil {
@@ -498,10 +525,15 @@ pipeline test_inspect_session_evidence_returns_a_bounded_redacted_transcript(har
     harness.fs,
     { root ->
       const session_id = "session-inspected"
-      append_message(harness.agent, root, session_id, "API_KEY=\"two words\" make deploy")
       for index in range(0, 85) {
         append_message(harness.agent, root, session_id, "step ${index}")
       }
+      append_message(
+        harness.agent,
+        root,
+        session_id,
+        "retained credential entry: API_KEY=\"window-secret-left\"' window-secret-right' make deploy",
+      )
       const evidence = [
         {
           id: "run-inspected",
@@ -534,7 +566,15 @@ pipeline test_inspect_session_evidence_returns_a_bounded_redacted_transcript(har
       const seen = json_stringify(result?.agent_result ?? {})
       assert(seen.contains("truncated"), "the handler ran and returned the bounded transcript")
       assert(seen.contains("step 84"), "the handler returned the newest entries")
-      assert(!seen.contains("two words"), "the handler must not return a credential")
+      assert(
+        regex_match("retained credential entry: <redacted:[^>]+> make deploy", seen),
+        "the credential-bearing entry must be inside the returned window",
+      )
+      assert(!seen.contains("window-secret-left"), "the handler must redact the first segment")
+      assert(
+        !seen.contains("window-secret-right"),
+        "the handler must redact the concatenated segment",
+      )
       return nil
     },
   )
