@@ -284,6 +284,24 @@ fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Op
         })
 }
 
+fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
+    match &node.node {
+        Node::Identifier(name) => vec![(name.as_str(), node.span)],
+        Node::FunctionCall { name, .. } => vec![(name.as_str(), node.span)],
+        Node::FnDecl { name, .. }
+        | Node::Pipeline { name, .. }
+        | Node::ToolDecl { name, .. }
+        | Node::SkillDecl { name, .. }
+        | Node::StructDecl { name, .. }
+        | Node::EnumDecl { name, .. }
+        | Node::InterfaceDecl { name, .. }
+        | Node::TypeDecl { name, .. }
+        | Node::OverrideDecl { name, .. } => vec![(name.as_str(), node.span)],
+        Node::EvalPackDecl { binding_name, .. } => vec![(binding_name.as_str(), node.span)],
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod identifier_span_tests {
     use super::*;
@@ -316,23 +334,5 @@ mod identifier_span_tests {
                 }
             }
         }
-    }
-}
-
-fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
-    match &node.node {
-        Node::Identifier(name) => vec![(name.as_str(), node.span)],
-        Node::FunctionCall { name, .. } => vec![(name.as_str(), node.span)],
-        Node::FnDecl { name, .. }
-        | Node::Pipeline { name, .. }
-        | Node::ToolDecl { name, .. }
-        | Node::SkillDecl { name, .. }
-        | Node::StructDecl { name, .. }
-        | Node::EnumDecl { name, .. }
-        | Node::InterfaceDecl { name, .. }
-        | Node::TypeDecl { name, .. }
-        | Node::OverrideDecl { name, .. } => vec![(name.as_str(), node.span)],
-        Node::EvalPackDecl { binding_name, .. } => vec![(binding_name.as_str(), node.span)],
-        _ => Vec::new(),
     }
 }
