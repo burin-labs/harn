@@ -182,7 +182,69 @@ pub(super) struct Record {
     pub fields: Vec<Field>,
 }
 
+pub(super) fn append_string_enum(out: &mut String, target: Target, name: &str, values: &[String]) {
+    match target {
+        Target::Typescript => out.push_str(&format!("export type {name} = {}\n", values.iter().map(|value| format!("{value:?}")).collect::<Vec<_>>().join(" | "))),
+        Target::Rust => out.push_str(&format!("#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"snake_case\")]\npub enum {name} {{ {} }}\n", values.iter().map(|value| super::rust::rust_type_name(value)).collect::<Vec<_>>().join(", "))),
+        Target::Swift => out.push_str(&format!("public enum {name}: String, Codable, Sendable, Equatable {{ case {} }}\n", values.iter().map(|value| {
+            let case = super::swift::swift_case_name(value);
+            if &case == value { case } else { format!("{case} = {value:?}") }
+        }).collect::<Vec<_>>().join(", "))),
+        Target::Python => out.push_str(&super::python::py_str_enum_owned(name, values)),
+        Target::Go => out.push_str(&format!("type {name} string\n")),
+    }
+}
+
 impl Record {
+    pub(super) fn append_with_initializer(&self, out: &mut String, target: Target) {
+        if !matches!(target, Target::Swift) {
+            self.append_mutable(out, target, true);
+            if matches!(target, Target::Python) {
+                let required = self
+                    .fields
+                    .iter()
+                    .filter(|field| field.required)
+                    .map(|field| format!("{:?}", field.wire_name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!(
+                    "{}.__harn_required_fields__ = frozenset([{required}])\n\n",
+                    self.name
+                ));
+            }
+            return;
+        }
+        let parameters = self
+            .fields
+            .iter()
+            .map(|field| {
+                let name = camel_ident(&field.wire_name);
+                let kind = field.kind.optional_type(target, field.required);
+                let default = if !field.required || matches!(field.kind, FieldKind::Nullable(_)) {
+                    " = nil"
+                } else {
+                    ""
+                };
+                format!("{name}: {kind}{default}")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut body = format!("\n    public init({parameters}) {{\n");
+        for field in &self.fields {
+            let name = camel_ident(&field.wire_name);
+            body.push_str(&format!("        self.{name} = {name}\n"));
+        }
+        body.push_str("    }\n");
+        self.append_record(
+            out,
+            target,
+            false,
+            true,
+            true,
+            Some((&body, &BTreeMap::new())),
+        );
+    }
+
     pub(super) fn append(&self, out: &mut String, target: Target) {
         self.append_record(out, target, false, false, false, None);
     }
@@ -274,15 +336,25 @@ impl Record {
                 Target::Typescript => {
                     out.push_str(&format!("  {}{optional}: {kind}\n", field.wire_name));
                 }
-                Target::Python => out.push_str(&format!(
-                    "    {}: {kind}{}\n",
-                    field.wire_name,
-                    if !closed && !field.required {
-                        " = None"
+                Target::Python => {
+                    let ident = super::python::field_ident(&field.wire_name);
+                    let default = if ident != field.wire_name {
+                        let default = if !closed && !field.required {
+                            "default=None, "
+                        } else {
+                            ""
+                        };
+                        format!(
+                            " = field({default}metadata={{\"wire_name\": {:?}}})",
+                            field.wire_name
+                        )
+                    } else if !closed && !field.required {
+                        " = None".into()
                     } else {
-                        ""
-                    }
-                )),
+                        String::new()
+                    };
+                    out.push_str(&format!("    {ident}: {kind}{default}\n"));
+                }
                 Target::Go => out.push_str(&format!(
                     "    {} {kind} `json:\"{}{}\"`\n",
                     go_ident(&field.wire_name),
@@ -341,7 +413,10 @@ impl Record {
             out.push_str("\n    public init(from decoder: Decoder) throws {\n        let values = try decoder.container(keyedBy: CodingKeys.self)\n");
             for field in &self.fields {
                 let name = camel_ident(&field.wire_name);
-                let kind = field.kind.type_name(target);
+                let kind = match (&field.kind, field.required) {
+                    (FieldKind::Nullable(inner), false) => inner.type_name(target),
+                    _ => field.kind.type_name(target),
+                };
                 if !field.required && matches!(field.kind, FieldKind::Json) {
                     out.push_str(&format!("        {name} = values.contains(.{name}) ? try values.decode({kind}.self, forKey: .{name}) : nil\n"));
                 } else {

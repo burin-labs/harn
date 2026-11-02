@@ -2815,3 +2815,219 @@ type HarnAgentEventTurnPhaseChanged struct {
 type HarnAgentEventTypedCheckpoint struct {
 	Checkpoint json.RawMessage `json:"checkpoint"`
 }
+
+type HarnCrystallizationKind string
+type HarnCrystallizationPromotionStatus string
+type HarnCrystallizationReplayExpectation string
+type HarnCrystallizationSegmentKind string
+type HarnCrystallizationCandidateBundle struct {
+	Schema             string                              `json:"schema"`
+	SchemaVersion      uint64                              `json:"schema_version"`
+	GeneratedAt        string                              `json:"generated_at"`
+	Generator          HarnCrystallizationGenerator        `json:"generator"`
+	Kind               HarnCrystallizationKind             `json:"kind"`
+	CandidateID        string                              `json:"candidate_id"`
+	ExternalKey        string                              `json:"external_key"`
+	Title              string                              `json:"title"`
+	Team               *string                             `json:"team"`
+	Repo               *string                             `json:"repo"`
+	RiskLevel          string                              `json:"risk_level"`
+	Workflow           HarnCrystallizationWorkflowRef      `json:"workflow"`
+	SourceTraceHashes  []string                            `json:"source_trace_hashes"`
+	SourceTraces       []HarnCrystallizationSourceTrace    `json:"source_traces"`
+	DeterministicSteps []HarnCrystallizationStep           `json:"deterministic_steps"`
+	FuzzySteps         []HarnCrystallizationStep           `json:"fuzzy_steps"`
+	SideEffects        []HarnCrystallizationSideEffect     `json:"side_effects"`
+	Capabilities       []string                            `json:"capabilities"`
+	RequiredSecrets    []string                            `json:"required_secrets"`
+	Savings            HarnCrystallizationSavingsEstimate  `json:"savings"`
+	Shadow             HarnCrystallizationShadowRunReport  `json:"shadow"`
+	EvalPack           *HarnCrystallizationEvalPackRef     `json:"eval_pack"`
+	Skill              *HarnCrystallizationSkillRef        `json:"skill"`
+	Fixtures           []HarnCrystallizationFixtureRef     `json:"fixtures"`
+	Promotion          HarnCrystallizationPromotion        `json:"promotion"`
+	Redaction          HarnCrystallizationRedactionSummary `json:"redaction"`
+	Confidence         float64                             `json:"confidence"`
+	RejectionReasons   []string                            `json:"rejection_reasons"`
+	Warnings           []string                            `json:"warnings"`
+}
+
+type HarnCrystallizationEvalPackRef struct {
+	Path string  `json:"path"`
+	Link *string `json:"link"`
+}
+
+type HarnCrystallizationFixtureRef struct {
+	Path       string `json:"path"`
+	TraceID    string `json:"trace_id"`
+	SourceHash string `json:"source_hash"`
+	Redacted   bool   `json:"redacted"`
+}
+
+type HarnCrystallizationGenerator struct {
+	Tool    string `json:"tool"`
+	Version string `json:"version"`
+}
+
+type HarnCrystallizationPromotion struct {
+	Owner                     *string                                        `json:"owner"`
+	Approver                  *string                                        `json:"approver"`
+	Author                    *string                                        `json:"author"`
+	RolloutPolicy             string                                         `json:"rollout_policy"`
+	RollbackTarget            *string                                        `json:"rollback_target"`
+	CreatedAt                 string                                         `json:"created_at"`
+	WorkflowVersion           string                                         `json:"workflow_version"`
+	PackageName               string                                         `json:"package_name"`
+	SampleCount               uint64                                         `json:"sample_count"`
+	Confidence                float64                                        `json:"confidence"`
+	ShadowSuccessCount        uint64                                         `json:"shadow_success_count"`
+	ShadowFailureCount        uint64                                         `json:"shadow_failure_count"`
+	DivergenceHistory         []HarnCrystallizationPromotionDivergenceRecord `json:"divergence_history"`
+	ApprovalHistory           []HarnCrystallizationPromotionApprovalRecord   `json:"approval_history"`
+	Criteria                  HarnCrystallizationPromotionCriteria           `json:"criteria"`
+	EstimatedTimeTokenSavings HarnCrystallizationSavingsEstimate             `json:"estimated_time_token_savings"`
+}
+
+type HarnCrystallizationRedactionSummary struct {
+	Applied      bool     `json:"applied"`
+	Rules        []string `json:"rules"`
+	Summary      string   `json:"summary"`
+	FixtureCount uint64   `json:"fixture_count"`
+}
+
+type HarnCrystallizationSkillRef struct {
+	Path                string `json:"path"`
+	GateReceiptPath     string `json:"gate_receipt_path"`
+	Name                string `json:"name"`
+	SkillCandidateID    string `json:"skill_candidate_id"`
+	WorkflowCandidateID string `json:"workflow_candidate_id"`
+}
+
+type HarnCrystallizationSourceTrace struct {
+	TraceID         string  `json:"trace_id"`
+	SourceHash      string  `json:"source_hash"`
+	SourceUrl       *string `json:"source_url"`
+	SourceReceiptID *string `json:"source_receipt_id"`
+	FixturePath     *string `json:"fixture_path"`
+	ExecutionID     *string `json:"execution_id,omitempty"`
+}
+
+type HarnCrystallizationStep struct {
+	Index            uint64                          `json:"index"`
+	Kind             string                          `json:"kind"`
+	Name             string                          `json:"name"`
+	Segment          HarnCrystallizationSegmentKind  `json:"segment"`
+	ParameterRefs    []string                        `json:"parameter_refs"`
+	SideEffectsKnown bool                            `json:"side_effects_known"`
+	SideEffects      []HarnCrystallizationSideEffect `json:"side_effects"`
+	Capabilities     []string                        `json:"capabilities"`
+	RequiredSecrets  []string                        `json:"required_secrets"`
+	Approval         *HarnCrystallizationApproval    `json:"approval"`
+	ReviewNotes      []string                        `json:"review_notes"`
+}
+
+type HarnCrystallizationWorkflowRef struct {
+	Path           string `json:"path"`
+	Name           string `json:"name"`
+	PackageName    string `json:"package_name"`
+	PackageVersion string `json:"package_version"`
+}
+
+type HarnCrystallizationApproval struct {
+	Prompt   *string `json:"prompt"`
+	Approver *string `json:"approver"`
+	Required bool    `json:"required"`
+	Boundary *string `json:"boundary"`
+}
+
+type HarnCrystallizationSideEffect struct {
+	Kind       string     `json:"kind"`
+	Target     string     `json:"target"`
+	Capability *string    `json:"capability"`
+	Mutation   *string    `json:"mutation"`
+	Metadata   JSONObject `json:"metadata"`
+}
+
+type HarnCrystallizationPromotionApprovalRecord struct {
+	Actor      string  `json:"actor"`
+	Decision   string  `json:"decision"`
+	RecordedAt string  `json:"recorded_at"`
+	Reason     *string `json:"reason"`
+}
+
+type HarnCrystallizationPromotionCriteria struct {
+	MinExamples           uint64                             `json:"min_examples"`
+	MinConfidence         float64                            `json:"min_confidence"`
+	RequiresShadowPass    bool                               `json:"requires_shadow_pass"`
+	RequiresNoRejections  bool                               `json:"requires_no_rejections"`
+	RequiresHumanApproval bool                               `json:"requires_human_approval"`
+	ApprovalReason        *string                            `json:"approval_reason"`
+	Status                HarnCrystallizationPromotionStatus `json:"status"`
+	Reasons               []string                           `json:"reasons"`
+}
+
+type HarnCrystallizationPromotionDivergenceRecord struct {
+	TraceID string          `json:"trace_id"`
+	Path    *string         `json:"path"`
+	Message string          `json:"message"`
+	Left    json.RawMessage `json:"left"`
+	Right   json.RawMessage `json:"right"`
+}
+
+type HarnCrystallizationReplayDivergence struct {
+	Path    string          `json:"path"`
+	Left    json.RawMessage `json:"left"`
+	Right   json.RawMessage `json:"right"`
+	Message string          `json:"message"`
+}
+
+type HarnCrystallizationReplayOracleReport struct {
+	Name                string                                  `json:"name"`
+	Expectation         HarnCrystallizationReplayExpectation    `json:"expectation"`
+	Passed              bool                                    `json:"passed"`
+	FirstRunCounts      HarnCrystallizationReplayTraceRunCounts `json:"first_run_counts"`
+	SecondRunCounts     HarnCrystallizationReplayTraceRunCounts `json:"second_run_counts"`
+	ProtocolFixtureRefs []string                                `json:"protocol_fixture_refs"`
+	Divergence          *HarnCrystallizationReplayDivergence    `json:"divergence"`
+}
+
+type HarnCrystallizationReplayTraceRunCounts struct {
+	EventLogEntries       uint64 `json:"event_log_entries"`
+	TriggerFirings        uint64 `json:"trigger_firings"`
+	LlmInteractions       uint64 `json:"llm_interactions"`
+	ProtocolInteractions  uint64 `json:"protocol_interactions"`
+	ApprovalInteractions  uint64 `json:"approval_interactions"`
+	EffectReceipts        uint64 `json:"effect_receipts"`
+	PersonaRuntimeStates  uint64 `json:"persona_runtime_states"`
+	AgentTranscriptDeltas uint64 `json:"agent_transcript_deltas"`
+	FinalArtifacts        uint64 `json:"final_artifacts"`
+	PolicyDecisions       uint64 `json:"policy_decisions"`
+	ChannelReceipts       uint64 `json:"channel_receipts"`
+	LifecycleReceipts     uint64 `json:"lifecycle_receipts"`
+}
+
+type HarnCrystallizationSavingsEstimate struct {
+	ModelCallsAvoided       int64   `json:"model_calls_avoided"`
+	InputTokensAvoided      int64   `json:"input_tokens_avoided"`
+	OutputTokensAvoided     int64   `json:"output_tokens_avoided"`
+	EstimatedCostUsdAvoided float64 `json:"estimated_cost_usd_avoided"`
+	WallMsAvoided           int64   `json:"wall_ms_avoided"`
+	CpuRuntimeCostUsd       float64 `json:"cpu_runtime_cost_usd"`
+	RemainingModelCalls     int64   `json:"remaining_model_calls"`
+}
+
+type HarnCrystallizationShadowRunReport struct {
+	Pass           bool                                   `json:"pass"`
+	ComparedTraces uint64                                 `json:"compared_traces"`
+	Failures       []string                               `json:"failures"`
+	Traces         []HarnCrystallizationShadowTraceResult `json:"traces"`
+}
+
+type HarnCrystallizationShadowTraceResult struct {
+	TraceID          string                                 `json:"trace_id"`
+	SourceHash       string                                 `json:"source_hash"`
+	Pass             bool                                   `json:"pass"`
+	Details          []string                               `json:"details"`
+	ComparedReceipts uint64                                 `json:"compared_receipts"`
+	ReplayOracle     *HarnCrystallizationReplayOracleReport `json:"replay_oracle"`
+}

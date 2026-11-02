@@ -148,6 +148,16 @@ pub(super) fn generate_manifest_with_vocabularies(
         },
     }));
 
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/orchestration/crystallize/bundle.rs",
+        "artifact": harn_vm::orchestration::CRYSTALLIZATION_BUNDLE_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::orchestration::CrystallizationBundleManifest",
+            "schema": harn_vm::orchestration::BUNDLE_SCHEMA,
+            "schema_version": harn_vm::orchestration::BUNDLE_SCHEMA_VERSION,
+        },
+    }));
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
         "generatedBy": "harn dump-protocol-artifacts",
@@ -346,6 +356,9 @@ pub(super) fn generate_readme() -> String {
          make check-protocol-artifacts\n\
          ```\n\n\
          Files:\n\n\
+         - `crystallization-bundle.schema.json`: serialized candidate manifest\n\
+           derived from Harn's bundle types. The `HarnCrystallization*` bindings\n\
+           preserve effect knowledge, replay evidence, and promotion criteria.\n\
          - `manifest.json`: deterministic summary of protocol versions, advertised Harn\n\
            extension fields, and generated binding vocabulary.\n\
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\

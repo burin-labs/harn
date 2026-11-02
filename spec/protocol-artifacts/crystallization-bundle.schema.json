@@ -1,0 +1,1271 @@
+{
+  "$defs": {
+    "BundleEvalPackRef": {
+      "properties": {
+        "link": {
+          "default": null,
+          "description": "Optional external link the eval pack also lives at (e.g. a hosted\n`eval-pack://` URI when the bundle was promoted into a tenant).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": "",
+          "description": "Relative path of the eval pack inside the bundle directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "link"
+      ],
+      "type": "object"
+    },
+    "BundleFixtureRef": {
+      "properties": {
+        "path": {
+          "default": "",
+          "type": "string"
+        },
+        "redacted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "source_hash": {
+          "default": "",
+          "type": "string"
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "trace_id",
+        "source_hash",
+        "redacted"
+      ],
+      "type": "object"
+    },
+    "BundleGenerator": {
+      "properties": {
+        "tool": {
+          "default": "harn",
+          "type": "string"
+        },
+        "version": {
+          "default": "0.10.185",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "version"
+      ],
+      "type": "object"
+    },
+    "BundleKind": {
+      "oneOf": [
+        {
+          "const": "candidate",
+          "description": "A normal candidate that passed shadow comparison and is ready for\nreview and promotion.",
+          "type": "string"
+        },
+        {
+          "const": "plan_only",
+          "description": "A \"plan-only\" candidate: every step has a side-effect-free, in-process\noutcome (e.g. classify and write a receipt). Cloud importers can\npromote these without explicit external-side-effect approval.",
+          "type": "string"
+        },
+        {
+          "const": "rejected",
+          "description": "No safe candidate was selected. The bundle still records what was\nattempted, the rejection reasons, and any rejected candidates so\nreviewers can debug or feed it back into mining.",
+          "type": "string"
+        }
+      ]
+    },
+    "BundlePromotion": {
+      "properties": {
+        "approval_history": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PromotionApprovalRecord"
+          },
+          "type": "array"
+        },
+        "approver": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "created_at": {
+          "default": "",
+          "type": "string"
+        },
+        "criteria": {
+          "$ref": "#/$defs/PromotionCriteria",
+          "default": {
+            "approval_reason": null,
+            "min_confidence": 0.0,
+            "min_examples": 0,
+            "reasons": [],
+            "requires_human_approval": false,
+            "requires_no_rejections": false,
+            "requires_shadow_pass": false,
+            "status": "blocked"
+          }
+        },
+        "divergence_history": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PromotionDivergenceRecord"
+          },
+          "type": "array"
+        },
+        "estimated_time_token_savings": {
+          "$ref": "#/$defs/SavingsEstimate",
+          "default": {
+            "cpu_runtime_cost_usd": 0.0,
+            "estimated_cost_usd_avoided": 0.0,
+            "input_tokens_avoided": 0,
+            "model_calls_avoided": 0,
+            "output_tokens_avoided": 0,
+            "remaining_model_calls": 0,
+            "wall_ms_avoided": 0
+          }
+        },
+        "owner": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_name": {
+          "default": "",
+          "type": "string"
+        },
+        "rollback_target": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rollout_policy": {
+          "default": "shadow_then_canary",
+          "description": "Logical rollout strategy. Defaults to `shadow_then_canary`. Hosted\nsurfaces may extend this enum but must keep existing values stable.",
+          "type": "string"
+        },
+        "sample_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shadow_failure_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shadow_success_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workflow_version": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "approver",
+        "author",
+        "rollout_policy",
+        "rollback_target",
+        "created_at",
+        "workflow_version",
+        "package_name",
+        "sample_count",
+        "confidence",
+        "shadow_success_count",
+        "shadow_failure_count",
+        "divergence_history",
+        "approval_history",
+        "criteria",
+        "estimated_time_token_savings"
+      ],
+      "type": "object"
+    },
+    "BundleRedactionSummary": {
+      "properties": {
+        "applied": {
+          "default": false,
+          "type": "boolean"
+        },
+        "fixture_count": {
+          "default": 0,
+          "description": "Number of fixture files copied into the bundle (0 when no fixture\ndirectory was emitted).",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "applied",
+        "rules",
+        "summary",
+        "fixture_count"
+      ],
+      "type": "object"
+    },
+    "BundleSkillRef": {
+      "properties": {
+        "gate_receipt_path": {
+          "default": "",
+          "description": "Relative path to the replay/held-out gate receipt for the skill.",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "description": "Relative path to the generated `SKILL.md` inside the bundle.",
+          "type": "string"
+        },
+        "skill_candidate_id": {
+          "default": "",
+          "type": "string"
+        },
+        "workflow_candidate_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "gate_receipt_path",
+        "name",
+        "skill_candidate_id",
+        "workflow_candidate_id"
+      ],
+      "type": "object"
+    },
+    "BundleSourceTrace": {
+      "properties": {
+        "execution_id": {
+          "description": "Harn-owned execution identity retained from the source trace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fixture_path": {
+          "default": null,
+          "description": "Relative path of the redacted fixture inside the bundle, if one\nwas emitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_hash": {
+          "default": "",
+          "type": "string"
+        },
+        "source_receipt_id": {
+          "default": null,
+          "description": "Optional cloud-side receipt id when the trace was already promoted\ninto a tenant receipt. Cloud importers use this to wire candidate\nevidence to existing receipts without round-tripping the raw payload.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_url": {
+          "default": null,
+          "description": "Optional human-visible URL (PR, issue, run record path) for the\ntrace. `None` when the trace was loaded from an in-memory store.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "source_hash",
+        "source_url",
+        "source_receipt_id",
+        "fixture_path"
+      ],
+      "type": "object"
+    },
+    "BundleStep": {
+      "properties": {
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrystallizationApproval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "index": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "parameter_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_secrets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "review_notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "segment": {
+          "$ref": "#/$defs/SegmentKind",
+          "default": "deterministic"
+        },
+        "side_effects": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CrystallizationSideEffect"
+          },
+          "type": "array"
+        },
+        "side_effects_known": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "name",
+        "segment",
+        "parameter_refs",
+        "side_effects_known",
+        "side_effects",
+        "capabilities",
+        "required_secrets",
+        "approval",
+        "review_notes"
+      ],
+      "type": "object"
+    },
+    "BundleWorkflowRef": {
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Short identifier used in `pipeline NAME(harness: Harness, ...)`.",
+          "type": "string"
+        },
+        "package_name": {
+          "default": "",
+          "description": "Logical package name promotion uses to register the workflow.",
+          "type": "string"
+        },
+        "package_version": {
+          "default": "",
+          "description": "Initial workflow version proposed for promotion.",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "description": "Relative path inside the bundle directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "package_name",
+        "package_version"
+      ],
+      "type": "object"
+    },
+    "CrystallizationApproval": {
+      "properties": {
+        "approver": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "boundary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "prompt",
+        "approver",
+        "required",
+        "boundary"
+      ],
+      "type": "object"
+    },
+    "CrystallizationSideEffect": {
+      "properties": {
+        "capability": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "mutation": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target",
+        "capability",
+        "mutation",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "PromotionApprovalRecord": {
+      "properties": {
+        "actor": {
+          "default": "",
+          "type": "string"
+        },
+        "decision": {
+          "default": "",
+          "type": "string"
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recorded_at": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "decision",
+        "recorded_at",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PromotionCriteria": {
+      "properties": {
+        "approval_reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "min_confidence": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "min_examples": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requires_human_approval": {
+          "default": false,
+          "type": "boolean"
+        },
+        "requires_no_rejections": {
+          "default": false,
+          "type": "boolean"
+        },
+        "requires_shadow_pass": {
+          "default": false,
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/PromotionStatus",
+          "default": "blocked"
+        }
+      },
+      "required": [
+        "min_examples",
+        "min_confidence",
+        "requires_shadow_pass",
+        "requires_no_rejections",
+        "requires_human_approval",
+        "approval_reason",
+        "status",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "PromotionDivergenceRecord": {
+      "properties": {
+        "left": {
+          "default": null
+        },
+        "message": {
+          "default": "",
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "right": {
+          "default": null
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "path",
+        "message",
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "PromotionStatus": {
+      "enum": [
+        "blocked",
+        "needs_approval",
+        "ready"
+      ],
+      "type": "string"
+    },
+    "ReplayDivergence": {
+      "properties": {
+        "left": true,
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "right": true
+      },
+      "required": [
+        "path",
+        "left",
+        "right",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ReplayExpectation": {
+      "enum": [
+        "match",
+        "drift"
+      ],
+      "type": "string"
+    },
+    "ReplayOracleReport": {
+      "properties": {
+        "divergence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplayDivergence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expectation": {
+          "$ref": "#/$defs/ReplayExpectation",
+          "default": "match"
+        },
+        "first_run_counts": {
+          "$ref": "#/$defs/ReplayTraceRunCounts",
+          "default": {
+            "agent_transcript_deltas": 0,
+            "approval_interactions": 0,
+            "channel_receipts": 0,
+            "effect_receipts": 0,
+            "event_log_entries": 0,
+            "final_artifacts": 0,
+            "lifecycle_receipts": 0,
+            "llm_interactions": 0,
+            "persona_runtime_states": 0,
+            "policy_decisions": 0,
+            "protocol_interactions": 0,
+            "trigger_firings": 0
+          }
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "passed": {
+          "default": false,
+          "type": "boolean"
+        },
+        "protocol_fixture_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "second_run_counts": {
+          "$ref": "#/$defs/ReplayTraceRunCounts",
+          "default": {
+            "agent_transcript_deltas": 0,
+            "approval_interactions": 0,
+            "channel_receipts": 0,
+            "effect_receipts": 0,
+            "event_log_entries": 0,
+            "final_artifacts": 0,
+            "lifecycle_receipts": 0,
+            "llm_interactions": 0,
+            "persona_runtime_states": 0,
+            "policy_decisions": 0,
+            "protocol_interactions": 0,
+            "trigger_firings": 0
+          }
+        }
+      },
+      "required": [
+        "name",
+        "expectation",
+        "passed",
+        "first_run_counts",
+        "second_run_counts",
+        "protocol_fixture_refs",
+        "divergence"
+      ],
+      "type": "object"
+    },
+    "ReplayTraceRunCounts": {
+      "properties": {
+        "agent_transcript_deltas": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "approval_interactions": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "channel_receipts": {
+          "default": 0,
+          "description": "CH-07 (#1878).",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "effect_receipts": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_log_entries": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "final_artifacts": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lifecycle_receipts": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "llm_interactions": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "persona_runtime_states": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy_decisions": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocol_interactions": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trigger_firings": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_log_entries",
+        "trigger_firings",
+        "llm_interactions",
+        "protocol_interactions",
+        "approval_interactions",
+        "effect_receipts",
+        "persona_runtime_states",
+        "agent_transcript_deltas",
+        "final_artifacts",
+        "policy_decisions",
+        "channel_receipts",
+        "lifecycle_receipts"
+      ],
+      "type": "object"
+    },
+    "SavingsEstimate": {
+      "properties": {
+        "cpu_runtime_cost_usd": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "estimated_cost_usd_avoided": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "input_tokens_avoided": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "model_calls_avoided": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "output_tokens_avoided": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "remaining_model_calls": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "wall_ms_avoided": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model_calls_avoided",
+        "input_tokens_avoided",
+        "output_tokens_avoided",
+        "estimated_cost_usd_avoided",
+        "wall_ms_avoided",
+        "cpu_runtime_cost_usd",
+        "remaining_model_calls"
+      ],
+      "type": "object"
+    },
+    "SegmentKind": {
+      "enum": [
+        "deterministic",
+        "fuzzy"
+      ],
+      "type": "string"
+    },
+    "ShadowRunReport": {
+      "properties": {
+        "compared_traces": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failures": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pass": {
+          "default": false,
+          "type": "boolean"
+        },
+        "traces": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ShadowTraceResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pass",
+        "compared_traces",
+        "failures",
+        "traces"
+      ],
+      "type": "object"
+    },
+    "ShadowTraceResult": {
+      "properties": {
+        "compared_receipts": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "details": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pass": {
+          "default": false,
+          "type": "boolean"
+        },
+        "replay_oracle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplayOracleReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_hash": {
+          "default": "",
+          "type": "string"
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "source_hash",
+        "pass",
+        "details",
+        "compared_receipts",
+        "replay_oracle"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "candidate_id": {
+      "default": "",
+      "type": "string"
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "confidence": {
+      "default": 0.0,
+      "format": "double",
+      "type": "number"
+    },
+    "deterministic_steps": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleStep"
+      },
+      "type": "array"
+    },
+    "eval_pack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BundleEvalPackRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "external_key": {
+      "default": "",
+      "type": "string"
+    },
+    "fixtures": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleFixtureRef"
+      },
+      "type": "array"
+    },
+    "fuzzy_steps": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleStep"
+      },
+      "type": "array"
+    },
+    "generated_at": {
+      "default": "",
+      "type": "string"
+    },
+    "generator": {
+      "$ref": "#/$defs/BundleGenerator",
+      "default": {
+        "tool": "harn",
+        "version": "0.10.185"
+      }
+    },
+    "kind": {
+      "$ref": "#/$defs/BundleKind",
+      "default": "candidate"
+    },
+    "promotion": {
+      "$ref": "#/$defs/BundlePromotion",
+      "default": {
+        "approval_history": [],
+        "approver": null,
+        "author": null,
+        "confidence": 0.0,
+        "created_at": "",
+        "criteria": {
+          "approval_reason": null,
+          "min_confidence": 0.0,
+          "min_examples": 0,
+          "reasons": [],
+          "requires_human_approval": false,
+          "requires_no_rejections": false,
+          "requires_shadow_pass": false,
+          "status": "blocked"
+        },
+        "divergence_history": [],
+        "estimated_time_token_savings": {
+          "cpu_runtime_cost_usd": 0.0,
+          "estimated_cost_usd_avoided": 0.0,
+          "input_tokens_avoided": 0,
+          "model_calls_avoided": 0,
+          "output_tokens_avoided": 0,
+          "remaining_model_calls": 0,
+          "wall_ms_avoided": 0
+        },
+        "owner": null,
+        "package_name": "",
+        "rollback_target": null,
+        "rollout_policy": "shadow_then_canary",
+        "sample_count": 0,
+        "shadow_failure_count": 0,
+        "shadow_success_count": 0,
+        "workflow_version": ""
+      }
+    },
+    "redaction": {
+      "$ref": "#/$defs/BundleRedactionSummary",
+      "default": {
+        "applied": false,
+        "fixture_count": 0,
+        "rules": [],
+        "summary": ""
+      }
+    },
+    "rejection_reasons": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "repo": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "required_secrets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "risk_level": {
+      "default": "",
+      "type": "string"
+    },
+    "savings": {
+      "$ref": "#/$defs/SavingsEstimate",
+      "default": {
+        "cpu_runtime_cost_usd": 0.0,
+        "estimated_cost_usd_avoided": 0.0,
+        "input_tokens_avoided": 0,
+        "model_calls_avoided": 0,
+        "output_tokens_avoided": 0,
+        "remaining_model_calls": 0,
+        "wall_ms_avoided": 0
+      }
+    },
+    "schema": {
+      "const": "harn.crystallization.candidate.bundle",
+      "default": "",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2,
+      "default": 0,
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "shadow": {
+      "$ref": "#/$defs/ShadowRunReport",
+      "default": {
+        "compared_traces": 0,
+        "failures": [],
+        "pass": false,
+        "traces": []
+      }
+    },
+    "side_effects": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CrystallizationSideEffect"
+      },
+      "type": "array"
+    },
+    "skill": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BundleSkillRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source_trace_hashes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_traces": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleSourceTrace"
+      },
+      "type": "array"
+    },
+    "team": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "default": "",
+      "type": "string"
+    },
+    "warnings": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "workflow": {
+      "$ref": "#/$defs/BundleWorkflowRef",
+      "default": {
+        "name": "",
+        "package_name": "",
+        "package_version": "",
+        "path": ""
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "schema_version",
+    "generated_at",
+    "generator",
+    "kind",
+    "candidate_id",
+    "external_key",
+    "title",
+    "team",
+    "repo",
+    "risk_level",
+    "workflow",
+    "source_trace_hashes",
+    "source_traces",
+    "deterministic_steps",
+    "fuzzy_steps",
+    "side_effects",
+    "capabilities",
+    "required_secrets",
+    "savings",
+    "shadow",
+    "eval_pack",
+    "skill",
+    "fixtures",
+    "promotion",
+    "redaction",
+    "confidence",
+    "rejection_reasons",
+    "warnings"
+  ],
+  "title": "CrystallizationBundleManifest",
+  "type": "object",
+  "x-harn-bundle": {
+    "evalPackFile": "harn.eval.toml",
+    "fixturesDir": "fixtures",
+    "manifestFile": "candidate.json",
+    "reportFile": "report.json",
+    "schemaIdentifier": "harn.crystallization.candidate.bundle",
+    "schemaVersion": 2,
+    "skillDir": "skill",
+    "skillFile": "SKILL.md",
+    "skillGateFile": "gate.json",
+    "workflowFile": "workflow.harn"
+  }
+}

@@ -8,6 +8,7 @@ mod api;
 mod bundle;
 mod codegen;
 mod normalize;
+mod schema;
 mod shadow;
 mod skill;
 mod trajectory;
@@ -27,6 +28,7 @@ pub use bundle::{
     CrystallizationBundleManifest,
 };
 pub use codegen::{generate_eval_pack, generate_harn_code};
+pub use schema::{crystallization_bundle_json_schema, CRYSTALLIZATION_BUNDLE_SCHEMA_ARTIFACT};
 pub use skill::{induce_skill_candidate, refresh_skill_candidates};
 pub use trajectory::{
     apply_trajectory_verifier, ingest_agent_loop_trajectory, turn_record, AgentTurnRecord,
