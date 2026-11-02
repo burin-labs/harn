@@ -236,9 +236,8 @@ impl AcpWebSocketHub {
                 worker_for_output.handle_output(line).await;
             }
         });
-        let worker_name = worker_id;
         harn_parser::runtime_stack::builder()
-            .name(format!("harn-acp-ws-{worker_name}"))
+            .name(format!("harn-acp-ws-{worker_id}"))
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
