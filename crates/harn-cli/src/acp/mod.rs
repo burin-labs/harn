@@ -182,7 +182,8 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
         crate::compiler_context::enable_trusted_host_dispatch_for_source(vm, path)
             .map_err(|error| format!("failed to enable trusted host dispatch: {error}"))?;
 
-        let extensions = crate::package::load_runtime_extensions(path);
+        let extensions =
+            crate::package::try_load_runtime_extensions(path).map_err(|error| error.to_string())?;
         crate::package::install_runtime_extensions(&extensions);
         crate::package::install_manifest_triggers(vm, &extensions)
             .await
@@ -226,29 +227,27 @@ pub(crate) fn server_config(
     auth_policy: AuthPolicy,
 ) -> Result<AcpServerConfig, String> {
     let host_inference_boundary = harn_vm::llm::api::InferenceBoundary::capture_process()?;
-    Ok(server_config_with_boundary(
-        pipeline,
-        auth_policy,
-        host_inference_boundary,
-    ))
+    server_config_with_boundary(pipeline, auth_policy, host_inference_boundary)
 }
 
 pub(crate) fn server_config_with_boundary(
     pipeline: Option<String>,
     auth_policy: AuthPolicy,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
-) -> AcpServerConfig {
+) -> Result<AcpServerConfig, String> {
     let extensions = pipeline
         .as_deref()
         .map(Path::new)
-        .map(crate::package::load_runtime_extensions)
+        .map(crate::package::try_load_root_runtime_extensions)
+        .transpose()
+        .map_err(|error| error.to_string())?
         .unwrap_or_default();
     let mut config = AcpServerConfig::new(pipeline)
         .with_auth_policy(auth_policy)
         .with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator::from_env()))
         .with_llm_overrides(extensions.llm, extensions.capabilities);
     config.host_inference_boundary = host_inference_boundary;
-    config
+    Ok(config)
 }
 
 pub(crate) fn ensure_acp_event_log(pipeline: Option<&str>) {

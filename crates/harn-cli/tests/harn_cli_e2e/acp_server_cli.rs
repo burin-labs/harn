@@ -16,6 +16,85 @@ use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 static ACP_CLI_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+#[test]
+fn acp_catalog_reads_root_overrides_without_installing_unrelated_packages() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "agent.harn",
+        "pipeline main(harness: Harness) -> nil { return nil }\n",
+    );
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[llm.aliases]
+project-fast = { id = "project/model", provider = "project" }
+
+[llm.providers.project]
+base_url = "https://project.test/v1"
+chat_endpoint = "/chat/completions"
+
+[dependencies]
+unrelated = { path = "not-installed" }
+"#,
+    );
+    let mut client = spawn_acp(&temp, "agent.harn");
+    let (_, response) = send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":1,"method":"_harn/providerCatalog","params":{}}),
+    );
+    assert!(response["error"].is_null(), "{response}");
+    let aliases = response["result"]["aliases"]
+        .as_array()
+        .expect("catalog aliases");
+    let alias = aliases
+        .iter()
+        .find(|alias| alias["name"] == "project-fast")
+        .expect("the live catalog must include the root override");
+    assert_eq!(alias["model_id"], "project/model");
+    assert_eq!(alias["provider"], "project");
+    assert!(!temp.path().join("harn.lock").exists());
+    send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}),
+    );
+    let (_, created) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0","id":3,"method":"session/new",
+            "params":{"cwd":temp.path(),"environmentPolicy":{"kind":"isolated","grants":[]}}
+        }),
+    );
+    let session = created["result"]["sessionId"]
+        .as_str()
+        .expect("session created");
+    select_code_mode(&mut client, session);
+    let (_, executed) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0","id":4,"method":"session/prompt",
+            "params":{"sessionId":session,"prompt":[{"type":"text","text":"Run the pipeline."}]}
+        }),
+    );
+    let error = executed["error"]["message"]
+        .as_str()
+        .expect("execution must reject missing dependencies");
+    assert!(
+        error.contains("harn.lock") || error.contains("not-installed"),
+        "{executed}"
+    );
+    let (_, after_error) = send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":5,"method":"_harn/providerCatalog","params":{}}),
+    );
+    assert_eq!(
+        after_error["result"]["aliases"],
+        response["result"]["aliases"]
+    );
+    client.shutdown_expect_success();
+}
+
 fn lock_acp_cli_tests() -> MutexGuard<'static, ()> {
     ACP_CLI_TEST_LOCK
         .get_or_init(|| Mutex::new(()))
