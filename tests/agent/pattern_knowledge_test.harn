@@ -534,6 +534,37 @@ pipeline test_inspect_session_evidence_returns_a_bounded_redacted_transcript(har
         session_id,
         "retained credential entry: API_KEY=\"window-secret-left\"' window-secret-right' make deploy",
       )
+      const suffix_cases = [
+        {
+          marker: "bracket",
+          command: "TOKEN=\"bracket-prefix-secret\"[bracket-tail-secret] make deploy",
+          fragments: ["bracket-prefix-secret", "bracket-tail-secret"],
+        },
+        {
+          marker: "brace",
+          command: "TOKEN=\"brace-prefix-secret\"{brace-tail-secret} make deploy",
+          fragments: ["brace-prefix-secret", "brace-tail-secret"],
+        },
+        {
+          marker: "mixed",
+          command:
+            "TOKEN=mixed123prefixsecret\"mixed-middle-secret\"[mixed-bracket-secret]{mixed-brace-secret} make deploy",
+          fragments: [
+            "mixed123prefixsecret",
+            "mixed-middle-secret",
+            "mixed-bracket-secret",
+            "mixed-brace-secret",
+          ],
+        },
+      ]
+      for suffix_case in suffix_cases {
+        append_message(
+          harness.agent,
+          root,
+          session_id,
+          "retained " + suffix_case.marker + " credential entry: " + suffix_case.command,
+        )
+      }
       const evidence = [
         {
           id: "run-inspected",
@@ -575,6 +606,21 @@ pipeline test_inspect_session_evidence_returns_a_bounded_redacted_transcript(har
         !seen.contains("window-secret-right"),
         "the handler must redact the concatenated segment",
       )
+      for suffix_case in suffix_cases {
+        assert(
+          regex_match(
+            "retained " + suffix_case.marker + " credential entry: <redacted:[^>]+> make deploy",
+            seen,
+          ),
+          "the retained literal-suffix entry must arrive fully redacted: " + suffix_case.marker,
+        )
+        for fragment in suffix_case.fragments {
+          assert(
+            !seen.contains(fragment),
+            "the handler must redact every literal segment: " + suffix_case.marker,
+          )
+        }
+      }
       return nil
     },
   )

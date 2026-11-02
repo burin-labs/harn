@@ -525,6 +525,9 @@ mod tests {
             r#"API_KEY="first-secret"' second-secret' ./deploy"#,
             r"password='first-secret'\''second-secret' ./deploy",
             r#"token=abc123" second.secret" ./deploy"#,
+            r#"TOKEN="first-secret"[second-secret] ./deploy"#,
+            r#"TOKEN="first-secret"{second-secret} ./deploy"#,
+            r#"TOKEN=abc123" second.secret"[first-secret]{second-secret} ./deploy"#,
         ] {
             let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
             assert!(out.contains("<redacted:sensitive_assignment:"), "{out}");
@@ -556,7 +559,7 @@ mod tests {
     #[test]
     fn sensitive_assignment_preserves_source_expressions() {
         run_clean();
-        let input = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;";
+        let input = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;\ntoken = readKey2[0];\ntoken = items123[\"key\"];\ntoken = Type123{field:1};";
         let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Borrowed(_)), "{out}");
     }
