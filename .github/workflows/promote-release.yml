@@ -145,6 +145,9 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       major_minor: ${{ steps.plan.outputs.major_minor }}
       requires_rehearsal: ${{ steps.plan.outputs.requires_rehearsal }}
+      expected_attempt: ${{ steps.plan.outputs.expected_attempt }}
+      expected_manifest_id: ${{ steps.plan.outputs.expected_manifest_id }}
+      expected_manifest_digest: ${{ steps.plan.outputs.expected_manifest_digest }}
       requires_attached_consumer: ${{ needs.resolve.outputs.requires_attached_consumer }}
       requires_consumer_repair: ${{ needs.resolve.outputs.requires_consumer_repair }}
       producer_attempt: ${{ needs.resolve.outputs.producer_attempt }}
@@ -302,6 +305,12 @@ jobs:
             # The pass must still describe this source, these archives and the consumer revision.
             release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
           fi
+          # Capture the exact settled producer before launching a fresh recovery
+          # rehearsal. Promotion must later verify this same manifest/attempt.
+          if [[ "$requires_rehearsal" == true && "${REQUIRES_CONSUMER_REPAIR:-false}" != true ]]; then
+            identity="$(node scripts/lib/release-candidate-state.mjs producer-identity "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA")"
+            release_write_producer_identity "$identity"
+          fi
           echo "::notice::Promoting $tag from build run $candidate_run at $HEAD_SHA."
           {
             echo "promote=true"
@@ -413,9 +422,9 @@ jobs:
       ready: ${{ steps.authorize.outputs.ready || steps.standalone.outputs.ready }}
       original_context: ${{ steps.original-context.outputs.context }}
       consumer_repair: ${{ steps.consumer-repair.outputs.repair_request }}
-      expected_attempt: ${{ steps.producer-binding.outputs.expected_attempt }}
-      expected_manifest_id: ${{ steps.producer-binding.outputs.expected_manifest_id }}
-      expected_manifest_digest: ${{ steps.producer-binding.outputs.expected_manifest_digest }}
+      expected_attempt: ${{ steps.producer-binding.outputs.expected_attempt || needs.plan.outputs.expected_attempt }}
+      expected_manifest_id: ${{ steps.producer-binding.outputs.expected_manifest_id || needs.plan.outputs.expected_manifest_id }}
+      expected_manifest_digest: ${{ steps.producer-binding.outputs.expected_manifest_digest || needs.plan.outputs.expected_manifest_digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -530,12 +539,7 @@ jobs:
           # shellcheck source=scripts/lib/release_consumer_verdict.sh
           source scripts/lib/release_consumer_verdict.sh
           identity="$(release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA")"
-          jq -er '
-            select((.producer_attempt | type == "number" and . > 0 and . == floor) and
-              (.manifest_id | type == "number" and . > 0 and . == floor) and
-              (.manifest_digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))) |
-            "expected_attempt=\(.producer_attempt)\nexpected_manifest_id=\(.manifest_id)\nexpected_manifest_digest=\(.manifest_digest)"
-          ' <<< "$identity" >> "$GITHUB_OUTPUT"
+          release_write_producer_identity "$identity"
       - name: Require the owning rehearsal result
         if: needs.plan.outputs.standalone_harn != 'true'
         id: authorize

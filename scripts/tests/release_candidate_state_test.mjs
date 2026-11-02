@@ -347,6 +347,46 @@ else if(endpoint.pathname.endsWith('/artifacts')) {
         assert.notEqual(result.status,0,`${scenario} must refuse rather than schedule a new build`);
         assert.equal(result.stdout.trim(),'');
       }
+      if(['good','early_change','late_change','partial','manifest_attempt','manifest_source',
+        'attempt_mismatch','changed_artifact'].includes(scenario)){
+        fs.writeFileSync(calls,'');
+        const reader=fileURLToPath(new URL('../lib/release-candidate-state.mjs',import.meta.url));
+        const identity=spawnSync(process.execPath,[reader,'producer-identity',repository,'42',source],{
+          encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,CALLS:calls,
+            SCENARIO:scenario,GH_TOKEN:'fixture-read',MANIFEST_ZIP:archive,MANIFEST_SIZE:String(bytes.length),
+            MANIFEST_DIGEST:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}});
+        if(scenario==='good'){
+          assert.equal(identity.status,0,identity.stderr);
+          assert.deepEqual(JSON.parse(identity.stdout),{producer_attempt:1,manifest_id:101,
+            manifest_digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`});
+        }else{
+          assert.notEqual(identity.status,0,`${scenario} must refuse an unproved producer identity`);
+          assert.equal(identity.stdout,'');
+        }
+      }
+    }
+  }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
+test('workflow identity projection rejects partial or malformed tuples',()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-producer-output-'));
+  try{
+    const output=path.join(scratch,'outputs');
+    const library=fileURLToPath(new URL('../lib/release_consumer_verdict.sh',import.meta.url));
+    const script=path.join(scratch,'projection.sh');
+    fs.writeFileSync(script,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${library}'\nrelease_write_producer_identity "$1"\n`);
+    const valid={producer_attempt:1,manifest_id:100,manifest_digest:`sha256:${'a'.repeat(64)}`};
+    for(const identity of [valid,{...valid,producer_attempt:0},{...valid,manifest_id:null},
+      {...valid,manifest_digest:'sha256:bad'}, {producer_attempt:1,manifest_id:100}]){
+      fs.writeFileSync(output,'');
+      const result=spawnSync('bash',[script,JSON.stringify(identity)],{encoding:'utf8',env:{...process.env,GITHUB_OUTPUT:output}});
+      if(identity===valid){
+        assert.equal(result.status,0,result.stderr);
+        assert.equal(fs.readFileSync(output,'utf8'),`expected_attempt=1\nexpected_manifest_id=100\nexpected_manifest_digest=${valid.manifest_digest}\n`);
+      }else{
+        assert.notEqual(result.status,0);
+        assert.equal(fs.readFileSync(output,'utf8'),'');
+      }
     }
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });

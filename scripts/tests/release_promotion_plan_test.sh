@@ -293,6 +293,12 @@ plan standalone_red_source RECOVERY=true STANDALONE_HARN=true FAKE_GREEN=ahead
 plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
 [[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"
+[[ "$(output recovery_missing expected_attempt)" == 1 && "$(output recovery_missing expected_manifest_id)" == 78 &&
+   "$(output recovery_missing expected_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || fail "fresh rehearsal did not capture the actual producer manifest identity"
+plan recovery_missing_other_source RECOVERY=true FAKE_CONSUMER=missing FAKE_RUN_SHA=1111111111111111111111111111111111111111
+[[ "$(cat "$tmp/recovery_missing_other_source.status")" != 0 && -z "$(output recovery_missing_other_source promote)" ]] \
+  || fail "fresh rehearsal accepted another source's producer"
 plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
 [[ "$(output recovery_explicit_pair promote)" == true && "$(output recovery_explicit_pair requires_rehearsal)" == true ]] \
   || fail "explicit consumer repair did not require actual measurement"
@@ -302,6 +308,8 @@ plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
 plan verified_repair RECOVERY=true REQUIRES_CONSUMER_REPAIR=true CONSUMER_PULL_REQUEST=7 FAKE_CONSUMER=failure
 [[ "$(cat "$tmp/verified_repair.status")" == 0 && "$(output verified_repair requires_rehearsal)" == true ]] \
   || fail "verified archive repair did not require a fresh consumer measurement"
+[[ -z "$(output verified_repair expected_attempt)" ]] \
+  || fail "archive repair received an unrelated ordinary-producer identity"
 for invalid in no_pull nonnumeric_pull not_manual; do
   case "$invalid" in
     no_pull) extras=(RECOVERY=true) ;;

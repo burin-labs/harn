@@ -110,6 +110,17 @@ release_binding_refusal() {
 #
 # Harn is read with GH_TOKEN, the consumer with CONSUMER_READ_TOKEN at
 # CANARY_REPOSITORY. No line printed names the consumer or its revisions.
+# Both existing and fresh rehearsals project one checked producer identity to
+# the workflow outputs consumed by shared publication.
+release_write_producer_identity() {
+  jq -er '
+    select((.producer_attempt | type == "number" and . > 0 and . == floor) and
+      (.manifest_id | type == "number" and . > 0 and . == floor) and
+      (.manifest_digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))) |
+    "expected_attempt=\(.producer_attempt)\nexpected_manifest_id=\(.manifest_id)\nexpected_manifest_digest=\(.manifest_digest)"
+  ' <<< "$1" >> "${GITHUB_OUTPUT:?output required}"
+}
+
 release_require_rehearsal_binding() (
   set -euo pipefail
   repository="${1:?repository required}" run_id="${2:?candidate run required}" sha="${3:?candidate commit required}"
