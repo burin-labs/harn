@@ -4,6 +4,93 @@ use crate::test_util::process::harn_e2e_command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+#[tokio::test]
+pub(crate) async fn provider_endpoint_configuration_precedes_policy_without_transport() {
+    let temp = tempfile::tempdir().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let observed = requests.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new().fallback(axum::routing::any(move || {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            axum::http::StatusCode::OK
+        }
+    }));
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let endpoint = format!("http://{address}/v1");
+    reqwest::get(&endpoint)
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    assert_eq!(
+        requests.swap(0, Ordering::SeqCst),
+        1,
+        "request observer must be live"
+    );
+    let request = serde_json::json!({
+        "provider": "zai", "model": "glm-5.3",
+        "boundary": {"reach": "any_hosted", "allow_training_discounts": false}
+    });
+    for (override_url, configuration_error) in [
+        (
+            Some("https://userinfo:credential-marker@[invalid/path-marker"),
+            Some("invalid_url"),
+        ),
+        (Some("file:///credential-marker"), Some("not_absolute_http")),
+        (Some(endpoint.as_str()), None),
+        (None, None),
+    ] {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(temp.path())
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env_remove("HARN_INFERENCE_BOUNDARY_JSON")
+            .env_remove("HARN_HOST_PROVIDERS_CONFIG")
+            .env_remove("HARN_PROVIDERS_CONFIG")
+            .env_remove("ZAI_REGION")
+            .env_remove("ZAI_BASE_URL")
+            .args(["provider", "admission", "--request", &request.to_string()]);
+        if let Some(endpoint) = override_url {
+            command.env("ZAI_BASE_URL", endpoint);
+        }
+        let output = tokio::task::spawn_blocking(move || command.output().unwrap())
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(output.status.success(), configuration_error.is_none());
+        if let Some(reason) = configuration_error {
+            assert_eq!(value, serde_json::json!({"configuration_error": reason}));
+        } else if override_url.is_some() {
+            assert_eq!(value["status"], "unknown");
+            assert_eq!(
+                value["governing_rule"],
+                "inference_boundary.training_unknown"
+            );
+        } else {
+            assert_eq!(value["status"], "admitted");
+        }
+        for bytes in [&output.stdout, &output.stderr] {
+            let text = String::from_utf8_lossy(bytes);
+            for marker in ["userinfo", "credential-marker", "path-marker"] {
+                assert!(
+                    !text.contains(marker),
+                    "diagnostic exposed supplied endpoint values"
+                );
+            }
+        }
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            0,
+            "admission must not contact the provider"
+        );
+    }
+    server.abort();
+    let _ = server.await;
+}
+
 #[test]
 pub(crate) fn admission_requires_account_evidence_for_conditional_provider_terms() {
     let temp = tempfile::tempdir().unwrap();

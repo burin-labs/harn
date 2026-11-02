@@ -24,7 +24,8 @@ pub(crate) use dispatch_test_scope::ToolInterceptionScope;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
 pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
 use reminder_spec::parse_reminder_spec;
-use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks};
+pub use vm_entry::VmLifecycleHookInvocation;
+use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks, VmLifecycleHookRegistration};
 
 tokio::task_local! {
     static HOOK_REMINDER_REPORTS_TASK: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>;
@@ -446,6 +447,7 @@ enum RuntimeHookHandler {
     Vm {
         handler_name: String,
         callable: crate::value::VmCallable,
+        tool_scope: crate::tool_handler_scope::CallbackScope,
     },
 }
 
@@ -467,32 +469,6 @@ struct RuntimeHook {
     event: HookEvent,
     matcher: PatternMatcher,
     handler: RuntimeHookHandler,
-}
-
-#[derive(Clone, Debug)]
-pub struct VmLifecycleHookInvocation {
-    callable: crate::value::VmCallable,
-    pub handler_name: String,
-}
-
-impl VmLifecycleHookInvocation {
-    /// Resolve this invocation's handler closure against `vm`, loading the
-    /// handler's module on demand for a lazy manifest hook (a cache hit
-    /// when `vm` already imported the graph).
-    pub async fn resolve(&self, vm: &mut crate::vm::Vm) -> Result<Arc<VmClosure>, VmError> {
-        vm.resolve_callable(&self.callable).await.map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to resolve lifecycle hook '{}': {error}",
-                self.handler_name
-            ))
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
-struct VmLifecycleHookRegistration {
-    handler_name: String,
-    callable: crate::value::VmCallable,
 }
 
 thread_local! {
@@ -595,6 +571,7 @@ pub fn register_vm_hook(
             handler: RuntimeHookHandler::Vm {
                 handler_name: handler_name.into(),
                 callable: crate::value::VmCallable::Eager(closure),
+                tool_scope: crate::tool_handler_scope::CallbackScope::capture(),
             },
         });
     });
@@ -614,6 +591,7 @@ pub fn register_vm_hook_lazy(
             handler: RuntimeHookHandler::Vm {
                 handler_name: handler_name.into(),
                 callable: crate::value::VmCallable::Lazy(lazy),
+                tool_scope: crate::tool_handler_scope::CallbackScope::capture(),
             },
         });
     });
@@ -1397,10 +1375,8 @@ pub async fn run_lifecycle_hooks_with_control_with_ctx(
     let mut current_payload = payload.clone();
     let mut accumulated_modify: Option<serde_json::Value> = None;
     for registration in registrations {
-        // First-party registered lifecycle hook (see `invoke_vm_lifecycle_hooks`):
-        // the runtime chose to invoke this closure, so its body's bridge/builtin
-        // calls are a trusted bridge call and must not trip the agent loop's
-        // active execution policy. Held across the invocation await.
+        // Match the advisory lifecycle path's bridge policy and registration
+        // scope while resolving and invoking this callback.
         let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
         let harness = vm.root_harness_value().ok_or_else(|| {
             VmError::Runtime(
@@ -1415,8 +1391,14 @@ pub async fn run_lifecycle_hooks_with_control_with_ctx(
             &registration.handler_name,
             &current_payload,
         );
-        let closure = resolve_lifecycle_handler(&mut vm, &registration.callable).await?;
-        let raw = vm.call_closure_pub(&closure, &[harness, arg]).await?;
+        let closure = registration
+            .tool_scope
+            .scope(resolve_lifecycle_handler(&mut vm, &registration.callable))
+            .await?;
+        let raw = registration
+            .tool_scope
+            .scope(vm.call_closure_pub(&closure, &[harness, arg]))
+            .await?;
         if let Some(ctx) = ctx {
             ctx.forward_output(&vm.take_output());
         }
@@ -1625,6 +1607,7 @@ pub fn matching_vm_lifecycle_hooks(
         .map(|registration| VmLifecycleHookInvocation {
             callable: registration.callable,
             handler_name: registration.handler_name,
+            tool_scope: registration.tool_scope,
         })
         .collect()
 }
@@ -1643,9 +1626,11 @@ fn matching_vm_lifecycle_registrations(
                 RuntimeHookHandler::Vm {
                     callable,
                     handler_name,
+                    tool_scope,
                 } => Some(VmLifecycleHookRegistration {
                     handler_name: handler_name.clone(),
                     callable: callable.clone(),
+                    tool_scope: *tool_scope,
                 }),
                 RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => {
                     None

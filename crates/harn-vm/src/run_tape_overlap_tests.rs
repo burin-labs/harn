@@ -47,7 +47,7 @@ fn sequential_dispatches_remain_replayable() {
     for id in ["t1", "t2"] {
         assert!(matches!(
             serve_tool_call(id, "write", &args),
-            ToolServe::Served(_, _)
+            ToolServe::Served(_, _, _)
         ));
         assert_eq!(
             std::fs::read(workspace.join(format!("src/{id}.txt"))).unwrap(),

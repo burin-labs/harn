@@ -54,10 +54,10 @@ pub use errors::{LlmErrorKind, LlmErrorReason};
 #[doc(inline)]
 pub use harn_llm::inference::{InferenceBoundary, InferenceReach};
 pub use inference_boundary::{
-    capture_process_attestations, inference_admission_schemas, preview_inference_admission,
-    DataControlsRefusal, InferenceAdmissionRequest, InferenceAdmissionSnapshot,
-    InferenceAdmissionStatus, ProviderAccountAttestation, DATA_CONTROLS_TRAINING_REFUSED_RULE,
-    HOST_ACCOUNT_ATTESTATIONS_ENV,
+    capture_process_attestations, inference_admission_schemas, preflight_inference_admission,
+    preview_inference_admission, DataControlsRefusal, InferenceAdmissionRequest,
+    InferenceAdmissionSnapshot, InferenceAdmissionStatus, ProviderAccountAttestation,
+    DATA_CONTROLS_TRAINING_REFUSED_RULE, HOST_ACCOUNT_ATTESTATIONS_ENV,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;

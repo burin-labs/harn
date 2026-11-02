@@ -74,14 +74,8 @@ impl RuntimeProviderEndpointOverrides {
                 "runtime provider endpoint for `{provider}` must not be empty"
             ));
         }
-        let parsed = url::Url::parse(&base_url).map_err(|error| {
-            format!("runtime provider endpoint for `{provider}` is not a URL: {error}")
-        })?;
-        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-            return Err(format!(
-                "runtime provider endpoint for `{provider}` must be an absolute HTTP(S) URL"
-            ));
-        }
+        validate_http_provider_endpoint(&base_url)
+            .map_err(|error| format!("runtime provider endpoint for `{provider}`: {error}"))?;
         self.endpoints.insert(provider, base_url);
         Ok(())
     }

@@ -2499,6 +2499,12 @@ export interface HarnPlanDocument {
   created_at: string
   updated_at: string
 }
+export const HARN_PROVIDER_ENDPOINT_CONFIGURATION_ERROR_VALUES = [
+  "invalid_url",
+  "not_absolute_http",
+] as const
+export type HarnProviderEndpointConfigurationError = (typeof HARN_PROVIDER_ENDPOINT_CONFIGURATION_ERROR_VALUES)[number]
+
 export const HARN_MACHINE_SPEND_PERIOD_VALUES = [
   "day",
   "month",

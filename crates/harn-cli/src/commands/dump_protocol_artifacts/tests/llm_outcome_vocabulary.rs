@@ -15,6 +15,32 @@ use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, Harn
 use super::*;
 
 #[test]
+fn endpoint_configuration_diagnostics_match_the_generated_host_vocabulary() {
+    use super::generated_rust_binding::HarnProviderEndpointConfigurationError;
+    use harn_vm::llm_config::ProviderEndpointConfigurationError;
+
+    let schema = ProviderEndpointConfigurationError::json_schema();
+    let known = HarnProviderEndpointConfigurationError::KNOWN
+        .iter()
+        .map(|value| serde_json::to_value(value).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(serde_json::json!(known), schema["enum"]);
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    for wire in known {
+        assert!(validator.is_valid(&wire));
+        let native: ProviderEndpointConfigurationError =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(native).unwrap(), wire);
+    }
+    let future = serde_json::json!("future_configuration_error");
+    assert!(!validator.is_valid(&future));
+    let host: HarnProviderEndpointConfigurationError =
+        serde_json::from_value(future.clone()).unwrap();
+    assert!(!host.is_known());
+    assert_eq!(serde_json::to_value(host).unwrap(), future);
+}
+
+#[test]
 fn machine_quota_facts_survive_native_and_generated_host_projections() {
     use super::generated_rust_binding::HarnMachineSpendExhaustion;
     let facts = AcpPromptFailureFacts::from_thrown(&json!({

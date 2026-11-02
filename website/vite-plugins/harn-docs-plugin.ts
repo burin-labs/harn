@@ -27,9 +27,15 @@ export function harnDocsPlugin(): Plugin {
     name: "harn-docs",
     config(config) {
       // An explicit allow list replaces Vite's workspace default. Preserve
-      // that default (or the caller's list), adding only the source tree.
+      // that default (or the caller's list), adding the shared site sources.
       const allow = config.server?.fs?.allow ?? [searchForWorkspaceRoot(resolve(config.root ?? process.cwd()))]
-      return { server: { fs: { allow: [...allow, docsRoot] } } }
+      return {
+        server: {
+          fs: {
+            allow: [...allow, docsRoot, resolve(REPO_ROOT, "ui"), resolve(REPO_ROOT, "crates/harn-cli/assets/demo")],
+          },
+        },
+      }
     },
     resolveId(id) {
       if (id === VIRTUAL_ID) return RESOLVED_ID

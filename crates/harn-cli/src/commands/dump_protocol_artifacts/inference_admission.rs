@@ -8,6 +8,10 @@ use super::schema_records::SchemaRecords;
 pub(super) fn schemas() -> Vec<(&'static str, Value)> {
     let mut schemas = harn_vm::llm::api::inference_admission_schemas().to_vec();
     schemas.push((
+        "ProviderEndpointConfigurationError",
+        harn_vm::llm_config::ProviderEndpointConfigurationError::json_schema(),
+    ));
+    schemas.push((
         "MachineSpendExhaustion",
         harn_vm::llm::MachineSpendExhaustion::json_schema(),
     ));
@@ -27,6 +31,10 @@ pub(super) fn append(out: &mut String, target: Target) {
         definitions.insert(name.to_owned(), schema);
     }
     for (key, name) in [
+        (
+            "ProviderEndpointConfigurationError",
+            "HarnProviderEndpointConfigurationError",
+        ),
         ("MachineSpendPeriod", "HarnMachineSpendPeriod"),
         ("InferenceAdmissionStatus", "HarnInferenceAdmissionStatus"),
         ("InferenceReach", "HarnInferenceAdmissionReach"),
