@@ -34,7 +34,7 @@ fn cc_text(value: string?) -> string {
  * around the fixed Harn argv. Candidate effects remain capability mediated.
  */
 fn cc_toolchain_command_options(overrides: dict? = nil) -> dict {
-  const cwd = cc_text(overrides?.cwd)
+  const cwd = to_string(overrides?.cwd ?? "")
   const isolated_runtime = if cwd == "" {
     {LANG: "en_US.UTF-8", TERM: "dumb"}
   } else {
@@ -139,7 +139,7 @@ fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
     if !(entry?.ok ?? false) {
       return true
     }
-    const command = cc_text(entry?.command)
+    const command = to_string(entry?.command ?? "")
     if command != ""
       && !checks.any({ check -> cc_runs_declared_check(check, {command: command, cwd: ""}) }) {
       return true
@@ -212,7 +212,7 @@ fn cc_allowed_session(args: dict, allowed: list) -> string {
 fn cc_validate_artifact(harness: Harness, artifact: dict, options: any = nil) -> dict {
   const source = to_string(artifact?.source ?? "")
   const test_source = to_string(artifact?.test_source ?? "")
-  const entrypoint = cc_text(artifact?.entrypoint)
+  const entrypoint = to_string(artifact?.entrypoint ?? "")
   const injected = options?.validator
   if injected != nil {
     const checked = injected(source)
@@ -493,7 +493,7 @@ pipeline test_run_stops_at_the_first_failure() {
 /** One step as shell text; a step with a `cwd` runs in a subshell from that directory. */
 fn cc_step_shell(step: dict) -> string {
   const command = join(step.argv.map({ word -> cc_shell_word(word) }).to_list(), " ")
-  const dir = cc_text(step?.cwd)
+  const dir = to_string(step?.cwd ?? "")
   return dir == "" ? command : "(cd " + cc_shell_word(dir) + " && " + command + ")"
 }
 
@@ -526,7 +526,7 @@ fn cc_normalize_steps(raw_steps: list, field: string) -> list {
       }
       words = words + [text]
     }
-    const dir = cc_text(raw?.cwd)
+    const dir = to_string(raw?.cwd ?? "")
     if dir != ""
       && (dir.starts_with("/") || dir.contains("..") || !regex_match("^[A-Za-z0-9_./-]+$", dir)) {
       throw "invalid_steps: a step cwd must be a repository-relative directory, got: " + dir
@@ -727,18 +727,18 @@ fn cc_installed(fs: HarnessFs, options: any = nil) -> list {
   for item in (options?.installed ?? []) + accepted.to_list() {
     const name = cc_text(item?.name)
     if name != "" {
-      out = out + [{name: name, verify_command: cc_text(item?.verify_command)}]
+      out = out + [{name: name, verify_command: to_string(item?.verify_command ?? "")}]
     }
   }
   return out
 }
 
-/** A proposal duplicates an installed capability by name or by its verifier line. */
+/** A proposal duplicates an installed capability by name or its exact verifier line. */
 fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
   const name = cc_text(proposal?.name)
-  const verify = cc_text(proposal?.artifact?.verify_command)
+  const verify = to_string(proposal?.artifact?.verify_command ?? "")
   return installed.any(
-    { item -> item.name == name || (verify != "" && item.verify_command == verify) },
+    { item -> item.name == name || (verify.trim() != "" && item.verify_command == verify) },
   )
 }
 
@@ -750,14 +750,14 @@ fn cc_duplicates_installed(proposal: dict, installed: list) -> bool {
 fn cc_declared_checks(options: any = nil) -> list {
   let out = []
   for item in options?.declared_checks ?? [] {
-    const command = cc_text(item?.command)
+    const command = to_string(item?.command ?? "")
     if command != "" {
       out = out
         + [
           {
             intent: cc_text(item?.intent),
             command: command,
-            cwd: cc_text(item?.cwd),
+            cwd: to_string(item?.cwd ?? ""),
             origin: cc_text(item?.origin),
           },
         ]
@@ -806,7 +806,7 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
       prepared = prepared + [proposal]
       continue
     }
-    const verify = cc_text(proposal?.artifact?.verify_command)
+    const verify = to_string(proposal?.artifact?.verify_command ?? "")
     if verify != "" && len(required) > 0
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
       throw "submit_crystallization_batch: `verify_command` must run a declared test check word for word from its cwd, not a broader command. Declared: "

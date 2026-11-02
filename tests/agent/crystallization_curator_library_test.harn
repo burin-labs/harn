@@ -236,6 +236,136 @@ fn submit_one(proposal: dict) -> list {
   return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
 }
 
+pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
+  const declared_command = "python3 check.py --expected \"left  right\""
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", expected: 0},
+    {command: declared_command, expected: 1},
+    {command: "  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            declared_checks: [{intent: "test", command: declared_command, cwd: ""}],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(
+          result.proposal_count ?? 0,
+          sample.expected,
+          "quoted argument bytes distinguish checks",
+        )
+        if sample.expected == 1 {
+          assert_eq(result.proposals[0].artifact.verify_command, sample.command)
+        }
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_declared_directory(harness: Harness) {
+  for sample in [
+    {command: "(cd 'web pkg' && npm test)", expected: 0},
+    {command: "(cd 'web  pkg' && npm test)", expected: 1},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            declared_checks: [{intent: "test", command: "npm test", cwd: "web  pkg"}],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(result.proposal_count ?? 0, sample.expected, "directory bytes distinguish checks")
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_installed_evidence(harness: Harness) {
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", review: true},
+    {command: "python3 check.py --expected \"left  right\"", review: false},
+    {command: "python3\tcheck.py  --expected 'left  right'", review: false},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          priced_empty_batch(),
+          {
+            require_new_evidence: true,
+            installed: [
+              {
+                name: "installed-check",
+                verify_command: "python3 check.py --expected \"left  right\"",
+              },
+            ],
+            evidence: [
+              session_running(
+                "spacing-evidence",
+                [{tool: "verify", command: sample.command, exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+        )
+        assert_eq(
+          result?.usage != nil,
+          sample.review,
+          "only the same installed check suppresses review",
+        )
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_proposal_duplicates(harness: Harness) {
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", expected: 1},
+    {command: "python3 check.py --expected \"left  right\"", expected: 0},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            installed: [
+              {
+                name: "installed-check",
+                verify_command: "python3 check.py --expected \"left  right\"",
+              },
+            ],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(
+          result.proposal_count ?? 0,
+          sample.expected,
+          "only the same verifier is a duplicate",
+        )
+        return nil
+      },
+    )
+  }
+}
+
 /** Printed commands and shell control flow cannot substitute for a declared check. */
 pipeline test_curator_rejects_printed_checks_and_unknown_shell_context(harness: Harness) {
   with_temp_dir(

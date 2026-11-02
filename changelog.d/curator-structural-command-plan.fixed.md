@@ -4,3 +4,5 @@ directory change, or using unsupported shell context cannot satisfy admission.
 `std/command.command_sequence_plan` exposes the same structural observation
 without executing commands.
 Incomplete curator runs keep their evidence eligible for a later review.
+Command evidence, declared checks and verifier deduplication preserve whitespace
+inside literal arguments and directory names.

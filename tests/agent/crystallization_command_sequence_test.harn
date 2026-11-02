@@ -69,6 +69,16 @@ pipeline test_package_runs_a_step_from_its_directory() {
     )
   }
   assert(is_err(escaped), "a step directory must stay inside the repository")
+  for dir in [" packages/web", "packages/web ", "packages/ web"] {
+    const unsupported = try {
+      crystallization_command_sequence_package(
+        "web check",
+        "Keep the supplied directory.",
+        [{label: "web", argv: ["npm", "test"], cwd: dir}],
+      )
+    }
+    assert(is_err(unsupported), "unsupported directory bytes must not be silently rewritten")
+  }
 }
 
 pipeline test_package_rejects_machine_paths_and_unbounded_sequences() {

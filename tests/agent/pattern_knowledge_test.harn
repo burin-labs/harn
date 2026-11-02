@@ -11,11 +11,15 @@ import {
   pattern_learning_state,
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
-import { pl_redact_command } from "std/agent/pattern_knowledge_persistence"
+import {
+  pl_redact_command,
+  pl_sanitize_command_ledger,
+} from "std/agent/pattern_knowledge_persistence"
 import {
   pattern_learning_session_transcript,
   pl_session_command_ledger,
 } from "std/agent/pattern_knowledge_sessions"
+import { command_sequence_plan } from "std/command"
 import { session_store_append, session_store_events, session_store_list } from "std/session-store"
 import { llm_text, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 
@@ -386,7 +390,7 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
         session_id,
         run_id,
         "c2",
-        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=abc123secret python3 -m pytest -m \"not slow\" -q",
+        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=abc123secret python3 -m pytest -m \"not slow\" --expected \"left  right\" -q",
         0,
       )
       session_store_append(
@@ -413,7 +417,7 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
       assert_eq(ledger[1]?.ok, true)
       assert_eq(
         ledger[1]?.command,
-        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=<redacted> python3 -m pytest -m \"not slow\" -q",
+        "APP_DB_URL=sqlite:///:memory: SERVICE_API_KEY=<redacted> python3 -m pytest -m \"not slow\" --expected \"left  right\" -q",
       )
       assert(
         !ledger[1]?.command.contains("abc123secret"),
@@ -498,10 +502,35 @@ pipeline test_command_ledger_reads_host_commands_and_settles_background_runs() {
   assert_eq(
     ledger,
     [
-      {tool: "run", command: "python3 -m pytest", exit_code: 1, ok: false},
+      {tool: "run", command: "'python3' '-m' 'pytest'", exit_code: 1, ok: false},
       {tool: "verify", command: "python3 -m pytest", exit_code: 0, ok: true},
     ],
   )
+}
+
+pipeline test_command_ledger_preserves_semantic_whitespace() {
+  const command = "python3 check.py --expected \"left  right\""
+  const ledger = pl_sanitize_command_ledger(
+    pl_session_command_ledger(
+      [
+        tool_update("raw", "run", {command_exit_code: 0}, {command: command}, nil),
+        tool_update(
+          "argv",
+          "run",
+          {command_exit_code: 0},
+          {argv: ["python3", "check.py", "--expected", "left  right"]},
+          nil,
+        ),
+        tool_update("host", "verify", {command_exit_code: 0}, nil, command),
+      ],
+    ),
+  )
+  assert_eq(len(ledger), 3)
+  assert_eq(ledger[0].command, command, "input command bytes survive persistence")
+  assert_eq(ledger[2].command, command, "host command bytes survive persistence")
+  const plan = command_sequence_plan(ledger[1].command)
+  assert_eq(plan.status, "measured")
+  assert_eq(plan.steps, [{argv: ["python3", "check.py", "--expected", "left  right"], cwd: ""}])
 }
 
 pipeline test_command_redaction_removes_whole_quoted_values() {

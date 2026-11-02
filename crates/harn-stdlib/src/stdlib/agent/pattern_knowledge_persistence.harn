@@ -319,7 +319,7 @@ pub fn pl_redact_command(text: string) -> string {
 pub fn pl_sanitize_command_ledger(ledger: list) -> list {
   let out = []
   for raw in ledger ?? [] {
-    const command = pl_redact_command(pl_text(raw?.command))
+    const command = pl_redact_command(to_string(raw?.command ?? ""))
     if command == "" {
       continue
     }

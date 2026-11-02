@@ -9,6 +9,7 @@ import {
   pl_sanitize_tool_sequence,
 } from "std/agent/pattern_knowledge_persistence"
 import { pl_text } from "std/agent/pattern_knowledge_values"
+import { shell_command_from_argv } from "std/command"
 import {
   SessionStoreListOptions,
   SessionStoreOptions,
@@ -81,11 +82,11 @@ pub fn pl_session_tool_sequence(events: list) -> list {
 fn pl_command_from_input(input: any) -> string {
   const command = input?.command
   if type_of(command) == "string" {
-    return pl_text(command)
+    return to_string(command)
   }
   const argv = input?.argv ?? command
   if type_of(argv) == "list" {
-    return pl_text(join(argv.map({ part -> to_string(part) }).to_list(), " "))
+    return shell_command_from_argv(argv)
   }
   return ""
 }
@@ -93,7 +94,7 @@ fn pl_command_from_input(input: any) -> string {
 /** The command a host reports it ran, from the result's command outcome. */
 fn pl_command_from_result(raw_output: any) -> string {
   const outcome = raw_output?.data?.run_outcome ?? raw_output?.run_outcome
-  return type_of(outcome?.command) == "string" ? pl_text(outcome.command) : ""
+  return type_of(outcome?.command) == "string" ? to_string(outcome.command) : ""
 }
 
 /**
