@@ -335,6 +335,13 @@ struct ActiveProcessCleanup {
     pid: Option<u32>,
     cleanup_token: String,
     owner_cancel_token: Option<Arc<AtomicBool>>,
+    scope: Option<Arc<dyn ActiveProcessCleanupScope>>,
+}
+
+/// A foreground call reserves its launch lifetime before it has a native PID.
+pub trait ActiveProcessCleanupScope: std::fmt::Debug + Send + Sync {
+    fn signal(&self, signal: i32) -> ProcessCleanupReport;
+    fn terminate(&self) -> Option<ProcessCleanupReport>;
 }
 
 static ACTIVE_PROCESS_CLEANUP_ID: AtomicU64 = AtomicU64::new(1);
@@ -398,18 +405,32 @@ pub fn register_active_process_cleanup(
     cleanup_token: &str,
     owner_cancel_token: Option<Arc<AtomicBool>>,
 ) -> ActiveProcessCleanupGuard {
+    register_process_cleanup_entry(ActiveProcessCleanup {
+        pid,
+        cleanup_token: cleanup_token.to_string(),
+        owner_cancel_token,
+        scope: None,
+    })
+}
+
+pub fn register_active_process_cleanup_scope(
+    owner_cancel_token: Arc<AtomicBool>,
+    scope: Arc<dyn ActiveProcessCleanupScope>,
+) -> ActiveProcessCleanupGuard {
+    register_process_cleanup_entry(ActiveProcessCleanup {
+        pid: None,
+        cleanup_token: String::new(),
+        owner_cancel_token: Some(owner_cancel_token),
+        scope: Some(scope),
+    })
+}
+
+fn register_process_cleanup_entry(entry: ActiveProcessCleanup) -> ActiveProcessCleanupGuard {
     let id = ACTIVE_PROCESS_CLEANUP_ID.fetch_add(1, Ordering::SeqCst);
     ACTIVE_PROCESS_CLEANUPS
         .lock()
         .expect("active process cleanup registry poisoned")
-        .insert(
-            id,
-            ActiveProcessCleanup {
-                pid,
-                cleanup_token: cleanup_token.to_string(),
-                owner_cancel_token,
-            },
-        );
+        .insert(id, entry);
     ActiveProcessCleanupGuard {
         id,
         terminate_on_drop: false,
@@ -445,6 +466,53 @@ pub fn signal_active_process_cleanups_for_cancel_token(
             .as_ref()
             .is_some_and(|owner| Arc::ptr_eq(owner, cancel_token))
     })
+}
+
+/// Retire one cancelled foreground call before its async waiter can disappear.
+/// `None` means that call has no enrolled process, not a successful OS census.
+pub fn terminate_active_process_cleanups_for_cancel_token(
+    cancel_token: &Arc<AtomicBool>,
+) -> Option<ProcessCleanupReport> {
+    let entries = ACTIVE_PROCESS_CLEANUPS
+        .lock()
+        .expect("active process cleanup registry poisoned")
+        .values()
+        .filter(|entry| {
+            entry
+                .owner_cancel_token
+                .as_ref()
+                .is_some_and(|owner| Arc::ptr_eq(owner, cancel_token))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return None;
+    }
+    let mut report = ProcessCleanupReport::default();
+    let mut measured = false;
+    for entry in entries {
+        if let Some(scope) = &entry.scope {
+            if let Some(retired) = scope.terminate() {
+                measured = true;
+                report.merge(retired);
+            }
+        } else if let Some(pid) = entry.pid {
+            measured = true;
+            report.merge(terminate_pid_tree_group_and_token_with_report(
+                pid,
+                Some(&entry.cleanup_token),
+            ));
+        } else {
+            measured = true;
+            let mut retired = signal_registered_process(&entry, 15);
+            #[cfg(unix)]
+            wait_for_report_children_to_exit(&retired, SUBPROCESS_TERM_GRACE);
+            retired.merge(signal_registered_process(&entry, 9));
+            retired.refresh_survivor_status();
+            report.merge(retired);
+        }
+    }
+    measured.then_some(report)
 }
 
 #[cfg(test)]
@@ -493,6 +561,9 @@ fn signal_active_process_cleanups_matching(
 }
 
 fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> ProcessCleanupReport {
+    if let Some(scope) = &entry.scope {
+        return scope.signal(signal);
+    }
     if let Some(pid) = entry.pid {
         return signal_pid_tree_group_and_token_with_report(
             pid,

@@ -18,6 +18,38 @@ pub struct RunInterruptTokens {
     pub signal_token: Arc<Mutex<Option<String>>>,
 }
 
+#[derive(Clone)]
+pub(super) struct RunTerminalControl {
+    tokens: RunInterruptTokens,
+    deadline: Option<Arc<RunDeadlineGuard>>,
+}
+
+impl RunTerminalControl {
+    pub(super) fn new(tokens: RunInterruptTokens, deadline: Option<Arc<RunDeadlineGuard>>) -> Self {
+        Self { tokens, deadline }
+    }
+
+    pub(super) fn finish_exit(&self, exit_code: i32) -> i32 {
+        if let Some(deadline) = &self.deadline {
+            deadline.finish();
+        }
+        if self
+            .deadline
+            .as_ref()
+            .is_some_and(|deadline| deadline.timed_out())
+            || self.tokens.cancel_token.load(Ordering::SeqCst)
+        {
+            self.tokens.cancel_token.store(true, Ordering::SeqCst);
+            let _ = harn_vm::op_interrupt::terminate_active_process_cleanups_for_cancel_token(
+                &self.tokens.cancel_token,
+            );
+            crate::exit::RUN_INTERRUPTED
+        } else {
+            exit_code
+        }
+    }
+}
+
 const FIRST_SIGNAL_MESSAGE: &str =
     "signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";
 const RUN_TIMEOUT_MESSAGE: &str =

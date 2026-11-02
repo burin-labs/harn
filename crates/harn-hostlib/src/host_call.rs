@@ -112,6 +112,7 @@ impl CallAddress {
 )]
 #[derive(Clone, Debug)]
 pub(crate) struct HostCallContext {
+    process_scope: Option<crate::process::call_scope::CallProcessScope>,
     call: Option<CallAddress>,
     /// The live tool handle is signalled before asynchronous dispatch unwinds.
     cancellation: Option<harn_vm::tool_call_cancellations::Handle>,
@@ -141,6 +142,7 @@ impl HostCallContext {
             harn_vm::tool_call_cancellations::lookup(&call.session_id, &call.tool_call_id)
         });
         Self {
+            process_scope: None,
             call,
             cancellation,
             budget: None,
@@ -149,12 +151,23 @@ impl HostCallContext {
         }
     }
 
-    #[cfg(feature = "ast")]
     /// The context the registry installed for this call, or an empty one.
     pub(crate) fn current() -> Self {
         CURRENT
             .with(|slot| slot.borrow().clone())
             .unwrap_or_else(|| Self::new(None))
+    }
+
+    pub(crate) fn with_process_scope(
+        mut self,
+        scope: crate::process::call_scope::CallProcessScope,
+    ) -> Self {
+        self.process_scope = Some(scope);
+        self
+    }
+
+    pub(crate) fn process_scope(&self) -> Option<&crate::process::call_scope::CallProcessScope> {
+        self.process_scope.as_ref()
     }
 
     /// Install this context on the current thread until the guard drops.
