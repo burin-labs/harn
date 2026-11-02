@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use harn_lexer::{Lexer, Span, Token, TokenKind};
 use harn_parser::{
-    lexical::{resolved_identifier_bindings, BindingId},
+    lexical::{resolved_identifier_bindings_with_source, BindingId, MatchPatternCatalog},
     visit::walk_program_interpolated,
     Node,
 };
@@ -163,7 +163,12 @@ pub fn index_references(
             definitions.insert(name.to_owned(), definition.clone());
             definition
         };
-        let lexical = resolved_identifier_bindings(&[], &parsed.program);
+        let lexical = resolved_identifier_bindings_with_source(
+            &[],
+            &parsed.program,
+            Some(&parsed.source),
+            &MatchPatternCatalog::default(),
+        );
         let tokens = Lexer::new(&parsed.source)
             .tokenize()
             .expect("a retained parsed source must still lex");
@@ -196,9 +201,11 @@ pub fn index_references(
         for (binding, def) in &lexical_defs {
             if let Some(span) = identifier_span(
                 &tokens,
+                &parsed.source,
                 &binding.name,
                 binding.declaration_start,
                 binding.declaration_end,
+                None,
             ) {
                 insert_reference(
                     &mut index,
@@ -220,7 +227,14 @@ pub fn index_references(
                     .or_else(|| definition_of(name));
                 if let (Some(def), Some(span)) = (
                     def,
-                    identifier_span(&tokens, name, broad_span.start, broad_span.end),
+                    identifier_span(
+                        &tokens,
+                        &parsed.source,
+                        name,
+                        broad_span.start,
+                        broad_span.end,
+                        Some((broad_span.line, broad_span.column)),
+                    ),
                 ) {
                     insert_reference(
                         &mut index,
@@ -277,11 +291,18 @@ fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {
     index.site_defs.push((site, key));
 }
 
-fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Option<Span> {
+fn identifier_span(
+    tokens: &[Token],
+    source: &str,
+    name: &str,
+    start: usize,
+    end: usize,
+    position: Option<(usize, usize)>,
+) -> Option<Span> {
     // Lexer tokens are emitted in source order. Skip tokens before the
     // requested range instead of rescanning the file for every identifier.
     let first = tokens.partition_point(|token| token.span.start < start);
-    tokens[first..]
+    let found = tokens[first..]
         .iter()
         .take_while(|token| token.span.start <= end)
         .find_map(|token| match &token.kind {
@@ -290,6 +311,36 @@ fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Op
             {
                 Some(token.span)
             }
+            _ => None,
+        });
+    if found.is_some() {
+        return found;
+    }
+
+    // Interpolation expressions are nested inside a string token in the
+    // containing file. Re-lex their AST range at its original coordinates.
+    let enclosing = first.checked_sub(1).and_then(|index| tokens.get(index))?;
+    if !matches!(enclosing.kind, TokenKind::InterpolatedString(_)) || end > enclosing.span.end {
+        return None;
+    }
+    let segment = source.get(start..end)?;
+    let (line, column) = if let Some(position) = position {
+        position
+    } else {
+        // Declarations have byte offsets but no line/column in BindingId.
+        // Count only within the containing token, not from the file start.
+        let prefix = source.get(enclosing.span.start..start)?;
+        let lines = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let column = prefix.rsplit('\n').next()?.chars().count()
+            + if lines == 0 { enclosing.span.column } else { 1 };
+        (enclosing.span.line + lines, column)
+    };
+    Lexer::with_position_and_offset(segment, line, column, start)
+        .tokenize()
+        .ok()?
+        .into_iter()
+        .find_map(|token| match token.kind {
+            TokenKind::Identifier(found) if found == name => Some(token.span),
             _ => None,
         })
 }
@@ -337,7 +388,7 @@ mod identifier_span_tests {
                         _ => None,
                     });
                     assert_eq!(
-                        identifier_span(&tokens, name, start, end),
+                        identifier_span(&tokens, source, name, start, end, None),
                         expected,
                         "{name} in {start}..{end}"
                     );

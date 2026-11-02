@@ -614,35 +614,6 @@
       "latency_p50_ms": 1800
     },
     {
-      "id": "github_models",
-      "display_name": "Github Models",
-      "classification": "hosted",
-      "endpoint": {
-        "base_url": "https://models.github.ai/inference",
-        "base_url_env": "GITHUB_MODELS_BASE_URL",
-        "chat_endpoint": "/chat/completions",
-        "completion_endpoint": "/completions"
-      },
-      "auth": {
-        "style": "bearer",
-        "env": [
-          "GITHUB_MODELS_TOKEN"
-        ],
-        "required": true
-      },
-      "healthcheck": {
-        "method": "GET",
-        "url": "https://models.github.ai/catalog/models"
-      },
-      "protocols": [
-        "openai_chat_completions"
-      ],
-      "features": [
-        "native_tools"
-      ],
-      "caveats": []
-    },
-    {
       "id": "groq",
       "display_name": "Groq",
       "classification": "hosted",

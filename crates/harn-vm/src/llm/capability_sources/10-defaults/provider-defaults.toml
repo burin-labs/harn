@@ -273,9 +273,6 @@ top_k_supported = false
 [provider_defaults.atlas]
 top_k_supported = false
 
-[provider_defaults.github_models]
-top_k_supported = false
-
 [provider_defaults.vercel_ai_gateway]
 top_k_supported = false
 

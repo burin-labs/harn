@@ -63,16 +63,6 @@ text_tool_wire_format_supported = true
 tool_mode_parity = "unknown"
 tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."
 
-[[provider.github_models]]
-model_match = "*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "native"
-structured_output_mode = "native_json"
-text_tool_wire_format_supported = true
-tool_mode_parity = "unknown"
-tool_mode_parity_notes = "GitHub Models publishes capability flags per catalog model; Harn needs route-specific probes before assuming native/text tool parity."
-
 [[provider.vercel_ai_gateway]]
 model_match = "google/gemini-3.1*"
 extends = true

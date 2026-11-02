@@ -35,7 +35,6 @@ unverified = [
   "deepinfra",
   "flexai",
   "friendli",
-  "github_models",
   "huggingface",
   "hunyuan",
   "hyperbolic",
