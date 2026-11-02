@@ -706,6 +706,7 @@
   "Effort rungs to try": "Уровни усилий для перебора",
   "Embedded canonical skills ({}):": "Встроенные канонические навыки ({0}):",
   "Embedded replay fixture: {}": "Встроенный набор фикстур для воспроизведения: {0}",
+  "Expectations compared: {}": "Сравнено ожиданий: {0}",
   "Emit CSV rows instead of the text table": "Выводить строки CSV вместо текстовой таблицы",
   "Emit JSON": "Выводить JSON",
   "Emit JSON instead of a human table": "Выводить JSON вместо таблицы для человека",

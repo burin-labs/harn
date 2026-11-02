@@ -31,10 +31,7 @@ pub(super) fn load_eval_pack_case_fixture(
         }
         return load_replay_fixture(&resolve_manifest_path(base_dir, fixture_ref));
     }
-    Ok(run
-        .replay_fixture
-        .clone()
-        .unwrap_or_else(|| replay_fixture_from_run(run)))
+    Ok(recorded_replay_fixture(run))
 }
 
 pub(super) fn eval_pack_case_source_path(
@@ -146,12 +143,15 @@ pub(super) fn friction_suggestion_options(
     }
 }
 
+/// Apply the thresholds that are set and return how many were checked.
 pub(super) fn apply_eval_pack_thresholds(
     run: &RunRecord,
     thresholds: &super::super::types::EvalPackThresholds,
     failures: &mut Vec<String>,
-) {
+) -> usize {
+    let mut checked = 0;
     if let Some(max_stage_count) = thresholds.max_stage_count {
+        checked += 1;
         if run.stages.len() > max_stage_count {
             failures.push(format!(
                 "stage count {} exceeds threshold {}",
@@ -161,6 +161,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_latency_ms) = thresholds.max_latency_ms {
+        checked += 1;
         let actual = run
             .usage
             .as_ref()
@@ -173,6 +174,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_cost_usd) = thresholds.max_cost_usd {
+        checked += 1;
         match run.usage.as_ref().and_then(|usage| usage.cost_usd) {
             Some(actual) if actual > max_cost_usd => failures.push(format!(
                 "cost ${actual:.6} exceeds threshold ${max_cost_usd:.6}"
@@ -182,6 +184,7 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_tokens) = thresholds.max_tokens {
+        checked += 1;
         let actual = run
             .usage
             .as_ref()
@@ -193,6 +196,7 @@ pub(super) fn apply_eval_pack_thresholds(
             ));
         }
     }
+    checked
 }
 
 pub(super) fn apply_eval_pack_rubric(
@@ -436,11 +440,73 @@ pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
     }
 }
 
-pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
-    if fixture.eval_kind.as_deref() == Some("clarifying_question") {
-        return evaluate_clarifying_question(run, fixture);
+/// Failure every evaluator reports when a fixture asserted nothing.
+pub const NOTHING_COMPARED: &str = "the fixture records no expectations, so nothing was compared";
+
+/// The fixture a run recorded, for evaluating that run. A run that recorded none
+/// gets an empty fixture, which compares nothing and so fails: deriving a fixture
+/// from the run being evaluated would compare the run with itself.
+pub fn recorded_replay_fixture(run: &RunRecord) -> ReplayFixture {
+    run.replay_fixture.clone().unwrap_or_default()
+}
+
+/// Failure every evaluator reports when a fixture was recorded from the very
+/// run it is asked to check.
+pub const RECORDED_FROM_THIS_RUN: &str =
+    "the fixture was recorded from this run, so it cannot check it; evaluate another run against it";
+
+/// Failures a case's fixture contributes when the case may also be checked by
+/// other means (rubrics, thresholds, a baseline). A case that names no fixture
+/// falls back to the one its run carries, and that fallback counts only when it
+/// independently compared something: a run's self-recorded fixture never fails
+/// or passes a case that is checked another way. With no other check at all,
+/// the fixture's failures stand, so the case still never passes vacuously.
+pub(super) fn case_fixture_failures(
+    declared: bool,
+    eval: &ReplayEvalReport,
+    other_checks: usize,
+) -> Vec<String> {
+    if declared || (eval.checked && eval.expectations_compared > 0) || other_checks == 0 {
+        eval.failures.clone()
+    } else {
+        Vec::new()
     }
+}
+
+/// Whether a fixture was recorded from `run` itself. Such a fixture is the
+/// reference for other runs of the same workflow, never evidence about `run`.
+/// A fixture with no source run is hand-written and so independent.
+pub fn fixture_recorded_from_run(run: &RunRecord, fixture: &ReplayFixture) -> bool {
+    !fixture.source_run_id.is_empty() && fixture.source_run_id == run.id
+}
+
+/// Evaluate a run against a fixture. `pass` means the fixture is independent of
+/// the run, every recorded expectation matched, and at least one was compared.
+pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
+    if fixture_recorded_from_run(run, fixture) {
+        return ReplayEvalReport {
+            checked: false,
+            pass: false,
+            failures: vec![RECORDED_FROM_THIS_RUN.to_string()],
+            stage_count: run.stages.len(),
+            expectations_compared: 0,
+        };
+    }
+    let mut report = if fixture.eval_kind.as_deref() == Some("clarifying_question") {
+        evaluate_clarifying_question(run, fixture)
+    } else {
+        evaluate_stage_fixture(run, fixture)
+    };
+    if report.expectations_compared == 0 {
+        report.failures.push(NOTHING_COMPARED.to_string());
+    }
+    report.pass = report.failures.is_empty();
+    report
+}
+
+fn evaluate_stage_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
     let mut failures = Vec::new();
+    let mut expectations_compared = status_expectation_count(fixture);
     if run.status != fixture.expected_status {
         failures.push(format!(
             "run status mismatch: expected {}, got {}",
@@ -451,9 +517,16 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         run.stages.iter().map(|s| (s.node_id.as_str(), s)).collect();
     for assertion in &fixture.stage_assertions {
         let Some(stage) = stages_by_id.get(assertion.node_id.as_str()) else {
+            expectations_compared += 1;
             failures.push(format!("missing stage {}", assertion.node_id));
             continue;
         };
+        // Count only what the assertion records, as for the run status.
+        expectations_compared += usize::from(!assertion.expected_status.is_empty())
+            + usize::from(!assertion.expected_outcome.is_empty())
+            + usize::from(assertion.expected_branch.is_some())
+            + assertion.required_artifact_kinds.len()
+            + usize::from(assertion.visible_text_contains.is_some());
         if stage.status != assertion.expected_status {
             failures.push(format!(
                 "stage {} status mismatch: expected {}, got {}",
@@ -496,9 +569,11 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
     }
 
     ReplayEvalReport {
+        checked: true,
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
 }
 
@@ -566,13 +641,14 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
         matches_expected && has_required_terms && avoids_forbidden_terms
     });
 
-    if !questions.is_empty()
-        && (!normalized_accepted.is_empty()
-            || normalized_expected.is_some()
-            || !required_terms.is_empty()
-            || !forbidden_terms.is_empty())
-        && !matched
-    {
+    let has_text_spec = !normalized_accepted.is_empty()
+        || normalized_expected.is_some()
+        || !required_terms.is_empty()
+        || !forbidden_terms.is_empty();
+    // The question-count bounds are always compared; the status and text checks
+    // count only when the fixture records them.
+    let expectations_compared = status_expectation_count(fixture) + 2 + usize::from(has_text_spec);
+    if !questions.is_empty() && has_text_spec && !matched {
         failures.push(format!(
             "no clarifying question matched fixture; actual questions: {}",
             questions
@@ -584,10 +660,18 @@ fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> Rep
     }
 
     ReplayEvalReport {
+        checked: true,
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+        expectations_compared,
     }
+}
+
+/// An empty `expected_status` records no expectation: comparing it against an
+/// empty run status would pass without checking anything.
+fn status_expectation_count(fixture: &ReplayFixture) -> usize {
+    usize::from(!fixture.expected_status.is_empty())
 }
 
 pub fn evaluate_run_suite(

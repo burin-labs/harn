@@ -103,7 +103,7 @@ fn write_failing_run_record(path: &std::path::Path) {
         "replay_fixture": {
             "_type": "replay_fixture",
             "id": "fixture-expects-completed",
-            "source_run_id": "run-failing-fixture",
+            "source_run_id": "run-reference",
             "workflow_id": "replay-fixture-exit",
             "workflow_name": "Replay fixture exit",
             "created_at": "2026-05-26T00:00:01.000Z",
@@ -239,7 +239,45 @@ fn replay_session_id_reads_events_db_and_compares_runs() {
     assert_eq!(parsed["determinism"]["pass"], true);
     assert_eq!(parsed["reports"][0]["run_id"], session_id);
     assert_eq!(parsed["reports"][0]["transcript_event_count"], 4);
+    // The run is rebuilt from the session's own events, so the replay claims
+    // no fixture verdict: it neither passes nor fails a self-derived check.
+    assert_eq!(parsed["reports"][0]["fixture"]["checked"], false);
+    assert_eq!(parsed["reports"][0]["fixture"]["expectations_compared"], 0);
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
+
+    let human = harn_e2e_command()
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn harn replay --session-id");
+    // One read compares nothing, so it has no verdict: never a pass.
+    assert_eq!(human.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        stdout.contains("Embedded replay fixture: not checked"),
+        "{stdout}"
+    );
+
+    let single = harn_e2e_command()
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --session-id --json");
+    assert_eq!(single.status.code(), Some(2));
+    let single = stdout_json(&single);
+    assert_eq!(single["ok"], false);
+    assert_eq!(single["error"]["code"], "replay_not_checked");
 }
 
 #[test]
@@ -694,6 +732,225 @@ fn replay_fixture_runs_use_oracle_allowlist() {
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
 }
 
+fn replay_oracle_fixtures(dir: &str) -> Vec<std::path::PathBuf> {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle")
+        .join(dir);
+    let mut paths = std::fs::read_dir(&root)
+        .expect("read replay oracle fixtures")
+        .map(|entry| entry.expect("fixture entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "no replay oracle fixtures under {}",
+        root.display()
+    );
+    paths
+}
+
+fn replay_fixture_json(path: &std::path::Path) -> (std::process::ExitStatus, serde_json::Value) {
+    let out = harn_e2e_command()
+        .args(["replay", "--fixture", path.to_str().unwrap(), "--json"])
+        .output()
+        .expect("spawn harn replay --fixture");
+    (out.status, stdout_json(&out))
+}
+
+/// The replay oracle's own negative controls must fail `replay --fixture` too:
+/// one replay run used to compare a recorded execution against itself and pass.
+#[test]
+fn replay_fixture_fails_every_oracle_mutation() {
+    for path in replay_oracle_fixtures("mutations") {
+        let (status, parsed) = replay_fixture_json(&path);
+        assert!(
+            !status.success(),
+            "{} passed replay --fixture",
+            path.display()
+        );
+        assert_eq!(parsed["ok"], false, "{}", path.display());
+        assert_eq!(parsed["error"]["code"], "replay_fixture_failed");
+        assert!(
+            parsed["data"]["fixture"]["expectations_compared"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(!parsed["data"]["fixture"]["failures"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let human = harn_e2e_command()
+            .args(["replay", "--fixture", path.to_str().unwrap()])
+            .output()
+            .expect("spawn harn replay --fixture");
+        assert!(
+            !human.status.success(),
+            "{} passed in human mode",
+            path.display()
+        );
+        let stdout = String::from_utf8_lossy(&human.stdout);
+        assert!(stdout.contains("Embedded replay fixture: FAIL"), "{stdout}");
+        assert!(stdout.contains("Expectations compared: "), "{stdout}");
+    }
+}
+
+/// The count is the values the oracle compared, once each: allowlisted fields
+/// count zero, and a drifting trace stops at its first divergence.
+#[test]
+fn replay_fixture_counts_each_compared_value_once() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle");
+    // kind, payload.binding_id, then the divergent payload.result.status.
+    let (_, drifted) = replay_fixture_json(&root.join("mutations/meaningful_drift.invalid.json"));
+    assert_eq!(drifted["data"]["fixture"]["expectations_compared"], 3);
+    // kind, payload.binding_id, payload.result.status and topic all match.
+    let (status, matched) =
+        replay_fixture_json(&root.join("mutations/missing_expected_drift.invalid.json"));
+    assert!(!status.success());
+    assert_eq!(matched["data"]["fixture"]["expectations_compared"], 4);
+    assert!(matched["data"]["fixture"]["failures"][0]
+        .as_str()
+        .unwrap()
+        .contains("expects the executions to drift"));
+}
+
+#[test]
+fn replay_fixture_passes_every_valid_oracle_trace_with_expectations_compared() {
+    for path in replay_oracle_fixtures("fixtures") {
+        let (status, parsed) = replay_fixture_json(&path);
+        assert!(status.success(), "{} failed: {parsed}", path.display());
+        assert!(
+            parsed["data"]["fixture"]["expectations_compared"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+}
+
+#[test]
+fn replay_fixture_refuses_a_file_it_cannot_check() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("unknown.json");
+    std::fs::write(&path, b"{}").expect("write unknown fixture");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(
+        !status.success(),
+        "an untyped JSON object passed replay --fixture"
+    );
+    assert_eq!(parsed["ok"], false);
+    assert!(parsed["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not a fixture harn replay can check"));
+}
+
+#[test]
+fn replay_run_record_with_no_expectations_does_not_pass() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("run.json");
+    let run = json!({
+        "_type": "run_record",
+        "id": "run-no-expectations",
+        "replay_fixture": {"_type": "replay_fixture", "id": "empty", "expected_status": "", "stage_assertions": []}
+    });
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).expect("write run record");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(!status.success(), "a fixture that asserts nothing passed");
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+    assert_eq!(parsed["data"]["fixture"]["pass"], false);
+}
+
+/// A run record that recorded no fixture must not be checked against one
+/// derived from itself, which would always match.
+#[test]
+fn replay_and_eval_fail_a_run_record_that_recorded_no_fixture() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("run.json");
+    std::fs::write(
+        &path,
+        br#"{"_type":"run_record","id":"r","status":"completed"}"#,
+    )
+    .expect("write run record");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(!status.success(), "a run with no recorded fixture passed");
+    assert_eq!(parsed["data"]["fixture"]["checked"], true);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+
+    let eval = harn_e2e_command()
+        .args(["eval", path.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    let stdout = String::from_utf8_lossy(&eval.stdout);
+    assert!(!eval.status.success(), "harn eval passed: {stdout}");
+    assert!(stdout.contains("Expectations compared: 0"), "{stdout}");
+    assert!(stdout.contains("nothing was compared"), "{stdout}");
+}
+
+/// A fixture Harn records when it saves a run is the reference for other runs
+/// of that workflow. Checked against the run it was recorded from it can only
+/// match, so replay and eval report no verdict instead of a pass.
+#[test]
+fn a_fixture_recorded_from_the_run_never_passes_that_run() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let record = |id: &str| {
+        json!({
+            "_type": "run_record",
+            "id": id,
+            "workflow_id": "wf",
+            "status": "completed",
+            "replay_fixture": {
+                "_type": "replay_fixture",
+                "id": "fixture-from-run-a",
+                "source_run_id": "run-a",
+                "workflow_id": "wf",
+                "expected_status": "completed",
+                "stage_assertions": []
+            }
+        })
+    };
+    let own = temp.path().join("run-a.json");
+    std::fs::write(&own, serde_json::to_vec(&record("run-a")).unwrap()).unwrap();
+    let (status, parsed) = replay_fixture_json(&own);
+    assert_eq!(status.code(), Some(2), "{parsed}");
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["error"]["code"], "replay_not_checked");
+    assert_eq!(parsed["data"]["fixture"]["checked"], false);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+    let eval = harn_e2e_command()
+        .args(["eval", own.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    let stdout = String::from_utf8_lossy(&eval.stdout);
+    assert!(!eval.status.success(), "{stdout}");
+    assert!(stdout.contains("NOT CHECKED"), "{stdout}");
+    assert!(stdout.contains("recorded from this run"), "{stdout}");
+
+    // The same fixture checks a different run of the workflow.
+    let other = temp.path().join("run-b.json");
+    std::fs::write(&other, serde_json::to_vec(&record("run-b")).unwrap()).unwrap();
+    let (status, parsed) = replay_fixture_json(&other);
+    assert!(status.success(), "{parsed}");
+    assert_eq!(parsed["data"]["fixture"]["checked"], true);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 1);
+}
+
+#[test]
+fn eval_refuses_a_file_that_is_not_a_run_record() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("unknown.json");
+    std::fs::write(&path, b"{}").expect("write unknown file");
+    let eval = harn_e2e_command()
+        .args(["eval", path.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    assert!(!eval.status.success(), "harn eval accepted an untyped file");
+    assert!(String::from_utf8_lossy(&eval.stderr).contains("is not a run record"));
+}
+
 fn offline_coding_fixture(
     verify_argv: Vec<String>,
     include_finish: bool,
@@ -849,6 +1106,9 @@ fn offline_coding_replay_cli_proves_execution_and_universal_envelope() {
     assert_eq!(receipt["data"]["kind"], "offline_coding");
     assert_eq!(receipt["data"]["runs"].as_array().map(Vec::len), Some(2));
     assert_eq!(receipt["data"]["repeatability"]["pass"], true);
+    assert!(receipt["data"]["expectations_compared"]
+        .as_u64()
+        .is_some_and(|count| count > 0));
     let seed = &receipt["data"]["runs"][0]["workspace_seed"];
     assert_eq!(seed["schema"], "harn.workspace-seed.v1");
     assert_eq!(seed["files"], 3);

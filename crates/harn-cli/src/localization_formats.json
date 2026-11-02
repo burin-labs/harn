@@ -216,6 +216,7 @@
   "Eval pack: {eval_path}": "Eval pack: {eval_path}",
   "Eval pack: {path}": "Eval pack: {path}",
   "Execution: {execution_id}": "Execution: {execution_id}",
+  "Expectations compared: {}": "Expectations compared: {0}",
   "Expires: {}": "Expires: {0}",
   "Failures:": "Failures:",
   "First compile: {:.3} ms | repeated compile p50/p95: {:.3}/{:.3} ms | decode: {:.3}/{:.3} ms": "First compile: {0:.3} ms | repeated compile p50/p95: {1:.3}/{2:.3} ms | decode: {3:.3}/{4:.3} ms",

@@ -69,9 +69,19 @@ fn replay_fixture_round_trip_passes() {
         persisted_path: None,
     };
     let fixture = replay_fixture_from_run(&run);
-    let report = evaluate_run_against_fixture(&run, &fixture);
-    assert!(report.pass);
+    let replay = RunRecord {
+        id: "run_1_replay".to_string(),
+        ..run.clone()
+    };
+    let report = evaluate_run_against_fixture(&replay, &fixture);
+    assert!(report.checked && report.pass, "{:?}", report.failures);
     assert!(report.failures.is_empty());
+
+    // The fixture is the reference for other runs, never evidence about the
+    // run it was recorded from.
+    let own = evaluate_run_against_fixture(&run, &fixture);
+    assert!(!own.checked && !own.pass);
+    assert_eq!(own.expectations_compared, 0);
 }
 
 #[test]
@@ -102,7 +112,10 @@ fn replay_eval_suite_reports_failed_case() {
     };
     let suite = evaluate_run_suite(vec![
         (
-            good.clone(),
+            RunRecord {
+                id: "run_good_replay".to_string(),
+                ..good.clone()
+            },
             replay_fixture_from_run(&good),
             Some("good.json".to_string()),
         ),
@@ -136,7 +149,7 @@ fn clarifying_question_eval_requires_matching_hitl_prompt() {
     let fixture = ReplayFixture {
         type_name: "replay_fixture".to_string(),
         id: "fixture_clarify".to_string(),
-        source_run_id: run.id.clone(),
+        source_run_id: "run_clarify_reference".to_string(),
         workflow_id: run.workflow_id.clone(),
         created_at: "2026-04-23T12:00:01Z".to_string(),
         eval_kind: Some("clarifying_question".to_string()),

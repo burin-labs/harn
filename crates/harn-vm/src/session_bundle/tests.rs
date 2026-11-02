@@ -523,14 +523,7 @@ fn worker_snapshot_checkpoint_builds_resumable_bundle() {
     assert_eq!(run.status, "suspended");
     assert_eq!(run.workflow_id, "worker_snapshot_checkpoint");
     assert_eq!(run.checkpoints[0].persisted_at, "2026-05-01T00:00:20Z");
-    assert_eq!(
-        run.replay_fixture.as_ref().unwrap().created_at,
-        "2026-05-01T00:00:20Z"
-    );
-    assert_eq!(
-        run.replay_fixture.as_ref().unwrap().eval_kind.as_deref(),
-        Some("worker_snapshot_checkpoint")
-    );
+    assert!(run.replay_fixture.is_none());
     assert_eq!(run.checkpoints.len(), 1);
     assert_eq!(run.child_runs.len(), 1);
     assert_eq!(
@@ -554,7 +547,7 @@ fn worker_snapshot_checkpoint_builds_resumable_bundle() {
     )
     .unwrap();
     assert_eq!(bundle.source.status, "suspended");
-    assert!(bundle.replay.replay_fixture.is_some());
+    assert!(bundle.replay.replay_fixture.is_none());
     assert_eq!(bundle.replay.checkpoints.len(), 1);
     assert!(bundle
         .replay
@@ -1044,15 +1037,7 @@ fn bundle_status_reflects_suspended_loop_not_completed() {
         bundle.metadata.get(SESSION_BUNDLE_LIVENESS_KEY),
         Some(&json!("suspended"))
     );
-    assert_eq!(
-        bundle
-            .replay
-            .replay_fixture
-            .as_ref()
-            .unwrap()
-            .expected_status,
-        SESSION_BUNDLE_STATUS_SUSPENDED
-    );
+    assert!(bundle.replay.replay_fixture.is_none());
 }
 
 #[test]

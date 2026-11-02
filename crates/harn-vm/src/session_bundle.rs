@@ -628,7 +628,14 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
         }
         return Ok(run_record);
     }
-    if let Some(fixture) = &bundle.replay.replay_fixture {
+    // A bundle without an embedded run record is rebuilt from its replay
+    // material. A replay fixture is optional: bundles rebuilt from their own
+    // events or checkpoints carry none, because one derived from that same
+    // material would always match it.
+    let has_replay_material = bundle.replay.replay_fixture.is_some()
+        || !bundle.transcript.sections.is_empty()
+        || !bundle.replay.checkpoints.is_empty();
+    if has_replay_material {
         let transcript = bundle.transcript.sections.first().map(|section| {
             json!({
                 "_type": "transcript",
@@ -665,7 +672,7 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
             "policy": {},
             "transcript": transcript,
             "usage": bundle.runtime.usage.clone(),
-            "replay_fixture": fixture,
+            "replay_fixture": bundle.replay.replay_fixture.clone(),
             "observability": replay_observability,
             "trace_spans": bundle.replay.trace_spans.clone(),
             "tool_recordings": bundle.tools.calls.clone(),
@@ -768,9 +775,9 @@ fn run_record_from_worker_snapshot_value(
 
     Ok(RunRecord {
         type_name: "run_record".to_string(),
-        id: run_id.clone(),
-        workflow_id: workflow_id.clone(),
-        workflow_name: workflow_name.clone(),
+        id: run_id,
+        workflow_id,
+        workflow_name,
         task,
         status,
         started_at,
@@ -780,22 +787,14 @@ fn run_record_from_worker_snapshot_value(
             ready_nodes: vec!["worker_snapshot_resume".to_string()],
             completed_nodes: Vec::new(),
             last_stage_id: None,
-            persisted_at: checkpointed_at.clone(),
+            persisted_at: checkpointed_at,
             reason: "suspended_worker_snapshot_turn_boundary".to_string(),
         }],
         child_runs: vec![child],
         transcript: value.get("transcript").cloned(),
-        replay_fixture: Some(ReplayFixture {
-            type_name: "replay_fixture".to_string(),
-            id: format!("fixture_{run_id}"),
-            source_run_id: run_id,
-            workflow_id,
-            workflow_name,
-            created_at: checkpointed_at,
-            eval_kind: Some("worker_snapshot_checkpoint".to_string()),
-            expected_status: "suspended".to_string(),
-            ..ReplayFixture::default()
-        }),
+        // The snapshot's own status is not an independent expectation, so the
+        // checkpoint records no replay fixture to check it against.
+        replay_fixture: None,
         observability: Some(RunObservabilityRecord {
             schema_version: 4,
             worker_lineage: vec![lineage],
@@ -1023,18 +1022,6 @@ pub fn session_bundle_from_agent_session_events(
         json!("events.sqlite observability.agent_events topic"),
     );
 
-    let replay_fixture = ReplayFixture {
-        type_name: "replay_fixture".to_string(),
-        id: format!("fixture_from_session_{stable_id}"),
-        source_run_id: run_id.clone(),
-        workflow_id: workflow_id.clone(),
-        workflow_name: Some(format!("Agent session {session_id}")),
-        created_at: created_at.clone(),
-        eval_kind: Some("replay".to_string()),
-        expected_status: status.clone(),
-        ..ReplayFixture::default()
-    };
-
     Ok(SessionBundle {
         bundle_id: format!("bundle_from_session_{stable_id}"),
         created_at,
@@ -1077,7 +1064,9 @@ pub fn session_bundle_from_agent_session_events(
         },
         permissions: permissions_from_agent_session(events),
         replay: BundleReplay {
-            replay_fixture: Some(replay_fixture),
+            // A run rebuilt from its own events has no independent expectations:
+            // a fixture derived from those events would always match them.
+            replay_fixture: None,
             event_log_pointers: vec![BundleEventLogPointer {
                 kind: "agent_events".to_string(),
                 topic: Some(format!(

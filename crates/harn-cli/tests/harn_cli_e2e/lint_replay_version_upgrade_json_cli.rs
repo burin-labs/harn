@@ -102,6 +102,7 @@ fn replay_json_loads_persisted_run_record() {
     // Write a minimal RunRecord shape that matches harn_vm::orchestration::RunRecord.
     let path = temp.path().join("run.json");
     let run = serde_json::json!({
+        "_type": "run_record",
         "id": "test-run-1",
         "schema_version": 1,
         "schema": "harn.run.v1",

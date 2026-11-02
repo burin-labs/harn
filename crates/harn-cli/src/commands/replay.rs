@@ -14,6 +14,9 @@ use crate::cli::ReplayArgs;
 use crate::json_envelope::{self, JsonEnvelope};
 
 pub(crate) const REPLAY_SCHEMA_VERSION: u32 = 1;
+/// Exit code of a single replay read that compared nothing independent of the
+/// run, so it neither passed nor failed.
+const NO_VERDICT_EXIT: i32 = 2;
 
 pub(crate) fn json_schema() -> JsonValue {
     json!({
@@ -33,12 +36,21 @@ pub(crate) fn json_schema() -> JsonValue {
                             "run_id": {"type": "string"},
                             "execution_id": {"type": "string"},
                             "status": {"type": "string"},
-                            "fixture": {"type": "object"}
+                            "fixture": {
+                                "type": "object",
+                                "required": ["checked", "pass", "failures", "expectations_compared"],
+                                "properties": {
+                                    "checked": {"type": "boolean"},
+                                    "pass": {"type": "boolean"},
+                                    "failures": {"type": "array", "items": {"type": "string"}},
+                                    "expectations_compared": {"type": "integer", "minimum": 0}
+                                }
+                            }
                         }
                     },
                     {
                         "type": "object",
-                        "required": ["kind", "source", "producer", "runs", "repeatability", "pending_count", "missing_count"],
+                        "required": ["kind", "source", "producer", "runs", "repeatability", "expectations_compared", "pending_count", "missing_count"],
                         "properties": {
                             "kind": {"const": "offline_coding"},
                             "source": {"type": "string"},
@@ -68,6 +80,7 @@ pub(crate) fn json_schema() -> JsonValue {
                                 },
                                 "additionalProperties": false
                             },
+                            "expectations_compared": {"type": "integer", "minimum": 0},
                             "pending_count": {"type": "integer", "minimum": 0},
                             "missing_count": {"type": "integer", "minimum": 0}
                         }
@@ -130,9 +143,66 @@ pub(crate) struct ReplayTransition {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayFixtureResult {
+    /// False when the source has no expectations independent of the run: a
+    /// session rebuilt from its own events, or a run record whose fixture was
+    /// recorded from that same run. Nothing is compared and `pass` is false.
+    /// A single replay then has no verdict and fails with exit code 2; with
+    /// `--runs N` the determinism comparison decides.
+    pub checked: bool,
+    /// True only when every recorded expectation matched and at least one was
+    /// compared: a fixture that asserts nothing never passes.
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+    pub expectations_compared: usize,
+}
+
+impl ReplayFixtureResult {
+    fn from_eval(report: &harn_vm::orchestration::ReplayEvalReport) -> Self {
+        Self {
+            checked: report.checked,
+            pass: report.pass,
+            failures: report.failures.clone(),
+            stage_count: report.stage_count,
+            expectations_compared: report.expectations_compared,
+        }
+    }
+
+    fn not_checked(stage_count: usize, reason: &str) -> Self {
+        Self {
+            checked: false,
+            pass: false,
+            failures: vec![reason.to_string()],
+            stage_count,
+            expectations_compared: 0,
+        }
+    }
+
+    /// A checked fixture whose comparison failed. An unchecked one is no
+    /// failure, and never a pass.
+    fn failed(&self) -> bool {
+        self.checked && !self.pass
+    }
+
+    /// Exit code for a single replay read: 0 pass, 1 fail, 2 no verdict. An
+    /// unchecked fixture still succeeds when the read made another real
+    /// comparison, such as a counterfactual plan against the workspace.
+    fn exit_code(&self, compared_elsewhere: bool) -> i32 {
+        match (self.checked, self.pass) {
+            (false, _) if compared_elsewhere => 0,
+            (false, _) => NO_VERDICT_EXIT,
+            (true, true) => 0,
+            (true, false) => 1,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match (self.checked, self.pass) {
+            (false, _) => "not checked",
+            (true, true) => "PASS",
+            (true, false) => "FAIL",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -335,8 +405,11 @@ fn run_json(source: ReplaySource, runs: usize) -> i32 {
             .into_iter()
             .next()
             .expect("execute_runs returns one execution for runs=1");
+        let exit = execution
+            .report
+            .fixture
+            .exit_code(execution.report.counterfactual.is_some());
         let envelope = envelope_for_report(execution.report);
-        let exit = i32::from(!envelope.ok);
         println!("{}", json_envelope::to_string_pretty(&envelope));
         return exit;
     }
@@ -350,7 +423,7 @@ fn run_json(source: ReplaySource, runs: usize) -> i32 {
         .iter()
         .map(|execution| execution.event_sequence.clone())
         .collect::<Vec<_>>();
-    let fixture_failed = reports.iter().any(|report| !report.fixture.pass);
+    let fixture_failed = reports.iter().any(|report| report.fixture.failed());
     let ok = !fixture_failed && determinism.pass;
     let error = if ok {
         None
@@ -424,7 +497,7 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         let determinism = determinism_summary(&source, &executions);
         let fixture_failed = executions
             .iter()
-            .any(|execution| !execution.report.fixture.pass);
+            .any(|execution| execution.report.fixture.failed());
         println!(
             "{}",
             crate::localization::formatted!(
@@ -438,7 +511,10 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         }
         return i32::from(fixture_failed || !determinism.pass);
     }
-    i32::from(!executions[0].report.fixture.pass)
+    executions[0]
+        .report
+        .fixture
+        .exit_code(counterfactual.is_some())
 }
 
 fn evaluate_counterfactual(
@@ -527,6 +603,18 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
 fn execute_run_record(path: &Path) -> Result<ReplayExecution, String> {
     let run = harn_vm::orchestration::load_run_record(path)
         .map_err(|error| format!("failed to load run record {}: {error}", path.display()))?;
+    // Any JSON object deserializes into a defaulted run record, so the type tag is
+    // what tells a run record apart from a file this command cannot check.
+    if !crate::is_tagged_run_record(&run) {
+        return Err(format!(
+            "{} is not a fixture harn replay can check (its _type is {:?}). It reads a run \
+             record (_type \"run_record\"), a replay trace ({}), or an offline coding replay \
+             fixture.",
+            path.display(),
+            run.type_name,
+            harn_vm::REPLAY_TRACE_SCHEMA_VERSION
+        ));
+    }
     if run.evidence.execution_id.is_some() {
         harn_vm::orchestration::validate_execution_evidence(&run.evidence)
             .map_err(|error| format!("run record has invalid execution evidence: {error}"))?;
@@ -598,7 +686,15 @@ fn execute_session_replay(
             .map_err(|error| {
             format!("failed to reconstruct run record from session events: {error}")
         })?;
-    let report = replay_report_from_run(&run);
+    // The run is rebuilt from the session's own events, so there is nothing
+    // independent to check it against.
+    let report = replay_report_with_fixture(
+        &run,
+        ReplayFixtureResult::not_checked(
+            run.stages.len(),
+            "the run is rebuilt from the session's own events, so nothing independent checks it",
+        ),
+    );
     let raw_events = events
         .iter()
         .map(|entry| {
@@ -640,7 +736,7 @@ fn execute_replay_trace(
     } else {
         trace.second_run.clone()
     };
-    let fixture = trace_fixture_result(trace, &trace_run)?;
+    let fixture = trace_fixture_result(trace)?;
     let report = ReplayReport {
         run_id: trace_run.run_id.clone(),
         execution_id: None,
@@ -660,13 +756,19 @@ fn execute_replay_trace(
     })
 }
 
+/// Report a run record checked against the replay fixture it recorded. A run
+/// that recorded none is checked against an empty fixture and fails, so no run
+/// is ever compared with a fixture derived from itself.
 fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayReport {
-    let fixture = run
-        .replay_fixture
-        .clone()
-        .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(run));
-    let report = harn_vm::orchestration::evaluate_run_against_fixture(run, &fixture);
+    let fixture = harn_vm::orchestration::recorded_replay_fixture(run);
+    let eval = harn_vm::orchestration::evaluate_run_against_fixture(run, &fixture);
+    replay_report_with_fixture(run, ReplayFixtureResult::from_eval(&eval))
+}
 
+fn replay_report_with_fixture(
+    run: &harn_vm::orchestration::RunRecord,
+    fixture: ReplayFixtureResult,
+) -> ReplayReport {
     let stages: Vec<ReplayStage> = run
         .stages
         .iter()
@@ -704,30 +806,37 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
         stages,
         transitions,
         transcript_event_count,
-        fixture: ReplayFixtureResult {
-            pass: report.pass,
-            failures: report.failures.clone(),
-            stage_count: report.stage_count,
-        },
+        fixture,
         counterfactual: None,
     }
 }
 
 fn envelope_for_report(payload: ReplayReport) -> JsonEnvelope<ReplayReport> {
-    if payload.fixture.pass {
-        JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload)
-    } else {
-        JsonEnvelope {
-            schema_version: REPLAY_SCHEMA_VERSION,
-            ok: false,
-            data: Some(payload),
-            error: Some(json_envelope::JsonError {
-                code: "replay_fixture_failed".to_string(),
-                message: "embedded replay fixture did not pass".to_string(),
-                details: serde_json::Value::Null,
-            }),
-            warnings: Vec::new(),
+    let compared_elsewhere = payload.counterfactual.is_some();
+    let (code, message) = match (payload.fixture.checked, payload.fixture.pass) {
+        (true, true) => return JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload),
+        (false, _) if compared_elsewhere => {
+            return JsonEnvelope::ok(REPLAY_SCHEMA_VERSION, payload)
         }
+        (true, false) => (
+            "replay_fixture_failed",
+            "embedded replay fixture did not pass",
+        ),
+        (false, _) => (
+            "replay_not_checked",
+            "nothing independent of this run was compared, so the replay has no verdict",
+        ),
+    };
+    JsonEnvelope {
+        schema_version: REPLAY_SCHEMA_VERSION,
+        ok: false,
+        data: Some(payload),
+        error: Some(json_envelope::JsonError {
+            code: code.to_string(),
+            message: message.to_string(),
+            details: serde_json::Value::Null,
+        }),
+        warnings: Vec::new(),
     }
 }
 
@@ -781,9 +890,13 @@ fn print_report_human(report: &ReplayReport) {
     );
     println!(
         "{}",
+        crate::localization::formatted!("Embedded replay fixture: {}", report.fixture.label())
+    );
+    println!(
+        "{}",
         crate::localization::formatted!(
-            "Embedded replay fixture: {}",
-            if report.fixture.pass { "PASS" } else { "FAIL" }
+            "Expectations compared: {}",
+            report.fixture.expectations_compared
         )
     );
     for failure in &report.fixture.failures {
@@ -811,30 +924,30 @@ fn print_report_human(report: &ReplayReport) {
     }
 }
 
-fn trace_fixture_result(
-    trace: &ReplayOracleTrace,
-    trace_run: &ReplayTraceRun,
-) -> Result<ReplayFixtureResult, String> {
-    let oracle = ReplayOracleTrace {
-        name: format!("{} replay fixture", trace.name),
-        expect: ReplayExpectation::Match,
-        protocol_fixture_refs: trace.protocol_fixture_refs.clone(),
-        allowlist: trace.allowlist.clone(),
-        first_run: trace.first_run.clone(),
-        second_run: trace_run.clone(),
-        ..ReplayOracleTrace::default()
-    };
-    let report = harn_vm::run_replay_oracle_trace(&oracle)
+/// A replay trace records two executions and whether they must match or drift.
+/// Its verdict is the oracle's verdict on that whole recording, the same one
+/// `harn orchestrator replay-oracle` gives, so no replay run can compare a
+/// recorded execution against itself.
+fn trace_fixture_result(trace: &ReplayOracleTrace) -> Result<ReplayFixtureResult, String> {
+    let report = harn_vm::run_replay_oracle_trace(trace)
         .map_err(|error| format!("failed to evaluate replay trace: {error}"))?;
-    let failures = report
-        .divergence
-        .as_ref()
-        .map(|divergence| vec![divergence.message.clone()])
-        .unwrap_or_default();
+    let mut failures = Vec::new();
+    if report.compared_values == 0 {
+        failures.push(harn_vm::orchestration::NOTHING_COMPARED.to_string());
+    }
+    match (&report.divergence, report.expectation) {
+        (Some(divergence), ReplayExpectation::Match) => failures.push(divergence.message.clone()),
+        (None, ReplayExpectation::Drift) => {
+            failures.push("the trace expects the executions to drift, but they match".to_string());
+        }
+        _ => {}
+    }
     Ok(ReplayFixtureResult {
-        pass: report.passed,
+        checked: true,
+        pass: report.passed && failures.is_empty(),
         failures,
         stage_count: 0,
+        expectations_compared: report.compared_values,
     })
 }
 
@@ -1015,7 +1128,10 @@ mod tests {
     fn replay_rejects_a_claimed_non_harn_execution_identity() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("run.json");
-        let mut run = harn_vm::orchestration::RunRecord::default();
+        let mut run = harn_vm::orchestration::RunRecord {
+            type_name: "run_record".to_string(),
+            ..Default::default()
+        };
         run.evidence.schema_version = harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
         run.evidence.execution_id = Some("external-run-1".to_string());
         std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();

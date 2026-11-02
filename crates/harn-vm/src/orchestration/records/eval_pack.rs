@@ -45,7 +45,10 @@ pub use ledger::{
 };
 use live::*;
 use replay::*;
-pub use replay::{evaluate_run_against_fixture, evaluate_run_suite, replay_fixture_from_run};
+pub use replay::{
+    evaluate_run_against_fixture, evaluate_run_suite, fixture_recorded_from_run,
+    recorded_replay_fixture, replay_fixture_from_run, NOTHING_COMPARED, RECORDED_FROM_THIS_RUN,
+};
 use report::*;
 
 const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v2";
@@ -649,14 +652,15 @@ pub fn evaluate_run_suite_manifest(
         let run = load_run_record(&run_path)?;
         let fixture = match &case.fixture_path {
             Some(path) => load_replay_fixture(&resolve_manifest_path(base_dir, path))?,
-            None => run
-                .replay_fixture
-                .clone()
-                .unwrap_or_else(|| replay_fixture_from_run(&run)),
+            None => recorded_replay_fixture(&run),
         };
         let eval = evaluate_run_against_fixture(&run, &fixture);
-        let mut pass = eval.pass;
-        let mut failures = eval.failures;
+        let mut failures = case_fixture_failures(
+            case.fixture_path.is_some(),
+            &eval,
+            usize::from(case.compare_to.is_some()),
+        );
+        let mut pass = failures.is_empty();
         let comparison = match &case.compare_to {
             Some(path) => {
                 let baseline_path = resolve_manifest_path(base_dir, path);
@@ -1103,9 +1107,9 @@ fn evaluate_eval_pack_run_trial(
     let fixture =
         load_eval_pack_case_fixture(case, base_dir, fixture_base_dir, fixtures_by_id, &run)?;
     let eval = evaluate_run_against_fixture(&run, &fixture);
-    failures.extend(eval.failures);
-    apply_eval_pack_thresholds(&run, &manifest.defaults.thresholds, &mut failures);
-    apply_eval_pack_thresholds(&run, &case.thresholds, &mut failures);
+    let mut other_checks = case.rubrics.len();
+    other_checks += apply_eval_pack_thresholds(&run, &manifest.defaults.thresholds, &mut failures);
+    other_checks += apply_eval_pack_thresholds(&run, &case.thresholds, &mut failures);
 
     let comparison = match case.compare_to.as_ref().or(manifest.baseline.as_ref()) {
         Some(path) => {
@@ -1123,6 +1127,9 @@ fn evaluate_eval_pack_run_trial(
         }
         None => None,
     };
+    other_checks += usize::from(comparison.is_some());
+    let declares_fixture = case.fixture.is_some() || case.fixture_path.is_some();
+    failures.extend(case_fixture_failures(declares_fixture, &eval, other_checks));
 
     for rubric_id in &case.rubrics {
         let Some(rubric) = rubrics_by_id.get(rubric_id.as_str()) else {

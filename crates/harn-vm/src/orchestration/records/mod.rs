@@ -30,10 +30,11 @@ pub use eval_pack::{
     evaluate_eval_pack_manifest_resumable,
     evaluate_eval_pack_manifest_resumable_with_live_executor,
     evaluate_eval_pack_manifest_with_live_executor, evaluate_run_against_fixture,
-    evaluate_run_suite, evaluate_run_suite_manifest, load_eval_pack_manifest,
-    load_eval_suite_manifest, normalize_eval_pack_manifest_value, normalize_eval_suite_manifest,
-    replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
-    EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
+    evaluate_run_suite, evaluate_run_suite_manifest, fixture_recorded_from_run,
+    load_eval_pack_manifest, load_eval_suite_manifest, normalize_eval_pack_manifest_value,
+    normalize_eval_suite_manifest, recorded_replay_fixture, replay_fixture_from_run,
+    validate_eval_pack_split, EvalPackLiveExecutor, EvalPackLiveExecutorRequest,
+    EvalPackLiveVerifyOutcome, NOTHING_COMPARED, RECORDED_FROM_THIS_RUN,
 };
 pub use execution_evidence::{
     validate_execution_evidence, validate_execution_id, ExecutionEvidenceValidationError,
