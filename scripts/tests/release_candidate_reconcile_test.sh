@@ -28,7 +28,7 @@ release_commit="$(commit_version 1.2.3 2000000)"
 main_sha="$(commit_version 1.2.3 2000100)"
 dev_sha="$(git -C "$repo" rev-parse HEAD~2)"
 
-mkdir -p "$tmp/bin"
+mkdir -p "$tmp/bin" "$tmp/candidate-fixture"
 # FAKE_TAGS: published tags (JSON array). FAKE_BUILDS, FAKE_PROMOTIONS and
 # FAKE_ATTEMPTS: workflow_runs arrays for the in-flight build census, the
 # promotion census and the attempts at main's commit. FAKE_CANDIDATE_SHAS:
@@ -36,6 +36,8 @@ mkdir -p "$tmp/bin"
 # read (releases, builds, promotions, attempts) that cannot be read.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+# shellcheck source=scripts/lib/sha256.sh
+source "$FAKE_LIB/sha256.sh"
 printf '%s\n' "$*" >> "$FAKE_GH_LOG"
 unread() { [[ "${FAKE_FAIL:-}" == "$1" ]] && exit 1; return 0; }
 case "$1 $2" in
@@ -63,11 +65,22 @@ case "$1 $2" in
   "api repos/o/r/actions/workflows/build-release-binaries.yml/runs?head_sha="*"&per_page=100&page="*)
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
     if [[ " ${FAKE_CANDIDATE_SHAS:-} " == *" $sha "* ]]; then
-      jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+      printf '%s\n' "$sha" > "$FAKE_STATE/source"
+      jq -n --arg sha "$sha" '{total_count:1,workflow_runs:[{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"o/r"},head_repository:{full_name:"o/r"}}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
-  "api repos/o/r/actions/runs/77/artifacts?name=candidate-manifest-"*)
-    sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
-    jq -n --arg sha "$sha" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:77,head_sha:$sha}}]}' ;;
+  "api repos/o/r/actions/runs/77"|"api repos/o/r/actions/runs/77/attempts/1")
+    sha="$(cat "$FAKE_STATE/source")"
+    jq -n --arg sha "$sha" '{id:77,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"o/r"},head_repository:{full_name:"o/r"}}' ;;
+  "api repos/o/r/actions/runs/77/artifacts?per_page=100&page=1")
+    sha="$(cat "$FAKE_STATE/source")"
+    if [[ ! -f "$FAKE_STATE/manifest.zip" ]]; then
+      jq -n --arg sha "$sha" '{schemaVersion:"burin-labs.candidate_manifest.v1",repository:"o/r",sourceCommit:$sha,runId:"77",runAttempt:"1"}' > "$FAKE_STATE/candidate-manifest.json"
+      (cd "$FAKE_STATE" && zip -q -X manifest.zip candidate-manifest.json)
+    fi
+    jq -n --arg sha "$sha" --arg digest "sha256:$(sha256_file_hex "$FAKE_STATE/manifest.zip")" \
+      --argjson size "$(wc -c < "$FAKE_STATE/manifest.zip")" \
+      '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:$size,digest:$digest,workflow_run:{id:77,head_sha:$sha}}]}' ;;
+  "api repos/o/r/actions/artifacts/78/zip") cat "$FAKE_STATE/manifest.zip" ;;
   "api repos/o/r/actions/runs/900/jobs?per_page=100")
     unread jobs
     jq -n --argjson jobs "${FAKE_JOBS:-[]}" --arg override "${FAKE_JOBS_TOTAL:-}" '[{total_count: (if $override == "" then ($jobs | length) else ($override | tonumber) end), jobs: $jobs}]' ;;
@@ -85,8 +98,9 @@ chmod +x "$tmp/bin/gh"
 
 run() {
   : > "$tmp/gh.log"
+  rm -f "$tmp/candidate-fixture/source" "$tmp/candidate-fixture/manifest.zip" "$tmp/candidate-fixture/candidate-manifest.json"
   set +e
-  env PATH="$tmp/bin:$PATH" FAKE_GH_LOG="$tmp/gh.log" GITHUB_REPOSITORY=o/r FAKE_TAGS='["v1.2.2"]' \
+  env PATH="$tmp/bin:$PATH" FAKE_GH_LOG="$tmp/gh.log" FAKE_STATE="$tmp/candidate-fixture" FAKE_LIB="$root/scripts/lib" GITHUB_REPOSITORY=o/r FAKE_TAGS='["v1.2.2"]' \
     MAIN_SHA="$main_sha" SOURCE_DIRECTORY="$repo" SELF_RUN_ID=500 NOW_EPOCH="$young" "$@" \
     bash "$root/scripts/ci/release_candidate_reconcile.sh" > "$tmp/out" 2>&1
   status=$?
@@ -160,7 +174,7 @@ run "FAKE_BUILDS=[$legacy]" "FAKE_JOBS=$failed_checkout"
 # this run never counts itself.
 promotion() { jq -nc --argjson id "$1" --arg sha "$2" '{id: $id,run_attempt:1,head_sha:$sha,head_branch:"main",event:"workflow_dispatch",conclusion:null,path:".github/workflows/promote-release.yml",repository:{full_name:"o/r"},head_repository:{full_name:"o/r"}, status: "in_progress", display_title: ("Promote release " + $sha)}'; }
 run "FAKE_PROMOTIONS=[$(promotion 600 "$release_commit")]" "FAKE_CANDIDATE_SHAS=$release_commit"
-[[ $status == 0 && "$(dispatched)" == 0 ]] || fail "a candidate was requested beside a candidate's promotion"
+[[ $status == 0 && "$(dispatched)" == 0 ]] || fail "a candidate was requested beside a candidate's promotion: $(cat "$tmp/out")"
 grep -Fq 'candidate promotions in flight: [600]' "$tmp/out" || fail "the in-flight promotion was not reported"
 run "FAKE_PROMOTIONS=[$(promotion 600 "$main_sha"),$(promotion 500 "$release_commit")]" "FAKE_CANDIDATE_SHAS=$release_commit"
 [[ $status == 0 && "$(dispatched)" == 1 ]] || fail "a candidate-less or self promotion blocked the request"

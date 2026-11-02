@@ -108,16 +108,46 @@ impl ReferenceIndex {
                 });
             }
         }
-        edges.sort_by(|left, right| {
-            left.from
-                .file
-                .cmp(&right.from.file)
-                .then_with(|| left.from.span.start.cmp(&right.from.span.start))
-                .then_with(|| left.to_file.cmp(&right.to_file))
-                .then_with(|| left.to_name.cmp(&right.to_name))
-        });
+        sort_edges(&mut edges);
         edges
     }
+
+    /// The first use in each source file for each resolved definition.
+    ///
+    /// Use this for file-level graphs that discard occurrence locations. A
+    /// positional consumer, such as find-references, must use `edges` instead.
+    pub fn file_edges(&self) -> Vec<ReferenceEdge> {
+        let mut edges = Vec::new();
+        for (key, refs) in &self.by_def {
+            // `index_references` sorts each definition's uses by file and
+            // position, so the first occurrence represents that file.
+            let mut previous_file: Option<&std::path::Path> = None;
+            for site in refs {
+                if previous_file == Some(site.file.as_path()) {
+                    continue;
+                }
+                previous_file = Some(site.file.as_path());
+                edges.push(ReferenceEdge {
+                    from: site.clone(),
+                    to_file: key.file.clone(),
+                    to_name: key.name.clone(),
+                });
+            }
+        }
+        sort_edges(&mut edges);
+        edges
+    }
+}
+
+fn sort_edges(edges: &mut [ReferenceEdge]) {
+    edges.sort_by(|left, right| {
+        left.from
+            .file
+            .cmp(&right.from.file)
+            .then_with(|| left.from.span.start.cmp(&right.from.span.start))
+            .then_with(|| left.to_file.cmp(&right.to_file))
+            .then_with(|| left.to_name.cmp(&right.to_name))
+    });
 }
 
 /// One resolution-backed reference edge: a use site and the definition it
