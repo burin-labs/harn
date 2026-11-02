@@ -260,10 +260,13 @@ pub fn pl_sanitize_tool_sequence(sequence: list) -> list {
 }
 
 /**
- * A secret's whole value: a double-quoted string (escaped quotes allowed), a
- * single-quoted one, or a bare word. An unterminated quote runs to the end.
+ * A secret's whole shell word, including adjacent quoted, bare and escaped
+ * segments. Unterminated quotes run to the end. An unescaped dollar or backtick
+ * outside single quotes may introduce nested shell syntax: suppress the rest
+ * instead of guessing where that value ends.
  */
-const PL_SECRET_VALUE: string = r"(?:\x22(?:[^\x22\\]|\\.)*(?:\x22|$)|'[^']*(?:'|$)|\S+)"
+const PL_SECRET_VALUE: string =
+  r"(?:\x22(?:[^\x22\\$`]|\\(?:[\s\S]|$))*(?:\x22|$|[$`][\s\S]*)|'[^']*(?:'|$)|\\(?:[\s\S]|$)|[^\s\x22'\\$`]|[$`][\s\S]*)+"
 
 pub fn pl_redact_sensitive(text: string) -> string {
   const no_private = regex_replace(
