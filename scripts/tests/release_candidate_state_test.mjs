@@ -410,13 +410,29 @@ else process.exit(1);
       fs.writeFileSync(bindingFile,JSON.stringify(binding));fs.rmSync(bindingZip,{force:true});
       execFileSync('zip',['-q','-X',bindingZip,'consumer-rehearsal-binding.json'],{cwd:scratch});
       const bindingBytes=fs.readFileSync(bindingZip);
-      const result=spawnSync('bash',[script],{encoding:'utf8',env:{...process.env,PATH:`${scratch}:${process.env.PATH}`,
+      const env={...process.env,PATH:`${scratch}:${process.env.PATH}`,
         CALLS:calls,SCENARIO:scenario,GH_TOKEN:'fixture-read',CANARY_REPOSITORY:'acme/widget-host',
         CONSUMER_READ_TOKEN:'fixture-consumer',MANIFEST_ZIP:manifestZip,MANIFEST_SIZE:String(manifestBytes.length),
         MANIFEST_DIGEST:manifestDigest,BINDING_ZIP:bindingZip,BINDING_SIZE:String(bindingBytes.length),
-        BINDING_DIGEST:`sha256:${createHash('sha256').update(bindingBytes).digest('hex')}`}});
-      if(scenario==='good')assert.equal(result.status,0,result.stderr);
-      else assert.notEqual(result.status,0,`${scenario} accepted: ${result.stderr}`);
+        BINDING_DIGEST:`sha256:${createHash('sha256').update(bindingBytes).digest('hex')}`};
+      const result=spawnSync('bash',[script],{encoding:'utf8',env});
+      if(scenario==='good'){
+        assert.equal(result.status,0,result.stderr);
+        assert.deepEqual(JSON.parse(result.stdout),{producer_attempt:1,manifest_id:100,manifest_digest:manifestDigest});
+        const root=fileURLToPath(new URL('../..',import.meta.url));
+        const workflow=fs.readFileSync(path.join(root,'.github/workflows/promote-release.yml'),'utf8');
+        const match=/name: Re-read the producer rehearsal binding[\s\S]*?\n        run: \|\n((?:          .*\n)+)/.exec(workflow);
+        assert.ok(match,'the owning workflow step must be reached');
+        const step=path.join(scratch,'step.sh'),output=path.join(scratch,'step.outputs');
+        fs.writeFileSync(step,match[1].replace(/^          /gm,''));fs.writeFileSync(output,'');fs.writeFileSync(calls,'');
+        const stepResult=spawnSync('bash',[step],{encoding:'utf8',cwd:root,env:{...env,GITHUB_REPOSITORY:repository,
+          SOURCE_SHA:source,CANDIDATE_RUN_ID:'42',GITHUB_OUTPUT:output}});
+        assert.equal(stepResult.status,0,stepResult.stderr);
+        assert.equal(fs.readFileSync(output,'utf8'),`expected_attempt=1\nexpected_manifest_id=100\nexpected_manifest_digest=${manifestDigest}\n`);
+      }else{
+        assert.notEqual(result.status,0,`${scenario} accepted: ${result.stderr}`);
+        assert.equal(result.stdout,'');
+      }
     }
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
 });
