@@ -560,6 +560,11 @@ fn cc_sequence_template(template: string, bindings: dict<string, string>) -> str
   return rendered
 }
 
+// JSON is data, not Harn source: carry its bytes in an ASCII-only literal.
+fn cc_sequence_data(value: any) -> string {
+  return "json_parse(base64_decode(\"" + base64_encode(json_stringify(value)) + "\"))"
+}
+
 /**
  * Render a complete, tested MCP tool package that runs a learned command
  * sequence in order and returns a compact failure receipt, plus the same
@@ -596,9 +601,16 @@ pub fn crystallization_command_sequence_package(
   const labels = steps.map({ step -> step.label }).to_list()
   const source = cc_sequence_template(
     COMMAND_SEQUENCE_SERVER,
-    {STEPS: json_stringify(steps), TOOL: tool, DESCRIPTION: json_stringify(description)},
+    {
+      STEPS: cc_sequence_data(steps),
+      TOOL: tool,
+      DESCRIPTION: "base64_decode(\"" + base64_encode(description) + "\")",
+    },
   )
-  const test_source = cc_sequence_template(COMMAND_SEQUENCE_TEST, {LABELS: json_stringify(labels)})
+  const test_source = cc_sequence_template(
+    COMMAND_SEQUENCE_TEST,
+    {LABELS: cc_sequence_data(labels)},
+  )
   const rendered = {
     entrypoint: "server.harn",
     tool_names: [tool],

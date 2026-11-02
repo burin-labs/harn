@@ -5,3 +5,5 @@ tested MCP tool that runs it in order with failure receipts. It also returns the
 
 Template insertion preserves literal arguments, directories and descriptions,
 including text that resembles a template placeholder.
+Inserted data is decoded at runtime, preserving interpolation-like text,
+backslashes and control characters without interpreting them as Harn source.

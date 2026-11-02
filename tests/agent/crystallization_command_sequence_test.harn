@@ -14,15 +14,7 @@ pipeline test_package_projects_one_sequence_to_a_tool_and_a_shell_line() {
     pkg.verify_command,
     "python3 tools/codegen.py && python3 tools/build_wire.py && python3 -m pytest -q -m 'not soak'",
   )
-  assert(
-    pkg.source.contains("\"label\":\"build_wire\""),
-    "labels are normalized into the tool's plan",
-  )
   assert(pkg.source.contains("\"relay_check\""), "the tool is registered under its name")
-  assert(
-    pkg.test_source.contains("[\"codegen\",\"build_wire\",\"tests\"]"),
-    "the test pins the order",
-  )
 }
 
 pipeline test_package_quotes_a_single_quote_for_the_shell() {
@@ -35,28 +27,53 @@ pipeline test_package_quotes_a_single_quote_for_the_shell() {
 }
 
 pipeline test_emitted_package_preserves_placeholder_like_data(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the emitted verifier equivalence control uses a POSIX shell")
+  }
   const steps = [
-    {label: "first", argv: ["python3", "__TOOL__.py", "__DESCRIPTION__", "__STEPS__"]},
+    {
+      label: "first",
+      argv: [
+        "python3",
+        "__TOOL__.py",
+        "__DESCRIPTION__",
+        "__STEPS__",
+        "\${1+1}.py",
+        "slash\\tail",
+        bytes_to_string(bytes_from_hex("01080c")),
+      ],
+    },
     {label: "second", argv: ["python3", "__LABELS__.py", "left  right"], cwd: "__TOOL__"},
   ]
-  const description = "Keep __TOOL__, __STEPS__, __DESCRIPTION__ and  spaces."
+  const description = "Keep __TOOL__, __STEPS__, __DESCRIPTION__, \${1+1}, slash\\tail and  spaces."
+    + bytes_to_string(bytes_from_hex("01080c"))
   const pkg = crystallization_command_sequence_package("check", description, steps)
   const dir = harness.fs.mkdtemp_in_workspace("sequence-literal-data")
   harness.fs.write_text(path_join(dir, "server.harn"), pkg.source)
   harness.fs.write_text(path_join(dir, "authored.harn"), pkg.test_source)
   harness.fs.write_text(path_join(dir, "verify.json"), json_stringify(pkg.verify_command))
   harness.fs.write_text(
+    path_join(dir, "expected.json"),
+    json_stringify({steps: steps, description: description}),
+  )
+  const receiver = """
+import json, os, sys
+print(json.dumps({"argv": ["python3", os.path.basename(__file__), *sys.argv[1:]], "cwd": os.getcwd()}))
+"""
+  harness.fs.write_text(path_join(dir, "__TOOL__.py"), receiver)
+  harness.fs.mkdir(path_join(dir, "__TOOL__"))
+  harness.fs.write_text(path_join(dir, "__TOOL__", "__LABELS__.py"), receiver)
+  harness.fs.write_text(
     path_join(dir, "test.harn"),
     """
-import { check_plan, run_plan } from "./server"
-import { command_sequence_plan } from "std/command"
+import { check_plan, run_plan, tools } from "./server"
+import { command_run } from "std/command"
 
 pipeline test_original_arguments_reach_the_emitted_runner(harness: Harness) {
-  const expected = [
-    {label: "first", argv: ["python3", "__TOOL__.py", "__DESCRIPTION__", "__STEPS__"]},
-    {label: "second", argv: ["python3", "__LABELS__.py", "left  right"], cwd: "__TOOL__"},
-  ]
+  const original = json_parse(harness.fs.read_text(path_join(harness.fs.project_root(), "expected.json")))
+  const expected = original.steps
   assert_eq(check_plan(""), expected)
+  assert_eq(tool_list(tools(harness))[0].description, original.description)
   let calls = []
   const receipt = run_plan({ argv, cwd ->
     calls = calls + [{argv: argv, cwd: cwd}]
@@ -68,16 +85,35 @@ pipeline test_original_arguments_reach_the_emitted_runner(harness: Harness) {
     {argv: expected[1].argv, cwd: path_join("workspace", "__TOOL__")},
   ])
   const verifier = json_parse(harness.fs.read_text(path_join(harness.fs.project_root(), "verify.json")))
-  const planned = command_sequence_plan(verifier)
-  assert_eq(planned.status, "measured")
-  assert_eq(planned.steps, [
-    {argv: expected[0].argv, cwd: ""},
-    {argv: expected[1].argv, cwd: "__TOOL__"},
+  const root = harness.fs.project_root()
+  const execution = command_run(harness.tools, ["/bin/sh", "-c", verifier], {cwd: root, sandbox_profile: "workspace_paths", timeout_ms: 30000})
+  assert_eq(execution.success, true, execution.combined)
+  const actual = execution.stdout.trim().split("\n").map({ line -> json_parse(line) }).to_list()
+  assert_eq(actual, [
+    {argv: expected[0].argv, cwd: root},
+    {argv: expected[1].argv, cwd: path_join(root, "__TOOL__")},
   ])
 }
 """,
   )
   const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const formatted = harness.process.exec(
+    binary,
+    "fmt",
+    path_join(dir, "server.harn"),
+    path_join(dir, "authored.harn"),
+    path_join(dir, "test.harn"),
+  )
+  assert_eq(formatted.exit_code, 0, formatted.stdout + formatted.stderr)
+  const checked = harness.process.exec(
+    binary,
+    "check",
+    "--strict",
+    path_join(dir, "server.harn"),
+    path_join(dir, "authored.harn"),
+    path_join(dir, "test.harn"),
+  )
+  assert_eq(checked.exit_code, 0, checked.stdout + checked.stderr)
   const executed = harness.process.exec(
     binary,
     "test",
@@ -85,7 +121,6 @@ pipeline test_original_arguments_reach_the_emitted_runner(harness: Harness) {
     path_join(dir, "authored.harn"),
   )
   assert_eq(executed.exit_code, 0, executed.stdout + executed.stderr)
-  assert(pkg.source.contains(json_stringify(description)), "description bytes remain literal data")
   harness.fs.delete(dir)
 }
 
@@ -112,10 +147,6 @@ pipeline test_package_runs_a_step_from_its_directory() {
     ],
   )
   assert_eq(pkg.verify_command, "python3 tools/codegen.py && (cd packages/web && npm test)")
-  assert(
-    pkg.source.contains("\"cwd\":\"packages/web\""),
-    "the tool's plan keeps the step directory",
-  )
   const escaped = try {
     crystallization_command_sequence_package(
       "web check",
