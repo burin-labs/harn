@@ -305,6 +305,37 @@ mod tests {
     }
 
     #[test]
+    fn python_future_imports_bind_features_and_aliases() {
+        let src = "from __future__ import (annotations, division as classic)\n\
+                   annotations\nclassic\ndivision\nmissing()\n";
+        let result = run_with(src, "python");
+        assert_eq!(names(&result), vec!["division", "missing"]);
+        let VmValue::Dict(output) = &result else {
+            panic!("expected diagnostics object");
+        };
+        let Some(VmValue::List(diagnostics)) = output.get("diagnostics") else {
+            panic!("expected diagnostics list");
+        };
+        let VmValue::Dict(first) = &diagnostics[0] else {
+            panic!("expected diagnostic object");
+        };
+        assert!(matches!(first.get("row"), Some(VmValue::Int(3))));
+    }
+
+    #[test]
+    fn python_imports_bind_only_the_names_visible_in_the_importing_scope() {
+        let src = "import os.path as path_alias\n\
+                   from collections import OrderedDict as ordered_alias\n\
+                   import xml.dom\nfrom pathlib import Path\n\
+                   path_alias.join()\nordered_alias()\nxml.dom\nPath()\n\
+                   os\ncollections\nOrderedDict\nmissing()\n";
+        assert_eq!(
+            names(&run_with(src, "python")),
+            vec!["os", "collections", "OrderedDict", "missing"]
+        );
+    }
+
+    #[test]
     fn python_skips_attribute_rhs() {
         let src = "import os\nos.path.join('a', 'b')\n";
         let result = run_with(src, "py");

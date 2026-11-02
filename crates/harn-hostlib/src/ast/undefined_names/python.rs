@@ -178,7 +178,7 @@ fn visit(
                 visit(body, source, defined, refs);
             }
         }
-        "import_statement" | "import_from_statement" => {
+        "import_statement" | "import_from_statement" | "future_import_statement" => {
             collect_python_imports(node, source, defined);
         }
         "for_statement" | "for_in_clause" => {
@@ -298,43 +298,24 @@ fn collect_python_parameters(params: Node<'_>, source: &str, defined: &mut HashS
 }
 
 fn collect_python_imports(node: Node<'_>, source: &str, defined: &mut HashSet<String>) {
-    // Bind aliases and bare module names from anywhere in the import.
-    let mut vis = |child: Node<'_>| match child.kind() {
-        "aliased_import" => {
-            if let Some(alias) = child.child_by_field_name("alias") {
-                defined.insert(node_text(alias, source).to_string());
+    // Only imported names bind in this scope: the module in a `from` import
+    // does not, and an alias replaces the imported spelling.
+    let mut cursor = node.walk();
+    for imported in node.children_by_field_name("name", &mut cursor) {
+        let binding = match imported.kind() {
+            "aliased_import" => imported.child_by_field_name("alias"),
+            "dotted_name" => {
+                let index = if node.kind() == "import_statement" {
+                    0
+                } else {
+                    imported.named_child_count().saturating_sub(1) as u32
+                };
+                imported.named_child(index)
             }
-        }
-        "dotted_name" => {
-            if let Some(first) = child.named_child(0) {
-                defined.insert(node_text(first, source).to_string());
-            }
-        }
-        _ => {}
-    };
-    walk(node, &mut vis);
-
-    // `from x import y, z` — direct identifiers after `import`.
-    if node.kind() == "import_from_statement" {
-        let mut saw_import = false;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "import" {
-                saw_import = true;
-                continue;
-            }
-            if saw_import {
-                if child.kind() == "identifier" {
-                    defined.insert(node_text(child, source).to_string());
-                } else if child.kind() == "dotted_name" {
-                    let count = child.named_child_count();
-                    if count > 0 {
-                        if let Some(last) = child.named_child((count - 1) as u32) {
-                            defined.insert(node_text(last, source).to_string());
-                        }
-                    }
-                }
-            }
+            _ => None,
+        };
+        if let Some(binding) = binding {
+            defined.insert(node_text(binding, source).to_string());
         }
     }
 }
