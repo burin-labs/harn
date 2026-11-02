@@ -40,13 +40,18 @@ describe("prerender metadata", () => {
       template,
       docs: { pages: new Map([[doc.slug, doc]]) },
       render: (url) => `<main>${url}</main>`,
-      landingPageMeta: metadata("landing", "Harn", "Landing description.", "/"),
+      staticPages: [
+        metadata("landing", "Harn", "Landing description.", "/"),
+        metadata("contribution", "Contribute | Harn", "Help improve Harn.", "/contribute.html"),
+      ],
       notFoundPageMeta: metadata("notFound", "Page not found | Harn", "Missing page.", "/404.html"),
       pageMetaForDoc: (data) =>
         metadata("doc", `${data.title} | Harn`, data.description, data.url),
     })
     const htmlByPath = new Map(pages)
     const titleOf = (html) => html.match(/<title>(.*?)<\/title>/)?.[1]
+    expect(titleOf(htmlByPath.get("contribute.html"))).toBe("Contribute | Harn")
+    expect(htmlByPath.get("contribute.html")).toContain("<main>/contribute.html</main>")
 
     expect(titleOf(htmlByPath.get("index.html"))).not.toBe(
       titleOf(htmlByPath.get("getting-started.html")),
