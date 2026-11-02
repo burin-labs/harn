@@ -489,6 +489,30 @@ fn build_bundle_assembles_versioned_manifest() {
     )
     .unwrap();
 
+    let schema = crystallization_bundle_json_schema();
+    jsonschema::meta::validate(&schema).expect("bundle schema is valid Draft 2020-12");
+    let validator = jsonschema::draft202012::new(&schema).expect("bundle validator");
+    let wire = serde_json::to_value(&bundle.manifest).unwrap();
+    assert!(
+        validator.is_valid(&wire),
+        "mined manifest matches its exported contract"
+    );
+    let mut legacy = wire.clone();
+    legacy["schema_version"] = json!(BUNDLE_SCHEMA_VERSION - 1);
+    assert!(
+        !validator.is_valid(&legacy),
+        "older bundle versions are not this contract"
+    );
+    let mut missing_effect_knowledge = wire;
+    missing_effect_knowledge["deterministic_steps"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("side_effects_known");
+    assert!(
+        !validator.is_valid(&missing_effect_knowledge),
+        "effect knowledge cannot disappear from the wire contract"
+    );
+
     let manifest = &bundle.manifest;
     assert_eq!(manifest.schema, BUNDLE_SCHEMA);
     assert_eq!(manifest.schema_version, BUNDLE_SCHEMA_VERSION);

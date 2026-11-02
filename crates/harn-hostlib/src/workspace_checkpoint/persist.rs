@@ -258,6 +258,7 @@ fn take_test_write_result(path: &Path) -> Option<TestWriteResult> {
 /// later [`resume`]. Refused while a call is in flight, since its window would
 /// be lost. Returns whether a session was released.
 pub fn unload(session_id: &str) -> bool {
+    let _operation = super::operation();
     let mut registry = sessions()
         .lock()
         .expect("workspace checkpoint registry poisoned");
@@ -286,6 +287,7 @@ pub struct ResumeReceipt {
 /// under `root`. A session already in memory is left as it is.
 pub fn resume(session_id: &str, root: &Path) -> Result<Outcome<ResumeReceipt>, HostlibError> {
     const BUILTIN: &str = "hostlib_fs_checkpoint_resume";
+    let _operation = super::operation();
     crate::fs::paths::validate_session_id(BUILTIN, session_id)?;
     let root = resolve_root(Some(root));
     if let Some(session) = find_session(session_id) {

@@ -55,7 +55,16 @@ impl ProcessSpawner for RealSpawner {
                 Ok(child) => child,
                 Err(error) => {
                     harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
-                    return Err(map_spawn_error(error));
+                    return Err(match map_spawn_error(error) {
+                        ProcessError::SpawnIo { kind, message } => ProcessError::SpawnIo {
+                            kind,
+                            message: format!(
+                                "starting command supervisor {}: {message}",
+                                command.get_program().to_string_lossy()
+                            ),
+                        },
+                        error => error,
+                    });
                 }
             };
             drop(command);
