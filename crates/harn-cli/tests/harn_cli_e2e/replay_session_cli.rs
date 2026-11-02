@@ -666,6 +666,45 @@ fn replay_counterfactual_does_not_evaluate_when_cutoff_is_invalid() {
 }
 
 #[test]
+fn fully_allowlisted_oracle_fixture_fails_both_replay_commands() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json");
+    let mut fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(source).unwrap()).unwrap();
+    fixture["allowlist"] = json!([{ "path": "/*", "reason": "ignore all recorded values" }]);
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("fully-allowlisted.json");
+    std::fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+    for (command, is_replay) in [
+        (vec!["replay", "--fixture"], true),
+        (vec!["orchestrator", "replay-oracle"], false),
+    ] {
+        let output = harn_e2e_command()
+            .args(command)
+            .arg(&path)
+            .arg("--json")
+            .output()
+            .expect("run replay oracle");
+        assert!(
+            !output.status.success(),
+            "zero comparisons must fail: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let report = stdout_json(&output);
+        assert!(
+            report.to_string().contains("expectations_compared=0"),
+            "{report}"
+        );
+        if is_replay {
+            assert_eq!(report["data"]["fixture"]["expectations_compared"], 0);
+            assert_eq!(report["data"]["fixture"]["pass"], false);
+        } else {
+            assert_eq!(report["fixtures"][0]["passed"], false);
+        }
+    }
+}
+
+#[test]
 fn replay_fixture_runs_use_oracle_allowlist() {
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json");
