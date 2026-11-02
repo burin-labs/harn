@@ -239,7 +239,10 @@ fn intent_run(harness: Harness, purpose_labels: bool) -> dict {
   )
 }
 
-pipeline test_initial_purpose_does_not_repeat_on_later_tool_batches(harness: Harness, task: unknown) {
+pipeline test_initial_purpose_does_not_repeat_on_later_tool_batches(
+  harness: Harness,
+  task: unknown,
+) {
   const session = "initial-purpose-" + harness.random.uuid()
   with_llm_script(
     harness.llm,
@@ -249,12 +252,26 @@ pipeline test_initial_purpose_does_not_repeat_on_later_tool_batches(harness: Har
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const captured = agent_capture_events(harness.agent, session, { -> agent_loop(
-        harness, "Inspect the project.", nil,
-        {provider: "mock", session_id: session, tools: intent_tools(),
-         purpose_labels: {enabled: true, delivery: "nudge", first_only: true},
-         loop_until_done: true, max_iterations: 4, final_wrapup: false},
-      ) })
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        { ->
+          agent_loop(
+            harness,
+            "Inspect the project.",
+            nil,
+            {
+              provider: "mock",
+              session_id: session,
+              tools: intent_tools(),
+              purpose_labels: {enabled: true, delivery: "nudge", first_only: true},
+              loop_until_done: true,
+              max_iterations: 4,
+              final_wrapup: false,
+            },
+          )
+        },
+      )
       const labels = captured.events.filter({ event -> event.type == "purpose_label" }).to_list()
       assert_eq(len(labels), 1, "only the initial batch should add a user-facing update")
       assert_eq(labels[0].label, "I'll look around.")
@@ -269,19 +286,40 @@ pipeline test_initial_purpose_survives_a_tool_free_iteration(harness: Harness, t
   with_llm_script(
     harness.llm,
     [
-      llm_text("I need to inspect the project first."),
-      llm_tool_call("inspect", {}, "first") + {text: "<purpose>I'll inspect the project.</purpose>"},
+      llm_text(
+        "<purpose>Thinking through the request.</purpose>I need to inspect the project first.",
+      ),
+      llm_tool_call("inspect", {}, "first")
+        + {text: "<purpose>I'll inspect the project.</purpose>"},
       llm_text("Done. ##DONE##"),
     ],
     { ->
-      const captured = agent_capture_events(harness.agent, session, { -> agent_loop(
-        harness, "Inspect the project.", nil,
-        {provider: "mock", session_id: session, tools: intent_tools(),
-         purpose_labels: {enabled: true, delivery: "nudge", first_only: true},
-         loop_until_done: true, max_iterations: 4, final_wrapup: false},
-      ) })
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        { ->
+          agent_loop(
+            harness,
+            "Inspect the project.",
+            nil,
+            {
+              provider: "mock",
+              session_id: session,
+              tools: intent_tools(),
+              purpose_labels: {enabled: true, delivery: "nudge", first_only: true},
+              loop_until_done: true,
+              max_iterations: 4,
+              final_wrapup: false,
+            },
+          )
+        },
+      )
       const labels = captured.events.filter({ event -> event.type == "purpose_label" }).to_list()
-      assert_eq(len(labels), 1, "the first tool batch should still be introduced after a text-only iteration")
+      assert_eq(
+        len(labels),
+        1,
+        "the first tool batch should still be introduced after a text-only iteration",
+      )
       assert_eq(labels[0].label, "I'll inspect the project.")
     },
   )

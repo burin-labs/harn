@@ -35,11 +35,16 @@ import {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __purpose_label_arm(agent: HarnessAgent, session: dict, opts: any, iteration: int) -> dict {
+pub fn __purpose_label_arm(
+  agent: HarnessAgent,
+  session: dict,
+  opts: any,
+  prior_tool_calls: int,
+) -> dict {
   const taken_prefill = agent_take_one_shot_prefill(opts)
   const session_id = session.session_id
   const config = agent_purpose_label_config(opts?.purpose_labels)
-  if config.first_only && iteration > 0 {
+  if config.first_only && prior_tool_calls > 0 {
     return taken_prefill
   }
   const nudge = agent_purpose_label_turn_nudge(config)
@@ -71,8 +76,10 @@ pub fn __purpose_label_publish(
   iteration_index: int,
   tool_calls: list,
   options: any,
+  prior_tool_calls: int,
 ) -> nil {
-  if agent_purpose_label_config(options?.purpose_labels).first_only && iteration_index > 0 {
+  if len(tool_calls) == 0
+    || (agent_purpose_label_config(options?.purpose_labels).first_only && prior_tool_calls > 0) {
     return nil
   }
   agent_purpose_label_emit(

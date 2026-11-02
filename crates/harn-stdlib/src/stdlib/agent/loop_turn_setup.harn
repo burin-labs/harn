@@ -118,7 +118,12 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
   const monologue_actuation_prior_read_streak = stall_state.monologue_actuation.read_only_streak
   stall_state = stall_state
     + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
-  const pending_prefill = __purpose_label_arm(harness.agent, session, opts, iteration_index)
+  const pending_prefill = __purpose_label_arm(
+    harness.agent,
+    session,
+    opts,
+    state.tool_calls_attempted,
+  )
   opts = pending_prefill.options
   const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
   agent_emit_event(

@@ -145,6 +145,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             message: message,
             opts: opts,
             iteration: iteration,
+            tool_calls_attempted: tool_calls_attempted,
             call_budget: call_budget,
             stall_state: stall_state,
             command_hold_cap_tokens: command_hold_cap_tokens,
@@ -283,7 +284,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         if len(tool_calls) > 0 {
           terminal_assessment = nil
         }
-        __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls, turn_opts)
+        __purpose_label_publish(
+          harness.agent,
+          session,
+          projected,
+          iteration_index,
+          tool_calls,
+          turn_opts,
+          tool_calls_attempted,
+        )
         const parse_feedback = __agent_loop_record_parse_feedback(
           harness,
           session.session_id,
