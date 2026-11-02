@@ -202,6 +202,7 @@ mod tests {
             cancellation: super::super::SessionCancellation::default().prepare_prompt(),
             script_name: Mutex::new(String::new()),
             assistant_state: Mutex::new(Default::default()),
+            host_responder: None,
         });
         let projector = ModuleProgressProjector::start(bridge.clone());
         projector.advance(stats(1, 2));

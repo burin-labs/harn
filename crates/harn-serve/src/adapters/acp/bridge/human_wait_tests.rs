@@ -15,6 +15,7 @@ fn bridge() -> (AcpBridge, tokio::sync::mpsc::UnboundedReceiver<String>) {
             cancellation: SessionCancellation::default().prepare_prompt(),
             script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+            host_responder: None,
         },
         rx,
     )
