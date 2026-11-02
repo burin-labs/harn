@@ -31,10 +31,7 @@ pub(super) fn load_eval_pack_case_fixture(
         }
         return load_replay_fixture(&resolve_manifest_path(base_dir, fixture_ref));
     }
-    Ok(run
-        .replay_fixture
-        .clone()
-        .unwrap_or_else(|| replay_fixture_from_run(run)))
+    Ok(recorded_replay_fixture(run))
 }
 
 pub(super) fn eval_pack_case_source_path(
@@ -436,10 +433,32 @@ pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
     }
 }
 
+/// Failure every evaluator reports when a fixture asserted nothing.
+pub const NOTHING_COMPARED: &str = "the fixture records no expectations, so nothing was compared";
+
+/// The fixture a run recorded, for evaluating that run. A run that recorded none
+/// gets an empty fixture, which compares nothing and so fails: deriving a fixture
+/// from the run being evaluated would compare the run with itself.
+pub fn recorded_replay_fixture(run: &RunRecord) -> ReplayFixture {
+    run.replay_fixture.clone().unwrap_or_default()
+}
+
+/// Evaluate a run against a fixture. `pass` means every recorded expectation
+/// matched and at least one was compared.
 pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
-    if fixture.eval_kind.as_deref() == Some("clarifying_question") {
-        return evaluate_clarifying_question(run, fixture);
+    let mut report = if fixture.eval_kind.as_deref() == Some("clarifying_question") {
+        evaluate_clarifying_question(run, fixture)
+    } else {
+        evaluate_stage_fixture(run, fixture)
+    };
+    if report.expectations_compared == 0 {
+        report.failures.push(NOTHING_COMPARED.to_string());
     }
+    report.pass = report.failures.is_empty();
+    report
+}
+
+fn evaluate_stage_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
     let mut failures = Vec::new();
     let mut expectations_compared = status_expectation_count(fixture);
     if run.status != fixture.expected_status {
@@ -456,9 +475,10 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
             failures.push(format!("missing stage {}", assertion.node_id));
             continue;
         };
-        // Status, outcome and branch, then each required artifact kind and the
-        // visible-text snippet when the assertion records one.
-        expectations_compared += 3
+        // Count only what the assertion records, as for the run status.
+        expectations_compared += usize::from(!assertion.expected_status.is_empty())
+            + usize::from(!assertion.expected_outcome.is_empty())
+            + usize::from(assertion.expected_branch.is_some())
             + assertion.required_artifact_kinds.len()
             + usize::from(assertion.visible_text_contains.is_some());
         if stage.status != assertion.expected_status {

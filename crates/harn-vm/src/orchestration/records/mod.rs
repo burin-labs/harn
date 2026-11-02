@@ -32,8 +32,8 @@ pub use eval_pack::{
     evaluate_eval_pack_manifest_with_live_executor, evaluate_run_against_fixture,
     evaluate_run_suite, evaluate_run_suite_manifest, load_eval_pack_manifest,
     load_eval_suite_manifest, normalize_eval_pack_manifest_value, normalize_eval_suite_manifest,
-    replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
-    EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
+    recorded_replay_fixture, replay_fixture_from_run, validate_eval_pack_split,
+    EvalPackLiveExecutor, EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome, NOTHING_COMPARED,
 };
 pub use execution_evidence::{
     validate_execution_evidence, validate_execution_id, ExecutionEvidenceValidationError,

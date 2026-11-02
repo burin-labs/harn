@@ -22,10 +22,10 @@ use crate::orchestration::{
     normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
     normalize_handoff_artifact_json, normalize_persona_eval_ladder_manifest_value,
     normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
-    parse_json_payload, render_artifacts_context, render_unified_diff, replay_fixture_from_run,
-    run_persona_eval_ladder, save_run_record, select_artifacts, synthesize_candidate_from_trace,
-    validate_eval_pack_split, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
-    ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
+    parse_json_payload, recorded_replay_fixture, render_artifacts_context, render_unified_diff,
+    replay_fixture_from_run, run_persona_eval_ladder, save_run_record, select_artifacts,
+    synthesize_candidate_from_trace, validate_eval_pack_split, ArtifactRecord, CapabilityPolicy,
+    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -826,6 +826,9 @@ fn run_record_save_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         args.first()
             .ok_or_else(|| VmError::Runtime("run_record_save: missing run".to_string()))?,
     )?;
+    if run.replay_fixture.is_none() {
+        run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
     let path = args.get(1).map(|v| v.display()).filter(|s| !s.is_empty());
     let persisted = save_run_record(&run, path.as_deref())?;
     run.persisted_path = Some(persisted.clone());
@@ -872,7 +875,7 @@ fn run_record_eval_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     )?;
     let fixture: ReplayFixture = match args.get(1) {
         Some(value) => parse_json_payload(to_json(value), "run_record_eval fixture")?,
-        None => replay_fixture_from_run(&run),
+        None => recorded_replay_fixture(&run),
     };
     to_vm(&evaluate_run_against_fixture(&run, &fixture))
 }
@@ -909,7 +912,7 @@ fn run_record_eval_suite_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         };
         let fixture: ReplayFixture = match item.as_dict().and_then(|dict| dict.get("fixture")) {
             Some(value) => parse_json_payload(to_json(value), "run_record_eval_suite fixture")?,
-            None => replay_fixture_from_run(&run),
+            None => recorded_replay_fixture(&run),
         };
         cases.push((run, fixture, source_path));
     }

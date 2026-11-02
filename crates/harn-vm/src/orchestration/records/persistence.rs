@@ -515,9 +515,6 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
         run.root_run_id = Some(run.id.clone());
     }
     normalize_evidence_identity(&mut run);
-    if run.replay_fixture.is_none() {
-        run.replay_fixture = Some(replay_fixture_from_run(&run));
-    }
     merge_hitl_questions_from_active_log(&mut run);
     materialize_child_runs_from_stage_metadata(&mut run);
     sync_run_handoffs(&mut run);
@@ -669,9 +666,9 @@ pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8
         serde_json::from_slice(&content).map_err(|_| payload_parse_error("run record"))?;
     normalize_evidence_identity(&mut run);
     materialize_child_runs_from_stage_metadata(&mut run);
-    if run.replay_fixture.is_none() {
-        run.replay_fixture = Some(replay_fixture_from_run(&run));
-    }
+    // A record that was written without a replay fixture stays without one. A
+    // fixture derived here from the loaded run would make every evaluation of
+    // that run compare the run with itself.
     run.persisted_path
         .get_or_insert_with(|| path.to_string_lossy().into_owned());
     sync_run_handoffs(&mut run);

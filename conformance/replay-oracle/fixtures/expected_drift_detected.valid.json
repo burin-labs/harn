@@ -1,0 +1,35 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "expected_dispatch_drift_detected",
+  "description": "Positive control for a drift expectation: the second run dead-letters a dispatch the first run delivered, and the oracle must report that drift.",
+  "expect": "drift",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"}
+  ],
+  "first_run": {
+    "run_id": "run_live_expected_drift",
+    "event_log_entries": [
+      {
+        "event_id": 401,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000002200,
+        "payload": {"binding_id": "expected-drift", "result": {"status": "dispatched"}}
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_expected_drift",
+    "event_log_entries": [
+      {
+        "event_id": 501,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001002200,
+        "payload": {"binding_id": "expected-drift", "result": {"status": "dlq"}}
+      }
+    ]
+  }
+}

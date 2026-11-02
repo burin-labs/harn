@@ -327,6 +327,7 @@ fn replay_oracle_for_shadow(
                 right: JsonValue::Null,
                 message: error.to_string(),
             }),
+            compared_values: 0,
         },
     };
     (Some(report), compared_receipts)

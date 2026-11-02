@@ -3,9 +3,24 @@
 
 use crate::*;
 
+/// Whether a loaded file declares itself a run record. Any JSON object
+/// deserializes into a defaulted run record, so a command that checks run
+/// records must refuse a file without the tag rather than check nothing.
+pub(crate) fn is_tagged_run_record(run: &harn_vm::orchestration::RunRecord) -> bool {
+    run.type_name == "run_record"
+}
+
 pub(crate) fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
     match harn_vm::orchestration::load_run_record(path) {
-        Ok(run) => run,
+        Ok(run) if is_tagged_run_record(&run) => run,
+        Ok(run) => {
+            cli_diagnostic!(
+                "error: {} is not a run record (its _type is {:?}, expected \"run_record\")",
+                path.display(),
+                run.type_name
+            );
+            process::exit(1);
+        }
         Err(error) => {
             cli_diagnostic!("error: failed to load run record: {error}");
             process::exit(1);

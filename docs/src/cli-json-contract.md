@@ -394,10 +394,28 @@ replay oracle's verdict on its two recorded executions and declared
 the same replayable run-record shape from the SQLite EventLog
 `observability.agent_events.<id>` topic.
 
-`fixture.expectations_compared` counts the recorded expectations the
-verdict compared. `fixture.pass` is true only when that count is above
-zero and every expectation matched, so a fixture that asserts nothing
-fails instead of passing.
+A run record is checked against the replay fixture it recorded. A run
+record that recorded none is checked against an empty fixture, so it
+fails: no verdict compares a run with a fixture derived from that run.
+`harn eval` follows the same rule and refuses a file whose `_type` is not
+`"run_record"`.
+
+`fixture.expectations_compared` counts the comparisons the verdict made.
+For a run record that is each recorded expectation: the run status and,
+per stage, each field the assertion sets. For a replay trace it is each
+value compared between the two canonical executions, once, with
+allowlisted fields excluded and counting stopped at the first divergence.
+`fixture.pass` is true only when that count is above zero and every
+comparison matched, so a fixture that asserts nothing fails instead of
+passing. An offline coding replay reports `expectations_compared` at the
+top of its payload, the fewest comparisons any run made, and fails when
+it is zero.
+
+`fixture.checked` is false for `--session-id`: the run is rebuilt from
+the session's own events, so there is nothing independent to check it
+against. The verdict then reads `rebuilt, not checked`, `pass` is false,
+`expectations_compared` is zero, and success depends only on loading and,
+with `--runs N`, determinism.
 
 The default `--runs 1` response keeps the original single `ReplayReport`
 payload. When `--runs N` is greater than one, the response keeps

@@ -239,7 +239,28 @@ fn replay_session_id_reads_events_db_and_compares_runs() {
     assert_eq!(parsed["determinism"]["pass"], true);
     assert_eq!(parsed["reports"][0]["run_id"], session_id);
     assert_eq!(parsed["reports"][0]["transcript_event_count"], 4);
+    // The run is rebuilt from the session's own events, so the replay claims
+    // no fixture verdict: it neither passes nor fails a self-derived check.
+    assert_eq!(parsed["reports"][0]["fixture"]["checked"], false);
+    assert_eq!(parsed["reports"][0]["fixture"]["expectations_compared"], 0);
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
+
+    let human = harn_e2e_command()
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn harn replay --session-id");
+    assert!(human.status.success());
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        stdout.contains("Embedded replay fixture: rebuilt, not checked"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -759,6 +780,26 @@ fn replay_fixture_fails_every_oracle_mutation() {
     }
 }
 
+/// The count is the values the oracle compared, once each: allowlisted fields
+/// count zero, and a drifting trace stops at its first divergence.
+#[test]
+fn replay_fixture_counts_each_compared_value_once() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle");
+    // kind, payload.binding_id, then the divergent payload.result.status.
+    let (_, drifted) = replay_fixture_json(&root.join("mutations/meaningful_drift.invalid.json"));
+    assert_eq!(drifted["data"]["fixture"]["expectations_compared"], 3);
+    // kind, payload.binding_id, payload.result.status and topic all match.
+    let (status, matched) =
+        replay_fixture_json(&root.join("mutations/missing_expected_drift.invalid.json"));
+    assert!(!status.success());
+    assert_eq!(matched["data"]["fixture"]["expectations_compared"], 4);
+    assert!(matched["data"]["fixture"]["failures"][0]
+        .as_str()
+        .unwrap()
+        .contains("expects the executions to drift"));
+}
+
 #[test]
 fn replay_fixture_passes_every_valid_oracle_trace_with_expectations_compared() {
     for path in replay_oracle_fixtures("fixtures") {
@@ -804,6 +845,45 @@ fn replay_run_record_with_no_expectations_does_not_pass() {
     assert!(!status.success(), "a fixture that asserts nothing passed");
     assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
     assert_eq!(parsed["data"]["fixture"]["pass"], false);
+}
+
+/// A run record that recorded no fixture must not be checked against one
+/// derived from itself, which would always match.
+#[test]
+fn replay_and_eval_fail_a_run_record_that_recorded_no_fixture() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("run.json");
+    std::fs::write(
+        &path,
+        br#"{"_type":"run_record","id":"r","status":"completed"}"#,
+    )
+    .expect("write run record");
+    let (status, parsed) = replay_fixture_json(&path);
+    assert!(!status.success(), "a run with no recorded fixture passed");
+    assert_eq!(parsed["data"]["fixture"]["checked"], true);
+    assert_eq!(parsed["data"]["fixture"]["expectations_compared"], 0);
+
+    let eval = harn_e2e_command()
+        .args(["eval", path.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    let stdout = String::from_utf8_lossy(&eval.stdout);
+    assert!(!eval.status.success(), "harn eval passed: {stdout}");
+    assert!(stdout.contains("Expectations compared: 0"), "{stdout}");
+    assert!(stdout.contains("nothing was compared"), "{stdout}");
+}
+
+#[test]
+fn eval_refuses_a_file_that_is_not_a_run_record() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("unknown.json");
+    std::fs::write(&path, b"{}").expect("write unknown file");
+    let eval = harn_e2e_command()
+        .args(["eval", path.to_str().unwrap()])
+        .output()
+        .expect("spawn harn eval");
+    assert!(!eval.status.success(), "harn eval accepted an untyped file");
+    assert!(String::from_utf8_lossy(&eval.stderr).contains("is not a run record"));
 }
 
 fn offline_coding_fixture(
@@ -961,6 +1041,9 @@ fn offline_coding_replay_cli_proves_execution_and_universal_envelope() {
     assert_eq!(receipt["data"]["kind"], "offline_coding");
     assert_eq!(receipt["data"]["runs"].as_array().map(Vec::len), Some(2));
     assert_eq!(receipt["data"]["repeatability"]["pass"], true);
+    assert!(receipt["data"]["expectations_compared"]
+        .as_u64()
+        .is_some_and(|count| count > 0));
     let seed = &receipt["data"]["runs"][0]["workspace_seed"];
     assert_eq!(seed["schema"], "harn.workspace-seed.v1");
     assert_eq!(seed["files"], 3);

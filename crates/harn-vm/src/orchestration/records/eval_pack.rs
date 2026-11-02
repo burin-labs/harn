@@ -45,7 +45,10 @@ pub use ledger::{
 };
 use live::*;
 use replay::*;
-pub use replay::{evaluate_run_against_fixture, evaluate_run_suite, replay_fixture_from_run};
+pub use replay::{
+    evaluate_run_against_fixture, evaluate_run_suite, recorded_replay_fixture,
+    replay_fixture_from_run, NOTHING_COMPARED,
+};
 use report::*;
 
 const EVAL_LEDGER_ROW_SCHEMA: &str = "harn.eval.ledger.row.v2";
@@ -649,10 +652,7 @@ pub fn evaluate_run_suite_manifest(
         let run = load_run_record(&run_path)?;
         let fixture = match &case.fixture_path {
             Some(path) => load_replay_fixture(&resolve_manifest_path(base_dir, path))?,
-            None => run
-                .replay_fixture
-                .clone()
-                .unwrap_or_else(|| replay_fixture_from_run(&run)),
+            None => recorded_replay_fixture(&run),
         };
         let eval = evaluate_run_against_fixture(&run, &fixture);
         let mut pass = eval.pass;

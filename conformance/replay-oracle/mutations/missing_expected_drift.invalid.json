@@ -1,0 +1,35 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "missing_expected_drift_mutation",
+  "description": "Mutation fixture for a drift expectation: both runs deliver the same dispatch, so the drift the trace expects never happens and the oracle must fail.",
+  "expect": "drift",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"}
+  ],
+  "first_run": {
+    "run_id": "run_live_missing_drift",
+    "event_log_entries": [
+      {
+        "event_id": 601,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000003200,
+        "payload": {"binding_id": "missing-drift", "result": {"status": "dispatched"}}
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_missing_drift",
+    "event_log_entries": [
+      {
+        "event_id": 701,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001003200,
+        "payload": {"binding_id": "missing-drift", "result": {"status": "dispatched"}}
+      }
+    ]
+  }
+}

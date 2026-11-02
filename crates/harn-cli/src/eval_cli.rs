@@ -139,10 +139,7 @@ pub(crate) fn eval_run_record(
         let mut cases = Vec::new();
         for path in &paths {
             let run = load_run_record_or_exit(path);
-            let fixture = run
-                .replay_fixture
-                .clone()
-                .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
+            let fixture = harn_vm::orchestration::recorded_replay_fixture(&run);
             cases.push((run, fixture, Some(path.display().to_string())));
         }
         let suite = harn_vm::orchestration::evaluate_run_suite(cases);
@@ -177,13 +174,11 @@ pub(crate) fn eval_run_record(
     }
 
     let run = load_run_record_or_exit(&paths[0]);
-    let fixture = run
-        .replay_fixture
-        .clone()
-        .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
+    let fixture = harn_vm::orchestration::recorded_replay_fixture(&run);
     let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
     println!("{}", if report.pass { "PASS" } else { "FAIL" });
     println!("Stages: {}", report.stage_count);
+    println!("Expectations compared: {}", report.expectations_compared);
     if let Some(compare_path) = compare {
         let baseline = load_run_record_or_exit(Path::new(compare_path));
         print_run_diff(&harn_vm::orchestration::diff_run_records(&baseline, &run));
@@ -386,14 +381,8 @@ pub(crate) fn run_structural_experiment_eval(
     println!("Structural experiment: {experiment}");
     println!("Cases: {}", baseline_runs.len());
     for (baseline_run, variant_run) in baseline_runs.iter().zip(variant_runs.iter()) {
-        let baseline_fixture = baseline_run
-            .replay_fixture
-            .clone()
-            .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(baseline_run));
-        let variant_fixture = variant_run
-            .replay_fixture
-            .clone()
-            .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(variant_run));
+        let baseline_fixture = harn_vm::orchestration::recorded_replay_fixture(baseline_run);
+        let variant_fixture = harn_vm::orchestration::recorded_replay_fixture(variant_run);
         let baseline_report =
             harn_vm::orchestration::evaluate_run_against_fixture(baseline_run, &baseline_fixture);
         let variant_report =

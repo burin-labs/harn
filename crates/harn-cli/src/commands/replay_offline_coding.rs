@@ -87,6 +87,9 @@ pub(crate) struct OfflineCodingReplayData {
     producer: ReplayProducer,
     runs: Vec<OfflineCodingReplayReceipt>,
     repeatability: RepeatabilityReceipt,
+    /// Comparisons every run actually made (passed or failed), the fewest over
+    /// runs. A replay that compared nothing fails.
+    expectations_compared: usize,
     pending_count: usize,
     pending_comparisons: Vec<String>,
     missing_count: usize,
@@ -334,7 +337,19 @@ pub(crate) async fn run(
         .into_iter()
         .collect::<Vec<_>>();
     let repeatability = repeatability_receipt(&receipts);
+    let expectations_compared = receipts
+        .iter()
+        .map(|receipt| {
+            receipt
+                .comparisons
+                .iter()
+                .filter(|comparison| !matches!(comparison.status, ComparisonStatus::Missing))
+                .count()
+        })
+        .min()
+        .unwrap_or(0);
     let ok = receipts.iter().all(|receipt| receipt.pass)
+        && expectations_compared > 0
         && repeatability.pass
         && pending_comparisons.is_empty()
         && missing_comparisons.is_empty();
@@ -350,6 +365,7 @@ pub(crate) async fn run(
         },
         runs: receipts,
         repeatability,
+        expectations_compared,
         pending_count: pending_comparisons.len(),
         pending_comparisons,
         missing_count: missing_comparisons.len(),
@@ -1143,6 +1159,10 @@ fn print_human(ok: bool, receipt: &OfflineCodingReplayData) {
             );
         }
     }
+    println!(
+        "{}",
+        crate::localization::formatted!("Expectations compared: {}", receipt.expectations_compared)
+    );
     println!(
         "{}",
         crate::localization::formatted!(

@@ -126,6 +126,10 @@ pub struct ReplayOracleReport {
     pub second_run_counts: ReplayTraceRunCounts,
     pub protocol_fixture_refs: Vec<String>,
     pub divergence: Option<ReplayDivergence>,
+    /// Values the comparison actually checked: each leaf present in both
+    /// canonical runs counts once, allowlisted sections count zero, and the
+    /// count stops at the first divergence, which counts one.
+    pub compared_values: usize,
 }
 
 impl Default for ReplayOracleReport {
@@ -138,6 +142,7 @@ impl Default for ReplayOracleReport {
             second_run_counts: ReplayTraceRunCounts::default(),
             protocol_fixture_refs: Vec::new(),
             divergence: None,
+            compared_values: 0,
         }
     }
 }
@@ -181,6 +186,7 @@ pub fn run_replay_oracle_trace(
     let first = canonicalize_run(&trace.first_run, &trace.allowlist)?;
     let second = canonicalize_run(&trace.second_run, &trace.allowlist)?;
     let divergence = first_divergence(&first, &second);
+    let compared_values = compared_value_count(trace)?;
     let passed = match (trace.expect, divergence.is_some()) {
         (ReplayExpectation::Match, false) => true,
         (ReplayExpectation::Match, true) => false,
@@ -196,7 +202,75 @@ pub fn run_replay_oracle_trace(
         second_run_counts,
         protocol_fixture_refs: trace.protocol_fixture_refs.clone(),
         divergence,
+        compared_values,
     })
+}
+
+/// Count the values the oracle compares. Each allowlist rule is applied with
+/// the default placeholder, whatever replacement it declares, so a replaced
+/// section is recognizable and contributes nothing to the count.
+fn compared_value_count(trace: &ReplayOracleTrace) -> Result<usize, ReplayOracleError> {
+    let placeholders = trace
+        .allowlist
+        .iter()
+        .map(|rule| ReplayAllowlistRule {
+            replacement: None,
+            ..rule.clone()
+        })
+        .collect::<Vec<_>>();
+    let first = canonicalize_run(&trace.first_run, &placeholders)?;
+    let second = canonicalize_run(&trace.second_run, &placeholders)?;
+    Ok(compared_values_at(&first, &second).0)
+}
+
+/// Returns the values compared and whether the walk reached a divergence.
+fn compared_values_at(left: &JsonValue, right: &JsonValue) -> (usize, bool) {
+    let is_placeholder = |value: &JsonValue| {
+        value
+            .as_object()
+            .is_some_and(|map| map.len() == 1 && map.contains_key("$harn_replay_allowlisted"))
+    };
+    if is_placeholder(left) && is_placeholder(right) {
+        return (0, left != right);
+    }
+    let mut compared = 0;
+    match (left, right) {
+        (JsonValue::Object(left_map), JsonValue::Object(right_map)) => {
+            let keys = left_map
+                .keys()
+                .chain(right_map.keys())
+                .collect::<BTreeSet<_>>();
+            for key in keys {
+                let (count, diverged) = match (left_map.get(key), right_map.get(key)) {
+                    (Some(left_child), Some(right_child)) => {
+                        compared_values_at(left_child, right_child)
+                    }
+                    _ => (1, true),
+                };
+                compared += count;
+                if diverged {
+                    return (compared, true);
+                }
+            }
+            (compared, false)
+        }
+        (JsonValue::Array(left_items), JsonValue::Array(right_items)) => {
+            for index in 0..left_items.len().max(right_items.len()) {
+                let (count, diverged) = match (left_items.get(index), right_items.get(index)) {
+                    (Some(left_child), Some(right_child)) => {
+                        compared_values_at(left_child, right_child)
+                    }
+                    _ => (1, true),
+                };
+                compared += count;
+                if diverged {
+                    return (compared, true);
+                }
+            }
+            (compared, false)
+        }
+        _ => (1, left != right),
+    }
 }
 
 pub fn canonicalize_run(
