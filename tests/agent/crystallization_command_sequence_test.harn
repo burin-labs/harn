@@ -34,6 +34,61 @@ pipeline test_package_quotes_a_single_quote_for_the_shell() {
   assert_eq(pkg.verify_command, "echo 'it'\"'\"'s done'")
 }
 
+pipeline test_emitted_package_preserves_placeholder_like_data(harness: Harness) {
+  const steps = [
+    {label: "first", argv: ["python3", "__TOOL__.py", "__DESCRIPTION__", "__STEPS__"]},
+    {label: "second", argv: ["python3", "__LABELS__.py", "left  right"], cwd: "__TOOL__"},
+  ]
+  const description = "Keep __TOOL__, __STEPS__, __DESCRIPTION__ and  spaces."
+  const pkg = crystallization_command_sequence_package("check", description, steps)
+  const dir = harness.fs.mkdtemp_in_workspace("sequence-literal-data")
+  harness.fs.write_text(path_join(dir, "server.harn"), pkg.source)
+  harness.fs.write_text(path_join(dir, "authored.harn"), pkg.test_source)
+  harness.fs.write_text(path_join(dir, "verify.json"), json_stringify(pkg.verify_command))
+  harness.fs.write_text(
+    path_join(dir, "test.harn"),
+    """
+import { check_plan, run_plan } from "./server"
+import { command_sequence_plan } from "std/command"
+
+pipeline test_original_arguments_reach_the_emitted_runner(harness: Harness) {
+  const expected = [
+    {label: "first", argv: ["python3", "__TOOL__.py", "__DESCRIPTION__", "__STEPS__"]},
+    {label: "second", argv: ["python3", "__LABELS__.py", "left  right"], cwd: "__TOOL__"},
+  ]
+  assert_eq(check_plan(""), expected)
+  let calls = []
+  const receipt = run_plan({ argv, cwd ->
+    calls = calls + [{argv: argv, cwd: cwd}]
+    return {success: true, exit_code: 0, combined: "passed"}
+  }, "workspace", check_plan(""))
+  assert_eq(receipt.ok, true)
+  assert_eq(calls, [
+    {argv: expected[0].argv, cwd: "workspace"},
+    {argv: expected[1].argv, cwd: path_join("workspace", "__TOOL__")},
+  ])
+  const verifier = json_parse(harness.fs.read_text(path_join(harness.fs.project_root(), "verify.json")))
+  const planned = command_sequence_plan(verifier)
+  assert_eq(planned.status, "measured")
+  assert_eq(planned.steps, [
+    {argv: expected[0].argv, cwd: ""},
+    {argv: expected[1].argv, cwd: "__TOOL__"},
+  ])
+}
+""",
+  )
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const executed = harness.process.exec(
+    binary,
+    "test",
+    path_join(dir, "test.harn"),
+    path_join(dir, "authored.harn"),
+  )
+  assert_eq(executed.exit_code, 0, executed.stdout + executed.stderr)
+  assert(pkg.source.contains(json_stringify(description)), "description bytes remain literal data")
+  harness.fs.delete(dir)
+}
+
 pipeline test_package_projects_a_fast_check_beside_the_full_chain() {
   const full = crystallization_command_sequence_package("Relay check", "Verify like CI.", STEPS)
   assert_eq(full?.fast_verify_command, nil, "no fast check unless one is learned")

@@ -541,6 +541,25 @@ fn cc_steps_shell(steps: list) -> string {
   return join(steps.map({ step -> cc_step_shell(step) }).to_list(), " && ")
 }
 
+// Substitute only tokens in the trusted template, never tokens in inserted data.
+fn cc_sequence_template(template: string, bindings: dict<string, string>) -> string {
+  const parts = template.split("__")
+  let rendered = ""
+  for index in range(0, len(parts)) {
+    const part = parts[index] ?? ""
+    if index % 2 == 0 {
+      rendered = rendered + part
+    } else {
+      const value = bindings[part]
+      if value == nil {
+        throw "missing command-sequence template binding: " + part
+      }
+      rendered = rendered + to_string(value)
+    }
+  }
+  return rendered
+}
+
 /**
  * Render a complete, tested MCP tool package that runs a learned command
  * sequence in order and returns a compact failure receipt, plus the same
@@ -565,8 +584,8 @@ pub fn crystallization_command_sequence_package(
   if tool == "" || !regex_match("^[a-z][a-z0-9_]*$", tool) {
     throw "invalid_steps: name must start with a letter, got: " + cc_text(raw_name)
   }
-  const description = cc_text(raw_description)
-  if description == "" {
+  const description = raw_description
+  if description.trim() == "" {
     throw "invalid_steps: description is required"
   }
   const steps = cc_normalize_steps(raw_steps, "steps")
@@ -575,12 +594,11 @@ pub fn crystallization_command_sequence_package(
     "fast_steps",
   )
   const labels = steps.map({ step -> step.label }).to_list()
-  const source = COMMAND_SEQUENCE_SERVER.replace("__STEPS__", json_stringify(steps)).replace(
-    "__TOOL__",
-    tool,
+  const source = cc_sequence_template(
+    COMMAND_SEQUENCE_SERVER,
+    {STEPS: json_stringify(steps), TOOL: tool, DESCRIPTION: json_stringify(description)},
   )
-    .replace("__DESCRIPTION__", json_stringify(description))
-  const test_source = COMMAND_SEQUENCE_TEST.replace("__LABELS__", json_stringify(labels))
+  const test_source = cc_sequence_template(COMMAND_SEQUENCE_TEST, {LABELS: json_stringify(labels)})
   const rendered = {
     entrypoint: "server.harn",
     tool_names: [tool],
