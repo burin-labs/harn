@@ -11,12 +11,12 @@ description = "Portable compiler, program artifact, and deterministic execution 
 [dependencies]
 arcstr = "1"
 blake3 = "1.8.7"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.185" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.185" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.185" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.185" }
-harn-parser = { path = "../harn-parser", version = "=0.10.185" }
-harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.185" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.186-dev" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.186-dev" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.186-dev" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.186-dev" }
+harn-parser = { path = "../harn-parser", version = "=0.10.186-dev" }
+harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.186-dev" }
 hex = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive", "rc"] }
@@ -24,7 +24,7 @@ serde_json = "1"
 sha2 = "0.11"
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.185" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.186-dev" }
 
 [lints]
 workspace = true

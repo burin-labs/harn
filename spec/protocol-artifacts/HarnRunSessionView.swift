@@ -752,7 +752,7 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
     public var models: [String] = []
     public var outputTokens: Int = 0
     public var totalCost: Double = 0.0
-    public var totalDurationMs: Int = 0
+    public var totalDurationMs: Int? = nil
     public var unpricedCalls: Int = 0
     public var usageUnknownCalls: Int = 0
 
@@ -782,7 +782,7 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
         if values.contains(.models) { models = try values.decode([String].self, forKey: .models) }
         if values.contains(.outputTokens) { outputTokens = try values.decode(Int.self, forKey: .outputTokens) }
         if values.contains(.totalCost) { totalCost = try values.decode(Double.self, forKey: .totalCost) }
-        if values.contains(.totalDurationMs) { totalDurationMs = try values.decode(Int.self, forKey: .totalDurationMs) }
+        if values.contains(.totalDurationMs) { totalDurationMs = try values.decode(Int?.self, forKey: .totalDurationMs) }
         if values.contains(.unpricedCalls) { unpricedCalls = try values.decode(Int.self, forKey: .unpricedCalls) }
         if values.contains(.usageUnknownCalls) { usageUnknownCalls = try values.decode(Int.self, forKey: .usageUnknownCalls) }
     }
