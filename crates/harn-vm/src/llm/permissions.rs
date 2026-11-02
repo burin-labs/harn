@@ -194,6 +194,11 @@ pub(crate) fn take_session_grants(session_id: &str) -> BTreeSet<String> {
 }
 
 pub(crate) fn store_session_grants(session_id: &str, grants: BTreeSet<String>) {
+    if !grants.is_empty() {
+        crate::run_tape::refuse_dispatch_replay(
+            "session-scoped permission grants cannot be restored by a served dispatch",
+        );
+    }
     SESSION_PERMISSION_GRANTS.with(|store| {
         store.borrow_mut().insert(session_id.to_string(), grants);
     });

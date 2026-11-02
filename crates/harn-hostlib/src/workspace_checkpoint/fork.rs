@@ -30,6 +30,7 @@ pub(super) fn fork_session_checked(
     before_publish: impl FnOnce(),
 ) -> Result<Outcome<ForkReceipt>, HostlibError> {
     const FORK: &str = "workspace_checkpoint_fork";
+    let _operation = super::operation();
     validate_session_id(FORK, source_id)?;
     validate_session_id(FORK, target_id)?;
     if source_id == target_id {
