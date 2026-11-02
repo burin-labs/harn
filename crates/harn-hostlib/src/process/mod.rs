@@ -17,9 +17,9 @@ mod secret_handoff;
 pub(crate) use harn_vm::op_interrupt::windows;
 
 pub use handle::{
-    current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,
-    OwnerDeathPolicy, ProcessCleanupChild, ProcessCleanupReport, ProcessError, ProcessHandle,
-    ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
+    current_spawner, install_spawner, spawn_process, BrokeredSpawn, EnvMode, ExitStatus,
+    OutputCapture, OwnerDeathPolicy, ProcessCleanupChild, ProcessCleanupReport, ProcessError,
+    ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
 };
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
 pub use program_lookup::{

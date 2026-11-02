@@ -56,6 +56,12 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
          stripped",
     ),
     (
+        "harn-hostlib/src/process/real.rs",
+        1,
+        "spawn-broker grant: clears the environment and applies exactly the embedder's \
+         grant, outside confinement by design",
+    ),
+    (
         "harn-hostlib/src/process/owner_death/prepared_command.rs",
         1,
         "guardian payload: rebuilds the child from the funnel's closed environment",

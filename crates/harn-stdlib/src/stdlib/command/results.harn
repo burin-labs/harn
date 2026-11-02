@@ -13,6 +13,7 @@ pub type CommandSandboxReport = {
   enforced: bool,
   denial_reporting: "not_enforced" | "backend_unavailable" | "inferred_only",
   network: CommandNetworkGrants,
+  broker?: string,
 }
 
 /** Common fields guaranteed by normalized command results. */

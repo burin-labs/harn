@@ -57,6 +57,7 @@ mod process_owner_death_e2e;
 mod process_sandbox_env_e2e;
 mod process_session_environment;
 mod process_session_handles_e2e;
+mod process_spawn_broker_e2e;
 mod process_tools;
 mod process_tools_background_schema;
 mod process_tools_capture_transport;
