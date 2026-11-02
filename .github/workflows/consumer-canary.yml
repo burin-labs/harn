@@ -15,8 +15,11 @@ name: Consumer canary
 # fails this workflow, including scheduled runs; a settled verdict is evidence
 # of measurement, not evidence of success.
 #
-# A `Pairs-with: consumer#N` trailer in the rehearsed commit's message rehearses
-# that consumer pull request's branch instead of the default branch.
+# A `Pairs-with: consumer#N` trailer rehearses that consumer pull request's
+# branch instead of the default branch. A release source reads the trailers of
+# every commit since the previous stable tag, not only the release commit. A
+# release producer's passing rehearsal uploads the binding promotion re-reads:
+# the Harn source, the candidate manifest digest and the consumer revision.
 #
 # The consumer may be private and this workflow's output is public. Its
 # identity comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the
@@ -170,11 +173,15 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      # Full history and tags, without file contents beyond Cargo.toml: a
+      # release reads pairing trailers from every commit since its previous tag.
       - name: Read the certified product source separately
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.decide.outputs.source_revision }}
           path: certified-consumer-source
+          fetch-depth: 0
+          fetch-tags: true
           sparse-checkout: Cargo.toml
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -238,11 +245,11 @@ jobs:
           CANARY_PULL_REQUEST_CLI_ARTIFACT: ${{ inputs.pull_request_cli_artifact }}
           CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
           CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
-          PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
+          PAIRING_TEXT: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
+          CANARY_PAIRING_SOURCE: certified-consumer-source
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
             WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' certified-consumer-source/Cargo.toml)" \
-            PAIRING_TEXT="${PULL_REQUEST_BODY:-$(git -C certified-consumer-source log -1 --format=%B HEAD)}" \
             bash scripts/ci/consumer_canary.sh --dispatch
       - name: Observe the first bounded window
         id: observe-1
@@ -355,7 +362,25 @@ jobs:
           CANARY_CONSUMER_REVISION: ${{ inputs.consumer_revision }}
           CANARY_DISPATCH_REASON: ${{ steps.canary.outputs.reason }}
           CANARY_FAILURE_RECEIPT: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
-        run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --record
+          # A release producer's pass is bound to what it measured; promotion re-reads the binding.
+          CANARY_BINDING_FILE: ${{ inputs.release_producer_run_id != '' && format('{0}/consumer-rehearsal-binding/consumer-rehearsal-binding.json', runner.temp) || '' }}
+          CANARY_VERDICT: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
+          SOURCE_REVISION: ${{ needs.decide.outputs.source_revision }}
+          CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
+          CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
+          CANARY_PAIRED_PULL: ${{ steps.canary.outputs.paired_pull }}
+          CANARY_DECLARED_PULL: ${{ steps.canary.outputs.declared_pull }}
+        run: |
+          if [[ -n "$CANARY_BINDING_FILE" ]]; then mkdir -p "$(dirname "$CANARY_BINDING_FILE")"; fi
+          CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --record
+      - name: Preserve the release rehearsal binding
+        if: always() && steps.record.outputs.binding != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: consumer-rehearsal-binding-${{ github.run_attempt }}
+          path: ${{ steps.record.outputs.binding }}
+          if-no-files-found: error
+          retention-days: 7
       - name: Reconcile the ended observer's exact child
         if: always() && steps.cleanup-token.outcome == 'success'
         env:

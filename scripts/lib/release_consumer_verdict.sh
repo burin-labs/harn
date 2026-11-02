@@ -4,6 +4,8 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer_canary_policy.sh"
 # shellcheck source=scripts/lib/candidate_archive_contract.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/candidate_archive_contract.sh"
+# shellcheck source=scripts/lib/sha256.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sha256.sh"
 
 # Runner records choose their original budget. Job-clock records additionally
 # require the policy from their authenticated producer head.
@@ -91,6 +93,102 @@ release_require_consumer_verdict() {
     return 1
   fi
 }
+
+release_binding_refusal() {
+  echo "::error::Consumer rehearsal binding refused publication: reason=$1${2:+ $2}" >&2
+  return 1
+}
+
+# A candidate's consumer pass authorizes publication only for what it measured
+# (canary_bind in scripts/ci/consumer_canary.sh): this Harn source, this run's
+# candidate manifest, and one consumer revision. Promotion re-reads each and
+# refuses by name when one moved. A paired pull request must still be open at
+# the rehearsed head. An unpaired rehearsal's revision must still be in the
+# consumer default branch's history; that branch advancing is logged by name
+# rather than refused, because an actively developed consumer moves during
+# every rehearsal and the pairing itself is fixed by the Harn source.
+#
+# Harn is read with GH_TOKEN, the consumer with CONSUMER_READ_TOKEN at
+# CANARY_REPOSITORY. No line printed names the consumer or its revisions.
+release_require_rehearsal_binding() (
+  set -euo pipefail
+  repository="${1:?repository required}" run_id="${2:?candidate run required}" sha="${3:?candidate commit required}"
+  consumer=${CANARY_REPOSITORY:-} consumer_token=${CONSUMER_READ_TOKEN:-}
+  artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100" 2>/dev/null)" ||
+    release_binding_refusal rehearsal_binding_unreadable "run=$run_id" || exit 1
+  selected="$(jq -ce --arg run "$run_id" '
+    if (.total_count | type) != "number" or .total_count > 100 or (.artifacts | type) != "array"
+    then error("partial artifact census") else . end |
+    [.artifacts[] | select((.name | type) == "string" and (.name | test("^consumer-rehearsal-binding-[1-9][0-9]*$")))] |
+    if length == 0 then error("no binding") else . end |
+    max_by(.name | ltrimstr("consumer-rehearsal-binding-") | tonumber) |
+    select(.expired == false and (.workflow_run.id | tostring) == $run and
+      (.id | type) == "number" and (.digest | type) == "string" and (.digest | test("^sha256:[0-9a-f]{64}$")))
+  ' <<< "$artifacts")" ||
+    release_binding_refusal rehearsal_binding_missing "run=$run_id recovery=request_a_new_release_candidate" || exit 1
+  manifest="$(jq -er --arg name "candidate-manifest-$sha" --arg run "$run_id" '
+    [.artifacts[] | select(.name == $name and .expired == false and (.workflow_run.id | tostring) == $run) | .digest] |
+    if length == 1 and (.[0] | test("^sha256:[0-9a-f]{64}$")) then .[0] else error("manifest") end
+  ' <<< "$artifacts")" || release_binding_refusal candidate_manifest_unmeasured "run=$run_id" || exit 1
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  gh api "repos/$repository/actions/artifacts/$(jq -r .id <<< "$selected")/zip" > "$dir/binding.zip" 2>/dev/null &&
+    [[ "sha256:$(sha256_file_hex "$dir/binding.zip")" == "$(jq -r .digest <<< "$selected")" ]] &&
+    binding="$(unzip -p "$dir/binding.zip" consumer-rehearsal-binding.json 2>/dev/null)" ||
+    release_binding_refusal rehearsal_binding_unreadable "run=$run_id" || exit 1
+  jq -e '
+    .schema == "harn.release.consumer_rehearsal_binding.v1" and .verdict == "pass" and
+    (.source_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+    (.producer_run | type == "string" and test("^[1-9][0-9]*$")) and
+    (.producer_attempt | type == "number" and . >= 1 and . == floor) and
+    (.manifest_digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+    (.consumer_run | type == "string" and test("^[1-9][0-9]*$")) and
+    (.consumer_head_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    (.consumer_pull == null or (.consumer_pull | type == "string" and test("^[1-9][0-9]*$")))
+  ' <<< "$binding" >/dev/null || release_binding_refusal rehearsal_binding_malformed "run=$run_id" || exit 1
+  field() { jq -r ".$1 // empty" <<< "$binding"; }
+  [[ "$(field source_sha)" == "$sha" ]] ||
+    release_binding_refusal rehearsal_source_mismatch "rehearsed=$(field source_sha) promoted=$sha" || exit 1
+  [[ "$(field producer_run)" == "$run_id" ]] ||
+    release_binding_refusal rehearsal_producer_mismatch "rehearsed=$(field producer_run) promoted=$run_id" || exit 1
+  [[ "$(field manifest_digest)" == "$manifest" ]] ||
+    release_binding_refusal rehearsal_archive_mismatch "run=$run_id" || exit 1
+  [[ "$consumer" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && -n "$consumer_token" ]] ||
+    release_binding_refusal consumer_read_authority_missing || exit 1
+  consumer_read() { GH_TOKEN="$consumer_token" gh api "repos/$consumer$1" --jq "$2" 2>/dev/null; }
+  tested="$(consumer_read "/actions/runs/$(field consumer_run)" .head_sha)" &&
+    [[ "$tested" =~ ^[0-9a-f]{40}$ && "$(sha256_text_hex "$tested")" == "$(field consumer_head_sha256)" ]] ||
+    release_binding_refusal consumer_revision_unproven "consumer_run=$(field consumer_run)" || exit 1
+  pull="$(field consumer_pull)"
+  if [[ -n "$pull" ]]; then
+    record="$(consumer_read "/pulls/$pull" '"\(.state) \(.merged) \(.head.repo.full_name // "none") \(.head.sha)"')" ||
+      release_binding_refusal consumer_pull_unreadable "pull=$pull" || exit 1
+    read -r state merged head_repository head <<< "$record"
+    if [[ "$state" == open && "$head_repository" == "$consumer" && "$head" == "$tested" ]]; then
+      decision="consumer=pull-$pull decision=rehearsed_head_current"
+    elif [[ "$state" == open ]]; then
+      release_binding_refusal consumer_pull_head_moved \
+        "pull=$pull recovery=dispatch_promote-release.yml_with_consumer_pull_request=$pull" || exit 1
+    elif [[ "$merged" == true ]]; then
+      release_binding_refusal consumer_pull_merged_since_rehearsal \
+        "pull=$pull recovery=request_a_new_release_candidate" || exit 1
+    else
+      release_binding_refusal consumer_pull_closed_since_rehearsal "pull=$pull" || exit 1
+    fi
+  else
+    default="$(consumer_read "" .default_branch)" && [[ -n "$default" ]] ||
+      release_binding_refusal consumer_default_unreadable || exit 1
+    record="$(consumer_read "/compare/$tested...$default" '"\(.status) \(.ahead_by)"')" ||
+      release_binding_refusal consumer_default_unreadable || exit 1
+    read -r status ahead <<< "$record"
+    case "$status" in
+      identical) decision="consumer=default decision=rehearsed_head_current" ;;
+      ahead) decision="consumer=default decision=default_advanced_from_rehearsed_head ahead_by=$ahead" ;;
+      *) release_binding_refusal consumer_default_diverged "status=${status:-unreported}" || exit 1 ;;
+    esac
+  fi
+  echo "Consumer rehearsal binding source=$sha producer=$run_id manifest=$manifest consumer_run=$(field consumer_run) $decision" >&2
+)
 
 # A late child is evidence only for the dispatch that originally owned it.
 # The adapter supplies authenticated latest-attempt API records and named job
