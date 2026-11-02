@@ -1,1 +1,0 @@
-- Build file-level Harn reference graphs without retaining a full positional index.
