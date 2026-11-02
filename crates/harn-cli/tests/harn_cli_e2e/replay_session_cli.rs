@@ -689,9 +689,141 @@ fn replay_fixture_runs_use_oracle_allowlist() {
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["source"]["kind"], "replay_trace");
     assert_eq!(parsed["reports"].as_array().unwrap().len(), 3);
+    assert!(parsed["reports"].as_array().unwrap().iter().all(|report| {
+        report["fixture"]["expectations_compared"] == 1
+            && report["fixture"]["failures"] == json!([])
+    }));
     assert_eq!(parsed["runs"].as_array().unwrap().len(), 3);
     assert_eq!(parsed["determinism"]["pass"], true);
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
+}
+
+#[test]
+fn replay_fixture_refuses_oracle_mutations_and_counts_the_comparison() {
+    let mutations = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle/mutations");
+    let fixtures: Vec<_> = std::fs::read_dir(mutations)
+        .expect("oracle mutation fixtures")
+        .map(|entry| entry.expect("mutation entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
+    assert!(!fixtures.is_empty(), "negative controls must actually run");
+    for fixture in fixtures {
+        let output = harn_e2e_command()
+            .args(["replay", "--fixture"])
+            .arg(&fixture)
+            .arg("--json")
+            .output()
+            .expect("run oracle mutation through replay");
+        assert!(!output.status.success(), "{} must fail", fixture.display());
+        let report = stdout_json(&output);
+        assert_eq!(report["ok"], false);
+        assert_eq!(report["error"]["code"], "replay_fixture_failed");
+        assert_eq!(report["data"]["fixture"]["expectations_compared"], 1);
+        assert_eq!(report["data"]["fixture"]["pass"], false);
+        assert!(!report["data"]["fixture"]["failures"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
+fn replay_fixture_preserves_the_declared_drift_expectation() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle/mutations/meaningful_drift.invalid.json");
+    let mut fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(source).expect("read drift mutation"))
+            .expect("decode drift mutation");
+    fixture["expect"] = json!("drift");
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("expected-drift.json");
+    std::fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+    let output = harn_e2e_command()
+        .args(["replay", "--fixture"])
+        .arg(&path)
+        .arg("--json")
+        .output()
+        .expect("run declared drift expectation");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = stdout_json(&output);
+    assert_eq!(report["data"]["fixture"]["pass"], true);
+    assert_eq!(report["data"]["fixture"]["expectations_compared"], 1);
+    assert_eq!(report["data"]["fixture"]["failures"], json!([]));
+}
+
+#[test]
+fn replay_fixture_rejects_an_unknown_kind_before_any_comparison() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("unknown.json");
+    std::fs::write(&path, br#"{"schema_version":"unknown.fixture.v1"}"#).unwrap();
+    let output = harn_e2e_command()
+        .args(["replay", "--fixture"])
+        .arg(&path)
+        .output()
+        .expect("run unknown replay fixture");
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("unrecognized replay fixture"), "{error}");
+    assert!(error.contains("expectations_compared=0"), "{error}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PASS"));
+}
+
+#[test]
+fn replay_fixture_refuses_missing_protocol_references_before_comparison() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json");
+    let mut fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(source).unwrap()).unwrap();
+    fixture["protocol_fixture_refs"] =
+        json!(["conformance/protocols/fixtures/missing-replay-reference.json"]);
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("missing-reference.json");
+    std::fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+    let output = harn_e2e_command()
+        .args(["replay", "--fixture"])
+        .arg(&path)
+        .output()
+        .expect("run missing protocol reference");
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("protocol fixture ref not found"), "{error}");
+    assert!(error.contains("expectations_compared=0"), "{error}");
+}
+
+#[test]
+fn replay_counts_only_stage_expectations_that_were_compared() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("missing-stage.json");
+    write_failing_run_record(&path);
+    let mut fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    fixture["replay_fixture"]["stage_assertions"] = json!([{
+        "node_id": "missing", "expected_status": "completed", "expected_outcome": "ok"
+    }]);
+    for kind in ["run_record", "workflow_run"] {
+        fixture["_type"] = json!(kind);
+        std::fs::write(&path, serde_json::to_vec(&fixture).unwrap()).unwrap();
+        let output = harn_e2e_command()
+            .args(["replay", "--fixture"])
+            .arg(&path)
+            .output()
+            .expect("run missing-stage expectation");
+        assert!(!output.status.success());
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            text.contains("Embedded replay fixture: FAIL (expectations_compared=2)"),
+            "{text}"
+        );
+        assert!(text.contains("missing stage missing"), "{text}");
+    }
 }
 
 fn offline_coding_fixture(

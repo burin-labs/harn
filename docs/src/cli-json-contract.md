@@ -390,6 +390,17 @@ fixture. `harn replay --session-id <id> --events-db <path>` reconstructs
 the same replayable run-record shape from the SQLite EventLog
 `observability.agent_events.<id>` topic.
 
+Trace fixtures compare the complete recorded `first_run` and `second_run`
+through the replay oracle, including the declared `match` or `drift`
+expectation and its allowlist. `fixture.expectations_compared` counts that
+whole-trace expectation as one. For run records it counts the checked run
+status, stage existence and checked stage fields; a missing stage does not
+count comparisons of its unavailable fields. Clarifying-question fixtures
+count status, minimum and maximum question counts, plus the content-match
+expectation when questions and content constraints are present. The human
+verdict also prints `expectations_compared`. An unknown fixture kind is
+refused with a nonzero exit and `expectations_compared=0`.
+
 The default `--runs 1` response keeps the original single `ReplayReport`
 payload. When `--runs N` is greater than one, the response keeps
 `schemaVersion`, `ok`, `error`, and `warnings` at the top level and also

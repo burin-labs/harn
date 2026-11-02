@@ -1303,6 +1303,49 @@ fn lexical_shadow_does_not_resolve_to_same_named_import() {
 }
 
 #[test]
+fn reference_resolution_is_refreshed_after_import_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let first = write_file(root, "first.harn", "pub fn run() { 1 }\n");
+    let second = write_file(root, "second.harn", "pub fn run() { 2 }\n");
+    let first_source = "import { run } from \"./first\"\nfn helper() { run(); run() }\n";
+    let importer = write_file(root, "importer.harn", first_source);
+    let files = [first.clone(), second.clone(), importer.clone()];
+
+    let first_build = build_for_reference_index(&files, None);
+    let first_index = index_references(
+        &first_build.graph,
+        &first_build.parsed_sources,
+        &HashSet::new(),
+    );
+    let first_use = first_source.rfind("run").unwrap() + 1;
+    assert_eq!(
+        first_index
+            .definition_at(&importer, "run", first_use)
+            .unwrap()
+            .file,
+        canonical_path(&first)
+    );
+
+    let second_source = "import { run } from \"./second\"\nfn helper() { run(); run() }\n";
+    write_file(root, "importer.harn", second_source);
+    let second_build = build_for_reference_index(&files, None);
+    let second_index = index_references(
+        &second_build.graph,
+        &second_build.parsed_sources,
+        &HashSet::new(),
+    );
+    let second_use = second_source.rfind("run").unwrap() + 1;
+    assert_eq!(
+        second_index
+            .definition_at(&importer, "run", second_use)
+            .unwrap()
+            .file,
+        canonical_path(&second)
+    );
+}
+
+#[test]
 fn omitting_the_importer_from_the_index_is_a_visible_gap_not_a_pass() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
