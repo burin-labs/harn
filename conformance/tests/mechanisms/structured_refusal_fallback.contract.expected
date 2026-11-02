@@ -1,0 +1,3 @@
+effect_policy_refusal_stops=true
+negative_policy_refusal_does_not_consume_next_request=true
+effect_real_format_rejection_falls_back=true
