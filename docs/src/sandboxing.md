@@ -804,18 +804,26 @@ installed it runs these steps in order:
 1. The universal catastrophic-command floor runs. A refused argv never reaches
    the broker.
 2. A shell interpreter (`sh`, `bash`, `zsh`, `cmd`, `pwsh`, and the other
-   common shells) is never offered to the broker.
+   common shells, by name or path) is never offered to the broker.
 3. `admit` sees the requested program, literal arguments, cwd, and the caller's
    environment overrides. `None` leaves the spawn on its normal confined path.
-4. On `Some(grant)` the exact argv runs with no confinement, in `grant.cwd`,
-   with `grant.env` as the whole environment. Nothing is inherited, and the
+4. Harn resolves the program against the grant's `PATH` (and `PATHEXT` on
+   Windows). If it resolves to a shell or a Windows `.bat`/`.cmd` script, the
+   grant is dropped and the spawn stays confined. The catastrophic floor runs
+   again against `grant.cwd`.
+5. The exact argv then runs with no confinement, in `grant.cwd`, with
+   `grant.env` as the whole environment. Nothing is inherited, and the
    caller's `env` and `env_remove` are not applied. Harn adds only its private
-   process-cleanup token so it can still reap the child's tree. Output capture,
+   process-tree tokens so it can still reap the child's tree. Output capture,
    process groups, timeouts, cancellation, and owner-death cleanup behave as
    they do for any other spawn.
 
-The command receipt reports `sandbox.enforced: false` and
-`sandbox.broker: "<broker_id>"`. If the host process itself was confined with
+Harn refuses shells; every other element of the argv is the broker's decision.
+A launcher such as `env`, `xargs`, or `timeout` runs whatever program its
+arguments name, so admit only argv whose every element you have validated.
+
+The command receipt reports `sandbox.enforced: false`,
+`sandbox.broker: "<broker_id>"`, and the grant's directory as `cwd`. If the host process itself was confined with
 `confine_current_process`, the brokered child still runs under that confinement
 and the receipt says `enforced: true`. With no broker installed, spawning is
 unchanged. On Windows no spawn is OS-confined to begin with, so a grant changes

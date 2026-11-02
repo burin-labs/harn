@@ -191,10 +191,15 @@ pub(crate) fn run_with_filter(
         process_error_to_hostlib(req.builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
 
-    if let Some(broker) = handle.spawn_broker() {
-        sandbox_reporting =
-            harn_vm::process_sandbox::ProcessSandboxReportingContext::brokered(broker);
-    }
+    let effective_cwd = match handle.spawn_broker() {
+        Some(brokered) => {
+            sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::brokered(
+                brokered.broker_id.clone(),
+            );
+            brokered.cwd.clone()
+        }
+        None => effective_cwd,
+    };
     let pid = handle.pid();
     let missing_program = handle.missing_program().map(str::to_string);
     let process_group_id = handle.process_group_id();

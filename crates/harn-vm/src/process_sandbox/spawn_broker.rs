@@ -12,8 +12,10 @@
 //! as the child's whole environment. The command receipt then reports
 //! `sandbox.enforced: false` with the grant's `broker` id.
 //!
-//! The broker is never consulted for a shell interpreter, so a grant can only
-//! ever name one program and its literal arguments.
+//! Harn never brokers a shell interpreter or a Windows batch script, either as
+//! requested or as the program the grant's `PATH` resolves. Every other argv,
+//! including a launcher such as `env` or `xargs` that runs another program, is
+//! the broker's decision: admit only argv whose every element you validated.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -46,13 +48,26 @@ pub struct SpawnBrokerRequest<'a> {
 pub struct SpawnBrokerGrant {
     /// Stable id reported as `sandbox.broker` on the command receipt.
     pub broker_id: String,
-    /// Working directory for the child. The workspace-root check is skipped.
+    /// Working directory for the child. The workspace-root check is skipped;
+    /// the catastrophic-command floor is re-checked against it.
     pub cwd: PathBuf,
     /// The child's COMPLETE environment. Nothing is inherited from the host
     /// process and the caller's overrides and removals are not applied. The
-    /// process host adds only its private process-cleanup token, which it
-    /// needs to reap the child's tree.
+    /// process host adds only its private process-tree tokens, which it needs
+    /// to reap the child's tree. A bare program name resolves against this
+    /// environment's `PATH` (and `PATHEXT` on Windows).
     pub env: BTreeMap<String, String>,
+}
+
+/// A grant Harn accepted, with the program resolved against the grant's
+/// environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdmittedSpawn {
+    /// The broker's grant.
+    pub grant: SpawnBrokerGrant,
+    /// Program to execute: the request's program resolved against the grant's
+    /// `PATH`, or the request's program unchanged when it does not resolve.
+    pub program: String,
 }
 
 /// Returned when a broker is already installed.
@@ -78,41 +93,65 @@ pub fn install_spawn_broker(
 /// Ask the installed broker about one direct program spawn.
 ///
 /// Returns `None` without consulting anything when no broker is installed or
-/// when `program` is a shell interpreter.
-pub fn admit_spawn(request: &SpawnBrokerRequest<'_>) -> Option<SpawnBrokerGrant> {
+/// when `program` is a shell interpreter, and `None` after consulting when
+/// the broker declines or the grant's `PATH` resolves `program` to a shell or
+/// batch script.
+pub fn admit_spawn(request: &SpawnBrokerRequest<'_>) -> Option<AdmittedSpawn> {
     let broker = SPAWN_BROKER.get()?;
-    if is_shell_interpreter(request.program) {
+    if runs_through_shell(request.program) {
         return None;
     }
-    broker.admit(request)
+    let grant = broker.admit(request)?;
+    let overlay: Vec<(String, String)> = grant
+        .env
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let program =
+        crate::stdlib::process::resolve_program_path(request.program, &None, true, &overlay);
+    if runs_through_shell(&program) {
+        return None;
+    }
+    Some(AdmittedSpawn { grant, program })
 }
 
 const SHELL_INTERPRETERS: &[&str] = &[
     "sh",
+    "ash",
     "bash",
+    "rbash",
     "zsh",
     "dash",
     "ksh",
     "mksh",
+    "yash",
     "fish",
     "csh",
     "tcsh",
     "nu",
+    "elvish",
+    "xonsh",
+    "busybox",
     "cmd",
     "powershell",
     "pwsh",
 ];
 
-fn is_shell_interpreter(program: &str) -> bool {
+/// A shell interpreter by name or path, or a Windows batch script, which
+/// always runs through `cmd.exe`.
+fn runs_through_shell(program: &str) -> bool {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
     let name = name.to_ascii_lowercase();
+    if name.ends_with(".bat") || name.ends_with(".cmd") {
+        return true;
+    }
     let name = name.strip_suffix(".exe").unwrap_or(&name);
     SHELL_INTERPRETERS.contains(&name)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_shell_interpreter;
+    use super::runs_through_shell;
 
     #[test]
     fn shells_are_recognized_by_name_and_by_path() {
@@ -131,11 +170,16 @@ mod tests {
             "/usr/local/bin/bash",
             "/opt/homebrew/bin/fish",
             r"C:\Windows\System32\cmd.exe",
+            "ash",
+            "/bin/busybox",
+            "rbash",
+            "npm.cmd",
+            r"C:\tools\build.BAT",
         ] {
-            assert!(is_shell_interpreter(shell), "{shell}");
+            assert!(runs_through_shell(shell), "{shell}");
         }
         for program in ["env", "/usr/bin/git", "shellcheck", "bashful", "cmdx"] {
-            assert!(!is_shell_interpreter(program), "{program}");
+            assert!(!runs_through_shell(program), "{program}");
         }
     }
 }

@@ -47,7 +47,7 @@ impl ProcessSpawner for RealSpawner {
                 missing_program,
                 verifier_witness,
                 cleanup_receipt,
-                broker_id,
+                broker,
                 #[cfg(target_os = "linux")]
                 cancel_request,
             } = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
@@ -145,7 +145,7 @@ impl ProcessSpawner for RealSpawner {
             process.missing_program = missing_program;
             process.payload_stdin = payload_stdin;
             process.verifier_witness = verifier_witness;
-            process.broker_id = broker_id;
+            process.broker = broker;
             #[cfg(target_os = "linux")]
             {
                 if let Some(reaper) = reaper_identity {
@@ -166,7 +166,7 @@ impl ProcessSpawner for RealSpawner {
             env_cleared,
             source_verifier_bound,
             verifier_witness,
-            broker_id,
+            broker,
         } = prepare_command(&spec, None)?;
         let missing_program = if source_verifier_bound {
             None
@@ -225,7 +225,7 @@ impl ProcessSpawner for RealSpawner {
         let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
         process.missing_program = missing_program;
         process.verifier_witness = verifier_witness;
-        process.broker_id = broker_id;
+        process.broker = broker;
         Ok(Box::new(process))
     }
 }
@@ -242,8 +242,8 @@ pub(crate) struct PreparedSpawn {
     /// process tree with a Job Object and never re-creates the command.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) env_cleared: bool,
-    /// Id of the spawn broker that admitted this spawn unconfined.
-    pub(crate) broker_id: Option<String>,
+    /// Set when the spawn broker admitted this spawn unconfined.
+    pub(crate) broker: Option<super::handle::BrokeredSpawn>,
 }
 
 pub(crate) fn prepare_command(
@@ -441,7 +441,7 @@ pub(crate) fn prepare_command_from(
         command,
         cleanup_token,
         env_cleared,
-        broker_id: None,
+        broker: None,
     })
 }
 
@@ -453,15 +453,22 @@ pub(crate) fn prepare_brokered(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
 ) -> Result<Option<PreparedSpawn>, ProcessError> {
-    let Some(grant) = process_sandbox::admit_spawn(&process_sandbox::SpawnBrokerRequest {
-        program: &spec.program,
-        args: &spec.args,
-        cwd: spec.cwd.as_deref(),
-        env: &spec.env,
-    }) else {
+    let Some(process_sandbox::AdmittedSpawn { grant, program }) =
+        process_sandbox::admit_spawn(&process_sandbox::SpawnBrokerRequest {
+            program: &spec.program,
+            args: &spec.args,
+            cwd: spec.cwd.as_deref(),
+            env: &spec.env,
+        })
+    else {
         return Ok(None);
     };
-    let mut command = Command::new(&spec.program);
+    // The floor already ran against the requested cwd; cwd-relative rules
+    // must also hold for the directory the child actually runs in.
+    let mut in_grant_cwd = spec.clone();
+    in_grant_cwd.cwd = Some(grant.cwd.clone());
+    super::handle::validate_process_spec(&in_grant_cwd)?;
+    let mut command = Command::new(&program);
     command
         .args(&spec.args)
         .env_clear()
@@ -480,7 +487,10 @@ pub(crate) fn prepare_brokered(
         command,
         cleanup_token,
         env_cleared: true,
-        broker_id: Some(grant.broker_id),
+        broker: Some(super::handle::BrokeredSpawn {
+            broker_id: grant.broker_id,
+            cwd: grant.cwd,
+        }),
     }))
 }
 
@@ -679,7 +689,7 @@ struct RealProcess {
     verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     missing_program: Option<String>,
-    broker_id: Option<String>,
+    broker: Option<super::handle::BrokeredSpawn>,
     pid: u32,
     pgid: Option<u32>,
     #[cfg(not(target_os = "windows"))]
@@ -724,7 +734,7 @@ fn real_process(
         verifier_witness: None,
         verifier_receipt: None,
         missing_program: None,
-        broker_id: None,
+        broker: None,
         pid,
         pgid,
         #[cfg(not(target_os = "windows"))]
@@ -785,8 +795,8 @@ impl ProcessHandle for RealProcess {
         self.missing_program.as_deref()
     }
 
-    fn spawn_broker(&self) -> Option<&str> {
-        self.broker_id.as_deref()
+    fn spawn_broker(&self) -> Option<&super::handle::BrokeredSpawn> {
+        self.broker.as_ref()
     }
 
     fn pid(&self) -> Option<u32> {

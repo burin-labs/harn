@@ -220,7 +220,7 @@ pub trait ProcessHandle: Send {
     /// Id of the embedder spawn broker that ran this child outside the active
     /// confinement (see [`harn_vm::process_sandbox::SpawnBroker`]). `None`
     /// for every confined spawn.
-    fn spawn_broker(&self) -> Option<&str> {
+    fn spawn_broker(&self) -> Option<&BrokeredSpawn> {
         None
     }
 
@@ -262,6 +262,15 @@ pub trait ProcessHandle: Send {
     /// Used by the background (`background: true`) waiter thread, whose
     /// children deliberately outlive scope cancellation and deadlines.
     fn wait(&mut self) -> io::Result<ExitStatus>;
+}
+
+/// What a handle reports about a spawn the embedder spawn broker admitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrokeredSpawn {
+    /// The grant's broker id, reported as `sandbox.broker`.
+    pub broker_id: String,
+    /// The directory the child actually runs in.
+    pub cwd: PathBuf,
 }
 
 /// How a [`ProcessHandle::wait_with_timeout`] ended.

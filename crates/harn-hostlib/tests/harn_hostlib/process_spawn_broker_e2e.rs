@@ -2,8 +2,9 @@
 //!
 //! The broker is process-global and installable once, so every scenario runs
 //! in one test, in order: the unbrokered baseline first, then the same argv
-//! after the broker is installed. Its grants admit only marker argvs, so a
-//! sibling test sharing this process under a threaded runner never matches.
+//! after the broker is installed. It admits only marker argvs (and, to prove
+//! the host refuses them first, shells and one catastrophic argv), so a sibling
+//! test sharing this process under a threaded runner never matches.
 
 #![cfg(unix)]
 
@@ -31,6 +32,7 @@ const BROKER_ID: &str = "probe-broker";
 const ENV_MARKER: &str = "HARN_SPAWN_BROKER_PROBE=1";
 const DECLINED_MARKER: &str = "HARN_SPAWN_BROKER_DECLINED=1";
 const CWD_MARKER: &str = "spawn-broker-grant-cwd-marker";
+const WRITE_MARKER: &str = "spawn-broker-write-outside-workspace";
 const INHERITED_PLAIN: &str = "PAGER";
 const INHERITED_CREDENTIAL: &str = "EXAMPLE_CLI_TOKEN";
 
@@ -77,8 +79,9 @@ impl SpawnBroker for ProbeBroker {
         let args: Vec<&str> = request.args.iter().map(String::as_str).collect();
         let admitted = match (request.program, args.as_slice()) {
             ("env", [ENV_MARKER, "env"]) | ("ls", [CWD_MARKER]) => true,
+            ("touch", [path]) => path.ends_with(WRITE_MARKER),
             // Would admit if asked: proves the refusal comes from the host.
-            ("sh" | "git", _) => true,
+            ("sh", _) | ("git", ["reset", "--hard"]) => true,
             _ => false,
         };
         admitted.then(|| self.grant())
@@ -221,6 +224,11 @@ fn spawn_broker_runs_admitted_argv_unconfined_and_nothing_else() {
         .enforced;
     let env_argv = ["env", ENV_MARKER, "env"];
     let ls_argv = ["ls", CWD_MARKER];
+    // Outside every workspace root, so the confined path cannot write it.
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("outside dir");
+    let write_target = outside.path().join(WRITE_MARKER);
+    let write_target_str = path_str(&write_target);
+    let touch_argv = ["touch", write_target_str.as_str()];
 
     // (a) No broker installed: the marker argvs take the normal path.
     let baseline = run(&env_argv, workspace.path(), false);
@@ -247,6 +255,14 @@ fn spawn_broker_runs_admitted_argv_unconfined_and_nothing_else() {
         0,
         "the marker exists only in the grant cwd"
     );
+    let baseline_touch = run(&touch_argv, workspace.path(), false);
+    assert_unbrokered(&baseline_touch, confined_enforced);
+    if confined_enforced {
+        assert!(
+            !write_target.exists(),
+            "confinement must refuse a write outside the workspace: {baseline_touch:?}"
+        );
+    }
 
     let broker = Arc::new(ProbeBroker {
         grant_cwd: grant_dir.path().to_path_buf(),
@@ -269,6 +285,21 @@ fn spawn_broker_runs_admitted_argv_unconfined_and_nothing_else() {
     assert_eq!(
         require_str(&require_nested_dict(&brokered_ls, "sandbox"), "broker"),
         BROKER_ID
+    );
+    let grant_name = grant_dir.path().file_name().unwrap().to_string_lossy();
+    assert!(
+        require_str(&brokered_ls, "cwd").ends_with(grant_name.as_ref()),
+        "the receipt names the directory the child ran in: {brokered_ls:?}"
+    );
+    let brokered_touch = run(&touch_argv, workspace.path(), false);
+    assert_eq!(
+        require_int(&brokered_touch, "exit_code"),
+        0,
+        "{brokered_touch:?}"
+    );
+    assert!(
+        write_target.exists(),
+        "an admitted spawn runs outside confinement"
     );
 
     // (c) A shell is never offered to the broker, even one it would admit.

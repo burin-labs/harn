@@ -177,8 +177,8 @@ pub use crate::stdlib::sandbox::{
 
 mod spawn_broker;
 pub use spawn_broker::{
-    admit_spawn, install_spawn_broker, SpawnBroker, SpawnBrokerAlreadyInstalled, SpawnBrokerGrant,
-    SpawnBrokerRequest,
+    admit_spawn, install_spawn_broker, AdmittedSpawn, SpawnBroker, SpawnBrokerAlreadyInstalled,
+    SpawnBrokerGrant, SpawnBrokerRequest,
 };
 
 mod loopback;
