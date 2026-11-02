@@ -9,4 +9,4 @@ pub use cache_fields::{
     reported_cache_write_tokens, CacheCounts,
 };
 pub use prompt_tokens::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
-pub use reported_cache::ReportedCacheUsage;
+pub use reported_cache::{ReportedCacheTotals, ReportedCacheUsage};

@@ -30,10 +30,12 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     out.push_str("module. Field names match the wire JSON (camelCase) so dataclass\n");
     out.push_str("instances round-trip through ``json.dumps(asdict(obj))`` without a\n");
     out.push_str("custom encoder. Generic optional fields default to ``None`` and are\n");
-    out.push_str("stripped by :func:`to_wire`; closed recap shapes preserve required nulls.\n");
+    out.push_str("stripped by :func:`to_wire`; schema-required nullable fields retain null.\n");
     out.push_str("\"\"\"\n\n");
     out.push_str("from __future__ import annotations\n\n");
-    out.push_str("from dataclasses import asdict, dataclass, field, fields, is_dataclass\n");
+    out.push_str(
+        "from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass\n",
+    );
     out.push_str("from enum import Enum\n");
     out.push_str("from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union\n\n");
     out.push_str("__all__ = [\n");
@@ -54,6 +56,11 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
         .map(str::to_owned),
     );
     public_names.extend(payloads.records.iter().map(|record| record.name.clone()));
+    public_names.extend(
+        super::provider_usage::records()
+            .into_iter()
+            .map(|record| record.name),
+    );
     for name in &public_names {
         out.push_str("    ");
         out.push_str(&json_string_literal(name));
@@ -364,8 +371,8 @@ _T = TypeVar("_T", bound="_HarnDataclass")
 class _HarnDataclass:
     """Mixin providing wire-faithful ``to_wire`` / ``from_wire`` helpers.
 
-    ``to_wire`` strips fields that are ``None`` so the JSON envelope stays
-    minimal and matches what the Rust adapters emit. ``from_wire`` accepts a
+    ``to_wire`` omits absent optional fields and preserves schema-required
+    nullable fields, including nested records. ``from_wire`` accepts a
     decoded JSON object plus any unknown extension fields, ignoring keys
     that the static schema does not yet know about so additive enum or
     struct extensions stay forward-compatible.
@@ -382,12 +389,20 @@ class _HarnDataclass:
     def to_wire(self) -> JsonObject:
         if not is_dataclass(self):
             raise TypeError("to_wire requires a dataclass instance")
-        return _strip_none(asdict(self))
+        return _strip_none(self)
 
 
 def _strip_none(value: Any) -> Any:
+    if is_dataclass(value):
+        # Constructor defaults own presence, including required fields whose value is null.
+        return {
+            item.name: _strip_none(getattr(value, item.name))
+            for item in fields(value)
+            if getattr(value, item.name) is not None
+            or (item.default is MISSING and item.default_factory is MISSING)
+        }
     if isinstance(value, dict):
-        return {key: _strip_none(item) for key, item in value.items() if item is not None}
+        return {key: _strip_none(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_strip_none(item) for item in value]
     if isinstance(value, Enum):

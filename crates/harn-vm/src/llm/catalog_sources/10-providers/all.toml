@@ -15,11 +15,9 @@ reviewed_on = "2026-08-26"
 expires_on = "2026-11-14"
 tracking_issue = 7320
 unverified = [
-  "atlas",
   "cloudflare_ai_gateway",
   "cohere",
   "github_models",
-  "hunyuan",
   "local",
   "parasail",
   "siliconflow",
@@ -110,15 +108,13 @@ checked_on = "2026-10-16"
 fields = ["cache", "stream"]
 sources = ["https://vercel.com/docs/ai-gateway/models-and-providers/automatic-caching", "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/streaming", "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531"]
 
-# vLLM exposes real cached-token counters when the server's
-# --enable-prompt-tokens-details flag is enabled. Without that opt-in the
-# response omits the details. Keep cache accounting undeclared until the
-# request ledger distinguishes an absent counter from an explicit zero.
+# vLLM reports optional read/write counts with --enable-prompt-tokens-details.
+# Omitted categories remain unknown; explicit zeros are measurements.
 [[usage_accounting_audit.verified]]
 provider = "vllm"
-checked_on = "2026-10-16"
-fields = ["stream"]
-sources = ["https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/chat_completion/serving.py", "https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/api_utils.py"]
+checked_on = "2026-11-01"
+fields = ["cache", "stream"]
+sources = ["https://github.com/vllm-project/vllm/blob/3a90cc6fd0504b52bf47d58e8d70cff4b03f2c19/vllm/entrypoints/openai/chat_completion/serving.py"]
 
 [[usage_accounting_audit.verified]]
 provider = "zai"
@@ -178,6 +174,18 @@ sources = [
   "https://console.groq.com/docs/prompt-caching",
   "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
 ]
+
+[[usage_accounting_audit.verified]]
+provider = "atlas"
+checked_on = "2026-11-01"
+fields = ["stream"]
+sources = ["https://www.atlascloud.ai/docs/en/llm-protocols"]
+
+[[usage_accounting_audit.verified]]
+provider = "hunyuan"
+checked_on = "2026-11-01"
+fields = ["stream"]
+sources = ["https://cloud.tencent.com/document/product/1729/111007"]
 
 [[usage_accounting_audit.verified]]
 provider = "huggingface"
@@ -898,6 +906,7 @@ path = "/models"
 # Atlas Cloud — OpenAI-compatible coding-plan/provider surface that overlaps
 # GLM, Kimi, DeepSeek, Qwen, and MiniMax families.
 [providers.atlas]
+stream_usage_accounting = true
 base_url = "https://api.atlascloud.ai/v1"
 base_url_env = "ATLAS_BASE_URL"
 auth_style = "bearer"
@@ -1031,6 +1040,7 @@ path = "/models"
 
 # Tencent Hunyuan — OpenAI-compatible `/v1/chat/completions` endpoint.
 [providers.hunyuan]
+stream_usage_accounting = true
 base_url = "https://api.hunyuan.cloud.tencent.com/v1"
 base_url_env = "HUNYUAN_BASE_URL"
 auth_style = "bearer"
@@ -1161,6 +1171,7 @@ method = "GET"
 path = "/v1/models"
 
 [providers.vllm]
+cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "http://localhost:8000"
 base_url_env = "VLLM_BASE_URL"

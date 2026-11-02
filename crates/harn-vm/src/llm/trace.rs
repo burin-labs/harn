@@ -85,7 +85,7 @@ impl LlmTraceRuntime {
             .duration_ms
             .saturating_add(i64::try_from(entry.duration_ms).unwrap_or(i64::MAX));
         summary.cost.record(&entry.usage);
-        summary.cache.record_usage(&entry.usage);
+        entry.usage.record_cache_into(&mut summary.cache);
         if state.enabled {
             state.entries.push(entry);
         }

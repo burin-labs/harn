@@ -10,6 +10,8 @@ private enum RecapBindingProbeError: Error {
     case acceptedMissingSessionUpdateIdentity
     case agentEventDecodedAsUntyped(String)
     case acceptedMalformedAgentEvent(String)
+    case acceptedMissingProviderUsageFact
+    case acceptedMissingRequiredNullableField(String)
 }
 
 /// Every emitted agent event decodes into its generated body and re-encodes
@@ -48,7 +50,9 @@ private func roundTrip<T: Codable>(_ type: T.Type, _ input: [String: Any], _ exp
     let decoded = try JSONDecoder().decode(type, from: data)
     let encoded = try JSONEncoder().encode(decoded)
     let actual = try JSONSerialization.jsonObject(with: encoded) as! NSDictionary
-    guard actual.isEqual(to: expected) else {
+    let expectedValue = try JSONDecoder().decode(HarnACPValue.self, from: JSONSerialization.data(withJSONObject: expected))
+    let actualValue = try JSONDecoder().decode(HarnACPValue.self, from: encoded)
+    guard actualValue == expectedValue else {
         throw RecapBindingProbeError.wireMismatch(
             type: String(describing: type), expected: String(describing: expected),
             actual: String(describing: actual)
@@ -65,6 +69,19 @@ private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ 
     try roundTrip(type, input, input)
 }
 
+private func requiredNullableField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ field: String, _ present: Any) throws {
+    do {
+        _ = try JSONDecoder().decode(type, from: JSONSerialization.data(withJSONObject: base))
+        throw RecapBindingProbeError.acceptedMissingRequiredNullableField(field)
+    } catch is DecodingError {
+    }
+    var input = base
+    input[field] = NSNull()
+    try roundTrip(type, input, input)
+    input[field] = present
+    try roundTrip(type, input, input)
+}
+
 @main
 private struct RecapBindingProbe {
     static func main() throws {
@@ -75,6 +92,18 @@ private struct RecapBindingProbe {
         let fixture = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         ) as! [String: Any]
+        let providerUsage = fixture["providerUsage"] as! [[String: Any]]
+        precondition(providerUsage.count == 3 && providerUsage[0]["reported_cache"] is NSNull)
+        for usage in providerUsage {
+            try roundTrip(HarnProviderUsage.self, usage, usage)
+        }
+        let missingCache = providerUsage[0].filter { $0.key != "reported_cache" }
+        do {
+            _ = try JSONDecoder().decode(
+                HarnProviderUsage.self, from: JSONSerialization.data(withJSONObject: missingCache))
+            throw RecapBindingProbeError.acceptedMissingProviderUsageFact
+        } catch is DecodingError {
+        }
         let notifications = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
         ) as! [[String: Any]]
@@ -140,7 +169,7 @@ private struct RecapBindingProbe {
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]
         let plan = fixture["planDocument"] as! [String: Any]
         try roundTrip(HarnPlanDocument.self, plan, plan)
-        try optionalField(HarnPlanStep.self, ["id": "step", "content": "Verify", "status": "pending"], "priority", "high")
+        try requiredNullableField(HarnPlanStep.self, ["id": "step", "content": "Verify", "status": "pending"], "priority", "high")
         try optionalField(HarnPlanApproval.self, ["state": "unrequested"], "reviewers", ["reviewer"])
         try optionalField(HarnPlanCommentAnchor.self, ["step_id": "step"], "range", ["start": 0, "end": 1])
         let recapData = try JSONSerialization.data(withJSONObject: recap)

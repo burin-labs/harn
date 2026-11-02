@@ -219,9 +219,6 @@ pub(crate) fn parse_llm_response(
             raw_tool_calls,
             input_tokens,
             output_tokens,
-            cache_read_tokens: cache.read_tokens,
-            cache_write_tokens: cache.write_tokens,
-            cache_counts_reported: cache.reported,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -234,7 +231,8 @@ pub(crate) fn parse_llm_response(
             blocks,
             telemetry: Box::new(telemetry),
             ..Default::default()
-        })
+        }
+        .with_cache_counts(cache))
     } else {
         openai::parse_chat_completions_response(json, provider, model, tools_offered)
     }

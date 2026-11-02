@@ -568,9 +568,7 @@ fn parse_bedrock_converse_response(
     let reported_input_tokens = json["usage"]["inputTokens"].as_i64();
     result.output_tokens = json["usage"]["outputTokens"].as_i64().unwrap_or(0);
     let cache = crate::llm::usage::extract_cache_counts(&json["usage"])?;
-    result.cache_read_tokens = cache.read_tokens;
-    result.cache_write_tokens = cache.write_tokens;
-    result.cache_counts_reported = cache.reported;
+    result = result.with_cache_counts(cache);
     // Converse counts only fresh input, including when the model is not Claude.
     // https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
     result.input_tokens = reported_input_tokens
