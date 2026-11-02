@@ -75,6 +75,7 @@ spec/protocol-artifacts/HarnProtocol.swift -merge
 spec/protocol-artifacts/HarnRunSessionView.swift -merge
 spec/protocol-artifacts/manifest.json -merge
 crates/harn-cli/data/protocol-manifest.json -merge
+spec/protocol-artifacts/crystallization-bundle.schema.json -merge
 spec/protocol-artifacts/schemas/harn-tools-v2.schema.json -merge
 spec/protocol-artifacts/schemas/plan-document-v1.schema.json -merge
 spec/protocol-artifacts/schemas/inference-admission-request.schema.json -merge
