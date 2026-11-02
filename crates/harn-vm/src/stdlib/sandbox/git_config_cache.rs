@@ -305,6 +305,38 @@ mod tests {
             "an unchanged workspace must query each scope only once"
         );
 
+        // Staging a file and writing a tree replace temporary files in .git,
+        // changing the directory's mtime without changing Git config or HEAD.
+        std::fs::write(repository.join("tracked.txt"), "content\n").unwrap();
+        for (index, argv) in [&["add", "tracked.txt"][..], &["write-tree"][..]]
+            .into_iter()
+            .enumerate()
+        {
+            let output = crate::process_sandbox::session_std_command(&git)
+                .unwrap()
+                .env_clear()
+                .envs(&env)
+                .arg("-C")
+                .arg(&repository)
+                .args(argv)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            // Do not depend on the host filesystem's timestamp resolution.
+            std::fs::File::open(repository.join(".git"))
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(
+                    SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(index as u64 + 1),
+                ))
+                .unwrap();
+            assert_eq!(query(&mut cache, &env), first);
+            assert_eq!(
+                calls.get(),
+                2,
+                "staging and tree writes must not rerun unchanged Git config queries"
+            );
+        }
+
         std::fs::write(&included, "[core]\nexcludesFile = ~/ignore\n").unwrap();
         assert!(query(&mut cache, &env)
             .contains(&super::super::normalize_for_policy(&home.join("ignore"))));
@@ -343,6 +375,28 @@ mod tests {
             10,
             "a measured empty result must be cached too"
         );
+
+        // A newly created nearer repository changes Git's discovery result.
+        let nested_git = workspace.join(".git");
+        let init_nested = || {
+            crate::process_sandbox::session_std_command(&git)
+                .unwrap()
+                .env_clear()
+                .envs(&env)
+                .args(["init", "-q"])
+                .arg(&workspace)
+                .status()
+                .unwrap()
+        };
+        assert!(init_nested().success());
+        assert!(query(&mut cache, &env).is_empty());
+        assert_eq!(calls.get(), 12, "a newly discovered repository invalidates");
+
+        // Replacing a directory at the same path changes repository identity.
+        std::fs::rename(&nested_git, workspace.join(".git-backup")).unwrap();
+        assert!(init_nested().success());
+        assert!(query(&mut cache, &env).is_empty());
+        assert_eq!(calls.get(), 14, "a replaced repository invalidates");
     }
 
     #[test]
@@ -364,5 +418,54 @@ mod tests {
             assert!(roots.is_empty());
         }
         assert_eq!(calls.get(), 2);
+    }
+
+    fn assert_discovery_change_invalidates(workspace: &Path, change: impl FnOnce()) {
+        let mut cache = Cache::default();
+        let env = BTreeMap::new();
+        let calls = Cell::new(0);
+        let mut query = || {
+            cache.roots(workspace, None, Path::new("/git"), &env, || {
+                calls.set(calls.get() + 1);
+                (Vec::new(), true)
+            })
+        };
+        query();
+        query();
+        assert_eq!(calls.get(), 1);
+        change();
+        query();
+        assert_eq!(calls.get(), 2, "changed gitdir discovery must invalidate");
+    }
+
+    #[test]
+    fn linked_worktree_pointer_change_invalidates_the_discovery_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir(temp.path().join("one")).unwrap();
+        std::fs::create_dir(temp.path().join("second")).unwrap();
+        let pointer = workspace.join(".git");
+        std::fs::write(&pointer, "gitdir: ../one\n").unwrap();
+        assert_discovery_change_invalidates(&workspace, || {
+            std::fs::write(&pointer, "gitdir: ../second\n").unwrap();
+        });
+    }
+
+    #[test]
+    fn git_directory_symlink_retarget_invalidates_the_discovery_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let first = temp.path().join("one");
+        let second = temp.path().join("two");
+        for path in [&workspace, &first, &second] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let pointer = workspace.join(".git");
+        std::os::unix::fs::symlink(&first, &pointer).unwrap();
+        assert_discovery_change_invalidates(&workspace, || {
+            std::fs::remove_file(&pointer).unwrap();
+            std::os::unix::fs::symlink(&second, &pointer).unwrap();
+        });
     }
 }
