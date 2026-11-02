@@ -6,9 +6,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$script_dir/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$script_dir/lib/harn_bin.sh"
-# Restore before any Cargo probe below runs through the configured wrapper.
-harn_restore_configured_sccache_wrapper "$(cd "$script_dir/.." && pwd -P)"
-
 case "${HARN_BIN_NO_BUILD:-0}" in
   0) mode="build" ;;
   1) mode="no-build" ;;
@@ -39,7 +36,7 @@ feature graph as Harn and its freshness checker; it requires build mode.
 Environment:
   HARN_BIN           explicit executable to validate and use; the resolved path
                      is exported to the child process for nested Harn commands
-  HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
+  HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo and compiler-wrapper builds
   CARGO_TARGET_DIR                 target directory for --no-build worktree lookup
   HARN_BIN_CARGO_TIMEOUT_SECONDS   Cargo probe deadline in seconds (default: 600)
   HARN_BIN_RETRY_WITHOUT_WRAPPER   opt into one wrapper-disabled retry (0 or 1)
@@ -93,6 +90,23 @@ if [[ "$record_receipt_only" = "1" ]]; then
     echo "error: --record-receipt does not accept print modes or harn arguments" >&2
     exit 2
   fi
+fi
+
+if [[ "$print_only" = "1" && "$print_build_freshness" = "1" ]]; then
+  echo "error: --print and --print-build-freshness are mutually exclusive" >&2
+  exit 2
+fi
+if [[ "$print_build_freshness" = "1" && $# -ne 0 ]]; then
+  echo "error: --print-build-freshness does not accept harn arguments" >&2
+  exit 2
+fi
+
+# Compiler bootstrap belongs only to an admitted build-mode resolution.
+if [[ "$mode" = "build" ]]; then
+  harn_restore_configured_sccache_wrapper "$(cd "$script_dir/.." && pwd -P)"
+fi
+
+if [[ "$record_receipt_only" = "1" ]]; then
   # This producer intentionally ignores an inherited explicit HARN_BIN. A
   # receipt is proof for the canonical worktree artifact, never a caller-owned
   # pin. Recording still fails closed unless compiled provenance matches the
@@ -103,15 +117,6 @@ if [[ "$record_receipt_only" = "1" ]]; then
   bin="$(harn_debug_binary_path)"
   harn_record_binary_freshness "$bin"
   exit 0
-fi
-
-if [[ "$print_only" = "1" && "$print_build_freshness" = "1" ]]; then
-  echo "error: --print and --print-build-freshness are mutually exclusive" >&2
-  exit 2
-fi
-if [[ "$print_build_freshness" = "1" && $# -ne 0 ]]; then
-  echo "error: --print-build-freshness does not accept harn arguments" >&2
-  exit 2
 fi
 
 toolset=cli
