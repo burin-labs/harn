@@ -42,6 +42,21 @@ mod tests {
         assert!(swift.contains("public static let schemaVersion = 2"));
         assert!(swift.contains("try values.encode(team, forKey: .team)"));
         assert!(!swift.contains("struct HarnCrystallizationBundleStep"));
+        let version = &projection.schema["$defs"]["BundleGenerator"]["properties"]["version"];
+        assert!(version.get("default").is_none());
+        assert_eq!(version["x-harn-contextual-default"], true);
+        assert!(projection.schema["properties"]["generator"]
+            .get("default")
+            .is_none());
+        assert_eq!(
+            projection.schema["$defs"]["BundleGenerator"]["properties"]["tool"]["default"],
+            "harn"
+        );
+        assert_eq!(
+            projection.schema["$defs"]["BundlePromotion"]["properties"]["rollout_policy"]
+                ["default"],
+            harn_vm::orchestration::BundlePromotion::default().rollout_policy
+        );
     }
 
     #[test]

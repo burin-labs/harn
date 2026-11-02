@@ -48,6 +48,7 @@ use crate::value::VmError;
 #[derive(schemars::JsonSchema)]
 pub struct BundleGenerator {
     pub tool: String,
+    #[schemars(transform = super::schema::omit_contextual_default)]
     pub version: String,
 }
 
@@ -230,6 +231,7 @@ pub struct CrystallizationBundleManifest {
     pub schema: String,
     pub schema_version: u32,
     pub generated_at: String,
+    #[schemars(transform = super::schema::omit_contextual_default)]
     pub generator: BundleGenerator,
     pub kind: BundleKind,
     pub candidate_id: String,

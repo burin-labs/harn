@@ -5,6 +5,12 @@ use serde_json::{json, Value};
 
 pub const CRYSTALLIZATION_BUNDLE_SCHEMA_ARTIFACT: &str = "crystallization-bundle.schema.json";
 
+/// The producer's running version cannot be frozen into a published contract.
+pub(super) fn omit_contextual_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+    schema.insert("x-harn-contextual-default".into(), json!(true));
+}
+
 pub fn crystallization_bundle_json_schema() -> Value {
     let settings = schemars::generate::SchemaSettings::draft2020_12().for_serialize();
     let schema = settings

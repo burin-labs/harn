@@ -56,8 +56,8 @@
           "type": "string"
         },
         "version": {
-          "default": "0.10.185",
-          "type": "string"
+          "type": "string",
+          "x-harn-contextual-default": true
         }
       },
       "required": [
@@ -1049,10 +1049,7 @@
     },
     "generator": {
       "$ref": "#/$defs/BundleGenerator",
-      "default": {
-        "tool": "harn",
-        "version": "0.10.185"
-      }
+      "x-harn-contextual-default": true
     },
     "kind": {
       "$ref": "#/$defs/BundleKind",
