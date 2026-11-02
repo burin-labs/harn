@@ -280,11 +280,27 @@ pub struct ProcessSandboxReportingContext {
     /// a refusal classified later (on a waiter thread) still names the grants
     /// that were actually in force.
     pub policy: Option<Box<CapabilityPolicy>>,
+    /// Set when an embedder spawn broker ran the child outside the active
+    /// confinement; see [`crate::process_sandbox::SpawnBroker`].
+    pub broker: Option<String>,
 }
 
 impl ProcessSandboxReportingContext {
     pub fn current() -> Self {
-        let policy = super::active_sandbox_policy();
+        Self::capture(super::active_sandbox_policy())
+    }
+
+    /// Reporting for a child a spawn broker ran outside the active policy.
+    /// Only confinement the host process itself is under still applies, so
+    /// the receipt reports `enforced: true` only in that case.
+    pub fn brokered(broker_id: impl Into<String>) -> Self {
+        Self {
+            broker: Some(broker_id.into()),
+            ..Self::capture(None)
+        }
+    }
+
+    fn capture(policy: Option<(CapabilityPolicy, SandboxProfile)>) -> Self {
         let inherited = super::self_confinement::current_process_confinement().is_some();
         let reporting = match policy {
             Some(_) if ActiveBackend::available() => ProcessSandboxDenialReporting::InferredOnly,
@@ -304,6 +320,7 @@ impl ProcessSandboxReportingContext {
                 network_inherited,
             ),
             policy: policy.map(|(policy, _)| Box::new(policy)),
+            broker: None,
         }
     }
 
@@ -313,6 +330,7 @@ impl ProcessSandboxReportingContext {
             enforced: self.reporting == ProcessSandboxDenialReporting::InferredOnly,
             denial_reporting: self.reporting,
             network: self.network,
+            broker: self.broker.clone(),
         }
     }
 

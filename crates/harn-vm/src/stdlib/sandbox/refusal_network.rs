@@ -48,6 +48,10 @@ pub struct ProcessSandboxReport {
     pub enforced: bool,
     pub denial_reporting: ProcessSandboxDenialReporting,
     pub network: ProcessSandboxNetwork,
+    /// Id of the embedder spawn broker that ran this child outside the
+    /// active confinement. Absent for every ordinary spawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broker: Option<String>,
 }
 
 #[cfg(test)]

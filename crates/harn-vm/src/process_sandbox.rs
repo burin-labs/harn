@@ -175,6 +175,12 @@ pub use crate::stdlib::sandbox::{
     decode_seccomp_hex, transferable_confinement, TransferableConfinement,
 };
 
+mod spawn_broker;
+pub use spawn_broker::{
+    admit_spawn, install_spawn_broker, SpawnBroker, SpawnBrokerAlreadyInstalled, SpawnBrokerGrant,
+    SpawnBrokerRequest,
+};
+
 mod loopback;
 pub(crate) use loopback::reconcile;
 pub use loopback::{

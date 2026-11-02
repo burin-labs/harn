@@ -452,8 +452,7 @@ pub(crate) fn spawn_long_running_with_options(
     let started = std::time::Instant::now();
     let requested_cwd = cwd.as_ref().map(to_agent_path);
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
-    let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
-    let sandbox_report = sandbox_reporting.report();
+    let mut sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
     let spec = SpawnSpec {
@@ -472,6 +471,11 @@ pub(crate) fn spawn_long_running_with_options(
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
+    if let Some(broker) = handle.spawn_broker() {
+        sandbox_reporting =
+            harn_vm::process_sandbox::ProcessSandboxReportingContext::brokered(broker);
+    }
+    let sandbox_report = sandbox_reporting.report();
 
     let pid = handle.pid().unwrap_or(0);
     let process_group_id = handle.process_group_id();

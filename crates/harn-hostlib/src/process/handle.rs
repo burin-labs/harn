@@ -217,6 +217,13 @@ pub trait ProcessHandle: Send {
         None
     }
 
+    /// Id of the embedder spawn broker that ran this child outside the active
+    /// confinement (see [`harn_vm::process_sandbox::SpawnBroker`]). `None`
+    /// for every confined spawn.
+    fn spawn_broker(&self) -> Option<&str> {
+        None
+    }
+
     /// OS process id, when available.
     fn pid(&self) -> Option<u32>;
 

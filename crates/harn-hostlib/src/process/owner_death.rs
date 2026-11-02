@@ -196,6 +196,7 @@ pub(crate) struct PreparedGuardian {
     pub(crate) request: Vec<u8>,
     pub(crate) missing_program: Option<String>,
     pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
+    pub(crate) broker_id: Option<String>,
 }
 
 /// Build the guardian re-exec command and its private pipe request.
@@ -208,10 +209,22 @@ pub(crate) fn prepare_guardian(
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
+    // A brokered payload runs unconfined, so the guardian receives no
+    // confinement to hand on.
+    let brokered = super::real::prepare_brokered(&payload_spec, Some(cleanup_token.clone()))?;
     #[cfg(target_os = "linux")]
-    let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
+    let pinned = if brokered.is_some() {
+        None
+    } else {
+        super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?
+    };
+    let broker_id = brokered
+        .as_ref()
+        .and_then(|prepared| prepared.broker_id.clone());
     #[cfg(target_os = "linux")]
-    let (prepared, confinement) = {
+    let (prepared, confinement) = if let Some(prepared) = brokered {
+        (prepared, None)
+    } else {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(
             pinned
                 .as_ref()
@@ -232,10 +245,14 @@ pub(crate) fn prepare_guardian(
         (prepared, confinement.map(TransferredConfinement))
     };
     #[cfg(not(target_os = "linux"))]
-    let (prepared, confinement) = (
-        super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?,
-        build_confinement(&payload_spec.program)?,
-    );
+    let (prepared, confinement) = if let Some(prepared) = brokered {
+        (prepared, None)
+    } else {
+        (
+            super::real::prepare_confined_command(&payload_spec, Some(cleanup_token.clone()))?,
+            build_confinement(&payload_spec.program)?,
+        )
+    };
     #[cfg(target_os = "linux")]
     let source_verifier_bound = pinned.is_some();
     #[cfg(not(target_os = "linux"))]
@@ -335,6 +352,7 @@ pub(crate) fn prepare_guardian(
         request,
         missing_program,
         verifier_witness: witness,
+        broker_id,
     })
 }
 

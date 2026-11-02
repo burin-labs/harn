@@ -106,6 +106,10 @@
           "type": "string",
           "enum": ["not_enforced", "backend_unavailable", "inferred_only"],
           "description": "Coverage of mid-run sandbox denial reporting. inferred_only means a null denial is not proof that no operation was refused."
+        },
+        "broker": {
+          "type": "string",
+          "description": "Id of the embedder spawn broker that ran this exact argv outside the active confinement. Absent for every confined spawn."
         }
       },
       "required": ["kind", "enforced", "denial_reporting", "network"],

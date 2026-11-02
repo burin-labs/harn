@@ -768,6 +768,59 @@ let policy = CapabilityPolicy {
 push_execution_policy(policy);
 ```
 
+### Brokering one trusted spawn
+
+An embedder may need one specific trusted invocation to run outside the
+confinement, for example a read-only CLI call that needs host credentials the
+confined child cannot see. `harn_vm::process_sandbox::install_spawn_broker`
+installs a process-wide `SpawnBroker`. It can be installed once; a second call
+returns `SpawnBrokerAlreadyInstalled` and keeps the first broker.
+
+```rust,ignore
+use harn_vm::process_sandbox::{
+    install_spawn_broker, SpawnBroker, SpawnBrokerGrant, SpawnBrokerRequest,
+};
+
+struct ReadOnlyStatus;
+
+impl SpawnBroker for ReadOnlyStatus {
+    fn admit(&self, request: &SpawnBrokerRequest<'_>) -> Option<SpawnBrokerGrant> {
+        (request.program == "/usr/local/bin/status-cli"
+            && request.args == ["status", "--json"])
+            .then(|| SpawnBrokerGrant {
+                broker_id: "status-cli".into(),
+                cwd: request.cwd?.to_path_buf(),
+                env: host_credentials_env(),
+            })
+    }
+}
+
+install_spawn_broker(std::sync::Arc::new(ReadOnlyStatus))?;
+```
+
+Every `harn-hostlib` process spawn goes through `spawn_process`. With a broker
+installed it runs these steps in order:
+
+1. The universal catastrophic-command floor runs. A refused argv never reaches
+   the broker.
+2. A shell interpreter (`sh`, `bash`, `zsh`, `cmd`, `pwsh`, and the other
+   common shells) is never offered to the broker.
+3. `admit` sees the requested program, literal arguments, cwd, and the caller's
+   environment overrides. `None` leaves the spawn on its normal confined path.
+4. On `Some(grant)` the exact argv runs with no confinement, in `grant.cwd`,
+   with `grant.env` as the whole environment. Nothing is inherited, and the
+   caller's `env` and `env_remove` are not applied. Harn adds only its private
+   process-cleanup token so it can still reap the child's tree. Output capture,
+   process groups, timeouts, cancellation, and owner-death cleanup behave as
+   they do for any other spawn.
+
+The command receipt reports `sandbox.enforced: false` and
+`sandbox.broker: "<broker_id>"`. If the host process itself was confined with
+`confine_current_process`, the brokered child still runs under that confinement
+and the receipt says `enforced: true`. With no broker installed, spawning is
+unchanged. On Windows no spawn is OS-confined to begin with, so a grant changes
+only the child's cwd and environment.
+
 ## Confining a server process
 
 Everything above confines a child when Harn spawns it. An agent server that
