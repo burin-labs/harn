@@ -230,6 +230,9 @@ impl Vm {
     /// loop checks `is_cancel_requested()` at every instruction and
     /// exits with `VmError::Cancelled` when set.
     pub fn install_cancel_token(&mut self, token: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        if self.owns_execution || self.execution_cancel_token.is_none() {
+            self.execution_cancel_token = Some(token.clone());
+        }
         self.cancel_token = Some(token);
         self.cancel_grace_instructions_remaining = None;
     }

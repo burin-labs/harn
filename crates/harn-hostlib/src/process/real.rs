@@ -709,6 +709,25 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn register_scope_cleanup(
+        &self,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Option<harn_vm::op_interrupt::ActiveProcessCleanupGuard> {
+        #[cfg(unix)]
+        {
+            Some(harn_vm::op_interrupt::register_active_process_cleanup(
+                Some(self.pid),
+                &self.cleanup_token,
+                Some(cancel),
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = cancel;
+            None
+        }
+    }
+
     fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
         self.cleanup_report.clone()
     }

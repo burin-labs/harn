@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::commands::time::{self, RunTiming};
@@ -53,7 +53,7 @@ use self::eval_source::{eval_source_for_code, split_eval_header};
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 pub use self::interrupts::RunInterruptTokens;
 use self::interrupts::{
-    install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
+    install_signal_shutdown_handler, start_run_deadline_watchdog, RunTerminalControl,
 };
 use self::json_events::NdjsonEmitter;
 pub use self::lifecycle::RunProfileOptions;
@@ -244,13 +244,18 @@ pub(crate) async fn run_file_with_skill_dirs(
 ) -> i32 {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
-    let deadline_guard = control
-        .timeout
-        .map(|timeout| start_run_deadline_watchdog(timeout, interrupt_tokens.clone()));
+    let deadline_guard = control.timeout.map(|timeout| {
+        Arc::new(start_run_deadline_watchdog(
+            timeout,
+            interrupt_tokens.clone(),
+        ))
+    });
+    let terminal_control = RunTerminalControl::new(interrupt_tokens.clone(), deadline_guard);
 
     let _stdout_passthrough = StdoutPassthroughGuard::enable();
     let json_session = json.map(|options| {
         JsonRunSession::new(options, Box::new(io::stdout()) as Box<dyn io::Write + Send>)
+            .with_terminal_control(terminal_control.clone())
     });
     let outcome = execute_run_inner(ExecuteRunInputs {
         evaluation: control.evaluation,
@@ -273,9 +278,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         flight_recorder: control.flight_recorder,
     })
     .await;
-    if let Some(guard) = &deadline_guard {
-        guard.finish();
-    }
+    let exit_code = terminal_control.finish_exit(outcome.exit_code);
 
     // `harn run` streams normal program stdout during execution. Any stdout
     // left here came from older capture paths, so flush it after diagnostics.
@@ -286,14 +289,6 @@ pub(crate) async fn run_file_with_skill_dirs(
         io::stdout().write_all(outcome.stdout.as_bytes()).ok();
     }
 
-    let mut exit_code = outcome.exit_code;
-    if deadline_guard
-        .as_ref()
-        .is_some_and(RunDeadlineGuard::timed_out)
-        || (exit_code != 0 && interrupt_tokens.cancel_token.load(Ordering::SeqCst))
-    {
-        exit_code = crate::exit::RUN_INTERRUPTED;
-    }
     exit_code
 }
 
