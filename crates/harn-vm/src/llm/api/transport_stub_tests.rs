@@ -1447,4 +1447,6 @@ fn streaming_path_classifies_opaque_500_as_http_error() {
     assert!(err.contains("upstream exploded"), "err was: {err}");
 }
 
+mod hyperbolic;
 mod prompt_accounting;
+mod structured_output_fallback;
