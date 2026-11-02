@@ -268,14 +268,20 @@ fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {
 }
 
 fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Option<Span> {
-    tokens.iter().find_map(|token| match &token.kind {
-        TokenKind::Identifier(found)
-            if found == name && token.span.start >= start && token.span.end <= end =>
-        {
-            Some(token.span)
-        }
-        _ => None,
-    })
+    // Lexer tokens are emitted in source order. Skip tokens before the
+    // requested range instead of rescanning the file for every identifier.
+    let first = tokens.partition_point(|token| token.span.start < start);
+    tokens[first..]
+        .iter()
+        .take_while(|token| token.span.start <= end)
+        .find_map(|token| match &token.kind {
+            TokenKind::Identifier(found)
+                if found == name && token.span.start >= start && token.span.end <= end =>
+            {
+                Some(token.span)
+            }
+            _ => None,
+        })
 }
 
 fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
@@ -293,5 +299,40 @@ fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
         | Node::OverrideDecl { name, .. } => vec![(name.as_str(), node.span)],
         Node::EvalPackDecl { binding_name, .. } => vec![(binding_name.as_str(), node.span)],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod identifier_span_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_lookup_matches_linear_lookup_for_all_source_ranges() {
+        let source = "let alpha = 1\nlet βeta = alpha + alpha\nlet text = \"hello {alpha}\"\n";
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        assert!(tokens
+            .windows(2)
+            .all(|pair| pair[0].span.start <= pair[1].span.start));
+        for start in 0..=source.len() {
+            for end in start..=source.len() {
+                for name in ["alpha", "βeta", "text", "absent"] {
+                    let expected = tokens.iter().find_map(|token| match &token.kind {
+                        TokenKind::Identifier(found)
+                            if found == name
+                                && token.span.start >= start
+                                && token.span.end <= end =>
+                        {
+                            Some(token.span)
+                        }
+                        _ => None,
+                    });
+                    assert_eq!(
+                        identifier_span(&tokens, name, start, end),
+                        expected,
+                        "{name} in {start}..{end}"
+                    );
+                }
+            }
+        }
     }
 }
