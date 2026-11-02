@@ -570,7 +570,7 @@
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0,
+            "total_duration_ms": null,
             "unpriced_calls": 0,
             "usage_unknown_calls": 0
           }
@@ -1150,7 +1150,7 @@
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0,
+            "total_duration_ms": null,
             "unpriced_calls": 0,
             "usage_unknown_calls": 0
           }
@@ -1225,9 +1225,12 @@
           "type": "number"
         },
         "total_duration_ms": {
-          "default": 0,
+          "default": null,
           "format": "int64",
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "unpriced_calls": {
           "default": 0,
@@ -1339,7 +1342,7 @@
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0,
+            "total_duration_ms": null,
             "unpriced_calls": 0,
             "usage_unknown_calls": 0
           }
