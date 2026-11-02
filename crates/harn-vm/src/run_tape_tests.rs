@@ -14,6 +14,9 @@ mod session_reset;
 #[path = "run_tape_reminder_tests.rs"]
 mod reminders;
 
+#[path = "run_tape_host_effect_tests.rs"]
+mod host_effects;
+
 #[path = "run_tape_store_tests.rs"]
 mod store_changes;
 
@@ -1340,107 +1343,6 @@ fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
         seen.contains("egress-policy"),
         "the scan reached no capability contracts"
     );
-}
-
-/// Code-index methods that write workspace files, so a prefix refuses them.
-const REFUSED_CODE_INDEX_METHODS: &[&str] = &[
-    "change_signature",
-    "extract_function",
-    "move_symbol",
-    "rename_symbol",
-];
-
-/// A host that warms the code index before its first model call can branch:
-/// index maintenance of the restored workspace runs in the prefix, while a
-/// rebuild of another root, a source-writing refactor and a machine-global
-/// host lease are refused.
-#[test]
-fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
-    use harn_builtin_meta::CapabilityId;
-    let contract = |capability: CapabilityId, method: &str| {
-        let field = capability.field_name();
-        crate::stdlib::capability_method_manifest_entry(capability, method)
-            .map(|entry| entry.contract.effects)
-            .or_else(|| {
-                crate::stdlib::builtin_policy_metadata(&format!("__cap_{field}_{method}"))
-                    .1
-                    .map(|contract| contract.effects)
-            })
-    };
-    let mut unclassified = Vec::new();
-    for method in harn_capability_contracts::declared_capability_method_names("code_index") {
-        let writes = contract(CapabilityId::CodeIndex, method).is_some_and(|effects| {
-            effects
-                .iter()
-                .any(|effect| !matches!(effect.access, EffectAccess::Read | EffectAccess::Observe))
-        });
-        let admitted = prefix::WORKSPACE_INDEX_METHODS.contains(&method);
-        let refused = REFUSED_CODE_INDEX_METHODS.contains(&method);
-        assert!(
-            !(admitted && refused),
-            "`{method}` is both admitted and refused"
-        );
-        if writes && !admitted && !refused {
-            unclassified.push(method);
-        }
-    }
-    assert!(
-        unclassified.is_empty(),
-        "classify these code_index methods in WORKSPACE_INDEX_METHODS or \
-         REFUSED_CODE_INDEX_METHODS: {unclassified:?}"
-    );
-
-    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
-    let workspace = tmp.path().join("workspace");
-    let elsewhere = tmp.path().join("elsewhere");
-    std::fs::create_dir_all(&elsewhere).unwrap();
-    {
-        let _guard = record_full(tmp.path());
-        record_llm_call(&request("one"), &result("a", None));
-    }
-    let _branch = branch(tmp.path(), 1, &workspace);
-    let call = |capability: CapabilityId, method: &str, args: serde_json::Value| {
-        let args = [crate::schema::json_to_vm_value(&args)];
-        serve_read(
-            Some((capability, method)),
-            method,
-            contract(capability, method),
-            &args,
-        )
-    };
-    let root = |path: &Path| serde_json::json!({"root": path.display().to_string()});
-    assert!(
-        call(CapabilityId::CodeIndex, "rebuild", root(&workspace)).is_none(),
-        "a rebuild of the restored workspace runs"
-    );
-    for method in [
-        "reindex_file",
-        "agent_register",
-        "lock_try",
-        "version_record",
-    ] {
-        assert!(
-            call(CapabilityId::CodeIndex, method, serde_json::json!({})).is_none(),
-            "`code_index.{method}` runs"
-        );
-    }
-    let refused =
-        |outcome: Option<Result<VmValue, crate::value::VmError>>| matches!(outcome, Some(Err(_)));
-    assert!(
-        refused(call(CapabilityId::CodeIndex, "rebuild", root(&elsewhere))),
-        "a rebuild outside the restored workspace is refused"
-    );
-    assert!(refused(call(
-        CapabilityId::CodeIndex,
-        "rename_symbol",
-        serde_json::json!({})
-    )));
-    assert!(refused(call(
-        CapabilityId::HostLease,
-        "acquire",
-        serde_json::json!({})
-    )));
 }
 
 /// Hosted providers never probe, so a branch passes through; a self-hosted

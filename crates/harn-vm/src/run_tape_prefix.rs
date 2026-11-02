@@ -1,13 +1,13 @@
 //! What a branch prefix may do besides model and tool calls.
 //!
 //! While a branch replays its prefix, every builtin and capability call is
-//! checked against its registry effect contract. Clock, random, env and workspace-location reads
-//! are served from the recording. The runtime store opens with what the
-//! recorded run opened. Durable state writes land in the branch's own state
-//! root (see `scope`). Reads of the restored workspace, state, host facts and
-//! secrets run, and so does code-index maintenance of the restored workspace.
-//! Anything else would act on the world a second time, so it is
-//! refused and the branch diverges.
+//! checked against its registry effect contract. Clock, random, env,
+//! workspace-location and command-output reads are served from the recording.
+//! The runtime store opens with what the recorded run opened. Durable state
+//! writes land in the branch's own state root (see `scope`). Reads of the
+//! restored workspace, state, host facts and secrets run, and so does
+//! code-index maintenance of the restored workspace. Anything else would act
+//! on the world a second time, so it is refused and the branch diverges.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -54,6 +54,9 @@ fn verdict(owner: Owner<'_>, effects: &[EffectSpec]) -> Verdict {
             EffectKind::Fs | EffectKind::Host | EffectKind::Secret | EffectKind::State if reads => {
             }
             EffectKind::Network if reads && gates_own_network_reads(owner) => {}
+            // The prefix serves commands from the tape, so what a later read of
+            // their handles saw is on the tape too.
+            EffectKind::Process if reads && observes_recorded_commands(owner) => serve = true,
             EffectKind::State
                 if branch_owns_state(owner)
                     || process_local(effect)
@@ -86,6 +89,19 @@ fn gates_own_network_reads(owner: Owner<'_>) -> bool {
     matches!(
         owner,
         Some((CapabilityId::Llm, "probe_provider_capabilities"))
+    )
+}
+
+/// Reads of command handles and their output. In a prefix the commands they
+/// observe were served from the tape and never ran, so the read is served
+/// from the recording too, and a recording made before it was taped diverges.
+fn observes_recorded_commands(owner: Owner<'_>) -> bool {
+    matches!(
+        owner,
+        Some((
+            CapabilityId::Tools,
+            "list_handles" | "read_command_output" | "wait_command" | "wait_command_output"
+        ))
     )
 }
 
