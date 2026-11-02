@@ -126,6 +126,11 @@ impl AsyncBuiltinCtx {
         self.child.lock().interrupt_sources()
     }
 
+    /// Top-level cancellation identity, retained across parallel child tokens.
+    pub fn execution_cancel_token(&self) -> Option<Arc<std::sync::atomic::AtomicBool>> {
+        self.child.lock().execution_cancel_token.clone()
+    }
+
     /// Pause the outer host execution rail while an embedder-owned resource is
     /// not runnable. Catchable script deadlines remain unchanged.
     pub fn pause_execution_deadline(

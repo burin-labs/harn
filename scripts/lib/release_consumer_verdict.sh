@@ -170,6 +170,7 @@ release_require_rehearsal_binding() (
   binding_after="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" &&
     [[ "$binding_after" == "$binding" ]] ||
     release_binding_refusal rehearsal_binding_changed "run=$run_id" || exit 1
+  jq -ce '.evidence | {producer_attempt,manifest_id:.manifest.id,manifest_digest:.manifest.digest}' <<< "$binding"
   echo "Consumer rehearsal binding source=$sha producer=$run_id manifest=$manifest consumer_run=$(field consumer_run) $decision" >&2
 )
 

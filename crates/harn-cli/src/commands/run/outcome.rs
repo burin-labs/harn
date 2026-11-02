@@ -20,12 +20,14 @@ use std::sync::Arc;
 /// binary entry can `process::exit(...)`.
 pub(super) struct JsonRunSession {
     emitter: self::json_events::NdjsonEmitter,
+    terminal_control: Option<RunTerminalControl>,
 }
 
 impl JsonRunSession {
     pub(super) fn new(options: RunJsonOptions, out: Box<dyn io::Write + Send>) -> Self {
         Self {
             emitter: NdjsonEmitter::new(out, options.quiet),
+            terminal_control: None,
         }
     }
 
@@ -33,7 +35,19 @@ impl JsonRunSession {
         self.emitter.sink()
     }
 
+    pub(super) fn with_terminal_control(mut self, control: RunTerminalControl) -> Self {
+        self.terminal_control = Some(control);
+        self
+    }
+
+    fn finish_exit(&self, exit_code: i32) -> i32 {
+        self.terminal_control
+            .as_ref()
+            .map_or(exit_code, |control| control.finish_exit(exit_code))
+    }
+
     pub(super) fn finalize_result(self, value: serde_json::Value, exit_code: i32) -> RunOutcome {
+        let exit_code = self.finish_exit(exit_code);
         self.emitter.emit_result(value, exit_code);
         RunOutcome {
             stdout: String::new(),
@@ -58,6 +72,7 @@ impl JsonRunSession {
         details: serde_json::Value,
         exit_code: i32,
     ) -> RunOutcome {
+        let exit_code = self.finish_exit(exit_code);
         self.emitter.emit_error_with_details(code, message, details);
         RunOutcome {
             stdout: String::new(),

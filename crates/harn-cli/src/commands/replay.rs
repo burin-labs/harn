@@ -832,8 +832,18 @@ fn print_report_human(report: &ReplayReport) {
 }
 
 fn trace_fixture_result(trace: &ReplayOracleTrace) -> Result<ReplayFixtureResult, String> {
-    let report = harn_vm::run_replay_oracle_trace(trace)
-        .map_err(|error| format!("failed to evaluate replay trace: {error}"))?;
+    let report = match harn_vm::run_replay_oracle_trace(trace) {
+        Ok(report) => report,
+        Err(harn_vm::ReplayOracleError::NothingCompared) => {
+            return Ok(ReplayFixtureResult {
+                pass: false,
+                failures: vec![harn_vm::ReplayOracleError::NothingCompared.to_string()],
+                stage_count: 0,
+                expectations_compared: 0,
+            });
+        }
+        Err(error) => return Err(format!("failed to evaluate replay trace: {error}")),
+    };
     let failures = if report.passed {
         Vec::new()
     } else {

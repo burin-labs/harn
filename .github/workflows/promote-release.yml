@@ -413,6 +413,9 @@ jobs:
       ready: ${{ steps.authorize.outputs.ready || steps.standalone.outputs.ready }}
       original_context: ${{ steps.original-context.outputs.context }}
       consumer_repair: ${{ steps.consumer-repair.outputs.repair_request }}
+      expected_attempt: ${{ steps.producer-binding.outputs.expected_attempt }}
+      expected_manifest_id: ${{ steps.producer-binding.outputs.expected_manifest_id }}
+      expected_manifest_digest: ${{ steps.producer-binding.outputs.expected_manifest_digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -515,6 +518,7 @@ jobs:
           permission-pull-requests: read
       - name: Re-read the producer rehearsal binding
         if: needs.plan.outputs.standalone_harn != 'true' && needs.plan.outputs.requires_rehearsal == 'false' && needs.plan.outputs.requires_attached_consumer != 'true'
+        id: producer-binding
         env:
           GH_TOKEN: ${{ github.token }}
           CONSUMER_READ_TOKEN: ${{ steps.binding-read.outputs.token }}
@@ -525,7 +529,13 @@ jobs:
           set -euo pipefail
           # shellcheck source=scripts/lib/release_consumer_verdict.sh
           source scripts/lib/release_consumer_verdict.sh
-          release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA"
+          identity="$(release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA")"
+          jq -er '
+            select((.producer_attempt | type == "number" and . > 0 and . == floor) and
+              (.manifest_id | type == "number" and . > 0 and . == floor) and
+              (.manifest_digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))) |
+            "expected_attempt=\(.producer_attempt)\nexpected_manifest_id=\(.manifest_id)\nexpected_manifest_digest=\(.manifest_digest)"
+          ' <<< "$identity" >> "$GITHUB_OUTPUT"
       - name: Require the owning rehearsal result
         if: needs.plan.outputs.standalone_harn != 'true'
         id: authorize
@@ -578,10 +588,13 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@ef4578faeb3462013fa74bb3915a455f1172c058
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@01061668fe79be467fa6ab964b4e46a149ab7001
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
+      expected-attempt: ${{ needs.authorize.outputs.expected_attempt }}
+      expected-manifest-id: ${{ needs.authorize.outputs.expected_manifest_id }}
+      expected-manifest-digest: ${{ needs.authorize.outputs.expected_manifest_digest }}
       tag: ${{ needs.plan.outputs.tag }}
       original-consumer-context: ${{ needs.authorize.outputs.original_context }}
       consumer-repair: ${{ needs.authorize.outputs.consumer_repair }}
