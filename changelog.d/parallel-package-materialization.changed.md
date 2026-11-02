@@ -1,0 +1,1 @@
+- Fetch independent locked package sources concurrently while preserving atomic package generation publication.

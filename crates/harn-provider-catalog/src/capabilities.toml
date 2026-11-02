@@ -1043,6 +1043,14 @@ jitter = true
 model_match = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5", "anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5"]
 extends = true
 computer_use_style = "native_anthropic_toolset"
+anthropic_beta_features = ["thinking-binding-controls-2026-08-01"]
+
+# These models validate signed reasoning against its full conversation prefix.
+# The Messages API can drop invalidated blocks when the caller changes context.
+[[provider.anthropic]]
+model_match = ["claude-fable-5-1*", "claude-mythos-5-1*", "anthropic/claude-fable-5-1*", "anthropic/claude-fable-5.1*", "anthropic/claude-mythos-5-1*", "anthropic/claude-mythos-5.1*"]
+extends = true
+anthropic_beta_features = ["thinking-binding-controls-2026-08-01"]
 
 # `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
 # actually cache. Below it a `cache_control` breakpoint is accepted and then
