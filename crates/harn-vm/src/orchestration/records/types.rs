@@ -221,6 +221,7 @@ pub struct ReplayEvalReport {
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+    pub expectations_compared: usize,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,0 +1,63 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  const options = {
+    provider: "mock",
+    model: "mock-model",
+    schema_retries: 0,
+    repair: {enabled: false},
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {
+          status: 400,
+          kind: "terminal",
+          reason: "content_policy",
+          message: "provider HTTP 400 Bad Request [content_policy]: blocked",
+        },
+      },
+      llm_text("{\"answer\":\"next-request\"}"),
+    ],
+    { ->
+      const refused = harness.llm.call_structured_result("First request", schema, options)
+      contract_effect(
+        harness.stdio,
+        "effect_policy_refusal_stops",
+        refused.ok == false && refused.repaired == false
+          && contains(refused.error, "content_policy"),
+      )
+      const next = harness.llm.call_structured_result("Next request", schema, options)
+      contract_negative(
+        harness.stdio,
+        "negative_policy_refusal_does_not_consume_next_request",
+        next.ok != true || next?.data?.answer != "next-request",
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {
+          status: 400,
+          kind: "terminal",
+          reason: "invalid_request",
+          message: "provider HTTP 400 Bad Request [invalid_request]: response_format unsupported",
+        },
+      },
+      llm_text("{\"answer\":\"ready\"}"),
+    ],
+    { ->
+      const fallback = harness.llm.call_structured_result("Format fallback", schema, options)
+      contract_effect(
+        harness.stdio,
+        "effect_real_format_rejection_falls_back",
+        fallback.ok == true && fallback?.data?.answer == "ready",
+      )
+    },
+  )
+}

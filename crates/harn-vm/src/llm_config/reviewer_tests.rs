@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn decision_only_models_cannot_be_selected_as_text_reviewers() {
+    let config = effective_config();
+    let decision = &config.models["openrouter/liquid/d1"];
+    assert!(!decision.supports_operation(ModelOperation::TextGeneration));
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "qwen/qwen3.6-35b-a3b".to_string(),
+            author_provider: Some("openrouter".to_string()),
+            intent: ComplementaryReviewerIntent::PlanReview,
+            max_price_multiplier: Some(0.01),
+            min_price_cap_per_mtok: None,
+            max_price_cap_per_mtok: None,
+        },
+        |_| true,
+    );
+    assert!(
+        config.models[&selection.reviewer.id].supports_operation(ModelOperation::TextGeneration),
+        "{selection:?}"
+    );
+}
+
+#[test]
 fn complementary_reviewer_uses_different_family() {
     let selection = pick_complementary_reviewer_with_availability(
         ComplementaryReviewerOptions {

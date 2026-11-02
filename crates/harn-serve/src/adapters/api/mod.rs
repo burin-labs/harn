@@ -68,6 +68,7 @@ pub struct ApiServerConfig {
     pub auth_policy: AuthPolicy,
     pub workspace_root: PathBuf,
     default_session_mode: String,
+    session_environment: crate::adapters::acp::AcpSessionEnvironmentConfig,
     host_responder: Option<Arc<dyn ApiHostResponder>>,
 }
 
@@ -80,6 +81,10 @@ impl ApiServerConfig {
             auth_policy: AuthPolicy::allow_all(),
             workspace_root: root,
             default_session_mode: "ask".to_string(),
+            session_environment: crate::adapters::acp::AcpSessionEnvironmentConfig {
+                kind: harn_vm::security::EnvironmentPolicyKind::Isolated,
+                grants: Vec::new(),
+            },
             host_responder: None,
         }
     }
@@ -91,6 +96,16 @@ impl ApiServerConfig {
 
     pub fn with_host_responder(mut self, responder: Arc<dyn ApiHostResponder>) -> Self {
         self.host_responder = Some(responder);
+        self
+    }
+
+    /// Supply the trusted embedder's environment declaration for new and restored sessions.
+    /// REST requests cannot override it; the default remains isolated.
+    pub fn with_session_environment(
+        mut self,
+        environment: crate::adapters::acp::AcpSessionEnvironmentConfig,
+    ) -> Self {
+        self.session_environment = environment;
         self
     }
 
@@ -144,6 +159,7 @@ impl ApiServer {
             permissions: Arc::new(InMemoryPermissionStore::default()),
             provider_catalog,
             default_session_mode: config.default_session_mode,
+            session_environment: config.session_environment,
             host_responder: config.host_responder,
             event_log,
             event_log_error,
@@ -198,6 +214,7 @@ struct ApiState {
     permissions: Arc<InMemoryPermissionStore>,
     provider_catalog: ProviderCatalogRuntime,
     default_session_mode: String,
+    session_environment: crate::adapters::acp::AcpSessionEnvironmentConfig,
     host_responder: Option<Arc<dyn ApiHostResponder>>,
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
