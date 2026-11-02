@@ -806,6 +806,55 @@ fn inject_reminder_with_policy(
     })
 }
 
+/// Renew a provider reminder whose emission is unchanged and still held by
+/// the session. The held copy keeps its id, so the model is not sent its body
+/// again, and its TTL restarts from the candidate's turn. A copy matches when
+/// it has the candidate's dedupe key and carries `emission_tag`, a digest of
+/// every declared field. Returns the held reminder's id, or `None` when the
+/// session holds no matching copy.
+pub(crate) fn renew_unchanged_provider_reminder(
+    id: &str,
+    candidate: &crate::llm::helpers::SystemReminder,
+    emission_tag: &str,
+) -> Result<Option<String>, String> {
+    let Some(dedupe_key) = candidate.dedupe_key.as_deref() else {
+        return Ok(None);
+    };
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_session_renew_reminder: unknown session id '{id}'"
+            ));
+        };
+        let Some(dict) = state.transcript.as_dict().cloned() else {
+            return Ok(None);
+        };
+        let Some(VmValue::List(events)) = dict.get("events") else {
+            return Ok(None);
+        };
+        let mut events: Vec<VmValue> = events.iter().cloned().collect();
+        let Some((index, mut held)) = events.iter().enumerate().find_map(|(index, event)| {
+            crate::llm::helpers::reminder_from_event(event)
+                .filter(|held| {
+                    held.dedupe_key.as_deref() == Some(dedupe_key)
+                        && held.tags.iter().any(|tag| tag == emission_tag)
+                })
+                .map(|held| (index, held))
+        }) else {
+            return Ok(None);
+        };
+        held.ttl_turns = candidate.ttl_turns;
+        held.fired_at_turn = candidate.fired_at_turn;
+        events[index] = crate::llm::helpers::replace_reminder_payload(&events[index], &held);
+        let mut next = dict;
+        next.put("events", VmValue::list(events));
+        apply_transcript_with_budget(state, VmValue::dict(next), "renew_provider_reminder")?;
+        state.touch();
+        Ok(Some(held.id))
+    })
+}
+
 fn same_provider_reminder(
     existing: &crate::llm::helpers::SystemReminder,
     candidate: &crate::llm::helpers::SystemReminder,
