@@ -503,7 +503,7 @@ fn build_bundle_assembles_versioned_manifest() {
         !validator.is_valid(&legacy),
         "older bundle versions are not this contract"
     );
-    let mut missing_effect_knowledge = wire.clone();
+    let mut missing_effect_knowledge = wire;
     missing_effect_knowledge["deterministic_steps"][0]
         .as_object_mut()
         .unwrap()

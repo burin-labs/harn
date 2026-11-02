@@ -18,56 +18,6 @@ fn name(key: &str) -> String {
     format!("HarnCrystallization{key}")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn bundle_projection_carries_safety_and_provenance_fields() {
-        let projection = BundleProjection::load().expect("bundle projection");
-        let swift = projection.append(String::new(), Target::Swift);
-        for field in [
-            "sideEffectsKnown",
-            "executionId",
-            "replayOracle",
-            "comparedReceipts",
-            "divergenceHistory",
-            "estimatedTimeTokenSavings",
-            "skillCandidateId",
-        ] {
-            assert!(swift.contains(field), "missing bundle field {field}");
-        }
-        assert!(swift.contains("needsApproval = \"needs_approval\""));
-        assert!(swift.contains("public static let schemaVersion = 2"));
-        assert!(swift.contains("try values.encode(team, forKey: .team)"));
-        assert!(!swift.contains("struct HarnCrystallizationBundleStep"));
-        let version = &projection.schema["$defs"]["BundleGenerator"]["properties"]["version"];
-        assert!(version.get("default").is_none());
-        assert_eq!(version["x-harn-contextual-default"], true);
-        assert!(projection.schema["properties"]["generator"]
-            .get("default")
-            .is_none());
-        assert_eq!(
-            projection.schema["$defs"]["BundleGenerator"]["properties"]["tool"]["default"],
-            "harn"
-        );
-        assert_eq!(
-            projection.schema["$defs"]["BundlePromotion"]["properties"]["rollout_policy"]
-                ["default"],
-            harn_vm::orchestration::BundlePromotion::default().rollout_policy
-        );
-    }
-
-    #[test]
-    fn bundle_projection_rejects_an_unprojectable_new_wire_shape() {
-        let mut schema = harn_vm::orchestration::crystallization_bundle_json_schema();
-        schema["properties"]["future_field"] =
-            json!({"type": "object", "patternProperties": {"^x": {"type": "string"}}});
-        assert!(BundleProjection::from_schema(schema).is_err());
-    }
-}
-
 impl BundleProjection {
     pub(super) fn load() -> Result<Self, String> {
         Self::from_schema(harn_vm::orchestration::crystallization_bundle_json_schema())
@@ -178,5 +128,55 @@ impl BundleProjection {
         out.truncate(out.trim_end().len());
         out.push('\n');
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn bundle_projection_carries_safety_and_provenance_fields() {
+        let projection = BundleProjection::load().expect("bundle projection");
+        let swift = projection.append(String::new(), Target::Swift);
+        for field in [
+            "sideEffectsKnown",
+            "executionId",
+            "replayOracle",
+            "comparedReceipts",
+            "divergenceHistory",
+            "estimatedTimeTokenSavings",
+            "skillCandidateId",
+        ] {
+            assert!(swift.contains(field), "missing bundle field {field}");
+        }
+        assert!(swift.contains("needsApproval = \"needs_approval\""));
+        assert!(swift.contains("public static let schemaVersion = 2"));
+        assert!(swift.contains("try values.encode(team, forKey: .team)"));
+        assert!(!swift.contains("struct HarnCrystallizationBundleStep"));
+        let version = &projection.schema["$defs"]["BundleGenerator"]["properties"]["version"];
+        assert!(version.get("default").is_none());
+        assert_eq!(version["x-harn-contextual-default"], true);
+        assert!(projection.schema["properties"]["generator"]
+            .get("default")
+            .is_none());
+        assert_eq!(
+            projection.schema["$defs"]["BundleGenerator"]["properties"]["tool"]["default"],
+            "harn"
+        );
+        assert_eq!(
+            projection.schema["$defs"]["BundlePromotion"]["properties"]["rollout_policy"]
+                ["default"],
+            harn_vm::orchestration::BundlePromotion::default().rollout_policy
+        );
+    }
+
+    #[test]
+    fn bundle_projection_rejects_an_unprojectable_new_wire_shape() {
+        let mut schema = harn_vm::orchestration::crystallization_bundle_json_schema();
+        schema["properties"]["future_field"] =
+            json!({"type": "object", "patternProperties": {"^x": {"type": "string"}}});
+        assert!(BundleProjection::from_schema(schema).is_err());
     }
 }
