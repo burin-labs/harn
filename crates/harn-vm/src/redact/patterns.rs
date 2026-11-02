@@ -559,8 +559,14 @@ mod tests {
     #[test]
     fn sensitive_assignment_preserves_source_expressions() {
         run_clean();
-        let input = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;\ntoken = readKey2[0];\ntoken = items123[\"key\"];\ntoken = Type123{field:1};";
-        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        let input = [
+            "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;\ntoken = readKey2[0];\ntoken = items123[\"key\"];\ntoken = Type123",
+            "{",
+            "field:1",
+            "};",
+        ]
+        .concat();
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Borrowed(_)), "{out}");
     }
 
