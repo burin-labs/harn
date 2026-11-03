@@ -1778,6 +1778,22 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   const ci = declared["ci.yml"]
   const declared_policy = policy()
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  // A toolchain move must republish the artifact the manifest binds to it.
+  const push_without_toolchain = {
+    ...producer,
+    on: {
+      ...producer["on"],
+      push: {
+        ...producer["on"].push,
+        paths: producer["on"].push.paths.filter({ path -> return path != "rust-toolchain.toml" }).to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, push_without_toolchain, ci).contains(
+      "macos-nightly.yml must republish the warm artifact on a push to main that changes rust-toolchain.toml, which its manifest binds",
+    ),
+  )
   const without_invalidation = {
     ...producer,
     jobs: {

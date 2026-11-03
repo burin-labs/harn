@@ -31,6 +31,10 @@ on:
       - "scripts/lib/rustc_frontend.sh"
       - "scripts/rustc_frontend_wrapper.sh"
       - ".github/actions/rust-toolchain/**"
+      # The warm artifact's manifest binds this file's hash, so a toolchain move
+      # leaves every pull request without a compatible artifact until a producer
+      # run republishes it. Republish on the move, not at the next nightly.
+      - "rust-toolchain.toml"
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
     # the Windows workspace tests so the two don't contend for cache lookups.

@@ -537,6 +537,7 @@ pub fn workflows() {
       },
     },
     "macos-nightly.yml": {
+      "on": {push: {branches: ["main"], paths: ["rust-toolchain.toml"]}},
       env: {RUSTFLAGS: "-D warnings"},
       permissions: {contents: "read", actions: "write"},
       jobs: {
