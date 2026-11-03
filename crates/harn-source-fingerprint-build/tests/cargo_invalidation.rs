@@ -1,6 +1,24 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The workspace's compiler. Cargo runs each crate's rustc from that crate's directory, so outside
+/// the workspace a rustup proxy would pick the host's default toolchain for registry dependencies.
+fn workspace_rustc() -> PathBuf {
+    let output = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("ask the workspace's toolchain for its sysroot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Path::new(String::from_utf8(output.stdout).unwrap().trim())
+        .join("bin")
+        .join(format!("rustc{}", std::env::consts::EXE_SUFFIX))
+}
 
 fn build(root: &Path) -> (String, Vec<serde_json::Value>) {
     let output = Command::new(env!("CARGO"))
@@ -15,6 +33,7 @@ fn build(root: &Path) -> (String, Vec<serde_json::Value>) {
         .env("CARGO_TARGET_DIR", root.join("target"))
         .env("CARGO_BUILD_BUILD_DIR", root.join("build"))
         .env("CARGO_INCREMENTAL", "0")
+        .env("RUSTC", workspace_rustc())
         .env("RUSTC_WRAPPER", "")
         .env("RUSTC_WORKSPACE_WRAPPER", "")
         .env("CARGO_BUILD_RUSTC_WRAPPER", "")
@@ -69,15 +88,11 @@ fn cargo_reuses_unchanged_inputs_and_invalidates_a_changed_dependency() {
     fs::create_dir_all(root.join("component/src")).unwrap();
     fs::create_dir_all(root.join("consumer/src")).unwrap();
     let build_helper = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let crates = build_helper.parent().unwrap();
-    let helper = crates.join("harn-source-fingerprint");
+    let helper = build_helper
+        .parent()
+        .unwrap()
+        .join("harn-source-fingerprint");
     let helper = serde_json::to_string(&helper.to_string_lossy()).unwrap();
-    // The fixture sits outside the workspace, where rustup would otherwise pick the host's default.
-    fs::copy(
-        crates.parent().unwrap().join("rust-toolchain.toml"),
-        root.join("rust-toolchain.toml"),
-    )
-    .unwrap();
     let build_helper = serde_json::to_string(&build_helper.to_string_lossy()).unwrap();
     fs::write(
         root.join("Cargo.toml"),
