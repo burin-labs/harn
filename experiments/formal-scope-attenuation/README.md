@@ -20,18 +20,18 @@ HARN_TEST_ONE_PACKAGE=harn-vm HARN_TEST_ONE_BINARY=scope_attenuation_bounded HAR
 
 ## Optional algebra proof
 
-With an already installed Z3, run from this directory:
+With an already installed Z3, inspect the mathematical model from the repo root:
 
 ```sh
-python3 verify_scope_algebra.py --repo /path/to/harn --out /path/to/evidence
+z3 -smt2 experiments/formal-scope-attenuation/scope_algebra.smt2
 ```
 
-The runner pins the full production actor-chain source hash, defaults to HEAD,
-and refuses changed source. An explicit `--ref` reproduces an older revision.
-It expects eight UNSAT counterexample searches, an Off-mode widening witness,
-and three SAT mutation witnesses: removing inclusion, removing strictness, and
-skipping the origin edge. Missing, unknown or errored solver results fail.
-It adds no solver installation or new CI dependency.
+The expected transcript has eight UNSAT counterexample searches, an Off-mode
+widening witness, and three SAT mutation witnesses: removing inclusion, removing
+strictness, and skipping the origin edge. Unknown, missing or errored results
+are not evidence of success. This optional command is not a CI gate; the Rust
+test is the maintained connection to production code. No solver installation
+or new CI dependency is added.
 
 This is a finite mathematical abstraction, **not Rust MIR verification**.
 It trusts Z3 and the encoding, plus the refinement from normalized
