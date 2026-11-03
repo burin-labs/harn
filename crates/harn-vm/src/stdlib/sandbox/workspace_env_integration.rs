@@ -862,3 +862,58 @@ fn a_confined_child_runs_the_installed_pinned_pnpm_without_the_registry() {
     // A pin that is not installed leaves the search path alone.
     assert_eq!(pnpm_for("9.9.8").unwrap().stdout, b"OUTER-PNPM\n");
 }
+
+/// A launcher cache path is kept when the policy already grants it: inside the
+/// workspace, or under one of the policy's process write roots. Anywhere else
+/// it is relocated, so an inherited global path still cannot widen the jail.
+#[cfg(unix)]
+#[test]
+fn a_launcher_cache_under_a_granted_write_root_is_kept() {
+    let workspace = tempfile::tempdir().unwrap();
+    let granted = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let granted = granted.path().canonicalize().unwrap();
+    let outside = outside.path().canonicalize().unwrap();
+    let granted_cache = granted.join("uv");
+    let workspace_cache = workspace.join(".outer-harness-cache/uv");
+    let outside_cache = outside.join("uv");
+    for cache in [&granted_cache, &workspace_cache, &outside_cache] {
+        std::fs::create_dir_all(cache).unwrap();
+    }
+
+    for (cache, kept) in [
+        (&granted_cache, true),
+        (&workspace_cache, true),
+        (&outside_cache, false),
+    ] {
+        let environment =
+            isolated_environment([("UV_CACHE_DIR".to_string(), cache.display().to_string())]);
+        let _guard = enter_policy_with_environment(&workspace, environment);
+        let mut policy = crate::orchestration::current_execution_policy().unwrap();
+        pop_execution_policy();
+        policy
+            .process_sandbox
+            .write_roots
+            .push(granted.display().to_string());
+        push_execution_policy(policy);
+
+        let env = find_program("env").expect("env executable");
+        let Some(output) = run(&env, &[], &workspace) else {
+            return;
+        };
+        let observed = PathBuf::from(
+            output_environment(output)
+                .get("UV_CACHE_DIR")
+                .expect("UV_CACHE_DIR reaches the child"),
+        );
+        if kept {
+            assert_eq!(&observed, cache, "a granted cache path is kept");
+        } else {
+            assert!(
+                !observed.starts_with(&outside),
+                "a cache path outside every grant must be relocated: {observed:?}"
+            );
+        }
+    }
+}
