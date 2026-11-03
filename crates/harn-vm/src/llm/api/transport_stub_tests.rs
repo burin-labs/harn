@@ -292,6 +292,7 @@ fn install_openai_stub_provider_with_cache_accounting(
             auth_env: crate::llm_config::AuthEnv::None,
             chat_endpoint: "/chat/completions".to_string(),
             cache_usage_accounting,
+            stream_usage_accounting: Some(true),
             ..Default::default()
         },
     );

@@ -6,12 +6,12 @@ Mirrors the TypeScript and Swift artifacts generated alongside this
 module. Field names match the wire JSON (camelCase) so dataclass
 instances round-trip through ``json.dumps(asdict(obj))`` without a
 custom encoder. Generic optional fields default to ``None`` and are
-stripped by :func:`to_wire`; closed recap shapes preserve required nulls.
+stripped by :func:`to_wire`; schema-required nullable fields retain null.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -239,6 +239,8 @@ __all__ = [
     "ACPWorkerUpdateMetaHarn",
     "ACPWorkerUpdateMeta",
     "ACPWorkerUpdate",
+    "HarnProviderUsage",
+    "HarnReportedCacheTotals",
 ]
 
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
@@ -1064,7 +1066,10 @@ def _strip_none(value: Any, preserve_dict_nulls: bool = False) -> Any:
         return {
             f.metadata.get("wire_name", f.name): _strip_none(getattr(value, f.name), preserve_dict_nulls or bool(required))
             for f in fields(value)
-            if getattr(value, f.name) is not None or f.metadata.get("wire_name", f.name) in required
+            # A field without a constructor default is required on the wire, even when it is null.
+            if getattr(value, f.name) is not None
+            or f.metadata.get("wire_name", f.name) in required
+            or (f.default is MISSING and f.default_factory is MISSING)
         }
     if isinstance(value, dict):
         return {key: _strip_none(item, preserve_dict_nulls) for key, item in value.items() if item is not None or preserve_dict_nulls}
@@ -1192,7 +1197,11 @@ class ACPNotification(_HarnDataclass):
     jsonrpc: str = "2.0"
 
 
-ACPMessage = Union[ACPRequest, ACPResponse, ACPNotification]
+# `params` is caller data, so a null nested inside it is a value, not an absent field.
+ACPNotification.__harn_required_fields__ = frozenset(["method", "jsonrpc"])
+
+
+ACPMessage =Union[ACPRequest, ACPResponse, ACPNotification]
 
 
 def is_request(message: Mapping[str, Any]) -> bool:
@@ -2056,6 +2065,7 @@ class HarnSessionRecapSource(_HarnStrictRecapDataclass):
 class HarnSessionRecapTextFact(_HarnStrictRecapDataclass):
     text: str
     sourceEventId: int
+    messageId: Optional[str]
 
 @dataclass
 class HarnSessionRecapVerificationFact(_HarnStrictRecapDataclass):
@@ -2483,6 +2493,15 @@ class HarnProviderUsage(_HarnDataclass):
     usage_unknown_calls: int
     known_cost_usd: float
     cost_usd: Optional[float]
+    reported_cache: Optional[HarnReportedCacheTotals]
+
+@dataclass
+class HarnReportedCacheTotals(_HarnDataclass):
+    reported_calls: int
+    read_reported_calls: int
+    write_reported_calls: int
+    read_tokens: int
+    write_tokens: int
 
 
 

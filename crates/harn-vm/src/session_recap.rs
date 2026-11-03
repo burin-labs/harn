@@ -210,6 +210,7 @@ pub struct IterationRecap {
 pub struct RecapTextFact {
     pub text: String,
     pub source_event_id: u64,
+    pub message_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -692,6 +693,7 @@ impl<'a> RecapProjector<'a> {
                 self.turns[turn_index].recap.prompts.push(RecapTextFact {
                     text,
                     source_event_id: event.event_id,
+                    message_id: event.headers.get("message_id").cloned(),
                 });
                 self.matched += 1;
             }
@@ -707,6 +709,7 @@ impl<'a> RecapProjector<'a> {
                     .push(RecapTextFact {
                         text,
                         source_event_id: event.event_id,
+                        message_id: None,
                     });
                 self.mark_segment_event(turn_index, segment_index, event.event_id);
             }

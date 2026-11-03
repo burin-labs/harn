@@ -412,6 +412,23 @@ fn llm_usage_runtime_and_typed_projections_match_bidirectionally() {
         stdlib_keys, runtime_keys,
         "stdlib LlmUsage drifted from the runtime-emitted llm_call usage envelope"
     );
+    let cache = serde_json::to_value(crate::llm::usage::ReportedCacheTotals::default())
+        .expect("cache measurements serialize");
+    let cache_keys: BTreeSet<String> = cache
+        .as_object()
+        .expect("cache record")
+        .keys()
+        .cloned()
+        .collect();
+    let harn_builtin_meta::Ty::Shape(fields) = harn_builtin_meta::shapes::LLM_REPORTED_CACHE else {
+        panic!("cache measurements must remain a closed shape");
+    };
+    let builtin_cache_keys = fields.iter().map(|field| field.name.to_string()).collect();
+    assert_eq!(cache_keys, builtin_cache_keys);
+    assert_eq!(
+        cache_keys,
+        harn_alias_keys(llm_envelope_harn(), "LlmReportedCache")
+    );
 }
 
 #[test]
