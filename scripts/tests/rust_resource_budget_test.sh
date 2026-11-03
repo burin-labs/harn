@@ -72,6 +72,10 @@ grep -q 'runner_environment=unset' "$diagnostic"
 # setting. A large box stops at the ceiling; a small one, where the old literal
 # four oversubscribed the host, gets its own cores minus the reserve.
 [[ $(rust_resource_budget "$policy" 24 1 producer 65536) == $'build_jobs=8\ntest_threads=23' ]]
+# An owned 10-core, 16 GiB Mac can start cold; memory bounds it to two
+# compilers, and two active jobs on that host must each receive one.
+[[ $(rust_resource_budget "$policy" 10 1 producer 16384) == $'build_jobs=2\ntest_threads=9' ]]
+[[ $(rust_resource_budget "$policy" 10 2 producer 16384) == $'build_jobs=1\ntest_threads=4' ]]
 [[ $(rust_resource_budget "$policy" 8 1 producer 65536) == $'build_jobs=7\ntest_threads=7' ]]
 [[ $(rust_resource_budget "$policy" 2 1 producer 8192) == $'build_jobs=1\ntest_threads=1' ]]
 # The two profiles must not collapse into one another.
