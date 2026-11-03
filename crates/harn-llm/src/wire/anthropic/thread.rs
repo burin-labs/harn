@@ -248,9 +248,7 @@ fn validate(full: &Value) -> Result<(), PrepareError> {
     if object.contains_key("thread") {
         return Err(PrepareError::AlreadyThreaded);
     }
-    if !full["model"]
-        .as_str()
-        .is_some_and(|model| !model.is_empty())
+    if full["model"].as_str().is_none_or(str::is_empty)
         || !full["messages"].as_array().is_some_and(|messages| {
             !messages.is_empty()
                 && messages.iter().all(|message| {
