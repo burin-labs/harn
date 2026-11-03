@@ -11,6 +11,8 @@ mod redirect_facts;
 mod sealed_dispatch;
 mod standard_io;
 mod windows_shell;
+#[cfg(unix)]
+mod workspace_root_spellings;
 
 fn ctx(argv: &[&str]) -> JsonValue {
     serde_json::json!({
