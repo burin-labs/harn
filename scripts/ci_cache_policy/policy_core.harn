@@ -557,6 +557,11 @@ pub const MACOS_WARM_PACK_MARKER = "workspace_warm_artifact.sh macos pack"
 // for every pull request until the next nightly.
 pub const MACOS_WARM_MANIFEST_PUSH_INPUTS = ["rust-toolchain.toml"]
 
+// The warm artifact's name embeds the workspace compiler identity, which the
+// toolchain action derives from the host's core and memory count unless this
+// is pinned. Producer and consumer jobs set it to 1 (serial front end).
+pub const MACOS_WARM_FRONTEND_THREADS_ENV = "HARN_RUSTC_FRONTEND_THREADS"
+
 pub const MACOS_WARM_PACK_STEP_ID = "macos-warm-pack"
 
 pub const MACOS_WARM_UPLOAD_NAME = "$" + "{{ steps.macos-warm-pack.outputs.artifact_name }}"

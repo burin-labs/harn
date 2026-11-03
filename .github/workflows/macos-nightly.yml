@@ -98,6 +98,13 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
+  # The warm artifact's name binds the workspace compiler wrapper, which the
+  # toolchain action exports only when the host's core and memory count selects
+  # the parallel front end. Hosted macOS jobs land on different machine shapes,
+  # so a producer on a larger one published an artifact no 3-core consumer could
+  # name (-Zthreads=8 on 2026-11-03T16:08Z against serial everywhere else).
+  # Pinning the thread count makes the identity independent of the host.
+  HARN_RUSTC_FRONTEND_THREADS: "1"
 
 jobs:
   nextest:

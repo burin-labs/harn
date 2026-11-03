@@ -1778,6 +1778,30 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   const ci = declared["ci.yml"]
   const declared_policy = policy()
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  // The artifact name binds the compiler wrapper, which depends on the host's
+  // core and memory count unless the front-end thread count is pinned. A run on
+  // another hosted machine shape then names an artifact no consumer can find.
+  const unpinned_producer = {
+    ...producer,
+    env: {RUSTFLAGS: "-D warnings"},
+  }
+  assert(
+    macos_warm_errors(declared_policy, unpinned_producer, ci).contains(
+      "macos-nightly.yml must pin HARN_RUSTC_FRONTEND_THREADS=1 so the warm artifact name does not depend on the host shape",
+    ),
+  )
+  const unpinned_consumer = {
+    ...ci,
+    jobs: {
+      ...ci.jobs,
+      "macos-lint": {...ci.jobs["macos-lint"], env: {RUSTFLAGS: "-D warnings"}},
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, producer, unpinned_consumer).contains(
+      "ci.yml:macos-lint must pin HARN_RUSTC_FRONTEND_THREADS=1 to match the warm artifact producer",
+    ),
+  )
   // A toolchain move must republish the artifact the manifest binds to it.
   const push_without_toolchain = {
     ...producer,
