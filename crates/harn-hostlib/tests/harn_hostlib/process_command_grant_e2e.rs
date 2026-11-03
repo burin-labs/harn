@@ -877,7 +877,7 @@ fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let confined_read = confined(&fixture, || fixture.shell(&reader));
+        let confined_read = confined(fixture, || fixture.shell(&reader));
         let unconfined_read = fixture.shell(&reader);
         (granted.join().unwrap(), confined_read, unconfined_read)
     });
