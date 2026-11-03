@@ -342,6 +342,18 @@ pub fn pl_sanitize_command_ledger(ledger: list) -> list {
   return out[start:len(out)]
 }
 
+/**
+ * The run's assessed goal outcome, reduced to its kind and reason. Absent when
+ * nothing assessed the run, so an unassessed session never reads as a success.
+ */
+fn pl_goal_outcome(outcome: any) -> dict? {
+  const kind = pl_text(outcome?.kind)
+  if kind == "" {
+    return nil
+  }
+  return {kind: kind, reason: pl_text(outcome?.reason)}
+}
+
 pub fn pl_observation_from_input(
   clock: HarnessClock,
   random: HarnessRandom,
@@ -362,6 +374,7 @@ pub fn pl_observation_from_input(
     prompt: prompt,
     tool_sequence: pl_sanitize_tool_sequence(input?.tool_sequence ?? input?.toolSequence ?? []),
     command_ledger: pl_sanitize_command_ledger(input?.command_ledger ?? []),
+    outcome: pl_goal_outcome(input?.outcome),
     observed_at: pl_text(input?.observed_at ?? input?.observedAt ?? pl_now(clock, options)),
   }
 }

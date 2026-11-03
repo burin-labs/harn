@@ -27,6 +27,7 @@ import {
   pl_unique_record_id,
 } from "std/agent/pattern_knowledge_persistence"
 import {
+  pl_run_goal_outcome,
   pl_run_has_eligible_natural_terminal,
   pl_run_observed_at,
   pl_session_command_ledger,
@@ -192,6 +193,7 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
             prompt: prompt,
             tool_sequence: pl_session_tool_sequence(run_events),
             command_ledger: pl_session_command_ledger(run_events),
+            outcome: pl_run_goal_outcome(run_events),
             observed_at: pl_run_observed_at(
               run_events,
               pl_text(session.updated_at) == "" ? pl_now(harness.clock, options) : session

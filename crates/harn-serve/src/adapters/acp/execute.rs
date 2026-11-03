@@ -203,6 +203,10 @@ pub(super) async fn prepare_vm_baseline(
 }
 
 /// Execute a compiled chunk with ACP bridge builtins.
+#[expect(
+    clippy::result_large_err,
+    reason = "PromptExecutionError is built once per failed prompt, not on a hot path"
+)]
 pub(super) async fn execute_chunk(
     chunk: harn_vm::Chunk,
     bridge: Arc<AcpBridge>,
