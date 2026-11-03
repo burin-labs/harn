@@ -42,21 +42,25 @@ const OTHER_PROBE: &str = "harn-probe-unprofiled-grant";
 const PROBE_BASIC: &str = "eC1hY2Nlc3MtdG9rZW46aGFybi1wcm9iZS1naC1ncmFudA";
 
 const FAKE_GH: &str = r#"#!/bin/sh
-if [ -n "$GH_TOKEN" ]; then echo "gh-grant=present"; else echo "gh-grant=absent"; fi
+token=$(sed -n "s/^    oauth_token: '\(.*\)'\$/\1/p" "${GH_CONFIG_DIR:-/nonexistent}/hosts.yml" 2>/dev/null | head -n 1)
+if [ -n "$token" ]; then echo "gh-grant=present"; else echo "gh-grant=absent"; fi
+echo "env-token=[${GH_TOKEN:+set}${GITHUB_TOKEN:+set}] host=[$GH_HOST]"
 echo "pager=[$GH_PAGER] editor=[$GH_EDITOR]"
 echo "config=[$GH_CONFIG_DIR]"
 config="${GH_CONFIG_DIR:-$HOME/.config/gh}/config.yml"
 if [ -f "$config" ]; then sed 's/^/cfg: /' "$config"; fi
 case "$1 $2" in
-  "auth token") echo "$GH_TOKEN"; exit 0 ;;
+  "auth token") echo "$token"; exit 0 ;;
   "pr checkout") exec git checkout -q -B "$3" ;;
   "pr diff") git checkout -q -B "probe-$3" ;;
+  "issue status") env; exit 0 ;;
+  "issue view") echo $$ > gh.pid; sleep 4; exit 0 ;;
   "api leak")
-    printf 'token=%s' "$(printf '%s' "$GH_TOKEN" | cut -c1-9)"; sleep 0.2
-    printf '%s\n' "$(printf '%s' "$GH_TOKEN" | cut -c10-)"
-    printf 'b64=%s\n' "$(printf '%s' "$GH_TOKEN" | base64)"
-    printf 'basic=%s\n' "$(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
-    printf 'err=%s\n' "$GH_TOKEN" >&2
+    printf 'token=%s' "$(printf '%s' "$token" | cut -c1-9)"; sleep 0.2
+    printf '%s\n' "$(printf '%s' "$token" | cut -c10-)"
+    printf 'b64=%s\n' "$(printf '%s' "$token" | base64)"
+    printf 'basic=%s\n' "$(printf 'x-access-token:%s' "$token" | base64)"
+    printf 'err=%s\n' "$token" >&2
     exit 0 ;;
 esac
 if [ -n "$1" ] && [ -f "$config" ]; then
@@ -326,6 +330,10 @@ fn assert_granted_without_leak(out: &str, vector: &str) {
     assert!(
         out.contains("gh-grant=present"),
         "{vector}: the trusted gh must be granted; stdout:\n{out}"
+    );
+    assert!(
+        out.contains("env-token=[] host=[github.com]"),
+        "{vector}: the token must reach gh only as a github.com login; stdout:\n{out}"
     );
     assert!(
         !out.contains(&format!("{GRANTED}=")) && !out.contains("planted-gh"),
@@ -716,6 +724,182 @@ fn a_write_root_over_the_users_git_or_ssh_config_refuses_the_grant() {
         assert!(error.contains("command_grant_refused"), "{error}");
     }
     assert_granted_without_leak(&fixture.shell("gh issue list"), "no write root");
+}
+
+/// The token is a github.com login, and a granted read that names any other
+/// host, in any spelling, is refused before gh runs.
+#[test]
+fn a_granted_read_naming_another_host_is_refused() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+
+    let not_refused = [
+        "gh api --hostname github.localhost user",
+        "gh api --hostname=github.localhost user",
+        "gh -R github.localhost/o/r issue list",
+        "gh -Rgithub.localhost/o/r issue list",
+        "gh issue list --repo=github.localhost/o/r",
+        "gh issue list --repo github.localhost/o/r",
+        "gh repo view github.localhost/o/r",
+        "gh run list -R github.localhost/o/r",
+        "gh -R zz-probe-tenant.ghe.com/o/r issue list",
+        "gh repo view https://github.localhost/o/r",
+        "gh repo view git@github.localhost:o/r",
+        "gh api http://api.github.localhost/user",
+    ]
+    .into_iter()
+    .filter(|command| {
+        !fixture
+            .shell_in(fixture.workspace.path(), command)
+            .is_err_and(|error| error.contains("command_grant_refused"))
+    })
+    .collect::<Vec<_>>();
+    assert!(not_refused.is_empty(), "not refused: {not_refused:#?}");
+    for read in [
+        "gh -R o/r issue list",
+        "gh -R github.com/o/r issue list",
+        "gh repo view https://github.com/o/r",
+        "gh api --hostname github.com user",
+        "gh pr view feature/a/b",
+    ] {
+        assert_granted_without_leak(&fixture.shell(read), read);
+    }
+}
+
+/// Run `body` under a confined Worktree policy that can read the user's files.
+fn confined<T>(fixture: &Fixture, body: impl FnOnce() -> T) -> T {
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+    let mut policy = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![fixture.workspace.path().display().to_string()],
+        ..CapabilityPolicy::default()
+    };
+    policy
+        .process_sandbox
+        .read_roots
+        .push(fixture.user.path().display().to_string());
+    push_execution_policy(policy);
+    struct PopPolicy;
+    impl Drop for PopPolicy {
+        fn drop(&mut self) {
+            pop_execution_policy();
+        }
+    }
+    let _policy = PopPolicy;
+    body()
+}
+
+/// A caller variable that would route, intercept or log gh's requests never
+/// reaches a granted gh: everything but a short allowlist is dropped, and the
+/// proxy and debug variables are set empty. Needs a live process sandbox.
+#[test]
+fn caller_proxy_tls_and_debug_variables_never_reach_a_granted_gh() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let blocked = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "GODEBUG",
+        "CURL_CA_BUNDLE",
+        "GITHUB_TOKEN",
+    ];
+    confined(&fixture, || {
+        for var in blocked {
+            let injected = format!("harn-injected-{}", var.to_ascii_lowercase());
+            let out = fixture.argv(&["gh", "issue", "status"], &[(var, injected.clone())]);
+            assert_granted_without_leak(&out, var);
+            assert!(
+                !out.contains(&injected),
+                "{var} reached the granted gh:\n{out}"
+            );
+        }
+        let out = fixture.argv(
+            &["gh", "issue", "status"],
+            &[("LANG", "C.UTF-8".to_string())],
+        );
+        assert!(
+            out.contains("LANG=C.UTF-8"),
+            "an allowlisted variable was dropped:\n{out}"
+        );
+        for empty in ["HTTP_PROXY=", "HTTPS_PROXY=", "GODEBUG=", "GH_DEBUG="] {
+            assert!(
+                out.lines().any(|line| line == empty),
+                "{empty} is not set empty:\n{out}"
+            );
+        }
+    });
+}
+
+/// While a granted gh runs, its credential sits in its private `hosts.yml`
+/// and nowhere in its environment. A confined sibling can read neither the
+/// file nor, on Linux, the process's environment. An unconfined reader in
+/// the same window is the control: it reads the file and finds the
+/// environment free of the token. Needs a live process sandbox.
+#[test]
+fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let hosts = fixture
+        .user
+        .path()
+        .join("harn-home/grant-spawns/*/config/hosts.yml")
+        .display()
+        .to_string();
+    let reader = format!(
+        "echo file=$(cat {hosts} 2>/dev/null | grep -c oauth_token); \
+         pid=$(cat gh.pid); \
+         if [ -r /proc/self/environ ]; then \
+           echo environ=$(tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null | grep -c -e '^PATH=' -e harn-probe-gh-gran[t]); \
+           echo token=$(tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null | grep -c harn-probe-gh-gran[t]); \
+         fi"
+    );
+    let session = harn_vm::stdlib::process::current_session_environment();
+    let (granted, confined_read, unconfined_read) = std::thread::scope(|scope| {
+        let fixture = &fixture;
+        let granted = scope.spawn(move || {
+            harn_vm::stdlib::process::set_session_environment(session);
+            confined(fixture, || fixture.shell("gh issue view 1"))
+        });
+        let started = std::time::Instant::now();
+        while !fixture.workspace("gh.pid").exists() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(20),
+                "the granted gh never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let confined_read = confined(&fixture, || fixture.shell(&reader));
+        let unconfined_read = fixture.shell(&reader);
+        (granted.join().unwrap(), confined_read, unconfined_read)
+    });
+    assert_granted_without_leak(&granted, "sleeping read");
+    assert!(
+        unconfined_read.contains("file=2"),
+        "control: the unconfined reader must see the live hosts.yml:\n{unconfined_read}"
+    );
+    assert!(
+        confined_read.contains("file=0"),
+        "a confined sibling read the granted credential file:\n{confined_read}"
+    );
+    if cfg!(target_os = "linux") {
+        assert!(
+            unconfined_read.contains("token=0") && !unconfined_read.contains("environ=0"),
+            "control: the unconfined reader must read the environment and find no token:\n{unconfined_read}"
+        );
+        assert!(
+            confined_read.contains("environ=0"),
+            "a confined sibling read the granted gh's environment:\n{confined_read}"
+        );
+    }
 }
 
 /// The same proof through a confined spawn. Needs a live process sandbox.

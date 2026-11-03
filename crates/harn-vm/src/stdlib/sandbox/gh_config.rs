@@ -16,8 +16,12 @@
 //!   `~/.local/share` and, on Windows, `%LocalAppData%`), and the variable
 //!   wins over both.
 //! - `GH_CONFIG_DIR` points at a per-spawn `config.yml` that keeps only a few
-//!   display settings and inert aliases. `hosts.yml` is never copied.
-//! - `gh auth` subcommands that print the credential are refused.
+//!   display settings and inert aliases, and a per-spawn `hosts.yml` holding
+//!   the granted token for github.com only. The user's `hosts.yml` is never
+//!   copied, and no token is in gh's environment, so gh has no credential for
+//!   any other host. `GH_HOST` is github.com.
+//! - `gh auth` subcommands that print the credential are refused, as is a
+//!   read naming another host.
 //! - Only read subcommands receive the grant at all; see
 //!   `gh_invocation_is_read_only`.
 
@@ -30,6 +34,8 @@ pub(crate) const GH_PROFILE: ExecProfile = ExecProfile {
     empty_env: &["GH_PAGER", "PAGER"],
     refusing_env: &["GH_BROWSER", "BROWSER", "GH_EDITOR", "EDITOR", "VISUAL"],
     dir_env: &[("GH_CONFIG_DIR", "config"), ("XDG_DATA_HOME", "data")],
+    credential_env: &["GH_TOKEN", "GITHUB_TOKEN"],
+    fixed_env: &[("GH_HOST", "github.com"), ("GH_DEBUG", ""), ("GODEBUG", "")],
     seed: seed_granted_config,
     refusal: gh_refusal,
     // Reads only: a write, clone, checkout, extension, alias, or anything
@@ -94,7 +100,67 @@ fn gh_refusal(args: &[String]) -> Option<&'static str> {
             return Some("an output filter can read the credential from the environment");
         }
     }
+    if names_another_host(args) {
+        return Some("the grant is for github.com, and this names another host");
+    }
     None
+}
+
+/// Hosts a granted gh may name; the token in its `hosts.yml` is for these.
+const GRANTED_HOSTS: &[&str] = &["github.com", "api.github.com"];
+
+/// Whether a `--hostname`, a `-R`/`--repo` value, or a positional argument
+/// names a host other than github.com, in any spelling: `HOST/OWNER/REPO`, a
+/// URL, or an SSH remote. `OWNER/REPO` names no host.
+fn names_another_host(args: &[String]) -> bool {
+    let foreign = |host: &str| {
+        !GRANTED_HOSTS
+            .iter()
+            .any(|granted| host.eq_ignore_ascii_case(granted))
+    };
+    let mut words = args.iter().map(String::as_str);
+    while let Some(arg) = words.next() {
+        let (hostname, repo) = match arg {
+            "--hostname" => (words.next(), None),
+            "-R" | "--repo" => (None, words.next()),
+            _ => (
+                arg.strip_prefix("--hostname="),
+                arg.strip_prefix("--repo=")
+                    .or_else(|| arg.strip_prefix("-R").filter(|rest| !rest.is_empty())),
+            ),
+        };
+        if hostname.is_some_and(foreign) {
+            return true;
+        }
+        let candidate = repo.or((!arg.starts_with('-')).then_some(arg));
+        if candidate
+            .and_then(|value| repository_host(value, repo.is_some()))
+            .is_some_and(foreign)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// The host a repository or URL argument names, if any. A positional argument
+/// is read as `HOST/OWNER/REPO` only when its first segment looks like a host,
+/// so a branch such as `feature/a/b` is not mistaken for one.
+fn repository_host(value: &str, is_repo_flag: bool) -> Option<&str> {
+    if let Some((_, rest)) = value.split_once("://") {
+        let authority = rest.split('/').next().unwrap_or_default();
+        let host = authority.rsplit('@').next().unwrap_or_default();
+        return Some(host.split(':').next().unwrap_or_default());
+    }
+    if let Some((user_host, _)) = value.split_once(':') {
+        if let Some((_, host)) = user_host.split_once('@') {
+            return Some(host);
+        }
+    }
+    let segments: Vec<&str> = value.split('/').collect();
+    let first = segments.first().copied().unwrap_or_default();
+    let looks_like_host = first.contains('.') || first.eq_ignore_ascii_case("localhost");
+    (segments.len() >= 3 && (is_repo_flag || looks_like_host)).then_some(first)
 }
 
 /// Only a plain `gh auth status` is not refused; it still receives no grant,
@@ -121,23 +187,41 @@ fn auth_refusal(args: &[String]) -> Option<&'static str> {
     None
 }
 
-/// Write the granted stand-in `config.yml` into `dir/config`. A missing user
-/// config writes nothing; an unreadable one is an error.
-fn seed_granted_config(dir: &Path) -> std::io::Result<()> {
+/// Write the granted stand-in into `dir/config`: a `config.yml` with the
+/// user's allowed keys, and a `hosts.yml` holding `token` for github.com only.
+/// Both are marked current, so gh never migrates them or looks up the
+/// account over the network. An unreadable user config is an error.
+fn seed_granted_config(dir: &Path, token: &str) -> std::io::Result<()> {
+    if token.chars().any(char::is_control) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the granted token contains a control character",
+        ));
+    }
     let home = crate::user_dirs::home_dir().unwrap_or_default();
     let source = super::gh_config_source(&home).join("config.yml");
-    let raw = match std::fs::read_to_string(&source) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+    let projected = match std::fs::read_to_string(&source) {
+        Ok(raw) => project_gh_config(&raw, Some(GRANTED_KEYS)).unwrap_or_default(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error),
     };
-    match project_gh_config(&raw, Some(GRANTED_KEYS)) {
-        Some(config) => {
-            super::grant_spawn::write_private_file(&dir.join("config/config.yml"), &config)
-        }
-        None => Ok(()),
-    }
+    let config = dir.join("config");
+    super::grant_spawn::write_private_file(
+        &config.join("config.yml"),
+        &format!("version: \"1\"\n{projected}"),
+    )?;
+    let quoted = format!("'{}'", token.replace('\'', "''"));
+    super::grant_spawn::write_private_file(
+        &config.join("hosts.yml"),
+        &format!(
+            "github.com:\n    oauth_token: {quoted}\n    git_protocol: https\n    user: {GRANTED_USER}\n    users:\n        {GRANTED_USER}:\n            oauth_token: {quoted}\n"
+        ),
+    )
 }
+
+/// The account name the per-spawn `hosts.yml` records. gh needs one, and it
+/// only labels the entry; the token decides who the requests act as.
+const GRANTED_USER: &str = "granted";
 
 /// The credential-free, exec-free stand-in a confined, ungranted gh reads.
 pub(crate) fn sanitize_gh_config(raw: &str) -> Option<String> {
@@ -305,6 +389,9 @@ prompt: enabled
             &["-R", "o/test", "pr", "view", "1"],
             &["-Rkit/test", "pr", "list"],
             &["pr", "list", "--json", "number"],
+            &["-R", "github.com/o/r", "issue", "list"],
+            &["api", "--hostname", "github.com", "user"],
+            &["pr", "view", "feature/a/b"],
             // Not reads: they run without the grant, so nothing is refused.
             &["pr", "create", "-t", "x"],
             &["repo", "clone", "o/r", "--", "-c", "filter.a.smudge=x"],
@@ -329,6 +416,12 @@ prompt: enabled
             &["api", "x", "--template={{.}}"],
             &["api", "x", "-t", "{{.}}"],
             &["api", "x", "-t{{.}}"],
+            &["api", "--hostname", "github.localhost", "user"],
+            &["-Rgithub.localhost/o/r", "issue", "list"],
+            &["issue", "list", "--repo=x.ghe.com/o/r"],
+            &["repo", "view", "github.localhost/o/r"],
+            &["repo", "view", "git@evil.example:o/r"],
+            &["api", "https://evil.example/x"],
         ] {
             assert!(refused(args), "{args:?}");
         }

@@ -26,8 +26,15 @@ pub(crate) struct ExecProfile {
     pub(crate) refusing_env: &'static [&'static str],
     /// Variables pointing at a subdirectory of the per-spawn directory.
     pub(crate) dir_env: &'static [(&'static str, &'static str)],
-    /// Fill the per-spawn directory from the user's own configuration.
-    pub(crate) seed: fn(&Path) -> std::io::Result<()>,
+    /// Grant variables the program receives as a stored login instead of an
+    /// environment variable. A command-bound grant exposing any other name
+    /// is refused for a profiled program.
+    pub(crate) credential_env: &'static [&'static str],
+    /// Variables set to these values on every granted spawn.
+    pub(crate) fixed_env: &'static [(&'static str, &'static str)],
+    /// Fill the per-spawn directory from the user's own configuration and
+    /// store the credential there, where only the program's host gets it.
+    pub(crate) seed: fn(&Path, &str) -> std::io::Result<()>,
     /// Why these arguments would print the credential, if they would.
     pub(crate) refusal: fn(&[String]) -> Option<&'static str>,
     /// Whether these arguments may run with the grant at all. Everything
@@ -96,14 +103,32 @@ pub(crate) fn strip_profiled_grants(program: &str, env: &mut BTreeMap<String, St
     }
 }
 
+/// Caller and ambient variables a granted spawn keeps. Everything else the
+/// caller sets or the session carries is dropped: proxy, TLS, debug and
+/// token variables would each route or reveal the credential.
+fn kept_variable(key: &str) -> bool {
+    matches!(key, "LANG" | "TERM" | "TMPDIR" | "TZ" | "NO_COLOR") || key.starts_with("LC_")
+}
+
 /// One spawn that receives a command-bound grant: the canonical program file
-/// to run and the entries to apply after every other environment layer.
+/// to run, the whole caller-supplied environment it may set (`env`, which
+/// replaces the request's), and the inherited names to remove (`remove`).
 /// Holds the per-spawn directory, which is removed when this is dropped, so
 /// keep it alive until the child has exited.
 pub struct GrantedSpawn {
     pub program: String,
     pub env: Vec<(String, String)>,
+    pub remove: Vec<String>,
     _dir: grant_spawn::SpawnDir,
+}
+
+impl GrantedSpawn {
+    /// Hold while launching the program: its own sandbox profile may then
+    /// read its private directory, which every other confined child is
+    /// denied.
+    pub fn launching(&self) -> grant_spawn::OwnSpawnLaunch {
+        grant_spawn::OwnSpawnLaunch::begin()
+    }
 }
 
 /// Prepare a spawn of `program args` that receives the command-bound grants
@@ -137,7 +162,7 @@ pub fn granted_spawn(
     if !(profile.grants)(args) || overlay.keys().any(|key| reopens_exec_path(profile, key)) {
         return Ok(None);
     }
-    let Some(mut session) = super::session_env_with_command_grants(program)? else {
+    let Some(session) = super::session_env_with_command_grants(program)? else {
         return Ok(None);
     };
     let untrusted = grant_spawn::untrusted_roots(cwd);
@@ -173,21 +198,34 @@ pub fn granted_spawn(
             ),
         ));
     }
-    let granted: Vec<(String, String)> = vars
-        .into_iter()
-        .filter_map(|var| session.remove(&var).map(|value| (var, value)))
-        .collect();
-    if granted.is_empty() {
-        return Ok(None);
+    if let Some(var) = vars
+        .iter()
+        .find(|var| !profile.credential_env.contains(&var.as_str()))
+    {
+        return Err(refusal(
+            profile,
+            format!("a grant for it may expose only a stored login, not {var}"),
+        ));
     }
+    // The values were registered for redaction when the session environment
+    // resolved them; the token reaches the program only through its stored
+    // login, never its environment.
+    let Some(token) = vars.iter().find_map(|var| session.get(var).cloned()) else {
+        return Ok(None);
+    };
     let mut subdirs: Vec<&str> = profile.dir_env.iter().map(|(_, dir)| *dir).collect();
     subdirs.push(HOOKS_DIR);
     let dir = grant_spawn::create_spawn_dir(&untrusted, &subdirs)
-        .and_then(|dir| (profile.seed)(dir.path()).map(|()| dir))
+        .and_then(|dir| (profile.seed)(dir.path(), &token).map(|()| dir))
         .map_err(|error| refusal(profile, format!("preparing its private directory: {error}")))?;
     let path = std::env::join_paths(&entries)
         .map_err(|error| refusal(profile, format!("joining the trusted PATH: {error}")))?;
-    let mut env = vec![
+    let mut env: Vec<(String, String)> = overlay
+        .iter()
+        .filter(|(key, _)| kept_variable(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    env.extend([
         ("PATH".to_string(), path.to_string_lossy().into_owned()),
         ("HOME".to_string(), home.display().to_string()),
         (
@@ -199,7 +237,7 @@ pub fn granted_spawn(
             "GIT_CONFIG_COUNT".to_string(),
             GIT_HARDENING.len().to_string(),
         ),
-    ];
+    ]);
     let hooks = dir.path().join(HOOKS_DIR).display().to_string();
     for (index, (key, value)) in GIT_HARDENING.iter().enumerate() {
         let value = if value.is_empty() {
@@ -228,12 +266,26 @@ pub fn granted_spawn(
             dir.path().join(subdir).display().to_string(),
         )
     }));
-    // The values were registered for redaction when the session environment
-    // resolved them.
-    env.extend(granted);
+    env.extend(
+        profile
+            .fixed_env
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string())),
+    );
+    env.extend(grant_spawn::network_env());
+    // Every inherited name the spawn does not set or keep is removed, from
+    // the session set and from this process alike.
+    let remove = session
+        .into_keys()
+        .chain(std::env::vars_os().filter_map(|(key, _)| key.into_string().ok()))
+        .filter(|key| !kept_variable(key) && !env.iter().any(|(set, _)| set == key))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     Ok(Some(GrantedSpawn {
         program: canonical.display().to_string(),
         env,
+        remove,
         _dir: dir,
     }))
 }

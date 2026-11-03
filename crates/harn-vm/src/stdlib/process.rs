@@ -747,6 +747,7 @@ mod command_grant;
 mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
+pub use crate::stdlib::sandbox::workspace_env::grant_spawn::OwnSpawnLaunch;
 pub(crate) use command_grant::ExecProfile;
 pub use command_grant::{command_bound_grant_reaches, granted_spawn, GrantedSpawn};
 pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};

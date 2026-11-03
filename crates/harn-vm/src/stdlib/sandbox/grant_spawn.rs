@@ -179,6 +179,68 @@ impl Drop for SpawnDir {
 
 static NEXT_SPAWN_DIR: AtomicU64 = AtomicU64::new(0);
 
+/// Where every per-spawn directory lives. It holds credentials while a granted
+/// spawn runs, so it is on every confined child's read denylist
+/// ([`denied_read_root`]) except the granted spawn's own.
+pub(crate) fn grant_spawns_root() -> PathBuf {
+    crate::mcp_oauth::harn_home_dir().join("grant-spawns")
+}
+
+thread_local! {
+    static OWN_SPAWN_LAUNCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The per-spawn root a confined child must not read, or `None` while this
+/// thread launches the granted spawn that has to read its own directory.
+pub(crate) fn denied_read_root() -> Option<PathBuf> {
+    (!OWN_SPAWN_LAUNCHING.with(std::cell::Cell::get)).then(grant_spawns_root)
+}
+
+/// Lifts the per-spawn root from the read denylist on this thread until
+/// dropped. Held only around launching the granted program itself, so its
+/// sandbox profile can read its private directory and no other spawn's can.
+pub struct OwnSpawnLaunch(());
+
+impl OwnSpawnLaunch {
+    pub(crate) fn begin() -> Self {
+        OWN_SPAWN_LAUNCHING.with(|launching| launching.set(true));
+        Self(())
+    }
+}
+
+impl Drop for OwnSpawnLaunch {
+    fn drop(&mut self) {
+        OWN_SPAWN_LAUNCHING.with(|launching| launching.set(false));
+    }
+}
+
+/// Network variables for a granted spawn: the managed egress proxy when one
+/// confines this spawn, which the host itself runs, and otherwise every proxy
+/// variable set empty so a caller or ambient value cannot route the request.
+pub(crate) fn network_env() -> Vec<(String, String)> {
+    const PROXY_KEYS: [&str; 8] = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ];
+    match super::super::active_sandbox_policy().and_then(|(policy, _)| policy.process_network_proxy)
+    {
+        Some(proxy) => super::super::process_output::managed_proxy_environment(proxy)
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+        None => PROXY_KEYS
+            .iter()
+            .map(|key| (key.to_string(), String::new()))
+            .collect(),
+    }
+}
+
 /// Create a [`SpawnDir`] with `subdirs` under the Harn home, refusing when that
 /// location is inside an untrusted root, is a link, or is reachable by any
 /// other user. The leaf is created exclusively, so nothing planted in
@@ -189,7 +251,7 @@ pub(crate) fn create_spawn_dir(
 ) -> std::io::Result<SpawnDir> {
     let refuse =
         |message: String| std::io::Error::new(std::io::ErrorKind::PermissionDenied, message);
-    let base = crate::mcp_oauth::harn_home_dir().join("grant-spawns");
+    let base = grant_spawns_root();
     private_dir_builder(true).create(&base)?;
     let canonical = std::fs::canonicalize(&base)?;
     if is_untrusted(&canonical, untrusted) {
