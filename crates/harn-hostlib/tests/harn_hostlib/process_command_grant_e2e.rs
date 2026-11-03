@@ -614,7 +614,7 @@ fn output_filters_and_passthrough_are_refused_on_a_granted_read() {
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
 
-    for command in [
+    let not_refused = [
         "gh api user --jq env.GH_TOKEN",
         "gh api user --jq=env.GH_TOKEN",
         "gh pr list --json number -q env",
@@ -625,16 +625,15 @@ fn output_filters_and_passthrough_are_refused_on_a_granted_read() {
         "gh api user -t x",
         "gh api user -tx",
         "gh pr view 1 -- -c filter.a.smudge=env",
-    ] {
-        let error = fixture
+    ]
+    .into_iter()
+    .filter(|command| {
+        !fixture
             .shell_in(fixture.workspace.path(), command)
-            .err()
-            .unwrap_or_else(|| panic!("{command} must be refused"));
-        assert!(
-            error.contains("command_grant_refused"),
-            "{command}: {error}"
-        );
-    }
+            .is_err_and(|error| error.contains("command_grant_refused"))
+    })
+    .collect::<Vec<_>>();
+    assert!(not_refused.is_empty(), "not refused: {not_refused:#?}");
     for other in [
         "gh repo clone o/r -- -c filter.a.smudge=env",
         "gh pr create -t title",
