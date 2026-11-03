@@ -202,7 +202,13 @@ pub fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
   return false
 }
 
-/** The completion owner's goal assessment recorded on the run's natural terminal. */
+/**
+ * The completion owner's goal assessment recorded on the run's natural terminal.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
 pub fn pl_run_goal_outcome(events: list) -> any {
   for event in events ?? [] {
     const transcript_event = pl_session_transcript_event(event)
