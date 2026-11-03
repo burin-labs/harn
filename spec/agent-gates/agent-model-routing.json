@@ -72,6 +72,10 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "reader": "__first_ladder_step"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
         "reader": "explicit-routing-key-domain"
       },
@@ -239,6 +243,10 @@
     "name": "AgentSpec.models",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "reader": "__first_ladder_step"
+      },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
         "reader": "explicit-routing-key-domain"
