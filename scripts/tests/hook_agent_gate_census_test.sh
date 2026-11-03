@@ -15,6 +15,7 @@ fake_bin="$tmp_root/bin"
 work="$tmp_root/work"
 make_record="$tmp_root/make-commands.txt"
 build_record="$tmp_root/builds.txt"
+effects_record="$tmp_root/no-build-effects.txt"
 mkdir -p "$fake_bin" "$work/.githooks" "$work/spec/agent-gates" "$work/scripts" \
   "$work/target/debug" "$work/crates/harn-stdlib/src/stdlib/workflow" "$work/crates/harn-parser/src"
 worktree_harn="$work/target/debug/harn"
@@ -88,9 +89,12 @@ SH
 cat > "$work/scripts/harn_bin.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-case " $* " in
-  *" --no-build "*)
-    [[ -z "${WORKTREE_STALE:-}" ]] || exit 1
+if [[ " $* " == *" --record-receipt "* && "${HOOK_RECEIPT_FAIL:-0}" == 1 ]]; then
+  exit 92
+fi
+case "${HARN_BIN_NO_BUILD:-0} $* " in
+  1\ *|*" --no-build "*)
+    [[ -z "${WORKTREE_STALE:-}" && -x "$(pwd)/target/debug/harn" ]] || exit 1
     ;;
   *)
     if [[ -n "${HARN_BUILD_FAIL:-}" ]]; then
@@ -103,6 +107,28 @@ esac
 printf '%s\n' "$(pwd)/target/debug/harn"
 SH
 chmod +x "$worktree_harn" "$work/target/debug/harn-freshness-check" "$work/scripts/harn_bin.sh"
+
+cat > "$fake_bin/uname" <<'SH'
+#!/bin/sh
+if [ "${HOOK_TEST_UNAME:-}" = Darwin ]; then
+  printf 'Darwin\n'
+else
+  /usr/bin/uname "$@"
+fi
+SH
+cat > "$fake_bin/mkdir" <<'SH'
+#!/bin/sh
+if [ "$*" = "-p ${CARGO_TARGET_DIR:-}" ]; then
+  printf 'target-bootstrap\n' >> "$NO_BUILD_EFFECT_RECORD"
+fi
+exec /bin/mkdir "$@"
+SH
+cat > "$work/scripts/sign_local_macos.sh" <<'SH'
+#!/bin/sh
+printf 'codesign\n' >> "$NO_BUILD_EFFECT_RECORD"
+[ "${HOOK_SIGN_FAIL:-0}" != 1 ] || exit 91
+SH
+chmod +x "$fake_bin/uname" "$fake_bin/mkdir" "$work/scripts/sign_local_macos.sh"
 
 cat > "$fake_bin/npx" <<'SH'
 #!/usr/bin/env bash
@@ -166,6 +192,7 @@ run_prepush() {
   output=$3
   : > "$make_record"
   : > "$build_record"
+  : > "$effects_record"
   set +e
   (
     cd "$work"
@@ -174,6 +201,8 @@ run_prepush() {
       CENSUS_RESULT="$census_result" \
       MAKE_COMMAND_RECORD="$make_record" \
       BUILD_RECORD="$build_record" \
+      NO_BUILD_EFFECT_RECORD="$effects_record" \
+      HARN_HOOKS_FULL_LOCAL=0 \
       HARN_BIN="${INHERITED_HARN_BIN-$fake_bin/harn}" \
       CARGO_TARGET_DIR="$work/target" \
       CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
@@ -184,6 +213,8 @@ run_prepush() {
   set -e
   return "$status"
 }
+
+unset HARN_BIN_NO_BUILD
 
 fail() {
   echo "$1" >&2
@@ -207,6 +238,62 @@ grep -Fq "UNMEASURED" "$missing_out" ||
 if grep -Fq "check-agent-gates" "$make_record"; then
   fail "the census ran through an unverified installed runtime" "$make_record"
 fi
+
+# The actual watched-reader path must retain the no-build refusal, including
+# when the caller's conditional suppresses errexit inside shell functions.
+for runtime in stale missing; do
+  if [[ "$runtime" == missing ]]; then
+    mv "$worktree_harn" "$tmp_root/saved-harn"
+  fi
+  no_build_out="$tmp_root/no-build-$runtime.out"
+  if HARN_BIN_NO_BUILD=1 WORKTREE_STALE=1 HOOK_TEST_UNAME=Darwin \
+      run_prepush "$changed_reader" pass "$no_build_out"; then
+    fail "explicit no-build accepted a $runtime runtime" "$no_build_out"
+  fi
+  grep -Fq 'checking the agent gate census' "$no_build_out" ||
+    fail 'the watched-reader path was not reached' "$no_build_out"
+  grep -Fq UNMEASURED "$no_build_out" ||
+    fail 'no-build refusal was not attributed to missing proof' "$no_build_out"
+  if [[ -s "$build_record" || -s "$effects_record" || -s "$make_record" ]]; then
+    fail 'no-build refusal invoked a build, bootstrap, signing or census' \
+      "$build_record" "$effects_record" "$make_record"
+  fi
+  if [[ "$runtime" == missing ]]; then
+    mv "$tmp_root/saved-harn" "$worktree_harn"
+  fi
+done
+
+no_build_fresh_out="$tmp_root/no-build-fresh.out"
+HARN_BIN_NO_BUILD=1 HOOK_TEST_UNAME=Darwin \
+  run_prepush "$changed_reader" pass "$no_build_fresh_out" ||
+  fail 'explicit no-build refused the proven worktree runtime' "$no_build_fresh_out"
+grep -Fq "make -s check-agent-gates HARN_BIN=$worktree_harn" "$make_record" ||
+  fail 'explicit no-build did not run the required census' "$make_record"
+grep -Fq 'Agent gate census OK.' "$no_build_fresh_out" ||
+  fail 'the no-build census did not finish' "$no_build_fresh_out"
+if [[ -s "$build_record" || -s "$effects_record" ]]; then
+  fail 'a fresh no-build runtime triggered build or signing' "$build_record" "$effects_record"
+fi
+
+for failure in sign receipt; do
+  failure_out="$tmp_root/$failure-refused.out"
+  sign_fail=0
+  receipt_fail=0
+  if [[ "$failure" == sign ]]; then
+    sign_fail=1
+  else
+    receipt_fail=1
+  fi
+  if HARN_BIN_NO_BUILD=0 WORKTREE_STALE=1 HOOK_TEST_UNAME=Darwin \
+      HOOK_SIGN_FAIL="$sign_fail" HOOK_RECEIPT_FAIL="$receipt_fail" \
+      run_prepush "$changed_reader" pass "$failure_out"; then
+    fail "a failed $failure checkpoint allowed the census" "$failure_out"
+  fi
+  grep -Fq UNMEASURED "$failure_out" || fail "the $failure refusal was hidden" "$failure_out"
+  [[ -s "$build_record" && -s "$effects_record" ]] ||
+    fail "the $failure checkpoint was not reached" "$build_record" "$effects_record"
+  [[ ! -s "$make_record" ]] || fail "a failed $failure checkpoint still ran the census" "$make_record"
+done
 
 # An explicit artifact still has to execute the audit successfully. Import
 # failures are not a completed census and cannot justify regeneration advice.

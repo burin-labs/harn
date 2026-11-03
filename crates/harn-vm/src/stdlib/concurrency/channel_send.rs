@@ -49,9 +49,8 @@ pub(super) async fn send(
                 }
             };
         }
-    } else {
-        Err(VmError::Thrown(VmValue::string(
-            "send: first argument must be a channel",
-        )))
     }
+    Err(VmError::Thrown(VmValue::string(
+        "send: first argument must be a channel",
+    )))
 }

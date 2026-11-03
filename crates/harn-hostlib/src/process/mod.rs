@@ -6,6 +6,7 @@
 //! goes through `harn_vm::process_sandbox`. Tests install
 //! [`mock::MockSpawner`] to drive process behaviour deterministically.
 
+pub(crate) mod call_scope;
 pub mod handle;
 pub mod mock;
 pub mod owner_death;

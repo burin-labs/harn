@@ -763,14 +763,12 @@ fn configured_secret_chain_display() -> String {
 
 fn has_orchestrator_api_keys_configured() -> bool {
     std::env::var("HARN_ORCHESTRATOR_API_KEYS")
-        .ok()
-        .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
+        .is_ok_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
 }
 
 fn has_mcp_oauth_configured() -> bool {
     std::env::var("HARN_MCP_OAUTH_AUTHORIZATION_SERVERS")
-        .ok()
-        .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
+        .is_ok_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
 }
 
 #[cfg(test)]

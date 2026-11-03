@@ -37,13 +37,16 @@ pub type AsyncHandler = Arc<
 
 /// A dropped async host call must still interrupt the synchronous operation
 /// that was moved to Tokio's blocking pool. `JoinHandle::abort` cannot stop a
-/// blocking closure, so a per-call token is the explicit handoff to its wait
-/// loops. Tripping it after the operation finished is harmless.
-struct CancelOnDrop(Arc<AtomicBool>);
+/// blocking closure, so per-call cancellation retires its enrolled processes
+/// before the async caller can report a terminal result.
+struct CancelOnDrop {
+    scope: crate::process::call_scope::CallProcessScope,
+    _execution_cleanup: Option<harn_vm::op_interrupt::ActiveProcessCleanupGuard>,
+}
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
+        let _ = self.scope.cancel_and_drain();
     }
 }
 
@@ -52,8 +55,8 @@ impl Drop for CancelOnDrop {
 ///
 /// The worker observes the VM's deadlines and a token of its own that the VM
 /// trips by dropping the call: a tool-call cancel, a VM cancel, or an expired
-/// deadline. It never shares the VM's token, so stopping one call leaves the
-/// VM running. The worker also gets the [`HostCallContext`] of the tool call
+/// deadline. Parent cancellation is also observed, while stopping one call
+/// leaves the VM running. The worker also gets the [`HostCallContext`] of the tool call
 /// that dispatched it.
 async fn run_interruptible(
     ctx: &harn_vm::AsyncBuiltinCtx,
@@ -62,16 +65,31 @@ async fn run_interruptible(
     request: VmValue,
 ) -> Result<VmValue, VmError> {
     let mut sources = ctx.interrupt_sources();
+    let parent_cancel = sources.cancel.clone();
     let cancelled = sources
         .cancel
         .as_ref()
         .is_some_and(|token| token.load(Ordering::SeqCst));
     let cancel = Arc::new(AtomicBool::new(cancelled));
     sources.cancel = Some(Arc::clone(&cancel));
+    let process_scope = crate::process::call_scope::CallProcessScope::new(cancel, parent_cancel);
+    let execution_cleanup = ctx.execution_cancel_token().map(|owner| {
+        let guard = harn_vm::op_interrupt::register_active_process_cleanup_scope(
+            owner.clone(),
+            Arc::new(process_scope.clone()),
+        );
+        if owner.load(Ordering::SeqCst) {
+            let _ = process_scope.cancel_and_drain();
+        }
+        guard
+    });
     let address = CallAddress::current();
-    let call = HostCallContext::new(address.clone());
+    let call = HostCallContext::new(address.clone()).with_process_scope(process_scope.clone());
     let completion = call.clone();
-    let _cancel_on_drop = CancelOnDrop(cancel);
+    let _cancel_on_drop = CancelOnDrop {
+        scope: process_scope,
+        _execution_cleanup: execution_cleanup,
+    };
     let result = harn_vm::orchestration::run_blocking_with_ambient(move || {
         let _interrupt = sources.install();
         let _session = address

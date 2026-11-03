@@ -774,7 +774,7 @@ async function githubArtifactPayload(token, repository, artifact, expected, fetc
   if (!token || !/^[^/]+\/[^/]+$/.test(repository)
     || !id.test(expected.runId) || !sha.test(expected.headSha)
     || typeof expected.name !== 'string' || !expected.name
-    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
+    || !/^(?:consumer-observer(?:-[0-9a-f-]+)?|consumer-rehearsal-binding|candidate-manifest|dependency-security-proof)\.json$/.test(expected.filename)) {
     refuse('artifact_read_identity_invalid');
   }
   if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired !== false
@@ -873,7 +873,12 @@ export function consumerPairing(text, requestedPull = '') {
     if(!match) refuse('consumer_pairing_invalid');
     pairs.add(match[1]);
   }
-  if(pairs.size>1) refuse('consumer_pairing_ambiguous');
+  if(pairs.size>1){
+    // Pull numbers are already public in the trailers; naming them says which to reconcile.
+    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
+    error.pulls=[...pairs].sort((left,right)=>Number(left)-Number(right));
+    throw error;
+  }
   return pairs.size===1?[...pairs][0]:null;
 }
 

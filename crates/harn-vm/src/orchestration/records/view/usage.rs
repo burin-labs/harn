@@ -7,7 +7,7 @@ use super::super::LlmUsageRecord;
 pub struct RunViewUsage {
     pub input_tokens: i64,
     pub output_tokens: i64,
-    pub total_duration_ms: i64,
+    pub total_duration_ms: Option<i64>,
     pub call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
@@ -26,7 +26,7 @@ impl From<&LlmUsageRecord> for RunViewUsage {
         Self {
             input_tokens: value.input_tokens,
             output_tokens: value.output_tokens,
-            total_duration_ms: value.total_duration_ms,
+            total_duration_ms: (value.total_duration_ms >= 0).then_some(value.total_duration_ms),
             call_count: value.call_count,
             unpriced_calls: value.unpriced_calls,
             usage_unknown_calls: value.usage_unknown_calls,
@@ -41,14 +41,30 @@ impl From<&LlmUsageRecord> for RunViewUsage {
 }
 
 impl RunViewUsage {
-    pub(super) fn add_usage(&mut self, usage: &Self) {
+    pub(super) fn aggregate<'a>(values: impl Iterator<Item = &'a Self>) -> Self {
+        let mut total = Self::default();
+        let mut duration_ms = Some(0_i64);
+        let mut observed = false;
+        for usage in values {
+            observed = true;
+            total.add_usage(usage);
+            duration_ms = duration_ms
+                .zip(usage.total_duration_ms)
+                .and_then(|(total, more)| total.checked_add(more));
+        }
+        if observed {
+            total.total_duration_ms = duration_ms;
+        }
+        total
+    }
+
+    fn add_usage(&mut self, usage: &Self) {
         // A missing total is not a measured zero, even when the input has no
         // explicit unpriced count. Preserve each owner's certainty while folding.
         let total_is_exact = (self.call_count == 0 || self.cost_usd.is_some())
             && (usage.call_count == 0 || usage.cost_usd.is_some());
         self.input_tokens += usage.input_tokens;
         self.output_tokens += usage.output_tokens;
-        self.total_duration_ms += usage.total_duration_ms;
         self.call_count += usage.call_count;
         self.unpriced_calls += usage.unpriced_calls;
         self.usage_unknown_calls += usage.usage_unknown_calls;

@@ -187,9 +187,20 @@ pub(crate) fn run_with_filter(
             .map(FileCapture::output_capture)
             .unwrap_or(OutputCapture::Pipe),
     };
+    let call = crate::host_call::HostCallContext::current();
+    let scope = call.process_scope();
+    let launch_permit = match scope {
+        Some(scope) => Some(scope.enter_launch().ok_or_else(|| HostlibError::Backend {
+            builtin: req.builtin,
+            message: "command cancelled before process launch".to_string(),
+        })?),
+        None => None,
+    };
     let mut handle = process_handle::spawn_process(spec).map_err(|error| {
         process_error_to_hostlib(req.builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
+    let cleanup = scope.and_then(|scope| scope.register(handle.as_ref()));
+    drop(launch_permit);
 
     let pid = handle.pid();
     let missing_program = handle.missing_program().map(str::to_string);
@@ -214,7 +225,14 @@ pub(crate) fn run_with_filter(
     // spawns bypass this path (see `tools/long_running.rs`) and remain the
     // fire-and-forget escape hatch.
     let deadline = req.timeout.map(|timeout| started + timeout);
-    let wait_result = handle.wait_with_timeout(req.timeout, &harn_vm::op_interrupt::requested);
+    let wait_result = handle.wait_with_timeout(req.timeout, &|| {
+        harn_vm::op_interrupt::requested() || scope.is_some_and(|scope| scope.cancel_requested())
+    });
+    if wait_result.is_ok() {
+        if let Some(cleanup) = &cleanup {
+            cleanup.update_root_pid(None);
+        }
+    }
     if wait_result.is_err() {
         let _ = killer.kill();
     }

@@ -16,6 +16,51 @@ use super::values::*;
 
 pub(super) const PYTHON_INIT_STUB: &str = "from .harn_protocol import *  # noqa: F401,F403\n";
 
+pub(super) fn field_ident(name: &str) -> String {
+    if matches!(
+        name,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    ) {
+        format!("{name}_")
+    } else {
+        name.to_owned()
+    }
+}
+
 #[cfg(test)]
 pub(super) fn generate_python() -> String {
     generate_python_with_payloads(&SessionUpdatePayloads::load_for_tests())
@@ -371,8 +416,8 @@ _T = TypeVar("_T", bound="_HarnDataclass")
 class _HarnDataclass:
     """Mixin providing wire-faithful ``to_wire`` / ``from_wire`` helpers.
 
-    ``to_wire`` omits absent optional fields and preserves schema-required
-    nullable fields, including nested records. ``from_wire`` accepts a
+    ``to_wire`` strips absent optional fields and preserves required nulls
+    declared by a generated schema. ``from_wire`` accepts a
     decoded JSON object plus any unknown extension fields, ignoring keys
     that the static schema does not yet know about so additive enum or
     struct extensions stay forward-compatible.
@@ -382,8 +427,8 @@ class _HarnDataclass:
     def from_wire(cls: Type[_T], data: Mapping[str, Any]) -> _T:
         if not isinstance(data, Mapping):
             raise TypeError(f"{cls.__name__}.from_wire expected a mapping, got {type(data).__name__}")
-        accepted = {f.name for f in fields(cls)}  # type: ignore[arg-type]
-        kwargs = {key: value for key, value in data.items() if key in accepted}
+        accepted = {f.metadata.get("wire_name", f.name): f.name for f in fields(cls)}  # type: ignore[arg-type]
+        kwargs = {accepted[key]: value for key, value in data.items() if key in accepted}
         return cls(**kwargs)
 
     def to_wire(self) -> JsonObject:
@@ -392,19 +437,21 @@ class _HarnDataclass:
         return _strip_none(self)
 
 
-def _strip_none(value: Any) -> Any:
-    if is_dataclass(value):
-        # Constructor defaults own presence, including required fields whose value is null.
+def _strip_none(value: Any, preserve_dict_nulls: bool = False) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        required = getattr(type(value), "__harn_required_fields__", frozenset())
         return {
-            item.name: _strip_none(getattr(value, item.name))
-            for item in fields(value)
-            if getattr(value, item.name) is not None
-            or (item.default is MISSING and item.default_factory is MISSING)
+            f.metadata.get("wire_name", f.name): _strip_none(getattr(value, f.name), preserve_dict_nulls or bool(required))
+            for f in fields(value)
+            # A field without a constructor default is required on the wire, even when it is null.
+            if getattr(value, f.name) is not None
+            or f.metadata.get("wire_name", f.name) in required
+            or (f.default is MISSING and f.default_factory is MISSING)
         }
     if isinstance(value, dict):
-        return {key: _strip_none(item) for key, item in value.items()}
+        return {key: _strip_none(item, preserve_dict_nulls) for key, item in value.items() if item is not None or preserve_dict_nulls}
     if isinstance(value, list):
-        return [_strip_none(item) for item in value]
+        return [_strip_none(item, preserve_dict_nulls) for item in value]
     if isinstance(value, Enum):
         return value.value
     return value
@@ -527,7 +574,11 @@ class ACPNotification(_HarnDataclass):
     jsonrpc: str = "2.0"
 
 
-ACPMessage = Union[ACPRequest, ACPResponse, ACPNotification]
+# `params` is caller data, so a null nested inside it is a value, not an absent field.
+ACPNotification.__harn_required_fields__ = frozenset(["method", "jsonrpc"])
+
+
+ACPMessage =Union[ACPRequest, ACPResponse, ACPNotification]
 
 
 def is_request(message: Mapping[str, Any]) -> bool:
