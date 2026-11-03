@@ -30,6 +30,9 @@ pub(crate) struct ExecProfile {
     pub(crate) seed: fn(&Path) -> std::io::Result<()>,
     /// Why these arguments would print the credential, if they would.
     pub(crate) refusal: fn(&[String]) -> Option<&'static str>,
+    /// Whether these arguments may run with the grant at all. Everything
+    /// else runs without it, so an unrecognized subcommand never gets it.
+    pub(crate) grants: fn(&[String]) -> bool,
 }
 
 const PROFILES: &[&ExecProfile] = &[&gh_config::GH_PROFILE];
@@ -107,12 +110,13 @@ pub struct GrantedSpawn {
 /// reaching it, or `None` when it receives none.
 ///
 /// No grant is given when the program has no [`ExecProfile`] (the plain
-/// session environment already carries it), when `overlay` sets a variable
+/// session environment already carries it), when the profile does not grant
+/// these arguments (for gh, anything but a read), when `overlay` sets a variable
 /// that could reopen an exec path, or when `program` does not resolve to a
-/// file outside every workspace and write root ([`grant_spawn`]). Arguments
-/// that would print the credential are refused with an error. Every granted
-/// value is registered for exact-value output redaction before it is
-/// returned. Any failure to build the private directory is an error, never
+/// native executable outside every workspace and write root
+/// ([`grant_spawn`]). Arguments that would print or pass on the credential
+/// are refused with an error, as is a write root overlapping the user's git,
+/// SSH or gh configuration. Any failure to build the private directory is an error, never
 /// a grant with an open exec path.
 pub fn granted_spawn(
     program: &str,
@@ -130,7 +134,7 @@ pub fn granted_spawn(
     if let Some(reason) = (profile.refusal)(args) {
         return Err(refusal(profile, reason.to_string()));
     }
-    if overlay.keys().any(|key| reopens_exec_path(profile, key)) {
+    if !(profile.grants)(args) || overlay.keys().any(|key| reopens_exec_path(profile, key)) {
         return Ok(None);
     }
     let Some(mut session) = super::session_env_with_command_grants(program)? else {
@@ -151,6 +155,24 @@ pub fn granted_spawn(
                 "the home directory is missing or inside a workspace".to_string(),
             )
         })?;
+    // Git and gh read these as the user's own; a root a confined child can
+    // write that contains or lies inside one would let it plant config.
+    if let Some(path) = grant_spawn::trusted_config_paths(&home)
+        .into_iter()
+        .find(|path| {
+            untrusted
+                .iter()
+                .any(|root| path.starts_with(root) || root.starts_with(path))
+        })
+    {
+        return Err(refusal(
+            profile,
+            format!(
+                "{} overlaps a directory a workspace or confined process can write",
+                path.display()
+            ),
+        ));
+    }
     let granted: Vec<(String, String)> = vars
         .into_iter()
         .filter_map(|var| session.remove(&var).map(|value| (var, value)))
@@ -206,14 +228,8 @@ pub fn granted_spawn(
             dir.path().join(subdir).display().to_string(),
         )
     }));
-    for (_, value) in &granted {
-        if !crate::session_inputs::register_granted_value(value) {
-            return Err(refusal(
-                profile,
-                "the redaction registry is full".to_string(),
-            ));
-        }
-    }
+    // The values were registered for redaction when the session environment
+    // resolved them.
     env.extend(granted);
     Ok(Some(GrantedSpawn {
         program: canonical.display().to_string(),

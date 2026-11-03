@@ -1308,6 +1308,19 @@ fn session_env_with(
             env.insert(key, value);
         }
     }
+    // Every value a grant hands a child is filtered out of what it prints.
+    for grant in environment
+        .grants()
+        .iter()
+        .filter(|grant| grant_owns_key(grant))
+    {
+        let value = grant.exposed_env_var().and_then(|var| env.get(var));
+        if value.is_some_and(|value| !crate::session_inputs::register_granted_value(value)) {
+            return Err(VmError::Thrown(VmValue::string(
+                "[environment_policy.redaction_full] too many granted values to redact",
+            )));
+        }
+    }
     if let Some((name, socket)) = granted_ssh_agent_env() {
         env.insert(name.to_string(), socket);
     }

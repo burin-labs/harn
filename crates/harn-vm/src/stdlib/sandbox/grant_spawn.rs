@@ -93,13 +93,46 @@ pub(crate) fn trusted_program(
             .find(|candidate| is_executable_file(candidate))
     })?;
     let canonical = std::fs::canonicalize(found).ok()?;
-    if is_untrusted(&canonical, untrusted) {
+    if is_untrusted(&canonical, untrusted) || !is_native_executable(&canonical) {
         return None;
     }
     if requested.is_absolute() && std::fs::canonicalize(requested).ok()? != canonical {
         return None;
     }
     Some(canonical)
+}
+
+/// Whether `path` is a compiled executable, not a script or a version-manager
+/// shim that would pick the real program from files in the working directory.
+fn is_native_executable(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 4];
+    let read = std::fs::File::open(path).and_then(|mut file| file.read_exact(&mut magic));
+    read.is_ok()
+        && (magic == *b"\x7fELF"
+            || matches!(
+                u32::from_be_bytes(magic),
+                0xFEED_FACE | 0xFEED_FACF | 0xCEFA_EDFE | 0xCFFA_EDFE | 0xCAFE_BABE | 0xBEBA_FECA
+            )
+            || (cfg!(windows) && magic[..2] == *b"MZ"))
+}
+
+/// The files git and gh read as the user's own configuration.
+pub(crate) fn trusted_config_paths(home: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![
+        home.join(".gitconfig"),
+        home.join(".config/git"),
+        home.join(".ssh"),
+        home.join(".config/gh"),
+        super::gh_config_source(home),
+        PathBuf::from("/etc/gitconfig"),
+        PathBuf::from("/etc/ssh"),
+    ];
+    paths.extend(std::env::var_os("GIT_CONFIG_GLOBAL").map(PathBuf::from));
+    paths
+        .into_iter()
+        .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
+        .collect()
 }
 
 fn executable_names(name: &str) -> impl Iterator<Item = String> + '_ {
@@ -244,7 +277,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::create_dir_all(dir).unwrap();
             let program = dir.join("tool");
-            std::fs::write(&program, "#!/bin/sh\n").unwrap();
+            std::fs::write(&program, b"\x7fELF\x02\x01\x01").unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::canonicalize(program).unwrap()
         };
@@ -274,6 +307,17 @@ mod tests {
                 "{refused}"
             );
         }
+        // A script, such as a version-manager shim, is not a native executable.
+        let shim = user.path().join("shims");
+        std::fs::create_dir_all(&shim).unwrap();
+        std::fs::write(shim.join("tool"), "#!/bin/sh\nexec mise x -- tool\n").unwrap();
+        std::fs::set_permissions(
+            shim.join("tool"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let entries = trusted_path_entries(shim.to_str().unwrap(), &untrusted);
+        assert_eq!(trusted_program("tool", &entries, &untrusted), None);
         // A trusted entry whose program links into the workspace is refused.
         let linked = user.path().join("linked");
         std::fs::create_dir_all(&linked).unwrap();

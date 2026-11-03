@@ -192,12 +192,31 @@ const GH_READ_VERBS: &[&str] = &["checks", "diff", "list", "status", "view"];
 /// comment`, and `gh api -X POST ...` change GitHub. Only the listed read verbs
 /// and a GET `gh api` call without request fields are reads. Unknown
 /// subcommands, `--web`, and every write stay unrecognized, which keeps them
-/// out of the observation phase.
-fn gh_invocation_is_read_only(args: &[String]) -> bool {
+/// out of the observation phase. Global `-R`/`--repo`/`--hostname` flags are
+/// skipped before the subcommand is read.
+///
+/// This is also the only gate on which gh invocations receive a command-bound
+/// credential grant. Traced with `GIT_TRACE`, the reads run git only for
+/// `config`, `remote -v`, `rev-parse` and `symbolic-ref`, none of which runs a
+/// filter driver, hook or external diff.
+pub(crate) fn gh_invocation_is_read_only(args: &[String]) -> bool {
     if args.iter().any(|arg| arg == "--web" || arg == "-w") {
         return false;
     }
-    match args {
+    let mut words = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "-R" | "--repo" | "--hostname" => {
+                iter.next();
+            }
+            flag if flag.starts_with("--repo=")
+                || flag.starts_with("--hostname=")
+                || (flag.starts_with("-R") && flag.len() > 2) => {}
+            _ => words.push(arg.clone()),
+        }
+    }
+    match words.as_slice() {
         [api, rest @ ..] if api == "api" => gh_api_is_read_only(rest),
         [status] if status == "status" => true,
         [group, verb, ..] => {
@@ -675,6 +694,9 @@ mod tests {
             "gh api repos/o/r/pulls",
             "gh api -X GET repos/o/r/issues",
             "gh api --method=get repos/o/r",
+            "gh -R o/r pr view 1",
+            "gh pr view --repo=o/r 1",
+            "gh --hostname h.example issue list",
         ] {
             assert_eq!(effect(command), "read_effect", "{command}");
         }
@@ -702,6 +724,22 @@ mod tests {
             "gh api",
             "gh pr view 7 --web",
             "gh extension-name",
+            "gh pr checkout 7",
+            "gh -R o/r pr checkout 7",
+            "gh pr co 7",
+            "gh co 7",
+            "gh repo clone o/r",
+            "gh -R o/r repo clone o/r -- -c filter.a.smudge=x",
+            "gh repo fork o/r --clone",
+            "gh repo sync",
+            "gh gist clone x",
+            "gh workflow run ci",
+            "gh extension install o/gh-x",
+            "gh alias set co 'pr checkout'",
+            "gh codespace ssh",
+            "gh ssh-key add k.pub",
+            "gh secret set X",
+            "gh -R",
             "gh",
         ] {
             assert_ne!(effect(command), "read_effect", "{command}");

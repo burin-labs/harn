@@ -6,7 +6,8 @@
 //! variable arrived, and that reproduces the GitHub CLI's own exec paths: a
 //! `!` alias from `$GH_CONFIG_DIR/config.yml` runs through `sh -c`, an
 //! extension under `$XDG_DATA_HOME/gh/extensions` is executed, output goes
-//! through `$GH_PAGER`, `pr checkout` runs git, and `auth token` prints the
+//! through `$GH_PAGER`, `pr checkout` and (to stand in for a read that touches
+//! the work tree) `pr diff` run git, and `auth token` prints the
 //! credential. The granted value is a probe held by a host secret provider,
 //! never a token, and every call goes through the blocking-pool dispatch a
 //! real tool call uses, so the provider must follow it there. Each leak
@@ -45,6 +46,7 @@ if [ -f "$config" ]; then sed 's/^/cfg: /' "$config"; fi
 case "$1 $2" in
   "auth token") echo "$GH_TOKEN"; exit 0 ;;
   "pr checkout") exec git checkout -q -B "$3" ;;
+  "pr diff") git checkout -q -B "probe-$3" ;;
   "api leak")
     printf 'token=%s' "$(printf '%s' "$GH_TOKEN" | cut -c1-9)"; sleep 0.2
     printf '%s\n' "$(printf '%s' "$GH_TOKEN" | cut -c10-)"
@@ -345,12 +347,14 @@ fn compound_shell_commands_keep_the_shell_and_receive_no_grant() {
 }
 
 #[test]
-fn a_granted_gh_cannot_hand_the_grant_to_an_alias_an_extension_or_a_pager() {
+fn an_alias_an_extension_or_a_caller_pager_never_runs_with_the_grant() {
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
 
     for (vector, command) in [("`!` alias", "gh leak"), ("extension", "gh ext")] {
-        assert_granted_without_leak(&fixture.shell(command), vector);
+        let out = fixture.shell(command);
+        assert!(out.contains("gh-grant=absent"), "{vector}: {out}");
+        assert!(!out.contains(&format!("{GRANTED}=")), "{vector}: {out}");
     }
     // A caller variable that would reopen an exec path withholds the grant;
     // the pager it names does run, and sees nothing.
@@ -376,7 +380,16 @@ fn a_planted_stand_in_link_cannot_redirect_a_granted_gh() {
     std::fs::create_dir_all(&stand_in).unwrap();
     std::os::unix::fs::symlink(&attacker, stand_in.join("config")).unwrap();
 
-    assert_granted_without_leak(&fixture.shell("gh triage"), "planted stand-in");
+    let out = fixture.shell("gh triage");
+    assert!(out.contains("gh-grant="), "gh never ran: {out}");
+    assert!(
+        !out.contains(&format!("{GRANTED}=")),
+        "the planted alias saw the grant: {out}"
+    );
+    // A granted read is not redirected through the link either.
+    let out = fixture.shell("gh issue list");
+    assert_granted_without_leak(&out, "planted stand-in, read");
+    assert!(!out.contains(&stand_in.display().to_string()), "{out}");
     // A racer that fills the private extension directory between its creation
     // and gh's lookup cannot: it is created exclusively, owner-only, and
     // outside every root a confined child can write.
@@ -420,7 +433,7 @@ fn gh_auth_token_is_refused_and_printed_credentials_are_redacted() {
         );
         assert!(!error.contains(PROBE), "{command}: {error}");
     }
-    assert_granted_without_leak(&fixture.shell("gh auth status"), "auth status");
+    assert!(fixture.shell("gh auth status").contains("gh-grant=absent"));
 
     // A granted program that prints its credential anyway, split across
     // writes and encoded, has every form redacted from both streams.
@@ -496,20 +509,64 @@ fn git_hooks_of_the_workspace_never_see_the_grant() {
     let hook_env = repo.join("hook-env");
 
     // Control: without the grant the hook fires in this repository.
-    fixture
-        .shell_in(&repo, "gh pr checkout control; true")
-        .unwrap();
+    fixture.shell_in(&repo, "gh pr diff 1; true").unwrap();
     let control = std::fs::read_to_string(&hook_env).expect("the hook must fire");
     assert!(control.contains("PATH="), "{control}");
     std::fs::remove_file(&hook_env).unwrap();
 
-    let out = fixture.shell_in(&repo, "gh pr checkout feature").unwrap();
-    assert_granted_without_leak(&out.stdout, "pr checkout");
+    // A granted read that touched the work tree would still not run it.
+    let out = fixture.shell_in(&repo, "gh pr diff 2").unwrap();
+    assert_granted_without_leak(&out.stdout, "pr diff");
     let granted = std::fs::read_to_string(&hook_env).unwrap_or_default();
     assert!(
         !granted.contains(&format!("{GRANTED}=")),
         "a workspace git hook saw the grant"
     );
+}
+
+#[test]
+fn only_gh_reads_receive_the_grant() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+
+    for read in [
+        "gh issue list",
+        "gh -R o/r pr view 1",
+        "gh pr view --repo=o/r 1",
+        "gh api repos/o/r",
+    ] {
+        assert_granted_without_leak(&fixture.shell(read), read);
+    }
+    // Deny by default: every write, clone, checkout, fork, extension, alias,
+    // and unrecognized spelling runs without the credential, whatever
+    // repository selector precedes it.
+    for other in [
+        "gh pr checkout 7",
+        "gh -R o/r pr checkout 7",
+        "gh --repo=o/r pr checkout 7",
+        "gh pr -R o/r checkout 7",
+        "gh pr co 7",
+        "gh co 7",
+        "gh repo clone o/r",
+        "gh -R o/r repo fork",
+        "gh repo fork o/r --clone",
+        "gh gist clone x",
+        "gh extension install o/gh-x",
+        "gh alias set co 'pr checkout'",
+        "gh workflow run ci.yml",
+        "gh codespace list",
+        "gh ssh-key list",
+        "gh secret list",
+        "gh api -X POST repos/o/r/issues",
+        "gh api repos/o/r/issues -f title=t",
+        "gh pr view 1 --web",
+    ] {
+        let out = fixture.shell(other);
+        assert!(
+            out.contains("gh-grant=absent"),
+            "{other} received the grant: {out}"
+        );
+    }
 }
 
 /// The same proof through a confined spawn. Needs a live process sandbox.
@@ -585,19 +642,30 @@ fn the_real_github_cli_neither_prints_nor_leaks_the_grant() {
         .err()
         .expect("gh auth token must be refused");
     assert!(error.contains("command_grant_refused"), "{error}");
-    for alias in ["gh leak", "gh triage"] {
-        let out = fixture.shell_in(fixture.workspace.path(), alias).unwrap();
+    // An alias is never a read, so gh runs it without the credential: the
+    // user's own `!` alias prints an empty value, and the planted one is
+    // unknown because the link is never read.
+    let out = fixture
+        .shell_in(fixture.workspace.path(), "gh leak")
+        .unwrap();
+    assert!(
+        out.stdout.contains("leaked="),
+        "the alias never ran: {}",
+        out.stdout
+    );
+    let out_triage = fixture
+        .shell_in(fixture.workspace.path(), "gh triage")
+        .unwrap();
+    assert!(
+        out_triage.stderr.contains("unknown command"),
+        "{}",
+        out_triage.stderr
+    );
+    for out in [out, out_triage] {
         assert!(
-            !out.stdout.contains("leaked=") && !out.stderr.contains("leaked="),
-            "{alias} ran a shell alias:\n{}\n{}",
+            !out.stdout.contains(PROBE) && !out.stderr.contains(PROBE),
+            "{}\n{}",
             out.stdout,
-            out.stderr
-        );
-        assert!(!out.stdout.contains(PROBE) && !out.stderr.contains(PROBE));
-        // The control that gh itself ran: it rejects the unknown command.
-        assert!(
-            out.stderr.contains("unknown command"),
-            "{alias}: {}",
             out.stderr
         );
     }

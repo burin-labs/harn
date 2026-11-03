@@ -18,6 +18,8 @@
 //! - `GH_CONFIG_DIR` points at a per-spawn `config.yml` that keeps only a few
 //!   display settings and inert aliases. `hosts.yml` is never copied.
 //! - `gh auth` subcommands that print the credential are refused.
+//! - Only read subcommands receive the grant at all; see
+//!   `gh_invocation_is_read_only`.
 
 use std::path::Path;
 
@@ -29,7 +31,11 @@ pub(crate) const GH_PROFILE: ExecProfile = ExecProfile {
     refusing_env: &["GH_BROWSER", "BROWSER", "GH_EDITOR", "EDITOR", "VISUAL"],
     dir_env: &[("GH_CONFIG_DIR", "config"), ("XDG_DATA_HOME", "data")],
     seed: seed_granted_config,
-    refusal: auth_refusal,
+    refusal: gh_refusal,
+    // Reads only: a write, clone, checkout, extension, alias, or anything
+    // unrecognized runs without the credential, and with it any git work in
+    // the repository that could start a filter driver or diff program.
+    grants: crate::orchestration::gh_invocation_is_read_only,
 };
 
 /// Top-level keys a granted spawn's stand-in keeps. Every other key either
@@ -47,9 +53,49 @@ const GRANTED_KEYS: &[&str] = &[
 /// Top-level keys no stand-in keeps, granted or not.
 const EXEC_KEYS: &[&str] = &["pager", "browser", "editor", "http_unix_socket"];
 
-/// `gh auth` prints the credential for `token`, `status --show-token` and
-/// `git-credential`, and changes the user's git or gh configuration for the
-/// rest. Only a plain `gh auth status` runs with the grant.
+/// Why a granted gh must not run these arguments at all.
+///
+/// - `--` hands the rest of the line to another program: `gh repo clone o/r
+///   -- -c filter.x.smudge=...` passes it to `git clone`.
+/// - `--jq`/`-q` filters can read the environment (`$ENV`, `env`) and print
+///   the credential in a form exact-value redaction cannot see. `--template`
+///   and `-t` are refused with them: the template functions are not known to
+///   reach the environment, but they format the same output.
+/// - `gh auth` prints the credential for `token`, `status --show-token` and
+///   `git-credential`, and changes git or gh configuration for the rest.
+///
+/// Short flags are refused by letter anywhere in a cluster (`-qX`, `-Lq`),
+/// except a `-R` cluster, whose remainder is the repository name. Only a read,
+/// which would otherwise receive the grant, is refused for `--` or a filter;
+/// anything else already runs without it, so `gh pr create -t x` still works.
+fn gh_refusal(args: &[String]) -> Option<&'static str> {
+    if let Some(reason) = auth_refusal(args) {
+        return Some(reason);
+    }
+    if !crate::orchestration::gh_invocation_is_read_only(args) {
+        return None;
+    }
+    for arg in args {
+        if arg == "--" {
+            return Some("`--` would pass the rest of the command to another program");
+        }
+        let long_filter = ["--jq", "--template"]
+            .iter()
+            .any(|flag| arg == flag || arg.starts_with(&format!("{flag}=")));
+        let short_filter = arg.len() > 1
+            && arg.starts_with('-')
+            && !arg.starts_with("--")
+            && !arg.starts_with("-R")
+            && arg[1..].contains(['q', 't']);
+        if long_filter || short_filter {
+            return Some("an output filter can read the credential from the environment");
+        }
+    }
+    None
+}
+
+/// Only a plain `gh auth status` is not refused; it still receives no grant,
+/// because it is not a read.
 fn auth_refusal(args: &[String]) -> Option<&'static str> {
     let mut words = args.iter().map(String::as_str);
     if words.find(|word| !word.starts_with('-')) != Some("auth") {
@@ -193,7 +239,7 @@ fn alias_entry_is_inert(content: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_refusal, project_gh_config, sanitize_gh_config, GRANTED_KEYS};
+    use super::{gh_refusal, project_gh_config, sanitize_gh_config, GRANTED_KEYS};
 
     #[test]
     fn shell_aliases_never_reach_the_stand_in() {
@@ -244,15 +290,21 @@ prompt: enabled
     }
 
     #[test]
-    fn only_a_plain_auth_status_keeps_the_grant() {
+    fn credential_printing_arguments_are_refused() {
         let refused = |args: &[&str]| {
-            auth_refusal(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>()).is_some()
+            gh_refusal(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>()).is_some()
         };
         for allowed in [
             &["issue", "list"][..],
             &["auth", "status"],
             &["auth", "status", "-h", "github.com", "--active"],
             &["api", "auth"],
+            &["-R", "o/test", "pr", "view", "1"],
+            &["-Rkit/test", "pr", "list"],
+            &["pr", "list", "--json", "number"],
+            // Not reads: they run without the grant, so nothing is refused.
+            &["pr", "create", "-t", "x"],
+            &["repo", "clone", "o/r", "--", "-c", "filter.a.smudge=x"],
         ] {
             assert!(!refused(allowed), "{allowed:?}");
         }
@@ -264,6 +316,16 @@ prompt: enabled
             &["auth", "setup-git"],
             &["--help", "auth", "token"],
             &["auth"],
+            &["pr", "view", "1", "--", "-c", "filter.a.smudge=x"],
+            &["api", "rate_limit", "--jq", "$ENV.X"],
+            &["api", "rate_limit", "--jq=env.X"],
+            &["pr", "list", "--json", "n", "-q", ".[]"],
+            &["pr", "list", "-q.[]"],
+            &["pr", "list", "-Lq", "5"],
+            &["api", "x", "--template", "{{.}}"],
+            &["api", "x", "--template={{.}}"],
+            &["api", "x", "-t", "{{.}}"],
+            &["api", "x", "-t{{.}}"],
         ] {
             assert!(refused(args), "{args:?}");
         }
