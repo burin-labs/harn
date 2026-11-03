@@ -1,0 +1,43 @@
+// Run: harn test tests/agent/ladder_tool_format_test.harn
+//
+// A ladder route names no top-level model. Its tool format must follow the
+// ladder's first step, the model that serves the request, instead of falling
+// back to text tool calls on a request that also attaches no tools.
+import { agent_tool_format_resolution } from "std/agent/options"
+
+pipeline test_named_ladder_resolves_the_tool_format_of_its_first_step(
+  harness: Harness,
+  task: unknown,
+) {
+  const first = harness.llm.model_ladder("agent_frontier").steps[0]
+  const direct = agent_tool_format_resolution(
+    harness.llm,
+    {provider: first.provider, model: first.model},
+  )
+  const laddered = agent_tool_format_resolution(harness.llm, {ladder: "agent_frontier"})
+  assert(laddered.source != "unresolved", "a named ladder must resolve a route")
+  assert_eq(laddered.tool_format, direct.tool_format)
+  assert_eq(laddered.provider, direct.provider)
+  assert_eq(laddered.model, direct.model)
+}
+
+pipeline test_inline_ladder_resolves_the_tool_format_of_its_first_step(
+  harness: Harness,
+  task: unknown,
+) {
+  const direct = agent_tool_format_resolution(
+    harness.llm,
+    {provider: "anthropic", model: "claude-sonnet-5-5"},
+  )
+  const laddered = agent_tool_format_resolution(
+    harness.llm,
+    {ladder: [{model: "claude-sonnet-5-5", provider: "anthropic"}, {model: "claude-opus-5-5"}]},
+  )
+  assert_eq(laddered.tool_format, direct.tool_format)
+  assert_eq(laddered.model, direct.model)
+}
+
+pipeline test_unknown_ladder_stays_unresolved(harness: Harness, task: unknown) {
+  const laddered = agent_tool_format_resolution(harness.llm, {ladder: "no-such-ladder"})
+  assert_eq(laddered.source, "unresolved")
+}
