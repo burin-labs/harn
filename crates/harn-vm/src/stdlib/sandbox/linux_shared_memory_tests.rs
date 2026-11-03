@@ -52,7 +52,9 @@ fn a_direct_landlock_child_gets_semaphores_and_only_regular_files_in_dev_shm() {
         return;
     }
     let workspace = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    // The runtime cwd, not the compile-time manifest dir: CI runs an archived
+    // test binary on a host where the build path does not exist.
+    let outside = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
     let tag = format!("harn-shm-test-{}", std::process::id());
     let executable = Path::new(super::SHARED_MEMORY_DIR).join(format!("{tag}-exec"));
     std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
