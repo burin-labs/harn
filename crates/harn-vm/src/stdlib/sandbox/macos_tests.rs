@@ -751,6 +751,32 @@ fn sandbox_exec_profile_allows_common_device_runtime_access() {
 }
 
 #[test]
+fn sandbox_exec_profile_allows_a_multiprocessing_lock_but_not_the_network() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/python3").exists() {
+        return;
+    }
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    let run = |code: &str| {
+        Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", &profile, "--", "/usr/bin/python3", "-I", "-c", code])
+            .current_dir("/")
+            .output()
+            .expect("run sandbox-exec python smoke")
+    };
+    let lock = run("import multiprocessing as m; l = m.Lock(); l.acquire(); l.release()");
+    assert!(
+        lock.status.success(),
+        "multiprocessing.Lock should work under the profile\nstderr:\n{}",
+        String::from_utf8_lossy(&lock.stderr)
+    );
+    let network = run("import socket; socket.create_connection(('1.1.1.1', 443), 3)");
+    assert!(
+        !network.status.success(),
+        "the semaphore grant must not open the network"
+    );
+}
+
+#[test]
 fn sandbox_exec_profile_allows_xcrun_to_resolve_swift() {
     if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/xcrun").exists() {
         return;
