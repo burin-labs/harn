@@ -806,7 +806,7 @@ import { command_run } from "std/command"
 pipeline main(harness: Harness) {
   const result = command_run(
     harness.tools,
-    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
+    {argv: ["sh", "-c", "[ \"$HARN_TEST_CHILD_VAR\" = granted-secret-value ] && printf delivered; printf ' %s' \"$HARN_TEST_CHILD_VAR\""]},
     {capture: {max_inline_bytes: 64}},
   )
   if !result.success {
@@ -861,7 +861,7 @@ pipeline main(harness: Harness) {
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.stdout.lines().collect::<Vec<_>>(),
-        ["granted-secret-value", "absent"]
+        ["delivered [redacted]", "absent"]
     );
     assert!(
         outcome.stderr.contains("environment policy: granted"),

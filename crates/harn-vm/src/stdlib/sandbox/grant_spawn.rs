@@ -34,6 +34,7 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
             target_os = "windows"
         ))]
         roots.extend(super::super::process_sandbox_policy_write_roots(&policy));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         roots.extend(super::super::process_sandbox_developer_toolchain_cache_roots(&policy));
         roots.extend(super::workspace_local_tmpdir(&policy));
     }

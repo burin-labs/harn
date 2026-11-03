@@ -85,13 +85,30 @@ fn write_executable(path: &Path, body: impl AsRef<[u8]>) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// A scratch directory a granted spawn can trust, so neither the host temp dir
+/// nor the current directory. The build's target dir qualifies, but an archived
+/// test binary can run on a host where that path does not exist and is itself
+/// extracted under the temp dir, so such a run uses the real home.
+fn trusted_scratch_dir() -> tempfile::TempDir {
+    let built = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let parent = if built.is_dir() {
+        built.to_path_buf()
+    } else {
+        PathBuf::from(std::env::var_os("HOME").expect("HOME must name the real home"))
+    };
+    tempfile::Builder::new()
+        .prefix("harn-grant-e2e-")
+        .tempdir_in(parent)
+        .expect("trusted scratch dir")
+}
+
 /// A grant reaches only a compiled `gh`, never a script. This one is a
 /// compiled launcher that runs the `gh.sh` beside it, so the stand-in stays a
 /// readable script.
 const NATIVE_LAUNCHER: &str = r#"use std::os::unix::process::CommandExt;
 fn main() {
     let script = std::env::current_exe().unwrap().with_file_name("gh.sh");
-    let error = std::process::Command::new("/bin/sh").arg(script).args(std::env::args_os().skip(1)).exec();
+    let error = std::process::Command::new(script).args(std::env::args_os().skip(1)).exec();
     eprintln!("{error}");
     std::process::exit(127);
 }
@@ -100,7 +117,7 @@ fn main() {
 fn native_launcher() -> &'static [u8] {
     static LAUNCHER: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     LAUNCHER.get_or_init(|| {
-        let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let dir = trusted_scratch_dir();
         let source = dir.path().join("launcher.rs");
         let binary = dir.path().join("launcher");
         std::fs::write(&source, NATIVE_LAUNCHER).unwrap();
@@ -145,7 +162,7 @@ impl Fixture {
     }
 
     fn with(paths: impl FnOnce(&Path) -> Paths) -> Self {
-        let user = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("user root");
+        let user = trusted_scratch_dir();
         // Not `$TMPDIR`: other suites in this binary repoint it under their
         // own lock and remove the directory afterwards.
         let workspace = tempfile::tempdir_in("/tmp").expect("workspace root");
@@ -172,8 +189,11 @@ impl Fixture {
         .filter(|entry| !entry.is_empty())
         .collect::<Vec<_>>()
         .join(":");
-        let set: [(&'static str, PathBuf); 5] = [
+        let set: [(&'static str, PathBuf); 6] = [
             ("PATH", PathBuf::from(search_path)),
+            // The test lane's own config home sits under the host temp dir,
+            // which a grant correctly refuses to trust.
+            ("XDG_CONFIG_HOME", home.join(".config")),
             ("HOME", home),
             ("XDG_DATA_HOME", user.path().join("user-data")),
             (
