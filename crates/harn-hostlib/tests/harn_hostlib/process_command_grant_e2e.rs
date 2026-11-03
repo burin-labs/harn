@@ -58,7 +58,7 @@ case "$1 $2" in
   "pr status")
     other=$(cat gh.config)
     echo "own=$(grep -c oauth_token "$GH_CONFIG_DIR/hosts.yml" 2>/dev/null)"
-    echo "other=$(grep -c oauth_token "$other/hosts.yml" 2>/dev/null)"
+    echo "other=$(cat "$other/hosts.yml" 2>/dev/null | grep -c oauth_token)"
     exit 0 ;;
   "api leak")
     printf 'token=%s' "$(printf '%s' "$token" | cut -c1-9)"; sleep 0.2
