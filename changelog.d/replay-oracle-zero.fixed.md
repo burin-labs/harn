@@ -1,1 +1,0 @@
-- Replay oracle checks now refuse to pass when the allowlist removes every comparable value, including in shadow comparisons.
