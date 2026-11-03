@@ -54,7 +54,12 @@ case "$1 $2" in
   "pr checkout") exec git checkout -q -B "$3" ;;
   "pr diff") git checkout -q -B "probe-$3" ;;
   "issue status") env; exit 0 ;;
-  "issue view") echo $$ > gh.pid; sleep 4; exit 0 ;;
+  "issue view") echo "$GH_CONFIG_DIR" > gh.config; echo $$ > gh.pid; sleep 4; exit 0 ;;
+  "pr status")
+    other=$(cat gh.config)
+    echo "own=$(grep -c oauth_token "$GH_CONFIG_DIR/hosts.yml" 2>/dev/null)"
+    echo "other=$(grep -c oauth_token "$other/hosts.yml" 2>/dev/null)"
+    exit 0 ;;
   "api leak")
     printf 'token=%s' "$(printf '%s' "$token" | cut -c1-9)"; sleep 0.2
     printf '%s\n' "$(printf '%s' "$token" | cut -c10-)"
@@ -726,8 +731,9 @@ fn a_write_root_over_the_users_git_or_ssh_config_refuses_the_grant() {
     assert_granted_without_leak(&fixture.shell("gh issue list"), "no write root");
 }
 
-/// The token is a github.com login, and a granted read that names any other
-/// host, in any spelling, is refused before gh runs.
+/// The token is a github.com login sent only over https: a granted read that
+/// names any other host, or any URL scheme but https, in any spelling, is
+/// refused before gh runs.
 #[test]
 fn a_granted_read_naming_another_host_is_refused() {
     let _env_guard = super::process_tools_e2e::lock_env();
@@ -746,6 +752,11 @@ fn a_granted_read_naming_another_host_is_refused() {
         "gh repo view https://github.localhost/o/r",
         "gh repo view git@github.localhost:o/r",
         "gh api http://api.github.localhost/user",
+        "gh api http://api.github.com/user",
+        "gh api http://github.com/api/v3/user",
+        "gh api HTTP://api.github.com/user",
+        "gh api //api.github.com/user",
+        "gh repo view --repo=http://github.com/o/r",
     ]
     .into_iter()
     .filter(|command| {
@@ -863,7 +874,7 @@ fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
          fi"
     );
     let session = harn_vm::stdlib::process::current_session_environment();
-    let (granted, confined_read, unconfined_read) = std::thread::scope(|scope| {
+    let (granted, confined_read, unconfined_read, peer) = std::thread::scope(|scope| {
         let fixture = &fixture;
         let granted = scope.spawn(move || {
             harn_vm::stdlib::process::set_session_environment(session);
@@ -879,8 +890,19 @@ fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
         }
         let confined_read = confined(fixture, || fixture.shell(&reader));
         let unconfined_read = fixture.shell(&reader);
-        (granted.join().unwrap(), confined_read, unconfined_read)
+        // A second granted gh reads its own login and not the running one's.
+        let peer = confined(fixture, || fixture.shell("gh pr status"));
+        (
+            granted.join().unwrap(),
+            confined_read,
+            unconfined_read,
+            peer,
+        )
     });
+    assert!(
+        peer.contains("own=2") && peer.contains("other=0"),
+        "a granted gh must read its own login and no concurrent spawn's:\n{peer}"
+    );
     assert_granted_without_leak(&granted, "sleeping read");
     assert!(
         unconfined_read.contains("file=2"),
@@ -900,6 +922,68 @@ fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
             "a confined sibling read the granted gh's environment:\n{confined_read}"
         );
     }
+}
+
+/// A crashed or killed spawn's directory, which holds its login, is removed by
+/// the next granted spawn: when its process is gone, or when it is older than
+/// the age bound. A link, an entry another mode or name, and a live spawn's
+/// directory are left alone, and a link is never followed.
+#[test]
+fn a_granted_spawn_sweeps_directories_a_crashed_spawn_left_behind() {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let base = fixture.user.path().join("harn-home/grant-spawns");
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true).mode(0o700);
+    builder.create(&base).unwrap();
+    let dead = {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let me = std::process::id();
+    let leaf = |name: String, mode: u32| {
+        let dir = base.join(name);
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(mode)
+            .create(dir.join("config"))
+            .unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        std::fs::write(dir.join("config/hosts.yml"), "oauth_token: x\n").unwrap();
+        dir
+    };
+    let crashed = leaf(format!("{dead}-0-{now}"), 0o700);
+    let expired = leaf(format!("{me}-1-0"), 0o700);
+    let live = leaf(format!("{me}-2-{now}"), 0o700);
+    let shared = leaf(format!("{dead}-3-{now}"), 0o755);
+    let unrelated = leaf("keep-me".to_string(), 0o700);
+    let outside = fixture.user.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("marker"), "x").unwrap();
+    let link = base.join(format!("{dead}-4-{now}"));
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    assert_granted_without_leak(&fixture.shell("gh issue list"), "sweeping read");
+    assert!(!crashed.exists(), "a dead process's directory survived");
+    assert!(!expired.exists(), "a directory past the age bound survived");
+    for kept in [&live, &shared, &unrelated] {
+        assert!(
+            kept.join("config/hosts.yml").exists(),
+            "{} was removed",
+            kept.display()
+        );
+    }
+    assert!(
+        std::fs::symlink_metadata(&link).is_ok() && outside.join("marker").exists(),
+        "the sweep followed or removed a link"
+    );
 }
 
 /// The same proof through a confined spawn. Needs a live process sandbox.

@@ -127,7 +127,7 @@ impl GrantedSpawn {
     /// read its private directory, which every other confined child is
     /// denied.
     pub fn launching(&self) -> grant_spawn::OwnSpawnLaunch {
-        grant_spawn::OwnSpawnLaunch::begin()
+        grant_spawn::OwnSpawnLaunch::begin(self._dir.path())
     }
 }
 

@@ -180,37 +180,44 @@ impl Drop for SpawnDir {
 static NEXT_SPAWN_DIR: AtomicU64 = AtomicU64::new(0);
 
 /// Where every per-spawn directory lives. It holds credentials while a granted
-/// spawn runs, so it is on every confined child's read denylist
-/// ([`denied_read_root`]) except the granted spawn's own.
+/// spawn runs, so every confined child has it on its read denylist
+/// ([`denied_read_root`]). The one exception is the granted spawn's own leaf,
+/// which its own profile re-allows ([`own_spawn_read_root`]).
 pub(crate) fn grant_spawns_root() -> PathBuf {
     crate::mcp_oauth::harn_home_dir().join("grant-spawns")
 }
 
 thread_local! {
-    static OWN_SPAWN_LAUNCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static OWN_SPAWN_LAUNCHING: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-/// The per-spawn root a confined child must not read, or `None` while this
-/// thread launches the granted spawn that has to read its own directory.
-pub(crate) fn denied_read_root() -> Option<PathBuf> {
-    (!OWN_SPAWN_LAUNCHING.with(std::cell::Cell::get)).then(grant_spawns_root)
+/// The per-spawn root every confined child is denied.
+pub(crate) fn denied_read_root() -> PathBuf {
+    grant_spawns_root()
 }
 
-/// Lifts the per-spawn root from the read denylist on this thread until
-/// dropped. Held only around launching the granted program itself, so its
-/// sandbox profile can read its private directory and no other spawn's can.
+/// The one per-spawn directory the spawn this thread is launching may read:
+/// its own, re-allowed inside the denied root by the backend that builds its
+/// profile. Every other spawn's directory stays denied to it.
+pub(crate) fn own_spawn_read_root() -> Option<PathBuf> {
+    OWN_SPAWN_LAUNCHING.with(|own| own.borrow().clone())
+}
+
+/// Re-allows one per-spawn directory to the program launched on this thread
+/// until dropped. Held only around launching the granted program itself.
 pub struct OwnSpawnLaunch(());
 
 impl OwnSpawnLaunch {
-    pub(crate) fn begin() -> Self {
-        OWN_SPAWN_LAUNCHING.with(|launching| launching.set(true));
+    pub(crate) fn begin(dir: &Path) -> Self {
+        OWN_SPAWN_LAUNCHING.with(|own| *own.borrow_mut() = Some(dir.to_path_buf()));
         Self(())
     }
 }
 
 impl Drop for OwnSpawnLaunch {
     fn drop(&mut self) {
-        OWN_SPAWN_LAUNCHING.with(|launching| launching.set(false));
+        OWN_SPAWN_LAUNCHING.with(|own| *own.borrow_mut() = None);
     }
 }
 
@@ -261,6 +268,7 @@ pub(crate) fn create_spawn_dir(
         )));
     }
     check_private(&base)?;
+    sweep_stale_spawn_dirs(&canonical);
     let leaf = canonical.join(format!(
         "{}-{}-{}",
         std::process::id(),
@@ -275,6 +283,62 @@ pub(crate) fn create_spawn_dir(
         private_dir_builder(false).create(dir.path.join(subdir))?;
     }
     Ok(dir)
+}
+
+/// A per-spawn directory older than this is removed even if its process
+/// still runs: no granted command is meant to live that long, and a reused
+/// process id must not keep a crashed spawn's credential forever.
+const STALE_SPAWN_DIR: std::time::Duration = std::time::Duration::from_hours(24);
+
+/// Remove every per-spawn directory a crashed or killed process left behind:
+/// its creating process is gone, or it is older than [`STALE_SPAWN_DIR`]. An
+/// entry that is not a real directory this user owns, or whose name is not a
+/// per-spawn name, is left alone and never followed.
+fn sweep_stale_spawn_dirs(base: &Path) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if check_private(&path).is_err() {
+            continue;
+        }
+        let name = entry.file_name();
+        let mut parts = name.to_str().unwrap_or_default().split('-');
+        let (Some(pid), Some(_), Some(created), None) = (
+            parts.next().and_then(|pid| pid.parse::<u32>().ok()),
+            parts.next().and_then(|n| n.parse::<u64>().ok()),
+            parts.next().and_then(|nanos| nanos.parse::<u128>().ok()),
+            parts.next(),
+        ) else {
+            continue;
+        };
+        let expired = now.saturating_sub(created) > STALE_SPAWN_DIR.as_nanos();
+        if expired || (pid != std::process::id() && !process_is_alive(pid)) {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Without a cheap liveness check, only the age bound applies.
+#[cfg(not(unix))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
 }
 
 fn private_dir_builder(recursive: bool) -> std::fs::DirBuilder {

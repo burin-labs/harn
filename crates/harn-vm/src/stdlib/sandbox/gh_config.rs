@@ -103,7 +103,30 @@ fn gh_refusal(args: &[String]) -> Option<&'static str> {
     if names_another_host(args) {
         return Some("the grant is for github.com, and this names another host");
     }
+    if args.iter().any(|arg| names_plaintext_url(arg)) {
+        return Some("the grant is sent only over https, and this names another scheme");
+    }
     None
+}
+
+/// Whether `arg` holds a URL whose scheme is not `https`, in any case or
+/// position (`http://…`, `--repo=HTTP://…`, `ftp://…`), or a scheme-relative
+/// `//host/…` form. gh sends the token to github.com over whatever scheme the
+/// URL names, so `gh api http://api.github.com/user` would send it in
+/// plaintext.
+fn names_plaintext_url(arg: &str) -> bool {
+    let is_scheme_char =
+        |letter: char| letter.is_ascii_alphanumeric() || matches!(letter, '+' | '-' | '.');
+    let mut pieces: Vec<&str> = arg.split("://").collect();
+    pieces.pop();
+    pieces.iter().any(|before| {
+        let scheme = before
+            .rsplit(|letter| !is_scheme_char(letter))
+            .next()
+            .unwrap_or_default();
+        !scheme.eq_ignore_ascii_case("https")
+    }) || arg.starts_with("//")
+        || arg.contains("=//")
 }
 
 /// Hosts a granted gh may name; the token in its `hosts.yml` is for these.
@@ -392,6 +415,8 @@ prompt: enabled
             &["-R", "github.com/o/r", "issue", "list"],
             &["api", "--hostname", "github.com", "user"],
             &["pr", "view", "feature/a/b"],
+            &["repo", "view", "https://github.com/o/r"],
+            &["api", "HTTPS://api.github.com/user"],
             // Not reads: they run without the grant, so nothing is refused.
             &["pr", "create", "-t", "x"],
             &["repo", "clone", "o/r", "--", "-c", "filter.a.smudge=x"],
@@ -422,6 +447,11 @@ prompt: enabled
             &["repo", "view", "github.localhost/o/r"],
             &["repo", "view", "git@evil.example:o/r"],
             &["api", "https://evil.example/x"],
+            &["api", "http://api.github.com/user"],
+            &["api", "HTTP://github.com/api/v3/user"],
+            &["repo", "view", "--repo=http://github.com/o/r"],
+            &["api", "//api.github.com/user"],
+            &["api", "ftp://github.com/x"],
         ] {
             assert!(refused(args), "{args:?}");
         }
