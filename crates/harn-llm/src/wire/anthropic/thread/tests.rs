@@ -365,7 +365,7 @@ fn unsupported_feature_disables_threading_only_for_the_same_scope() {
 }
 
 #[test]
-fn incomplete_refused_fallback_or_malformed_responses_never_supply_a_cursor() {
+fn incomplete_refused_fallback_or_invalid_envelopes_never_supply_a_cursor() {
     let full = initial();
     let ordinary = response("end_turn");
     let mut variants = Vec::new();
@@ -405,6 +405,24 @@ fn incomplete_refused_fallback_or_malformed_responses_never_supply_a_cursor() {
                 .mode(),
             Mode::Create
         );
+    }
+}
+
+#[test]
+fn content_shape_checks_leave_semantic_validation_to_the_host_decoder() {
+    let full = initial();
+    // These satisfy the codec's structural gate while omitting fields a
+    // semantic decoder must examine. A true result is a cursor candidate,
+    // not evidence that the host can accept or dispatch the response.
+    for block in [json!({"type":"text"}), json!({"type":"tool_use"})] {
+        let mut reply = response("end_turn");
+        reply["content"] = json!([block]);
+        let mut thread = MessageThread::default();
+        assert!(thread.prepare(SCOPE, &full).unwrap().complete(&reply));
+        let next = next(&full, &reply);
+        let turn = thread.prepare(SCOPE, &next).unwrap();
+        assert_eq!(turn.mode(), Mode::Continue);
+        assert_eq!(turn.full_request(), &next);
     }
 }
 

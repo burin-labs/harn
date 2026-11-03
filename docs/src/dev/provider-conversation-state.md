@@ -31,9 +31,15 @@ removed before preparation. A failed preparation, cancellation, dropped stream
 or discarded turn therefore cannot leave a reusable old cursor. No thread state
 is serialized, cloned, or included in a derived debug representation.
 
-Only the host's completed JSON response or terminal `message_stop` may call
-`complete`. Refusal, truncation, missing identifiers, changed models, malformed
-response content and provider iteration records do not advance the cursor.
+Only a complete JSON response or terminal `message_stop`, accepted by the host's
+normal provider response decoder, may reach `complete`. The codec checks the
+response envelope and content shape: content must be an array of objects whose
+`type` fields are nonempty strings. It does not validate type-specific fields;
+for example, a typed text or tool-use block with missing required fields can
+pass this structural gate. The host must apply its semantic validation before
+calling it. Refusal, truncation, missing identifiers, changed models, invalid
+envelopes or content shapes, and provider iteration records do not advance the
+cursor.
 `pause_turn` permits an empty continuation and refuses new input on that cursor.
 The returned cursor remains a candidate: the service does not attest that it
 stored the response and may expire it at any time.
@@ -73,6 +79,22 @@ The following work remains before runtime adoption:
 - Probe an explicitly approved account/model with synthetic data before adding
   a live capability declaration. No credentials or cursor values belong in
   public evidence.
+
+The following rollout gates remain open; the offline primitive does not qualify
+them:
+
+- Exercise actual cached tool loops through Harn's encoder, response decoder and
+  session history, including cache markers, signed blocks and tool results.
+- Verify canonical response/request model identity and alias resolution. The
+  current gate requires exact model equality and may decline an alias response.
+- Establish explicit storage consent and enforce the effective privacy posture
+  and account eligibility before any threaded dispatch.
+- Verify admission and accounting for full billable context on every physical
+  attempt, including structured-error recovery; smaller uploads do not establish
+  token or price savings.
+- Verify terminal events through the actual transport: only an accepted JSON
+  reply or completed stream can advance a cursor; cancellation, truncation and
+  parser rejection must leave it invalidated.
 
 The protocol reference is Anthropic's
 [message threads documentation](https://platform.claude.com/docs/en/build-with-claude/message-threads).

@@ -178,6 +178,9 @@ impl PreparedTurn<'_> {
     }
 
     /// Call only after a complete JSON reply or the stream's `message_stop`.
+    /// The host must first accept the reply with its provider response decoder.
+    /// This gate checks the envelope, content array and nonempty block types;
+    /// it does not validate type-specific fields such as text or tool inputs.
     /// Returns whether this response supplies a candidate continuation cursor;
     /// the provider can still expire or decline to store that candidate.
     pub fn complete(self, response: &Value) -> bool {
