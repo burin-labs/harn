@@ -257,7 +257,7 @@ async fn export_trust_chain_emits_envelope_matching_chain_schema() {
     assert_eq!(envelope_json["schema"], OPENTRUSTGRAPH_CHAIN_SCHEMA_V0);
     assert_eq!(envelope_json["chain"]["total"], 2);
     assert_eq!(envelope_json["chain"]["verified"], true);
-    assert!(envelope_json["records"].as_array().unwrap().len() == 2);
+    assert_eq!(envelope_json["records"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]

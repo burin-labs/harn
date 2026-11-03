@@ -31,6 +31,7 @@ fn append_session_evidence(
   terminal_kind: string,
   workflow_learning_eligibility: string,
   run_id: string,
+  goal_outcome: any = nil,
 ) -> nil {
   const base = {
     root: root,
@@ -66,7 +67,7 @@ fn append_session_evidence(
         role: "assistant",
         visibility: "internal",
         text: "Agent loop reached a terminal state",
-        metadata: {terminal: {kind: terminal_kind}},
+        metadata: {terminal: {kind: terminal_kind}, goal_outcome: goal_outcome},
       },
     },
     base + {kind_type: "agent_run_terminal"},
@@ -92,6 +93,11 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(ha
           "natural",
           "eligible",
           "coding-" + session_id,
+          session_id == "session-a" ? {
+            kind: "achieved",
+            reason: "requirements_met",
+            evidence_id: "verify-1",
+          } : nil,
         )
       }
       append_session_evidence(
@@ -177,6 +183,16 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(ha
       assert(
         curator_evidence.all({ item -> item?.tool_sequence == ["edit"] }),
         "the imported evidence must retain the canonical tool-call sequence",
+      )
+      const by_session = { id -> curator_evidence.filter({ item -> item?.session_id == id })[0] }
+      assert_eq(
+        by_session("session-a")?.outcome,
+        {kind: "achieved", reason: "requirements_met"},
+        "a curator must see whether the session achieved its goal",
+      )
+      assert(
+        by_session("session-b")?.outcome == nil,
+        "an unassessed session must stay unassessed, never read as a success",
       )
       const second = pattern_learning_import_session_records(harness, options)
       assert(second?.imported_count == 0, "re-running import must not duplicate session evidence")

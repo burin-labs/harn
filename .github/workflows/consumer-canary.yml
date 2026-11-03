@@ -245,7 +245,7 @@ jobs:
           CANARY_PULL_REQUEST_CLI_ARTIFACT: ${{ inputs.pull_request_cli_artifact }}
           CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
           CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
-          PAIRING_TEXT: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
+          PAIRING_TEXT: ${{ github.event_name == 'pull_request' && github.event.pull_request.body || '' }}
           CANARY_PAIRING_SOURCE: certified-consumer-source
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \

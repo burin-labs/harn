@@ -889,6 +889,20 @@ const dispatch = steps.filter((step) => step.id === 'canary');
 assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
 assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
+const pairingText = (eventName, cliRun, body) => require('node:vm').runInNewContext(
+  dispatch[0].env.PAIRING_TEXT.replace(/^\$\{\{|\}\}$/g, ''), {
+    inputs: {pull_request_cli_run: cliRun},
+    github: {event_name: eventName, event: eventName === 'pull_request' ? {pull_request: {body}} : {}},
+  });
+const releaseBody = 'Release v1.2.4\n\nPairs-with: consumer#7';
+assert.equal(pairingText('pull_request', '', releaseBody), releaseBody,
+  'a release PR without a CLI-artifact input must retain its declared pairing');
+assert.equal(pairingText('pull_request', '123', releaseBody), releaseBody);
+assert.equal(pairingText('pull_request', '', null), '');
+for (const event of ['schedule', 'push', 'workflow_dispatch']) {
+  assert.equal(pairingText(event, '123', releaseBody), '',
+    'non-PR sources must retain their existing commit/release-range pairing owner');
+}
 for (const suffix of ['run_id', 'run_attempt']) {
   const name = `release_producer_${suffix}`;
   assert.deepEqual(workflow.on.workflow_call.inputs[name], {
