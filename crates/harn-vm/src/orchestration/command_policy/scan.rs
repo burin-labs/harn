@@ -1299,7 +1299,7 @@ impl WorkspaceRoot {
     fn new(root: &str) -> Self {
         Self {
             lexical: normalize_path(root),
-            resolved: crate::stdlib::sandbox::paths::normalize_for_policy(Path::new(root)),
+            resolved: crate::orchestration::policy::normalize_for_policy(Path::new(root)),
         }
     }
 }
@@ -1316,7 +1316,7 @@ pub(super) fn inside_any_root(path: &str, roots: &[WorkspaceRoot]) -> bool {
     if roots.iter().any(|root| lexical.starts_with(&root.lexical)) {
         return true;
     }
-    let resolved = crate::stdlib::sandbox::paths::normalize_for_policy(Path::new(path));
+    let resolved = crate::orchestration::policy::normalize_for_policy(Path::new(path));
     roots
         .iter()
         .any(|root| resolved.starts_with(&root.resolved))
