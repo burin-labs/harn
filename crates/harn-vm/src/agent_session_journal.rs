@@ -17,7 +17,9 @@ use crate::agent_sessions::session_event::{
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
+mod checkpoint;
 pub(crate) mod live;
+pub(crate) use checkpoint::inspect_closed_session_checkpoint;
 mod queue;
 mod run_preparation;
 mod workspace_roots;

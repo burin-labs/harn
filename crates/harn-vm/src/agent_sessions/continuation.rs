@@ -1,7 +1,7 @@
 //! Closed transcripts are data; reopening never retains runnable authority.
 
 use super::*;
-use harn_session_store::{SessionMeta, SessionStore, SessionWriteLease};
+use harn_session_store::{SessionMeta, SessionStore};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TranscriptCheckpoint {
@@ -89,14 +89,19 @@ pub async fn prepare_closed_session_continuation(
     {
         return Ok(None);
     }
-    let _lease = SessionWriteLease::try_acquire(state_dir.as_path(), id).map_err(|error| {
-        crate::stdlib::session_store::session_lease_error("session continuation", error)
-    })?;
-    let store = crate::stdlib::session_store::open_store(&state_dir)?;
-    let meta = store.describe(id).await.map_err(|error| {
-        crate::value::VmError::Runtime(format!("session continuation: {error}"))
-    })?;
-    Ok(cached_transcript(id, &state_dir, &meta).map(ClosedSessionContinuation))
+    let Some(checkpoint) = crate::agent_session_journal::inspect_closed_session_checkpoint(
+        id,
+        Some(state_dir),
+        |_| true,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        cached_transcript(id, &checkpoint.state_dir, &checkpoint.meta)
+            .map(ClosedSessionContinuation),
+    )
 }
 
 pub(crate) async fn remember_flushed_transcript(id: &str) -> Result<(), crate::value::VmError> {
@@ -160,28 +165,27 @@ pub async fn load_closed_session_continuation(
     id: &str,
     token: &str,
 ) -> Result<Option<ClosedSessionContinuation>, crate::value::VmError> {
-    let state_dir = crate::stdlib::session_store::canonical_store_state_dir(None)?;
-    if !active_session_runtime()
+    let Some(expected_dir) = active_session_runtime()
         .closed_transcript
         .read()
         .as_ref()
-        .is_some_and(|entry| entry.id == id && entry.token == token && entry.state_dir == state_dir)
-    {
+        .filter(|entry| entry.id == id && entry.token == token)
+        .map(|entry| entry.state_dir.clone())
+    else {
         return Ok(None);
-    }
-    let _lease = SessionWriteLease::try_acquire(state_dir.as_path(), id).map_err(|error| {
-        crate::stdlib::session_store::session_lease_error("session continuation", error)
-    })?;
-    let store = crate::stdlib::session_store::open_store(&state_dir)?;
-    let meta = match store.describe(id).await {
-        Ok(meta) => meta,
-        Err(harn_session_store::StoreError::NotFound(_)) => return Ok(None),
-        Err(error) => return Err(crate::value::VmError::Runtime(error.to_string())),
     };
-    if !crate::persistent_state::session_matches_current_workspace(&meta) {
+    let Some(checkpoint) =
+        crate::agent_session_journal::inspect_closed_session_checkpoint(id, None, |dir| {
+            dir == &expected_dir
+        })
+        .await?
+    else {
+        return Ok(None);
+    };
+    if !crate::persistent_state::session_matches_current_workspace(&checkpoint.meta) {
         return Ok(None);
     }
-    let Some(cached) = cached_transcript(id, &state_dir, &meta) else {
+    let Some(cached) = cached_transcript(id, &checkpoint.state_dir, &checkpoint.meta) else {
         return Ok(None);
     };
     Ok(Some(ClosedSessionContinuation(cached)))
