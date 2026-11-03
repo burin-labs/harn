@@ -3462,8 +3462,9 @@ plain terminal.
   source dir); `**` glob is supported.
 - `harness.fs.glob(pattern, base?)` is the capability-aware form and returns
   the same matches as `harness.fs.glob(...)`.
-- `harness.fs.workspace_temp_dir()` returns the sandbox-visible workspace
-  scratch directory, creating it lazily.
+- `harness.fs.workspace_temp_dir()` returns the sandbox-writable per-workspace
+  scratch directory, outside the workspace in the user cache directory,
+  creating it lazily.
 - `harness.fs.mkdtemp_in_workspace(prefix?)` creates a unique directory under
   that workspace scratch root. Prefer it for intermediate files used by
   sandboxed workflows.

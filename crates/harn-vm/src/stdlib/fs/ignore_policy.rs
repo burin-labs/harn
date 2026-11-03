@@ -83,6 +83,9 @@ pub const BUILTIN_IGNORED_DIRS: &[&str] = &[
     ".harn",
     ".harn-runs",
     ".harn-tmp",
+    // The user cache directory's sandbox runtime dirs, reached by a walk of a
+    // workspace that contains the cache directory (a workspace at `$HOME`).
+    crate::user_dirs::SANDBOX_RUNTIME_DIR_NAME,
 ];
 
 /// The custom ignore filename that gives agent tooling the last word.
@@ -354,18 +357,22 @@ pub fn is_scratch_path(path: &Path) -> bool {
     managed_scratch_root(path).is_some()
 }
 
-/// Nearest ancestor (inclusive) whose name denotes Harn-managed scratch.
+/// Nearest ancestor (inclusive) that is Harn-managed scratch: a legacy
+/// in-workspace runtime directory, or the directory holding the sandbox
+/// runtime dirs, which a workspace containing the user cache directory would
+/// otherwise lend its ignore stack.
 ///
 /// Returning the boundary, rather than only a boolean, lets policy selection
 /// distinguish a real repository nested below scratch from the outer project
 /// that created the scratch directory.
 fn managed_scratch_root(path: &Path) -> Option<&Path> {
+    let runtime_base = workspace_env::sandbox_runtime_base_dir();
     path.ancestors().find(|ancestor| {
         matches!(
             ancestor.file_name().and_then(|name| name.to_str()),
             Some(workspace_env::LEGACY_WORKSPACE_TMPDIR_NAME)
                 | Some(workspace_env::LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
-        )
+        ) || runtime_base.as_deref() == Some(*ancestor)
     })
 }
 

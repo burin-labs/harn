@@ -94,6 +94,10 @@ pub fn package_cache_dir() -> Option<PathBuf> {
     )
 }
 
+/// The directory under the user cache directory that holds every workspace's
+/// sandbox runtime dir.
+pub const SANDBOX_RUNTIME_DIR_NAME: &str = "harn-sandbox";
+
 /// Where confined children's per-workspace runtime directories live, resolved
 /// from explicit values.
 ///
@@ -111,7 +115,7 @@ pub fn sandbox_runtime_base_from_environment(
     xdg_cache_home: Option<&OsStr>,
     local_app_data: Option<&OsStr>,
 ) -> Option<PathBuf> {
-    const NAME: &str = "harn-sandbox";
+    const NAME: &str = SANDBOX_RUNTIME_DIR_NAME;
     let home = home.filter(|home| home.is_absolute());
     match os {
         "macos" => home.map(|home| home.join("Library/Caches").join(NAME)),

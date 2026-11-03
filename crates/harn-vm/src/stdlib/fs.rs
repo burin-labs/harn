@@ -1124,7 +1124,7 @@ fn temp_dir_path_string(path: &Path) -> String {
     exposure = "runtime_internal",
     sig = "workspace_temp_dir() -> string",
     category = "fs",
-    doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
+    doc = "Return a sandbox-writable per-workspace scratch directory outside the workspace, creating it lazily."
 )]
 fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(temp_dir_path_string(
@@ -1192,21 +1192,26 @@ pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
     }
     let root = resolve_fs_path(".")?;
     let path =
-        crate::stdlib::sandbox::workspace_env::runtime_tmpdir_for_root(&root).map_err(|error| {
-            io_error_thrown(
-                format!(
-                    "workspace_temp_dir: failed to create the temp dir for {}: {error}",
-                    root.display()
-                ),
-                &error,
-            )
+        crate::stdlib::sandbox::workspace_env::runtime_tmpdir_path(&root).ok_or_else(|| {
+            VmError::Runtime(format!(
+                "workspace_temp_dir: no user cache directory for the temp dir of {}",
+                root.display()
+            ))
         })?;
     crate::stdlib::sandbox::enforce_fs_path(
         "workspace_temp_dir",
         &path,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    Ok(path)
+    crate::stdlib::sandbox::workspace_env::create_runtime_tmpdir(&root).map_err(|error| {
+        io_error_thrown(
+            format!(
+                "workspace_temp_dir: failed to create {}: {error}",
+                path.display()
+            ),
+            &error,
+        )
+    })
 }
 
 fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {

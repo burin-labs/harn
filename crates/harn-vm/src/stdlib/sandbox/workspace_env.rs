@@ -32,6 +32,13 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
         || name == OsStr::new(LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
+/// The file in a runtime dir that names the canonical workspace root it
+/// belongs to, so a later process can tell when the workspace is gone.
+const RUNTIME_DIR_MARKER: &str = "workspace-root";
+
+/// The longest workspace root a marker is read back as.
+const RUNTIME_DIR_MARKER_MAX: u64 = 4096;
+
 /// The per-workspace runtime directory a confined child's temp dir and
 /// toolchain cache live in: `<user cache>/harn-sandbox/<digest>`, the digest
 /// taken over the canonical workspace root. It sits outside every workspace,
@@ -39,16 +46,29 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
 /// temporary files, and is stable, so caches survive across runs. Computed
 /// without touching disk; `None` without a resolvable user cache directory.
 pub fn sandbox_runtime_dir(workspace_root: &Path) -> Option<PathBuf> {
+    Some(runtime_base()?.join(runtime_digest(&normalize_for_policy(workspace_root))))
+}
+
+/// `<user cache>/harn-sandbox`, which holds every workspace's runtime dir.
+fn runtime_base() -> Option<PathBuf> {
     // Resolved once: a spawn and the grant that admits its writes must name
     // the same directory, even if something in the process later changes
     // `HOME` or `XDG_CACHE_HOME`.
     static BASE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(crate::user_dirs::sandbox_runtime_base);
-    let base = normalize_for_policy(base.as_ref()?);
-    let root = normalize_for_policy(workspace_root);
+    Some(normalize_for_policy(base.as_ref()?))
+}
+
+/// [`runtime_base`] for the ignore policy, which skips it like other scratch.
+pub(crate) fn sandbox_runtime_base_dir() -> Option<PathBuf> {
+    runtime_base()
+}
+
+/// The runtime dir name for an already-normalized workspace root.
+fn runtime_digest(root: &Path) -> String {
     let mut digest = harn_kernel::pure::sha256_hex(root.as_os_str().as_encoded_bytes());
     digest.truncate(RUNTIME_DIR_DIGEST_HEX);
-    Some(base.join(digest))
+    digest
 }
 
 /// The runtime dir for the policy's first workspace root, without creating it.
@@ -72,12 +92,13 @@ pub(super) fn granted_runtime_dir(
     if !policy.sandbox_profile.enforces_path_scope() {
         return None;
     }
-    let dir = sandbox_runtime_dir(base_roots.first()?)?;
+    let root = base_roots.first()?;
+    let dir = sandbox_runtime_dir(root)?;
     let present = dir
         .symlink_metadata()
         .is_ok_and(|metadata| metadata.is_dir());
     if !present {
-        if let Err(error) = ensure_private_dir(&dir, 2) {
+        if let Err(error) = ensure_runtime_dir(root, None) {
             warn_once(
                 "handler_sandbox_runtime_dir",
                 &format!(
@@ -98,61 +119,166 @@ fn create_runtime_dir(
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
-    let path = planned_runtime_dir(policy)?.join(name);
-    if let Err(error) = ensure_private_dir(&path, 3) {
-        warn_once(
-            warning_key,
-            &format!(
-                "could not create the sandbox {label} '{}': {error}; \
-                 leaving the child's inherited environment in place",
-                path.display()
-            ),
-        );
+    if !policy.sandbox_profile.enforces_path_scope() {
         return None;
     }
-    Some(path)
+    let root = base_workspace_roots(policy).into_iter().next()?;
+    match ensure_runtime_dir(&root, Some(name)) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            warn_once(
+                warning_key,
+                &format!(
+                    "could not create the sandbox {label} for '{}': {error}; \
+                     leaving the child's inherited environment in place",
+                    root.display()
+                ),
+            );
+            None
+        }
+    }
 }
 
-/// Create `path` and the `owned` components ending it (`harn-sandbox`, the
-/// workspace digest, and a child) as owner-only directories. The user cache
-/// directory above them is the user's own and may be a symlink; every owned
-/// component is opened without following one, and a component owned by
-/// another user is refused rather than shared.
+/// Create the runtime dir for `workspace_root`, and `child` inside it, and
+/// return the deepest. `harn-sandbox`, the digest dir, and the child are
+/// owner-only. The user cache directory above them is the user's own and may
+/// be a symlink; every owned component is opened without following one, and
+/// a component owned by another user is refused rather than shared. The
+/// digest dir records its workspace root, and the first creation in a process
+/// sweeps the runtime dirs of workspaces that no longer exist.
 #[cfg(unix)]
-fn ensure_private_dir(path: &Path, owned: usize) -> std::io::Result<()> {
+fn ensure_runtime_dir(workspace_root: &Path, child: Option<&str>) -> std::io::Result<PathBuf> {
+    let root = normalize_for_policy(workspace_root);
+    let base = runtime_base().ok_or_else(|| {
+        std::io::Error::other("no user cache directory for the sandbox runtime dir")
+    })?;
+    let digest = runtime_digest(&root);
+    let (Some(cache), Some(base_name)) = (base.parent(), base.file_name().and_then(OsStr::to_str))
+    else {
+        return Err(std::io::Error::other(
+            "the sandbox runtime base has no parent",
+        ));
+    };
+    std::fs::create_dir_all(cache)?;
+    let cache_fd = super::open_dir_absolute(&std::fs::canonicalize(cache)?)?;
+    let base_fd = open_private_dir_at(&cache_fd, base_name)?;
+    let runtime_fd = open_private_dir_at(&base_fd, &digest)?;
+    write_runtime_marker(&runtime_fd, &root)?;
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(|| sweep_stale_runtime_dirs(&base_fd, &base, &digest));
+    let runtime = base.join(&digest);
+    match child {
+        Some(name) => {
+            open_private_dir_at(&runtime_fd, name)?;
+            Ok(runtime.join(name))
+        }
+        None => Ok(runtime),
+    }
+}
+
+/// Open the owner-only directory `name` under `parent`, creating it 0700.
+#[cfg(unix)]
+fn open_private_dir_at(
+    parent: &std::os::fd::OwnedFd,
+    name: &str,
+) -> std::io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::AsRawFd;
 
-    let mut names = Vec::with_capacity(owned);
-    let mut cache = path;
-    for _ in 0..owned {
-        let name = cache.file_name().and_then(OsStr::to_str).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("not a runtime dir path: {}", path.display()),
-            )
-        })?;
-        names.push(name);
-        cache = cache.parent().unwrap_or(Path::new(""));
-    }
-    std::fs::create_dir_all(cache)?;
-    let mut current = super::open_dir_absolute(&std::fs::canonicalize(cache)?)?;
-    for name in names.into_iter().rev() {
-        current = match super::open_dir_at(current.as_raw_fd(), name) {
-            Ok(next) => next,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                match super::mkdirat_mode(current.as_raw_fd(), name, 0o700) {
-                    Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
-                        return Err(error)
-                    }
-                    _ => {}
+    let dir = match super::open_dir_at(parent.as_raw_fd(), name) {
+        Ok(dir) => dir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match super::mkdirat_mode(parent.as_raw_fd(), name, 0o700) {
+                Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
+                    return Err(error)
                 }
-                super::open_dir_at(current.as_raw_fd(), name)?
+                _ => {}
             }
-            Err(error) => return Err(error),
-        };
-        restrict_to_owner(&current)?;
+            super::open_dir_at(parent.as_raw_fd(), name)?
+        }
+        Err(error) => return Err(error),
+    };
+    restrict_to_owner(&dir)?;
+    Ok(dir)
+}
+
+/// Record the workspace root in its runtime dir, once.
+#[cfg(unix)]
+fn write_runtime_marker(runtime: &std::os::fd::OwnedFd, root: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    match super::openat_file(
+        runtime.as_raw_fd(),
+        RUNTIME_DIR_MARKER,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o600,
+    ) {
+        Ok(mut file) => file.write_all(root.as_os_str().as_bytes()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
     }
-    Ok(())
+}
+
+/// Remove the runtime dirs under `base` whose workspace root no longer exists.
+///
+/// Only a digest-named directory owned by this user, reached without following
+/// a symlink, whose marker names a root that hashes to that same digest, is a
+/// candidate, and only when that root is definitely gone. A dir with no
+/// marker, a marker a child rewrote, or a root that cannot be examined is
+/// left alone. `own` is never removed. Best effort: a failure leaves the dir
+/// for the next process.
+#[cfg(unix)]
+fn sweep_stale_runtime_dirs(base_fd: &std::os::fd::OwnedFd, base: &Path, own: &str) {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let digest_named = name.len() == RUNTIME_DIR_DIGEST_HEX
+            && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        if !digest_named || name == own {
+            continue;
+        }
+        let Ok(dir) = super::open_dir_at(base_fd.as_raw_fd(), name) else {
+            continue;
+        };
+        if restrict_to_owner(&dir).is_err() {
+            continue;
+        }
+        let Ok(marker) = super::openat_file(
+            dir.as_raw_fd(),
+            RUNTIME_DIR_MARKER,
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+            0,
+        ) else {
+            continue;
+        };
+        let mut recorded = Vec::new();
+        if marker
+            .take(RUNTIME_DIR_MARKER_MAX + 1)
+            .read_to_end(&mut recorded)
+            .is_err()
+            || recorded.len() as u64 > RUNTIME_DIR_MARKER_MAX
+        {
+            continue;
+        }
+        let root = Path::new(OsStr::from_bytes(&recorded));
+        if !root.is_absolute() || runtime_digest(root) != name {
+            continue;
+        }
+        if matches!(root.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            let _ = std::fs::remove_dir_all(base.join(name));
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -178,20 +304,30 @@ fn restrict_to_owner(dir: &std::os::fd::OwnedFd) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn ensure_private_dir(path: &Path, _owned: usize) -> std::io::Result<()> {
-    std::fs::create_dir_all(path)
+fn ensure_runtime_dir(workspace_root: &Path, child: Option<&str>) -> std::io::Result<PathBuf> {
+    let root = normalize_for_policy(workspace_root);
+    let runtime = sandbox_runtime_dir(&root).ok_or_else(|| {
+        std::io::Error::other("no user cache directory for the sandbox runtime dir")
+    })?;
+    std::fs::create_dir_all(&runtime)?;
+    let marker = runtime.join(RUNTIME_DIR_MARKER);
+    if !marker.exists() {
+        let _ = std::fs::write(marker, root.to_string_lossy().as_bytes());
+    }
+    let path = child.map_or(runtime.clone(), |name| runtime.join(name));
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
 }
 
-/// The temp dir of the runtime dir for `workspace_root`, created on first use.
+/// The temp dir of the runtime dir for `workspace_root`, without creating it.
 /// For callers with no path-scoping policy to read the root from.
-pub(crate) fn runtime_tmpdir_for_root(workspace_root: &Path) -> std::io::Result<PathBuf> {
-    let path = sandbox_runtime_dir(workspace_root)
-        .ok_or_else(|| {
-            std::io::Error::other("no user cache directory for the sandbox runtime dir")
-        })?
-        .join(RUNTIME_TMPDIR_NAME);
-    ensure_private_dir(&path, 3)?;
-    Ok(path)
+pub(crate) fn runtime_tmpdir_path(workspace_root: &Path) -> Option<PathBuf> {
+    Some(sandbox_runtime_dir(workspace_root)?.join(RUNTIME_TMPDIR_NAME))
+}
+
+/// Create the temp dir [`runtime_tmpdir_path`] names.
+pub(crate) fn create_runtime_tmpdir(workspace_root: &Path) -> std::io::Result<PathBuf> {
+    ensure_runtime_dir(workspace_root, Some(RUNTIME_TMPDIR_NAME))
 }
 
 /// The session's own temp dir, `tmp` in the [`sandbox_runtime_dir`] of the
@@ -871,6 +1007,77 @@ mod tests {
         std::fs::remove_dir_all(tmp.parent().unwrap()).unwrap();
         assert_eq!(redirected, None);
         assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+
+    /// Only the runtime dir of a workspace that is gone is swept. A live
+    /// workspace's dir, a dir with no marker, a marker naming a root of a
+    /// different digest, a symlink, and this process's own dir all survive.
+    #[cfg(unix)]
+    #[test]
+    fn the_sweep_removes_only_marked_runtime_dirs_of_vanished_workspaces() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let live_root = live.path().canonicalize().unwrap();
+        let gone_root = {
+            let gone = tempfile::tempdir().unwrap();
+            gone.path().canonicalize().unwrap()
+        };
+        let mark = |name: &str, root: &Path| {
+            let dir = base.path().join(name);
+            std::fs::create_dir_all(dir.join("toolchain/go-build")).unwrap();
+            std::fs::write(dir.join(RUNTIME_DIR_MARKER), root.as_os_str().as_bytes()).unwrap();
+            dir
+        };
+        let stale = mark(&runtime_digest(&gone_root), &gone_root);
+        let kept_live = mark(&runtime_digest(&live_root), &live_root);
+        let mismatched = mark("00000000000000aa", &gone_root);
+        let unmarked = base.path().join("00000000000000bb");
+        std::fs::create_dir(&unmarked).unwrap();
+        let own_root = gone_root.join("own");
+        let own = mark(&runtime_digest(&own_root), &own_root);
+        std::fs::write(
+            outside.path().join(RUNTIME_DIR_MARKER),
+            gone_root.as_os_str().as_bytes(),
+        )
+        .unwrap();
+        let linked = base.path().join("00000000000000cc");
+        std::os::unix::fs::symlink(outside.path(), &linked).unwrap();
+
+        let base_fd =
+            super::super::open_dir_absolute(&base.path().canonicalize().unwrap()).unwrap();
+        sweep_stale_runtime_dirs(
+            &base_fd,
+            &base.path().canonicalize().unwrap(),
+            own.file_name().unwrap().to_str().unwrap(),
+        );
+
+        assert!(
+            !stale.exists(),
+            "a vanished workspace's runtime dir is swept"
+        );
+        for survivor in [&kept_live, &mismatched, &unmarked, &own] {
+            assert!(survivor.is_dir(), "{survivor:?} must survive the sweep");
+        }
+        assert!(linked.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(outside.path().join(RUNTIME_DIR_MARKER).is_file());
+    }
+
+    /// A created runtime dir records the workspace root the sweep checks.
+    #[cfg(unix)]
+    #[test]
+    fn a_created_runtime_dir_records_its_workspace_root() {
+        let workspace = tempfile::tempdir().unwrap();
+        let tmp = workspace_local_tmpdir(&policy(workspace.path())).unwrap();
+        let runtime = tmp.parent().unwrap().to_path_buf();
+        let recorded = std::fs::read_to_string(runtime.join(RUNTIME_DIR_MARKER)).unwrap();
+        std::fs::remove_dir_all(&runtime).unwrap();
+        assert_eq!(
+            Path::new(&recorded),
+            workspace.path().canonicalize().unwrap()
+        );
     }
 
     #[test]
