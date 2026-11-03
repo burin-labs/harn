@@ -171,7 +171,14 @@ per-platform mechanisms are:
   the workspace capability set, plus a seccomp-bpf blocklist of
   Tier-1 dangerous syscalls (and the network family when the
   side-effect level is below `network`); `PR_SET_NO_NEW_PRIVS` is
-  always enabled.
+  always enabled. POSIX semaphores (Python `multiprocessing` locks and
+  process pools) need `/dev/shm`. A launch with a mount namespace
+  (bubblewrap, or the loopback namespace helper) gives the child an
+  empty private tmpfs there. A Landlock-only launch grants the host
+  `/dev/shm` regular-file creation, reads, writes, and removal, and
+  nothing else: on those hosts a confined child can read and write the
+  same user's shared-memory segments in `/dev/shm`. Other users'
+  segments stay protected by file permissions.
 - **macOS**: a `sandbox-exec` profile rendered from the policy.
   Writes are limited to scratch dirs plus declared `workspace_roots`
   only when the policy allows workspace writes; network is allowed

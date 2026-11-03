@@ -264,6 +264,35 @@ pub(crate) fn enter_ruleset(ruleset: RawFd) -> io::Result<()> {
     Ok(())
 }
 
+/// Add one path rule to a ruleset received as a bare descriptor, for a path
+/// that only exists inside the receiver's mount namespace. Raw for the same
+/// reason as [`enter_ruleset`]: the crate cannot adopt a foreign descriptor.
+pub(crate) fn add_path_rule(ruleset: RawFd, parent: &File, access: FsAccess) -> io::Result<()> {
+    #[repr(C, packed)]
+    struct PathBeneathAttr {
+        allowed_access: u64,
+        parent_fd: i32,
+    }
+    const LANDLOCK_RULE_PATH_BENEATH: libc::c_long = 1;
+    let attr = PathBeneathAttr {
+        allowed_access: access.bits(),
+        parent_fd: parent.as_raw_fd(),
+    };
+    let added = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_add_rule,
+            ruleset,
+            LANDLOCK_RULE_PATH_BENEATH,
+            &raw const attr,
+            0,
+        )
+    };
+    if added < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// What this host's Landlock supports, once a child restriction has been seen
 /// to hold. ABI presence alone is not enforcement.
 pub(crate) fn host_support() -> Option<LandlockSupport> {

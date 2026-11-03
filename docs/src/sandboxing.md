@@ -955,6 +955,8 @@ files-only `/proc` grant mounts no procfs at all; a child that reads
 from the sandbox's private PID namespace, which lists only the sandbox's own
 processes. This applies only to hosts without usable Landlock, since every
 image in the table above selects Landlock.
+Bubblewrap also mounts an empty private tmpfs on `/dev/shm`, so POSIX
+semaphores work and the child never sees the host's shared-memory segments.
 An unavailable namespace facility or a failed mount stops the launch before
 the payload runs.
 
@@ -968,6 +970,7 @@ the payload runs.
 | `process_sandbox.allow_child_workspace_write` | the full write set above on `workspace_roots`, plus writable `process_sandbox.write_roots` and toolchain caches | a read-only role's children can build and test; `read_only_roots` keep read-only rules |
 | `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when child writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
+| always | without a mount namespace, Landlock `_MAKE_REG` + `_READ_FILE` + `_WRITE_FILE` + `_REMOVE_FILE` on `/dev/shm`; the loopback namespace helper mounts a private tmpfs there and grants it the same rights | Python `multiprocessing` locks and process pools work; no directories, symlinks, special files, listing, or execution in `/dev/shm`. On a Landlock-only launch the child can read and write the same user's shared-memory segments in `/dev/shm`; other users' segments stay protected by file permissions |
 | `side_effect_level < network` | seccomp-bpf allowlist excludes addressable socket openers: `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`. `socketpair`, `sendto`, `sendmsg`, `recvfrom`, and `recvmsg` stay allowlisted for inherited anonymous local IPC | addressable-socket / egress syscalls fail with `EPERM`, while local IPC keeps working |
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
