@@ -476,9 +476,6 @@ pub(crate) fn parse_openai_responses_response(
         raw_tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens: cache.read_tokens,
-        cache_write_tokens: cache.write_tokens,
-        cache_counts_reported: cache.reported,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking_summary: if thinking_summary.is_empty() {
@@ -491,7 +488,8 @@ pub(crate) fn parse_openai_responses_response(
         blocks,
         telemetry: Box::new(telemetry),
         ..Default::default()
-    })
+    }
+    .with_cache_counts(cache))
 }
 
 pub(super) fn parse_chat_completions_response(
@@ -734,9 +732,6 @@ pub(super) fn parse_chat_completions_response(
         raw_tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens: cache.read_tokens,
-        cache_write_tokens: cache.write_tokens,
-        cache_counts_reported: cache.reported,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: if extracted_thinking.is_empty() {
@@ -755,5 +750,6 @@ pub(super) fn parse_chat_completions_response(
         logprobs: extract_openai_choice_logprobs(choice),
         telemetry: Box::new(telemetry),
         ..Default::default()
-    })
+    }
+    .with_cache_counts(cache))
 }

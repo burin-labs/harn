@@ -228,9 +228,7 @@ pub fn available_process_credential_environment_name<'a>(
     secret: &str,
 ) -> Option<&'a str> {
     available_credential_environment_name(sources, secret, |name| {
-        std::env::var(name)
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty())
+        std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
     })
 }
 

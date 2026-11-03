@@ -363,8 +363,11 @@ impl Record {
                 )),
             }
         }
+        // A custom view body that declares its own decoder owns the decoding
+        // policy; its promoted fields are in-memory defaults, not wire presence.
+        let body_decodes = swift_body.is_some_and(|(body, _)| body.contains("init(from decoder"));
         let explicit_swift_nulls = matches!(target, Target::Swift)
-            && preserve_wire_presence
+            && !body_decodes
             && self
                 .fields
                 .iter()
@@ -409,7 +412,7 @@ impl Record {
         // when its optional JSON fields were tightened. The encoder below
         // stayed, so the artifact still wrote every key while no longer
         // refusing a frame that omitted one.
-        if explicit_swift_nulls || explicit_swift_presence {
+        if (explicit_swift_nulls || explicit_swift_presence) && !body_decodes {
             out.push_str("\n    public init(from decoder: Decoder) throws {\n        let values = try decoder.container(keyedBy: CodingKeys.self)\n");
             for field in &self.fields {
                 let name = camel_ident(&field.wire_name);

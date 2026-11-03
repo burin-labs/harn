@@ -154,13 +154,16 @@ rust_api_breaks() {
 # so the two checkouts would reuse each other's generated sources, which name
 # absolute paths. A private target directory would rebuild every dependency.
 semver_report() {
-  local work=$1 package crate head
+  local work=$1 package crate head toolchain=""
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "::error title=$TITLE::rust-api checks out the merge base in place; commit or stash local changes first." >&2
     return 1
   fi
   # Return to the branch when there is one, else to the detached commit.
   head=$(git symbolic-ref --quiet --short HEAD || git rev-parse HEAD)
+  if command -v rustup >/dev/null 2>&1; then
+    toolchain=$(rustup show active-toolchain | awk 'NR == 1 { print $1 }') || toolchain=""
+  fi
   publishable_rustdoc "$work/current"
   if [[ -n "${PUBLIC_API_RUSTDOC_OUTPUT:-}" ]]; then
     mkdir -p "$PUBLIC_API_RUSTDOC_OUTPUT"
@@ -174,7 +177,16 @@ semver_report() {
   else
     echo "::notice title=$TITLE::No matching baseline rustdoc; documenting $merge_base." >&2
     git checkout --quiet --detach "$merge_base"
-    publishable_rustdoc "$work/baseline-doc"
+    if [[ -n "$toolchain" ]] && ! git diff --quiet "$head" -- rust-toolchain.toml; then
+      # cargo-semver-checks compares rustdoc JSON of one format only, so the
+      # baseline is documented with this job's compiler rather than the one the
+      # merge base pins. That compiler's new lints are not this gate's verdict.
+      echo "::notice title=$TITLE::$merge_base pins another Rust toolchain; documenting it with $toolchain." >&2
+      RUSTUP_TOOLCHAIN=$toolchain RUSTFLAGS="${RUSTFLAGS:-} --cap-lints=warn" \
+        publishable_rustdoc "$work/baseline-doc"
+    else
+      publishable_rustdoc "$work/baseline-doc"
+    fi
     git checkout --quiet "$head"
   fi
   while IFS=$'\t' read -r package crate; do

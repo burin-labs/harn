@@ -14,7 +14,10 @@ fn reported_cache(read_tokens: i64, write_tokens: i64) -> super::CacheCounts {
     super::CacheCounts {
         read_tokens,
         write_tokens,
-        reported: true,
+        reported: super::ReportedCacheUsage {
+            read_tokens: Some(read_tokens),
+            write_tokens: Some(write_tokens),
+        },
     }
 }
 
@@ -31,6 +34,10 @@ fn accounted_result() -> LlmResult {
         stop_reason: Some("end_turn".to_string()),
         telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(true),
+            reported_cache_usage: Some(Box::new(super::ReportedCacheUsage {
+                read_tokens: Some(800),
+                write_tokens: Some(25),
+            })),
             ..ProviderTelemetry::default()
         }),
         attempts: ProviderAttempts {
@@ -645,6 +652,7 @@ fn one_ledger_projects_matching_vm_event_and_trace_accounting() {
         "cost_usd",
         "cache_read_tokens",
         "cache_write_tokens",
+        "reported_cache",
         "cache_hit_ratio",
         "cache_savings_usd",
         "served_fast",
@@ -976,17 +984,22 @@ fn omitted_cache_counters_on_a_declared_supported_route_stay_unmeasured() {
     response.cache_read_tokens = 0;
     response.cache_write_tokens = 0;
     response.cache_counts_reported = false;
+    response.telemetry.reported_cache_usage = None;
     let omitted = LlmUsage::from_result(&response);
     assert!(!omitted.cache_counts_reported());
     assert_eq!(omitted.cache_hit_ratio, None);
     let mut totals = super::ReportedCacheTotals::default();
-    totals.record_usage(&omitted);
+    omitted.record_cache_into(&mut totals);
     assert_eq!(totals.reported_read_tokens(), None);
 
     response.cache_counts_reported = true;
+    response.telemetry.reported_cache_usage = Some(Box::new(super::ReportedCacheUsage {
+        read_tokens: Some(0),
+        write_tokens: Some(0),
+    }));
     let measured = LlmUsage::from_result(&response);
     assert!(measured.cache_counts_reported());
     assert_eq!(measured.cache_hit_ratio, Some(0.0));
-    totals.record_usage(&measured);
+    measured.record_cache_into(&mut totals);
     assert_eq!(totals.reported_read_tokens(), Some(0));
 }

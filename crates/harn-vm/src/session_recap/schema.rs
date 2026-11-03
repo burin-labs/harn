@@ -95,10 +95,11 @@ pub fn session_recap_json_schema() -> Value {
             "textFact": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["text", "sourceEventId"],
+                "required": ["text", "sourceEventId", "messageId"],
                 "properties": {
                     "text": {"type": "string"},
-                    "sourceEventId": {"type": "integer", "minimum": 0}
+                    "sourceEventId": {"type": "integer", "minimum": 0},
+                    "messageId": {"$ref": "#/$defs/nullableString"}
                 }
             },
             "verification": {
