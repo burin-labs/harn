@@ -294,11 +294,20 @@ fn render_profile_with_extra_read_roots(
     // returns EOF, which reads as "the sandbox made my program hang" rather
     // than as a denial. Signalling is scoped to the sandbox the process is
     // already in, so this grants reach over its own children, not the host.
+    //
+    // `ipc-posix-sem` is likewise its own operation. Python's
+    // `multiprocessing.Lock()` calls `sem_open`, so without it every linter or
+    // test runner that fans out over a process pool fails with a bare
+    // `PermissionError: [Errno 1] Operation not permitted`. Semaphore names
+    // are host-global, so an unfiltered grant would let a child unlink, post,
+    // or wait on another process's semaphore and break its locking. The grant
+    // is limited to the `/mp-` names `multiprocessing` generates for itself.
     let mut profile = String::from(
         "(version 1)\n\
          (deny default)\n\
          (allow process*)\n\
          (allow signal (target same-sandbox))\n\
+         (allow ipc-posix-sem (ipc-posix-name-prefix \"/mp-\"))\n\
          (allow sysctl-read)\n\
          (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
