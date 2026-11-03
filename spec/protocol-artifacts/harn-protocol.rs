@@ -4630,6 +4630,7 @@ pub struct HarnSessionRecapSource {
 pub struct HarnSessionRecapTextFact {
     pub text: String,
     pub source_event_id: u64,
+    pub message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

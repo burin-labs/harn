@@ -426,6 +426,7 @@
             {
               "assistantText": [
                 {
+                  "messageId": null,
                   "sourceEventId": 3,
                   "text": "I found and fixed the cause."
                 }
@@ -507,6 +508,7 @@
           ],
           "prompts": [
             {
+              "messageId": "prompt-recap-fixture",
               "sourceEventId": 1,
               "text": "Investigate the incident"
             }

@@ -4493,6 +4493,7 @@ public struct HarnSessionRecapSource: Codable, Sendable, Equatable {
 public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable {
     public var text: String
     public var sourceEventId: Int
+    public var messageId: String?
 }
 
 public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable {
@@ -4657,7 +4658,7 @@ private func validateHarnSessionRecapSource(_ value: HarnACPValue?) throws {
 }
 
 private func validateHarnSessionRecapTextFact(_ value: HarnACPValue?) throws {
-    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapTextFact", keys: ["text", "sourceEventId"])
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapTextFact", keys: ["text", "sourceEventId", "messageId"])
 }
 
 private func validateHarnSessionRecapVerificationFact(_ value: HarnACPValue?) throws {
