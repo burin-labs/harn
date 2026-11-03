@@ -157,11 +157,14 @@ export function htmlPages({
   template,
   docs,
   render,
-  landingPageMeta,
+  staticPages,
   notFoundPageMeta,
   pageMetaForDoc,
 }) {
-  const pages = [["index.html", page(template, render("/"), null, landingPageMeta)]]
+  const pages = staticPages.map((metadata) => [
+    metadata.path === "/" ? "index.html" : metadata.path.slice(1),
+    page(template, render(metadata.path), null, metadata),
+  ])
   for (const [slug, data] of docs.pages) {
     const url = "/" + slug + ".html"
     pages.push([slug + ".html", page(template, render(url, data), data, pageMetaForDoc(data))])
@@ -178,8 +181,8 @@ export async function prerenderSite() {
     render,
     loadAllDocs,
     REPO_ROOT,
-    LANDING_PAGE_META,
-    NOT_FOUND_PAGE_META,
+    staticPageMetadata,
+    notFoundPageMeta,
     pageMetaForDoc,
   } = await import("./.ssr/entry-server.js")
 
@@ -210,12 +213,13 @@ export async function prerenderSite() {
   writeFile(LLMS_TXT_PATH, renderLlmsTxt(agentPages))
   writeFile(LLMS_FULL_TXT_PATH, renderLlmsFullTxt(agentPages))
 
+  const staticPages = staticPageMetadata()
   const pages = htmlPages({
     template,
     docs,
     render,
-    landingPageMeta: LANDING_PAGE_META,
-    notFoundPageMeta: NOT_FOUND_PAGE_META,
+    staticPages,
+    notFoundPageMeta: notFoundPageMeta(),
     pageMetaForDoc,
   })
   for (const [relPath, contents] of pages) {
@@ -251,7 +255,7 @@ export async function prerenderSite() {
 
   // sitemap.xml from the canonical URLs the pages already declare, so search
   // engines can discover every page. robots.txt (in public/) points here.
-  const sitemapUrls = [LANDING_PAGE_META.canonicalUrl]
+  const sitemapUrls = staticPages.map((metadata) => metadata.canonicalUrl)
   for (const [, data] of docs.pages) {
     sitemapUrls.push(pageMetaForDoc(data).canonicalUrl)
   }
@@ -268,7 +272,7 @@ export async function prerenderSite() {
   publishDocAssets(DIST, docs.assets)
 
   console.log(
-    `prerender: ${docs.pages.size} doc pages + landing + 404, ${docs.pages.size} content JSON, ` +
+    `prerender: ${docs.pages.size} doc pages + ${staticPages.length} static pages + 404, ${docs.pages.size} content JSON, ` +
       `${docs.pages.size} agent markdown pages, ${LLMS_TXT_PATH}, ${LLMS_FULL_TXT_PATH}, ` +
       `${Object.keys(REDIRECTS).length} redirects, ${docs.assets.length} source assets, ` +
       `sitemap.xml (${sitemapUrls.length} urls) → docs/dist`,

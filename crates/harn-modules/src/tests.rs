@@ -1267,6 +1267,61 @@ fn same_named_symbols_in_different_modules_do_not_collapse() {
 }
 
 #[test]
+fn interpolation_references_preserve_imports_and_lexical_shadowing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    let importer_source = "import { run } from \"./exported\"\r\nfn helper() { \"résultat ${run()} ${\"nested ${run()}\"}\" }\n";
+    let shadow_source =
+        "import { run } from \"./exported\"\nfn helper() { let run = 2; \"${run}\" }\n";
+    let importer = write_file(root, "importer.harn", importer_source);
+    let shadow = write_file(root, "shadow.harn", shadow_source);
+    let build =
+        build_for_reference_index(&[exported.clone(), importer.clone(), shadow.clone()], None);
+    let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let project = |edges: Vec<ReferenceEdge>| {
+        let mut seen = HashSet::new();
+        edges
+            .into_iter()
+            .filter_map(|edge| {
+                let target = (edge.from.file, edge.to_file, edge.to_name);
+                seen.insert(target.clone()).then_some(target)
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = project(index.edges());
+    let actual = project(file_reference_edges(&build.graph, &build.parsed_sources));
+    assert_eq!(
+        actual, expected,
+        "file-level and positional resolution must agree"
+    );
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let shadow = canonical_path(&shadow);
+    let imported_uses: Vec<_> = importer_source
+        .match_indices("run()")
+        .map(|(start, _)| start)
+        .collect();
+    let shadow_use = shadow_source.rfind("run").unwrap();
+
+    let imported = index
+        .definition_at(&importer, "run", imported_uses[0])
+        .expect("imported call in interpolation");
+    assert_eq!(imported.file, exported);
+    let local = index
+        .definition_at(&shadow, "run", shadow_use)
+        .expect("local use in interpolation");
+    assert_eq!(local.file, shadow);
+    let uses = index.references_to(&imported);
+    for imported_use in imported_uses {
+        assert!(uses
+            .iter()
+            .any(|site| site.file == importer && site.span.start == imported_use));
+    }
+    assert!(!uses.iter().any(|site| site.file == shadow));
+}
+
+#[test]
 fn lexical_shadow_does_not_resolve_to_same_named_import() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -1299,6 +1354,49 @@ fn lexical_shadow_does_not_resolve_to_same_named_import() {
             .iter()
             .all(|site| site.file != importer),
         "the local shadow must not create an importer -> exported.run edge"
+    );
+}
+
+#[test]
+fn reference_resolution_is_refreshed_after_import_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let first = write_file(root, "first.harn", "pub fn run() { 1 }\n");
+    let second = write_file(root, "second.harn", "pub fn run() { 2 }\n");
+    let first_source = "import { run } from \"./first\"\nfn helper() { run(); run() }\n";
+    let importer = write_file(root, "importer.harn", first_source);
+    let files = [first.clone(), second.clone(), importer.clone()];
+
+    let first_build = build_for_reference_index(&files, None);
+    let first_index = index_references(
+        &first_build.graph,
+        &first_build.parsed_sources,
+        &HashSet::new(),
+    );
+    let first_use = first_source.rfind("run").unwrap() + 1;
+    assert_eq!(
+        first_index
+            .definition_at(&importer, "run", first_use)
+            .unwrap()
+            .file,
+        canonical_path(&first)
+    );
+
+    let second_source = "import { run } from \"./second\"\nfn helper() { run(); run() }\n";
+    write_file(root, "importer.harn", second_source);
+    let second_build = build_for_reference_index(&files, None);
+    let second_index = index_references(
+        &second_build.graph,
+        &second_build.parsed_sources,
+        &HashSet::new(),
+    );
+    let second_use = second_source.rfind("run").unwrap() + 1;
+    assert_eq!(
+        second_index
+            .definition_at(&importer, "run", second_use)
+            .unwrap()
+            .file,
+        canonical_path(&second)
     );
 }
 

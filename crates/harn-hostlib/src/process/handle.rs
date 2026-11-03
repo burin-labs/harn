@@ -199,6 +199,15 @@ pub enum OutputCapture {
 /// real and mock paths uniform without forcing async into the rest of the
 /// hostlib.
 pub trait ProcessHandle: Send {
+    /// Enroll a real foreground child in its call's existing cleanup owner.
+    /// Mock handles do not enroll synthetic PIDs in the native registry.
+    fn register_scope_cleanup(
+        &self,
+        _cancel: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Option<harn_vm::op_interrupt::ActiveProcessCleanupGuard> {
+        None
+    }
+
     /// Guardian evidence after wait; absent when unavailable or no guardian was used.
     fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
         None

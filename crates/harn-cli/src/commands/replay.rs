@@ -133,6 +133,7 @@ pub(crate) struct ReplayFixtureResult {
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+    pub expectations_compared: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -494,14 +495,30 @@ fn resolve_fixture_source(path: &Path) -> Result<ReplaySource, String> {
     {
         let trace = serde_json::from_value::<ReplayOracleTrace>(value)
             .map_err(|error| format!("failed to parse replay trace {}: {error}", path.display()))?;
+        let repo_root = crate::commands::replay_fixtures::discover_repo_root()
+            .unwrap_or_else(|| PathBuf::from("."));
+        crate::commands::replay_fixtures::validate_protocol_fixture_refs(
+            &repo_root,
+            &trace.protocol_fixture_refs,
+        )
+        .map_err(|error| format!("{error} (expectations_compared=0)"))?;
         return Ok(ReplaySource::ReplayTrace {
             path: path.to_path_buf(),
             trace: Box::new(trace),
         });
     }
-    Ok(ReplaySource::RunRecord {
-        path: path.to_path_buf(),
-    })
+    if matches!(
+        value.get("_type").and_then(JsonValue::as_str),
+        Some("run_record" | "workflow_run")
+    ) {
+        return Ok(ReplaySource::RunRecord {
+            path: path.to_path_buf(),
+        });
+    }
+    Err(format!(
+        "unrecognized replay fixture in {}; expected a run record, replay trace, or offline coding fixture (expectations_compared=0)",
+        path.display()
+    ))
 }
 
 fn execute_runs(source: &ReplaySource, runs: usize) -> Result<Vec<ReplayExecution>, String> {
@@ -640,7 +657,7 @@ fn execute_replay_trace(
     } else {
         trace.second_run.clone()
     };
-    let fixture = trace_fixture_result(trace, &trace_run)?;
+    let fixture = trace_fixture_result(trace)?;
     let report = ReplayReport {
         run_id: trace_run.run_id.clone(),
         execution_id: None,
@@ -708,6 +725,7 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
             pass: report.pass,
             failures: report.failures.clone(),
             stage_count: report.stage_count,
+            expectations_compared: report.expectations_compared,
         },
         counterfactual: None,
     }
@@ -779,12 +797,14 @@ fn print_report_human(report: &ReplayReport) {
             report.transcript_event_count
         )
     );
+    let verdict = format!(
+        "{} (expectations_compared={})",
+        if report.fixture.pass { "PASS" } else { "FAIL" },
+        report.fixture.expectations_compared
+    );
     println!(
         "{}",
-        crate::localization::formatted!(
-            "Embedded replay fixture: {}",
-            if report.fixture.pass { "PASS" } else { "FAIL" }
-        )
+        crate::localization::formatted!("Embedded replay fixture: {}", verdict)
     );
     for failure in &report.fixture.failures {
         println!(
@@ -811,30 +831,32 @@ fn print_report_human(report: &ReplayReport) {
     }
 }
 
-fn trace_fixture_result(
-    trace: &ReplayOracleTrace,
-    trace_run: &ReplayTraceRun,
-) -> Result<ReplayFixtureResult, String> {
-    let oracle = ReplayOracleTrace {
-        name: format!("{} replay fixture", trace.name),
-        expect: ReplayExpectation::Match,
-        protocol_fixture_refs: trace.protocol_fixture_refs.clone(),
-        allowlist: trace.allowlist.clone(),
-        first_run: trace.first_run.clone(),
-        second_run: trace_run.clone(),
-        ..ReplayOracleTrace::default()
+fn trace_fixture_result(trace: &ReplayOracleTrace) -> Result<ReplayFixtureResult, String> {
+    let report = match harn_vm::run_replay_oracle_trace(trace) {
+        Ok(report) => report,
+        Err(harn_vm::ReplayOracleError::NothingCompared) => {
+            return Ok(ReplayFixtureResult {
+                pass: false,
+                failures: vec![harn_vm::ReplayOracleError::NothingCompared.to_string()],
+                stage_count: 0,
+                expectations_compared: 0,
+            });
+        }
+        Err(error) => return Err(format!("failed to evaluate replay trace: {error}")),
     };
-    let report = harn_vm::run_replay_oracle_trace(&oracle)
-        .map_err(|error| format!("failed to evaluate replay trace: {error}"))?;
-    let failures = report
-        .divergence
-        .as_ref()
-        .map(|divergence| vec![divergence.message.clone()])
-        .unwrap_or_default();
+    let failures = if report.passed {
+        Vec::new()
+    } else {
+        vec![report.divergence.as_ref().map_or_else(
+            || "expected drift, but canonical replay runs matched".to_string(),
+            |divergence| divergence.message.clone(),
+        )]
+    };
     Ok(ReplayFixtureResult {
         pass: report.passed,
         failures,
         stage_count: 0,
+        expectations_compared: 1,
     })
 }
 

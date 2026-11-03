@@ -42,9 +42,7 @@ pub fn is_replay() -> bool {
 
 #[cfg(not(test))]
 fn replay_env_flag() -> bool {
-    std::env::var("HARN_REPLAY")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty() && value != "0")
+    std::env::var("HARN_REPLAY").is_ok_and(|value| !value.trim().is_empty() && value != "0")
 }
 
 #[cfg(test)]

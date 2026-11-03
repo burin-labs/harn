@@ -302,7 +302,7 @@ fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
     );
     assert!(
         fs::read_dir(&fixture.cache_dir).unwrap().all(|entry| {
-            entry.ok().is_some_and(|entry| {
+            entry.is_ok_and(|entry| {
                 !matches!(
                     entry.path().extension().and_then(|ext| ext.to_str()),
                     Some("harnbc" | "harnmod")

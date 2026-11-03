@@ -471,6 +471,11 @@ impl LlmCallOptions {
     pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {
         let caps = crate::llm::capabilities::lookup(&self.provider, &self.model);
         let mut features = caps.anthropic_beta_features;
+        // Binding controls are a capability, not an unconditional opt-in:
+        // final egress requests this beta only when it can apply the body field.
+        features.retain(|feature| {
+            feature != crate::llm::providers::anthropic::ANTHROPIC_THINKING_BINDING_BETA
+        });
         for feature in &self.anthropic_beta_features {
             push_unique_anthropic_beta_feature(&mut features, feature);
         }

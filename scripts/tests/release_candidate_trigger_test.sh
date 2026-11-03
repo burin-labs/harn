@@ -51,6 +51,8 @@ ln -s "$HARN_BIN" "$tmp/bin/harn"
 cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 [[ "${FAKE_GH_FAIL:-0}" == 1 ]] && exit 1
+# shellcheck source=scripts/lib/sha256.sh
+source "$FAKE_LIB/sha256.sh"
 case "$2" in
   */releases\?per_page=50)
     [[ "${FAKE_RELEASES_FAIL:-0}" != 1 ]] || exit 1
@@ -58,11 +60,36 @@ case "$2" in
   */build-release-binaries.yml/runs\?*)
     sha="${2#*head_sha=}"; sha="${sha%%&*}"
     if [[ -n "${FAKE_SOURCE_RUN:-}" ]]; then
-      jq -n --argjson id "$FAKE_SOURCE_RUN" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$id,run_attempt:1,event:"workflow_dispatch",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+      jq -n --argjson id "$FAKE_SOURCE_RUN" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$id,run_attempt:1,event:"workflow_dispatch",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},head_repository:{full_name:"burin-labs/harn"}}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
+  */actions/runs/*/attempts/1/jobs\?*)
+    jq -n --argjson run "$FAKE_SOURCE_RUN" --arg sha "$GITHUB_SHA" \
+      --argjson artifacts "$FAKE_SOURCE_ARTIFACTS" '
+      ([$artifacts.artifacts[].name|select(startswith("harn-") and . != "harn-release-files")|"Build " + ltrimstr("harn-")] + ["Assemble candidate manifest"]) |
+      to_entries | map({id:(.key+1),name:.value,run_id:$run,run_attempt:1,head_sha:$sha,status:"completed",conclusion:"success"}) |
+      {total_count:length,jobs:.}' ;;
   */artifacts\?per_page=100\&page=1)
-    jq '.artifacts |= (to_entries|map(.value+{id:(.key+1)}))' \
+    if [[ ! -f "$FAKE_SCRATCH/manifest.zip" ]]; then
+    jq -n --arg sha "$GITHUB_SHA" --arg run "$FAKE_SOURCE_RUN" --argjson inventory "$FAKE_SOURCE_ARTIFACTS" '
+      {schemaVersion:"burin-labs.candidate_manifest.v1",repository:"burin-labs/harn",sourceCommit:$sha,
+       runId:$run,runAttempt:"1",artifacts:([$inventory.artifacts[].name|
+        select(startswith("harn-") and . != "harn-release-files")|
+        {kind:"archive",target:ltrimstr("harn-"),artifact:.,sha256:("d"*64)}] +
+        [{kind:"notes",artifact:"harn-release-files",sha256:("e"*64)}])}' > "$FAKE_SCRATCH/candidate-manifest.json"
+    rm -f "$FAKE_SCRATCH/manifest.zip"
+    (cd "$FAKE_SCRATCH" && zip -q -X manifest.zip candidate-manifest.json)
+    fi
+    digest="sha256:$(sha256_file_hex "$FAKE_SCRATCH/manifest.zip")"
+    size="$(wc -c < "$FAKE_SCRATCH/manifest.zip")"
+    jq --arg sha "$GITHUB_SHA" --argjson run "$FAKE_SOURCE_RUN" --arg digest "$digest" --argjson size "$size" '
+      .artifacts |= (to_entries|map(.value+{id:(.key+1),digest:("sha256:"+("d"*64)),
+        workflow_run:{id:$run,head_sha:$sha}} |
+        if .name == ("candidate-manifest-"+$sha) then .digest=$digest|.size_in_bytes=$size else . end))' \
       <<< "${FAKE_SOURCE_ARTIFACTS:?source artifact fixture required}" ;;
+  */actions/artifacts/*/zip) cat "$FAKE_SCRATCH/manifest.zip" ;;
+  */actions/runs/*/attempts/1|*/actions/runs/*)
+    jq -n --argjson id "$FAKE_SOURCE_RUN" --arg sha "$GITHUB_SHA" \
+      '{id:$id,run_attempt:1,event:"workflow_dispatch",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},head_repository:{full_name:"burin-labs/harn"}}' ;;
   *) exit 2 ;;
 esac
 STUB
@@ -83,10 +110,12 @@ run_resolver() {
   local name=$1
   shift
   : > "$tmp/$name.outputs"
+  mkdir -p "$tmp/$name.artifacts"
   (
     cd "$repo"
     env \
       PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn \
+      FAKE_LIB="$root/scripts/lib" FAKE_SCRATCH="$tmp/$name.artifacts" \
       EVENT_NAME=push REF_TYPE=branch REF_NAME=main \
       GITHUB_SHA="$(git rev-parse HEAD)" PUSH_BEFORE='' MERGE_GROUP_BASE='' \
       PR_HEAD_SHA="$(git rev-parse HEAD)" PR_BASE_SHA="$(git rev-parse HEAD^)" \
@@ -202,11 +231,17 @@ for missing_proof in expired empty missing; do
     empty) filter='.artifacts[0].size_in_bytes = 0' ;;
     missing) filter='.artifacts = .artifacts[1:] | .total_count = (.artifacts | length)' ;;
   esac
-  resolve "scheduled_$missing_proof" EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
-    FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq "$filter" <<< "$source_artifacts")"
-  [[ "$(output "scheduled_$missing_proof" should_build_binaries)" == true ]] \
-    || fail "schedule reused $missing_proof candidate evidence"
+  if run_resolver "scheduled_$missing_proof" EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
+    FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq "$filter" <<< "$source_artifacts")"; then
+    fail "schedule treated $missing_proof evidence as a settled or absent candidate"
+  fi
+  [[ -z "$(output "scheduled_$missing_proof" should_build_binaries)" ]] \
+    || fail "schedule emitted a build decision for $missing_proof evidence"
 done
+resolve scheduled_empty EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
+  FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS='{"total_count":0,"artifacts":[]}'
+[[ "$(output scheduled_empty should_build_binaries)" == true ]] \
+  || fail "a measured empty candidate inventory did not allow a source build"
 if run_resolver scheduled_partial EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
   FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq '.total_count += 1' <<< "$source_artifacts")"; then
   fail "partial candidate artifacts read as an idle cache and started a new build"

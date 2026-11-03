@@ -3418,6 +3418,12 @@ null only when every part is null.
 
 ### Reporting on a run that never wrote a run record
 
+Model-call timing is nullable: `llm_calls[].duration_ms` and
+`usage.total_duration_ms` are null when the source cannot measure them. Zero
+means a measured zero. A session total is unavailable if any included run has
+unavailable model-call timing. The run's wall-clock duration remains separate;
+it includes time spent running tools and waiting for input.
+
 Nothing on the agent-session path writes a run record: `save_run_record` is
 called from `std/records`, `std/workflow`, and `run_review`, so a record exists
 only when a Harn *script* asks for one. A host that drives the agent loop

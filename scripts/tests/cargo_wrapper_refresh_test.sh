@@ -185,4 +185,73 @@ cmp -s "$checkout/.cargo/config.toml" "$tmp_root/relative-expected" || fail 'rel
 [[ "$(cat "$checkout/$relative_old")" == 'relative old artifact' ]] || fail 'relative old artifact changed'
 if grep -q FORBIDDEN "$REFRESH_CALLS"; then fail 'full setup or native build was reached'; fi
 [[ "$(wc -l < "$REFRESH_CALLS")" -eq 6 ]] || fail 'refusals reached the compiler'
+
+# Exercise the real resolver entry before its missing-wrapper bootstrap can run.
+resolver_checkout="$tmp_root/resolver-checkout"
+mkdir -p "$resolver_checkout/scripts/lib" "$resolver_checkout/.cargo"
+cp "$repo_root/scripts/harn_bin.sh" "$resolver_checkout/scripts/"
+cp "$repo_root/scripts/lib/"*.sh "$resolver_checkout/scripts/lib/"
+cp "$checkout/scripts/sccache_rustc_wrapper.rs" "$resolver_checkout/scripts/"
+printf '[package]\nname = "fixture"\nversion = "0.1.0"\n' > "$resolver_checkout/Cargo.toml"
+resolver_wrapper=$(harn_sccache_wrapper_path "$resolver_checkout" "$tmp_root/resolver-storage")
+printf '[build]\nrustc-wrapper = "%s"\n' "$resolver_wrapper" \
+  > "$resolver_checkout/.cargo/config.toml"
+cp "$resolver_checkout/.cargo/config.toml" "$tmp_root/resolver-config-before"
+resolver_pin="$tmp_root/existing-harn"
+cat > "$resolver_pin" <<'SH'
+#!/bin/sh
+printf 'runtime:%s\n' "$*" >> "$RESOLVER_RUNTIME_CALLS"
+printf 'pinned-ok\n'
+SH
+chmod +x "$resolver_pin"
+export RESOLVER_RUNTIME_CALLS="$tmp_root/resolver-runtime-calls"
+: > "$REFRESH_CALLS"
+
+(
+  cd "$resolver_checkout"
+  HARN_BIN="$resolver_pin" HARN_BIN_NO_BUILD=1 \
+    bash scripts/harn_bin.sh -- --fixture-env-positive
+) > "$tmp_root/resolver-env-positive.log" 2>&1 || {
+  cat "$tmp_root/resolver-env-positive.log" >&2
+  fail 'no-build could not execute an existing pinned runtime'
+}
+grep -Fxq 'runtime:--fixture-env-positive' "$RESOLVER_RUNTIME_CALLS" ||
+  fail 'the existing runtime was not actually executed'
+(
+  cd "$resolver_checkout"
+  HARN_BIN="$resolver_pin" HARN_BIN_NO_BUILD=0 \
+    bash scripts/harn_bin.sh --no-build -- --fixture-flag-positive
+) > "$tmp_root/resolver-flag-positive.log" 2>&1 || fail 'no-build flag lost the existing runtime'
+grep -Fxq 'runtime:--fixture-flag-positive' "$RESOLVER_RUNTIME_CALLS" ||
+  fail 'the no-build flag did not execute the runtime'
+
+for runtime in missing stale; do
+  if [[ "$runtime" == stale ]]; then
+    mkdir -p "$resolver_checkout/target/debug"
+    cp "$resolver_pin" "$resolver_checkout/target/debug/harn"
+  fi
+  if (
+    cd "$resolver_checkout"
+    HARN_BIN='' HARN_BIN_NO_BUILD=1 CARGO_TARGET_DIR="$resolver_checkout/target" \
+      bash scripts/harn_bin.sh --print
+  ) > "$tmp_root/resolver-$runtime.log" 2>&1; then
+    fail "no-build accepted a $runtime worktree runtime"
+  fi
+  grep -Eq 'no fresh worktree harn binary|cannot prove worktree harn binary freshness' \
+    "$tmp_root/resolver-$runtime.log" || fail "the $runtime refusal was not attributable"
+done
+if (
+  cd "$resolver_checkout"
+  HARN_BIN="$resolver_pin" HARN_BIN_NO_BUILD=invalid bash scripts/harn_bin.sh --print
+) > "$tmp_root/resolver-invalid.log" 2>&1; then
+  fail 'invalid no-build admission was accepted'
+fi
+grep -Fq 'HARN_BIN_NO_BUILD must be 0 or 1' "$tmp_root/resolver-invalid.log" ||
+  fail 'invalid no-build admission lost its diagnostic'
+[[ ! -s "$REFRESH_CALLS" ]] || fail 'no-build invoked compiler or tool bootstrap'
+[[ ! -e "$resolver_wrapper" && ! -d "$(dirname "$resolver_wrapper")" ]] ||
+  fail 'no-build restored the compiler wrapper cache'
+[[ ! -e "$resolver_checkout/.cargo/harn-target-dir" ]] || fail 'no-build rewrote target discovery'
+cmp -s "$resolver_checkout/.cargo/config.toml" "$tmp_root/resolver-config-before" ||
+  fail 'no-build changed Cargo configuration'
 echo 'cargo wrapper refresh: source-only controls passed'

@@ -49,10 +49,65 @@ fn materialize_lock_entries(
     offline: bool,
     installed_sources: Option<&InstalledPackageSources>,
 ) -> Result<usize, PackageError> {
+    let mut aliases = std::collections::BTreeSet::new();
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        if !aliases.insert(&entry.name) {
+            return Err(PackageError::Lockfile(format!(
+                "duplicate package name {:?} in lock",
+                entry.name
+            )));
+        }
+    }
+
+    // Cache entries are protected individually. Fetch independent remote
+    // sources together, but release every cache lease before the serial copy
+    // below: two aliases may refer to the same locked source. Publication of
+    // the resulting generation remains one transaction.
+    if refetch.is_none() && !offline {
+        let remote: Vec<_> = lock
+            .packages
+            .iter()
+            .filter(|entry| {
+                entry.source.starts_with("git+") || entry.source.starts_with("archive+")
+            })
+            .collect();
+        if remote.len() > 1 {
+            for batch in remote.chunks(8) {
+                harn_parser::runtime_stack::scope(|scope| -> Result<(), PackageError> {
+                    let workers: Vec<_> = batch
+                        .iter()
+                        .map(|entry| {
+                            scope.spawn(move || {
+                                locked_package_source_dir(
+                                    workspace,
+                                    installed_sources,
+                                    entry,
+                                    None,
+                                    false,
+                                )
+                                .map(drop)
+                            })
+                        })
+                        .collect();
+                    let mut first_error = None;
+                    for worker in workers {
+                        let outcome = worker.join().unwrap_or_else(|_| {
+                            Err(PackageError::Ops("package fetch worker panicked".into()))
+                        });
+                        if first_error.is_none() {
+                            first_error = outcome.err();
+                        }
+                    }
+                    first_error.map_or(Ok(()), Err)
+                })?;
+            }
+        }
+    }
+
     let mut installed = 0usize;
     for entry in &lock.packages {
         let alias = &entry.name;
-        validate_package_alias(alias)?;
         if entry.source.starts_with("path+") {
             let source = path_from_source_uri(&entry.source)?;
             materialize_path_dependency(&source, packages_dir, alias)?;

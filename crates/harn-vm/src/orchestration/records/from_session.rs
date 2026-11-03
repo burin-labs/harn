@@ -1056,11 +1056,7 @@ impl SessionFold {
         if self.tool_index.contains_key(&tool_call_id) {
             return;
         }
-        let args = record
-            .metadata()
-            .raw_input
-            .clone()
-            .unwrap_or(serde_json::Value::Null);
+        let args = record.tool_input().unwrap_or(serde_json::Value::Null);
         let tool_name = record.tool_name().unwrap_or_default();
         self.tool_index
             .insert(tool_call_id.clone(), self.tools.len());

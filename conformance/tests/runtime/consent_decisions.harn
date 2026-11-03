@@ -1,0 +1,96 @@
+import { shell_command_from_argv } from "std/command"
+import { with_consent } from "std/llm/tool_middleware"
+
+pipeline default(harness: Harness) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "consent-decisions")
+  harness.fs.mkdir(root)
+  const input = path_join(root, ".env")
+  harness.fs.write_text(input, "PUBLIC_FIXTURE=consent-boundary\n")
+  const cases = [
+    {value: true, decision: "approved"},
+    {value: {decision: "approved"}, decision: "approved"},
+    {value: {decision: "auto"}, decision: "auto"},
+    {value: false, decision: "denied"},
+    {value: {decision: "denied", reason: "fixture refusal"}, decision: "denied"},
+    {value: {decision: "unmeasured"}, decision: "denied"},
+    {value: {decision: "Approved"}, decision: "denied"},
+    {value: {decision: ""}, decision: "denied"},
+    {value: {decision: true}, decision: "denied"},
+    {value: {decision: 1}, decision: "denied"},
+    {value: {decision: nil}, decision: "denied"},
+    {value: {}, decision: "denied"},
+    {value: nil, decision: "denied"},
+    {value: "approved", decision: "denied"},
+    {value: [], decision: "denied"},
+  ]
+  let index = 0
+  for entry in cases {
+    const allowed = entry.decision != "denied"
+    const asks = harness.runtime.atomic(0)
+    const policy = command_policy(
+      {
+        workspace_roots: [root],
+        require_approval: ["credential_file_read"],
+        consent: { _ctx ->
+          harness.runtime.atomic_add(asks, 1)
+          return entry.value
+        },
+      },
+    )
+    const marker = path_join(root, "child-${index}")
+    const read_command = shell_command_from_argv(["cat", input])
+    const marker_path = shell_command_from_argv([marker])
+    harness.runtime.command_policy_push(policy)
+    const result = harness.process.run(
+      {
+        program: "sh",
+        args: ["-c", "${read_command} && printf reached > ${marker_path}"],
+        cwd: root,
+      },
+    )
+    assert_eq(harness.runtime.atomic_get(asks), 1)
+    assert_eq(harness.fs.exists(marker), allowed)
+    if allowed {
+      assert(contains(result.stdout ?? "", "PUBLIC_FIXTURE=consent-boundary"))
+    } else {
+      assert_eq(result.status, "consent_denied")
+      if entry.value?.reason == "fixture refusal" {
+        assert(contains(result.stderr ?? "", "fixture refusal"))
+      }
+    }
+    const hostlib = harness.tools.run_command({argv: ["cat", input], cwd: root})
+    assert(harness.runtime.atomic_get(asks) >= 2)
+    if allowed {
+      assert(contains(hostlib?.stdout ?? "", "PUBLIC_FIXTURE=consent-boundary"))
+    } else {
+      assert_eq(hostlib?.status, "consent_denied")
+    }
+    harness.runtime.command_policy_pop()
+    const calls = harness.runtime.atomic(0)
+    const middleware = with_consent(harness.clock, { _call -> return entry.value })
+    const outcome = middleware(
+      {name: "fixture", arguments: {}},
+      { _call ->
+        harness.runtime.atomic_add(calls, 1)
+        return {status: "succeeded", output: "reached"}
+      },
+    )
+    assert_eq(
+      harness.runtime.atomic_get(calls),
+      if allowed {
+        1
+      } else {
+        0
+      },
+    )
+    assert_eq(outcome.audit.consent.decision, entry.decision)
+    if allowed {
+      assert_eq(outcome.status, "succeeded")
+    } else {
+      assert_eq(outcome.error_category, "consent_denied")
+    }
+    index = index + 1
+  }
+  harness.fs.delete(root)
+  harness.stdio.println("consent_decisions_ok")
+}

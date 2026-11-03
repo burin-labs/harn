@@ -78,7 +78,17 @@ impl SecretPatternSpec {
             .get(end..)
             .unwrap_or_default()
             .trim_start_matches([' ', '\t']);
-        if value.contains('.') || matches!(suffix.chars().next(), Some('(' | '[' | '.')) {
+        // Quoted and opaque shell suffixes belong to the same credential value.
+        let bare_prefix = value
+            .split(['"', '\'', '\\', '$', '`'])
+            .next()
+            .unwrap_or(value);
+        if bare_prefix.len() != value.len() {
+            return !bare_prefix.contains(['.', '[', '{']);
+        }
+        if bare_prefix.contains(['.', '[', '{'])
+            || matches!(suffix.chars().next(), Some('(' | '[' | '.'))
+        {
             return false;
         }
         true
@@ -218,7 +228,7 @@ pub const DEFAULT_SECRET_PATTERN_SPECS: &[SecretPatternSpec] = &[
         detector: "sensitive-assignment",
         source: "detect-secrets-keyword-detector",
         title: "Sensitive key/value assignment",
-        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9_\-+/=]*[0-9_\-+/=][A-Za-z0-9_\-+/=]*|secret|hidden|hideme|password|passwd|token)"#,
+        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9_\-+/=]*[0-9_\-+/=][A-Za-z0-9_\-+/=]*|secret|hidden|hideme|password|passwd|token)(?:"(?:[^"\\$`]|\\(?:[\s\S]|$))*(?:"|$|[$`][\s\S]*)|'[^']*(?:'|$)|\\(?:[\s\S]|$)|[^\s"'\\$`;|&()<>]|[$`][\s\S]*)*"#,
         precision: PRECISION_HEURISTIC,
     },
 ];
