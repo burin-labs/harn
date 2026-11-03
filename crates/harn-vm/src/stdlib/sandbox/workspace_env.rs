@@ -37,6 +37,7 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
 const RUNTIME_DIR_MARKER: &str = "workspace-root";
 
 /// The longest workspace root a marker is read back as.
+#[cfg(unix)]
 const RUNTIME_DIR_MARKER_MAX: u64 = 4096;
 
 /// The per-workspace runtime directory a confined child's temp dir and
