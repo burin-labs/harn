@@ -34,7 +34,7 @@ fn write_marker(runtime: &Path, contents: &[u8]) {
 fn owners_within_deadline(base: &Path, path: &Path) -> Vec<PathBuf> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let (base, path) = (base.to_path_buf(), path.to_path_buf());
-    std::thread::spawn(move || {
+    crate::runtime_stack::spawn(move || {
         let _ = sender.send(runtime_dir_owners_in(&base, &path));
     });
     receiver
@@ -66,10 +66,7 @@ fn an_honest_marker_names_its_workspace_and_chains_outward() {
     write_marker(&inner_runtime, root_bytes(&inner));
 
     let file = inner_runtime.join("tmp").join("file");
-    assert_eq!(
-        owners_within_deadline(&base, &file),
-        vec![inner.clone(), outer.clone()]
-    );
+    assert_eq!(owners_within_deadline(&base, &file), vec![inner, outer]);
     assert!(owners_within_deadline(&base, &base.join("not-a-digest").join("file")).is_empty());
 }
 
