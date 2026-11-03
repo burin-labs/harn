@@ -10,9 +10,11 @@ gets a fresh owner-only config and extension directory outside those roots, an e
 refusing browser and editor, a trusted `PATH`, and git hooks, fsmonitor and `ext::` remotes turned
 off. The token is never in gh's environment: it is stored as a github.com login in the per-spawn
 `hosts.yml`, which every other confined child is denied, so gh sends it to no other host. A granted
+spawn removes directories a crashed spawn left behind. A granted
 `gh` keeps only `LANG`, `LC_*`, `TERM`, `TMPDIR`, `TZ` and `NO_COLOR` from its caller; proxy, TLS,
 debug and token variables are dropped. A granted read is refused when it names `--jq`, `-q`,
-`--template` or `-t`, passes arguments after `--`, or names a host other than github.com, and when
+`--template` or `-t`, passes arguments after `--`, names a host other than github.com, or names a URL scheme other than
+`https`, and when
 a write root overlaps the user's git, SSH or gh configuration.
 `gh auth token` and the other `gh auth` subcommands that print the credential are refused. Every
 granted value, for any program, including its base64 and percent-encoded forms, is redacted from

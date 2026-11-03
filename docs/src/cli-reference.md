@@ -420,7 +420,10 @@ token to any other host. A `for=gh` grant must expose `GH_TOKEN` or
 `GITHUB_TOKEN`; any other name is refused. A granted read is also refused when
 it names another host: `--hostname`, a `HOST/OWNER/REPO` value for `-R` or
 `--repo`, or a positional repository, URL or SSH remote whose host is not
-github.com.
+github.com. It is also refused when any argument holds a URL whose scheme is
+not `https`, in any case (`http://`, `HTTP://`, `ftp://`), or a
+scheme-relative `//host/...` form, because gh would send the token to
+github.com over that scheme.
 
 A granted `gh` receives no caller or inherited variable except `LANG`,
 `LC_*`, `TERM`, `TMPDIR`, `TZ` and `NO_COLOR`, plus the variables in the
@@ -438,9 +441,13 @@ traced with `GIT_TRACE`, the reads run git only for `config`, `remote -v`,
 `rev-parse` and `symbolic-ref`.
 
 While a granted `gh` runs, its `hosts.yml` is the only place the token is
-stored. Every confined child except that `gh` has `$HARN_HOME/grant-spawns` on
-its read denylist, so a confined sibling cannot read it. The directory is
-removed when the command ends. An unconfined process of the same user can read
+stored. Every confined child has `$HARN_HOME/grant-spawns` on its read
+denylist. The granted `gh`'s own profile re-allows only its own directory, so
+neither a confined sibling nor another granted `gh` can read it. The directory
+is removed when the command ends. If the process crashes or is killed first,
+the next granted spawn removes it: any per-spawn directory whose creating
+process is gone, or that is older than 24 hours, is deleted. Links and entries
+that are not owner-only directories are left alone and never followed. An unconfined process of the same user can read
 the file for as long as the granted `gh` runs.
 
 A run record's `admitted_environment` lists the names a child could see, so it
