@@ -1006,7 +1006,7 @@ fn process_exec_injects_the_runtime_tmpdir() {
         );
         assert_eq!(
             canonical_tmpdir,
-            crate::stdlib::sandbox::sandbox_runtime_dir(&canonical_workspace)
+            crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir(&canonical_workspace)
                 .unwrap()
                 .join("tmp"),
             "child TMPDIR {tmpdir:?} must be the workspace's runtime temp dir"

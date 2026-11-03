@@ -861,7 +861,8 @@ fn workspace_local_tmpdir_lands_in_the_runtime_dir_outside_the_workspace() {
     };
 
     let tmpdir = workspace_local_tmpdir(&policy).expect("a writable root yields a temp dir");
-    let runtime = sandbox_runtime_dir(workspace.path()).expect("a user cache directory");
+    let runtime =
+        workspace_env::sandbox_runtime_dir(workspace.path()).expect("a user cache directory");
 
     // The temp dir is created in the workspace's runtime dir, and nowhere in
     // the workspace a linter or test collector would walk.

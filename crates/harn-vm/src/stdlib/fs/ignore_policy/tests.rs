@@ -239,7 +239,8 @@ fn scratch_detection_matches_harn_managed_names() {
     assert!(is_scratch_path(Path::new("/ws/.harn-toolchain-cache")));
     assert!(!is_scratch_path(Path::new("/ws/.harn-runs/run")));
     assert!(!is_scratch_path(Path::new("/ws/src")));
-    let runtime = crate::stdlib::sandbox::sandbox_runtime_dir(Path::new("/ws")).unwrap();
+    let runtime =
+        crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir(Path::new("/ws")).unwrap();
     assert!(is_scratch_path(&runtime.join("tmp/out.json")));
 }
 

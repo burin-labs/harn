@@ -11,7 +11,7 @@ use super::{command_output, ProcessCommandConfig};
 
 /// The runtime dir the sandbox keeps a workspace's temp dir and caches in.
 fn runtime_dir(workspace: &Path) -> PathBuf {
-    super::sandbox_runtime_dir(workspace).expect("a user cache directory")
+    super::workspace_env::sandbox_runtime_dir(workspace).expect("a user cache directory")
 }
 
 struct PolicyGuard;

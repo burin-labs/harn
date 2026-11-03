@@ -225,6 +225,9 @@ pub fn initialize_runtime_assets() {
     llm::agent_host_primitives::tool_result_budget::install_spill_root(|| {
         stdlib::fs::workspace_temp_root().map_err(|error| std::io::Error::other(error.to_string()))
     });
+    harn_execution_policy::install_owned_scratch_resolver(
+        stdlib::sandbox::workspace_env::root_in_owned_runtime_dir,
+    );
 }
 
 /// A startup condition that must stop the process before any work begins.

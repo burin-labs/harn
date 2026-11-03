@@ -49,7 +49,7 @@ fn write_grants(profile: &str) -> Vec<String> {
 /// `roots` plus the workspace's runtime dir, which holds the child's temp dir
 /// and toolchain cache and is always granted beside the workspace, sorted.
 fn with_runtime_dir(workspace: &str, roots: &[&str]) -> Vec<String> {
-    let runtime = super::super::sandbox_runtime_dir(Path::new(workspace)).unwrap();
+    let runtime = super::super::workspace_env::sandbox_runtime_dir(Path::new(workspace)).unwrap();
     let mut grants: Vec<String> = roots.iter().map(|root| root.to_string()).collect();
     grants.push(runtime.display().to_string());
     grants.sort();

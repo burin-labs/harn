@@ -17,6 +17,7 @@
 //! stable, documented surface to depend on without reaching into
 //! `stdlib::*` plumbing.
 
+pub use crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir;
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,
@@ -26,16 +27,15 @@ pub use crate::stdlib::sandbox::{
     enforce_process_cwd, enforcement, host_confinement, host_contains_process_reads,
     infer_process_sandbox_mechanism, is_process_sandbox_signal, is_workspace_runtime_directory,
     prepare_active_rustc_wrapper_for_command, process_spawn_error, process_violation_error,
-    push_process_sandbox_scope, render_policy_root, rustc_wrapper, sandbox_runtime_dir,
-    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
-    tokio_command_for, tokio_command_for_with_env_state, validate_command_environment,
-    workspace_local_tmpdir, FsAccess, HostProtectionGap, ProcessCommandConfig,
-    ProcessSandboxAssessment, ProcessSandboxDenialReporting, ProcessSandboxGrants,
-    ProcessSandboxMechanism, ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal,
-    ProcessSandboxReport, ProcessSandboxReportingContext, ProcessSandboxScope,
-    ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
-    SANDBOX_CONFINEMENT_SCHEMA,
+    push_process_sandbox_scope, render_policy_root, rustc_wrapper, session_std_command,
+    session_tokio_command, std_command_for, std_command_for_with_env_state, tokio_command_for,
+    tokio_command_for_with_env_state, validate_command_environment, workspace_local_tmpdir,
+    FsAccess, HostProtectionGap, ProcessCommandConfig, ProcessSandboxAssessment,
+    ProcessSandboxDenialReporting, ProcessSandboxGrants, ProcessSandboxMechanism,
+    ProcessSandboxNetwork, ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReport,
+    ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
+    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;

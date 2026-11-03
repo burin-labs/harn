@@ -85,6 +85,20 @@ pub(super) fn declared_path_roots_active() -> bool {
     PATH_SCOPE_ROOTS.with(|selection| selection.get() == PathScopeRoots::Declared)
 }
 
+/// Writable roots outside the working tree that its git topology implies: a
+/// linked worktree's git dirs and Harn's own relocated runtime directories.
+/// None under declared roots. The runtime dir is granted separately because
+/// it stays writable even then: a child's `TMPDIR` that its own sandbox
+/// refuses is a broken child.
+pub(super) fn topology_extension_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    if declared_path_roots_active() {
+        return Vec::new();
+    }
+    let mut outside = git_scope_extension_for_roots(roots).read_write;
+    outside.extend(relocated_runtime_roots(roots));
+    outside
+}
+
 fn check_fs_path_scope_with_roots(
     path: &Path,
     access: FsAccess,
@@ -139,9 +153,20 @@ fn check_fs_path_scope_with_roots(
             read_only: false,
         });
     }
+    // A workspace's runtime dir stands in for the scratch dir that once sat
+    // inside it, so every root covering the workspace covers it too. Resolved
+    // only for a path no root contains directly.
+    let owners = std::cell::OnceCell::new();
+    let covers = |root: &PathBuf| {
+        path_is_within(&candidate, root)
+            || owners
+                .get_or_init(|| workspace_env::runtime_dir_owners(&candidate))
+                .iter()
+                .any(|owner| path_is_within(owner, root))
+    };
     let writable_depth = roots
         .iter()
-        .filter(|root| path_is_within(&candidate, root))
+        .filter(|root| covers(root))
         .map(|root| root.components().count())
         .max();
     if let Some(depth) = writable_depth {
@@ -158,10 +183,7 @@ fn check_fs_path_scope_with_roots(
         }
         return Ok(());
     }
-    let within_read_only = scope
-        .read_only
-        .iter()
-        .any(|root| path_is_within(&candidate, root));
+    let within_read_only = scope.read_only.iter().any(covers);
     if within_read_only && access == FsAccess::Read {
         return Ok(());
     }

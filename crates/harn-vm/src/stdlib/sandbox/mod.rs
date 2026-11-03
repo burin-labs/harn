@@ -166,8 +166,7 @@ pub(crate) use replace::{
 };
 pub(crate) use workspace_env::inject_workspace_process_env;
 pub use workspace_env::{
-    active_workspace_process_env, is_workspace_runtime_directory, sandbox_runtime_dir,
-    workspace_local_tmpdir,
+    active_workspace_process_env, is_workspace_runtime_directory, workspace_local_tmpdir,
 };
 #[cfg(test)]
 pub(crate) use workspace_env::{inject_workspace_tmpdir, TMPDIR_ENV_KEYS};
@@ -353,7 +352,8 @@ fn scoped_mutation_target(
         io::Error::new(io::ErrorKind::PermissionDenied, violation.message(builtin))
     })?;
     let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(&policy);
+    let mut roots = normalized_workspace_roots(&policy);
+    roots.extend(workspace_env::owned_runtime_dir_containing(&candidate));
     let Some(root) = roots
         .into_iter()
         .find(|root| path_is_within(&candidate, root))
@@ -752,13 +752,8 @@ fn openat_file(
 
 #[cfg(unix)]
 fn mkdirat_name(parent_fd: libc::c_int, name: &str) -> io::Result<()> {
-    mkdirat_mode(parent_fd, name, 0o777)
-}
-
-#[cfg(unix)]
-fn mkdirat_mode(parent_fd: libc::c_int, name: &str, mode: libc::mode_t) -> io::Result<()> {
     let c_name = c_name(name)?;
-    let rc = unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), mode) };
+    let rc = unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), 0o777) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }
@@ -1417,18 +1412,8 @@ fn project_root_workspace_root() -> Option<PathBuf> {
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = base_workspace_roots(policy);
-    // The confined child's temp dir and toolchain cache live in a runtime dir
-    // outside the workspace, and stay writable even under declared roots: a
-    // child's `TMPDIR` that its own sandbox refuses is a broken child.
-    let runtime = workspace_env::granted_runtime_dir(policy, &roots);
-    let mut outside = Vec::new();
-    if !declared_path_roots_active() {
-        // A linked worktree's git dirs and Harn's own relocated runtime
-        // directories sit outside the working tree and must stay writable.
-        outside = git_scope_extension_for_roots(&roots).read_write;
-        outside.extend(relocated_runtime_roots(&roots));
-    }
-    outside.extend(runtime);
+    let mut outside = path_scope::topology_extension_roots(&roots);
+    outside.extend(workspace_env::granted_runtime_dir(policy, &roots));
     for dir in outside {
         if !roots.iter().any(|existing| existing == &dir) {
             roots.push(dir);

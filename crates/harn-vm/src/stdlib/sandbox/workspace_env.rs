@@ -37,7 +37,6 @@ pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
 const RUNTIME_DIR_MARKER: &str = "workspace-root";
 
 /// The longest workspace root a marker is read back as.
-#[cfg(unix)]
 const RUNTIME_DIR_MARKER_MAX: u64 = 4096;
 
 /// The per-workspace runtime directory a confined child's temp dir and
@@ -70,6 +69,86 @@ fn runtime_digest(root: &Path) -> String {
     let mut digest = harn_kernel::pure::sha256_hex(root.as_os_str().as_encoded_bytes());
     digest.truncate(RUNTIME_DIR_DIGEST_HEX);
     digest
+}
+
+/// Whether `name` has the shape [`runtime_digest`] gives a runtime dir.
+fn is_runtime_digest_name(name: &str) -> bool {
+    name.len() == RUNTIME_DIR_DIGEST_HEX
+        && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// How many runtime dirs nested in one another [`runtime_dir_owners`] follows.
+const MAX_RUNTIME_OWNER_DEPTH: usize = 8;
+
+/// The workspaces whose runtime dirs hold the normalized `path`, innermost
+/// first. A runtime dir stands in for the scratch dir that once sat inside its
+/// workspace, so a root covering the workspace covers the runtime dir too; a
+/// root made inside one workspace's temp dir has a runtime dir of its own, so
+/// the chain is followed outward. Empty for a path outside every runtime dir.
+pub(super) fn runtime_dir_owners(path: &Path) -> Vec<PathBuf> {
+    let mut owners: Vec<PathBuf> = Vec::new();
+    let Some(base) = runtime_base() else {
+        return owners;
+    };
+    while owners.len() < MAX_RUNTIME_OWNER_DEPTH {
+        let current = owners.last().map_or(path, PathBuf::as_path);
+        match containing_runtime_dir(&base, current).and_then(|dir| recorded_owner(&dir)) {
+            Some(owner) => owners.push(owner),
+            None => break,
+        }
+    }
+    owners
+}
+
+/// The policy-intersection view of [`runtime_dir_owners`]: whether the policy
+/// root `candidate` lies in the runtime dir of a workspace inside the policy
+/// root `root`, so requesting it narrows `root` rather than leaving it.
+pub(crate) fn root_in_owned_runtime_dir(candidate: &str, root: &str) -> bool {
+    let owners = runtime_dir_owners(&super::render_policy_root(candidate));
+    if owners.is_empty() {
+        return false;
+    }
+    let root = super::render_policy_root(root);
+    owners.iter().any(|owner| path_is_within(owner, &root))
+}
+
+/// The runtime dir holding the normalized `path`, when it has a valid owner.
+/// The fd-scoped mutation path opens it as the root of such a write.
+pub(super) fn owned_runtime_dir_containing(path: &Path) -> Option<PathBuf> {
+    let dir = containing_runtime_dir(&runtime_base()?, path)?;
+    recorded_owner(&dir).map(|_| dir)
+}
+
+/// `<base>/<digest>` when the normalized `path` lies inside it.
+fn containing_runtime_dir(base: &Path, path: &Path) -> Option<PathBuf> {
+    let name = path.strip_prefix(base).ok()?.components().next()?;
+    let name = name.as_os_str().to_str()?;
+    is_runtime_digest_name(name).then(|| base.join(name))
+}
+
+/// The workspace root a runtime dir's marker records. The marker is only a
+/// hint: it is trusted when the root it names digests to the dir's own name,
+/// so no file can claim a runtime dir for a workspace it does not belong to.
+fn recorded_owner(runtime: &Path) -> Option<PathBuf> {
+    use std::io::Read;
+
+    let mut recorded = Vec::new();
+    std::fs::File::open(runtime.join(RUNTIME_DIR_MARKER))
+        .ok()?
+        .take(RUNTIME_DIR_MARKER_MAX + 1)
+        .read_to_end(&mut recorded)
+        .ok()?;
+    if recorded.len() as u64 > RUNTIME_DIR_MARKER_MAX {
+        return None;
+    }
+    #[cfg(unix)]
+    let root = PathBuf::from(<OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(
+        &recorded,
+    ));
+    #[cfg(not(unix))]
+    let root = PathBuf::from(String::from_utf8(recorded).ok()?);
+    let name = runtime.file_name()?.to_str()?;
+    (root.is_absolute() && runtime_digest(&root) == name).then_some(root)
 }
 
 /// The runtime dir for the policy's first workspace root, without creating it.
@@ -188,7 +267,7 @@ fn open_private_dir_at(
     let dir = match super::open_dir_at(parent.as_raw_fd(), name) {
         Ok(dir) => dir,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match super::mkdirat_mode(parent.as_raw_fd(), name, 0o700) {
+            match mkdirat_private(parent.as_raw_fd(), name) {
                 Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
                     return Err(error)
                 }
@@ -200,6 +279,17 @@ fn open_private_dir_at(
     };
     restrict_to_owner(&dir)?;
     Ok(dir)
+}
+
+/// Create the directory `name` under `parent_fd` with mode 0700.
+#[cfg(unix)]
+fn mkdirat_private(parent_fd: libc::c_int, name: &str) -> std::io::Result<()> {
+    let c_name = super::c_name(name)?;
+    // SAFETY: `c_name` is a valid NUL-terminated string for the whole call.
+    if unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), 0o700) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Record the workspace root in its runtime dir, once.
@@ -243,9 +333,7 @@ fn sweep_stale_runtime_dirs(base_fd: &std::os::fd::OwnedFd, base: &Path, own: &s
         let Some(name) = name.to_str() else {
             continue;
         };
-        let digest_named = name.len() == RUNTIME_DIR_DIGEST_HEX
-            && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-        if !digest_named || name == own {
+        if !is_runtime_digest_name(name) || name == own {
             continue;
         }
         let Ok(dir) = super::open_dir_at(base_fd.as_raw_fd(), name) else {

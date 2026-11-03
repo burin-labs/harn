@@ -44,7 +44,8 @@ fn workspace_temp_symlinks_cannot_select_host_storage() {
     let baseline = prepare(&policy)
         .unwrap()
         .expect("ordinary private storage is admitted");
-    let runtime = super::super::super::sandbox_runtime_dir(workspace.path()).unwrap();
+    let runtime =
+        super::super::super::workspace_env::sandbox_runtime_dir(workspace.path()).unwrap();
     assert_eq!(baseline.directory, runtime.join("tmp"));
     std::fs::remove_dir_all(runtime.join("tmp")).unwrap();
     std::os::unix::fs::symlink(outside.path(), runtime.join("tmp")).unwrap();

@@ -864,7 +864,11 @@ lazily and owner-only, a symlinked or foreign-owned component is refused, and
 every backend grants it as a write root, including runs restricted to declared
 roots. The toolchain cache is its sibling `toolchain` directory. Each runtime
 dir records its workspace root, and the first runtime dir a process creates
-removes the runtime dirs of workspaces that no longer exist. Compiler linkers
+removes the runtime dirs of workspaces that no longer exist. A runtime dir
+counts as part of its workspace for the in-process file builtins and policy
+narrowing: a root that covers the workspace covers its runtime dir, so a
+`workspace_roots` entry made inside `harness.fs.workspace_temp_dir()` narrows
+the enclosing policy rather than falling outside it. Compiler linkers
 (`rustc`/`cc`/`ld`, Go, Swift, …) and many other toolchains write
 intermediate object/temp files to `$TMPDIR`, defaulting to the system
 `/tmp` when it is unset — which is outside the writable workspace roots, so

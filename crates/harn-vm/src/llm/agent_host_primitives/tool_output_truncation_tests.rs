@@ -162,14 +162,17 @@ async fn oversized_result_spills_and_the_model_sees_a_bounded_excerpt() {
     // <runtime dir>/tmp/tool-results/<session>/<file>, outside the workspace,
     // so spills never show in git status or a linter's walk.
     let temp_root = spill.ancestors().nth(3).expect("workspace temp root");
-    let execution_root = crate::stdlib::process::execution_root_path();
+    // Asserted through the user-dirs owner, not the sandbox module above this
+    // layer; the exact per-workspace digest is covered by the sandbox tests.
+    let runtime_base = harn_vm_core::user_dirs::sandbox_runtime_base().expect("runtime base");
+    let runtime_base = std::fs::canonicalize(&runtime_base).unwrap_or(runtime_base);
+    assert_eq!(temp_root.file_name(), Some(std::ffi::OsStr::new("tmp")));
     assert_eq!(
-        temp_root,
-        crate::stdlib::sandbox::sandbox_runtime_dir(&execution_root)
-            .unwrap()
-            .join("tmp")
+        temp_root.parent().and_then(std::path::Path::parent),
+        Some(runtime_base.as_path())
     );
-    assert!(!temp_root.starts_with(&execution_root));
+    let cwd = std::env::current_dir().expect("cwd");
+    assert!(!temp_root.starts_with(std::fs::canonicalize(&cwd).unwrap_or(cwd)));
     let spill_root = temp_root.join("tool-results");
     assert!(
         spill.starts_with(&spill_root),

@@ -449,7 +449,8 @@ fn workspace_temp_dir_is_the_sandbox_runtime_temp_dir() {
     let workspace_root = PathBuf::from(temp_dir_path_string(
         &workspace.path().canonicalize().unwrap(),
     ));
-    let runtime = crate::stdlib::sandbox::sandbox_runtime_dir(workspace.path()).unwrap();
+    let runtime =
+        crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir(workspace.path()).unwrap();
     assert!(!root.starts_with(&workspace_root));
     assert_eq!(
         root,
