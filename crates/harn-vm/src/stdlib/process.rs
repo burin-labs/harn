@@ -747,7 +747,8 @@ mod command_grant;
 mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
-pub use command_grant::{command_bound_grant_reaches, command_grant_env_hardening};
+pub(crate) use command_grant::ExecProfile;
+pub use command_grant::{command_bound_grant_reaches, granted_spawn, GrantedSpawn};
 pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
 pub(crate) use program_resolution::{
     find_executable_for_spawn, resolve_program_path, resolve_program_path_for_spawn,
@@ -1237,8 +1238,6 @@ pub(crate) fn session_closed_env_for_command(
         return Ok(None);
     };
     env.extend(overlay);
-    // Last, so an overlay cannot reopen an exec path a granted program has.
-    env.extend(command_grant_env_hardening(program)?);
     Ok(Some(env.into_iter().collect()))
 }
 
@@ -1255,8 +1254,20 @@ pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError>
 }
 
 /// The environment a spawn of `program` should see under the live session
-/// policy: session-scoped grants plus any `for_command` binding that matches.
+/// policy: session-scoped grants plus any `for_command` binding that matches,
+/// except one whose program can run others with it, which only
+/// [`granted_spawn`] exposes.
 pub(crate) fn session_env_for_command(
+    program: &str,
+) -> Result<Option<BTreeMap<String, String>>, VmError> {
+    let mut env = session_env_with_command_grants(program)?;
+    if let Some(env) = env.as_mut() {
+        command_grant::strip_profiled_grants(program, env);
+    }
+    Ok(env)
+}
+
+fn session_env_with_command_grants(
     program: &str,
 ) -> Result<Option<BTreeMap<String, String>>, VmError> {
     session_env_with(

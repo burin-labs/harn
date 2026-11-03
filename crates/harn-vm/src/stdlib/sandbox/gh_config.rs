@@ -3,96 +3,117 @@
 //!
 //! A `for_command: "gh"` grant hands a credential to one `gh` process. gh
 //! itself starts other programs with that same environment: a pager, a
-//! browser, an editor, an extension binary, and any `!`-prefixed alias, which
-//! gh runs through `sh -c`. Each of those is a program the grant never named,
-//! so a granted gh spawn closes all of them:
+//! browser, an editor, an extension binary, git, and any `!`-prefixed alias,
+//! which gh runs through `sh -c`. [`GH_PROFILE`] closes each of them for a
+//! granted spawn (see `process_command_grant` for the shared git and `PATH`
+//! hardening):
 //!
 //! - `GH_PAGER` and `PAGER` are empty, which gh reads as "no pager".
 //! - `GH_BROWSER`, `BROWSER`, `GH_EDITOR`, `EDITOR` and `VISUAL` name a
 //!   command that exits non-zero without running anything.
-//! - `XDG_DATA_HOME` points at an empty directory. gh finds extensions under
-//!   `$XDG_DATA_HOME/gh/extensions` (falling back to `~/.local/share` and, on
-//!   Windows, `%LocalAppData%`), and the variable wins over both.
-//! - `GH_CONFIG_DIR` points at a credential-free `config.yml` stand-in with
-//!   every shell alias removed. `hosts.yml` is never copied.
+//! - `XDG_DATA_HOME` points at an empty per-spawn directory. gh finds
+//!   extensions under `$XDG_DATA_HOME/gh/extensions` (falling back to
+//!   `~/.local/share` and, on Windows, `%LocalAppData%`), and the variable
+//!   wins over both.
+//! - `GH_CONFIG_DIR` points at a per-spawn `config.yml` that keeps only a few
+//!   display settings and inert aliases. `hosts.yml` is never copied.
+//! - `gh auth` subcommands that print the credential are refused.
 
-use std::path::PathBuf;
+use std::path::Path;
 
-use crate::value::{VmError, VmValue};
+use crate::stdlib::process::ExecProfile;
 
-/// Program gh runs in place of a browser or editor. `/usr/bin/false` exists
-/// on every supported Unix host and is not on a workspace-controlled path.
-#[cfg(unix)]
-const REFUSING_COMMAND: &str = "/usr/bin/false";
-/// Windows has no `false`; a device name is not an executable, so gh's spawn
-/// of it fails before anything runs.
-#[cfg(not(unix))]
-const REFUSING_COMMAND: &str = "NUL";
+pub(crate) const GH_PROFILE: ExecProfile = ExecProfile {
+    program: "gh",
+    empty_env: &["GH_PAGER", "PAGER"],
+    refusing_env: &["GH_BROWSER", "BROWSER", "GH_EDITOR", "EDITOR", "VISUAL"],
+    dir_env: &[("GH_CONFIG_DIR", "config"), ("XDG_DATA_HOME", "data")],
+    seed: seed_granted_config,
+    refusal: auth_refusal,
+};
 
-const EMPTY_KEYS: [&str; 2] = ["GH_PAGER", "PAGER"];
-const REFUSING_KEYS: [&str; 5] = ["GH_BROWSER", "BROWSER", "GH_EDITOR", "EDITOR", "VISUAL"];
+/// Top-level keys a granted spawn's stand-in keeps. Every other key either
+/// names a program (`pager`, `browser`, `editor`), a transport
+/// (`http_unix_socket`), or is not needed to talk to the API.
+const GRANTED_KEYS: &[&str] = &[
+    "git_protocol",
+    "prompt",
+    "spinner",
+    "color_labels",
+    "accessible_colors",
+    "accessible_prompter",
+    "aliases",
+];
+/// Top-level keys no stand-in keeps, granted or not.
+const EXEC_KEYS: &[&str] = &["pager", "browser", "editor", "http_unix_socket"];
 
-/// The stand-in root for granted gh spawns, under Harn's per-user cache.
-fn stand_in_root() -> Option<PathBuf> {
-    crate::user_dirs::package_cache_dir().map(|cache| cache.join("gh-grant"))
-}
-
-fn refusal(message: String) -> VmError {
-    VmError::Thrown(VmValue::string(format!(
-        "[environment_policy.gh_grant_unconfined] {message}; the GitHub CLI grant was not exposed"
-    )))
-}
-
-/// The environment entries a granted `gh` spawn must carry, applied after
-/// every other layer so no caller overlay can restore an exec path.
-///
-/// Fails closed: when the stand-in cannot be prepared, or the empty extension
-/// directory is no longer empty, the spawn is refused instead of running gh
-/// with a credential and an open exec path.
-pub(crate) fn granted_gh_env() -> Result<Vec<(String, String)>, VmError> {
-    let root =
-        stand_in_root().ok_or_else(|| refusal("no Harn cache directory resolves".to_string()))?;
-    let data = root.join("data");
-    if std::fs::read_dir(&data).is_ok_and(|mut entries| entries.next().is_some()) {
-        return Err(refusal(format!(
-            "the empty extension directory {} has entries",
-            data.display()
-        )));
+/// `gh auth` prints the credential for `token`, `status --show-token` and
+/// `git-credential`, and changes the user's git or gh configuration for the
+/// rest. Only a plain `gh auth status` runs with the grant.
+fn auth_refusal(args: &[String]) -> Option<&'static str> {
+    let mut words = args.iter().map(String::as_str);
+    if words.find(|word| !word.starts_with('-')) != Some("auth") {
+        return None;
     }
-    std::fs::create_dir_all(&root)
-        .map_err(|error| refusal(format!("create {}: {error}", root.display())))?;
+    if words.next() != Some("status") {
+        return Some("`gh auth` would print or change the credential");
+    }
+    let mut rest = words;
+    while let Some(word) = rest.next() {
+        match word {
+            "-a" | "--active" => {}
+            "-h" | "--hostname" => {
+                rest.next()?;
+            }
+            _ if word.starts_with("--hostname=") => {}
+            _ => return Some("`gh auth status` with these flags would print the credential"),
+        }
+    }
+    None
+}
+
+/// Write the granted stand-in `config.yml` into `dir/config`. A missing user
+/// config writes nothing; an unreadable one is an error.
+fn seed_granted_config(dir: &Path) -> std::io::Result<()> {
     let home = crate::user_dirs::home_dir().unwrap_or_default();
-    let config = super::seed_gh_config_dir(&super::gh_config_source(&home), &root, "config");
-    let mut env: Vec<(String, String)> = EMPTY_KEYS
-        .iter()
-        .map(|key| (key.to_string(), String::new()))
-        .collect();
-    env.extend(
-        REFUSING_KEYS
-            .iter()
-            .map(|key| (key.to_string(), REFUSING_COMMAND.to_string())),
-    );
-    env.push(("XDG_DATA_HOME".to_string(), data.display().to_string()));
-    env.push(("GH_CONFIG_DIR".to_string(), config.display().to_string()));
-    Ok(env)
+    let source = super::gh_config_source(&home).join("config.yml");
+    let raw = match std::fs::read_to_string(&source) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    match project_gh_config(&raw, Some(GRANTED_KEYS)) {
+        Some(config) => {
+            super::grant_spawn::write_private_file(&dir.join("config/config.yml"), &config)
+        }
+        None => Ok(()),
+    }
+}
+
+/// The credential-free, exec-free stand-in a confined, ungranted gh reads.
+pub(crate) fn sanitize_gh_config(raw: &str) -> Option<String> {
+    project_gh_config(raw, None)
 }
 
 /// The credential-free, exec-free projection of a gh `config.yml`, or `None`
-/// when the file must not be copied at all.
+/// when the file must not be copied at all. With `allowed`, only those
+/// top-level keys survive.
 ///
 /// gh runs an alias whose expansion starts with `!` through `sh -c`. This
 /// parser is line-based and conservative: it keeps an `aliases:` entry only
 /// when it is a one-line `name: value` whose value is a plain or simply quoted
-/// scalar that cannot start with `!`. Anything else inside the block (block
-/// scalars, anchors, tags, flow mappings, continuation lines, escapes) is
-/// dropped. A file whose top level is not plain `key:` lines, or that still
-/// carries a pre-1.0 `oauth_token`, is not copied.
-pub(crate) fn sanitize_gh_config(raw: &str) -> Option<String> {
+/// scalar that cannot start with `!` or expand to `auth`. Anything else inside
+/// the block (block scalars, anchors, tags, flow mappings, continuation lines,
+/// escapes) is dropped, as is every key that names a program to run. A file
+/// whose top level is not plain `key:` lines, or that still carries a pre-1.0
+/// `oauth_token`, is not copied.
+fn project_gh_config(raw: &str, allowed: Option<&[&str]>) -> Option<String> {
     if raw.contains("oauth_token") {
         return None;
     }
     let mut out = String::with_capacity(raw.len());
     let mut in_aliases = false;
+    let mut skip_block = false;
     for line in raw.lines() {
         let content = line.trim();
         if content.is_empty() || content.starts_with('#') {
@@ -103,11 +124,14 @@ pub(crate) fn sanitize_gh_config(raw: &str) -> Option<String> {
         if !line.starts_with([' ', '\t']) {
             let (key, rest) = split_mapping_entry(content)?;
             in_aliases = key == "aliases";
-            if in_aliases && !rest.is_empty() && !rest.starts_with('#') {
+            skip_block = EXEC_KEYS.contains(&key)
+                || allowed.is_some_and(|allowed| !allowed.contains(&key))
                 // An inline (flow) alias mapping is dropped whole.
+                || (in_aliases && !rest.is_empty() && !rest.starts_with('#'));
+            if skip_block {
                 continue;
             }
-        } else if in_aliases && !alias_entry_is_inert(content) {
+        } else if skip_block || (in_aliases && !alias_entry_is_inert(content)) {
             continue;
         }
         out.push_str(line);
@@ -155,6 +179,9 @@ fn alias_entry_is_inert(content: &str) -> bool {
         }
         value
     };
+    if unquoted.split_whitespace().next() == Some("auth") {
+        return false;
+    }
     let first = unquoted.trim_start().chars().next();
     first.is_some_and(|ch| {
         !matches!(
@@ -166,7 +193,7 @@ fn alias_entry_is_inert(content: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_gh_config;
+    use super::{auth_refusal, project_gh_config, sanitize_gh_config, GRANTED_KEYS};
 
     #[test]
     fn shell_aliases_never_reach_the_stand_in() {
@@ -174,8 +201,12 @@ mod tests {
 # gh config
 git_protocol: ssh
 editor: vim
+pager: less
+browser: firefox
+http_unix_socket: /run/x.sock
 aliases:
     co: pr checkout
+    tok: auth token
     quoted: 'issue list --limit 5'
     leak: '!env'
     bare: !env
@@ -192,17 +223,50 @@ prompt: enabled
         let sanitized = sanitize_gh_config(raw).unwrap();
         for kept in [
             "git_protocol: ssh",
-            "editor: vim",
             "co: pr checkout",
             "quoted: 'issue list --limit 5'",
             "prompt: enabled",
         ] {
             assert!(sanitized.contains(kept), "{kept} was dropped:\n{sanitized}");
         }
-        assert!(
-            !sanitized.contains("env"),
-            "an exec path survived:\n{sanitized}"
-        );
+        for dropped in ["env", "vim", "less", "firefox", "sock", "auth"] {
+            assert!(
+                !sanitized.contains(dropped),
+                "an exec path survived:\n{sanitized}"
+            );
+        }
+        let granted = project_gh_config(
+            "git_protocol: ssh\nversion: 1\nfuture:\n  x: y\n",
+            Some(GRANTED_KEYS),
+        )
+        .unwrap();
+        assert_eq!(granted, "git_protocol: ssh\n");
+    }
+
+    #[test]
+    fn only_a_plain_auth_status_keeps_the_grant() {
+        let refused = |args: &[&str]| {
+            auth_refusal(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>()).is_some()
+        };
+        for allowed in [
+            &["issue", "list"][..],
+            &["auth", "status"],
+            &["auth", "status", "-h", "github.com", "--active"],
+            &["api", "auth"],
+        ] {
+            assert!(!refused(allowed), "{allowed:?}");
+        }
+        for args in [
+            &["auth", "token"][..],
+            &["auth", "status", "-t"],
+            &["auth", "status", "--show-token"],
+            &["auth", "git-credential", "get"],
+            &["auth", "setup-git"],
+            &["--help", "auth", "token"],
+            &["auth"],
+        ] {
+            assert!(refused(args), "{args:?}");
+        }
     }
 
     #[test]

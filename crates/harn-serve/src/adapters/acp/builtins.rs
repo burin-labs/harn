@@ -636,14 +636,8 @@ fn local_shell_exec(cmd: &str, shell: &harn_vm::VmValue) -> std::io::Result<std:
                 format!("invalid shell invocation: {error}"),
             )
         })?;
-    let mut argv = invocation.command_grant_argv().unwrap_or_else(|| {
-        std::iter::once(invocation.program)
-            .chain(invocation.args)
-            .collect()
-    });
-    let program = argv.remove(0);
-    harn_vm::process_sandbox::session_std_command(program)
+    harn_vm::process_sandbox::session_std_command(invocation.program)
         .map_err(|error| std::io::Error::other(format!("session environment: {error:?}")))?
-        .args(argv)
+        .args(invocation.args)
         .output()
 }

@@ -1430,7 +1430,7 @@ fn default_oauth_lock_dir() -> PathBuf {
     harn_home_dir().join("mcp-oauth-locks")
 }
 
-fn harn_home_dir() -> PathBuf {
+pub(crate) fn harn_home_dir() -> PathBuf {
     if let Some(path) = std::env::var_os(HARN_HOME_ENV) {
         return PathBuf::from(path);
     }

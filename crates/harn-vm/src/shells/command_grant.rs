@@ -19,8 +19,10 @@ impl ShellInvocation {
     /// command with literal words only: no list, pipeline, redirect,
     /// assignment prefix, expansion, substitution, glob, subshell, or
     /// background operator (see [`plan_posix_command`]). The program must be
-    /// a bare name looked up on the child's `PATH`, never a path a workspace
-    /// file could occupy. Any doubt keeps the shell.
+    /// a bare name. Any doubt keeps the shell. Whether the spawned file then
+    /// receives the grant is decided by
+    /// [`granted_spawn`](crate::stdlib::process::granted_spawn), which trusts
+    /// only a file outside every workspace and write root.
     pub fn command_grant_argv(&self) -> Option<Vec<String>> {
         let argv = self.direct_argv_candidate()?;
         crate::stdlib::process::command_bound_grant_reaches(&argv[0]).then_some(argv)

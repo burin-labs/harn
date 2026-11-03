@@ -167,10 +167,27 @@ pub(crate) fn run_with_filter(
         CaptureTransport::Pipe => None,
         CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
     };
+    // The one seam a command-bound grant on a program that runs others
+    // reaches: inheriting, piped, and redacted below. Held until the child is
+    // reaped, because it owns the spawn's private directory.
+    let granted = if req.env_mode == EnvMode::Replace || file_capture.is_some() {
+        None
+    } else {
+        harn_vm::stdlib::process::granted_spawn(&req.program, &req.args, &effective_cwd, &req.env)
+            .map_err(|error| HostlibError::Backend {
+            builtin: req.builtin,
+            message: error.to_string(),
+        })?
+    };
+    if let Some(granted) = &granted {
+        env.extend(granted.env.iter().cloned());
+    }
 
     let spec = SpawnSpec {
         builtin: req.builtin,
-        program: req.program.clone(),
+        program: granted
+            .as_ref()
+            .map_or_else(|| req.program.clone(), |granted| granted.program.clone()),
         args: req.args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,

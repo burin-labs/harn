@@ -465,13 +465,6 @@ pub(crate) fn prepare_command_from(
         (_, false) => Stdio::null(),
     });
 
-    // After every caller and workspace layer: a granted program's exec paths
-    // stay closed whatever `spec.env` or the workspace defaults set.
-    if env_cleared {
-        let hardening = harn_vm::stdlib::process::command_grant_env_hardening(&spec.program)
-            .map_err(ProcessError::sandbox_setup)?;
-        command.envs(hardening);
-    }
     process_sandbox::validate_command_environment(&mut command, env_cleared)
         .map_err(ProcessError::sandbox_setup)?;
 

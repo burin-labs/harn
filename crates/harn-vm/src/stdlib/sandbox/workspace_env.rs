@@ -11,6 +11,8 @@ mod pinned_pnpm;
 
 #[path = "gh_config.rs"]
 pub(crate) mod gh_config;
+#[path = "grant_spawn.rs"]
+pub(crate) mod grant_spawn;
 
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
