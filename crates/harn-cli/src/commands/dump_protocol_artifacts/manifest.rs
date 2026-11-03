@@ -80,9 +80,17 @@ pub(super) fn generate_manifest_with_vocabularies(
     for (name, _) in super::inference_admission::schemas() {
         schemas.push(json!({
             "protocol": "harn",
-            "source": if name == "MachineSpendExhaustion" {"crates/harn-vm/src/llm/admission/durable.rs"} else {"crates/harn-vm/src/llm/api/inference_boundary/admission.rs"},
+            "source": match name {
+                "MachineSpendExhaustion" => "crates/harn-vm/src/llm/admission/durable.rs",
+                "ProviderEndpointConfigurationError" => "crates/harn-vm/src/llm_config/provider_def.rs",
+                _ => "crates/harn-vm/src/llm/api/inference_boundary/admission.rs",
+            },
             "artifact": format!("schemas/{}.schema.json", super::records::snake_ident(name).replace('_', "-")),
-            "provenance": {"owner": if name == "MachineSpendExhaustion" {"harn-vm::llm::admission"} else {"harn-vm::llm::api::inference_boundary"}, "schema_version": 1},
+            "provenance": {"owner": match name {
+                "MachineSpendExhaustion" => "harn-vm::llm::admission",
+                "ProviderEndpointConfigurationError" => "harn-vm::llm_config",
+                _ => "harn-vm::llm::api::inference_boundary",
+            }, "schema_version": 1},
         }));
     }
     schemas.push(json!({
@@ -140,6 +148,16 @@ pub(super) fn generate_manifest_with_vocabularies(
         },
     }));
 
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/orchestration/crystallize/bundle.rs",
+        "artifact": harn_vm::orchestration::CRYSTALLIZATION_BUNDLE_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::orchestration::CrystallizationBundleManifest",
+            "schema": harn_vm::orchestration::BUNDLE_SCHEMA,
+            "schema_version": harn_vm::orchestration::BUNDLE_SCHEMA_VERSION,
+        },
+    }));
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
         "generatedBy": "harn dump-protocol-artifacts",
@@ -338,6 +356,9 @@ pub(super) fn generate_readme() -> String {
          make check-protocol-artifacts\n\
          ```\n\n\
          Files:\n\n\
+         - `crystallization-bundle.schema.json`: serialized candidate manifest\n\
+           derived from Harn's bundle types. The `HarnCrystallization*` bindings\n\
+           preserve effect knowledge, replay evidence, and promotion criteria.\n\
          - `manifest.json`: deterministic summary of protocol versions, advertised Harn\n\
            extension fields, and generated binding vocabulary.\n\
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\

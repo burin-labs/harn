@@ -9,6 +9,56 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.185
+
+### Breaking
+
+- `AcpServerConfig` is now `#[non_exhaustive]` and gains the
+  `launcher_session_environment` field, so later launch inputs can be added
+  without another breaking release.
+
+  Migration: Rust embedders that built `AcpServerConfig` with a struct literal
+  must construct it with `AcpServerConfig::new(pipeline)` and the `with_*`
+  builder methods (for example `with_launcher_session_environment`). Reading and
+  assigning public fields is unchanged.
+- Managed services can report an unavailable included allowance without misclassifying it as a provider account billing
+  failure. The refusal stops without retrying and preserves the service's explanation and contact remedy separately
+  from transport diagnostics.
+
+  Migration: Rust callers constructing `AcpPromptFailureFacts` exhaustively must initialize the new `message` and
+  `detail` fields to `None`, or use `..AcpPromptFailureFacts::default()`. Hosts should regenerate protocol bindings
+  and handle the new `managed_allowance_unavailable` terminal class by showing the service message without retrying.
+- Russian is available across CLI output, the browser app host, portal, website interface, and VS Code extension.
+
+  Migration: Rust consumers matching `harn_hostlib::localization::Locale` exhaustively
+  must handle the new `Locale::Russian` variant. Its canonical language identifier is `ru`.
+
+### Added
+
+- **A standard ACP editor can open a session on `harn serve acp`.** The new
+  `--session-environment inherited|isolated` flag states, at launch, the
+  environment policy for a client whose `session/new` names none. Without the
+  flag such a request is still refused with `environment_policy.missing`. A
+  policy the client sends always wins, and the `session/new` result now reports
+  the policy that applied as `environmentPolicy: {kind, source}`.
+
+### Changed
+
+- `code_index.rename_symbol` on the syntax-tree backend now renames a symbol
+  declared inside a body: a TypeScript or JavaScript `const`, `let`, class,
+  type, interface or enum in a block, a function declared directly in a
+  function body, a Rust item in a block or a private item of an inline module,
+  and a Python def or class in a function body. Only that scope is rewritten,
+  so same-named declarations elsewhere no longer force `ambiguous_symbol`. Any
+  spelling in the scope that the proof cannot bind, such as a shadowing
+  parameter, a shorthand property or a binding macro, still refuses the whole
+  rename without writes. TypeScript `typeof name` in a type is now a proven
+  reference.
+
+### Fixed
+
+- Keep generated standard library archive bindings valid when cached build outputs move between checkouts.
+
 ## v0.10.184
 
 ### Breaking

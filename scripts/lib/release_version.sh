@@ -551,6 +551,23 @@ release_latest_stable_tag() {
   return 1
 }
 
+# The newest stable tag below stable <version> in the repository at [dir]: the
+# release that <version> follows, so `<tag>..<release commit>` is every commit
+# the release includes. Fails when no such tag is present, so a shallow or
+# tagless checkout is never read as an empty range.
+release_previous_stable_tag() {
+  local version="${1:-}" directory="${2:-.}" tag
+  release_version_is_canonical "$version" && ! release_version_is_prerelease "$version" || return 1
+  while IFS= read -r tag; do
+    release_tag_is_canonical "$tag" && ! release_version_is_prerelease "${tag#v}" || continue
+    if release_workspace_supersedes_source "${tag#v}" "$version"; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done < <(git -C "$directory" tag --list 'v*' --sort=-v:refname)
+  return 1
+}
+
 release_branch_is_canonical() {
   [[ "${1:-}" == release/v* ]] && release_version_is_canonical "${1#release/v}"
 }

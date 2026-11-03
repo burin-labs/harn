@@ -7,6 +7,7 @@ import it from "./it.json"
 import ja from "./ja.json"
 import ko from "./ko.json"
 import zhHans from "./zh-Hans.json"
+import ru from "./ru.json"
 import type { Locale } from "../../../../../ui/localization"
 
 export const catalogs: Record<Locale, Record<keyof typeof en, string>> = {
@@ -19,4 +20,5 @@ export const catalogs: Record<Locale, Record<keyof typeof en, string>> = {
   ja,
   ko,
   "zh-Hans": zhHans,
+  ru,
 }

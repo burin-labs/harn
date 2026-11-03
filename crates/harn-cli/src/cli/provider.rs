@@ -12,7 +12,7 @@ pub(crate) struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ProviderCommand {
-    /// Preview inference admission without network calls.
+    /// Check endpoint configuration and preview inference admission without network calls.
     Admission(ProviderAdmissionArgs),
     /// Bind user-confirmed account settings to the selected credential.
     AttestAccount(ProviderAttestAccountArgs),
@@ -77,7 +77,7 @@ pub(crate) enum ProviderCommand {
 #[derive(Debug, Args)]
 pub(crate) struct ProviderAdmissionArgs {
     /// Value-free JSON request: concrete provider/model, optional boundary and
-    /// data_controls. The result reports admitted, denied, or unknown.
+    /// data_controls. Returns admitted, denied, or unknown after endpoint validation.
     #[arg(long)]
     pub request: String,
 }

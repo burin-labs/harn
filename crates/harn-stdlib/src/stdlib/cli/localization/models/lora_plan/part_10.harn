@@ -29,6 +29,9 @@ pub fn message_50(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "não"
   }
+  if locale == "ru" {
+    return "нет"
+  }
   if locale == "zh-Hans" {
     return "否"
   }
@@ -64,6 +67,9 @@ pub fn message_51(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "recibos de lote opcionais"
+  }
+  if locale == "ru" {
+    return "необязательные пакетные квитанции"
   }
   if locale == "zh-Hans" {
     return "可选批量收据"
@@ -101,6 +107,9 @@ pub fn message_52(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "gates de precisão"
   }
+  if locale == "ru" {
+    return "пороги точности"
+  }
   if locale == "zh-Hans" {
     return "精度门控"
   }
@@ -137,6 +146,9 @@ pub fn message_53(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "corpus de pré-verificação"
   }
+  if locale == "ru" {
+    return "корпус предварительной проверки"
+  }
   if locale == "zh-Hans" {
     return "预检语料"
   }
@@ -172,6 +184,9 @@ pub fn message_54(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "gates de promoção"
+  }
+  if locale == "ru" {
+    return "пороги продвижения"
   }
   if locale == "zh-Hans" {
     return "晋升门控"

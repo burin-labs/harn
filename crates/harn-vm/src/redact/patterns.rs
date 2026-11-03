@@ -519,10 +519,54 @@ mod tests {
     }
 
     #[test]
+    fn sensitive_assignment_consumes_concatenated_shell_segments() {
+        run_clean();
+        for input in [
+            r#"API_KEY="first-secret"' second-secret' ./deploy"#,
+            r"password='first-secret'\''second-secret' ./deploy",
+            r#"token=abc123" second.secret" ./deploy"#,
+            r#"TOKEN="first-secret"[second-secret] ./deploy"#,
+            r#"TOKEN="first-secret"{second-secret} ./deploy"#,
+            r#"TOKEN=abc123" second.secret"[first-secret]{second-secret} ./deploy"#,
+        ] {
+            let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+            assert!(out.contains("<redacted:sensitive_assignment:"), "{out}");
+            for fragment in ["first-secret", "second-secret", "abc123", "second.secret"] {
+                assert!(!out.contains(fragment), "{out}");
+            }
+            assert!(out.ends_with(" ./deploy"), "{out}");
+        }
+    }
+
+    #[test]
+    fn sensitive_assignment_suppresses_opaque_shell_suffixes() {
+        run_clean();
+        for input in [
+            "TOKEN=abc123$(printf second-secret) ./deploy",
+            "TOKEN=abc123`printf second-secret` ./deploy",
+        ] {
+            let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+            assert!(out.contains("<redacted:sensitive_assignment:"), "{out}");
+            assert!(!out.contains("abc123"), "{out}");
+            assert!(!out.contains("second-secret"), "{out}");
+            assert!(
+                !out.contains("./deploy"),
+                "uncertain shell syntax must suppress the remainder: {out}"
+            );
+        }
+    }
+
+    #[test]
     fn sensitive_assignment_preserves_source_expressions() {
         run_clean();
-        let input = "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;";
-        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        let input = [
+            "const token = process.env.GITHUB_TOKEN ?? \"\";\nlet apiKey = readKey(path);\nlet accessToken = readKey2(path);\nconst password = credentials.current;\ntoken = readKey2[0];\ntoken = items123[\"key\"];\ntoken = Type123",
+            "{",
+            "field:1",
+            "};",
+        ]
+        .concat();
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Borrowed(_)), "{out}");
     }
 

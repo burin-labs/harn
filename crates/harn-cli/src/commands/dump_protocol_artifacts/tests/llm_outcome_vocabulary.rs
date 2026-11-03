@@ -15,6 +15,32 @@ use super::generated_rust_binding::{HarnLlmErrorCategory, HarnLlmErrorKind, Harn
 use super::*;
 
 #[test]
+fn endpoint_configuration_diagnostics_match_the_generated_host_vocabulary() {
+    use super::generated_rust_binding::HarnProviderEndpointConfigurationError;
+    use harn_vm::llm_config::ProviderEndpointConfigurationError;
+
+    let schema = ProviderEndpointConfigurationError::json_schema();
+    let known = HarnProviderEndpointConfigurationError::KNOWN
+        .iter()
+        .map(|value| serde_json::to_value(value).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(serde_json::json!(known), schema["enum"]);
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    for wire in known {
+        assert!(validator.is_valid(&wire));
+        let native: ProviderEndpointConfigurationError =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(native).unwrap(), wire);
+    }
+    let future = serde_json::json!("future_configuration_error");
+    assert!(!validator.is_valid(&future));
+    let host: HarnProviderEndpointConfigurationError =
+        serde_json::from_value(future.clone()).unwrap();
+    assert!(!host.is_known());
+    assert_eq!(serde_json::to_value(host).unwrap(), future);
+}
+
+#[test]
 fn machine_quota_facts_survive_native_and_generated_host_projections() {
     use super::generated_rust_binding::HarnMachineSpendExhaustion;
     let facts = AcpPromptFailureFacts::from_thrown(&json!({
@@ -159,6 +185,10 @@ fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
             HarnLlmErrorReason::ManagedSpendPaused,
         ),
         (
+            AgentTerminalClass::ManagedAllowanceUnavailable,
+            HarnLlmErrorReason::ManagedAllowanceUnavailable,
+        ),
+        (
             AgentTerminalClass::ProviderBilling,
             HarnLlmErrorReason::BillingLimit,
         ),
@@ -169,6 +199,7 @@ fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
     ] {
         let reason = match owner {
             AgentTerminalClass::ManagedSpendPaused => "managed_spend_paused",
+            AgentTerminalClass::ManagedAllowanceUnavailable => "managed_allowance_unavailable",
             AgentTerminalClass::ProviderBilling => "billing_limit",
             AgentTerminalClass::RateLimited => "rate_limit",
             _ => unreachable!(),
@@ -177,6 +208,8 @@ fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
         let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
             "category": if transient { "rate_limit" } else { "generic" },
             "kind": if transient { "transient" } else { "terminal" }, "reason": reason,
+            "message": "Your included allowance is unavailable. Contact support.",
+            "detail": "managed transport diagnostic",
         }));
         let envelope = serde_json::to_value(AcpPromptErrorData::with_facts(owner, facts)).unwrap();
         let decoded: HarnLlmErrorReason =
@@ -184,6 +217,22 @@ fn managed_spend_pause_survives_the_generated_prompt_error_projection() {
         assert_eq!(decoded, expected);
         assert!(decoded.is_known());
         assert_eq!(envelope["terminalClass"], owner.as_str());
+        assert_eq!(
+            envelope["message"],
+            "Your included allowance is unavailable. Contact support."
+        );
+        assert_eq!(envelope["detail"], "managed transport diagnostic");
+        let schema_source: serde_json::Value = serde_json::from_str(
+            &protocol_source()
+                .read_text("conformance/protocols/schemas/acp-session-update.schema.json")
+                .unwrap(),
+        )
+        .unwrap();
+        let schema = json!({"$ref":"#/$defs/HarnPromptErrorData", "$defs":schema_source["$defs"]});
+        jsonschema::draft202012::new(&schema)
+            .unwrap()
+            .validate(&envelope)
+            .unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), envelope["reason"]);
     }
 }

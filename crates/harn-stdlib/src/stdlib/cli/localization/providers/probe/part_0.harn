@@ -29,6 +29,9 @@ pub fn message_0(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "carregado:\n"
   }
+  if locale == "ru" {
+    return "загружено:\n"
+  }
   if locale == "zh-Hans" {
     return "已加载：\n"
   }
@@ -99,6 +102,15 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + ")\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
+      + (values[3] ?? "")
+      + " ctx="
+      + (values[4] ?? "")
+      + " expires="
+      + (values[5] ?? "")
+      + ")\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + "  - " + (values[1] ?? "") + " (size=" + (values[2] ?? "") + " vram="
       + (values[3] ?? "")
       + " ctx="

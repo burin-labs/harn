@@ -29,6 +29,9 @@ pub fn message_55(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "manifesto de proveniência"
   }
+  if locale == "ru" {
+    return "манифест происхождения"
+  }
   if locale == "zh-Hans" {
     return "溯源清单"
   }
@@ -64,6 +67,9 @@ pub fn message_56(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "ciclo de refinamento"
+  }
+  if locale == "ru" {
+    return "цикл доработки"
   }
   if locale == "zh-Hans" {
     return "细化循环"
@@ -101,6 +107,9 @@ pub fn message_57(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "colunas obrigatórias"
   }
+  if locale == "ru" {
+    return "обязательные столбцы"
+  }
   if locale == "zh-Hans" {
     return "必需列"
   }
@@ -137,6 +146,9 @@ pub fn message_58(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "métricas obrigatórias"
   }
+  if locale == "ru" {
+    return "обязательные метрики"
+  }
   if locale == "zh-Hans" {
     return "必需指标"
   }
@@ -172,6 +184,9 @@ pub fn message_59(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "recebimentos obrigatórios"
+  }
+  if locale == "ru" {
+    return "обязательные квитанции"
   }
   if locale == "zh-Hans" {
     return "必需收据"

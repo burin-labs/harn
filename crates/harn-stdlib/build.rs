@@ -44,10 +44,9 @@ fn main() {
     std::fs::write(
         out_dir.join("stdlib_archive.rs"),
         format!(
-            "const ARCHIVE: &[u8] = include_bytes!({:?});\n\
+            "const ARCHIVE: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/stdlib.zst\"));\n\
              const ARCHIVE_TEXT_LEN: usize = {};\n\
              const LENGTHS: &[usize] = &[{lengths}];\n",
-            archive_path.display().to_string(),
             text.len(),
         ),
     )

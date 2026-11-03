@@ -29,6 +29,9 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  launch:"
   }
+  if locale == "ru" {
+    return "  запуск:"
+  }
   if locale == "zh-Hans" {
     return "  启动:"
   }
@@ -64,6 +67,9 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  max LoRA rank: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  максимальный ранг LoRA: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  最大 LoRA 秩: " + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  modules to save: none"
   }
+  if locale == "ru" {
+    return "  модули для сохранения: нет"
+  }
   if locale == "zh-Hans" {
     return "  要保存的模块: 无"
   }
@@ -137,6 +146,9 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  modules to save: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  модули для сохранения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  要保存的模块: " + (values[0] ?? "")
   }
@@ -172,6 +184,10 @@ pub fn message_14(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "  встроенные инструменты: " + (values[0] ?? "") + ", предпочтительно: "
+      + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  原生工具: " + (values[0] ?? "") + ", 首选: " + (values[1] ?? "")

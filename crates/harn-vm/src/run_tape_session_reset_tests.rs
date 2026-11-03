@@ -86,7 +86,7 @@ fn bulk_reset_records_every_closed_session_before_replay_admission() {
             assert!(!workspace.join("src/reset.txt").exists());
             assert_eq!(replay.report().applied_file_effects, 0);
         } else {
-            assert!(matches!(served, ToolServe::Served(_, _)));
+            assert!(matches!(served, ToolServe::Served(_, _, _)));
             assert_eq!(
                 std::fs::read_to_string(workspace.join("src/reset.txt")).unwrap(),
                 "written"

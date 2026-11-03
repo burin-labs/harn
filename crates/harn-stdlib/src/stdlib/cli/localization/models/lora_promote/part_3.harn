@@ -29,6 +29,9 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "avisos"
   }
+  if locale == "ru" {
+    return "предупреждения"
+  }
   if locale == "zh-Hans" {
     return "警告"
   }

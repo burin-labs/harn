@@ -86,6 +86,13 @@ harn serve api --api-key "$HARN_KEY" agent.harn
 harn serve api --default-session-mode code agent.harn
 ```
 
+Task status follows the runtime's typed terminal outcome. Provider and runtime
+failures produce `FAILED` with the runtime diagnostic in `failure`; policy stops
+and cancellation produce `CANCELED`. An unsupported suspended outcome fails
+with its runtime diagnostic rather than reporting completed work.
+A successful prompt RPC alone does not establish successful agent work. Plain
+pipelines without an agent terminal still complete on a normal `end_turn`.
+
 Behavior today:
 
 - serves `GET /openapi.json`, `GET /health`, `GET /version`, and `/v1/*`
@@ -105,6 +112,12 @@ sessions private to their creator. Tenant-bound credentials and credentials with
 scoped grants return `403 unsupported_authorization_policy`. Use a hosted or site
 authorization owner when you need tenant, scope, or resource restrictions. Health,
 version, OpenAPI, and the API root remain public discovery routes.
+
+Embedded servers may set `ApiServerConfig::with_session_environment` with an
+`AcpSessionEnvironmentConfig` resolved by their trusted host. The declaration
+applies to both new sessions and cold restoration. It defaults to `isolated`
+with no grants; HTTP session requests cannot replace it. Use explicit grants
+with the appropriate audience when a local host supplies provider credentials.
 
 New sessions use ACP `ask` mode unless the server was started with
 `--default-session-mode` or the create request supplies `mode_id`. The accepted
@@ -585,7 +598,9 @@ Mapping:
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
 - the `_harn/providerCatalog` extension method returns the same normalized
-  provider catalog v8 artifact shape as Harn's checked-in catalog
+  provider catalog artifact shape as Harn's checked-in catalog, including the
+  source project's provider and capability overrides. Reading this catalog does
+  not install execution dependencies; those are validated when a prompt runs
 - each `session/prompt` exposes `prompt` as the text-only prompt string,
   `runtime_prompt_content()` from `std/runtime` as typed, normalized Harn
   content blocks. The legacy `prompt_content` and `prompt_messages` globals

@@ -404,16 +404,53 @@ enum RustAttributeEffect {
     Opaque,
 }
 
+/// Constructs that can supply a binding to a name declared inside `scope` and
+/// invisible outside it. Only code within the scope, or an expansion that
+/// rewrites an item enclosing it, can shadow such a binding.
+pub(crate) fn binding_defeaters_within(
+    scope: Node<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<Defeater> {
+    let mut defeaters: Vec<Defeater> = Vec::new();
+    let mut note = |d: Defeater| {
+        if !defeaters.contains(&d) {
+            defeaters.push(d);
+        }
+    };
+    if scope.has_error() {
+        note(Defeater::SyntaxError);
+    }
+    walk_nodes(scope, &mut |node| {
+        scan_node(node, source, language, &mut note);
+    });
+    if language == Language::Rust
+        && !rust_enclosing_attributes_all(scope, source, |effect| {
+            effect != RustAttributeEffect::Opaque
+        })
+    {
+        note(Defeater::DynamicNameAccess);
+    }
+    defeaters
+}
+
 /// A declaration behind an unknown configuration cannot authorize a write.
 pub(crate) fn rust_declaration_is_unconditional(node: Node<'_>, source: &str) -> bool {
+    rust_enclosing_attributes_all(node, source, |effect| effect == RustAttributeEffect::Inert)
+}
+
+/// Whether every attribute on `node` and on each item enclosing it passes `allowed`.
+fn rust_enclosing_attributes_all(
+    node: Node<'_>,
+    source: &str,
+    allowed: impl Fn(RustAttributeEffect) -> bool,
+) -> bool {
     let mut up = Some(node);
     while let Some(scope) = up {
         let mut previous = scope.prev_named_sibling();
         while let Some(prefix) = previous {
             match prefix.kind() {
-                "attribute_item"
-                    if rust_attribute_effect_at(prefix, source) != RustAttributeEffect::Inert =>
-                {
+                "attribute_item" if !allowed(rust_attribute_effect_at(prefix, source)) => {
                     return false;
                 }
                 "attribute_item" | "line_comment" | "block_comment" => {}
@@ -428,7 +465,7 @@ pub(crate) fn rust_declaration_is_unconditional(node: Node<'_>, source: &str) ->
             let mut cursor = container.walk();
             if container.named_children(&mut cursor).any(|child| {
                 child.kind() == "inner_attribute_item"
-                    && rust_attribute_effect_at(child, source) != RustAttributeEffect::Inert
+                    && !allowed(rust_attribute_effect_at(child, source))
             }) {
                 return false;
             }
@@ -445,6 +482,9 @@ pub(crate) fn rust_declaration_is_unconditional(node: Node<'_>, source: &str) ->
 /// call-site `let` that sibling code sees; one nested in an expression expands
 /// to that expression. Opaque attributes may rewrite their item; conditional
 /// attributes separately constrain whether a declaration is present.
+///
+/// Known gap: an expression-position user macro, possibly from a dependency,
+/// can still name a binding at its call site; body-local renames refuse it.
 fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
     match node.kind() {
         "macro_invocation" => {

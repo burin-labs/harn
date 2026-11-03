@@ -987,7 +987,7 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
     // The loop declines to dispatch and is about to inject bare user feedback.
     // Repair first, through the REAL entrypoint (session-locked to `text`).
     let feedback = "Emit your tool call as a native tool_use block, not text.";
-    let repaired = pair_orphaned_tool_use(&session_id, feedback);
+    let repaired = pair_orphaned_tool_use(&session_id, feedback, None);
     assert_eq!(repaired, 1, "exactly one orphan must be repaired");
 
     // The synthesized message must be a native canonical result, not a
@@ -1050,7 +1050,7 @@ fn escalation_orphan_repaired_via_production_path_openai_shape() {
     )
     .expect("assistant turn injects");
 
-    let repaired = pair_orphaned_tool_use(&session_id, "nudge");
+    let repaired = pair_orphaned_tool_use(&session_id, "nudge", None);
     assert_eq!(repaired, 1);
 
     let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");

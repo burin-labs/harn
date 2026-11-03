@@ -29,6 +29,9 @@ pub fn message_35(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  aviso: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  предупреждение: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  警告：" + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_36(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "Plano de LoRA para " + (values[0] ?? "") + " via " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "План LoRA для " + (values[0] ?? "") + " через " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "通过 " + (values[1] ?? "") + " 为 " + (values[0] ?? "") + " 制定 LoRA 计划"
@@ -101,6 +107,9 @@ pub fn message_37(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "manifesto de avaliação em lote"
   }
+  if locale == "ru" {
+    return "манифест пакетной оценки"
+  }
   if locale == "zh-Hans" {
     return "批量评估清单"
   }
@@ -137,6 +146,9 @@ pub fn message_38(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "agrupamento em lote por"
   }
+  if locale == "ru" {
+    return "группировать пакетно по"
+  }
   if locale == "zh-Hans" {
     return "按批次分组"
   }
@@ -172,6 +184,9 @@ pub fn message_39(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "coletar recibo de promoção"
+  }
+  if locale == "ru" {
+    return "собрать квитанцию о продвижении"
   }
   if locale == "zh-Hans" {
     return "收集晋升收据"

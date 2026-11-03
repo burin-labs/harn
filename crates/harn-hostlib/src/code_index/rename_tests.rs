@@ -8,6 +8,8 @@ use crate::code_index::CodeIndexCapability;
 
 #[path = "rename_tests/go.rs"]
 mod go;
+#[path = "rename_tests/lexical.rs"]
+mod lexical;
 
 fn list_len(value: &VmValue) -> usize {
     match value {

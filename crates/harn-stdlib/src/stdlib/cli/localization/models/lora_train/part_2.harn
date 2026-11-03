@@ -81,6 +81,16 @@ pub fn message_10(locale: string, values: list<string>) -> string {
       + " multi_turn_rows="
       + (values[4] ?? "")
   }
+  if locale == "ru" {
+    return "  покрытие датасета: text_tool_rows=" + (values[0] ?? "") + " native_tool_rows="
+      + (values[1] ?? "")
+      + " no_tool_rows="
+      + (values[2] ?? "")
+      + " parallel_rows="
+      + (values[3] ?? "")
+      + " multi_turn_rows="
+      + (values[4] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  数据集覆盖：text_tool_rows=" + (values[0] ?? "") + " native_tool_rows="
       + (values[1] ?? "")
@@ -130,6 +140,9 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  formato do conjunto de dados: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  формат датасета: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  数据集格式：" + (values[0] ?? "")
@@ -191,6 +204,12 @@ pub fn message_12(locale: string, values: list<string>) -> string {
       + " tool_result_rows="
       + (values[2] ?? "")
   }
+  if locale == "ru" {
+    return "  исправления датасета: schema_repaired=" + (values[0] ?? "") + " unavailable_tool="
+      + (values[1] ?? "")
+      + " tool_result_rows="
+      + (values[2] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  数据集修复：schema_repaired=" + (values[0] ?? "") + " unavailable_tool="
       + (values[1] ?? "")
@@ -233,6 +252,9 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  max_seq_length: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  max_seq_length: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  max_seq_length: " + (values[0] ?? "")
   }
@@ -268,6 +290,9 @@ pub fn message_14(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  output dir: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  каталог вывода: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  输出目录: " + (values[0] ?? "")

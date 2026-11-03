@@ -317,10 +317,8 @@ mod tests {
         let config = super::super::embedded_config(None);
         let validation = validate_usage_accounting_audit(&config, "2026-08-25");
 
-        // A census, not a threshold: it moves by exactly one when a provider
-        // on this dialect is added, and the move is the point. Meta's Model
-        // API is the 40th.
-        assert_eq!(validation.openai_sse_provider_count, 40);
+        // Pin the exact census so missing provider input cannot pass as an empty audit.
+        assert_eq!(validation.openai_sse_provider_count, 39);
         assert!(validation.is_clean(), "{:?}", validation.errors);
     }
 
@@ -399,7 +397,7 @@ mod tests {
     #[test]
     fn audit_expires_the_unverified_queue() {
         let config = super::super::embedded_config(None);
-        let validation = validate_usage_accounting_audit(&config, "2026-11-01");
+        let validation = validate_usage_accounting_audit(&config, "2099-01-01");
 
         assert!(validation
             .errors

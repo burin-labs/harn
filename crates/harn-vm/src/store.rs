@@ -17,7 +17,12 @@ pub(crate) struct StoreState {
     loaded: bool,
 }
 
-type SharedStore = Arc<parking_lot::Mutex<StoreState>>;
+pub(crate) type SharedStore = Arc<parking_lot::Mutex<StoreState>>;
+
+mod branch;
+pub(crate) use branch::{
+    capture_dispatch, decode_dispatch, replay_dispatch, BranchStores, StoreChange,
+};
 
 impl StoreState {
     fn new(base_dir: &Path) -> Self {
@@ -56,6 +61,14 @@ impl StoreState {
     }
 
     fn save(&mut self) -> Result<(), VmError> {
+        let result = self.save_contents();
+        if result.is_err() {
+            crate::run_tape::refuse_dispatch_replay("a runtime store write did not persist");
+        }
+        result
+    }
+
+    fn save_contents(&mut self) -> Result<(), VmError> {
         let obj: serde_json::Map<String, serde_json::Value> = self
             .data
             .iter()
@@ -78,14 +91,20 @@ impl StoreState {
 
     pub(crate) fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), VmError> {
         self.ensure_loaded()?;
-        self.data.insert(key, value);
-        self.save()
+        crate::run_tape::note_store_mutation();
+        self.data.insert(key.clone(), value);
+        self.save()?;
+        branch::note_set(&self.path, &key, &self.data[&key]);
+        Ok(())
     }
 
     fn delete(&mut self, key: &str) -> Result<(), VmError> {
         self.ensure_loaded()?;
+        crate::run_tape::note_store_mutation();
         self.data.remove(key);
-        self.save()
+        self.save()?;
+        branch::note_delete(&self.path, key);
+        Ok(())
     }
 
     fn list(&mut self) -> Result<Vec<String>, VmError> {
@@ -95,8 +114,11 @@ impl StoreState {
 
     fn clear(&mut self) -> Result<(), VmError> {
         self.ensure_loaded()?;
+        crate::run_tape::note_store_mutation();
         self.data.clear();
-        self.save()
+        self.save()?;
+        branch::note_clear(&self.path);
+        Ok(())
     }
 }
 
@@ -137,6 +159,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_get",
         move |args, _out| {
+            let s = branch::for_execution(&s)?;
             let key = args.first().map(|a| a.display()).unwrap_or_default();
             store_get(&s, &key)
         },
@@ -147,6 +170,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_set",
         move |args, _out| {
+            let s = branch::for_execution(&s)?;
             let key = args.first().map(|a| a.display()).unwrap_or_default();
             let value = args.get(1).unwrap_or(&VmValue::Nil);
             let json_val = vm_to_json(value)?;
@@ -160,6 +184,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_delete",
         move |args, _out| {
+            let s = branch::for_execution(&s)?;
             let key = args.first().map(|a| a.display()).unwrap_or_default();
             s.lock().delete(&key)?;
             Ok(VmValue::Nil)
@@ -171,6 +196,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_list",
         move |_args, _out| {
+            let s = branch::for_execution(&s)?;
             let keys = s.lock().list()?;
             Ok(VmValue::strings(keys))
         },
@@ -181,6 +207,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_save",
         move |_args, _out| {
+            let s = branch::for_execution(&s)?;
             // Load first: saving an unopened store would overwrite its file
             // with nothing, and a branch's open seeds it from the tape.
             let mut store = s.lock();
@@ -195,6 +222,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         harn_builtin_meta::CapabilityId::Runtime,
         "store_clear",
         move |_args, _out| {
+            let s = branch::for_execution(&s)?;
             s.lock().clear()?;
             Ok(VmValue::Nil)
         },

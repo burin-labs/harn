@@ -113,8 +113,20 @@ pub fn inference_admission_schemas() -> [(&'static str, serde_json::Value); 3] {
     ]
 }
 
+/// Validate the configured endpoint before resolving inference admission.
+/// Configuration diagnostics contain no supplied endpoint values. This does
+/// not establish credentials, model readiness, or endpoint availability.
+pub fn preflight_inference_admission(
+    request: &InferenceAdmissionRequest,
+) -> Result<InferenceAdmissionSnapshot, crate::llm_config::ProviderEndpointConfigurationError> {
+    crate::llm_config::validate_provider_endpoint_configuration(&request.provider)?;
+    Ok(preview_inference_admission(request))
+}
+
 /// Resolve a preview without provider I/O. When a host supplies an account
 /// confirmation, resolve the selected credential only to match that fact.
+/// Hosts gating startup should use [`preflight_inference_admission`] to
+/// preserve endpoint configuration diagnostics before policy decisions.
 pub fn preview_inference_admission(
     request: &InferenceAdmissionRequest,
 ) -> InferenceAdmissionSnapshot {

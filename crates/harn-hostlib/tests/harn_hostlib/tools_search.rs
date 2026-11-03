@@ -111,6 +111,40 @@ fn search_finds_literal_pattern() {
 }
 
 #[test]
+fn search_skips_binary_data_unless_explicitly_requested() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("code.txt"), b"TODO in source\n").unwrap();
+    fs::write(dir.path().join("font.ttf"), b"\0\x01\x02TODO in binary\n").unwrap();
+    let reg = tools_registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let run = |include_binary: Option<bool>| {
+        let mut args = vec![
+            ("pattern", vm_string("TODO")),
+            ("path", vm_string(&dir.path().to_string_lossy())),
+            ("fixed_strings", VmValue::Bool(true)),
+        ];
+        if let Some(include_binary) = include_binary {
+            args.push(("include_binary", VmValue::Bool(include_binary)));
+        }
+        (entry.handler)(&dict_arg(&args)).unwrap()
+    };
+    let default = match_paths(&run(None));
+    assert!(
+        default.iter().any(|path| path.ends_with("code.txt")),
+        "{default:?}"
+    );
+    assert!(
+        !default.iter().any(|path| path.ends_with("font.ttf")),
+        "{default:?}"
+    );
+    let opted_in = match_paths(&run(Some(true)));
+    assert!(
+        opted_in.iter().any(|path| path.ends_with("font.ttf")),
+        "{opted_in:?}"
+    );
+}
+
+#[test]
 fn search_respects_glob_filter() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("hit.rs"), "fn target() {}\n").unwrap();

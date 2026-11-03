@@ -29,6 +29,9 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  promotion id: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  идентификатор продвижения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  提升 ID: " + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_16(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  promotion minimum trials: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  минимум испытаний для продвижения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  提升最少试验次数: " + (values[0] ?? "")
@@ -104,6 +110,10 @@ pub fn message_17(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  padrões de procedência: split=" + (values[0] ?? "") + " license=" + (values[1] ?? "")
   }
+  if locale == "ru" {
+    return "  значения provenance по умолчанию: split=" + (values[0] ?? "") + " license="
+      + (values[1] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  溯源默认值: split=" + (values[0] ?? "") + " license=" + (values[1] ?? "")
   }
@@ -139,6 +149,9 @@ pub fn message_18(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  modelo solicitado: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  запрошенная модель: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  请求模型: " + (values[0] ?? "")
@@ -209,6 +222,15 @@ pub fn message_19(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  estatísticas: records=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
+      + " skipped="
+      + (values[2] ?? "")
+      + " tool_calls="
+      + (values[3] ?? "")
+      + " tool_results="
+      + (values[4] ?? "")
+  }
+  if locale == "ru" {
+    return "  статистика: records=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
       + " skipped="
       + (values[2] ?? "")
       + " tool_calls="

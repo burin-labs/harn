@@ -29,6 +29,9 @@ pub fn message_25(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  precisão da base de treinamento: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  точность базовой модели обучения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  训练基础精度：" + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_26(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  precisão de computação do treinamento: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  точность вычислений при обучении: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练计算精度：" + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_27(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  execução de treinamento: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  запуск обучения: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  训练运行：" + (values[0] ?? "")
   }
@@ -136,6 +145,9 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  treinamento: " + (values[0] ?? "") + " + " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "  обучение: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练：" + (values[0] ?? "") + " + " + (values[1] ?? "")
@@ -195,6 +207,13 @@ pub fn message_29(locale: string, values: list<string>) -> string {
       + (values[4] ?? "")
   }
   if locale == "pt-BR" {
+    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
+      + ", exists="
+      + (values[3] ?? "")
+      + ")"
+      + (values[4] ?? "")
+  }
+  if locale == "ru" {
     return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
       + ", exists="
       + (values[3] ?? "")

@@ -29,6 +29,9 @@ pub fn message_0(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  política de salvamento de embeddings: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  политика сохранения эмбеддингов: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  嵌入保存策略：" + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  identidade esperada do treinador: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  ожидаемая идентичность тренера: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  预期训练器标识：" + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  catálogo de inferência: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  каталог инференса: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  推理目录：" + (values[0] ?? "")
   }
@@ -137,6 +146,9 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  modules to save: none"
   }
+  if locale == "ru" {
+    return "  модули для сохранения: нет"
+  }
   if locale == "zh-Hans" {
     return "  要保存的模块: 无"
   }
@@ -172,6 +184,9 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  modules to save: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  модули для сохранения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  要保存的模块: " + (values[0] ?? "")

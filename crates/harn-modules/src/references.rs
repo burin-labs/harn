@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use harn_lexer::{Lexer, Span, Token, TokenKind};
 use harn_parser::{
-    lexical::{resolved_identifier_bindings, BindingId},
+    lexical::{resolved_identifier_bindings_with_source, BindingId, MatchPatternCatalog},
     visit::walk_program_interpolated,
     Node,
 };
@@ -108,16 +108,20 @@ impl ReferenceIndex {
                 });
             }
         }
-        edges.sort_by(|left, right| {
-            left.from
-                .file
-                .cmp(&right.from.file)
-                .then_with(|| left.from.span.start.cmp(&right.from.span.start))
-                .then_with(|| left.to_file.cmp(&right.to_file))
-                .then_with(|| left.to_name.cmp(&right.to_name))
-        });
+        sort_edges(&mut edges);
         edges
     }
+}
+
+fn sort_edges(edges: &mut [ReferenceEdge]) {
+    edges.sort_by(|left, right| {
+        left.from
+            .file
+            .cmp(&right.from.file)
+            .then_with(|| left.from.span.start.cmp(&right.from.span.start))
+            .then_with(|| left.to_file.cmp(&right.to_file))
+            .then_with(|| left.to_name.cmp(&right.to_name))
+    });
 }
 
 /// One resolution-backed reference edge: a use site and the definition it
@@ -151,80 +155,9 @@ pub fn index_references(
         site_defs: Vec::new(),
     };
 
-    for (file, parsed) in sources {
-        let lexical = resolved_identifier_bindings(&[], &parsed.program);
-        let tokens = Lexer::new(&parsed.source)
-            .tokenize()
-            .expect("a retained parsed source must still lex");
-
-        // A local declaration may not otherwise appear as an identifier AST
-        // node. Seed every binding reached by a use so include-declaration and
-        // a cursor on the declaration resolve to the same stable identity.
-        let mut lexical_defs: HashMap<BindingId, DefSite> = HashMap::new();
-        for binding in lexical.values() {
-            lexical_defs.entry(binding.clone()).or_insert_with(|| {
-                graph
-                    .definition_of(file, &binding.name)
-                    .filter(|def| {
-                        def.file == *file
-                            && def.span.start == binding.declaration_start
-                            && def.span.end == binding.declaration_end
-                    })
-                    .unwrap_or_else(|| DefSite {
-                        name: binding.name.clone(),
-                        file: file.clone(),
-                        kind: DefKind::Variable,
-                        span: Span::with_offsets(
-                            binding.declaration_start,
-                            binding.declaration_end,
-                            1,
-                            1,
-                        ),
-                    })
-            });
-        }
-        for (binding, def) in &lexical_defs {
-            if let Some(span) = identifier_span(
-                &tokens,
-                &binding.name,
-                binding.declaration_start,
-                binding.declaration_end,
-            ) {
-                insert_reference(
-                    &mut index,
-                    def.clone(),
-                    RefSite {
-                        file: file.clone(),
-                        span,
-                        name: binding.name.clone(),
-                    },
-                );
-            }
-        }
-
-        walk_program_interpolated(&parsed.source, &parsed.program, &mut |node| {
-            for (name, broad_span) in name_uses(node) {
-                let def = lexical
-                    .get(&(broad_span.start, broad_span.end))
-                    .and_then(|binding| lexical_defs.get(binding).cloned())
-                    .or_else(|| graph.definition_of(file, name));
-                if let (Some(def), Some(span)) = (
-                    def,
-                    identifier_span(&tokens, name, broad_span.start, broad_span.end),
-                ) {
-                    insert_reference(
-                        &mut index,
-                        def,
-                        RefSite {
-                            file: file.clone(),
-                            span,
-                            name: name.to_string(),
-                        },
-                    );
-                }
-            }
-        });
-    }
+    walk_resolved_references(graph, sources, |def, site| {
+        insert_reference(&mut index, def, site);
+    });
 
     for refs in index.by_def.values_mut() {
         refs.sort_by(|left, right| {
@@ -256,6 +189,139 @@ pub fn index_references(
     index
 }
 
+/// Resolve the same references as the positional index, retaining only the
+/// first occurrence per source file and definition for file-level graphs.
+pub fn file_reference_edges(
+    graph: &ModuleGraph,
+    sources: &HashMap<PathBuf, ParsedModuleSource>,
+) -> Vec<ReferenceEdge> {
+    let mut targets: HashMap<(PathBuf, DefKey), RefSite> = HashMap::new();
+    walk_resolved_references(graph, sources, |def, site| {
+        let key = (site.file.clone(), DefKey::from_def(&def));
+        targets
+            .entry(key)
+            .and_modify(|first| {
+                if site.span.start < first.span.start {
+                    *first = site.clone();
+                }
+            })
+            .or_insert(site);
+    });
+    let mut edges: Vec<_> = targets
+        .into_iter()
+        .map(|((_, key), from)| ReferenceEdge {
+            from,
+            to_file: key.file,
+            to_name: key.name,
+        })
+        .collect();
+    sort_edges(&mut edges);
+    edges
+}
+
+fn walk_resolved_references(
+    graph: &ModuleGraph,
+    sources: &HashMap<PathBuf, ParsedModuleSource>,
+    mut visit: impl FnMut(DefSite, RefSite),
+) {
+    for (file, parsed) in sources {
+        // The graph is immutable for this pass, so repeated lookups of the
+        // same name in this file resolve identically, including misses.
+        let mut definitions: HashMap<String, Option<DefSite>> = HashMap::new();
+        let mut definition_of = |name: &str| {
+            if let Some(definition) = definitions.get(name) {
+                return definition.clone();
+            }
+            let definition = graph.definition_of(file, name);
+            definitions.insert(name.to_owned(), definition.clone());
+            definition
+        };
+        let lexical = resolved_identifier_bindings_with_source(
+            &[],
+            &parsed.program,
+            Some(&parsed.source),
+            &MatchPatternCatalog::default(),
+        );
+        let tokens = Lexer::new(&parsed.source)
+            .tokenize()
+            .expect("a retained parsed source must still lex");
+
+        // A local declaration may not otherwise appear as an identifier AST
+        // node. Seed every binding reached by a use so include-declaration and
+        // a cursor on the declaration resolve to the same stable identity.
+        let mut lexical_defs: HashMap<BindingId, DefSite> = HashMap::new();
+        for binding in lexical.values() {
+            lexical_defs.entry(binding.clone()).or_insert_with(|| {
+                definition_of(&binding.name)
+                    .filter(|def| {
+                        def.file == *file
+                            && def.span.start == binding.declaration_start
+                            && def.span.end == binding.declaration_end
+                    })
+                    .unwrap_or_else(|| DefSite {
+                        name: binding.name.clone(),
+                        file: file.clone(),
+                        kind: DefKind::Variable,
+                        span: Span::with_offsets(
+                            binding.declaration_start,
+                            binding.declaration_end,
+                            1,
+                            1,
+                        ),
+                    })
+            });
+        }
+        for (binding, def) in &lexical_defs {
+            if let Some(span) = identifier_span(
+                &tokens,
+                &parsed.source,
+                &binding.name,
+                binding.declaration_start,
+                binding.declaration_end,
+                None,
+            ) {
+                visit(
+                    def.clone(),
+                    RefSite {
+                        file: file.clone(),
+                        span,
+                        name: binding.name.clone(),
+                    },
+                );
+            }
+        }
+
+        walk_program_interpolated(&parsed.source, &parsed.program, &mut |node| {
+            for (name, broad_span) in name_uses(node) {
+                let def = lexical
+                    .get(&(broad_span.start, broad_span.end))
+                    .and_then(|binding| lexical_defs.get(binding).cloned())
+                    .or_else(|| definition_of(name));
+                if let (Some(def), Some(span)) = (
+                    def,
+                    identifier_span(
+                        &tokens,
+                        &parsed.source,
+                        name,
+                        broad_span.start,
+                        broad_span.end,
+                        Some((broad_span.line, broad_span.column)),
+                    ),
+                ) {
+                    visit(
+                        def,
+                        RefSite {
+                            file: file.clone(),
+                            span,
+                            name: name.to_string(),
+                        },
+                    );
+                }
+            }
+        });
+    }
+}
+
 fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {
     let key = DefKey::from_def(&def);
     index.definitions.entry(key.clone()).or_insert(def);
@@ -267,15 +333,58 @@ fn insert_reference(index: &mut ReferenceIndex, def: DefSite, site: RefSite) {
     index.site_defs.push((site, key));
 }
 
-fn identifier_span(tokens: &[Token], name: &str, start: usize, end: usize) -> Option<Span> {
-    tokens.iter().find_map(|token| match &token.kind {
-        TokenKind::Identifier(found)
-            if found == name && token.span.start >= start && token.span.end <= end =>
-        {
-            Some(token.span)
-        }
-        _ => None,
-    })
+fn identifier_span(
+    tokens: &[Token],
+    source: &str,
+    name: &str,
+    start: usize,
+    end: usize,
+    position: Option<(usize, usize)>,
+) -> Option<Span> {
+    // Lexer tokens are emitted in source order. Skip tokens before the
+    // requested range instead of rescanning the file for every identifier.
+    let first = tokens.partition_point(|token| token.span.start < start);
+    let found = tokens[first..]
+        .iter()
+        .take_while(|token| token.span.start <= end)
+        .find_map(|token| match &token.kind {
+            TokenKind::Identifier(found)
+                if found == name && token.span.start >= start && token.span.end <= end =>
+            {
+                Some(token.span)
+            }
+            _ => None,
+        });
+    if found.is_some() {
+        return found;
+    }
+
+    // Interpolation expressions are nested inside a string token in the
+    // containing file. Re-lex their AST range at its original coordinates.
+    let enclosing = first.checked_sub(1).and_then(|index| tokens.get(index))?;
+    if !matches!(enclosing.kind, TokenKind::InterpolatedString(_)) || end > enclosing.span.end {
+        return None;
+    }
+    let segment = source.get(start..end)?;
+    let (line, column) = if let Some(position) = position {
+        position
+    } else {
+        // Declarations have byte offsets but no line/column in BindingId.
+        // Count only within the containing token, not from the file start.
+        let prefix = source.get(enclosing.span.start..start)?;
+        let lines = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let column = prefix.rsplit('\n').next()?.chars().count()
+            + if lines == 0 { enclosing.span.column } else { 1 };
+        (enclosing.span.line + lines, column)
+    };
+    Lexer::with_position_and_offset(segment, line, column, start)
+        .tokenize()
+        .ok()?
+        .into_iter()
+        .find_map(|token| match token.kind {
+            TokenKind::Identifier(found) if found == name => Some(token.span),
+            _ => None,
+        })
 }
 
 fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
@@ -293,5 +402,40 @@ fn name_uses(node: &harn_parser::SNode) -> Vec<(&str, Span)> {
         | Node::OverrideDecl { name, .. } => vec![(name.as_str(), node.span)],
         Node::EvalPackDecl { binding_name, .. } => vec![(binding_name.as_str(), node.span)],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod identifier_span_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_lookup_matches_linear_lookup_for_all_source_ranges() {
+        let source = "let alpha = 1\nlet βeta = alpha + alpha\nlet text = \"hello {alpha}\"\n";
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        assert!(tokens
+            .windows(2)
+            .all(|pair| pair[0].span.start <= pair[1].span.start));
+        for start in 0..=source.len() {
+            for end in start..=source.len() {
+                for name in ["alpha", "βeta", "text", "absent"] {
+                    let expected = tokens.iter().find_map(|token| match &token.kind {
+                        TokenKind::Identifier(found)
+                            if found == name
+                                && token.span.start >= start
+                                && token.span.end <= end =>
+                        {
+                            Some(token.span)
+                        }
+                        _ => None,
+                    });
+                    assert_eq!(
+                        identifier_span(&tokens, source, name, start, end, None),
+                        expected,
+                        "{name} in {start}..{end}"
+                    );
+                }
+            }
+        }
     }
 }

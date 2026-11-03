@@ -155,3 +155,30 @@ pipeline test_publication_receives_only_the_authenticated_recovery_outputs(harne
   assert_eq(authority[0].with["permission-contents"], "read")
   assert_eq(authority[0].with["permission-pull-requests"], "read")
 }
+
+pipeline test_publication_receives_the_qualified_manifest_identity(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/promote-release.yml", nil)
+  const job = workflow.jobs.authorize
+  const bindings = job.steps.filter({ step -> step?.id == "producer-binding" }).to_list()
+  assert_eq(len(bindings), 1)
+  const binding = bindings[0]
+  assert(binding.run.contains("release_require_rehearsal_binding"))
+  assert(binding.run.contains("release_write_producer_identity"))
+  for name in ["expected_attempt", "expected_manifest_id", "expected_manifest_digest"] {
+    assert_eq(
+      job.outputs[name],
+      expression("steps.producer-binding.outputs." + name + " || needs.plan.outputs." + name),
+    )
+    assert_eq(workflow.jobs.plan.outputs[name], expression("steps.plan.outputs." + name))
+  }
+  const call = workflow.jobs.promote
+  assert_eq(call.with["expected-attempt"], expression("needs.authorize.outputs.expected_attempt"))
+  assert_eq(
+    call.with["expected-manifest-id"],
+    expression("needs.authorize.outputs.expected_manifest_id"),
+  )
+  assert_eq(
+    call.with["expected-manifest-digest"],
+    expression("needs.authorize.outputs.expected_manifest_digest"),
+  )
+}

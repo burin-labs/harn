@@ -26,11 +26,13 @@ pub enum Locale {
     Korean,
     /// Simplified Chinese.
     SimplifiedChinese,
+    /// Russian.
+    Russian,
 }
 
 impl Locale {
     /// The complete interface language set, in presentation order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::English,
         Self::Spanish,
         Self::French,
@@ -40,6 +42,7 @@ impl Locale {
         Self::Japanese,
         Self::Korean,
         Self::SimplifiedChinese,
+        Self::Russian,
     ];
 
     /// Stable BCP 47 identifier for catalogs, HTML, and saved preferences.
@@ -54,6 +57,7 @@ impl Locale {
             Self::Japanese => "ja",
             Self::Korean => "ko",
             Self::SimplifiedChinese => "zh-Hans",
+            Self::Russian => "ru",
         }
     }
 }
@@ -76,6 +80,7 @@ pub fn resolve_locale(value: &str) -> Option<Locale> {
         "it" => Some(Locale::Italian),
         "ja" => Some(Locale::Japanese),
         "ko" => Some(Locale::Korean),
+        "ru" => Some(Locale::Russian),
         "zh" => {
             let mut parts = normalized.split('-').skip(1).peekable();
             for _ in 0..3 {

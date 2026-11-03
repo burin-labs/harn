@@ -56,6 +56,8 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
         r"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    public var message: String?
+    public var detail: String?
     /// Wire string for `HarnLlmErrorCategory`. Decode with
     /// `HarnLlmErrorCategory(rawValue:)`; `nil` means the producing Harn used
     /// a value this binding predates.

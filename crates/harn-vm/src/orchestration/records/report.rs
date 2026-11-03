@@ -138,7 +138,7 @@ pub struct RunReportLlmCall {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub start_ms: u64,
-    pub duration_ms: u64,
+    pub duration_ms: Option<u64>,
     pub ttft_ms: Option<u64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -911,7 +911,7 @@ fn llm_call_from_span(run_id: &str, span: &super::RunTraceSpanRecord) -> RunRepo
         provider: text(crate::tracing::meta::PROVIDER),
         model: text(crate::tracing::meta::MODEL),
         start_ms: span.start_ms,
-        duration_ms: span.duration_ms,
+        duration_ms: span.measured_duration_ms(),
         ttft_ms: span.ttft_ms,
         input_tokens: integer(crate::tracing::meta::INPUT_TOKENS),
         output_tokens: integer(crate::tracing::meta::OUTPUT_TOKENS),
@@ -1068,6 +1068,10 @@ fn nonempty(value: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "report/tool_call_tests.rs"]
 mod tool_call_tests;
+
+#[cfg(test)]
+#[path = "report/latency_tests.rs"]
+mod latency_tests;
 
 #[cfg(test)]
 mod tests {

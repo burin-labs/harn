@@ -29,6 +29,9 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  sessão: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  сеанс: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  会话: " + (values[0] ?? "")
   }
@@ -64,6 +67,9 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  status terminal: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  конечный статус: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  终端状态: " + (values[0] ?? "")
@@ -101,6 +107,9 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  catálogo de ferramentas: " + (values[0] ?? "") + " schemas, hash " + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "  каталог инструментов: " + (values[0] ?? "") + " схем, хэш " + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  工具目录：" + (values[0] ?? "") + " 个 schema，哈希 " + (values[1] ?? "")
@@ -157,6 +166,12 @@ pub fn message_8(locale: string, values: list<string>) -> string {
       + (values[2] ?? "")
       + " de saída"
   }
+  if locale == "ru" {
+    return "  использование: " + (values[0] ?? "") + " вызовов провайдера, " + (values[1] ?? "")
+      + " вход / "
+      + (values[2] ?? "")
+      + " выход"
+  }
   if locale == "zh-Hans" {
     return "  用量：" + (values[0] ?? "") + " 次提供方调用，输入 " + (values[1] ?? "") + " / 输出 "
       + (values[2] ?? "")
@@ -195,6 +210,9 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  gravado: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  записано: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  已写入：" + (values[0] ?? "")

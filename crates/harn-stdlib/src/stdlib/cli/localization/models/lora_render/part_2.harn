@@ -29,6 +29,9 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  ID do catálogo de ferramentas: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  ID каталога инструментов: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  工具目录 ID：" + (values[0] ?? "")
   }
@@ -65,6 +68,9 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  política do catálogo de ferramentas: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  политика каталога инструментов: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  工具目录策略：" + (values[0] ?? "")
   }
@@ -100,6 +106,9 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  atestado do ambiente de treinamento: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  аттестация среды обучения: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练器环境证明：" + (values[0] ?? "")
@@ -138,6 +147,9 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  ambiente de treinamento: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
+  if locale == "ru" {
+    return "  среда обучения: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  训练器环境：" + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
@@ -173,6 +185,9 @@ pub fn message_14(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  identidade do treinador: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
+  }
+  if locale == "ru" {
+    return "  идентичность тренера: " + (values[0] ?? "") + " promotable=" + (values[1] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练器身份：" + (values[0] ?? "") + " promotable=" + (values[1] ?? "")

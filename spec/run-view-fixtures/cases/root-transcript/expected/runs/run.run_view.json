@@ -108,8 +108,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:ecb4370cee53b688179181352f4ed35ecd67fd55319e6784922af90e04ae7f69",
-    "projection_id": "run_view:run_root_transcript:ecb4370cee53"
+    "projection_hash": "sha256:9f36255f7fe59bca32d8dafab89bc8eca0dd4f3eb1799cd4a56e55144c1edbed",
+    "projection_id": "run_view:run_root_transcript:9f36255f7fe5"
   },
   "providers": [
     {
@@ -167,7 +167,7 @@
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0,
+        "total_duration_ms": null,
         "unpriced_calls": 0,
         "usage_unknown_calls": 0
       },

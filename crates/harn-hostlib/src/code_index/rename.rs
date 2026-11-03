@@ -399,14 +399,24 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
 
+    let java_method = seed_node.language == "java"
+        && seed_node.kind == NodeKind::Function
+        && seed_node.owner_type.is_some();
+    // A body-local seed is invisible outside its scope: no other file can
+    // reference it, and the binding proof leaves other same-named bindings in
+    // its file alone.
+    let local_seed = !java_method
+        && go_proof.is_none()
+        && is_local_seed(state, seed_node, &seed_path, session_id.as_deref())?;
+    if local_seed {
+        in_scope_files = vec![seed_path.clone()];
+    }
+
     // The identifier rewrite below would otherwise silently rename both
     // definitions and their unrelated uses.
     let competing =
         competing_declarations(&state.symbols, seed_node_id, &symbol_name, &in_scope_files);
-    let java_method = seed_node.language == "java"
-        && seed_node.kind == NodeKind::Function
-        && seed_node.owner_type.is_some();
-    if !java_method && !competing.is_empty() {
+    if !java_method && !local_seed && !competing.is_empty() {
         return Ok(ambiguous_response_with_details(
             &env,
             "rename aborted without writes: the scope contains separate declarations with this name. Pinning the seed does not disambiguate their references; use a binding-aware LSP rename or narrow the scope.",
@@ -535,7 +545,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
 
         if !java_method {
-            if let Err(detail) = super::rename_binding::check(
+            match super::rename_binding::check(
                 super::rename_binding::Seed {
                     state,
                     node: seed_node,
@@ -548,12 +558,15 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 &tree,
                 &targets,
             ) {
-                return Ok(ambiguous_response_with_details(
-                    &env,
-                    &format!(
-                        "rename aborted without writes: {detail}; use a binding-aware LSP rename"
-                    ),
-                ));
+                Ok(proven) => targets = proven,
+                Err(detail) => {
+                    return Ok(ambiguous_response_with_details(
+                        &env,
+                        &format!(
+                            "rename aborted without writes: {detail}; use a binding-aware LSP rename"
+                        ),
+                    ));
+                }
             }
         }
 
@@ -603,6 +616,23 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     };
 
     Ok(applied_response(&env, &plans, dry_run, failed))
+}
+
+/// Whether the current seed file declares the seed inside a body.
+fn is_local_seed(
+    state: &super::state::IndexState,
+    seed: &super::symbol_graph::Node,
+    seed_path: &str,
+    session_id: Option<&str>,
+) -> Result<bool, HostlibError> {
+    let Some(language) = Language::detect(Path::new(seed_path), None) else {
+        return Ok(false);
+    };
+    let source = read_source(BUILTIN, &state.root, seed_path, session_id)?;
+    let Ok(tree) = ast_api::parse_tree(&source, language) else {
+        return Ok(false);
+    };
+    Ok(super::rename_binding::lexical(seed, language, &source, &tree).is_some())
 }
 
 // === Response shaping ===

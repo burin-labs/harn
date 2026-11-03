@@ -507,6 +507,24 @@ fn classify_error(terminal_class: Option<AgentTerminalClass>) -> AgentTerminalKi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn managed_allowance_checkpoint_keeps_service_remedy_separate_from_transport_detail() {
+        let facts = serde_json::json!({
+            "message": "Your included allowance is used up. Contact https://support.example.test/allowance.",
+            "detail": "managed transport HTTP 429 diagnostic"
+        });
+        let terminal = super::terminal_outcome_for_finalize(
+            "error",
+            "provider_error",
+            Some(crate::llm::AgentTerminalClass::ManagedAllowanceUnavailable),
+            true,
+        )
+        .with_error(Some(&facts))
+        .to_json();
+        assert_eq!(terminal["terminalClass"], "managed_allowance_unavailable");
+        assert_eq!(terminal["message"], facts["message"]);
+        assert_eq!(terminal["detail"], facts["detail"]);
+    }
     use super::*;
 
     #[test]

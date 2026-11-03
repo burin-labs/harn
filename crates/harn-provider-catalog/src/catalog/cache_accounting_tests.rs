@@ -95,7 +95,7 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
             .fields,
         [crate::config::UsageAccountingField::Stream]
     );
-    assert_eq!(audit.expires_on, "2026-10-31");
+    assert_eq!(audit.expires_on, "2026-11-14");
 }
 
 fn catalog_schema() -> serde_json::Value {

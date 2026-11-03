@@ -83,16 +83,7 @@ pub(super) fn append_enums(out: &mut String, target: Target) {
 
 fn append_enum(out: &mut String, target: Target, suffix: &str, values: &[String]) {
     let name = format!("HarnSessionRecap{suffix}");
-    match target {
-        Target::Typescript => out.push_str(&format!("export type {name} = {}\n", values.iter().map(|value| format!("{value:?}")).collect::<Vec<_>>().join(" | "))),
-        Target::Rust => out.push_str(&format!("#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"snake_case\")]\npub enum {name} {{ {} }}\n", values.iter().map(|value| super::rust::rust_type_name(value)).collect::<Vec<_>>().join(", "))),
-        Target::Swift => out.push_str(&format!("public enum {name}: String, Codable, Sendable, Equatable {{ case {} }}\n", values.iter().map(|value| {
-            let case = super::swift::swift_case_name(value);
-            if &case == value { case } else { format!("{case} = {value:?}") }
-        }).collect::<Vec<_>>().join(", "))),
-        Target::Python => out.push_str(&super::python::py_str_enum_owned(&name, values)),
-        Target::Go => out.push_str(&format!("type {name} string\n")),
-    }
+    super::records::append_string_enum(out, target, &name, values);
 }
 
 fn record_name(key: &str) -> Option<String> {

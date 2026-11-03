@@ -32,6 +32,7 @@ macro_rules! required_pr_e2e_cases {
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read,
             provider_admission_privacy::admission_requires_account_evidence_for_conditional_provider_terms,
+            provider_admission_privacy::provider_endpoint_configuration_precedes_policy_without_transport,
             provider_admission_privacy::unknown_gemini_account_is_refused_before_transport,
             durable_spend_policy::strict_scope_refuses_a_new_process_after_unpriced_provider_usage,
             durable_spend_policy::agent_spend_guard_actor_unknown,

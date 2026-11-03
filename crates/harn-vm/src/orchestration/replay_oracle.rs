@@ -35,6 +35,7 @@ impl Default for ReplayOracleTrace {
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(schemars::JsonSchema)]
 pub enum ReplayExpectation {
     #[default]
     Match,
@@ -100,6 +101,7 @@ impl ReplayTraceRun {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ReplayTraceRunCounts {
     pub event_log_entries: usize,
     pub trigger_firings: usize,
@@ -118,6 +120,7 @@ pub struct ReplayTraceRunCounts {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct ReplayOracleReport {
     pub name: String,
     pub expectation: ReplayExpectation,
@@ -142,7 +145,7 @@ impl Default for ReplayOracleReport {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct ReplayDivergence {
     pub path: String,
     pub left: JsonValue,
@@ -157,6 +160,7 @@ pub enum ReplayOracleError {
     InvalidAllowlistPath(String),
     AllowlistPathMissing(String),
     Serialization(String),
+    NothingCompared,
 }
 
 impl fmt::Display for ReplayOracleError {
@@ -166,6 +170,9 @@ impl fmt::Display for ReplayOracleError {
             | Self::InvalidAllowlistPath(message)
             | Self::AllowlistPathMissing(message)
             | Self::Serialization(message) => message.fmt(f),
+            Self::NothingCompared => {
+                f.write_str("no replay values were compared (expectations_compared=0)")
+            }
         }
     }
 }
@@ -180,6 +187,9 @@ pub fn run_replay_oracle_trace(
     let second_run_counts = trace.second_run.counts();
     let first = canonicalize_run(&trace.first_run, &trace.allowlist)?;
     let second = canonicalize_run(&trace.second_run, &trace.allowlist)?;
+    if !has_comparable_values(trace, &first, &second)? {
+        return Err(ReplayOracleError::NothingCompared);
+    }
     let divergence = first_divergence(&first, &second);
     let passed = match (trace.expect, divergence.is_some()) {
         (ReplayExpectation::Match, false) => true,
@@ -197,6 +207,66 @@ pub fn run_replay_oracle_trace(
         protocol_fixture_refs: trace.protocol_fixture_refs.clone(),
         divergence,
     })
+}
+
+// Keep the allowlist mask separate from recorded JSON, so real payloads cannot
+// accidentally collide with a sentinel used to mark ignored values.
+fn has_comparable_values(
+    trace: &ReplayOracleTrace,
+    canonical_first: &JsonValue,
+    canonical_second: &JsonValue,
+) -> Result<bool, ReplayOracleError> {
+    fn mask(value: &JsonValue) -> JsonValue {
+        match value {
+            JsonValue::Object(map) => JsonValue::Object(
+                map.iter()
+                    .map(|(key, value)| (key.clone(), mask(value)))
+                    .collect(),
+            ),
+            JsonValue::Array(items) => JsonValue::Array(items.iter().map(mask).collect()),
+            _ => JsonValue::Bool(false),
+        }
+    }
+    fn any(left: &JsonValue, right: &JsonValue, depth: usize) -> bool {
+        match (left, right) {
+            (JsonValue::Bool(true), JsonValue::Bool(true)) => false,
+            (JsonValue::Object(left), JsonValue::Object(right)) => {
+                if left.is_empty() && right.is_empty() {
+                    return depth >= 2;
+                }
+                left.keys()
+                    .chain(right.keys())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .any(|key| match (left.get(key), right.get(key)) {
+                        (Some(left), Some(right)) => any(left, right, depth + 1),
+                        _ => true,
+                    })
+            }
+            (JsonValue::Array(left), JsonValue::Array(right)) => {
+                if left.is_empty() && right.is_empty() {
+                    return depth >= 2;
+                }
+                left.len() != right.len()
+                    || left.iter().zip(right).any(|(a, b)| any(a, b, depth + 1))
+            }
+            _ => true,
+        }
+    }
+    let mut left = mask(canonical_first);
+    let mut right = mask(canonical_second);
+    for rule in &trace.allowlist {
+        let path = parse_pointer_path(&rule.path)?;
+        replace_matching_paths(&mut left, &path, &JsonValue::Bool(true));
+        replace_matching_paths(&mut right, &path, &JsonValue::Bool(true));
+    }
+    // A run id identifies an execution; it is not evidence of replay behavior.
+    for value in [&mut left, &mut right] {
+        if let Some(map) = value.as_object_mut() {
+            map.remove("run_id");
+        }
+    }
+    Ok(any(&left, &right, 0))
 }
 
 pub fn canonicalize_run(
@@ -788,6 +858,63 @@ mod tests {
         let report = run_replay_oracle_trace(&base_trace()).expect("oracle succeeds");
         assert!(report.passed, "{report:?}");
         assert_eq!(report.divergence, None);
+    }
+
+    #[test]
+    fn fully_allowlisted_replays_are_not_a_successful_comparison() {
+        let mut trace = base_trace();
+        trace.allowlist = vec![ReplayAllowlistRule {
+            path: "/*".to_string(),
+            reason: "ignore all recorded values".to_string(),
+            replacement: None,
+        }];
+        for expectation in [ReplayExpectation::Match, ReplayExpectation::Drift] {
+            trace.expect = expectation;
+            let error = run_replay_oracle_trace(&trace).expect_err("no comparison must fail");
+            assert!(matches!(error, ReplayOracleError::NothingCompared));
+            assert!(error.to_string().contains("expectations_compared=0"));
+        }
+    }
+
+    #[test]
+    fn an_allowlisted_payload_still_compares_array_shape() {
+        let mut trace = base_trace();
+        trace.allowlist.push(ReplayAllowlistRule {
+            path: "/event_log_entries/*".to_string(),
+            reason: "ignore event contents".to_string(),
+            replacement: None,
+        });
+        trace
+            .second_run
+            .event_log_entries
+            .push(json!({"extra": true}));
+        trace.expect = ReplayExpectation::Drift;
+        let report = run_replay_oracle_trace(&trace).expect("array lengths are comparable");
+        assert!(
+            report.passed,
+            "a real shape difference satisfies expected drift"
+        );
+    }
+
+    #[test]
+    fn ordinary_payload_cannot_collide_with_the_allowlist_mask() {
+        let mut trace = base_trace();
+        trace.allowlist.retain(|rule| rule.path == "/run_id");
+        let entry = json!({"$harn_replay_allowlisted": true});
+        trace.first_run.event_log_entries = vec![entry.clone()];
+        trace.second_run.event_log_entries = vec![entry];
+        let report = run_replay_oracle_trace(&trace).expect("payload is comparable");
+        assert!(report.passed);
+    }
+
+    #[test]
+    fn an_unmasked_empty_record_is_measured_evidence() {
+        let mut trace = base_trace();
+        trace.allowlist.retain(|rule| rule.path == "/run_id");
+        trace.first_run.event_log_entries = vec![json!({})];
+        trace.second_run.event_log_entries = vec![json!({})];
+        let report = run_replay_oracle_trace(&trace).expect("empty record is comparable");
+        assert!(report.passed);
     }
 
     #[test]

@@ -289,6 +289,120 @@ fn file_dirty_at_the_boundary_restores_to_its_dirty_content_not_head() {
     assert_eq!(read(root, "a.txt"), "a uncommitted work\n");
 }
 
+fn change_kinds(receipt: &Value) -> Vec<(String, String)> {
+    receipt["changes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("changes missing in {receipt}"))
+        .iter()
+        .map(|c| {
+            (
+                c["path"].as_str().unwrap().into(),
+                c["kind"].as_str().unwrap().into(),
+            )
+        })
+        .collect()
+}
+
+/// The scan reads only what git lists, so a checkout that rewrites clean
+/// files is seen through the HEAD change, not through a full-tree walk.
+#[test]
+fn a_checkout_that_rewrites_clean_files_is_attributed_and_restored() {
+    let dir = repo();
+    let root = dir.path();
+    git(root, &["checkout", "-q", "-b", "other"]);
+    fs::write(root.join("a.txt"), "a on other\n").unwrap();
+    git(root, &["commit", "-q", "-am", "other"]);
+    git(root, &["checkout", "-q", "-"]);
+    let s = Session::new(root);
+    s.capture("turn-1");
+
+    let attributed = s.call_with("shell-1", Some("process_exec"), || {
+        git(root, &["checkout", "-q", "other"]);
+    });
+    assert_eq!(
+        change_kinds(&attributed),
+        [("a.txt".into(), "modified".into())]
+    );
+    s.restore("turn-1");
+    assert_eq!(read(root, "a.txt"), "a original\n");
+}
+
+/// A dirty file put back to HEAD leaves git's list; committing a dirty file
+/// leaves it too but changes nothing on disk.
+#[test]
+fn leaving_the_dirty_list_is_a_change_only_when_the_file_changed() {
+    let dir = repo();
+    let root = dir.path();
+    fs::write(root.join("a.txt"), "a uncommitted work\n").unwrap();
+    fs::write(root.join("b.txt"), "b ready to commit\n").unwrap();
+    let s = Session::new(root);
+    s.capture("turn-1");
+
+    let attributed = s.call_with("shell-1", Some("process_exec"), || {
+        git(root, &["checkout", "--", "a.txt"]);
+        git(root, &["commit", "-q", "-m", "b", "b.txt"]);
+    });
+    assert_eq!(
+        change_kinds(&attributed),
+        [("a.txt".into(), "modified".into())]
+    );
+    s.restore("turn-1");
+    assert_eq!(read(root, "a.txt"), "a uncommitted work\n");
+    assert_eq!(read(root, "b.txt"), "b ready to commit\n");
+}
+
+/// `git status` never checks a file flagged assume-unchanged or
+/// skip-worktree, so the scan must stat those itself.
+#[test]
+fn edits_to_files_git_is_told_not_to_check_are_attributed_and_restored() {
+    let dir = repo();
+    let root = dir.path();
+    git(root, &["update-index", "--assume-unchanged", "a.txt"]);
+    git(root, &["update-index", "--skip-worktree", "b.txt"]);
+    let s = Session::new(root);
+    s.capture("turn-1");
+
+    let attributed = s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited while unchecked\n").unwrap();
+        fs::write(root.join("b.txt"), "b edited while unchecked\n").unwrap();
+    });
+    assert_eq!(
+        change_kinds(&attributed),
+        [
+            ("a.txt".into(), "modified".into()),
+            ("b.txt".into(), "modified".into()),
+        ]
+    );
+    s.restore("turn-1");
+    assert_eq!(read(root, "a.txt"), "a original\n");
+    assert_eq!(read(root, "b.txt"), "b original\n");
+}
+
+/// Per-call cost follows what git lists, not the size of the tree.
+#[test]
+fn a_call_scan_stats_only_the_files_git_lists() {
+    let dir = repo();
+    let root = dir.path();
+    fs::create_dir_all(root.join("clean")).unwrap();
+    for n in 0..200 {
+        fs::write(root.join(format!("clean/{n}.txt")), n.to_string()).unwrap();
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "clean files"]);
+    fs::write(root.join("a.txt"), "a dirty\n").unwrap();
+    let s = Session::new(root);
+    let captured = s.capture("turn-1");
+    assert_eq!(captured["scanned_files"], 1, "{captured}");
+    let begin = s.call("call_begin", vec![("call_id", vm_string("tool-1"))]);
+    assert_eq!(begin["scanned_files"], 1, "{begin}");
+    fs::write(root.join("clean/7.txt"), "edited").unwrap();
+    let end = s.call("call_end", vec![("call_id", vm_string("tool-1"))]);
+    assert_eq!(
+        change_kinds(&end),
+        [("clean/7.txt".into(), "modified".into())]
+    );
+}
+
 #[test]
 fn concurrent_writer_to_a_different_file_is_kept() {
     let dir = repo();

@@ -106,6 +106,20 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + (values[6] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  buckets: cache_effective=" + (values[1] ?? "")
+      + " cache_supported_miss="
+      + (values[2] ?? "")
+      + " unsupported_zero="
+      + (values[3] ?? "")
+      + " support_unknown_zero="
+      + (values[4] ?? "")
+      + " no_prompt_tokens="
+      + (values[5] ?? "")
+      + " provider_field_inconsistent="
+      + (values[6] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  buckets: cache_effective=" + (values[1] ?? "")
       + " cache_supported_miss="
@@ -224,6 +238,17 @@ pub fn message_1(locale: string, values: list<string>) -> string {
       + (values[6] ?? "")
       + "\n"
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + "  run " + (values[1] ?? "") + ": " + (values[2] ?? "") + " input="
+      + (values[3] ?? "")
+      + " fresh="
+      + (values[4] ?? "")
+      + " cache_read="
+      + (values[5] ?? "")
+      + " cache_write="
+      + (values[6] ?? "")
+      + "\n"
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + "  运行 " + (values[1] ?? "") + "：" + (values[2] ?? "") + " input="
       + (values[3] ?? "")
@@ -316,6 +341,16 @@ pub fn message_2(locale: string, values: list<string>) -> string {
       + "\n"
   }
   if locale == "pt-BR" {
+    return (values[0] ?? "") + " " + (values[1] ?? "") + " support=" + (values[2] ?? "")
+      + " breakpoint="
+      + (values[3] ?? "")
+      + " verdict="
+      + (values[4] ?? "")
+      + " dogfood_failure="
+      + (values[5] ?? "")
+      + "\n"
+  }
+  if locale == "ru" {
     return (values[0] ?? "") + " " + (values[1] ?? "") + " support=" + (values[2] ?? "")
       + " breakpoint="
       + (values[3] ?? "")

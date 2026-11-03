@@ -30,6 +30,7 @@ pub(super) fn fork_session_checked(
     before_publish: impl FnOnce(),
 ) -> Result<Outcome<ForkReceipt>, HostlibError> {
     const FORK: &str = "workspace_checkpoint_fork";
+    let _operation = super::operation();
     validate_session_id(FORK, source_id)?;
     validate_session_id(FORK, target_id)?;
     if source_id == target_id {
@@ -171,6 +172,8 @@ pub(super) fn fork_session_checked(
         // Inherited calls keep their invocations; new ones must not reuse them.
         revision,
         interrupted: None,
+
+        stored_hashes: HashMap::new(),
     };
     if let Err(error) = super::persist::save(target_id, &child) {
         if let Err(cleanup) = stdfs::remove_dir_all(&target_dir) {

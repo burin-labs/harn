@@ -13,9 +13,9 @@ harn models info <model>
 
 ### Inference admission preview
 
-`harn provider admission --request '<JSON>'` returns a policy decision for a
-concrete provider and model without resolving credentials or contacting the
-provider. For example:
+`harn provider admission --request '<JSON>'` checks the configured endpoint,
+then returns a policy decision for a concrete provider and model without
+contacting the provider. For example:
 
 ```bash
 harn provider admission --request '{"provider":"ollama","model":"selected-model","boundary":{"reach":"local_only","allow_training_discounts":false}}'
@@ -34,6 +34,13 @@ route facts, never credentials, endpoint URLs, or request-control values.
 `training_control_planned` describes a control the transport can apply. The
 preview does not apply it or establish model readiness. Inference enforces its
 boundary again at dispatch.
+
+A malformed configured endpoint exits unsuccessfully and returns a JSON
+`configuration_error`: `invalid_url` or `not_absolute_http`. These diagnostics
+contain no endpoint or credential values. A valid destination without trusted
+privacy facts still returns its actual admission decision. Native transports
+validate their unchanged catalog endpoint templates when resolving platform
+configuration; this check doesn't establish credentials or endpoint readiness.
 
 When a host sets an inference ceiling, privacy and model facts come from the
 host and verified catalog. Project `[llm]` overrides can restrict a route but
@@ -59,9 +66,13 @@ training on API traffic with no control to stop it is `denied` under
 and the typed `data_controls_refusal: training_without_control`, because
 inference refuses it before sending. Hosts read the typed field.
 
-Embedders can call `harn_vm::llm::api::preview_inference_admission`. Request and
-snapshot schemas and host records are generated from those owning types in
-the published protocol artifacts.
+Embedders gating startup call `harn_vm::llm::api::preflight_inference_admission`.
+It returns a snapshot or a typed `ProviderEndpointConfigurationError` before
+privacy admission. It uses the active session's endpoint resolution, including
+project, environment and host overrides. The policy-only
+`preview_inference_admission` remains available when configuration validation
+is handled separately. Request, snapshot and diagnostic schemas and host
+records are generated from their owning types in the published protocol artifacts.
 
 Set the provider credential in the environment. The complete list of providers
 and the variables each one reads is in

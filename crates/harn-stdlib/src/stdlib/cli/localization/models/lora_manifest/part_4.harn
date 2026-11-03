@@ -29,6 +29,9 @@ pub fn message_20(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  professor: " + (values[0] ?? "") + " via " + (values[1] ?? "")
   }
+  if locale == "ru" {
+    return "  учитель: " + (values[0] ?? "") + " через " + (values[1] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  教师: " + (values[0] ?? "") + " 通过 " + (values[1] ?? "")
   }
@@ -65,6 +68,9 @@ pub fn message_21(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  origem do modelo: " + (values[0] ?? "")
   }
+  if locale == "ru" {
+    return "  источник шаблона: " + (values[0] ?? "")
+  }
   if locale == "zh-Hans" {
     return "  模板来源: " + (values[0] ?? "")
   }
@@ -100,6 +106,9 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  modelo: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  шаблон: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  模板: " + (values[0] ?? "")
@@ -140,6 +149,9 @@ pub fn message_23(locale: string, values: list<string>) -> string {
     return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
       + ")"
   }
+  if locale == "ru" {
+    return "  формат инструмента: " + (values[0] ?? "") + " (запрошен " + (values[1] ?? "") + ")"
+  }
   if locale == "zh-Hans" {
     return "  工具格式：" + (values[0] ?? "") + "（请求 " + (values[1] ?? "") + "）"
   }
@@ -175,6 +187,9 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "  treinador: " + (values[0] ?? "")
+  }
+  if locale == "ru" {
+    return "  тренер: " + (values[0] ?? "")
   }
   if locale == "zh-Hans" {
     return "  训练器：" + (values[0] ?? "")

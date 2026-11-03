@@ -92,6 +92,50 @@ fn signed_reasoning_blocks_round_trip_on_anthropic_routes() {
 }
 
 #[test]
+fn binding_controls_apply_only_to_supported_adaptive_signed_history() {
+    use super::anthropic::prepare_thinking_binding;
+    let signed = serde_json::json!([{"role":"assistant", "content":[
+        {"type":"thinking", "thinking":"reason", "signature":"signed"},
+        {"type":"text", "text":"answer"}
+    ]}]);
+    let mut adaptive = serde_json::json!({"model":"claude-haiku-5-5", "messages":signed});
+    assert!(prepare_thinking_binding(
+        &mut adaptive,
+        "anthropic",
+        "ignored"
+    ));
+    assert_eq!(adaptive["thinking"]["type"], "adaptive");
+    assert_eq!(
+        adaptive["thinking"]["block_binding"]["prefix_mismatch_behavior"],
+        "drop_block"
+    );
+    assert_eq!(adaptive["messages"][0]["content"][0]["signature"], "signed");
+
+    let mut disabled = serde_json::json!({"model":"claude-haiku-5-5", "thinking":{"type":"disabled"}, "messages":signed});
+    let before = disabled.clone();
+    assert!(!prepare_thinking_binding(
+        &mut disabled,
+        "anthropic",
+        "ignored"
+    ));
+    assert_eq!(disabled, before);
+
+    let mut old = serde_json::json!({"model":"claude-haiku-4-5", "thinking":{"type":"adaptive"}, "messages":signed});
+    let before = old.clone();
+    assert!(!prepare_thinking_binding(&mut old, "anthropic", "ignored"));
+    assert_eq!(old, before);
+
+    let mut unsigned = serde_json::json!({"model":"claude-haiku-5-5", "messages":[{"role":"user", "content":"hi"}]});
+    let before = unsigned.clone();
+    assert!(!prepare_thinking_binding(
+        &mut unsigned,
+        "anthropic",
+        "ignored"
+    ));
+    assert_eq!(unsigned, before);
+}
+
+#[test]
 fn unsigned_route_strips_anthropic_reasoning_blocks() {
     let mut opts = base_payload();
     opts.provider = "custom".to_string();

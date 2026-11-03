@@ -29,6 +29,9 @@ pub fn message_65(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "requisitos do template"
   }
+  if locale == "ru" {
+    return "требования шаблона"
+  }
   if locale == "zh-Hans" {
     return "模板要求"
   }
@@ -64,6 +67,9 @@ pub fn message_66(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "treinar adaptador"
+  }
+  if locale == "ru" {
+    return "обучить адаптер"
   }
   if locale == "zh-Hans" {
     return "训练适配器"
@@ -101,6 +107,9 @@ pub fn message_67(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "contrato do trainer"
   }
+  if locale == "ru" {
+    return "контракт тренера"
+  }
   if locale == "zh-Hans" {
     return "训练器契约"
   }
@@ -137,6 +146,9 @@ pub fn message_68(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "observações de treinamento"
   }
+  if locale == "ru" {
+    return "заметки по обучению"
+  }
   if locale == "zh-Hans" {
     return "训练说明"
   }
@@ -172,6 +184,9 @@ pub fn message_69(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "sim"
+  }
+  if locale == "ru" {
+    return "да"
   }
   if locale == "zh-Hans" {
     return "是"

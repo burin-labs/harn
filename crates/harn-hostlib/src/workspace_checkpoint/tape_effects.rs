@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use harn_vm::run_tape::{EffectScan, ToolEffectObserver};
 
-use super::{scan::scan_tree, scan_blind_to, Scan, MAX_STORED_FILE_BYTES};
+use super::scan::{diff, rescan, scan_tree, ScanChange};
+use super::{scan_blind_to, Scan, MAX_STORED_FILE_BYTES};
 
 /// The scanner a run tape uses for per-call file effects; pass it in
 /// `harn_vm::run_tape::TapeWorkspace`.
@@ -41,40 +42,36 @@ impl ToolEffectObserver for TapeEffectObserver {
                 incomplete: true,
             };
         };
-        let after = scan_tree(root, false);
+        let after = rescan(&before, root, false);
         let mut scan = EffectScan {
             changes: Vec::new(),
             incomplete: before.unlocated_error || after.unlocated_error,
         };
-        for (path, entry) in &after.index {
-            if before.index.get(path) == Some(entry) {
-                continue;
-            }
-            if scan_blind_to(&before, path) || scan_blind_to(&after, path) {
+        for (path, change) in diff(root, &before, &after) {
+            if scan_blind_to(&before, &path) || scan_blind_to(&after, &path) {
                 scan.incomplete = true;
             }
-            if entry.size > MAX_STORED_FILE_BYTES {
-                scan.incomplete = true;
-                continue;
-            }
-            match std::fs::read(root.join(path)) {
-                Ok(bytes) => scan.changes.push((path.clone(), Some(bytes))),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    scan.changes.push((path.clone(), None));
+            match change {
+                ScanChange::Deleted => scan.changes.push((path, None)),
+                // Replaying an unseen path as a delete would lose it.
+                ScanChange::Unseen => scan.incomplete = true,
+                ScanChange::Created | ScanChange::Modified => {
+                    let full = root.join(&path);
+                    if full
+                        .metadata()
+                        .is_ok_and(|meta| meta.len() > MAX_STORED_FILE_BYTES)
+                    {
+                        scan.incomplete = true;
+                        continue;
+                    }
+                    match std::fs::read(full) {
+                        Ok(bytes) => scan.changes.push((path, Some(bytes))),
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                            scan.changes.push((path, None));
+                        }
+                        Err(_) => scan.incomplete = true,
+                    }
                 }
-                Err(_) => scan.incomplete = true,
-            }
-        }
-        for path in before.index.keys() {
-            if after.index.contains_key(path) {
-                continue;
-            }
-            // Gone from the scan but still on disk: the scan stopped seeing it
-            // (a .gitignore edit, say). Replaying that as a delete would lose it.
-            if root.join(path).symlink_metadata().is_ok() {
-                scan.incomplete = true;
-            } else {
-                scan.changes.push((path.clone(), None));
             }
         }
         scan.changes.sort_by(|a, b| a.0.cmp(&b.0));

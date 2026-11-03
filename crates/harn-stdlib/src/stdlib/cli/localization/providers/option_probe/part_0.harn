@@ -64,6 +64,14 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + " "
       + (values[5] ?? "")
   }
+  if locale == "ru" {
+    return (values[0] ?? "") + ":" + (values[1] ?? "") + " " + (values[2] ?? "") + " claim="
+      + (values[3] ?? "")
+      + " observed="
+      + (values[4] ?? "")
+      + " "
+      + (values[5] ?? "")
+  }
   if locale == "zh-Hans" {
     return (values[0] ?? "") + ":" + (values[1] ?? "") + " " + (values[2] ?? "") + " claim="
       + (values[3] ?? "")

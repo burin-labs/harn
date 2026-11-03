@@ -92,6 +92,18 @@ pub fn message_0(locale: string, values: list<string>) -> string {
       + " estimated_cost_usd="
       + (values[6] ?? "")
   }
+  if locale == "ru" {
+    return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
+      + (values[2] ?? "")
+      + " first_token_ms="
+      + (values[3] ?? "")
+      + " input_tokens="
+      + (values[4] ?? "")
+      + " output_tokens="
+      + (values[5] ?? "")
+      + " estimated_cost_usd="
+      + (values[6] ?? "")
+  }
   if locale == "zh-Hans" {
     return "model_id=" + (values[0] ?? "") + " provider=" + (values[1] ?? "") + " latency_ms="
       + (values[2] ?? "")

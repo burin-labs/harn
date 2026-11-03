@@ -1145,6 +1145,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
                 assistant_state: std::sync::Mutex::new(
                     harn_vm::visible_text::VisibleTextState::default(),
                 ),
+                host_responder: None,
             });
 
             bridge.send_progress(

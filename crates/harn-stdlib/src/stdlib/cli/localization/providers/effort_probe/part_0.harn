@@ -37,6 +37,10 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "sonda de esforço: " + (values[0] ?? "") + "/" + (values[1] ?? "")
       + " rotas não puderam ser medidas de forma alguma; nenhuma conclusão de catálogo está disponível"
   }
+  if locale == "ru" {
+    return "effort-probe: " + (values[0] ?? "") + "/" + (values[1] ?? "")
+      + " маршрутов не удалось измерить вовсе; заключение по каталогу недоступно"
+  }
   if locale == "zh-Hans" {
     return "努力探测：无法对 " + (values[0] ?? "") + "/" + (values[1] ?? "")
       + " 路由进行任何测量；无法获得目录结论"

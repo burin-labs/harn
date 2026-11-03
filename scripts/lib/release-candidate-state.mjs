@@ -43,29 +43,155 @@ async function candidates(token,repository,source,fetchRecord){
   return sourceRuns(await githubWorkflowRuns(token,repository,'build-release-binaries.yml',
     {head_sha:source},fetchRecord),source);
 }
-async function manifest(token,repository,run,source,fetchRecord){
-  const name=`candidate-manifest-${source}`;
-  const artifacts=await githubArtifactCensus(token,repository,String(run.id),fetchRecord,name);
-  const matches=artifacts.filter(artifact=>artifact.name===name);
-  if(matches.length>1) refuse('candidate_manifest_ambiguous');
-  const artifact=matches[0];
-  if(!artifact)return false;
-  if(typeof artifact.expired!=='boolean'||!Number.isSafeInteger(artifact.size_in_bytes)
-    ||artifact.size_in_bytes<1||!/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
-    ||String(artifact.workflow_run?.id)!==String(run.id)||artifact.workflow_run?.head_sha!==source){
-    refuse('candidate_manifest_unmeasured');
-  }
-  return !artifact.expired;
-}
-
 /** The general selector remains success-only; all pages must be measured. */
 export async function successfulCandidateRuns(token,repository,source,fetchRecord=fetch){
   return (await candidates(token,repository,source,fetchRecord))
     .filter(run=>run.status==='completed'&&run.conclusion==='success');
 }
+
+// One settled run and its complete artifact inventory form the shared boundary
+// for scheduling reuse and for accepting a consumer rehearsal.
+async function settledProducer(token,repository,runId,source,fetchRecord,expected=null){
+  const run=await githubRecord(token,repository,runId,fetchRecord);
+  const matches=value=>String(value.id)===runId&&value.head_sha===source
+    &&value.run_attempt===run.run_attempt&&value.status==='completed'&&value.conclusion==='success'
+    &&value.event===run.event&&value.head_branch===run.head_branch
+    &&value.path==='.github/workflows/build-release-binaries.yml'
+    &&value.repository?.full_name===repository&&value.head_repository?.full_name===repository
+    &&['push','schedule','workflow_dispatch','merge_group'].includes(value.event);
+  if(!matches(run)||expected&&!matches(expected))refuse('source_candidate_attempt_changed');
+  const attempt=await githubRecord(token,repository,runId,fetchRecord,run.run_attempt);
+  if(!matches(attempt))refuse('source_candidate_attempt_unmeasured');
+  const artifacts=await githubArtifactCensus(token,repository,runId,fetchRecord);
+  const identity=rows=>JSON.stringify(rows.map(artifact=>({id:artifact.id,name:artifact.name,
+    expired:artifact.expired,size:artifact.size_in_bytes,digest:artifact.digest,
+    run:artifact.workflow_run?.id,head:artifact.workflow_run?.head_sha})).sort((a,b)=>a.id-b.id));
+  return {run,artifacts,async recheck(){
+    if(!matches(await githubRecord(token,repository,runId,fetchRecord)))refuse('source_candidate_attempt_changed');
+    const after=await githubArtifactCensus(token,repository,runId,fetchRecord);
+    if(identity(after)!==identity(artifacts))refuse('source_candidate_artifacts_changed');
+    if(!matches(await githubRecord(token,repository,runId,fetchRecord)))refuse('source_candidate_attempt_changed');
+  }};
+}
+
+function measuredArtifact(artifacts,name,runId,source){
+  const matches=artifacts.filter(artifact=>artifact.name===name);
+  const artifact=matches[0];
+  if(matches.length!==1||!Number.isSafeInteger(artifact.id)||artifact.id<1
+    ||artifact.expired!==false||!Number.isSafeInteger(artifact.size_in_bytes)||artifact.size_in_bytes<1
+    ||!/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
+    ||String(artifact.workflow_run?.id)!==runId||artifact.workflow_run?.head_sha!==source){
+    refuse('source_candidate_artifacts_unmeasured');
+  }
+  return artifact;
+}
+
+async function candidateManifest(token,repository,runId,source,snapshot,fetchRecord){
+  const name=`candidate-manifest-${source}`;
+  const artifact=measuredArtifact(snapshot.artifacts,name,runId,source);
+  const manifest=await githubArtifactJson(token,repository,artifact,{runId,headSha:source,
+    name,filename:'candidate-manifest.json'},fetchRecord);
+  if(manifest?.schemaVersion!=='burin-labs.candidate_manifest.v1'||manifest.repository!==repository
+    ||manifest.sourceCommit!==source||manifest.runId!==runId
+    ||manifest.runAttempt!==String(snapshot.run.run_attempt))refuse('source_candidate_manifest_unmeasured');
+  return {artifact,manifest};
+}
+
+/** Capture the exact completed producer before a fresh consumer rehearsal. */
+export async function qualifiedProducerIdentity(token,repository,runId,source,fetchRecord=fetch){
+  if(!shaPattern.test(source))refuse('source_identity_invalid');
+  const snapshot=await settledProducer(token,repository,runId,source,fetchRecord);
+  if(snapshot.run.head_branch!=='main')refuse('source_candidate_identity_unmeasured');
+  const {artifact}=await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
+  await snapshot.recheck();
+  return {producer_attempt:snapshot.run.run_attempt,manifest_id:artifact.id,manifest_digest:artifact.digest};
+}
+
+/** Source reuse is a decision about one settled producer attempt, not a run ID. */
+export async function reusableSourceCandidate(token,repository,source,targets,fetchRecord=fetch){
+  if(!Array.isArray(targets)||targets.length===0||new Set(targets).size!==targets.length
+    ||targets.some(target=>typeof target!=='string'||!/^[a-z0-9_-]+$/.test(target))){
+    refuse('source_candidate_targets_unmeasured');
+  }
+  const names=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${source}`,'harn-release-files'];
+  const requiredJobs=[...targets.map(target=>`Build ${target}`),'Assemble candidate manifest'];
+  for(const listed of await successfulCandidateRuns(token,repository,source,fetchRecord)){
+    if(listed.head_branch!=='main')continue;
+    const runId=String(listed.id);
+    const snapshot=await settledProducer(token,repository,runId,source,fetchRecord,listed);
+    if(snapshot.run.head_branch!=='main'||snapshot.run.event!==listed.event){
+      refuse('source_candidate_identity_unmeasured');
+    }
+    const {artifacts}=snapshot;
+    const selected=names.map(name=>artifacts.filter(artifact=>artifact.name===name));
+    if(selected.every(group=>group.length===0)){
+      await snapshot.recheck();
+      continue;
+    }
+    const jobs=await githubRunJobs(token,repository,runId,listed.run_attempt,fetchRecord);
+    if(jobs.length===0||requiredJobs.some(name=>{
+      const matches=jobs.filter(job=>job.name===name);
+      return matches.length!==1||String(matches[0].run_id)!==runId
+        ||matches[0].run_attempt!==listed.run_attempt||matches[0].head_sha!==source
+        ||matches[0].status!=='completed'||matches[0].conclusion!=='success';
+    })){
+      refuse('source_candidate_jobs_unmeasured');
+    }
+    for(const name of names)measuredArtifact(artifacts,name,runId,source);
+    const {manifest}=await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
+    if(!Array.isArray(manifest.artifacts)
+      ||manifest.artifacts.filter(artifact=>artifact.kind==='archive').length!==targets.length
+      ||targets.some(target=>manifest.artifacts.filter(artifact=>
+        artifact.kind==='archive'&&artifact.target===target&&artifact.artifact===`harn-${target}`
+        &&/^[0-9a-f]{64}$/.test(artifact.sha256)).length!==1)
+      ||!manifest.artifacts.some(artifact=>artifact.artifact==='harn-release-files'
+        &&/^[0-9a-f]{64}$/.test(artifact.sha256))){
+      refuse('source_candidate_manifest_unmeasured');
+    }
+    await snapshot.recheck();
+    return runId;
+  }
+  return '';
+}
+
+/** A rehearsal is bound to the exact settled producer, manifest and attempt. */
+export async function rehearsalBinding(token,repository,runId,source,fetchRecord=fetch){
+  if(!shaPattern.test(source))refuse('source_identity_invalid');
+  const snapshot=await settledProducer(token,repository,runId,source,fetchRecord);
+  const {run,artifacts}=snapshot;
+  const jobs=await githubRunJobs(token,repository,runId,run.run_attempt,fetchRecord);
+  const consumers=jobs.filter(job=>job.name==='Consumer release rehearsal / Consumer canary');
+  if(consumers.length!==1||String(consumers[0].run_id)!==runId
+    ||consumers[0].run_attempt!==run.run_attempt||consumers[0].head_sha!==source
+    ||consumers[0].status!=='completed'||consumers[0].conclusion!=='success'){
+    refuse('rehearsal_job_unmeasured');
+  }
+  const bindingName=`consumer-rehearsal-binding-${run.run_attempt}`;
+  const bindingArtifact=measuredArtifact(artifacts,bindingName,runId,source);
+  const {artifact:manifestArtifact}=await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
+  const binding=await githubArtifactJson(token,repository,bindingArtifact,{runId,headSha:source,
+    name:bindingName,filename:'consumer-rehearsal-binding.json'},fetchRecord);
+  if(binding?.schema!=='harn.release.consumer_rehearsal_binding.v1'||binding.verdict!=='pass'
+    ||binding.source_sha!==source||binding.producer_run!==runId||binding.producer_attempt!==run.run_attempt
+    ||binding.manifest_digest!==manifestArtifact.digest){
+    refuse('rehearsal_binding_identity_mismatch');
+  }
+  await snapshot.recheck();
+  return {...binding,evidence:{producer_attempt:run.run_attempt,
+    manifest:{id:manifestArtifact.id,digest:manifestArtifact.digest},
+    binding:{id:bindingArtifact.id,digest:bindingArtifact.digest}}};
+}
 export async function successfulCandidate(token,repository,source,fetchRecord=fetch){
   for(const run of await successfulCandidateRuns(token,repository,source,fetchRecord)){
-    if(await manifest(token,repository,run,source,fetchRecord))return String(run.id);
+    const runId=String(run.id);
+    const snapshot=await settledProducer(token,repository,runId,source,fetchRecord,run);
+    if(!snapshot.artifacts.some(artifact=>artifact.name===`candidate-manifest-${source}`)){
+      await snapshot.recheck();
+      continue;
+    }
+    await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
+    await snapshot.recheck();
+    return runId;
   }
   return '';
 }
@@ -179,12 +305,17 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
     const [operation,repository,sourceOrSelf]=process.argv.slice(2);
     const token=process.env.GH_TOKEN??process.env.GITHUB_TOKEN??cliAuthority;
     if(operation==='successful')console.log(await successfulCandidate(token,repository,sourceOrSelf,ghRead));
-    else if(operation==='successful-main-runs')console.log((await successfulCandidateRuns(token,repository,
-      sourceOrSelf,ghRead)).filter(run=>run.head_branch==='main').map(run=>String(run.id)).join('\n'));
-    else if(operation==='artifacts'){
-      const artifacts=await githubArtifactCensus(token,repository,sourceOrSelf,ghRead);
-      console.log(JSON.stringify({total_count:artifacts.length,artifacts}));
+    else if(operation==='source-reuse'){
+      const matrix=JSON.parse(process.argv[5]??'null');
+      if(!Array.isArray(matrix)||matrix.some(row=>!row||typeof row.target!=='string')){
+        refuse('source_candidate_targets_unmeasured');
+      }
+      console.log(await reusableSourceCandidate(token,repository,sourceOrSelf,matrix.map(row=>row.target),ghRead));
     }
+    else if(operation==='producer-identity')console.log(JSON.stringify(await qualifiedProducerIdentity(token,repository,
+      sourceOrSelf,process.argv[5],ghRead)));
+    else if(operation==='rehearsal-binding')console.log(JSON.stringify(await rehearsalBinding(token,repository,
+      sourceOrSelf,process.argv[5],ghRead)));
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
       process.env.RELEASE_RECOVERY_READ_TOKEN,repository,sourceOrSelf,{repository:process.env.CANARY_REPOSITORY,
         workflow:`.github/workflows/${process.env.CANARY_WORKFLOW}`},ghRead)));

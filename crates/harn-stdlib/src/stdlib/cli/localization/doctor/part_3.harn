@@ -29,6 +29,9 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "não sondado"
   }
+  if locale == "ru" {
+    return "не проверялось"
+  }
   if locale == "zh-Hans" {
     return "未探测"
   }
@@ -64,6 +67,9 @@ pub fn message_16(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "sondado"
+  }
+  if locale == "ru" {
+    return "проверено"
   }
   if locale == "zh-Hans" {
     return "已探测"
@@ -101,6 +107,9 @@ pub fn message_17(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "acessível"
   }
+  if locale == "ru" {
+    return "доступно"
+  }
   if locale == "zh-Hans" {
     return "可达"
   }
@@ -137,6 +146,9 @@ pub fn message_18(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "acessível (" + (values[0] ?? "") + "ms)"
   }
+  if locale == "ru" {
+    return "доступно (" + (values[0] ?? "") + "мс)"
+  }
   if locale == "zh-Hans" {
     return "可达（" + (values[0] ?? "") + "ms）"
   }
@@ -172,6 +184,9 @@ pub fn message_19(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "inacessível"
+  }
+  if locale == "ru" {
+    return "недостижимо"
   }
   if locale == "zh-Hans" {
     return "不可到达"

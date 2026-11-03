@@ -43,6 +43,7 @@ mod builtins;
 mod fork;
 mod persist;
 mod receipts;
+mod retire;
 mod scan;
 mod seed;
 mod tape_effects;
@@ -61,9 +62,11 @@ pub use receipts::{
     ConfirmedPath, DropReceipt, IrreversibleEffect, ObservedFileState, Outcome, PlanEntry,
     PlanReceipt, RestoreReceipt, Unavailable, WriterPolicy,
 };
+pub use retire::drop_session;
+use retire::operation;
 #[cfg(all(test, unix))]
 use scan::scan_tree_with_exclusions;
-use scan::{excluded_paths, is_excluded, scan_tree};
+use scan::{rescan, scan_tree, ScanChange};
 pub use seed::{
     ReplayWorkspace, SavedReplayWorkspace, SeedError, SeedLimits, SeedReceipt, SeedSchema,
 };
@@ -155,6 +158,8 @@ struct Scan {
     /// True when an error carried no path, so every path is suspect.
     unlocated_error: bool,
     elapsed_ms: u64,
+    /// Set when git listed the candidates; `None` when the scan walked the tree.
+    git: Option<scan::GitFacts>,
 }
 
 #[derive(Clone, Debug)]
@@ -212,6 +217,9 @@ struct Session {
     /// A durable incomplete index means this process cannot safely continue
     /// checkpoint operations after a mutation whose final receipt was lost.
     interrupted: Option<String>,
+    /// Content hash of each file the last capture stored, keyed by path with
+    /// the stat it had, so an unchanged dirty file is not read again.
+    stored_hashes: HashMap<String, (StatEntry, String)>,
 }
 
 type SharedSession = Arc<Mutex<Session>>;
@@ -247,6 +255,7 @@ fn lock(session: &SharedSession) -> std::sync::MutexGuard<'_, Session> {
 
 /// Whether a captured session still belongs to the requested workspace root.
 pub fn root_matches(session_id: &str, root: &Path) -> Option<bool> {
+    let _operation = operation();
     find_session(session_id).map(|session| lock(&session).root == resolve_root(Some(root)))
 }
 
@@ -283,6 +292,7 @@ pub fn capture_with_writer_policy(
     root: Option<&Path>,
     requested_policy: Option<WriterPolicy>,
 ) -> Result<Outcome<CaptureReceipt>, HostlibError> {
+    let _operation = operation();
     let fail = backend(CAPTURE_BUILTIN);
     validate_session_id(CAPTURE_BUILTIN, session_id)?;
     require_non_empty(CAPTURE_BUILTIN, "boundary_id", boundary_id)?;
@@ -309,9 +319,16 @@ pub fn capture_with_writer_policy(
         if let Some(detail) = pending_calls_detail(&state) {
             return Ok(unavailable("calls_in_flight", detail));
         }
-        Some((state.revision, state.boundaries.len(), state.writer_policy))
+        Some((
+            (state.revision, state.boundaries.len(), state.writer_policy),
+            state.stored_hashes.clone(),
+        ))
     } else {
         None
+    };
+    let (initial_generation, known_hashes) = match initial_generation {
+        Some((generation, hashes)) => (Some(generation), hashes),
+        None => (None, HashMap::new()),
     };
 
     let prefix = match git(&root, &["rev-parse", "--show-prefix"]) {
@@ -329,58 +346,69 @@ pub fn capture_with_writer_policy(
         Ok(out) => String::from_utf8_lossy(&out).trim().to_string(),
         Err(error) => return Ok(unavailable("index_not_writable_as_tree", error.detail())),
     };
-    let scan = scan_tree(&root, read_parent_ignores);
+    let scan = match scan::git_scan(&root) {
+        Ok(scan) => scan,
+        Err(error) => return Ok(unavailable("incomplete_capture", error.detail())),
+    };
     if scan.errors > 0 {
-        let paths = if scan.error_paths.is_empty() {
-            "unlocated".to_string()
-        } else {
-            scan.error_paths.join(", ")
-        };
         return Ok(unavailable(
             "incomplete_capture",
-            format!("workspace scan errors: {}; paths: {paths}", scan.errors),
+            format!(
+                "workspace scan errors: {}; paths: {}",
+                scan.errors,
+                scan.error_paths.join(", ")
+            ),
         ));
     }
-
-    let dirty = nul_list(&git_text(
-        &root,
-        &["ls-files", "-z", "-m", "-o", "--exclude-standard"],
-    )?)?;
-    let absent_tracked: BTreeSet<String> = nul_list(&git_text(&root, &["ls-files", "-z", "-d"])?)?
-        .into_iter()
-        .collect();
+    let facts = scan.git.as_ref().expect("a git scan records git facts");
+    let absent_tracked = facts.absent.clone();
 
     let blob_dir = blob_dir(&root, session_id);
     let mut stored = BTreeMap::new();
-    let mut unrestorable = BTreeMap::new();
+    let mut stored_hashes = HashMap::new();
+    let mut unrestorable: BTreeMap<String, String> = facts
+        .irregular
+        .iter()
+        .map(|path| (path.clone(), "not a regular file".to_string()))
+        .collect();
     let mut stored_bytes = 0u64;
-    let excluded = excluded_paths(&root);
-    for path in dirty {
-        if path.ends_with('/')
-            || absent_tracked.contains(&path)
-            || is_excluded(&root, &root.join(&path), &excluded)
-        {
-            continue; // nested repository, already deleted, or runtime-owned
-        }
-        let full = root.join(&path);
+    for path in scan.index.keys() {
+        let full = root.join(path);
         let Ok(meta) = stdfs::symlink_metadata(&full) else {
             continue;
         };
         if !meta.is_file() {
-            unrestorable.insert(path, "not a regular file".to_string());
+            unrestorable.insert(path.clone(), "not a regular file".to_string());
             continue;
         }
         if meta.len() > MAX_STORED_FILE_BYTES {
-            unrestorable.insert(path, "larger than the checkpoint size cap".to_string());
+            unrestorable.insert(
+                path.clone(),
+                "larger than the checkpoint size cap".to_string(),
+            );
             continue;
         }
-        let bytes =
-            stdfs::read(&full).map_err(|e| fail(format!("read {}: {e}", full.display())))?;
-        let hash = sha256_hex(&bytes);
-        store_blob(&blob_dir, &hash, &bytes).map_err(&fail)?;
-        stored_bytes += bytes.len() as u64;
+        // The stat is taken before the read, so a write racing the read leaves
+        // a stat that no longer matches and the next capture reads it again.
+        let stat = stat_entry(&meta);
+        let known = known_hashes
+            .get(path)
+            .filter(|(seen, hash)| *seen == stat && blob_dir.join(hash).is_file())
+            .map(|(_, hash)| hash.clone());
+        let hash = match known {
+            Some(hash) => hash,
+            None => {
+                let bytes = stdfs::read(&full)
+                    .map_err(|e| fail(format!("read {}: {e}", full.display())))?;
+                let hash = sha256_hex(&bytes);
+                store_blob(&blob_dir, &hash, &bytes).map_err(&fail)?;
+                hash
+            }
+        };
+        stored_bytes += meta.len();
+        stored_hashes.insert(path.clone(), (stat, hash.clone()));
         stored.insert(
-            path,
+            path.clone(),
             StoredFile {
                 hash,
                 exec: is_executable(&meta),
@@ -427,6 +455,7 @@ pub fn capture_with_writer_policy(
                 pending: HashMap::new(),
                 revision: 0,
                 interrupted: None,
+                stored_hashes: HashMap::new(),
             }))
         })
         .clone();
@@ -468,6 +497,7 @@ pub fn capture_with_writer_policy(
     }
     advance_revision(&mut state, CAPTURE_BUILTIN)?;
     state.boundaries.push(boundary);
+    state.stored_hashes = stored_hashes;
     if let Err(error) = persist::save(session_id, &state) {
         return Ok(unavailable(
             "capture_failed",
@@ -482,6 +512,7 @@ pub fn call_begin(
     session_id: &str,
     call_id: &str,
 ) -> Result<Outcome<CallBeginReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(CALL_BEGIN_BUILTIN, session_id)?;
     require_non_empty(CALL_BEGIN_BUILTIN, "call_id", call_id)?;
     let Some(session) = find_session(session_id) else {
@@ -519,7 +550,7 @@ pub fn call_begin(
             state.revision = previous_revision;
             return Ok(unavailable(
                 "checkpoint_persist_failed",
-                format!("tool execution was refused before it ran: {error}"),
+                format!("the tool call could not be recorded before it ran: {error}"),
             ));
         }
         (state.root.clone(), state.read_parent_ignores)
@@ -552,6 +583,7 @@ pub fn call_end(
     call_id: &str,
     side_effect: Option<SideEffectLevel>,
 ) -> Result<Outcome<CallEndReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(CALL_END_BUILTIN, session_id)?;
     require_non_empty(CALL_END_BUILTIN, "call_id", call_id)?;
     let Some(session) = find_session(session_id) else {
@@ -599,7 +631,7 @@ pub fn call_end(
             hook();
         }
     });
-    let after = scan_tree(&root, parents);
+    let after = rescan(&before, &root, parents);
     let mut changes = Vec::new();
     let mut push = |path: &str, kind: &'static str, post_hash: Option<String>, unreadable: bool| {
         changes.push(AttributedChange {
@@ -610,26 +642,26 @@ pub fn call_end(
             incomplete: unreadable || scan_blind_to(&before, path) || scan_blind_to(&after, path),
         });
     };
-    for (path, entry) in &after.index {
-        let kind = match before.index.get(path) {
-            None => "created",
-            Some(prior) if prior != entry => "modified",
-            Some(_) => continue,
+    for (path, change) in scan::diff(&root, &before, &after) {
+        let kind = match change {
+            ScanChange::Created => "created",
+            ScanChange::Modified => "modified",
+            ScanChange::Deleted => {
+                push(&path, "deleted", None, false);
+                continue;
+            }
+            ScanChange::Unseen => {
+                push(&path, "modified", None, true);
+                continue;
+            }
         };
         // A file replaced mid-hash reads as gone; record the deletion. A file
         // that cannot be hashed has an unknown post state.
-        match sha256_file(&root.join(path)) {
-            Ok(Some(hash)) => push(path, kind, Some(hash), false),
-            Ok(None) => push(path, "deleted", None, false),
-            Err(_) => push(path, kind, None, true),
+        match sha256_file(&root.join(&path)) {
+            Ok(Some(hash)) => push(&path, kind, Some(hash), false),
+            Ok(None) => push(&path, "deleted", None, false),
+            Err(_) => push(&path, kind, None, true),
         }
-    }
-    for path in before
-        .index
-        .keys()
-        .filter(|p| !after.index.contains_key(*p))
-    {
-        push(path, "deleted", None, false);
     }
     changes.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -665,6 +697,7 @@ pub fn call_end(
 
 /// Compute the restore plan to a boundary without touching the workspace.
 pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(PLAN_BUILTIN, session_id)?;
     require_non_empty(PLAN_BUILTIN, "boundary_id", boundary_id)?;
     let Some(session) = find_session(session_id) else {
@@ -710,6 +743,7 @@ pub fn restore_with_confirmations(
     only_paths: Option<&[String]>,
     confirmed_paths: &[ConfirmedPath],
 ) -> Result<Outcome<RestoreReceipt>, HostlibError> {
+    let _operation = operation();
     validate_session_id(RESTORE_BUILTIN, session_id)?;
     require_non_empty(RESTORE_BUILTIN, "boundary_id", boundary_id)?;
     if only_paths.is_some_and(<[String]>::is_empty) {
@@ -886,35 +920,6 @@ pub fn restore_with_confirmations(
         irreversible: planned.irreversible,
         persistence_error,
     }))
-}
-
-/// Drop a session's checkpoint state and stored blobs.
-pub fn drop_session(session_id: &str) -> DropReceipt {
-    let removed = sessions()
-        .lock()
-        .expect("workspace checkpoint registry poisoned")
-        .remove(session_id);
-    let Some(session) = removed else {
-        return DropReceipt {
-            dropped: false,
-            error: None,
-        };
-    };
-    let root = lock(&session).root.clone();
-    match stdfs::remove_dir_all(session_dir(&root, session_id)) {
-        Ok(()) => DropReceipt {
-            dropped: true,
-            error: None,
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DropReceipt {
-            dropped: true,
-            error: None,
-        },
-        Err(e) => DropReceipt {
-            dropped: false,
-            error: Some(format!("stored files were not removed: {e}")),
-        },
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1376,14 +1381,6 @@ fn git_text(root: &Path, args: &[&str]) -> Result<String, HostlibError> {
             builtin: CAPTURE_BUILTIN,
             message: format!("git {}: {e}", args.first().copied().unwrap_or_default()),
         })
-}
-
-fn nul_list(text: &str) -> Result<Vec<String>, HostlibError> {
-    Ok(text
-        .split('\0')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect())
 }
 
 /// Which of `paths` git ignores (used so a delete never targets an ignored

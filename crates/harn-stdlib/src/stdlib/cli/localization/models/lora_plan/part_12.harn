@@ -29,6 +29,9 @@ pub fn message_60(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "política de amostragem"
   }
+  if locale == "ru" {
+    return "политика выборки"
+  }
   if locale == "zh-Hans" {
     return "采样策略"
   }
@@ -64,6 +67,9 @@ pub fn message_61(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "condições de parada da seleção"
+  }
+  if locale == "ru" {
+    return "условия остановки выбора"
   }
   if locale == "zh-Hans" {
     return "选择停止条件"
@@ -101,6 +107,9 @@ pub fn message_62(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "observações de serving"
   }
+  if locale == "ru" {
+    return "заметки по подаче"
+  }
   if locale == "zh-Hans" {
     return "服务说明"
   }
@@ -137,6 +146,9 @@ pub fn message_63(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "sequências de parada"
   }
+  if locale == "ru" {
+    return "стоп-последовательности"
+  }
   if locale == "zh-Hans" {
     return "停止序列"
   }
@@ -172,6 +184,9 @@ pub fn message_64(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "observações do template"
+  }
+  if locale == "ru" {
+    return "заметки шаблона"
   }
   if locale == "zh-Hans" {
     return "模板说明"

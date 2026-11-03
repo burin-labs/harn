@@ -86,8 +86,8 @@ impl NativeVmLifecycle for Vm {
         for invocation in invocations {
             let arg = crate::value::json::json_to_vm_value(&current_payload);
             let closure = invocation.resolve(self).await?;
-            let raw = self
-                .call_closure_pub(&closure, &[harness.clone(), arg])
+            let raw = invocation
+                .scope(self.call_closure_pub(&closure, &[harness.clone(), arg]))
                 .await?;
             let (action, effects) =
                 crate::orchestration::collect_hook_effects_and_action(event, raw, VmValue::Nil)?;

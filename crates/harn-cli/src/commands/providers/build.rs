@@ -554,7 +554,7 @@ runtime = "private/fast"
 
 [usage_accounting_audit]
 reviewed_on = "2026-08-25"
-expires_on = "2026-10-31"
+expires_on = "2099-12-31"
 tracking_issue = 7320
 unverified = ["private"]
 

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A provider endpoint configuration diagnostic containing no supplied values.",
+  "enum": [
+    "invalid_url",
+    "not_absolute_http"
+  ],
+  "title": "ProviderEndpointConfigurationError",
+  "type": "string"
+}
