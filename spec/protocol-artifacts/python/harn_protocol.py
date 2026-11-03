@@ -2056,6 +2056,7 @@ class HarnSessionRecapSource(_HarnStrictRecapDataclass):
 class HarnSessionRecapTextFact(_HarnStrictRecapDataclass):
     text: str
     sourceEventId: int
+    messageId: Optional[str]
 
 @dataclass
 class HarnSessionRecapVerificationFact(_HarnStrictRecapDataclass):

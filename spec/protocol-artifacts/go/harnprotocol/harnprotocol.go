@@ -1747,8 +1747,9 @@ type HarnSessionRecapSource struct {
 }
 
 type HarnSessionRecapTextFact struct {
-	Text          string `json:"text"`
-	SourceEventID uint64 `json:"sourceEventId"`
+	Text          string  `json:"text"`
+	SourceEventID uint64  `json:"sourceEventId"`
+	MessageID     *string `json:"messageId"`
 }
 
 type HarnSessionRecapVerificationFact struct {

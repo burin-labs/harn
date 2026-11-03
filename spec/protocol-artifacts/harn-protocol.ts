@@ -2156,6 +2156,7 @@ export interface HarnSessionRecapSource {
 export interface HarnSessionRecapTextFact {
   text: string
   sourceEventId: number
+  messageId: string | null
 }
 
 export interface HarnSessionRecapVerificationFact {
@@ -2301,7 +2302,7 @@ function validateHarnSessionRecapSource(value: unknown): void {
 }
 
 function validateHarnSessionRecapTextFact(value: unknown): void {
-  harnSessionRecapObject(value, "HarnSessionRecapTextFact", ["text", "sourceEventId"])
+  harnSessionRecapObject(value, "HarnSessionRecapTextFact", ["text", "sourceEventId", "messageId"])
 }
 
 function validateHarnSessionRecapVerificationFact(value: unknown): void {
