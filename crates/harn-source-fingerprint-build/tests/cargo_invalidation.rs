@@ -69,11 +69,15 @@ fn cargo_reuses_unchanged_inputs_and_invalidates_a_changed_dependency() {
     fs::create_dir_all(root.join("component/src")).unwrap();
     fs::create_dir_all(root.join("consumer/src")).unwrap();
     let build_helper = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let helper = build_helper
-        .parent()
-        .unwrap()
-        .join("harn-source-fingerprint");
+    let crates = build_helper.parent().unwrap();
+    let helper = crates.join("harn-source-fingerprint");
     let helper = serde_json::to_string(&helper.to_string_lossy()).unwrap();
+    // The fixture sits outside the workspace, where rustup would otherwise pick the host's default.
+    fs::copy(
+        crates.parent().unwrap().join("rust-toolchain.toml"),
+        root.join("rust-toolchain.toml"),
+    )
+    .unwrap();
     let build_helper = serde_json::to_string(&build_helper.to_string_lossy()).unwrap();
     fs::write(
         root.join("Cargo.toml"),
