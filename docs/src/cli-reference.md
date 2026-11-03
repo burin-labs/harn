@@ -326,6 +326,39 @@ environment. An `isolated` or `granted` session therefore hands an MCP server
 or ACP provider only the runtime essentials, the grants that reach it, and the
 `env` entries in that server's or provider's own configuration.
 
+#### Command-bound grants and shell commands
+
+A `,for=COMMAND` grant matches the program Harn spawns. A shell-mode command
+spawns the shell, so the shell never matches. When a shell-mode command is
+exactly one plain command whose program a command-bound grant names, Harn
+spawns that command directly, without the shell, and only that process
+receives the grant. `gh issue list --limit 5` run in shell mode is spawned as
+`gh` with the arguments `issue list --limit 5`.
+
+Every other shell command keeps the shell and receives no command-bound grant.
+That covers lists and pipelines (`;`, `&&`, `||`, `|`, `&`), redirects and
+here-strings, command or process substitution, variable and tilde expansion,
+globs, subshells and groups, comments, an assignment prefix such as
+`GH_PAGER=env gh issue list`, a program named by path (`./gh`), and anything
+the parser does not recognize. The program is looked up on the child's
+`PATH`; shell startup files, aliases, and functions do not apply to a direct
+spawn.
+
+A granted `gh` cannot pass the grant on through the programs it starts:
+
+| Variable | Value for a granted `gh` | Exec path it closes |
+|---|---|---|
+| `GH_PAGER`, `PAGER` | empty | pager |
+| `GH_BROWSER`, `BROWSER` | `/usr/bin/false` | browser |
+| `GH_EDITOR`, `EDITOR`, `VISUAL` | `/usr/bin/false` | editor |
+| `XDG_DATA_HOME` | an empty directory under Harn's cache | extensions |
+| `GH_CONFIG_DIR` | a stand-in `config.yml` with no `!` aliases and no `hosts.yml` | shell aliases |
+
+These values are applied after the caller's `env` and the workspace defaults,
+so a caller overlay cannot restore a pager or editor. A variable that a grant
+reaching the same spawn exposes is left to that grant. If the extension
+directory is no longer empty, the spawn is refused.
+
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 

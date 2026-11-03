@@ -463,6 +463,11 @@ pub(crate) fn build_sandboxed_command(
         cmd.env_remove(key);
     }
     let closed = launch.closed_env || session_closed;
+    if session_closed {
+        cmd.envs(crate::stdlib::process::command_grant_env_hardening(
+            &launch.program,
+        )?);
+    }
     crate::process_sandbox::apply_active_rustc_wrapper_policy_for_command(
         &launch.program,
         &launch.args,
@@ -680,7 +685,10 @@ pub(super) fn process_exec_argv(
             let invocation =
                 crate::shells::resolve_invocation_from_vm_params(&invocation_params)
                     .map_err(|err| VmError::Runtime(format!("host_call process.exec: {err}")))?;
-            Ok((invocation.program, invocation.args))
+            match invocation.command_grant_argv() {
+                Some(argv) => split_argv(argv),
+                None => Ok((invocation.program, invocation.args)),
+            }
         }
         other => Err(VmError::Runtime(format!(
             "host_call process.exec unsupported mode {other:?}"

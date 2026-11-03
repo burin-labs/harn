@@ -204,6 +204,10 @@ The two boundaries never widen each other, and environment policy stays
 active under `--no-sandbox`. See
 [Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
 
+A command-bound grant reaches a shell-mode command only when Harn can spawn it
+directly; see
+[Command-bound grants and shell commands](./cli-reference.md#command-bound-grants-and-shell-commands).
+
 ### Cargo compiler wrappers
 
 Confined process calls measure a configured Rust compiler wrapper for a

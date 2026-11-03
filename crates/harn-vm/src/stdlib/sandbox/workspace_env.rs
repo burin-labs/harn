@@ -9,6 +9,9 @@ use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_onc
 #[path = "pinned_pnpm.rs"]
 mod pinned_pnpm;
 
+#[path = "gh_config.rs"]
+pub(crate) mod gh_config;
+
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 pub(crate) const WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
@@ -415,7 +418,7 @@ fn toolchain_env_at(
 /// `$XDG_CONFIG_HOME/gh`, then `~/.config/gh`, the order gh itself uses. Read
 /// from the session's launcher environment, like the cache paths above, so an
 /// embedding host seeds from the session it serves rather than its own process.
-fn gh_config_source(operator_home: &Path) -> PathBuf {
+pub(crate) fn gh_config_source(operator_home: &Path) -> PathBuf {
     let launcher = |key: &str| match crate::stdlib::process::current_session_environment() {
         Some(environment) => environment.launcher_value(key).map(str::to_string),
         None => crate::test_env::env_var_seamed(key),
@@ -431,11 +434,12 @@ fn gh_config_source(operator_home: &Path) -> PathBuf {
 
 /// Copy the credential-free `config.yml` into the stand-in. gh releases before
 /// 1.0 kept `oauth_token` in `config.yml`; such a file is not copied, and a copy
-/// left from an earlier spawn is removed.
-fn seed_gh_config_dir(source: &Path, cache: &Path, relative: &str) -> PathBuf {
+/// left from an earlier spawn is removed. Shell aliases are dropped; see
+/// [`gh_config::sanitize_gh_config`].
+pub(crate) fn seed_gh_config_dir(source: &Path, cache: &Path, relative: &str) -> PathBuf {
     let raw = std::fs::read_to_string(source.join("config.yml"))
         .ok()
-        .filter(|raw| !raw.contains("oauth_token"));
+        .and_then(|raw| gh_config::sanitize_gh_config(&raw));
     let _ = publish_stand_in(
         cache,
         &Path::new(relative).join("config.yml"),

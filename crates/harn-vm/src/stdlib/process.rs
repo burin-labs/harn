@@ -741,10 +741,13 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_command_grant.rs"]
+mod command_grant;
 #[path = "process_credential_presence.rs"]
 mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
+pub use command_grant::{command_bound_grant_reaches, command_grant_env_hardening};
 pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
 pub(crate) use program_resolution::{
     find_executable_for_spawn, resolve_program_path, resolve_program_path_for_spawn,
@@ -1234,6 +1237,8 @@ pub(crate) fn session_closed_env_for_command(
         return Ok(None);
     };
     env.extend(overlay);
+    // Last, so an overlay cannot reopen an exec path a granted program has.
+    env.extend(command_grant_env_hardening(program)?);
     Ok(Some(env.into_iter().collect()))
 }
 

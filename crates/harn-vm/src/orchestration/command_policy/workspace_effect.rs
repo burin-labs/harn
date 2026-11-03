@@ -170,6 +170,7 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
             .iter()
             .any(|arg| arg == "-o" || arg.starts_with("--output=")),
         "sed" => sed_invocation_is_read_only(args),
+        "gh" => gh_invocation_is_read_only(args),
         "yq" => !args.iter().any(|arg| {
             arg == "-i"
                 || arg == "--inplace"
@@ -180,6 +181,59 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
         }),
         _ => READ_ONLY_PROGRAMS.contains(&program),
     }
+}
+
+/// GitHub CLI command groups whose listed verbs only read. `release` is
+/// absent on purpose: every release subcommand is treated as an effect.
+const GH_READ_GROUPS: &[&str] = &["gist", "issue", "label", "pr", "repo", "run", "workflow"];
+const GH_READ_VERBS: &[&str] = &["checks", "diff", "list", "status", "view"];
+
+/// `gh pr list` and `gh api repos/o/r` read; `gh pr merge`, `gh issue
+/// comment`, and `gh api -X POST ...` change GitHub. Only the listed read verbs
+/// and a GET `gh api` call without request fields are reads. Unknown
+/// subcommands, `--web`, and every write stay unrecognized, which keeps them
+/// out of the observation phase.
+fn gh_invocation_is_read_only(args: &[String]) -> bool {
+    if args.iter().any(|arg| arg == "--web" || arg == "-w") {
+        return false;
+    }
+    match args {
+        [api, rest @ ..] if api == "api" => gh_api_is_read_only(rest),
+        [status] if status == "status" => true,
+        [group, verb, ..] => {
+            GH_READ_GROUPS.contains(&group.as_str()) && GH_READ_VERBS.contains(&verb.as_str())
+        }
+        _ => false,
+    }
+}
+
+/// A `gh api` call reads only with no method other than GET and no request
+/// field or body: gh switches to POST as soon as a field is given.
+fn gh_api_is_read_only(args: &[String]) -> bool {
+    let mut endpoint = false;
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        let method = match arg.as_str() {
+            "-X" | "--method" => Some(words.next().map(String::as_str).unwrap_or_default()),
+            other => other
+                .strip_prefix("--method=")
+                .or_else(|| other.strip_prefix("-X").filter(|method| !method.is_empty())),
+        };
+        if let Some(method) = method {
+            if !method.eq_ignore_ascii_case("GET") {
+                return false;
+            }
+            continue;
+        }
+        let field = ["-f", "-F", "--field", "--raw-field", "--input"]
+            .iter()
+            .any(|flag| arg == flag || (arg.starts_with(flag) && arg.len() > flag.len()));
+        if field {
+            return false;
+        }
+        endpoint |= !arg.starts_with('-');
+    }
+    endpoint
 }
 
 /// `sed -n '1,105p' file` reads; `sed -i`, a `w file` command, or an `e`
@@ -604,6 +658,51 @@ mod tests {
             "git show --ext-diff HEAD",
             "git grep --open-files-in-pager=touch needle",
             "git ls-remote --upload-pack='touch changed' .",
+        ] {
+            assert_ne!(effect(command), "read_effect", "{command}");
+        }
+    }
+
+    #[test]
+    fn gh_reads_are_observations_and_gh_writes_are_not() {
+        for command in [
+            "gh pr list --state open",
+            "gh issue view 12 --comments",
+            "gh pr checks 7",
+            "gh pr diff 7",
+            "gh run view 99 --log",
+            "gh status",
+            "gh api repos/o/r/pulls",
+            "gh api -X GET repos/o/r/issues",
+            "gh api --method=get repos/o/r",
+        ] {
+            assert_eq!(effect(command), "read_effect", "{command}");
+        }
+        for command in [
+            "gh pr create --fill",
+            "gh issue comment 12 --body hi",
+            "gh pr merge 7 --squash",
+            "gh issue close 12",
+            "gh pr edit 7 --title t",
+            "gh issue reopen 12",
+            "gh release list",
+            "gh release create v1",
+            "gh repo create o/r",
+            "gh repo edit --visibility public",
+            "gh repo delete o/r",
+            "gh repo fork o/r",
+            "gh api -X POST repos/o/r/issues",
+            "gh api --method DELETE repos/o/r",
+            "gh api -XPATCH repos/o/r",
+            "gh api repos/o/r/issues -f title=t",
+            "gh api repos/o/r/issues -Ftitle=t",
+            "gh api graphql --raw-field query=q",
+            "gh api repos/o/r --input body.json",
+            "gh api -X",
+            "gh api",
+            "gh pr view 7 --web",
+            "gh extension-name",
+            "gh",
         ] {
             assert_ne!(effect(command), "read_effect", "{command}");
         }
