@@ -1,0 +1,475 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
+import { llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+
+fn curate_with(harness: Harness, root: string, script: list, extra: dict) -> dict {
+  const evidence = [
+    {
+      id: "run-one",
+      session_id: "",
+      prompt: "Verify the widget package",
+      tool_sequence: ["run"],
+      observed_at: "2026-08-13T12:00:00Z",
+    },
+  ]
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      crystallization_curate(
+        harness,
+        {
+          project_root: root,
+          memory_root: path_join(root, "memory"),
+          session_store_root: root,
+          evidence: evidence,
+          now: "2026-08-13T12:05:00Z",
+          agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 2},
+        }
+          + extra,
+      )
+    },
+  )
+}
+
+fn priced_empty_batch() -> list {
+  return [
+    llm_tool_call("submit_crystallization_batch", {proposals: []})
+      + {input_tokens: 900, output_tokens: 40, simulated_cost_usd: 0.01},
+  ]
+}
+
+/** An interrupted review can be retried; only a successful batch consumes evidence. */
+pipeline test_curator_retries_evidence_after_an_incomplete_review(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const first = curate_with(
+        harness,
+        root,
+        [{text: "I have not submitted a batch."}, {text: "I still have no batch."}],
+        {require_new_evidence: true},
+      )
+      assert_ne(first.status, "natural", "the first review did not submit a batch")
+      assert_eq(first.agent_result.tools.successful, [], "no submission succeeded")
+      const second = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_ne(second.status, "no_new_evidence", "an incomplete review must not consume evidence")
+      assert(second?.usage != nil, "the second review actually reached the model fixture")
+      assert(second.agent_result.tools.successful.contains("submit_crystallization_batch"))
+      const third = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_eq(third.status, "no_new_evidence", "a successful review consumes the evidence")
+      assert_eq(third?.usage, nil, "completed evidence is not reviewed again")
+      return nil
+    },
+  )
+}
+
+/**
+ * A review whose evidence an earlier review already saw makes no model call.
+ * The host imports sessions before the curator runs, so "new" means unreviewed,
+ * not newly imported.
+ */
+pipeline test_curator_skips_without_new_evidence(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const first = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert(first?.usage != nil, "unreviewed evidence is reviewed by the model")
+      const again = curate_with(harness, root, priced_empty_batch(), {require_new_evidence: true})
+      assert_eq(again.status, "no_new_evidence")
+      assert_eq(again?.usage, nil, "no model call was made")
+      const next = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        {
+          require_new_evidence: true,
+          evidence: [
+            {
+              id: "run-one",
+              session_id: "",
+              prompt: "Verify the widget package",
+              tool_sequence: ["run"],
+            },
+            {
+              id: "run-two",
+              session_id: "",
+              prompt: "Verify the widget again",
+              tool_sequence: ["run"],
+            },
+          ],
+        },
+      )
+      assert(next?.usage != nil, "one unreviewed session is enough for a review")
+      return nil
+    },
+  )
+}
+
+fn session_running(id: string, ledger: list) -> dict {
+  return {
+    id: id,
+    session_id: "",
+    prompt: "Fix the widget",
+    tool_sequence: ["verify"],
+    command_ledger: ledger,
+  }
+}
+
+/** A new session that only ran an installed check, and passed, is not reviewed by a model. */
+pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const library = {
+        require_new_evidence: true,
+        installed: [{name: "verify-widget", verify_command: "make gen && make check"}],
+      }
+      const learned = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s1",
+                [{tool: "verify", command: "make gen && make check", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+      )
+      assert_eq(learned.status, "no_new_workflow_evidence")
+      assert_eq(learned?.usage, nil, "no model call was made")
+      const failed = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s2",
+                [{tool: "verify", command: "make gen && make check", exit_code: 2, ok: false}],
+              ),
+            ],
+          },
+      )
+      assert(failed?.usage != nil, "a failed check is new workflow evidence")
+      const other = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library
+          + {
+            evidence: [
+              session_running(
+                "s3",
+                [{tool: "run", command: "make deploy", exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+      )
+      assert(other?.usage != nil, "a command no installed check runs is new workflow evidence")
+      return nil
+    },
+  )
+}
+
+/** A proposal that matches an installed capability is not staged again. */
+pipeline test_curator_drops_a_proposal_matching_an_installed_capability(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const skill = {
+        kind: "skill",
+        name: "verify-widget",
+        title: "Verify Widget",
+        description: "Run the widget checks.",
+        when_to_use: "Before merging widget changes.",
+        body: "# Verify Widget\n\nRun the checks.",
+        evidence_ids: ["run-one"],
+      }
+      const result = curate_with(
+        harness,
+        root,
+        [llm_tool_call("submit_crystallization_batch", {proposals: [skill]})],
+        {installed: [{name: "verify-widget", verify_command: "make check"}]},
+      )
+      assert_eq(result.proposal_count, 0, "the installed capability is not proposed again")
+      const fresh = curate_with(
+        harness,
+        root,
+        [
+          llm_tool_call(
+            "submit_crystallization_batch",
+            {proposals: [skill + {name: "lint-widget"}]},
+          ),
+        ],
+        {installed: [{name: "verify-widget", verify_command: "make check"}]},
+      )
+      assert_eq(fresh.proposal_count, 1, "a new capability is still staged")
+      return nil
+    },
+  )
+}
+
+fn verify_tool(verify_command: string) -> dict {
+  return {
+    kind: "harn_tool",
+    name: "verify-widget",
+    title: "Verify Widget",
+    description: "Generate, then run the widget checks.",
+    when_to_use: "Before finishing a widget change.",
+    body: "# Verify Widget\n\nCall the tool.",
+    evidence_ids: ["run-one"],
+    artifact: {
+      entrypoint: "server.harn",
+      tool_names: ["verify_widget"],
+      source: "pipeline main(harness: Harness, task) { }",
+      test_source: "pipeline test_ok(harness: Harness, task) { }",
+      verify_command: verify_command,
+    },
+  }
+}
+
+fn submit_one(proposal: dict) -> list {
+  return [llm_tool_call("submit_crystallization_batch", {proposals: [proposal]})]
+}
+
+pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
+  const declared_command = "python3 check.py --expected \"left  right\""
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", expected: 0},
+    {command: declared_command, expected: 1},
+    {command: "  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            declared_checks: [{intent: "test", command: declared_command, cwd: ""}],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(
+          result.proposal_count ?? 0,
+          sample.expected,
+          "quoted argument bytes distinguish checks",
+        )
+        if sample.expected == 1 {
+          assert_eq(result.proposals[0].artifact.verify_command, sample.command)
+        }
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_declared_directory(harness: Harness) {
+  for sample in [
+    {command: "(cd 'web pkg' && npm test)", expected: 0},
+    {command: "(cd 'web  pkg' && npm test)", expected: 1},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            declared_checks: [{intent: "test", command: "npm test", cwd: "web  pkg"}],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(result.proposal_count ?? 0, sample.expected, "directory bytes distinguish checks")
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_installed_evidence(harness: Harness) {
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", review: true},
+    {command: "python3 check.py --expected \"left  right\"", review: false},
+    {command: "python3\tcheck.py  --expected 'left  right'", review: false},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          priced_empty_batch(),
+          {
+            require_new_evidence: true,
+            installed: [
+              {
+                name: "installed-check",
+                verify_command: "python3 check.py --expected \"left  right\"",
+              },
+            ],
+            evidence: [
+              session_running(
+                "spacing-evidence",
+                [{tool: "verify", command: sample.command, exit_code: 0, ok: true}],
+              ),
+            ],
+          },
+        )
+        assert_eq(
+          result?.usage != nil,
+          sample.review,
+          "only the same installed check suppresses review",
+        )
+        return nil
+      },
+    )
+  }
+}
+
+pipeline test_semantic_whitespace_in_proposal_duplicates(harness: Harness) {
+  for sample in [
+    {command: "python3 check.py --expected \"left right\"", expected: 1},
+    {command: "python3 check.py --expected \"left  right\"", expected: 0},
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const result = curate_with(
+          harness,
+          root,
+          submit_one(verify_tool(sample.command)),
+          {
+            installed: [
+              {
+                name: "installed-check",
+                verify_command: "python3 check.py --expected \"left  right\"",
+              },
+            ],
+            validator: { _source -> {outcome: "pass"} },
+          },
+        )
+        assert_eq(
+          result.proposal_count ?? 0,
+          sample.expected,
+          "only the same verifier is a duplicate",
+        )
+        return nil
+      },
+    )
+  }
+}
+
+/** Printed commands and shell control flow cannot substitute for a declared check. */
+pipeline test_curator_rejects_printed_checks_and_unknown_shell_context(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [{intent: "test", command: "make check", cwd: ""}],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      for command in [
+        "printf '%s' 'before && make check && after'",
+        "python3 -c 'print(\"before && make check && after\")'",
+        "make check &",
+        "exit 0 && make check",
+      ] {
+        const result = curate_with(harness, root, submit_one(verify_tool(command)), declared)
+        assert_eq(result.proposal_count ?? 0, 0, "not a root declared check: " + command)
+      }
+      return nil
+    },
+  )
+}
+
+/** Directory changes persist across prerequisites and end at the subshell boundary. */
+pipeline test_curator_matches_the_effective_check_directory(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [{intent: "test", command: "make check", cwd: ""}],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const wrong = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("cd web && python3 tools/codegen.py && make check")),
+        declared,
+      )
+      assert_eq(wrong.proposal_count ?? 0, 0, "an earlier cd still changes the check directory")
+      const restored = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("(cd web && npm test) && make check")),
+        declared,
+      )
+      assert_eq(restored.proposal_count, 1, "the subshell restores the root check directory")
+      const web = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("cd web && python3 codegen.py && npm test") + {name: "verify-web"}),
+        declared + {declared_checks: [{intent: "test", command: "npm test", cwd: "web"}]},
+      )
+      assert_eq(web.proposal_count, 2, "both correctly scoped proposals remain staged")
+      assert(
+        web.proposals.any({ proposal -> proposal.name == "verify-web" }),
+        "an earlier cd still applies after a prerequisite",
+      )
+      return nil
+    },
+  )
+}
+
+/** A learned verifier must run a declared test check word for word, never only a broader suite. */
+pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [
+          {intent: "test", command: "python3 -m pytest tests/alerts -m \"not soak\" -q", cwd: ""},
+          {intent: "test", command: "npm test", cwd: "web"},
+        ],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const wider = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("python3 tools/codegen.py && python3 -m pytest tests")),
+        declared,
+      )
+      assert_eq(wider.proposal_count ?? 0, 0, "a verifier running the whole suite is rejected")
+      const wrong_dir = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("python3 tools/codegen.py && npm test")),
+        declared,
+      )
+      assert_eq(
+        wrong_dir.proposal_count ?? 0,
+        0,
+        "a declared check run from the wrong directory is rejected",
+      )
+      const scoped = curate_with(
+        harness,
+        root,
+        submit_one(
+          verify_tool(
+            "python3 tools/codegen.py && python3 -m pytest tests/alerts -m 'not soak' -q",
+          ),
+        ),
+        declared,
+      )
+      assert_eq(scoped.proposal_count, 1, "codegen composed on top of a declared check is staged")
+      return nil
+    },
+  )
+}

@@ -1,0 +1,55 @@
+import { command_sequence_plan } from "std/command"
+
+pipeline test_literal_steps_preserve_arguments_and_directory_scopes() {
+  const plan = command_sequence_plan(
+    "python3 -m pytest -m 'not soak' && (cd web && npm test) && make check",
+  )
+  assert_eq(plan.status, "measured")
+  assert_eq(
+    plan.steps,
+    [
+      {argv: ["python3", "-m", "pytest", "-m", "not soak"], cwd: ""},
+      {argv: ["npm", "test"], cwd: "web"},
+      {argv: ["make", "check"], cwd: ""},
+    ],
+  )
+  const persistent = command_sequence_plan("cd web && python3 codegen.py && npm test", "packages")
+  assert_eq(persistent.status, "measured")
+  assert_eq(
+    persistent.steps,
+    [
+      {argv: ["python3", "codegen.py"], cwd: "packages/web"},
+      {argv: ["npm", "test"], cwd: "packages/web"},
+    ],
+  )
+  const quoted = command_sequence_plan("python3 -c 'print(\"a && b\")'")
+  // The shared literal decoder conservatively refuses parenthesized words.
+  assert_eq(quoted.status, "unmeasured")
+  const literal = command_sequence_plan("python3 tool.py 'a && make check && b'")
+  assert_eq(literal.status, "measured")
+  assert_eq(literal.steps, [{argv: ["python3", "tool.py", "a && make check && b"], cwd: ""}])
+}
+
+pipeline test_unknown_shell_context_is_never_empty_success() {
+  for source in [
+    "",
+    "cd web",
+    "make check &",
+    "make check || true",
+    "make check; npm test",
+    "make check > output",
+    "export MODE=test && make check",
+    "source env.sh && make check",
+    "exit 0 && make check",
+    "cd ../outside && make check",
+    "cd /tmp && make check",
+    "make $TARGET",
+    "if false; then make check; fi",
+    "make check | cat",
+    "make 'unterminated",
+  ] {
+    const plan = command_sequence_plan(source)
+    assert_eq(plan.status, "unmeasured", source)
+    assert_eq(plan.steps, [], "partial plans are not execution proof: " + source)
+  }
+}
