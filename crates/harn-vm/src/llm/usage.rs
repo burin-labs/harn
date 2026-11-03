@@ -23,10 +23,10 @@ pub use cost::{
     CallCostSettlement, CallCostUnpriced,
 };
 mod receipt;
-#[doc(inline)]
-pub use harn_llm::usage::ReportedCacheUsage;
 pub(crate) use harn_llm::usage::{cache_field_roots, extract_cache_counts, CacheCounts};
 pub(crate) use harn_llm::usage::{InputTokenBasis, PromptTokenCounts, ReportedTokenUsage};
+#[doc(inline)]
+pub use harn_llm::usage::{ReportedCacheTotals, ReportedCacheUsage};
 pub(crate) use receipt::ProviderUsageReceipt;
 
 struct ProviderReceiptSettlement {
@@ -157,6 +157,9 @@ pub struct LlmUsage {
     /// supported route `false` means the counters were omitted, not zero.
     #[serde(default)]
     pub cache_counts_present: bool,
+    /// Category measurements retain omissions and physical-call coverage.
+    #[serde(default)]
+    pub reported_cache: Option<Box<ReportedCacheTotals>>,
     pub cache_hit_ratio: Option<f64>,
     pub cache_savings_usd: f64,
     pub cache_hit: bool,
@@ -371,59 +374,6 @@ impl UsageCostCertainty {
     }
 }
 
-/// Cache token totals over the calls whose provider reported cache accounting.
-///
-/// A call counts only when its route declared cache accounting and the
-/// response reported it (`cache_visibility` null). The totals read `None`
-/// until such a call is folded, so an unreported count never reads as a
-/// measured zero.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ReportedCacheTotals {
-    pub reported_calls: i64,
-    pub read_tokens: i64,
-    pub write_tokens: i64,
-}
-
-impl ReportedCacheTotals {
-    pub(crate) fn record(&mut self, reported: bool, read_tokens: i64, write_tokens: i64) {
-        if !reported {
-            return;
-        }
-        self.reported_calls = self.reported_calls.saturating_add(1);
-        self.read_tokens = self.read_tokens.saturating_add(read_tokens);
-        self.write_tokens = self.write_tokens.saturating_add(write_tokens);
-    }
-
-    pub(crate) fn record_usage(&mut self, usage: &LlmUsage) {
-        self.record(
-            usage.cache_counts_reported(),
-            usage.cache_read_tokens,
-            usage.cache_write_tokens,
-        );
-    }
-
-    /// Calls folded after `before` was taken from the same running total.
-    #[must_use]
-    pub(crate) fn since(&self, before: &Self) -> Self {
-        Self {
-            reported_calls: self.reported_calls.saturating_sub(before.reported_calls),
-            read_tokens: self.read_tokens.saturating_sub(before.read_tokens),
-            write_tokens: self.write_tokens.saturating_sub(before.write_tokens),
-        }
-    }
-
-    #[must_use]
-    pub fn reported_read_tokens(&self) -> Option<i64> {
-        (self.reported_calls > 0).then_some(self.read_tokens)
-    }
-
-    #[must_use]
-    pub fn reported_write_tokens(&self) -> Option<i64> {
-        (self.reported_calls > 0).then_some(self.write_tokens)
-    }
-}
-
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
@@ -550,6 +500,14 @@ impl LlmUsage {
         // A retry or sibling with no response must not erase a response that did
         // report, so presence is any() rather than all().
         let cache_counts_present = usages.iter().any(|usage| usage.cache_counts_present);
+        let mut cache = ReportedCacheTotals::default();
+        for measured in usages
+            .iter()
+            .filter_map(|usage| usage.reported_cache.as_deref())
+        {
+            cache.merge(measured);
+        }
+        let reported_cache = (cache.reported_calls > 0).then(|| Box::new(cache));
         Self {
             input_tokens,
             output_tokens,
@@ -565,9 +523,9 @@ impl LlmUsage {
             cache_supported,
             cache_accounting_declared,
             cache_counts_present,
-            cache_hit_ratio: (cache_counts_present
-                && cache_accounting_declared == Some(true)
-                && cache_supported)
+            reported_cache,
+            cache_hit_ratio: (certainty.provider_call_count > 0
+                && cache.read_reported_calls == certainty.provider_call_count)
                 .then(|| super::cost::cache_hit_ratio(input_tokens, cache_read_tokens)),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
@@ -674,6 +632,7 @@ impl LlmUsage {
             cache_supported: true,
             cache_accounting_declared: Some(true),
             cache_counts_present: false,
+            reported_cache: None,
             cache_hit_ratio: Some(0.0),
             cache_savings_usd: 0.0,
             cache_hit: false,
@@ -799,9 +758,14 @@ impl LlmUsage {
         } else {
             unpriced_projection(cost_usd, table_cost)
         };
-        let cache_hit_ratio = (result.cache_counts_reported
-            && result.telemetry.cache_accounting_declared == Some(true)
-            && result.cache_supported)
+        let reported_cache = Self::cache_measurement(
+            result.telemetry.reported_cache_usage.as_deref().copied(),
+            result.telemetry.cache_accounting_declared,
+            result.cache_supported,
+        );
+        let cache_hit_ratio = reported_cache
+            .as_deref()
+            .is_some_and(|cache| cache.read_reported_calls == 1)
             .then(|| super::cost::cache_hit_ratio(result.input_tokens, result.cache_read_tokens));
         Self {
             input_tokens: result.input_tokens,
@@ -813,6 +777,7 @@ impl LlmUsage {
             cache_supported: result.cache_supported,
             cache_accounting_declared: result.telemetry.cache_accounting_declared,
             cache_counts_present: result.cache_counts_reported,
+            reported_cache,
             cache_hit_ratio,
             cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
                 detail.as_ref(),
@@ -938,6 +903,15 @@ impl LlmUsage {
             unpriced_projection(cost_usd, table_cost)
         };
         let usage_unknown = i64::from(!complete_counts);
+        let reported_cache = Self::cache_measurement(
+            receipt.reported_cache_usage,
+            receipt.cache_accounting_declared,
+            receipt.cache_supported,
+        );
+        let cache_hit_ratio = reported_cache
+            .as_deref()
+            .is_some_and(|cache| cache.read_reported_calls == 1)
+            .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens));
         let usage = Self {
             input_tokens,
             output_tokens,
@@ -948,10 +922,8 @@ impl LlmUsage {
             cache_supported: receipt.cache_supported,
             cache_accounting_declared: receipt.cache_accounting_declared,
             cache_counts_present: receipt.cache_counts_reported,
-            cache_hit_ratio: (receipt.cache_counts_reported
-                && receipt.cache_accounting_declared == Some(true)
-                && receipt.cache_supported)
-                .then(|| super::cost::cache_hit_ratio(input_tokens, receipt.cache_read_tokens)),
+            reported_cache,
+            cache_hit_ratio,
             cache_savings_usd: super::cost::cache_savings_usd_for_pricing(
                 detail.as_ref(),
                 free_route,
@@ -1111,6 +1083,12 @@ impl LlmUsage {
         }
         usage.put_int("cache_read_tokens", self.cache_read_tokens);
         usage.put_int("cache_write_tokens", self.cache_write_tokens);
+        usage.put(
+            "reported_cache",
+            crate::schema::json_to_vm_value(
+                &serde_json::to_value(&self.reported_cache).expect("cache measurements serialize"),
+            ),
+        );
         usage.put_bool("cache_supported", self.cache_supported);
         usage.insert(
             crate::value::intern_key("cache_hit_ratio"),
@@ -1150,7 +1128,24 @@ impl LlmUsage {
     /// cache accounting and the response carried the counters. An unsupported,
     /// undeclared, or omitted count is not a measured zero.
     pub(crate) fn cache_counts_reported(&self) -> bool {
-        self.cache_counts_present && self.cache_visibility().is_none()
+        self.reported_cache.is_some()
+    }
+
+    fn cache_measurement(
+        usage: Option<ReportedCacheUsage>,
+        declared: Option<bool>,
+        supported: bool,
+    ) -> Option<Box<ReportedCacheTotals>> {
+        let usage = usage.filter(|usage| usage.has_any() && declared == Some(true) && supported)?;
+        let mut totals = ReportedCacheTotals::default();
+        totals.record(usage);
+        Some(Box::new(totals))
+    }
+
+    pub(crate) fn record_cache_into(&self, totals: &mut ReportedCacheTotals) {
+        if let Some(measured) = self.reported_cache.as_deref() {
+            totals.merge(measured);
+        }
     }
 
     /// Mechanically add the canonical accounting fields to the flat provider
@@ -1223,6 +1218,10 @@ impl LlmUsage {
         );
         fields.insert("cache_supported".to_string(), self.cache_supported.into());
         fields.insert(
+            "reported_cache".to_string(),
+            serde_json::to_value(&self.reported_cache).expect("cache measurements serialize"),
+        );
+        fields.insert(
             "cache_hit_ratio".to_string(),
             self.cache_hit_ratio
                 .map_or(Value::Null, serde_json::Value::from),
@@ -1282,15 +1281,16 @@ impl LlmUsage {
             (meta::PROVIDER, serde_json::json!(provider)),
             (meta::INPUT_TOKENS, serde_json::json!(self.input_tokens)),
             (meta::OUTPUT_TOKENS, serde_json::json!(self.output_tokens)),
-            (
-                meta::CACHE_READ_TOKENS,
-                serde_json::json!(self.cache_read_tokens),
-            ),
-            (
-                meta::CACHE_WRITE_TOKENS,
-                serde_json::json!(self.cache_write_tokens),
-            ),
+            ("reported_cache", serde_json::json!(self.reported_cache)),
         ];
+        if let Some(cache) = self.reported_cache.as_deref() {
+            if let Some(read) = cache.reported_read_tokens() {
+                pairs.push((meta::CACHE_READ_TOKENS, serde_json::json!(read)));
+            }
+            if let Some(write) = cache.reported_write_tokens() {
+                pairs.push((meta::CACHE_WRITE_TOKENS, serde_json::json!(write)));
+            }
+        }
         if let Some(cost) = self.cost_usd {
             pairs.push((meta::COST_USD, serde_json::json!(cost)));
         }
@@ -1380,8 +1380,10 @@ impl ToolProbeUsage {
                     CacheCounts {
                         read_tokens: reported.cache_read_tokens.unwrap_or(0),
                         write_tokens: reported.cache_write_tokens.unwrap_or(0),
-                        reported: reported.cache_read_tokens.is_some()
-                            || reported.cache_write_tokens.is_some(),
+                        reported: ReportedCacheUsage {
+                            read_tokens: reported.cache_read_tokens,
+                            write_tokens: reported.cache_write_tokens,
+                        },
                     },
                     None,
                     reported.cache_read_tokens.is_some() || reported.cache_write_tokens.is_some(),

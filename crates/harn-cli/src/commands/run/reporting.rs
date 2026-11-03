@@ -679,6 +679,13 @@ mod trace_summary_pricing_tests {
                 cache_supported: true,
                 cache_accounting_declared: Some(true),
                 cache_counts_present: true,
+                reported_cache: Some(Box::new(harn_vm::llm::usage::ReportedCacheTotals {
+                    reported_calls: 1,
+                    read_reported_calls: 1,
+                    write_reported_calls: 1,
+                    read_tokens: 0,
+                    write_tokens: 0,
+                })),
                 cache_hit_ratio: Some(0.0),
                 cache_savings_usd: 0.0,
                 cache_hit: false,
