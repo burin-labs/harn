@@ -72,16 +72,16 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
-        "reader": "__first_ladder_step"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
         "reader": "explicit-routing-key-domain"
       },
       {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "reader": "__first_ladder_step"
       }
     ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
@@ -244,16 +244,16 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
-        "reader": "__first_ladder_step"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
         "reader": "explicit-routing-key-domain"
       },
       {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "reader": "__first_ladder_step"
       }
     ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",

@@ -4,6 +4,19 @@
 // ladder's first step, the model that serves the request, instead of falling
 // back to text tool calls on a request that also attaches no tools.
 import { agent_tool_format_resolution } from "std/agent/options"
+import { agent_preset } from "std/agent/presets"
+
+/** A preset routed by ladder alone leaves the format to the request's own resolution. */
+pipeline test_ladder_routed_preset_resolves_at_the_request(harness: Harness, task: unknown) {
+  const preset = agent_preset(harness, "audit")
+  assert_eq(preset?.tool_format, nil)
+  const first = harness.llm.model_ladder(preset.ladder).steps[0]
+  const direct = agent_tool_format_resolution(
+    harness.llm,
+    {provider: first.provider, model: first.model},
+  )
+  assert_eq(agent_tool_format_resolution(harness.llm, preset).tool_format, direct.tool_format)
+}
 
 pipeline test_named_ladder_resolves_the_tool_format_of_its_first_step(
   harness: Harness,
