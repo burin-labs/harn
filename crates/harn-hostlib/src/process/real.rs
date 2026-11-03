@@ -385,7 +385,7 @@ pub(crate) fn prepare_command_from(
     // Give the child workspace-local temp, home, and toolchain-cache paths.
     // Applied after `spec.env`; caller-set keys win. The values are workspace
     // paths, not secrets, so this does not widen the scrub surface above.
-    for (key, value) in process_sandbox::active_workspace_process_env() {
+    for (key, value) in process_sandbox::active_workspace_process_env_for(&spec.program) {
         if spec.env.contains_key(&key) {
             continue;
         }
