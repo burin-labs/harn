@@ -1010,6 +1010,8 @@ isolated execution host for untrusted repair code that requires that guarantee.
 |---|---|---|
 | always | `(deny default)` | every operation requires an explicit allow |
 | always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
+| always | `(allow signal (target same-sandbox))` | a process can signal its own sandboxed children, not the host's processes |
+| always | `(allow ipc-posix-sem (ipc-posix-name-prefix "/mp-"))` | Python `multiprocessing` locks work; other processes' named semaphores stay out of reach |
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
