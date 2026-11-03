@@ -6,6 +6,8 @@
 // The published upstream archive omits its internal test fixtures. Harn's
 // owning SDK tests exercise this crate as a normal dependency instead.
 #![cfg(not(test))]
+// Newer Clippy lints that upstream sources predate; the SDK files stay pristine.
+#![allow(clippy::result_large_err, clippy::useless_borrows_in_formatting)]
 /* Automatically managed default lints */
 #![cfg_attr(docsrs, feature(doc_cfg))]
 /* End of automatically managed default lints */
