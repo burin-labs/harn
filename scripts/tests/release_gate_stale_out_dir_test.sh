@@ -148,6 +148,11 @@ case "${1:-}" in
         echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/tree-sitter-not-a-hash/out/file: No such file or directory (os error 2)" >&2
         exit 101
       fi
+      if [[ "$FAKE_CARGO_MODE" == "stale-199" ]]; then
+        echo "error: couldn't find file \`$CARGO_BUILD_BUILD_DIR/debug/build/tree-sitter-bb1d5a918bffdfb1/out/stdlib-symbols.txt\`" >&2
+        echo "error: couldn't find file \`$CARGO_BUILD_BUILD_DIR/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs\`" >&2
+        exit 101
+      fi
       echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/tree-sitter-bb1d5a918bffdfb1/out/stdlib-symbols.txt: No such file or directory (os error 2)" >&2
       echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
       exit 101
@@ -365,6 +370,18 @@ if ! grep -Fq 'recovery: stale Cargo build-script outputs detected for warm preb
 fi
 if [[ ! -f "$tmp_root/target success/deps/keep" || ! -f "$tmp_root/target success/incremental/keep" ]]; then
   echo "package-scoped recovery discarded unrelated target artifacts" >&2
+  exit 1
+fi
+
+stale_199_state=$(run_case stale199 stale-199)
+if [[ "$(<"$stale_199_state/status")" -ne 0 ]]; then
+  echo "rustc 1.99 missing-include wording was not recovered" >&2
+  cat "$stale_199_state/output" >&2
+  exit 1
+fi
+if ! grep -Fxq 'clean -p libsqlite3-sys -p tree-sitter' "$stale_199_state/cargo-record"; then
+  echo "rustc 1.99 wording should clean the same implicated packages" >&2
+  cat "$stale_199_state/cargo-record" >&2
   exit 1
 fi
 
