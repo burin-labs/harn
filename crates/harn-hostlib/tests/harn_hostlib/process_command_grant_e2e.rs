@@ -95,7 +95,9 @@ impl Fixture {
 
     fn with(paths: impl FnOnce(&Path) -> Paths) -> Self {
         let user = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("user root");
-        let workspace = tempfile::tempdir().expect("workspace root");
+        // Not `$TMPDIR`: other suites in this binary repoint it under their
+        // own lock and remove the directory afterwards.
+        let workspace = tempfile::tempdir_in("/tmp").expect("workspace root");
         let home = user.path().join("home");
         write_executable(&user.path().join("bin/gh"), FAKE_GH);
         std::fs::create_dir_all(home.join(".config/gh")).unwrap();
