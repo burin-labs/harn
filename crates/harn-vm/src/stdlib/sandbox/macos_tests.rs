@@ -769,8 +769,10 @@ fn sandbox_exec_profile_allows_a_multiprocessing_lock_but_not_the_network() {
             .output()
             .expect("run sandbox-exec python smoke")
     };
+    // Match Python's own EPERM exception: the xcrun launcher prints its own
+    // "Operation not permitted" cache warning on every confined run.
     let denied = |output: &std::process::Output| {
-        String::from_utf8_lossy(&output.stderr).contains("Operation not permitted")
+        String::from_utf8_lossy(&output.stderr).contains("PermissionError: [Errno 1]")
     };
     let lock = run("import multiprocessing as m; l = m.Lock(); l.acquire(); l.release()");
     assert!(
