@@ -505,25 +505,35 @@ fn publish_stand_in(cache: &Path, relative: &Path, contents: Option<&str>) -> st
         libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
         0,
     ) {
+        // Compare the length first so a planted huge file is never read in.
         let mut current = String::new();
-        if existing.metadata().is_ok_and(|meta| meta.is_file())
+        if existing
+            .metadata()
+            .is_ok_and(|meta| meta.is_file() && meta.len() == contents.len() as u64)
             && existing.read_to_string(&mut current).is_ok()
             && current == contents
         {
             return Ok(());
         }
     }
-    let staging = format!(".{leaf}.harn-staging");
-    let _ = super::unlinkat_name(parent, &staging, 0);
+    // A per-spawn staging name, so concurrent seeds never rename each other's
+    // half-written file into place.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staging = format!(".{leaf}.harn-staging.{}.{counter}", std::process::id());
     let mut staged = super::openat_file(
         parent,
         &staging,
         libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
         0o600,
     )?;
-    staged.write_all(contents.as_bytes())?;
-    drop(staged);
-    super::renameat_name(parent, &staging, parent, &leaf)
+    let published = staged
+        .write_all(contents.as_bytes())
+        .and_then(|()| super::renameat_name(parent, &staging, parent, &leaf));
+    if published.is_err() {
+        let _ = super::unlinkat_name(parent, &staging, 0);
+    }
+    published
 }
 
 #[cfg(not(unix))]
