@@ -114,7 +114,13 @@ fn check_fs_path_scope_with_roots(
     let scope = match root_selection {
         PathScopeRoots::Assembled => scope_memo::scope_roots(&policy, access),
         PathScopeRoots::Declared => std::rc::Rc::new(scope_memo::ScopeRoots {
-            workspace: base_workspace_roots(&policy),
+            // The declared roots, plus the runtime dir a confined child's
+            // temp dir and toolchain cache live in.
+            workspace: {
+                let mut roots = base_workspace_roots(&policy);
+                roots.extend(workspace_env::granted_runtime_dir(&policy, &roots));
+                roots
+            },
             read_only: read_roots::normalized_declared_read_only_roots(&policy),
             read_deny: process_sandbox_read_deny_roots(&policy),
         }),

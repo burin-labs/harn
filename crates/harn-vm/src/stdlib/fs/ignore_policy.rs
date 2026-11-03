@@ -363,8 +363,8 @@ fn managed_scratch_root(path: &Path) -> Option<&Path> {
     path.ancestors().find(|ancestor| {
         matches!(
             ancestor.file_name().and_then(|name| name.to_str()),
-            Some(workspace_env::WORKSPACE_TMPDIR_NAME)
-                | Some(workspace_env::WORKSPACE_TOOLCHAIN_CACHE_NAME)
+            Some(workspace_env::LEGACY_WORKSPACE_TMPDIR_NAME)
+                | Some(workspace_env::LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
         )
     })
 }

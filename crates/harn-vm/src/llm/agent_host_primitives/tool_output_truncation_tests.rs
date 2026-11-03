@@ -159,17 +159,17 @@ async fn oversized_result_spills_and_the_model_sees_a_bounded_excerpt() {
     assert!(result["dropped_bytes"].as_u64().unwrap_or(0) > 1_900_000);
     let spill = std::path::PathBuf::from(result["full_output_path"].as_str().expect("spill path"));
     assert!(rendered.contains(&format!("full output saved to {}]", spill.display())));
-    // <workspace>/.harn-tmp/tool-results/<session>/<file>
+    // <runtime dir>/tmp/tool-results/<session>/<file>, outside the workspace,
+    // so spills never show in git status or a linter's walk.
     let temp_root = spill.ancestors().nth(3).expect("workspace temp root");
+    let execution_root = crate::stdlib::process::execution_root_path();
     assert_eq!(
-        temp_root.file_name(),
-        Some(std::ffi::OsStr::new(".harn-tmp"))
+        temp_root,
+        crate::stdlib::sandbox::sandbox_runtime_dir(&execution_root)
+            .unwrap()
+            .join("tmp")
     );
-    let ignore = std::fs::read_to_string(temp_root.join(".gitignore")).expect("self-ignore");
-    assert!(
-        ignore.lines().any(|line| line.trim() == "*"),
-        "spills stay out of git status: {ignore:?}"
-    );
+    assert!(!temp_root.starts_with(&execution_root));
     let spill_root = temp_root.join("tool-results");
     assert!(
         spill.starts_with(&spill_root),

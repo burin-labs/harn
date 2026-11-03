@@ -94,6 +94,48 @@ pub fn package_cache_dir() -> Option<PathBuf> {
     )
 }
 
+/// Where confined children's per-workspace runtime directories live, resolved
+/// from explicit values.
+///
+/// Deliberately not under [`package_cache_dir_from`]: the package cache is a
+/// writable developer-toolchain root, so a child granted it could write every
+/// other workspace's temp dir and caches. Resolution order:
+///
+/// 1. On macOS, `~/Library/Caches/harn-sandbox`.
+/// 2. On Windows, `%LOCALAPPDATA%\harn-sandbox`.
+/// 3. `$XDG_CACHE_HOME/harn-sandbox`, when absolute.
+/// 4. `~/.cache/harn-sandbox`.
+pub fn sandbox_runtime_base_from_environment(
+    os: &str,
+    home: Option<&Path>,
+    xdg_cache_home: Option<&OsStr>,
+    local_app_data: Option<&OsStr>,
+) -> Option<PathBuf> {
+    const NAME: &str = "harn-sandbox";
+    let home = home.filter(|home| home.is_absolute());
+    match os {
+        "macos" => home.map(|home| home.join("Library/Caches").join(NAME)),
+        "windows" => non_blank(local_app_data)
+            .filter(|root| root.is_absolute())
+            .map(|root| root.join(NAME)),
+        _ => non_blank(xdg_cache_home)
+            .filter(|root| root.is_absolute())
+            .or_else(|| home.map(|home| home.join(".cache")))
+            .map(|root| root.join(NAME)),
+    }
+}
+
+/// [`sandbox_runtime_base_from_environment`] against the current process
+/// environment.
+pub fn sandbox_runtime_base() -> Option<PathBuf> {
+    sandbox_runtime_base_from_environment(
+        std::env::consts::OS,
+        home_dir().as_deref(),
+        std::env::var_os("XDG_CACHE_HOME").as_deref(),
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+    )
+}
+
 /// Harn's per-user configuration directory, resolved from explicit values.
 ///
 /// This is the one owner of where user-level configuration lives

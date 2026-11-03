@@ -37,7 +37,9 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     assert!(!profile.contains("localhost:*"), "{profile}");
     // Default presets include UserTemp, so a non-empty grant also admits
     // sockets under the session temp dir, and never the shared temp dirs.
-    let session_temp = workspace_path.join(".harn-tmp");
+    let session_temp = super::super::sandbox_runtime_dir(&workspace_path)
+        .unwrap()
+        .join("tmp");
     assert!(
         session_temp.is_dir(),
         "rendering must provision session temp"
@@ -66,7 +68,10 @@ fn the_session_temp_takes_sockets_only_with_an_explicit_grant() {
         .expect("canonical workspace");
     let session_bind = format!(
         "(allow network-bind (subpath \"{}\"))",
-        workspace_path.join(".harn-tmp").display()
+        super::super::sandbox_runtime_dir(&workspace_path)
+            .unwrap()
+            .join("tmp")
+            .display()
     );
     let elsewhere = tempfile::tempdir().expect("an unrelated socket root");
     for granted in [false, true] {

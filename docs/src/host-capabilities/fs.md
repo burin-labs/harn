@@ -87,10 +87,11 @@ completed. These fields do not claim stronger guarantees than the filesystem
 or storage hardware provides. Import the typed `replace_text[_result]` and
 `replace_bytes[_result]` wrappers from `std/fs` for application code.
 
-`harness.fs.workspace_temp_dir()` returns a workspace-local scratch directory,
-creating it lazily. Sandboxed runs place the directory inside the active
-workspace root; unsandboxed runs use `.harn-tmp` relative to the script source
-root.
+`harness.fs.workspace_temp_dir()` returns a per-workspace scratch directory,
+creating it lazily. It is the `tmp` directory of the workspace's runtime dir in
+the user cache directory, outside the workspace, and the same directory a
+confined child's `TMPDIR` names. Sandboxed runs key it on the active workspace
+root; unsandboxed runs key it on the script source root.
 
 `harness.fs.mkdtemp_in_workspace(prefix?)` creates a uniquely named directory
 under `harness.fs.workspace_temp_dir()`. Prefer this for intermediate files

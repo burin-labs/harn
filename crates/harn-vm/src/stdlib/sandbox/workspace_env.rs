@@ -9,38 +9,101 @@ use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_onc
 #[path = "pinned_pnpm.rs"]
 mod pinned_pnpm;
 
-pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
-pub(crate) const WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
+
+/// The names the temp dir and toolchain cache had when they lived inside the
+/// first workspace root. Nothing creates them any more; a checkout that still
+/// holds one keeps it out of walks and replay snapshots.
+pub(crate) const LEGACY_WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
+pub(crate) const LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
+
+/// The temp dir and toolchain cache, as children of the runtime dir.
+const RUNTIME_TMPDIR_NAME: &str = "tmp";
+const RUNTIME_TOOLCHAIN_CACHE_NAME: &str = "toolchain";
+
+/// Hex digits of the workspace digest that names its runtime dir. A Unix
+/// socket address holds 104 bytes on Darwin, and a socket under `TMPDIR`
+/// (the JVM's `.java_pid<pid>`) needs room after the directory.
+const RUNTIME_DIR_DIGEST_HEX: usize = 16;
 
 /// Reserved workspace directory names owned by the runtime rather than the application.
 pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
-    name == OsStr::new(WORKSPACE_TMPDIR_NAME) || name == OsStr::new(WORKSPACE_TOOLCHAIN_CACHE_NAME)
+    name == OsStr::new(LEGACY_WORKSPACE_TMPDIR_NAME)
+        || name == OsStr::new(LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
-/// Where a workspace-local runtime directory lives, without creating it. The
-/// first normalized root is always the first base root, so this skips the git
-/// topology walk.
-fn planned_workspace_dir(policy: &CapabilityPolicy, name: &str) -> Option<PathBuf> {
+/// The per-workspace runtime directory a confined child's temp dir and
+/// toolchain cache live in: `<user cache>/harn-sandbox/<digest>`, the digest
+/// taken over the canonical workspace root. It sits outside every workspace,
+/// so a linter or test collector walking the tree never meets a child's
+/// temporary files, and is stable, so caches survive across runs. Computed
+/// without touching disk; `None` without a resolvable user cache directory.
+pub fn sandbox_runtime_dir(workspace_root: &Path) -> Option<PathBuf> {
+    // Resolved once: a spawn and the grant that admits its writes must name
+    // the same directory, even if something in the process later changes
+    // `HOME` or `XDG_CACHE_HOME`.
+    static BASE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let base = BASE.get_or_init(crate::user_dirs::sandbox_runtime_base);
+    let base = normalize_for_policy(base.as_ref()?);
+    let root = normalize_for_policy(workspace_root);
+    let mut digest = harn_kernel::pure::sha256_hex(root.as_os_str().as_encoded_bytes());
+    digest.truncate(RUNTIME_DIR_DIGEST_HEX);
+    Some(base.join(digest))
+}
+
+/// The runtime dir for the policy's first workspace root, without creating it.
+/// The first normalized root is always the first base root, so this skips the
+/// git topology walk.
+fn planned_runtime_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
     if !policy.sandbox_profile.enforces_path_scope() {
         return None;
     }
-    Some(base_workspace_roots(policy).into_iter().next()?.join(name))
+    sandbox_runtime_dir(base_workspace_roots(policy).first()?)
 }
 
-fn create_self_ignored_dir(
+/// The runtime dir as a write root, created when missing. Every backend and
+/// the in-process scope check grant it beside the workspace roots, including
+/// when only declared roots are in force. `None` when it cannot be created
+/// safely, so no backend is asked to grant a path that is not there.
+pub(super) fn granted_runtime_dir(
+    policy: &CapabilityPolicy,
+    base_roots: &[PathBuf],
+) -> Option<PathBuf> {
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return None;
+    }
+    let dir = sandbox_runtime_dir(base_roots.first()?)?;
+    let present = dir
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir());
+    if !present {
+        if let Err(error) = ensure_private_dir(&dir, 2) {
+            warn_once(
+                "handler_sandbox_runtime_dir",
+                &format!(
+                    "could not create the sandbox runtime dir '{}': {error}; \
+                     confined children get no private temp dir or toolchain cache",
+                    dir.display()
+                ),
+            );
+            return None;
+        }
+    }
+    Some(dir)
+}
+
+fn create_runtime_dir(
     policy: &CapabilityPolicy,
     name: &str,
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
-    let path = planned_workspace_dir(policy, name)?;
-    let root = path.parent()?;
-    if let Err(error) = initialize_self_ignored_dir(root, name) {
+    let path = planned_runtime_dir(policy)?.join(name);
+    if let Err(error) = ensure_private_dir(&path, 3) {
         warn_once(
             warning_key,
             &format!(
-                "could not create workspace-local {label} '{}': {error}; \
+                "could not create the sandbox {label} '{}': {error}; \
                  leaving the child's inherited environment in place",
                 path.display()
             ),
@@ -50,69 +113,115 @@ fn create_self_ignored_dir(
     Some(path)
 }
 
+/// Create `path` and the `owned` components ending it (`harn-sandbox`, the
+/// workspace digest, and a child) as owner-only directories. The user cache
+/// directory above them is the user's own and may be a symlink; every owned
+/// component is opened without following one, and a component owned by
+/// another user is refused rather than shared.
 #[cfg(unix)]
-fn initialize_self_ignored_dir(root: &Path, name: &str) -> std::io::Result<()> {
-    let (parent, leaf) = super::ensure_parent_dirs_scoped(&super::ScopedMutationTarget {
-        root: root.to_path_buf(),
-        relative: Path::new(name).join(".gitignore"),
-    })?;
-    let _ = write_scoped_self_ignore(&parent, &leaf);
+fn ensure_private_dir(path: &Path, owned: usize) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let mut names = Vec::with_capacity(owned);
+    let mut cache = path;
+    for _ in 0..owned {
+        let name = cache.file_name().and_then(OsStr::to_str).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("not a runtime dir path: {}", path.display()),
+            )
+        })?;
+        names.push(name);
+        cache = cache.parent().unwrap_or(Path::new(""));
+    }
+    std::fs::create_dir_all(cache)?;
+    let mut current = super::open_dir_absolute(&std::fs::canonicalize(cache)?)?;
+    for name in names.into_iter().rev() {
+        current = match super::open_dir_at(current.as_raw_fd(), name) {
+            Ok(next) => next,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match super::mkdirat_mode(current.as_raw_fd(), name, 0o700) {
+                    Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
+                        return Err(error)
+                    }
+                    _ => {}
+                }
+                super::open_dir_at(current.as_raw_fd(), name)?
+            }
+            Err(error) => return Err(error),
+        };
+        restrict_to_owner(&current)?;
+    }
     Ok(())
 }
 
 #[cfg(unix)]
-fn write_scoped_self_ignore(parent: &std::os::fd::OwnedFd, name: &str) -> std::io::Result<()> {
-    use std::io::Write;
+fn restrict_to_owner(dir: &std::os::fd::OwnedFd) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
 
-    // Retain the directory descriptor through publication: replacing the
-    // workspace path after mkdir-p must never create a host ignore file.
-    match super::openat_file(
-        parent.as_raw_fd(),
-        name,
-        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-        0o600,
-    ) {
-        Ok(mut file) => file.write_all(crate::runtime_paths::SELF_IGNORE_CONTENTS.as_bytes()),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(error) => Err(error),
+    let metadata = std::fs::File::from(dir.try_clone()?).metadata()?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    if metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "sandbox runtime dir is owned by another user",
+        ));
     }
+    if metadata.mode() & 0o077 != 0 {
+        // SAFETY: the descriptor is open for the duration of the call.
+        if unsafe { libc::fchmod(dir.as_raw_fd(), 0o700) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn initialize_self_ignored_dir(root: &Path, name: &str) -> std::io::Result<()> {
-    super::create_dir_all_scoped_target(&super::ScopedMutationTarget {
-        root: root.to_path_buf(),
-        relative: PathBuf::from(name),
-    })?;
-    let _ = crate::runtime_paths::ensure_self_ignored_dir(&root.join(name));
-    Ok(())
+fn ensure_private_dir(path: &Path, _owned: usize) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)
 }
 
-/// The session's own temp dir, `.harn-tmp` in the first writable workspace
-/// root, created on first use. A confined child's `TMPDIR`, `TMP`, and `TEMP`
-/// point here. `None` when the profile does not scope paths.
+/// The temp dir of the runtime dir for `workspace_root`, created on first use.
+/// For callers with no path-scoping policy to read the root from.
+pub(crate) fn runtime_tmpdir_for_root(workspace_root: &Path) -> std::io::Result<PathBuf> {
+    let path = sandbox_runtime_dir(workspace_root)
+        .ok_or_else(|| {
+            std::io::Error::other("no user cache directory for the sandbox runtime dir")
+        })?
+        .join(RUNTIME_TMPDIR_NAME);
+    ensure_private_dir(&path, 3)?;
+    Ok(path)
+}
+
+/// The session's own temp dir, `tmp` in the [`sandbox_runtime_dir`] of the
+/// first writable workspace root, created on first use. A confined child's
+/// `TMPDIR`, `TMP`, and `TEMP` point here. `None` when the profile does not
+/// scope paths.
 pub fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
-    create_self_ignored_dir(
+    create_runtime_dir(
         policy,
-        WORKSPACE_TMPDIR_NAME,
+        RUNTIME_TMPDIR_NAME,
         "handler_sandbox_workspace_tmpdir",
         "temp dir",
     )
 }
 
-fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Option<PathBuf> {
-    create_self_ignored_dir(
+/// The toolchain cache, `toolchain` in the same runtime dir.
+pub(super) fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    create_runtime_dir(
         policy,
-        WORKSPACE_TOOLCHAIN_CACHE_NAME,
+        RUNTIME_TOOLCHAIN_CACHE_NAME,
         "handler_sandbox_workspace_toolchain_cache",
         "toolchain cache",
     )
 }
 
 /// Preserve a caller-selected toolchain path only when it resolves inside a
-/// writable workspace root. This lets an outer harness prewarm one cache for
-/// the whole run without allowing an inherited global path to widen the jail.
+/// writable workspace root or the workspace's runtime dir. This lets an outer
+/// harness prewarm one cache for the whole run, and a nested confined run keep
+/// the cache its parent handed it, without allowing an inherited global path
+/// to widen the jail.
 fn inherited_workspace_cache_path(policy: &CapabilityPolicy, key: &str) -> Option<String> {
     if !crate::security::environment_policy::TOOLCHAIN_CACHE_ENV_VARS.contains(&key) {
         return None;
@@ -127,8 +236,9 @@ fn inherited_workspace_cache_path(policy: &CapabilityPolicy, key: &str) -> Optio
     }
     let resolved = normalize_for_policy(&candidate);
     base_workspace_roots(policy)
-        .iter()
-        .any(|root| path_is_within(&resolved, root))
+        .into_iter()
+        .chain(planned_runtime_dir(policy))
+        .any(|root| path_is_within(&resolved, &root))
         .then(|| resolved.display().to_string())
 }
 
@@ -366,7 +476,7 @@ fn toolchain_env_at(
         // Pointing the tool at the denied file, or leaving the default, is the
         // same crash. The stand-in keeps the non-credential lines (registry
         // URLs, scopes, store settings) so a private registry still resolves,
-        // and never carries a token into the workspace.
+        // and never carries a token into the toolchain cache.
         env.push((
             "NPM_CONFIG_USERCONFIG".to_string(),
             if seed {
@@ -379,7 +489,7 @@ fn toolchain_env_at(
         ));
         // Composer treats an unreadable `auth.json` as fatal, and that file
         // is on the credential denylist. Pointing COMPOSER_HOME at a
-        // workspace stand-in that carries `config.json` but never `auth.json`
+        // toolchain-cache stand-in that carries `config.json` but never `auth.json`
         // keeps repositories and preferred-install settings and drops tokens.
         env.push((
             "COMPOSER_HOME".to_string(),
@@ -419,7 +529,7 @@ fn seed_sanitized_npmrc(source: &Path, stand_in: &Path) -> PathBuf {
 /// forms are `_auth`, `_authToken`, and `_password`. Any key whose final
 /// segment begins with `_`, or any registry-scoped (`//…/:`) key, goes; plain
 /// settings (`registry=`, `@scope:registry=`, `store-dir=`) stay.
-/// Workspace-local Composer home: copy non-credential files, never `auth.json`.
+/// Toolchain-cache Composer home: copy non-credential files, never `auth.json`.
 fn seed_composer_home(operator_home: &Path, dest: &Path) -> PathBuf {
     let _ = std::fs::create_dir_all(dest);
     for name in ["config.json", "composer.json"] {
@@ -486,7 +596,7 @@ fn push_absent(env: &mut Vec<(String, String)>, entries: Vec<(String, String)>) 
 
 /// The environment a confined child starts with. Creates the workspace temp
 /// and cache directories and, on macOS, the launchers that keep the child's
-/// temporary storage inside the workspace.
+/// temporary storage in the workspace's runtime dir.
 pub(crate) fn inject_workspace_process_env(
     env: &mut Vec<(String, String)>,
     policy: &CapabilityPolicy,
@@ -510,10 +620,11 @@ pub(crate) fn inject_workspace_process_env(
 /// absent here.
 fn workspace_process_env_for_read(policy: &CapabilityPolicy) -> Vec<(String, String)> {
     let mut env = Vec::new();
-    if let Some(tmpdir) = planned_workspace_dir(policy, WORKSPACE_TMPDIR_NAME) {
+    let runtime = planned_runtime_dir(policy);
+    if let Some(tmpdir) = runtime.as_ref().map(|dir| dir.join(RUNTIME_TMPDIR_NAME)) {
         push_tmpdir(&mut env, &tmpdir);
     }
-    if let Some(root) = planned_workspace_dir(policy, WORKSPACE_TOOLCHAIN_CACHE_NAME) {
+    if let Some(root) = runtime.map(|dir| dir.join(RUNTIME_TOOLCHAIN_CACHE_NAME)) {
         push_absent(
             &mut env,
             toolchain_env_at(policy, &root, crate::user_dirs::package_cache_dir(), false),
@@ -583,7 +694,7 @@ fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityP
     env.push(("JAVA_TOOL_OPTIONS".to_string(), value));
 }
 
-/// Workspace-local temp and mutable toolchain-state defaults for the active
+/// Per-workspace temp and mutable toolchain-state defaults for the active
 /// restricted execution policy.
 pub fn active_workspace_process_env() -> Vec<(String, String)> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
@@ -743,45 +854,38 @@ mod tests {
         }
     }
 
+    /// The runtime dir is the child's to write, so a child can replace its
+    /// `tmp` with a symlink. The next spawn must refuse it rather than hand
+    /// the next child, or Harn's own writes, a directory somewhere else.
     #[cfg(unix)]
     #[test]
-    fn runtime_ignore_uses_the_opened_directory_after_a_workspace_path_swap() {
+    fn a_symlinked_runtime_child_is_refused_not_followed() {
         let workspace = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        std::fs::write(outside.path().join("marker"), "host-unchanged").unwrap();
-        let (parent, leaf) =
-            super::super::ensure_parent_dirs_scoped(&super::super::ScopedMutationTarget {
-                root: workspace.path().to_path_buf(),
-                relative: PathBuf::from(".harn-tmp/.gitignore"),
-            })
-            .unwrap();
-        let original = workspace.path().join("original-temp");
-        std::fs::rename(workspace.path().join(".harn-tmp"), &original).unwrap();
-        std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
+        let policy = policy(workspace.path());
+        let tmp = workspace_local_tmpdir(&policy).expect("ordinary temp dir");
+        std::fs::remove_dir(&tmp).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &tmp).unwrap();
 
-        write_scoped_self_ignore(&parent, &leaf).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(original.join(".gitignore")).unwrap(),
-            crate::runtime_paths::SELF_IGNORE_CONTENTS
-        );
-        assert!(!outside.path().join(".gitignore").exists());
-        assert_eq!(
-            std::fs::read_to_string(outside.path().join("marker")).unwrap(),
-            "host-unchanged"
-        );
+        let redirected = workspace_local_tmpdir(&policy);
+        std::fs::remove_dir_all(tmp.parent().unwrap()).unwrap();
+        assert_eq!(redirected, None);
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
     }
 
     #[test]
-    fn process_env_is_workspace_local_and_self_ignored() {
+    fn process_env_lives_in_the_runtime_dir_outside_the_workspace() {
         let workspace = tempfile::tempdir().unwrap();
         let policy = policy(workspace.path());
         let mut env = Vec::new();
         inject_workspace_process_env(&mut env, &policy);
         let env: BTreeMap<_, _> = env.into_iter().collect();
 
+        let runtime = sandbox_runtime_dir(workspace.path()).unwrap();
         let workspace = workspace.path().canonicalize().unwrap();
-        let cache = workspace.join(WORKSPACE_TOOLCHAIN_CACHE_NAME);
-        let tmp = workspace.join(WORKSPACE_TMPDIR_NAME);
+        let cache = runtime.join(RUNTIME_TOOLCHAIN_CACHE_NAME);
+        let tmp = runtime.join(RUNTIME_TMPDIR_NAME);
+        assert!(!runtime.starts_with(&workspace) && !workspace.starts_with(&runtime));
         // PURE CACHES relocate. These are derived and reproducible, so
         // confining them keeps a run from polluting the user's real caches.
         for key in [
@@ -842,10 +946,9 @@ mod tests {
                 Some(tmp.to_str().unwrap())
             );
         }
-        for root in [cache, tmp] {
-            let ignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-            assert!(ignore.lines().any(|line| line.trim() == "*"));
-        }
+        assert!(cache.is_dir() && tmp.is_dir());
+        assert_eq!(std::fs::read_dir(&workspace).unwrap().count(), 0);
+        std::fs::remove_dir_all(runtime).unwrap();
     }
 
     #[test]
@@ -947,11 +1050,9 @@ mod tests {
         let Some(userconfig) = env.get("NPM_CONFIG_USERCONFIG") else {
             return; // no resolvable home on this host
         };
-        let cache = workspace
-            .path()
-            .canonicalize()
+        let cache = sandbox_runtime_dir(workspace.path())
             .unwrap()
-            .join(WORKSPACE_TOOLCHAIN_CACHE_NAME);
+            .join(RUNTIME_TOOLCHAIN_CACHE_NAME);
         assert!(
             PathBuf::from(userconfig).starts_with(&cache),
             "userconfig must be the workspace stand-in, not ~/.npmrc: {userconfig}"

@@ -625,7 +625,7 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 /// name, including Foundation's native temporary-directory lookup. Not the host's
 /// shared temp dirs: `/tmp` and `/var/folders` hold every other process's
 /// files, so granting them lets a confined child read and overwrite its
-/// neighbours'. Caches that default there are moved into the workspace by
+/// neighbours'. Caches that default there are moved into the runtime dir by
 /// the child's environment instead.
 fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     // Provision before a server confines itself: subsequent spawns can read

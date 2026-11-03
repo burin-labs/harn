@@ -1190,22 +1190,22 @@ pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
             }
         }
     }
-    let path = resolve_fs_path(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME)?;
+    let root = resolve_fs_path(".")?;
+    let path =
+        crate::stdlib::sandbox::workspace_env::runtime_tmpdir_for_root(&root).map_err(|error| {
+            io_error_thrown(
+                format!(
+                    "workspace_temp_dir: failed to create the temp dir for {}: {error}",
+                    root.display()
+                ),
+                &error,
+            )
+        })?;
     crate::stdlib::sandbox::enforce_fs_path(
         "workspace_temp_dir",
         &path,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    std::fs::create_dir_all(&path).map_err(|error| {
-        io_error_thrown(
-            format!(
-                "workspace_temp_dir: failed to create {}: {error}",
-                path.display()
-            ),
-            &error,
-        )
-    })?;
-    let _ = crate::runtime_paths::ensure_self_ignored_dir(&path);
     Ok(path)
 }
 

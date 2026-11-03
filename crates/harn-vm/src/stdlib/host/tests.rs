@@ -983,7 +983,7 @@ async fn process_exec_tmpdir_probe(
 
 #[cfg(unix)]
 #[test]
-fn process_exec_injects_workspace_local_tmpdir() {
+fn process_exec_injects_the_runtime_tmpdir() {
     run_host_async_test(|| async {
         let workspace = tempfile::tempdir().expect("workspace");
         let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), None).await else {
@@ -995,22 +995,25 @@ fn process_exec_injects_workspace_local_tmpdir() {
             "sandboxed child must receive a non-empty TMPDIR"
         );
         let tmpdir_path = std::path::PathBuf::from(&tmpdir);
-        let canonical_tmpdir = std::fs::canonicalize(&tmpdir_path)
-            .expect("workspace-local TMPDIR should canonicalize");
+        let canonical_tmpdir =
+            std::fs::canonicalize(&tmpdir_path).expect("the child's TMPDIR should canonicalize");
         let canonical_workspace =
             std::fs::canonicalize(workspace.path()).expect("workspace should canonicalize");
         assert!(
-            canonical_tmpdir.starts_with(&canonical_workspace),
-            "child TMPDIR {tmpdir:?} must live inside the workspace {:?}",
+            !canonical_tmpdir.starts_with(&canonical_workspace),
+            "child TMPDIR {tmpdir:?} must live outside the workspace {:?}",
             workspace.path()
         );
-        assert!(
-            tmpdir_path.ends_with(".harn-tmp"),
-            "child TMPDIR {tmpdir:?} must be the workspace-local .harn-tmp dir"
+        assert_eq!(
+            canonical_tmpdir,
+            crate::stdlib::sandbox::sandbox_runtime_dir(&canonical_workspace)
+                .unwrap()
+                .join("tmp"),
+            "child TMPDIR {tmpdir:?} must be the workspace's runtime temp dir"
         );
         assert!(
             tmpdir_path.is_dir(),
-            "the workspace-local TMPDIR must have been created on disk"
+            "the child's TMPDIR must have been created on disk"
         );
     });
 }

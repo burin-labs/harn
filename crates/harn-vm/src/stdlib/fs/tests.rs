@@ -415,7 +415,7 @@ fn path_status_distinguishes_missing_scope_and_read_only_denials() {
 }
 
 #[test]
-fn workspace_temp_dir_is_inside_sandbox_workspace() {
+fn workspace_temp_dir_is_the_sandbox_runtime_temp_dir() {
     use crate::orchestration::{
         clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
         CapabilityPolicy, SandboxProfile,
@@ -449,10 +449,13 @@ fn workspace_temp_dir_is_inside_sandbox_workspace() {
     let workspace_root = PathBuf::from(temp_dir_path_string(
         &workspace.path().canonicalize().unwrap(),
     ));
-    assert!(root.starts_with(&workspace_root));
-    assert!(root.ends_with(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME));
+    let runtime = crate::stdlib::sandbox::sandbox_runtime_dir(workspace.path()).unwrap();
+    assert!(!root.starts_with(&workspace_root));
+    assert_eq!(
+        root,
+        PathBuf::from(temp_dir_path_string(&runtime.join("tmp")))
+    );
     assert!(root.is_dir());
-    assert!(root.join(".gitignore").is_file());
     assert!(child.starts_with(&root));
     assert!(child.is_dir());
     assert!(child
