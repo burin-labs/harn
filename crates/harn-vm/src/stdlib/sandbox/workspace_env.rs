@@ -9,6 +9,10 @@ use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_onc
 #[path = "pinned_pnpm.rs"]
 mod pinned_pnpm;
 
+#[cfg(test)]
+#[path = "workspace_env_owner_tests.rs"]
+mod owner_tests;
+
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 
 /// The names the temp dir and toolchain cache had when they lived inside the
@@ -86,13 +90,15 @@ const MAX_RUNTIME_OWNER_DEPTH: usize = 8;
 /// root made inside one workspace's temp dir has a runtime dir of its own, so
 /// the chain is followed outward. Empty for a path outside every runtime dir.
 pub(super) fn runtime_dir_owners(path: &Path) -> Vec<PathBuf> {
+    runtime_base().map_or_else(Vec::new, |base| runtime_dir_owners_in(&base, path))
+}
+
+/// [`runtime_dir_owners`] under an explicit normalized runtime base.
+fn runtime_dir_owners_in(base: &Path, path: &Path) -> Vec<PathBuf> {
     let mut owners: Vec<PathBuf> = Vec::new();
-    let Some(base) = runtime_base() else {
-        return owners;
-    };
     while owners.len() < MAX_RUNTIME_OWNER_DEPTH {
         let current = owners.last().map_or(path, PathBuf::as_path);
-        match containing_runtime_dir(&base, current).and_then(|dir| recorded_owner(&dir)) {
+        match containing_runtime_dir(base, current).and_then(|name| recorded_owner(base, &name)) {
             Some(owner) => owners.push(owner),
             None => break,
         }
@@ -115,40 +121,93 @@ pub(crate) fn root_in_owned_runtime_dir(candidate: &str, root: &str) -> bool {
 /// The runtime dir holding the normalized `path`, when it has a valid owner.
 /// The fd-scoped mutation path opens it as the root of such a write.
 pub(super) fn owned_runtime_dir_containing(path: &Path) -> Option<PathBuf> {
-    let dir = containing_runtime_dir(&runtime_base()?, path)?;
-    recorded_owner(&dir).map(|_| dir)
+    let base = runtime_base()?;
+    let name = containing_runtime_dir(&base, path)?;
+    recorded_owner(&base, &name).map(|_| base.join(name))
 }
 
-/// `<base>/<digest>` when the normalized `path` lies inside it.
-fn containing_runtime_dir(base: &Path, path: &Path) -> Option<PathBuf> {
+/// The name of the runtime dir under `base` that holds the normalized `path`.
+fn containing_runtime_dir(base: &Path, path: &Path) -> Option<String> {
     let name = path.strip_prefix(base).ok()?.components().next()?;
     let name = name.as_os_str().to_str()?;
-    is_runtime_digest_name(name).then(|| base.join(name))
+    is_runtime_digest_name(name).then(|| name.to_string())
 }
 
 /// The workspace root a runtime dir's marker records. The marker is only a
 /// hint: it is trusted when the root it names digests to the dir's own name,
 /// so no file can claim a runtime dir for a workspace it does not belong to.
-fn recorded_owner(runtime: &Path) -> Option<PathBuf> {
+#[cfg(unix)]
+fn recorded_owner(base: &Path, name: &str) -> Option<PathBuf> {
+    read_runtime_marker(&super::open_dir_absolute(base).ok()?, name)
+}
+
+/// The one reader of a runtime dir's marker, shared by the trust check and the
+/// stale sweep. The child can rewrite its runtime dir, so nothing it plants
+/// may block or redirect the read: the dir is opened without following and
+/// must be this user's, and the marker is opened without following or
+/// blocking and must be a regular file before its bounded read. A FIFO,
+/// symlink, oversized, relative, or mismatched marker names no owner.
+#[cfg(unix)]
+fn read_runtime_marker(base_fd: &std::os::fd::OwnedFd, name: &str) -> Option<PathBuf> {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = super::open_dir_at(base_fd.as_raw_fd(), name).ok()?;
+    restrict_to_owner(&dir).ok()?;
+    let marker = super::openat_file(
+        dir.as_raw_fd(),
+        RUNTIME_DIR_MARKER,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        0,
+    )
+    .ok()?;
+    if !marker.metadata().ok()?.file_type().is_file() {
+        return None;
+    }
+    let mut recorded = Vec::new();
+    marker
+        .take(RUNTIME_DIR_MARKER_MAX + 1)
+        .read_to_end(&mut recorded)
+        .ok()?;
+    trusted_owner(
+        PathBuf::from(OsStr::from_bytes(&recorded)),
+        recorded.len(),
+        name,
+    )
+}
+
+/// Windows has no FIFO or no-follow open; a marker that is not a plain regular
+/// file (a symlink or other reparse point included) names no owner.
+#[cfg(not(unix))]
+fn recorded_owner(base: &Path, name: &str) -> Option<PathBuf> {
     use std::io::Read;
 
+    let marker = base.join(name).join(RUNTIME_DIR_MARKER);
+    if !marker.symlink_metadata().ok()?.file_type().is_file() {
+        return None;
+    }
     let mut recorded = Vec::new();
-    std::fs::File::open(runtime.join(RUNTIME_DIR_MARKER))
+    std::fs::File::open(marker)
         .ok()?
         .take(RUNTIME_DIR_MARKER_MAX + 1)
         .read_to_end(&mut recorded)
         .ok()?;
-    if recorded.len() as u64 > RUNTIME_DIR_MARKER_MAX {
-        return None;
-    }
-    #[cfg(unix)]
-    let root = PathBuf::from(<OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(
-        &recorded,
-    ));
-    #[cfg(not(unix))]
-    let root = PathBuf::from(String::from_utf8(recorded).ok()?);
-    let name = runtime.file_name()?.to_str()?;
-    (root.is_absolute() && runtime_digest(&root) == name).then_some(root)
+    let length = recorded.len();
+    trusted_owner(
+        PathBuf::from(String::from_utf8(recorded).ok()?),
+        length,
+        name,
+    )
+}
+
+/// A read-back marker root, trusted only within the bound, absolute, and
+/// digesting to its runtime dir's own name.
+fn trusted_owner(root: PathBuf, length: usize, name: &str) -> Option<PathBuf> {
+    let trusted = length as u64 <= RUNTIME_DIR_MARKER_MAX
+        && root.is_absolute()
+        && runtime_digest(&root) == name;
+    trusted.then_some(root)
 }
 
 /// The runtime dir for the policy's first workspace root, without creating it.
@@ -321,10 +380,6 @@ fn write_runtime_marker(runtime: &std::os::fd::OwnedFd, root: &Path) -> std::io:
 /// for the next process.
 #[cfg(unix)]
 fn sweep_stale_runtime_dirs(base_fd: &std::os::fd::OwnedFd, base: &Path, own: &str) {
-    use std::io::Read;
-    use std::os::fd::AsRawFd;
-    use std::os::unix::ffi::OsStrExt;
-
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
     };
@@ -336,33 +391,9 @@ fn sweep_stale_runtime_dirs(base_fd: &std::os::fd::OwnedFd, base: &Path, own: &s
         if !is_runtime_digest_name(name) || name == own {
             continue;
         }
-        let Ok(dir) = super::open_dir_at(base_fd.as_raw_fd(), name) else {
+        let Some(root) = read_runtime_marker(base_fd, name) else {
             continue;
         };
-        if restrict_to_owner(&dir).is_err() {
-            continue;
-        }
-        let Ok(marker) = super::openat_file(
-            dir.as_raw_fd(),
-            RUNTIME_DIR_MARKER,
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
-            0,
-        ) else {
-            continue;
-        };
-        let mut recorded = Vec::new();
-        if marker
-            .take(RUNTIME_DIR_MARKER_MAX + 1)
-            .read_to_end(&mut recorded)
-            .is_err()
-            || recorded.len() as u64 > RUNTIME_DIR_MARKER_MAX
-        {
-            continue;
-        }
-        let root = Path::new(OsStr::from_bytes(&recorded));
-        if !root.is_absolute() || runtime_digest(root) != name {
-            continue;
-        }
         if matches!(root.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
         {
             let _ = std::fs::remove_dir_all(base.join(name));

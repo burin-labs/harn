@@ -162,14 +162,19 @@ async fn oversized_result_spills_and_the_model_sees_a_bounded_excerpt() {
     // <runtime dir>/tmp/tool-results/<session>/<file>, outside the workspace,
     // so spills never show in git status or a linter's walk.
     let temp_root = spill.ancestors().nth(3).expect("workspace temp root");
-    // Asserted through the user-dirs owner, not the sandbox module above this
-    // layer; the exact per-workspace digest is covered by the sandbox tests.
-    let runtime_base = harn_vm_core::user_dirs::sandbox_runtime_base().expect("runtime base");
-    let runtime_base = std::fs::canonicalize(&runtime_base).unwrap_or(runtime_base);
+    // Asserted by shape rather than by re-resolving the base: the runtime
+    // resolves it once per process, and tests that run beside this one move
+    // `HOME`. The exact per-workspace digest is covered by the sandbox tests.
     assert_eq!(temp_root.file_name(), Some(std::ffi::OsStr::new("tmp")));
+    let base_name = temp_root
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::file_name);
     assert_eq!(
-        temp_root.parent().and_then(std::path::Path::parent),
-        Some(runtime_base.as_path())
+        base_name,
+        Some(std::ffi::OsStr::new(
+            harn_vm_core::user_dirs::SANDBOX_RUNTIME_DIR_NAME
+        ))
     );
     let cwd = std::env::current_dir().expect("cwd");
     assert!(!temp_root.starts_with(std::fs::canonicalize(&cwd).unwrap_or(cwd)));

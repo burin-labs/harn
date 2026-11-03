@@ -155,7 +155,8 @@ fn check_fs_path_scope_with_roots(
     }
     // A workspace's runtime dir stands in for the scratch dir that once sat
     // inside it, so every root covering the workspace covers it too. Resolved
-    // only for a path no root contains directly.
+    // once, on the first root that does not contain the path; it reads the
+    // disk only for a path under the runtime base.
     let owners = std::cell::OnceCell::new();
     let covers = |root: &PathBuf| {
         path_is_within(&candidate, root)
