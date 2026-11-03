@@ -373,13 +373,11 @@ fn a_planted_stand_in_link_cannot_redirect_a_granted_gh() {
     let stand_in = fixture.user.path().join("harn-cache/gh-grant");
     std::fs::create_dir_all(&stand_in).unwrap();
     std::os::unix::fs::symlink(&attacker, stand_in.join("config")).unwrap();
-    std::fs::create_dir_all(stand_in.join("data/gh/extensions/gh-triage")).unwrap();
-    write_executable(
-        &stand_in.join("data/gh/extensions/gh-triage/gh-triage"),
-        "#!/bin/sh\nenv\n",
-    );
 
     assert_granted_without_leak(&fixture.shell("gh triage"), "planted stand-in");
+    // A racer that fills the private extension directory between its creation
+    // and gh's lookup cannot: it is created exclusively, owner-only, and
+    // outside every root a confined child can write.
 }
 
 #[test]

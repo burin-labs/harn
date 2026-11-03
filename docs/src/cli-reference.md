@@ -340,24 +340,60 @@ That covers lists and pipelines (`;`, `&&`, `||`, `|`, `&`), redirects and
 here-strings, command or process substitution, variable and tilde expansion,
 globs, subshells and groups, comments, an assignment prefix such as
 `GH_PAGER=env gh issue list`, a program named by path (`./gh`), and anything
-the parser does not recognize. The program is looked up on the child's
-`PATH`; shell startup files, aliases, and functions do not apply to a direct
-spawn.
+the parser does not recognize. Shell startup files, aliases, and functions do
+not apply to a direct spawn.
 
-A granted `gh` cannot pass the grant on through the programs it starts:
+##### Which `gh` receives the grant
+
+A `,for=gh` grant reaches only a foreground `run_command` that inherits the
+session environment and captures output through pipes. Background commands,
+file capture, `env_mode: "replace"`, and every other spawn path run `gh`
+without the grant. So does a request whose `env` sets `PATH`, `HOME`, a
+`GIT_*`, `GH_*`, `SSH_*`, `LD_*`, `DYLD_*` or `XDG_*` variable, or a pager,
+browser or editor variable.
+
+Harn resolves the program once, to a canonical file, from absolute `PATH`
+entries outside every untrusted root: the workspace and execution roots, the
+spawn and process directories, sandbox write roots, toolchain and package
+caches, the workspace temp directory, and the host temp directory. Relative
+and empty `PATH` entries are ignored. A program named by a relative path
+(`./gh`), a file inside an untrusted root, or an absolute path that is not the
+resolved file runs without the grant. The grant is exposed only to the
+resolved file, which Harn spawns by its canonical path.
+
+##### What a granted `gh` cannot start
 
 | Variable | Value for a granted `gh` | Exec path it closes |
 |---|---|---|
 | `GH_PAGER`, `PAGER` | empty | pager |
 | `GH_BROWSER`, `BROWSER` | `/usr/bin/false` | browser |
 | `GH_EDITOR`, `EDITOR`, `VISUAL` | `/usr/bin/false` | editor |
-| `XDG_DATA_HOME` | an empty directory under Harn's cache | extensions |
-| `GH_CONFIG_DIR` | a stand-in `config.yml` with no `!` aliases and no `hosts.yml` | shell aliases |
+| `XDG_DATA_HOME` | an empty private directory | extensions |
+| `GH_CONFIG_DIR` | a private `config.yml` with display settings and inert aliases only, never `hosts.yml` | shell aliases, configured pager, browser, editor and socket |
+| `GIT_CONFIG_COUNT` and its keys | `core.hooksPath` to an empty directory, `core.fsmonitor=false`, `protocol.ext.allow=never`, `core.sshCommand=ssh` | repository hooks, filesystem monitor, `ext::` remotes, configured SSH command |
+| `PATH` | the trusted entries only | helpers such as `git` and `ssh` planted in the workspace |
+| `HOME`, `XDG_CONFIG_HOME` | the user's own home and `~/.config` | a workspace home's Git configuration |
 
-These values are applied after the caller's `env` and the workspace defaults,
-so a caller overlay cannot restore a pager or editor. A variable that a grant
-reaching the same spawn exposes is left to that grant. If the extension
-directory is no longer empty, the spawn is refused.
+The private directory is created fresh for each spawn, owner-only, under
+`$HARN_HOME/grant-spawns` (default `~/.harn/grant-spawns`), and removed when
+the command ends. If that location is inside an untrusted root, is not a
+private directory of the current user, or cannot be prepared, the command is
+refused and the grant is not exposed.
+
+`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, and
+every other `gh auth` subcommand except a plain `gh auth status` are refused,
+because they print or change the credential. A user alias that expands to
+`auth` is dropped from the private config.
+
+Every value a grant hands to a child is redacted from that command's stdout
+and stderr, from events, and from transcripts, including a value printed
+across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
+and its percent-encoded form. Values shorter than 8 bytes are not redacted.
+
+Git configuration that names other programs per repository, such as filter
+drivers in `.gitattributes` with a matching `filter.*` entry or
+`diff.external`, is not overridden. A granted `gh` command that runs git in an
+untrusted repository can still start them.
 
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
