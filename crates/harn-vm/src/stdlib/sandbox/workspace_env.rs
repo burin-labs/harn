@@ -391,8 +391,51 @@ fn toolchain_env_at(
             .display()
             .to_string(),
         ));
+        // GitHub CLI reads `hosts.yml` on every command and exits on the EPERM
+        // even when GH_TOKEN is set; a missing file is fine. `hosts.yml` is on
+        // the credential denylist, so the stand-in carries `config.yml`
+        // (aliases, git protocol, editor) and never `hosts.yml`. A host that
+        // grants GH_TOKEN then gets a working `gh`; without one, gh prints its
+        // own "gh auth login" message instead of a permission error.
+        env.push((
+            "GH_CONFIG_DIR".to_string(),
+            if seed {
+                seed_gh_config_dir(&gh_config_source(&home), &root.join("gh"))
+            } else {
+                root.join("gh")
+            }
+            .display()
+            .to_string(),
+        ));
     }
     env
+}
+
+/// The user's GitHub CLI config directory: GH_CONFIG_DIR, then
+/// `$XDG_CONFIG_HOME/gh`, then `~/.config/gh`, the order gh itself uses.
+fn gh_config_source(operator_home: &Path) -> PathBuf {
+    if let Some(dir) = std::env::var_os("GH_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir).join("gh");
+    }
+    operator_home.join(".config/gh")
+}
+
+/// Copy the credential-free `config.yml` into the stand-in. gh releases before
+/// 1.0 kept `oauth_token` in `config.yml`; such a file is not copied at all.
+fn seed_gh_config_dir(source: &Path, dest: &Path) -> PathBuf {
+    let _ = std::fs::create_dir_all(dest);
+    if let Ok(raw) = std::fs::read_to_string(source.join("config.yml")) {
+        let dest_file = dest.join("config.yml");
+        if !raw.contains("oauth_token")
+            && std::fs::read_to_string(&dest_file).ok().as_deref() != Some(raw.as_str())
+        {
+            let _ = std::fs::write(&dest_file, raw);
+        }
+    }
+    dest.to_path_buf()
 }
 
 /// Write the credential-free projection of `source` to `stand_in` and return
@@ -969,6 +1012,41 @@ mod tests {
             !composer_home.join("auth.json").exists(),
             "the stand-in must never carry auth.json"
         );
+        let gh_config = PathBuf::from(env.get("GH_CONFIG_DIR").unwrap());
+        assert!(
+            gh_config.starts_with(&cache),
+            "GH_CONFIG_DIR must be the workspace stand-in: {gh_config:?}"
+        );
+    }
+
+    #[test]
+    fn the_gh_stand_in_carries_config_but_never_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("gh");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("config.yml"), "git_protocol: ssh\n").unwrap();
+        std::fs::write(
+            source.join("hosts.yml"),
+            "github.com:\n  oauth_token: gho_x\n",
+        )
+        .unwrap();
+        let stand_in = seed_gh_config_dir(&source, &dir.path().join("cache/gh"));
+        assert_eq!(
+            std::fs::read_to_string(stand_in.join("config.yml")).unwrap(),
+            "git_protocol: ssh\n"
+        );
+        assert!(!stand_in.join("hosts.yml").exists());
+
+        // A pre-1.0 config.yml that still holds a token is not copied.
+        let legacy = tempfile::tempdir().unwrap();
+        std::fs::write(
+            legacy.path().join("config.yml"),
+            "hosts:\n  github.com:\n    oauth_token: gho_x\n",
+        )
+        .unwrap();
+        let stand_in = seed_gh_config_dir(legacy.path(), &dir.path().join("cache/gh-legacy"));
+        assert!(stand_in.is_dir());
+        assert!(!stand_in.join("config.yml").exists());
     }
 
     #[test]
