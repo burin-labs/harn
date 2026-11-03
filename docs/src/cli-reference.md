@@ -345,8 +345,14 @@ not apply to a direct spawn.
 
 ##### Which `gh` receives the grant
 
-A `,for=gh` grant reaches only a foreground `run_command` that inherits the
-session environment and captures output through pipes. Background commands,
+A `,for=gh` grant reaches only a `gh` read: `list`, `view`, `status`, `diff`
+and `checks` under `issue`, `pr`, `repo`, `run`, `workflow`, `label` and
+`gist`, plain `gh status`, and a GET `gh api` call without request fields.
+Global `-R`, `--repo` and `--hostname` flags are skipped before the subcommand
+is read. Every other invocation, including `pr checkout`, `repo clone`, `repo
+fork`, an alias, an extension, `--web`, and anything unrecognized, runs without
+the grant. A read reaches it only through a foreground `run_command` that
+inherits the session environment and captures output through pipes. Background commands,
 file capture, `env_mode: "replace"`, and every other spawn path run `gh`
 without the grant. So does a request whose `env` sets `PATH`, `HOME`, a
 `GIT_*`, `GH_*`, `SSH_*`, `LD_*`, `DYLD_*` or `XDG_*` variable, or a pager,
@@ -358,8 +364,17 @@ spawn and process directories, sandbox write roots, toolchain and package
 caches, the workspace temp directory, and the host temp directory. Relative
 and empty `PATH` entries are ignored. A program named by a relative path
 (`./gh`), a file inside an untrusted root, or an absolute path that is not the
-resolved file runs without the grant. The grant is exposed only to the
-resolved file, which Harn spawns by its canonical path.
+resolved file runs without the grant. The resolved file must be a native
+executable (ELF, Mach-O or PE). A script, such as a version-manager shim that
+picks the real program from files in the working directory, runs without the
+grant. The grant is exposed only to the resolved file, which Harn spawns by its
+canonical path.
+
+A granted read is refused when any untrusted root contains, or lies inside,
+`~/.gitconfig`, `~/.config/git`, `~/.ssh`, `~/.config/gh`, the resolved `gh`
+config directory, `$GIT_CONFIG_GLOBAL`, `/etc/gitconfig` or `/etc/ssh`. A
+confined process that can write one of them could plant a filter driver, an
+SSH `ProxyCommand` or an alias that a granted `gh` would then run.
 
 ##### What a granted `gh` cannot start
 
@@ -385,15 +400,32 @@ every other `gh auth` subcommand except a plain `gh auth status` are refused,
 because they print or change the credential. A user alias that expands to
 `auth` is dropped from the private config.
 
-Every value a grant hands to a child is redacted from that command's stdout
+A read that would otherwise receive the grant is refused when it names an
+output filter, `--jq`/`-q` or `--template`/`-t` in any spelling (`--jq=...`,
+`-q.`, `-Lq`), or passes arguments on after `--`. gh's jq filters can read the
+environment (`$ENV`, `env`) and print the credential in a form redaction cannot
+match; templates are refused with them because they format the same output.
+gh reads no environment variable that selects a filter or template, and
+`GH_PAGER` and `PAGER` are set empty after every other environment layer. The
+same arguments on a command that is not a read run without the grant and are
+not refused, so `gh pr create -t title` still works.
+
+Every value any grant hands to a child, for any program, is redacted from that command's stdout
 and stderr, from events, and from transcripts, including a value printed
 across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
 and its percent-encoded form. Values shorter than 8 bytes are not redacted.
 
 Git configuration that names other programs per repository, such as filter
-drivers in `.gitattributes` with a matching `filter.*` entry or
-`diff.external`, is not overridden. A granted `gh` command that runs git in an
-untrusted repository can still start them.
+drivers or `diff.external`, is not overridden, and no granted read reaches it:
+traced with `GIT_TRACE`, the reads run git only for `config`, `remote -v`,
+`rev-parse` and `symbolic-ref`.
+
+While a granted `gh` runs, its environment holds the credential. On Linux a
+confined sibling cannot read it: `/proc` is not listable and
+`/proc/<pid>/environ` fails with a permission error under Landlock. On macOS a
+confined sibling cannot run `ps`, and `KERN_PROCARGS2` returns no environment
+for another process. An unconfined process of the same user on Linux can read
+`/proc/<pid>/environ` for as long as the granted `gh` runs.
 
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
