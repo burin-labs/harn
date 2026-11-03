@@ -346,7 +346,7 @@ impl VmSharedStateRuntime {
             mailbox.received_count.fetch_add(1, Ordering::SeqCst);
             let _ = mailbox
                 .depth
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |depth| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |depth| {
                     Some(depth.saturating_sub(1))
                 });
         }

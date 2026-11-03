@@ -1031,6 +1031,10 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
 /// shaping the canonical 413 envelope when it is larger (the
 /// `DefaultBodyLimit` layer caps the stream; `to_bytes` surfaces the
 /// overflow as an error).
+#[expect(
+    clippy::result_large_err,
+    reason = "the axum Response is this helper's early-return rejection"
+)]
 async fn buffer_request_body(body: axum::body::Body) -> Result<Bytes, Response> {
     to_bytes(body, DEFAULT_HTTP_BODY_LIMIT_BYTES)
         .await

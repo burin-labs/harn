@@ -170,6 +170,16 @@ pipeline test_curator_skips_a_session_that_only_ran_installed_checks(harness: Ha
           },
       )
       assert(other?.usage != nil, "a command no installed check runs is new workflow evidence")
+      const commandless = curate_with(
+        harness,
+        root,
+        priced_empty_batch(),
+        library + {evidence: [session_running("s4", [])]},
+      )
+      assert(
+        commandless?.usage != nil,
+        "a session that ran no command is not covered by an installed check",
+      )
       return nil
     },
   )
