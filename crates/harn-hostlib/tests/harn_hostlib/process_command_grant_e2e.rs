@@ -35,6 +35,10 @@ const PROBE: &str = "harn-probe-gh-grant";
 const PROBE_BASE64: &str = "aGFybi1wcm9iZS1naC1ncmFudA";
 const SECRET_ACCOUNT: &str = "gh-grant-e2e";
 const SECRET_KEY: &str = "token";
+/// A second value, never granted to gh, so the process-wide redaction set
+/// holds it only if the unprofiled grant registered it.
+const OTHER_KEY: &str = "other";
+const OTHER_PROBE: &str = "harn-probe-unprofiled-grant";
 const PROBE_BASIC: &str = "eC1hY2Nlc3MtdG9rZW46aGFybi1wcm9iZS1naC1ncmFudA";
 
 const FAKE_GH: &str = r#"#!/bin/sh
@@ -274,7 +278,8 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
     use harn_vm::secrets::{MemorySecretProvider, SecretId, SecretProvider};
     let provider: std::sync::Arc<dyn SecretProvider> = std::sync::Arc::new(
         MemorySecretProvider::new(SECRET_ACCOUNT)
-            .with_secret(SecretId::new(SECRET_ACCOUNT, SECRET_KEY), PROBE),
+            .with_secret(SecretId::new(SECRET_ACCOUNT, SECRET_KEY), PROBE)
+            .with_secret(SecretId::new(SECRET_ACCOUNT, OTHER_KEY), OTHER_PROBE),
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -642,6 +647,36 @@ fn output_filters_and_passthrough_are_refused_on_a_granted_read() {
         assert!(out.contains("gh-grant=absent"), "{other}: {out}");
     }
     assert_granted_without_leak(&fixture.shell("gh pr list --json number"), "--json");
+}
+
+/// Redaction covers every grant's value, not only gh's: a command-bound
+/// grant to a program without an exec profile prints nothing it was given.
+#[test]
+fn a_grant_to_an_unprofiled_program_is_redacted_from_its_output() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let grant = GrantSpec {
+        name: "printenv_probe".to_string(),
+        source: GrantSourceSpec::SecretStore {
+            account: SECRET_ACCOUNT.to_string(),
+            key: OTHER_KEY.to_string(),
+        },
+        expose_as_env: Some("PRINTENV_PROBE".to_string()),
+        for_command: Some("printenv".to_string()),
+        expose_to: Default::default(),
+    };
+    let environment =
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![grant], &|name| {
+            std::env::var(name).ok()
+        })
+        .expect("the granted policy must launch");
+    harn_vm::stdlib::process::set_session_environment(Some(environment));
+    let out = fixture.argv(&["printenv", "PRINTENV_PROBE"], &[]);
+    assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
+    assert!(
+        !out.contains(OTHER_PROBE),
+        "an unprofiled grant was printed: {out}"
+    );
 }
 
 /// A script `gh` on a trusted `PATH` entry, such as a version-manager shim
