@@ -237,7 +237,6 @@ mod tests {
             max_age_seconds: Some(60),
             min_age_before_archive_seconds: Some(1),
             grace_seconds: 10,
-            ..RetentionPolicy::default()
         };
         let open = meta(SessionStatus::Open, 10_000, None);
         let closed = meta(SessionStatus::Closed, 10_000, None);
