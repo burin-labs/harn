@@ -295,7 +295,7 @@ fn replay_oracle_for_shadow(
     let mut second_run = first_run.clone();
     second_run.run_id = format!("shadow_{}_{}", candidate.id, trace.id);
     second_run.effect_receipts = candidate.expected_receipts.clone();
-    let compared_receipts = first_run
+    let mut compared_receipts = first_run
         .effect_receipts
         .len()
         .max(second_run.effect_receipts.len());
@@ -314,20 +314,23 @@ fn replay_oracle_for_shadow(
     let second_run_counts = oracle_trace.second_run.counts();
     let report = match run_replay_oracle_trace(&oracle_trace) {
         Ok(report) => report,
-        Err(error) => ReplayOracleReport {
-            name: oracle_name,
-            expectation: ReplayExpectation::Match,
-            passed: false,
-            first_run_counts: first_run.counts(),
-            second_run_counts,
-            protocol_fixture_refs: Vec::new(),
-            divergence: Some(super::super::ReplayDivergence {
-                path: "/".to_string(),
-                left: JsonValue::Null,
-                right: JsonValue::Null,
-                message: error.to_string(),
-            }),
-        },
+        Err(error) => {
+            compared_receipts = 0;
+            ReplayOracleReport {
+                name: oracle_name,
+                expectation: ReplayExpectation::Match,
+                passed: false,
+                first_run_counts: first_run.counts(),
+                second_run_counts,
+                protocol_fixture_refs: Vec::new(),
+                divergence: Some(super::super::ReplayDivergence {
+                    path: "/".to_string(),
+                    left: JsonValue::Null,
+                    right: JsonValue::Null,
+                    message: error.to_string(),
+                }),
+            }
+        }
     };
     (Some(report), compared_receipts)
 }
@@ -385,5 +388,52 @@ pub(super) fn infer_workflow_name(steps: &[WorkflowCandidateStep]) -> String {
         "crystallized_version_bump".to_string()
     } else {
         "crystallized_workflow".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::{ReplayAllowlistRule, ReplayTraceRun};
+    use serde_json::json;
+
+    #[test]
+    fn shadow_refuses_a_fully_allowlisted_receipt() {
+        let receipt = json!({"result": "saved"});
+        let candidate = WorkflowCandidate {
+            expected_receipts: vec![receipt.clone()],
+            ..WorkflowCandidate::default()
+        };
+        let mut trace = CrystallizationTrace {
+            replay_run: Some(ReplayTraceRun {
+                run_id: "original".to_string(),
+                effect_receipts: vec![receipt],
+                ..ReplayTraceRun::default()
+            }),
+            replay_allowlist: vec![ReplayAllowlistRule {
+                path: "/run_id".to_string(),
+                reason: "execution identity".to_string(),
+                replacement: None,
+            }],
+            ..CrystallizationTrace::default()
+        };
+        let positive = shadow_trace_result(&candidate, &trace, 0);
+        assert!(
+            positive.pass,
+            "unmasked receipt should be compared: {positive:?}"
+        );
+        assert_eq!(positive.compared_receipts, 1);
+        trace.replay_allowlist = vec![ReplayAllowlistRule {
+            path: "/*".to_string(),
+            reason: "ignore all recorded values".to_string(),
+            replacement: None,
+        }];
+        let result = shadow_trace_result(&candidate, &trace, 0);
+        assert!(!result.pass, "masked receipt must not authorize shadow");
+        assert_eq!(result.compared_receipts, 0);
+        assert!(result
+            .details
+            .iter()
+            .any(|detail| detail.contains("expectations_compared=0")));
     }
 }

@@ -4,6 +4,104 @@ use crate::package::test_support::*;
 use crate::package::*;
 
 #[test]
+fn duplicate_locked_package_does_not_replace_the_published_generation() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nacme-lib = {{ git = \"{git}\", tag = \"v1.0.0\" }}\n"
+        ),
+    )
+    .unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let ctx = workspace.env().load_manifest_context().unwrap();
+    let mut lock = LockFile::load(&ctx.lock_path()).unwrap().unwrap();
+    let current = fs::read(harn_modules::package_snapshot::package_current_path(root)).unwrap();
+    lock.packages.push(lock.packages[0].clone());
+
+    let error = materialize_dependencies_from_lock(workspace.env(), &ctx, &lock, None, false)
+        .expect_err("an ambiguous lock must not publish a generation");
+    assert!(error.to_string().contains("duplicate"), "{error}");
+    assert_eq!(
+        fs::read(harn_modules::package_snapshot::package_current_path(root)).unwrap(),
+        current,
+        "an invalid lock must leave the existing generation authoritative"
+    );
+}
+
+#[test]
+fn two_aliases_can_materialize_the_same_git_source() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nalpha = {{ git = \"{git}\", tag = \"v1.0.0\" }}\nbeta = {{ git = \"{git}\", tag = \"v1.0.0\" }}\n"
+        ),
+    )
+    .unwrap();
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let packages = current_packages_dir(root);
+    let alpha = fs::read(packages.join("alpha/lib.harn")).unwrap();
+    let beta = fs::read(packages.join("beta/lib.harn")).unwrap();
+    assert_eq!(alpha, beta);
+    assert!(!alpha.is_empty());
+}
+
+#[test]
+fn failed_parallel_fetch_keeps_the_previous_generation() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            "[package]\nname = \"workspace\"\nversion = \"0.1.0\"\n\n[dependencies]\nalpha = {{ git = \"{git}\", tag = \"v1.0.0\" }}\n"
+        ),
+    )
+    .unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let ctx = workspace.env().load_manifest_context().unwrap();
+    let mut lock = LockFile::load(&ctx.lock_path()).unwrap().unwrap();
+    let current = fs::read(harn_modules::package_snapshot::package_current_path(root)).unwrap();
+    let mut broken = lock.packages[0].clone();
+    broken.name = "broken".into();
+    broken.source = format!(
+        "git+{}",
+        url::Url::from_file_path(root.join("missing-repository")).unwrap()
+    );
+    lock.packages.push(broken);
+
+    materialize_dependencies_from_lock(workspace.env(), &ctx, &lock, None, false)
+        .expect_err("an unavailable source must refuse publication");
+    assert_eq!(
+        fs::read(harn_modules::package_snapshot::package_current_path(root)).unwrap(),
+        current
+    );
+    let generations = harn_modules::package_snapshot::package_generations_dir(root);
+    assert!(fs::read_dir(generations).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".staging-")
+    }));
+}
+
+#[test]
 fn concurrent_materialization_serializes_package_tree_updates() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     let project_tmp = tempfile::tempdir().unwrap();

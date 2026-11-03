@@ -230,7 +230,13 @@ fn background_hard_timeout_cancels_both_start_modes() {
         }
         request.put_int("hard_timeout_ms", 150);
         let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
-        assert_eq!(require_str(&started, "status"), "running");
+        assert!(
+            matches!(
+                require_str(&started, "status").as_str(),
+                "running" | "timed_out"
+            ),
+            "the start response may already carry the expired deadline"
+        );
         let mut wait = dict_map();
         wait.insert(
             "handle_id".into(),
@@ -274,7 +280,8 @@ fn background_hard_timeout_does_not_reclassify_completed_commands() {
     let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&["sleep", "30"]));
     request.put_bool("background", true);
-    request.put_int("hard_timeout_ms", 200);
+    // Drive the late deadline through cancel_handle after observed completion,
+    // so a live timer cannot race the completion this case requires first.
     let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
     controller.complete_with(ExitStatus::from_code(0));
     let mut wait = dict_map();

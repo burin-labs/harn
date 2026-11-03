@@ -45,8 +45,10 @@ use crate::value::VmError;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleGenerator {
     pub tool: String,
+    #[schemars(transform = super::schema::omit_contextual_default)]
     pub version: String,
 }
 
@@ -61,6 +63,7 @@ impl Default for BundleGenerator {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleWorkflowRef {
     /// Relative path inside the bundle directory.
     pub path: String,
@@ -74,6 +77,7 @@ pub struct BundleWorkflowRef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleSourceTrace {
     pub trace_id: String,
     /// Harn-owned execution identity retained from the source trace.
@@ -94,6 +98,7 @@ pub struct BundleSourceTrace {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleStep {
     pub index: usize,
     pub kind: String,
@@ -128,6 +133,7 @@ impl BundleStep {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleEvalPackRef {
     /// Relative path of the eval pack inside the bundle directory.
     pub path: String,
@@ -138,6 +144,7 @@ pub struct BundleEvalPackRef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleSkillRef {
     /// Relative path to the generated `SKILL.md` inside the bundle.
     pub path: String,
@@ -150,6 +157,7 @@ pub struct BundleSkillRef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleFixtureRef {
     pub path: String,
     pub trace_id: String,
@@ -159,6 +167,7 @@ pub struct BundleFixtureRef {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundlePromotion {
     pub owner: Option<String>,
     pub approver: Option<String>,
@@ -205,6 +214,7 @@ impl Default for BundlePromotion {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct BundleRedactionSummary {
     pub applied: bool,
     pub rules: Vec<String>,
@@ -216,10 +226,12 @@ pub struct BundleRedactionSummary {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(schemars::JsonSchema)]
 pub struct CrystallizationBundleManifest {
     pub schema: String,
     pub schema_version: u32,
     pub generated_at: String,
+    #[schemars(transform = super::schema::omit_contextual_default)]
     pub generator: BundleGenerator,
     pub kind: BundleKind,
     pub candidate_id: String,
@@ -250,6 +262,7 @@ pub struct CrystallizationBundleManifest {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(schemars::JsonSchema)]
 pub enum BundleKind {
     /// A normal candidate that passed shadow comparison and is ready for
     /// review and promotion.

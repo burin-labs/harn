@@ -22,6 +22,9 @@ make check-protocol-artifacts
 
 Files:
 
+- `crystallization-bundle.schema.json`: serialized candidate manifest
+derived from Harn's bundle types. The `HarnCrystallization*` bindings
+preserve effect knowledge, replay evidence, and promotion criteria.
 - `manifest.json`: deterministic summary of protocol versions, advertised Harn
 extension fields, and generated binding vocabulary.
 - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema

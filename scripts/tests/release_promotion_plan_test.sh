@@ -55,6 +55,8 @@ git -C "$repo" config commit.gpgsign false
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
+# shellcheck source=scripts/lib/sha256.sh
+source "$FAKE_LIB/sha256.sh"
 case "$2" in
   */git/matching-refs/heads/green)
     if [[ "${FAKE_GREEN:-identical}" == absent ]]; then echo '[]'
@@ -78,21 +80,71 @@ if [[ "$*" == *"/jobs?filter=latest"* ]]; then
   fi
   exit 0
 fi
+tested="${FAKE_CONSUMER_TESTED:-$(printf 'c%.0s' {1..40})}"
 case "$1 $2" in
+  # The consumer is read only with its own scoped token, and answers --jq.
+  "api repos/acme/widget-host"*)
+    [[ "${GH_TOKEN:-}" == fixture-consumer ]] || exit 1
+    case "$2" in
+      */actions/runs/77) record="$(jq -n --arg head "$tested" '{head_sha:$head}')" ;;
+      */pulls/7) record="$(jq -n --arg state "${FAKE_PULL_STATE:-open}" --argjson merged "${FAKE_PULL_MERGED:-false}" \
+        --arg head "${FAKE_PULL_HEAD:-$tested}" '{state:$state,merged:$merged,head:{sha:$head,repo:{full_name:"acme/widget-host"}}}')" ;;
+      */compare/"$tested"...main) record="$(jq -n --arg status "${FAKE_DEFAULT_STATUS:-ahead}" '{status:$status,ahead_by:3}')" ;;
+      repos/acme/widget-host) record='{"default_branch":"main"}' ;;
+      *) exit 2 ;;
+    esac
+    jq -r "$4" <<< "$record"
+    exit 0 ;;
+  # The producer's binding is served as the zip its canary uploaded.
+  "api "*/actions/runs/*/artifacts\?per_page=100*)
+    run="${FAKE_CANDIDATE_RUN-9001}"
+    if [[ ! -f "$GH_CALLS.dir/binding.zip" ]]; then
+    jq -n --arg source "$HEAD_SHA" --arg producer "$run" \
+      '{schemaVersion:"burin-labs.candidate_manifest.v1",repository:"burin-labs/harn",sourceCommit:$source,
+        runId:$producer,runAttempt:"1",artifacts:[]}' > "$GH_CALLS.dir/candidate-manifest.json"
+    rm -f "$GH_CALLS.dir/manifest.zip"
+    (cd "$GH_CALLS.dir" && zip -q -X manifest.zip candidate-manifest.json)
+    manifest_digest="sha256:$(sha256_file_hex "$GH_CALLS.dir/manifest.zip")"
+    jq -n --arg source "${FAKE_BINDING_SOURCE:-$HEAD_SHA}" --arg producer "${FAKE_BINDING_RUN:-$run}" \
+      --arg manifest "${FAKE_BINDING_MANIFEST:-$manifest_digest}" \
+      --arg head "$(sha256_text_hex "$tested")" --arg pull "${FAKE_BINDING_PULL:-}" \
+      '{schema:"harn.release.consumer_rehearsal_binding.v1",source_sha:$source,producer_run:$producer,
+        producer_attempt:1,manifest_digest:$manifest,consumer_run:"77",consumer_head_sha256:$head,
+        consumer_pull:(if $pull == "" then null else $pull end),declared_pull:null,verdict:"pass"}' \
+      > "$GH_CALLS.dir/consumer-rehearsal-binding.json"
+    rm -f "$GH_CALLS.dir/binding.zip"
+    (cd "$GH_CALLS.dir" && zip -q -X binding.zip consumer-rehearsal-binding.json)
+    fi
+    manifest_digest="sha256:$(sha256_file_hex "$GH_CALLS.dir/manifest.zip")"
+    jq -n --argjson run "$run" --arg sha "$HEAD_SHA" --arg digest "sha256:$(sha256_file_hex "$GH_CALLS.dir/binding.zip")" \
+      --arg manifest "$manifest_digest" --argjson msize "$(wc -c < "$GH_CALLS.dir/manifest.zip")" \
+      --argjson bsize "$(wc -c < "$GH_CALLS.dir/binding.zip")" --arg binding "${FAKE_BINDING:-present}" '
+      ([{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:$msize,digest:$manifest,workflow_run:{id:$run,head_sha:$sha}}] +
+        if $binding == "present" then [{id:91,name:"consumer-rehearsal-binding-1",expired:false,size_in_bytes:$bsize,digest:$digest,workflow_run:{id:$run,head_sha:$sha}}] else [] end) as $artifacts |
+      {total_count:($artifacts|length),artifacts:$artifacts}'
+    exit 0 ;;
+  "api "*/actions/artifacts/78/zip) cat "$GH_CALLS.dir/manifest.zip"; exit 0 ;;
+  "api "*/actions/artifacts/91/zip) cat "$GH_CALLS.dir/binding.zip"; exit 0 ;;
+  "api "*/actions/runs/*/attempts/1/jobs\?*)
+    jq -n --argjson run "${FAKE_CANDIDATE_RUN-9001}" --arg sha "$HEAD_SHA" \
+      '{total_count:1,jobs:[{id:42,name:"Consumer release rehearsal / Consumer canary",run_id:$run,
+        run_attempt:1,head_sha:$sha,status:"completed",conclusion:"success"}]}' ;;
   "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
   "api "*/build-release-binaries.yml/runs\?*)
     [[ "${FAKE_RUNS_FAIL:-0}" != 1 ]] || exit 1
     run="${FAKE_CANDIDATE_RUN-9001}"
     if [[ -n "$run" ]]; then
       sha="${2#*head_sha=}"; sha="${sha%%&*}"
-      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success"}]}'
+      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},head_repository:{full_name:"burin-labs/harn"}}]}'
     else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
   "api "*/artifacts\?name=candidate-manifest-*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
     jq -n --arg sha "$sha" --argjson run "${FAKE_CANDIDATE_RUN-9001}" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:$run,head_sha:$sha}}]}' ;;
   "api "*/actions/runs/*)
-    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
-      "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
+    jq -n --argjson id "${FAKE_CANDIDATE_RUN-9001}" --arg sha "${FAKE_RUN_SHA:-$HEAD_SHA}" \
+      '{id:$id,head_sha:$sha,run_attempt:1,event:"push",head_branch:"main",
+        path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},
+        head_repository:{full_name:"burin-labs/harn"},status:"completed",conclusion:"success"}' ;;
   "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   "api "*/releases\?per_page=50) [[ "${FAKE_RELEASE:-0}" == 1 ]] && echo true || echo false ;;
   "issue list") ;;
@@ -114,10 +166,12 @@ plan() {
   shift
   : > "$tmp/$name.outputs"
   : > "$tmp/$name.calls"
+  mkdir -p "$tmp/$name.calls.dir"
   local status=0
   (
     cd "$repo"
     env PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn GH_CALLS="$tmp/$name.calls" \
+      FAKE_LIB="$root/scripts/lib" CANARY_REPOSITORY=acme/widget-host CONSUMER_READ_TOKEN=fixture-consumer \
       GREEN_WAIT_SECONDS=0 GREEN_POLL_SECONDS=0 \
       HEAD_SHA="$(git rev-parse HEAD)" BUILD_RUN_ID=9001 GITHUB_OUTPUT="$tmp/$name.outputs" "$@" \
       bash -eu "$tmp/plan.sh" > "$tmp/$name.log" 2>&1
@@ -173,6 +227,47 @@ plan wrong_consumer_source FAKE_RUN_SHA=1111111111111111111111111111111111111111
 [[ "$(cat "$tmp/wrong_consumer_source.status")" != 0 ]] \
   || fail "another source's consumer verdict authorized publication"
 
+# A green consumer job is evidence only for what its rehearsal measured. The
+# candidate's binding names the Harn source, the manifest digest and the
+# consumer revision; promotion re-reads each and refuses a stale pass by name.
+refused_by() {
+  local name=$1 reason=$2
+  [[ "$(cat "$tmp/$name.status")" != 0 && "$(output "$name" promote)" != true ]] \
+    || fail "$name authorized publication: $(cat "$tmp/$name.log")"
+  grep -Fq "reason=$reason" "$tmp/$name.log" || fail "$name was not refused as $reason: $(cat "$tmp/$name.log")"
+  ! grep -Fq widget-host "$tmp/$name.log" || fail "$name named the consumer"
+}
+grep -Fq 'decision=default_advanced_from_rehearsed_head ahead_by=3' "$tmp/candidate.log" \
+  || fail "an advanced consumer default branch was not logged as a decision: $(cat "$tmp/candidate.log")"
+# Falsifier: the rehearsal measured Harn commit A; promotion of commit B refuses.
+plan binding_other_source FAKE_BINDING_SOURCE=1111111111111111111111111111111111111111
+refused_by binding_other_source rehearsal_binding_unmeasured
+plan binding_other_archives "FAKE_BINDING_MANIFEST=sha256:$(printf 'e%.0s' {1..64})"
+refused_by binding_other_archives rehearsal_binding_unmeasured
+plan binding_other_producer FAKE_BINDING_RUN=9002
+refused_by binding_other_producer rehearsal_binding_unmeasured
+plan binding_absent FAKE_BINDING=absent
+refused_by binding_absent rehearsal_binding_unmeasured
+# The paired pull request passes only while its rehearsed head is current.
+plan paired_current FAKE_BINDING_PULL=7
+[[ "$(output paired_current promote)" == true ]] || fail "a current paired head was refused: $(cat "$tmp/paired_current.log")"
+grep -Fq 'consumer=pull-7 decision=rehearsed_head_current' "$tmp/paired_current.log" \
+  || fail "the paired decision is not logged: $(cat "$tmp/paired_current.log")"
+# Falsifier: the paired pull request moved after a passing rehearsal.
+plan paired_moved FAKE_BINDING_PULL=7 "FAKE_PULL_HEAD=$(printf 'd%.0s' {1..40})"
+refused_by paired_moved consumer_pull_head_moved
+grep -Fq 'consumer_pull_request=7' "$tmp/paired_moved.log" || fail "the moved pairing does not name its repair"
+plan paired_merged FAKE_BINDING_PULL=7 FAKE_PULL_STATE=closed FAKE_PULL_MERGED=true
+refused_by paired_merged consumer_pull_merged_since_rehearsal
+plan paired_closed FAKE_BINDING_PULL=7 FAKE_PULL_STATE=closed
+refused_by paired_closed consumer_pull_closed_since_rehearsal
+plan default_diverged FAKE_DEFAULT_STATUS=diverged
+refused_by default_diverged consumer_default_diverged
+plan default_current FAKE_DEFAULT_STATUS=identical
+[[ "$(output default_current promote)" == true ]] || fail "a current default head was refused"
+plan consumer_unread CONSUMER_READ_TOKEN=
+refused_by consumer_unread consumer_read_authority_missing
+
 # The release's merge group built the candidate, so this push's run built
 # nothing: the queue's run is the one promoted.
 plan from_queue FAKE_CANDIDATE_RUN=4242
@@ -198,6 +293,12 @@ plan standalone_red_source RECOVERY=true STANDALONE_HARN=true FAKE_GREEN=ahead
 plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
 [[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"
+[[ "$(output recovery_missing expected_attempt)" == 1 && "$(output recovery_missing expected_manifest_id)" == 78 &&
+   "$(output recovery_missing expected_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || fail "fresh rehearsal did not capture the actual producer manifest identity"
+plan recovery_missing_other_source RECOVERY=true FAKE_CONSUMER=missing FAKE_RUN_SHA=1111111111111111111111111111111111111111
+[[ "$(cat "$tmp/recovery_missing_other_source.status")" != 0 && -z "$(output recovery_missing_other_source promote)" ]] \
+  || fail "fresh rehearsal accepted another source's producer"
 plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
 [[ "$(output recovery_explicit_pair promote)" == true && "$(output recovery_explicit_pair requires_rehearsal)" == true ]] \
   || fail "explicit consumer repair did not require actual measurement"
@@ -207,6 +308,8 @@ plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
 plan verified_repair RECOVERY=true REQUIRES_CONSUMER_REPAIR=true CONSUMER_PULL_REQUEST=7 FAKE_CONSUMER=failure
 [[ "$(cat "$tmp/verified_repair.status")" == 0 && "$(output verified_repair requires_rehearsal)" == true ]] \
   || fail "verified archive repair did not require a fresh consumer measurement"
+[[ -z "$(output verified_repair expected_attempt)" ]] \
+  || fail "archive repair received an unrelated ordinary-producer identity"
 for invalid in no_pull nonnumeric_pull not_manual; do
   case "$invalid" in
     no_pull) extras=(RECOVERY=true) ;;
@@ -272,7 +375,7 @@ plan runs_unread FAKE_RUNS_FAIL=1
 # A tag at this commit with no release yet is a promotion that stopped before
 # publishing; it is promoted again.
 plan resume "FAKE_TAG_SHA=$head_sha"
-[[ "$(output resume promote)" == true ]] || fail "a tag without a release was not resumed"
+[[ "$(output resume promote)" == true ]] || fail "a tag without a release was not resumed: $(cat "$tmp/resume.log") calls: $(cat "$tmp/resume.calls")"
 
 # Rerun after the release exists: no-op.
 plan rerun "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1

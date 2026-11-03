@@ -290,7 +290,7 @@ hook_export_cargo_target_dir() {
 
 hook_build_harn_bin() {
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
-  HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+  HARN_BIN='' HARN_BIN_NO_BUILD="${HARN_BIN_NO_BUILD:-0}" \
     RUSTC_WRAPPER='' RUSTC_WORKSPACE_WRAPPER='' \
     CARGO_BUILD_RUSTC_WRAPPER='' CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='' \
     "$repo_root/scripts/harn_bin.sh" --print
@@ -348,11 +348,15 @@ hook_ensure_harn() {
     printf '%s\n' "$HARN_FRESH_WORKTREE_BIN"
     return
   fi
+  if [ "${HARN_BIN_NO_BUILD:-0}" = "1" ]; then
+    hook_build_harn_bin
+    return $?
+  fi
   hook_export_cargo_target_dir
-  resolved_harn=$(hook_build_harn_bin)
+  resolved_harn=$(hook_build_harn_bin) || return $?
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
-    HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2
-    HARN_BIN='' ./scripts/harn_bin.sh --record-receipt >&2
+    HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2 || return $?
+    HARN_BIN='' ./scripts/harn_bin.sh --record-receipt >&2 || return $?
   fi
   printf '%s\n' "$resolved_harn"
 }
@@ -366,12 +370,12 @@ hook_export_harn_bin() {
     export HARN_BIN
     return 0
   fi
-  HARN_BIN=$(hook_ensure_harn)
+  HARN_BIN=$(hook_ensure_harn) || return $?
   export HARN_BIN
 }
 
 hook_export_fresh_worktree_harn_bin() {
-  HARN_BIN=$(unset HARN_BIN; hook_ensure_harn)
+  HARN_BIN=$(unset HARN_BIN; hook_ensure_harn) || return $?
   export HARN_BIN
 }
 
@@ -390,7 +394,7 @@ hook_export_registry_harn_bin() {
 
 hook_check_generated_registry() {
   changed_file_list=$1
-  hook_export_registry_harn_bin "$changed_file_list"
+  hook_export_registry_harn_bin "$changed_file_list" || return $?
   "$HARN_BIN" run scripts/check_generated_registry.harn
 }
 

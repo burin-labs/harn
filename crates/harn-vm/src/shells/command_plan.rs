@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 
 use tree_sitter::Node;
 
+mod sequence;
+pub use sequence::plan_posix_sequence;
+
 /// The first statically named executable and the environment prefixes that
 /// affect its lookup. `argv` is available only for a plain external command.
 #[derive(Debug, Clone, PartialEq, Eq)]

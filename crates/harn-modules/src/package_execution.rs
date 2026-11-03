@@ -427,7 +427,7 @@ fn lexical_package_relative_path(
             input_packages_root = Some(ancestor);
         }
     }
-    let input_packages_root = input_packages_root.ok_or_else(&outside_generation)?;
+    let input_packages_root = input_packages_root.ok_or_else(outside_generation)?;
     lexical_relative_suffix(entry, input_packages_root).ok_or_else(outside_generation)
 }
 

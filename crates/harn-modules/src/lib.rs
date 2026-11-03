@@ -54,7 +54,9 @@ pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
     unresolved_package_alias, PackageImport,
 };
-pub use references::{index_references, RefSite, ReferenceEdge, ReferenceIndex};
+pub use references::{
+    file_reference_edges, index_references, RefSite, ReferenceEdge, ReferenceIndex,
+};
 pub use standalone::build_with_standalone_source;
 use standalone::PackageContext;
 pub use symbol_reachability::{

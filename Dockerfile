@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM --platform=$BUILDPLATFORM rust:1.95-bookworm AS builder
+FROM --platform=$BUILDPLATFORM rust:1.99-bookworm AS builder
 
 ARG BUILDARCH
 ARG TARGETARCH
