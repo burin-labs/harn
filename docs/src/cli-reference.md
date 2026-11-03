@@ -384,7 +384,10 @@ SSH `ProxyCommand` or an alias that a granted `gh` would then run.
 | `GH_BROWSER`, `BROWSER` | `/usr/bin/false` | browser |
 | `GH_EDITOR`, `EDITOR`, `VISUAL` | `/usr/bin/false` | editor |
 | `XDG_DATA_HOME` | an empty private directory | extensions |
-| `GH_CONFIG_DIR` | a private `config.yml` with display settings and inert aliases only, never `hosts.yml` | shell aliases, configured pager, browser, editor and socket |
+| `GH_CONFIG_DIR` | a private `config.yml` with display settings and inert aliases only, and a private `hosts.yml` with the granted token for github.com only; the user's `hosts.yml` is never copied | shell aliases, configured pager, browser, editor and socket |
+| `GH_HOST` | `github.com` | another default host |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (both cases) | the host's managed egress proxy when one confines the spawn, otherwise empty | routing requests through a caller's proxy |
+| `GH_DEBUG`, `GODEBUG` | empty | request and header logging |
 | `GIT_CONFIG_COUNT` and its keys | `core.hooksPath` to an empty directory, `core.fsmonitor=false`, `protocol.ext.allow=never`, `core.sshCommand=ssh` | repository hooks, filesystem monitor, `ext::` remotes, configured SSH command |
 | `PATH` | the trusted entries only | helpers such as `git` and `ssh` planted in the workspace |
 | `HOME`, `XDG_CONFIG_HOME` | the user's own home and `~/.config` | a workspace home's Git configuration |
@@ -410,6 +413,20 @@ gh reads no environment variable that selects a filter or template, and
 same arguments on a command that is not a read run without the grant and are
 not refused, so `gh pr create -t title` still works.
 
+The token never enters the granted `gh`'s environment: `GH_TOKEN`,
+`GITHUB_TOKEN` and the enterprise variables are absent, and gh finds the token
+only as a github.com login in the private `hosts.yml`. gh therefore sends no
+token to any other host. A `for=gh` grant must expose `GH_TOKEN` or
+`GITHUB_TOKEN`; any other name is refused. A granted read is also refused when
+it names another host: `--hostname`, a `HOST/OWNER/REPO` value for `-R` or
+`--repo`, or a positional repository, URL or SSH remote whose host is not
+github.com.
+
+A granted `gh` receives no caller or inherited variable except `LANG`,
+`LC_*`, `TERM`, `TMPDIR`, `TZ` and `NO_COLOR`, plus the variables in the
+table above. Proxy, TLS (`SSL_CERT_FILE`, `SSL_CERT_DIR`), debug and token
+variables a caller sets are dropped.
+
 Every value any grant hands to a child, for any program, is redacted from that command's stdout
 and stderr, from events, and from transcripts, including a value printed
 across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
@@ -420,12 +437,11 @@ drivers or `diff.external`, is not overridden, and no granted read reaches it:
 traced with `GIT_TRACE`, the reads run git only for `config`, `remote -v`,
 `rev-parse` and `symbolic-ref`.
 
-While a granted `gh` runs, its environment holds the credential. On Linux a
-confined sibling cannot read it: `/proc` is not listable and
-`/proc/<pid>/environ` fails with a permission error under Landlock. On macOS a
-confined sibling cannot run `ps`, and `KERN_PROCARGS2` returns no environment
-for another process. An unconfined process of the same user on Linux can read
-`/proc/<pid>/environ` for as long as the granted `gh` runs.
+While a granted `gh` runs, its `hosts.yml` is the only place the token is
+stored. Every confined child except that `gh` has `$HARN_HOME/grant-spawns` on
+its read denylist, so a confined sibling cannot read it. The directory is
+removed when the command ends. An unconfined process of the same user can read
+the file for as long as the granted `gh` runs.
 
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
