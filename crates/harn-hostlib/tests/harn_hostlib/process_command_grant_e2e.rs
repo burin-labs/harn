@@ -66,10 +66,46 @@ if [ -n "$GH_PAGER" ]; then echo paged | $GH_PAGER; fi
 
 const PLANTED_GH: &str = "#!/bin/sh\necho planted-gh\nenv\n";
 
-fn write_executable(path: &Path, body: &str) {
+fn write_executable(path: &Path, body: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, body).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A grant reaches only a compiled `gh`, never a script. This one is a
+/// compiled launcher that runs the `gh.sh` beside it, so the stand-in stays a
+/// readable script.
+const NATIVE_LAUNCHER: &str = r#"use std::os::unix::process::CommandExt;
+fn main() {
+    let script = std::env::current_exe().unwrap().with_file_name("gh.sh");
+    let error = std::process::Command::new("/bin/sh").arg(script).args(std::env::args_os().skip(1)).exec();
+    eprintln!("{error}");
+    std::process::exit(127);
+}
+"#;
+
+fn native_launcher() -> &'static [u8] {
+    static LAUNCHER: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LAUNCHER.get_or_init(|| {
+        let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let source = dir.path().join("launcher.rs");
+        let binary = dir.path().join("launcher");
+        std::fs::write(&source, NATIVE_LAUNCHER).unwrap();
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let status = std::process::Command::new(rustc)
+            .args(["--edition", "2021", "-o"])
+            .arg(&binary)
+            .arg(&source)
+            .status()
+            .expect("rustc must run to build the native gh launcher");
+        assert!(status.success(), "building the native gh launcher failed");
+        std::fs::read(&binary).unwrap()
+    })
+}
+
+fn write_native_gh(bin: &Path, script: &str) {
+    write_executable(&bin.join("gh.sh"), script);
+    write_executable(&bin.join("gh"), native_launcher());
 }
 
 /// The user's gh setup the grant must not open (a `!` alias and an
@@ -101,7 +137,7 @@ impl Fixture {
         // own lock and remove the directory afterwards.
         let workspace = tempfile::tempdir_in("/tmp").expect("workspace root");
         let home = user.path().join("home");
-        write_executable(&user.path().join("bin/gh"), FAKE_GH);
+        write_native_gh(&user.path().join("bin"), FAKE_GH);
         std::fs::create_dir_all(home.join(".config/gh")).unwrap();
         std::fs::write(
             home.join(".config/gh/config.yml"),
@@ -567,6 +603,85 @@ fn only_gh_reads_receive_the_grant() {
             "{other} received the grant: {out}"
         );
     }
+}
+
+/// A granted read that names an output filter or passes arguments on after
+/// `--` is refused: gh's jq filters read the environment and can print the
+/// credential in a form redaction cannot match, and `--` hands the rest to
+/// git. The same arguments on a non-read run without the credential.
+#[test]
+fn output_filters_and_passthrough_are_refused_on_a_granted_read() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+
+    for command in [
+        "gh api user --jq env.GH_TOKEN",
+        "gh api user --jq=env.GH_TOKEN",
+        "gh pr list --json number -q env",
+        "gh pr list --json number -qenv",
+        "gh pr list -Lq 5",
+        "gh api user --template x",
+        "gh api user --template=x",
+        "gh api user -t x",
+        "gh api user -tx",
+        "gh pr view 1 -- -c filter.a.smudge=env",
+    ] {
+        let error = fixture
+            .shell_in(fixture.workspace.path(), command)
+            .err()
+            .unwrap_or_else(|| panic!("{command} must be refused"));
+        assert!(
+            error.contains("command_grant_refused"),
+            "{command}: {error}"
+        );
+    }
+    for other in [
+        "gh repo clone o/r -- -c filter.a.smudge=env",
+        "gh pr create -t title",
+    ] {
+        let out = fixture.shell(other);
+        assert!(out.contains("gh-grant=absent"), "{other}: {out}");
+    }
+    assert_granted_without_leak(&fixture.shell("gh pr list --json number"), "--json");
+}
+
+/// A script `gh` on a trusted `PATH` entry, such as a version-manager shim
+/// that picks the real program from files in the working directory, gets no
+/// grant.
+#[test]
+fn a_script_gh_on_a_trusted_path_receives_no_grant() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    write_executable(&fixture.user.path().join("bin/gh"), FAKE_GH);
+    let out = fixture.shell("gh issue list");
+    assert!(out.contains("gh-grant=absent"), "{out}");
+}
+
+/// A write root over the user's SSH or git configuration refuses the grant:
+/// a confined child could plant a `ProxyCommand` or a filter driver there.
+#[test]
+fn a_write_root_over_the_users_git_or_ssh_config_refuses_the_grant() {
+    use harn_vm::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let home = fixture.user.path().join("home");
+    for protected in [home.join(".ssh"), home.join(".config/git")] {
+        std::fs::create_dir_all(&protected).unwrap();
+        let mut policy = CapabilityPolicy::default();
+        policy
+            .process_sandbox
+            .write_roots
+            .push(protected.display().to_string());
+        push_execution_policy(policy);
+        let result = fixture.shell_in(fixture.workspace.path(), "gh issue list");
+        pop_execution_policy();
+        let error = result
+            .err()
+            .unwrap_or_else(|| panic!("a write root at {} must refuse", protected.display()));
+        assert!(error.contains("command_grant_refused"), "{error}");
+    }
+    assert_granted_without_leak(&fixture.shell("gh issue list"), "no write root");
 }
 
 /// The same proof through a confined spawn. Needs a live process sandbox.
