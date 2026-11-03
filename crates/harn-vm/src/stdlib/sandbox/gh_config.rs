@@ -86,7 +86,10 @@ fn gh_refusal(args: &[String]) -> Option<&'static str> {
             && arg.starts_with('-')
             && !arg.starts_with("--")
             && !arg.starts_with("-R")
-            && arg[1..].contains(['q', 't']);
+            && arg
+                .chars()
+                .skip(1)
+                .any(|letter| matches!(letter, 'q' | 't'));
         if long_filter || short_filter {
             return Some("an output filter can read the credential from the environment");
         }
