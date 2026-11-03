@@ -2470,6 +2470,10 @@ class HarnCanonicalHistoryBoundaries(_HarnDataclass):
 class HarnACPPromptCorrelation(_HarnDataclass):
     messageId: Optional[str] = None
 @dataclass
+class HarnACPSessionContinuation(_HarnDataclass):
+    continuation: Optional[str] = None
+
+@dataclass
 class HarnProviderUsage(_HarnDataclass):
     run_id: str
     parent_session_id: str

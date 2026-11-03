@@ -562,6 +562,8 @@ pub struct AcpSessionLoadParams {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<String>,
     #[serde(rename = "environmentPolicy")]
     pub environment_policy: AcpSessionEnvironmentConfig,
 }
@@ -583,6 +585,7 @@ impl AcpSessionLoadParams {
         Self {
             session_id: session_id.into(),
             cwd: None,
+            continuation: None,
             environment_policy,
         }
     }
@@ -592,11 +595,30 @@ impl AcpSessionLoadParams {
         self
     }
 
+    pub fn with_continuation(mut self, continuation: impl Into<String>) -> Self {
+        self.continuation = Some(continuation.into());
+        self
+    }
+
     pub fn with_workspace_checkpoint(self, enabled: bool) -> AcpSessionLoadWithCheckpoint {
         AcpSessionLoadWithCheckpoint {
             session: self,
             workspace_checkpoint: enabled,
         }
+    }
+}
+
+/// A closed session's optional process-local history continuation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AcpSessionCloseResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<String>,
+}
+
+impl AcpSessionCloseResult {
+    pub fn schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self))
+            .expect("ACP session continuation schema serializes")
     }
 }
 
@@ -999,6 +1021,7 @@ mod tests {
         let params = AcpSessionLoadParams {
             session_id: "saved-session".into(),
             cwd: Some("/workspace".into()),
+            continuation: None,
             environment_policy: AcpSessionEnvironmentConfig::default(),
         }
         .with_workspace_checkpoint(true);

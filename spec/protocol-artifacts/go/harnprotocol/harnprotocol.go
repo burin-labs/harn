@@ -2274,6 +2274,10 @@ type HarnCanonicalHistoryBoundaries struct {
 type HarnACPPromptCorrelation struct {
 	MessageID *string `json:"messageId,omitempty"`
 }
+type HarnACPSessionContinuation struct {
+	Continuation *string `json:"continuation,omitempty"`
+}
+
 type HarnProviderUsage struct {
 	RunID             string   `json:"run_id"`
 	ParentSessionID   string   `json:"parent_session_id"`

@@ -30,9 +30,6 @@ impl AcpServer {
             .get(session_id)
             .ok_or_else(|| format!("unknown session: {session_id}"))?;
         let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(session_id);
-        let snapshot = harn_vm::agent_sessions::snapshot(session_id)
-            .map(|value| harn_vm::llm::vm_value_to_json(&value))
-            .unwrap_or(serde_json::Value::Null);
         let active_prompt = session.host_bridge.is_some();
         let attachable_roles = serde_json::json!(["host_owner"]);
         let mut item = serde_json::json!({
@@ -43,8 +40,8 @@ impl AcpServer {
             "currentModeId": session.current_mode_id,
             "activePrompt": active_prompt,
         });
-        if let Some(created_at) = snapshot.get("created_at").cloned() {
-            item["createdAt"] = created_at;
+        if let Some(created_at) = harn_vm::agent_sessions::created_at(session_id) {
+            item["createdAt"] = serde_json::json!(created_at);
         }
         if let Some(last_event_id) = last_event_id {
             item["lastEventId"] = serde_json::json!(last_event_id);
@@ -240,6 +237,14 @@ impl AcpServer {
                 return;
             }
         };
+        let continuation = match params.get("continuation") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(token)) if !token.is_empty() => Some(token.as_str()),
+            Some(_) => {
+                self.send_error(id, -32602, "continuation must be a nonempty string");
+                return;
+            }
+        };
         if let (Some(requested), Some(live)) =
             (workspace_checkpoint, self.sessions.get(&session_id))
         {
@@ -342,39 +347,81 @@ impl AcpServer {
             };
             // Cold replay owns page buffers and its checkpoint state. Keep its
             // future out of the nested ACP dispatch frame.
-            match Box::pin(project_root.run(
-                harn_vm::agent_session_restore::load_canonical_session_replay(
-                    project_root.workspace(),
-                    &session_id,
-                ),
-            ))
-            .await
-            {
-                Ok(Some(persisted)) => {
-                    durable_checkpoint = persisted.last_event_id;
-                    replay_events = persisted.events;
-                    if let Err(error) = self.register_restored_session(
+            let cached = match continuation {
+                Some(token) => match project_root
+                    .run(harn_vm::agent_sessions::load_closed_session_continuation(
                         &session_id,
-                        params,
-                        environment.expect("cold load has declared authority"),
-                    ) {
-                        self.send_session_open_error(id, &error);
+                        token,
+                    ))
+                    .await
+                {
+                    Ok(cached) => cached,
+                    Err(error) => {
+                        self.send_error(
+                            id,
+                            -32000,
+                            &format!("Failed to continue session {session_id}: {error}"),
+                        );
                         return;
                     }
-                }
-                Ok(None) => {
-                    // Neither store knows this id: a typo or a stale id, and the
-                    // one case where failing loudly is right.
-                    self.send_error(id, -32602, &format!("unknown session: {session_id}"));
+                },
+                None => None,
+            };
+            if let Some(cached) = cached {
+                durable_checkpoint = cached.last_event_id();
+                if let Err(error) = self.register_restored_session(
+                    &session_id,
+                    params,
+                    environment.expect("cold load has declared authority"),
+                ) {
+                    self.send_session_open_error(id, &error);
                     return;
                 }
-                Err(error) => {
-                    self.send_error(
-                        id,
-                        -32000,
-                        &format!("Failed to restore session {session_id}: {error}"),
-                    );
+                if let Err(error) = cached.restore() {
+                    self.rollback_session_admission(&session_id);
+                    self.send_error(id, -32000, &error);
                     return;
+                }
+            } else {
+                match Box::pin(project_root.run(
+                    harn_vm::agent_session_restore::load_canonical_session_replay(
+                        project_root.workspace(),
+                        &session_id,
+                    ),
+                ))
+                .await
+                {
+                    Ok(Some(persisted)) => {
+                        if let Err(error) = self.register_restored_session(
+                            &session_id,
+                            params,
+                            environment.expect("cold load has declared authority"),
+                        ) {
+                            self.send_session_open_error(id, &error);
+                            return;
+                        }
+                        if let Err(error) = persisted.restore_transcript(&session_id) {
+                            self.rollback_session_admission(&session_id);
+                            self.send_error(id, -32000, &error.to_string());
+                            return;
+                        }
+                        durable_checkpoint = persisted.last_event_id;
+                        replay_events = persisted.events;
+                    }
+                    Ok(None) => {
+                        // Neither store knows this id: a typo or a stale id, and the
+                        // one case where failing loudly is right.
+                        self.send_error(id, -32602, &format!("unknown session: {session_id}"));
+                        return;
+                    }
+                    Err(error) => {
+                        self.send_error(
+                            id,
+                            -32000,
+                            &format!("Failed to restore session {session_id}: {error}"),
+                        );
+                        return;
+                    }
                 }
             }
         }

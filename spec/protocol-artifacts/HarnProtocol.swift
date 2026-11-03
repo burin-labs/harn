@@ -5209,6 +5209,10 @@ public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
 public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
     public let messageId: String?
 }
+public struct HarnACPSessionContinuation: Codable, Sendable, Equatable {
+    public let continuation: String?
+}
+
 public struct HarnProviderUsage: Codable, Sendable, Equatable {
     public let runId: String
     public let parentSessionId: String

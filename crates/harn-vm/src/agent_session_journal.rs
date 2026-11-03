@@ -228,6 +228,7 @@ impl HydratedTranscript {
             self.summary.as_deref(),
         )?;
         crate::agent_sessions::restore_message_event_ids(session_id, &self.source_event_ids)?;
+        crate::agent_sessions::restore_text_call_seq(session_id, &self.messages)?;
         self.restore_goal(session_id)
     }
 
@@ -246,6 +247,7 @@ impl HydratedTranscript {
 
 pub(crate) struct PreparedJournal {
     pub transcript: HydratedTranscript,
+    pub cached_transcript: Option<crate::agent_sessions::ClosedTranscript>,
     pub state: JournalState,
     pub has_events: bool,
 }
@@ -294,10 +296,29 @@ pub(crate) async fn prepare(
         Some(InitializationAccounting::default()),
     )
     .await?;
+    let meta = state
+        .config
+        .store
+        .describe(session_id)
+        .await
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+    crate::agent_sessions::validate_continuation_checkpoint(session_id, &meta)
+        .map_err(VmError::Runtime)?;
+    let cached = crate::agent_sessions::cached_transcript(session_id, &state.state_dir, &meta)
+        .filter(|_| crate::agent_sessions::has_continuation_checkpoint(session_id));
+    if let Some(cached_transcript) = cached {
+        return Ok(PreparedJournal {
+            transcript: HydratedTranscript::default(),
+            cached_transcript: Some(cached_transcript),
+            has_events: meta.event_count > 0,
+            state,
+        });
+    }
     let events = session_store::read_all_events(&state.config.store, session_id).await?;
     let has_events = !events.is_empty();
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
+        cached_transcript: None,
         has_events,
         state,
     })

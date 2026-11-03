@@ -2618,6 +2618,10 @@ export interface HarnCanonicalHistoryBoundaries {
 export interface HarnACPPromptCorrelation {
   messageId?: string
 }
+export interface HarnACPSessionContinuation {
+  continuation?: string | null
+}
+
 export interface HarnProviderUsage {
   run_id: string
   parent_session_id: string

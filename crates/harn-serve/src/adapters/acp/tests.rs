@@ -1096,6 +1096,7 @@ mod runtime_overrides;
 mod sanitize_visible_text;
 mod served_agent_turn;
 mod served_json_tool_fence;
+mod session_continuation;
 mod session_environment;
 mod session_inputs;
 mod session_recap;

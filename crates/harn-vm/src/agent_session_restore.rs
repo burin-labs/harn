@@ -36,6 +36,16 @@ const RESTORE_PAGE: usize = 512;
 pub struct CanonicalSessionReplay {
     pub events: Vec<AgentSessionReplayEvent>,
     pub last_event_id: Option<EventId>,
+    transcript: crate::agent_session_journal::HydratedTranscript,
+}
+
+impl CanonicalSessionReplay {
+    /// Install the same validated history that the client receives as replay.
+    pub fn restore_transcript(&self, session_id: &str) -> Result<(), VmError> {
+        self.transcript
+            .restore(session_id)
+            .map_err(VmError::Runtime)
+    }
 }
 
 /// Read `session_id`'s durable transcript out of `project_root`'s canonical
@@ -101,6 +111,7 @@ async fn read_canonical_session_prefix(
         return Ok(CanonicalSessionReplay {
             events: Vec::new(),
             last_event_id: None,
+            transcript: Default::default(),
         });
     }
 
@@ -178,6 +189,7 @@ async fn read_canonical_session_prefix(
     Ok(CanonicalSessionReplay {
         events: close_unanswered_tool_calls(session_id, events),
         last_event_id: checkpoint.last_event_id,
+        transcript,
     })
 }
 
