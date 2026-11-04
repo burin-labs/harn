@@ -67,6 +67,7 @@ impl AcpServer {
             runtime_provider_endpoint_overrides,
             llm_capability_overrides,
             default_budget: config.budget,
+            child_egress: super::child_egress::ChildEgress::start(&config.sandbox),
             sandbox: config.sandbox,
             host_inference_boundary: config.host_inference_boundary,
             machine_spend_quota: config.machine_spend_quota,
