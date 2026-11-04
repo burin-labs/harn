@@ -612,6 +612,9 @@ fn only_gh_reads_receive_the_grant() {
         "gh api -iXGET repos/o/r",
         "gh api --method=get repos/o/r",
         "gh api -H Accept:application/json repos/o/r",
+        "gh pr view -c 1",
+        "gh pr list -dL5",
+        "gh run list -w ci",
     ] {
         assert_granted_without_leak(&fixture.shell(read), read);
     }
@@ -651,6 +654,13 @@ fn only_gh_reads_receive_the_grant() {
         "gh api -iZ repos/o/r",
         "gh api -H X-HTTP-Method-Override:DELETE repos/o/r",
         "gh pr view 1 --web",
+        "gh pr view -cw 1",
+        "gh pr view -wc 1",
+        "gh issue view -cw 1",
+        "gh pr list -dw",
+        "gh run view -vw 99",
+        "gh pr view -Z 1",
+        "gh pr view --unknown 1",
     ] {
         let out = fixture.shell(other);
         assert!(
