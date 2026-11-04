@@ -30,6 +30,21 @@ fn parse_text_tool_call_seq(id: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
+pub(crate) fn restore_text_call_seq(
+    id: &str,
+    messages: &[serde_json::Value],
+) -> Result<(), String> {
+    let next = next_text_tool_call_seq_from_json_messages(messages);
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("unknown session '{id}'"))?;
+        state.text_tool_call_seq = state.text_tool_call_seq.max(next);
+        Ok(())
+    })
+}
+
 fn update_next_text_tool_call_seq(value: &serde_json::Value, next_seq: &mut u64) {
     match value {
         serde_json::Value::Array(items) => {
