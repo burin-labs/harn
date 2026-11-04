@@ -182,7 +182,14 @@ instead of the live policy: the proxy admits only the listed hosts, and Harn's o
 calls keep their separate policy. A pipeline reads what the proxy refused with
 `harness.net.child_network_refusals()`, which returns each destination once, and
 adds a host for the life of the server with `harness.net.child_network_allow(host)`.
-Refusals are per server, so commands running in parallel cannot be told apart.
+Refusals are per server, so commands running in parallel cannot be told apart, and
+an approval applies to every session on that server. Share a server this way only
+when it serves one user and one trust domain.
+
+An added host must be one DNS name, marked `can_approve` on its refusal. Addresses,
+single-label names, and all-digit labels are refused, and an added name that resolves
+to a loopback, private, or link-local address does not connect. A host listed at
+start keeps its private reach, so a list can name an internal registry.
 
 The managed boundary is available on macOS, and on Linux when the policy names
 the namespace launcher (`--netns-launcher`). A Linux child then runs in a private

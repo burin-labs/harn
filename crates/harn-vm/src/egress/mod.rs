@@ -355,6 +355,12 @@ pub fn register_egress_builtins(vm: &mut Vm) {
                         entry.put_str("host", refusal.host.as_str());
                         entry.insert("port".to_string(), VmValue::Int(i64::from(refusal.port)));
                         entry.put_str("protocol", refusal.protocol);
+                        entry.insert(
+                            "can_approve".to_string(),
+                            VmValue::Bool(process_proxy::can_approve_child_network_host(
+                                &refusal.host,
+                            )),
+                        );
                         VmValue::dict(entry)
                     })
                     .collect(),
