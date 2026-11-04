@@ -149,7 +149,9 @@ provider = "openai"
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
+# OpenAI's 2026-11-03 notice says standard rates start November 30, without a
+# time zone. Date-only catalog boundaries use UTC until a precise cutoff is published.
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", ends_on = "2026-11-29", review_after = "2026-11-30", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }], hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://developers.openai.com/api/docs/pricing" }, file_search = { per_1k_calls = 2.50, source_url = "https://developers.openai.com/api/docs/pricing" } } }
 superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]

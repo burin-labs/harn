@@ -72,7 +72,7 @@ pub(super) fn call(
     (entry.handler)(&[arg])
 }
 
-fn vlist(values: Vec<VmValue>) -> VmValue {
+pub(super) fn vlist(values: Vec<VmValue>) -> VmValue {
     VmValue::list(values)
 }
 

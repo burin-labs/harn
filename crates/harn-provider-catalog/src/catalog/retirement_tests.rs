@@ -5,8 +5,17 @@ use chrono::{Duration, NaiveDate};
 /// so a retirement that lands on a weekend does not open an issue early.
 const GRACE_DAYS: i64 = 3;
 
-fn parsed(date: Option<&str>) -> Option<NaiveDate> {
-    date.and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+fn parsed(date: Option<&str>, label: &str, problems: &mut Vec<String>) -> Option<NaiveDate> {
+    let date = date?;
+    match NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(date) => Some(date),
+        Err(_) => {
+            problems.push(format!(
+                "{label} has invalid date {date:?}; expected YYYY-MM-DD"
+            ));
+            None
+        }
+    }
 }
 
 /// A route whose provider has stopped serving it must not stay selectable by
@@ -16,10 +25,34 @@ fn parsed(date: Option<&str>) -> Option<NaiveDate> {
 fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> Vec<String> {
     let mut problems = Vec::new();
     for model in &catalog.models {
+        if let Some(pricing) = &model.pricing {
+            for promotion in &pricing.promotions {
+                let label = format!("{} promotion {} review_after", model.id, promotion.id);
+                if let Some(review) =
+                    parsed(promotion.review_after.as_deref(), &label, &mut problems)
+                {
+                    if review < cutoff {
+                        problems.push(format!(
+                            "{} promotion {} needs review after {review}",
+                            model.id, promotion.id
+                        ));
+                    }
+                }
+            }
+        }
         let deprecation = &model.deprecation;
+        let sunset = parsed(
+            deprecation.sunset_date.as_deref(),
+            &format!("{} sunset_date", model.id),
+            &mut problems,
+        );
+        let retires = parsed(
+            deprecation.retires_on.as_deref(),
+            &format!("{} retires_on", model.id),
+            &mut problems,
+        );
         if deprecation.status == DeprecationStatus::Deprecated {
-            let lapsed =
-                parsed(deprecation.sunset_date.as_deref()).is_some_and(|date| date < cutoff);
+            let lapsed = sunset.is_some_and(|date| date < cutoff);
             if lapsed && !model.aliases.is_empty() {
                 problems.push(format!(
                     "{} passed its sunset {} but aliases {:?} still select it; remove the aliases",
@@ -28,7 +61,7 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
                     model.aliases
                 ));
             }
-        } else if let Some(retires) = parsed(deprecation.retires_on.as_deref()) {
+        } else if let Some(retires) = retires {
             if retires < cutoff {
                 problems.push(format!(
                     "{} retired on {retires} but is not deprecated; \
@@ -44,7 +77,7 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
 /// The weekly `retirement-sweep` job in provider-contract-probe.yml injects
 /// today's date as `RETIREMENT_SWEEP_DATE` and files an issue when this fails.
 /// Everywhere else the variable is unset and the test does nothing, because a
-/// date-based check must never gate a merge: main would redden on a calendar day.
+/// date-based check does not gate a merge: main would redden on a calendar day.
 #[test]
 fn lapsed_retirements_are_not_left_routable() {
     let Ok(today) = std::env::var("RETIREMENT_SWEEP_DATE") else {
@@ -53,10 +86,30 @@ fn lapsed_retirements_are_not_left_routable() {
     let today = NaiveDate::parse_from_str(&today, "%Y-%m-%d")
         .expect("RETIREMENT_SWEEP_DATE must be a YYYY-MM-DD date");
     let cutoff = today - Duration::days(GRACE_DAYS);
-    let problems = lapsed_retirements(&artifact_embedded(None, None), cutoff);
+    let catalog = artifact_embedded(None, None);
+    let dated = catalog
+        .models
+        .iter()
+        .filter(|model| {
+            model.deprecation.retires_on.is_some()
+                || model.deprecation.sunset_date.is_some()
+                || model.pricing.as_ref().is_some_and(|pricing| {
+                    pricing
+                        .promotions
+                        .iter()
+                        .any(|promotion| promotion.review_after.is_some())
+                })
+        })
+        .count();
+    assert!(dated > 0, "catalog sweep found no dated models");
+    let problems = lapsed_retirements(&catalog, cutoff);
+    eprintln!(
+        "catalog sweep: {dated} dated models, {} needing review",
+        problems.len()
+    );
     assert!(
         problems.is_empty(),
-        "retirements past their date:\n{}",
+        "catalog dates needing review:\n{}",
         problems.join("\n")
     );
 }
@@ -101,6 +154,46 @@ fn announced_retirements_are_structured_and_recorded() {
             .iter()
             .all(|problem| !problem.starts_with(&silent.id))
     );
+}
+
+#[test]
+fn together_qwen_retirement_keeps_other_provider_route_active() {
+    let catalog = artifact_embedded(None, None);
+    let together = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "Qwen/Qwen3.8-2.4T-A95B" && model.provider == "together")
+        .expect("Together route");
+    assert_eq!(together.deprecation.status, DeprecationStatus::Deprecated);
+    assert_eq!(
+        together.deprecation.sunset_date.as_deref(),
+        Some("2026-11-04")
+    );
+    assert_eq!(
+        together.deprecation.superseded_by.as_deref(),
+        Some("Qwen/Qwen3.7-Max")
+    );
+    assert!(together.aliases.is_empty());
+    let other = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "qwen/qwen3.8-2.4t-a95b" && model.provider == "openrouter")
+        .expect("OpenRouter route");
+    assert_eq!(other.deprecation.status, DeprecationStatus::Active);
+}
+
+#[test]
+fn sol_promotion_review_is_reported_after_its_date() {
+    let catalog = artifact_embedded(None, None);
+    let mentions_sol = |cutoff| {
+        lapsed_retirements(&catalog, cutoff)
+            .iter()
+            .any(|problem| problem.contains("gpt-5.6-sol promotion openai-2026-08-sol"))
+    };
+    assert!(!mentions_sol(
+        NaiveDate::from_ymd_opt(2026, 11, 30).unwrap()
+    ));
+    assert!(mentions_sol(NaiveDate::from_ymd_opt(2026, 12, 1).unwrap()));
 }
 
 #[test]
@@ -160,6 +253,12 @@ name = "Undated"
 provider = "openai"
 context_window = 8192
 deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
+
+[models."fixture/promotion"]
+name = "Promotion"
+provider = "openai"
+context_window = 8192
+pricing = { input_per_mtok = 5.0, output_per_mtok = 30.0, promotions = [{ id = "intro", starts_on = "2025-01-01", review_after = "2026-01-03", input_per_mtok = 4.0, output_per_mtok = 20.0, source_url = "https://example.com" }] }
 "#,
     )
     .expect("overlay parses");
@@ -174,6 +273,12 @@ deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
         problems.iter().any(|p| p.starts_with("fixture/noticed ")),
         "{problems:?}"
     );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("fixture/promotion promotion intro")),
+        "{problems:?}"
+    );
     // A date written only in prose is context, never a retirement.
     assert!(
         problems.iter().all(|p| !p.starts_with("fixture/undated ")),
@@ -183,6 +288,47 @@ deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
     assert!(lapsed_retirements(&catalog, early)
         .iter()
         .all(|p| !p.starts_with("fixture/")));
+}
+
+#[test]
+fn malformed_dates_are_reported_by_the_sweep() {
+    let overlay = llm_config::parse_config_toml(
+        r#"
+[models."fixture/bad-sunset"]
+name = "Bad sunset"
+provider = "openai"
+context_window = 8192
+deprecated = true
+sunset_date = "next month"
+
+[models."fixture/bad-retirement"]
+name = "Bad retirement"
+provider = "openai"
+context_window = 8192
+retires_on = "2026-13-01"
+
+[models."fixture/bad-review"]
+name = "Bad review"
+provider = "openai"
+context_window = 8192
+pricing = { input_per_mtok = 5.0, output_per_mtok = 30.0, promotions = [{ id = "intro", starts_on = "2025-01-01", review_after = "later", input_per_mtok = 4.0, output_per_mtok = 20.0, source_url = "https://example.com" }] }
+"#,
+    )
+    .expect("overlay parses");
+    let catalog = artifact_embedded(Some(&overlay), None);
+    let problems = lapsed_retirements(&catalog, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+    for field in [
+        "fixture/bad-sunset sunset_date",
+        "fixture/bad-retirement retires_on",
+        "fixture/bad-review promotion intro review_after",
+    ] {
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.starts_with(field) && problem.contains("invalid date")),
+            "{field}: {problems:?}"
+        );
+    }
 }
 
 #[test]
