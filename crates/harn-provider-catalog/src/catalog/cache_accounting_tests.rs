@@ -67,6 +67,38 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
     // A concrete serializer without cache fields is an audited false. An
     // arbitrary local proxy remains unknown and must not inherit that claim.
     assert_eq!(config.providers["local"].cache_usage_accounting, None);
+    assert_eq!(config.providers["atlas"].cache_usage_accounting, None);
+    assert_eq!(
+        config.providers["atlas"].stream_usage_accounting,
+        Some(true)
+    );
+    let atlas = audit
+        .verified
+        .iter()
+        .find(|entry| entry.provider == "atlas")
+        .expect("documented gateway terminal usage contract");
+    assert_eq!(atlas.fields, [crate::config::UsageAccountingField::Stream]);
+    assert_eq!(atlas.checked_on, "2026-11-01");
+    assert!(!audit.unverified.iter().any(|provider| provider == "atlas"));
+    assert_eq!(config.providers["hunyuan"].cache_usage_accounting, None);
+    assert_eq!(
+        config.providers["hunyuan"].stream_usage_accounting,
+        Some(true)
+    );
+    let hunyuan = audit
+        .verified
+        .iter()
+        .find(|entry| entry.provider == "hunyuan")
+        .expect("documented terminal usage contract");
+    assert_eq!(
+        hunyuan.fields,
+        [crate::config::UsageAccountingField::Stream]
+    );
+    assert_eq!(hunyuan.checked_on, "2026-11-01");
+    assert!(!audit
+        .unverified
+        .iter()
+        .any(|provider| provider == "hunyuan"));
     // One Hugging Face upstream's counters do not prove the entire gateway.
     assert_eq!(config.providers["huggingface"].cache_usage_accounting, None);
     assert_eq!(
@@ -82,9 +114,8 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
             .fields,
         [crate::config::UsageAccountingField::Stream]
     );
-    // vLLM omits cache details unless its operator enables them. Its default
-    // route cannot turn that absence into a measured zero.
-    assert_eq!(config.providers["vllm"].cache_usage_accounting, None);
+    // Conditional emission is supported; the ledger retains category absence.
+    assert_eq!(config.providers["vllm"].cache_usage_accounting, Some(true));
     assert_eq!(config.providers["vllm"].stream_usage_accounting, Some(true));
     assert_eq!(
         audit
@@ -93,7 +124,10 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
             .find(|entry| entry.provider == "vllm")
             .unwrap()
             .fields,
-        [crate::config::UsageAccountingField::Stream]
+        [
+            crate::config::UsageAccountingField::Cache,
+            crate::config::UsageAccountingField::Stream
+        ]
     );
     assert_eq!(audit.expires_on, "2026-11-14");
 }

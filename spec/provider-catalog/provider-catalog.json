@@ -71,6 +71,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -707,6 +708,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1755,6 +1757,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": true,
       "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "none",

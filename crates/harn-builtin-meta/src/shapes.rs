@@ -619,6 +619,15 @@ pub const LLM_PROVIDER_ATTEMPTS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("other", TY_INT),
 ]);
 
+/// Measured cache subtotals and per-category provider-call coverage.
+pub const LLM_REPORTED_CACHE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("reported_calls", TY_INT),
+    ShapeFieldDescriptor::new("read_reported_calls", TY_INT),
+    ShapeFieldDescriptor::new("write_reported_calls", TY_INT),
+    ShapeFieldDescriptor::new("read_tokens", TY_INT),
+    ShapeFieldDescriptor::new("write_tokens", TY_INT),
+]);
+
 /// Canonical usage envelope emitted by the LLM accounting ledger.
 ///
 /// `harn-vm` has a bidirectional parity gate between this shape, the real
@@ -638,6 +647,7 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("usage_unknown_calls", TY_INT),
     ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
+    ShapeFieldDescriptor::new("reported_cache", Ty::Union(&[LLM_REPORTED_CACHE, TY_NIL])),
     ShapeFieldDescriptor::new("cache_supported", TY_BOOL),
     ShapeFieldDescriptor::new("cache_hit_ratio", TY_FLOAT_OR_NIL),
     ShapeFieldDescriptor::new("cache_visibility", TY_STRING_OR_NIL),

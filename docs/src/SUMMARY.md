@@ -356,6 +356,7 @@
 - [Toolchain config and cache reference](./sandbox-config-census.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
+- [Provider conversation state](./dev/provider-conversation-state.md)
 - [Agent plane ownership](./dev/agent-loops.md)
 - [Agent harness ownership](./dev/agent-harness-ownership.md)
 - [Agent configuration registry](./dev/agent-gates.md)

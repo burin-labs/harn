@@ -751,6 +751,54 @@ fn sandbox_exec_profile_allows_common_device_runtime_access() {
 }
 
 #[test]
+fn sandbox_exec_profile_allows_a_multiprocessing_lock_but_not_the_network() {
+    // `/usr/bin/python3` is an xcrun launcher that exists even without the
+    // Command Line Tools; skip unless it actually runs outside the sandbox.
+    let python_runs = Command::new("/usr/bin/python3")
+        .args(["-I", "-c", "pass"])
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || !python_runs {
+        return;
+    }
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    let run = |code: &str| {
+        Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", &profile, "--", "/usr/bin/python3", "-I", "-c", code])
+            .current_dir("/")
+            .output()
+            .expect("run sandbox-exec python smoke")
+    };
+    // Match Python's own EPERM exception: the xcrun launcher prints its own
+    // "Operation not permitted" cache warning on every confined run.
+    let denied = |output: &std::process::Output| {
+        String::from_utf8_lossy(&output.stderr).contains("PermissionError: [Errno 1]")
+    };
+    let lock = run("import multiprocessing as m; l = m.Lock(); l.acquire(); l.release()");
+    assert!(
+        lock.status.success(),
+        "multiprocessing.Lock should work under the profile\nstderr:\n{}",
+        String::from_utf8_lossy(&lock.stderr)
+    );
+    // A semaphore outside multiprocessing's own `/mp-` names stays denied, so
+    // the child cannot reach another process's named semaphore.
+    let foreign = run("import _multiprocessing as m; m.SemLock(1, 1, 1, '/harn-foreign', True)");
+    assert!(
+        !foreign.status.success() && denied(&foreign),
+        "a non-multiprocessing semaphore name must be denied\nstderr:\n{}",
+        String::from_utf8_lossy(&foreign.stderr)
+    );
+    // Assert a sandbox denial, not just a failure, so a host without network
+    // cannot pass this vacuously.
+    let network = run("import socket; socket.create_connection(('1.1.1.1', 443), 3)");
+    assert!(
+        !network.status.success() && denied(&network),
+        "the semaphore grant must not open the network\nstderr:\n{}",
+        String::from_utf8_lossy(&network.stderr)
+    );
+}
+
+#[test]
 fn sandbox_exec_profile_allows_xcrun_to_resolve_swift() {
     if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/xcrun").exists() {
         return;

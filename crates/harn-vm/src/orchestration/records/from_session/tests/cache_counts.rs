@@ -19,6 +19,14 @@ fn cached_llm_call(reported: Option<bool>, read: i64, write: i64) -> AppendEvent
     if let Some(reported) = reported {
         metadata["cache_counts_reported"] = json!(reported);
     }
+    if reported == Some(true) {
+        let mut totals = crate::llm::usage::ReportedCacheTotals::default();
+        totals.record(crate::llm::usage::ReportedCacheUsage {
+            read_tokens: Some(read),
+            write_tokens: Some(write),
+        });
+        metadata["reported_cache"] = json!(totals);
+    }
     AppendEvent::new(custom("llm_call"), transcript_event("llm_call", metadata))
 }
 
@@ -99,6 +107,56 @@ async fn calls_recorded_before_the_flag_read_as_unreported() {
         encoded.get("cache_read_tokens").is_none(),
         "an unknown count is absent from the record, not a zero: {encoded}"
     );
+}
+
+#[tokio::test]
+async fn partially_reported_categories_stay_absent_through_saved_run_projection() {
+    for (read, write, expected) in [
+        (None, Some(25), (None, Some(25))),
+        (Some(150), None, (Some(150), None)),
+        (Some(0), Some(0), (Some(0), Some(0))),
+    ] {
+        let mut totals = crate::llm::usage::ReportedCacheTotals::default();
+        totals.record(crate::llm::usage::ReportedCacheUsage {
+            read_tokens: read,
+            write_tokens: write,
+        });
+        let call = AppendEvent::new(
+            custom("llm_call"),
+            transcript_event(
+                "llm_call",
+                json!({
+                    "cache_read_tokens": read.unwrap_or(0),
+                    "cache_write_tokens": write.unwrap_or(0),
+                    "cache_counts_reported": true,
+                    "reported_cache": totals,
+                    "input_tokens": 200,
+                    "output_tokens": 1,
+                    "provider": "vllm",
+                    "model": "cached-model",
+                }),
+            ),
+        );
+        let run = project(vec![call]).await;
+        assert_eq!(cache_counts(&run), expected);
+        assert_eq!(span_cache_keys(&run), vec![expected]);
+    }
+}
+
+#[tokio::test]
+async fn coarse_presence_without_category_measurements_cannot_fabricate_zero() {
+    let call = AppendEvent::new(
+        custom("llm_call"),
+        transcript_event(
+            "llm_call",
+            json!({
+                "cache_read_tokens": 0, "cache_write_tokens": 25,
+                "cache_counts_reported": true,
+                "input_tokens": 200, "output_tokens": 1,
+            }),
+        ),
+    );
+    assert_eq!(cache_counts(&project(vec![call]).await), (None, None));
 }
 
 #[test]
