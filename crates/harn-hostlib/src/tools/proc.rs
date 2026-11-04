@@ -167,14 +167,35 @@ pub(crate) fn run_with_filter(
         CaptureTransport::Pipe => None,
         CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
     };
+    // The one seam a command-bound grant on a program that runs others
+    // reaches: inheriting, piped, and redacted below. Held until the child is
+    // reaped, because it owns the spawn's private directory.
+    let granted = if req.env_mode == EnvMode::Replace || file_capture.is_some() {
+        None
+    } else {
+        harn_vm::stdlib::process::granted_spawn(&req.program, &req.args, &effective_cwd, &req.env)
+            .map_err(|error| HostlibError::Backend {
+            builtin: req.builtin,
+            message: error.to_string(),
+        })?
+    };
+    // A granted spawn sets only what `granted_spawn` chose and removes every
+    // other inherited name, so no caller or ambient variable reaches it.
+    let mut env_remove = req.env_remove.clone();
+    if let Some(granted) = &granted {
+        env = granted.env.iter().cloned().collect();
+        env_remove.extend(granted.remove.iter().cloned());
+    }
 
     let spec = SpawnSpec {
         builtin: req.builtin,
-        program: req.program.clone(),
+        program: granted
+            .as_ref()
+            .map_or_else(|| req.program.clone(), |granted| granted.program.clone()),
         args: req.args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,
-        env_remove: req.env_remove.clone(),
+        env_remove,
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
         // Foreground children get their own process group too, so the
@@ -196,9 +217,11 @@ pub(crate) fn run_with_filter(
         })?),
         None => None,
     };
+    let launching = granted.as_ref().map(|granted| granted.launching());
     let mut handle = process_handle::spawn_process(spec).map_err(|error| {
         process_error_to_hostlib(req.builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
+    drop(launching);
     let cleanup = scope.and_then(|scope| scope.register(handle.as_ref()));
     drop(launch_permit);
 

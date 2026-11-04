@@ -21,6 +21,7 @@ use crate::value::VmError;
 
 const MICROS_PER_USD: f64 = 1_000_000.0;
 const READ_PAGE: usize = 512;
+const RECORDED_THROUGH: &str = "harn.llm_spend_recorded_through";
 
 /// What `session_id` has spent on LLM calls so far, in USD, per the canonical
 /// store under `project_root`. A store with no such session has spent nothing.
@@ -45,7 +46,13 @@ pub async fn load_session_llm_spend_usd_from_store(
         Err(StoreError::NotFound(_)) => return Ok(0.0),
         Err(error) => return Err(spend_error("describe", session_id, error)),
     };
-    if meta.usage_cost_usd_micros > 0 || meta.event_count == 0 {
+    let recorded_zero = meta.chain_root_hash.as_deref().is_some_and(|hash| {
+        meta.attributes
+            .get(RECORDED_THROUGH)
+            .and_then(serde_json::Value::as_str)
+            == Some(hash)
+    });
+    if meta.usage_cost_usd_micros > 0 || meta.event_count == 0 || recorded_zero {
         return Ok(meta.usage_cost_usd_micros as f64 / MICROS_PER_USD);
     }
     recorded_llm_call_cost_usd(store, session_id).await
@@ -73,8 +80,18 @@ pub async fn record_session_llm_spend_usd_in_store(
     } else {
         0
     };
+    let meta = match store.describe(session_id).await {
+        Ok(meta) => meta,
+        Err(StoreError::NotFound(_)) => return Ok(()),
+        Err(error) => return Err(spend_error("describe", session_id, error)),
+    };
     let update = UpdateSession {
         usage_cost_usd_micros: Some(micros),
+        attributes: meta
+            .chain_root_hash
+            .map(|hash| (RECORDED_THROUGH.into(), serde_json::json!(hash)))
+            .into_iter()
+            .collect(),
         ..UpdateSession::default()
     };
     match store.update(session_id, update).await {
@@ -178,6 +195,34 @@ mod tests {
             .await
             .unwrap();
         assert!((spent - 0.75).abs() < 1e-9, "{spent}");
+    }
+
+    #[tokio::test]
+    async fn recorded_zero_is_bound_to_the_history_it_measured() {
+        let store = store_with_session("zero").await;
+        store.append("zero", llm_call(0.0)).await.unwrap();
+        record_session_llm_spend_usd_in_store(&store, "zero", 0.0)
+            .await
+            .unwrap();
+        let meta = store.describe("zero").await.unwrap();
+        let hash = meta
+            .chain_root_hash
+            .as_deref()
+            .expect("recorded event chain");
+        assert_eq!(meta.attributes[RECORDED_THROUGH].as_str(), Some(hash));
+        assert_eq!(
+            load_session_llm_spend_usd_from_store(&store, "zero")
+                .await
+                .unwrap(),
+            0.0
+        );
+        store.append("zero", llm_call(0.25)).await.unwrap();
+        assert_eq!(
+            load_session_llm_spend_usd_from_store(&store, "zero")
+                .await
+                .unwrap(),
+            0.25
+        );
     }
 
     #[tokio::test]

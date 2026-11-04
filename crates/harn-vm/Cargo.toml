@@ -163,6 +163,7 @@ ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hex = "0.4"
 percent-encoding = "2.3"
+memchr = "2"
 hmac = "0.13"
 sha1 = "0.11"
 sha2 = "0.11"

@@ -55,15 +55,15 @@ impl RetentionPolicy {
         if !matches!(session.status, SessionStatus::Open | SessionStatus::Closed) {
             return false;
         }
-        let age_ms = now_ms.saturating_sub(session.created_at_ms);
+        let age_ms = harn_clock::elapsed_ms(now_ms, session.created_at_ms);
         if let Some(max_age_seconds) = self.max_age_seconds {
-            if age_ms as u64 >= max_age_seconds.saturating_mul(1_000) {
+            if age_ms >= max_age_seconds.saturating_mul(1_000) {
                 return true;
             }
         }
         if let Some(min_age) = self.min_age_before_archive_seconds {
             if matches!(session.status, SessionStatus::Closed)
-                && age_ms as u64 >= min_age.saturating_mul(1_000)
+                && age_ms >= min_age.saturating_mul(1_000)
             {
                 return true;
             }
@@ -78,8 +78,7 @@ impl RetentionPolicy {
         let Some(soft_deleted_at) = session.soft_deleted_at_ms else {
             return false;
         };
-        let elapsed_ms = now_ms.saturating_sub(soft_deleted_at);
-        elapsed_ms as u64 >= self.grace_seconds.saturating_mul(1_000)
+        harn_clock::elapsed_ms(now_ms, soft_deleted_at) >= self.grace_seconds.saturating_mul(1_000)
     }
 
     /// Returns true when a Closed session has crossed
@@ -94,8 +93,8 @@ impl RetentionPolicy {
         let Some(min_age) = self.min_age_before_archive_seconds else {
             return false;
         };
-        let age_ms = now_ms.saturating_sub(session.created_at_ms);
-        age_ms as u64 >= min_age.saturating_mul(1_000)
+        let age_ms = harn_clock::elapsed_ms(now_ms, session.created_at_ms);
+        age_ms >= min_age.saturating_mul(1_000)
     }
 }
 
@@ -230,5 +229,20 @@ mod tests {
         assert!(!policy.should_archive(&open, 60_000));
         assert!(policy.should_archive(&closed, 60_000));
         assert!(!policy.should_archive(&soft, 60_000));
+    }
+
+    #[test]
+    fn a_timestamp_ahead_of_now_is_never_old_enough() {
+        let policy = RetentionPolicy {
+            max_age_seconds: Some(60),
+            min_age_before_archive_seconds: Some(1),
+            grace_seconds: 10,
+        };
+        let open = meta(SessionStatus::Open, 10_000, None);
+        let closed = meta(SessionStatus::Closed, 10_000, None);
+        let soft = meta(SessionStatus::SoftDeleted, 0, Some(10_000));
+        assert!(!policy.should_soft_delete(&open, 5_000));
+        assert!(!policy.should_archive(&closed, 5_000));
+        assert!(!policy.should_hard_delete(&soft, 5_000));
     }
 }

@@ -18,6 +18,15 @@
           "ref": "refs/heads/main"
         }
       ]
+    },
+    {
+      "label": "harn-pr-macos",
+      "admits": [
+        {
+          "workflow": ".github/workflows/macos-pr-tests.yml",
+          "ref": "refs/heads/main"
+        }
+      ]
     }
   ]
 }

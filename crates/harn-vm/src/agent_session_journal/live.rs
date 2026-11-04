@@ -114,7 +114,10 @@ pub(crate) async fn initialize(
             ));
         }
     }
-    let has_canonical_history = !prepared.transcript.messages.is_empty();
+    let has_canonical_history = prepared.cached_transcript.as_ref().map_or_else(
+        || !prepared.transcript.messages.is_empty(),
+        crate::agent_sessions::ClosedTranscript::has_messages,
+    );
     let session_id = if has_canonical_history && !has_live_session {
         let seeded_session_id = crate::agent_sessions::seed_from_messages(
             Some(session_id.to_string()),
@@ -151,6 +154,8 @@ pub(crate) async fn initialize(
     // not replace an active session's goal from another canonical root.
     let goal_ready = if pending_fork_goal {
         crate::agent_sessions::persist_pending_fork_goal(&session_id)
+    } else if let Some(cached) = prepared.cached_transcript {
+        crate::agent_sessions::restore_session_goal(&session_id, cached.goal)
     } else {
         prepared.transcript.restore_goal(&session_id)
     };
@@ -304,6 +309,9 @@ pub(crate) async fn flush_init_terminal_with_cause(
     );
     let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
+    if let Err(error) = crate::agent_sessions::remember_flushed_transcript(session_id).await {
+        crate::events::log_warn("agent.session_continuation", &error.to_string());
+    }
     // Subscriber delivery can re-enter the VM. Keep its future off the
     // initialization caller's stack.
     Box::pin(crate::llm::emit_live_agent_event_with_ctx(
@@ -361,6 +369,9 @@ pub(crate) async fn flush_terminal(
     );
     let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
+    if let Err(error) = crate::agent_sessions::remember_flushed_transcript(session_id).await {
+        crate::events::log_warn("agent.session_continuation", &error.to_string());
+    }
     Ok(phase)
 }
 
