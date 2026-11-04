@@ -5,8 +5,17 @@ use chrono::{Duration, NaiveDate};
 /// so a retirement that lands on a weekend does not open an issue early.
 const GRACE_DAYS: i64 = 3;
 
-fn parsed(date: Option<&str>) -> Option<NaiveDate> {
-    date.and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+fn parsed(date: Option<&str>, label: &str, problems: &mut Vec<String>) -> Option<NaiveDate> {
+    let date = date?;
+    match NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(date) => Some(date),
+        Err(_) => {
+            problems.push(format!(
+                "{label} has invalid date {date:?}; expected YYYY-MM-DD"
+            ));
+            None
+        }
+    }
 }
 
 /// A route whose provider has stopped serving it must not stay selectable by
@@ -18,7 +27,10 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
     for model in &catalog.models {
         if let Some(pricing) = &model.pricing {
             for promotion in &pricing.promotions {
-                if let Some(review) = parsed(promotion.review_after.as_deref()) {
+                let label = format!("{} promotion {} review_after", model.id, promotion.id);
+                if let Some(review) =
+                    parsed(promotion.review_after.as_deref(), &label, &mut problems)
+                {
                     if review < cutoff {
                         problems.push(format!(
                             "{} promotion {} needs review after {review}",
@@ -29,9 +41,18 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
             }
         }
         let deprecation = &model.deprecation;
+        let sunset = parsed(
+            deprecation.sunset_date.as_deref(),
+            &format!("{} sunset_date", model.id),
+            &mut problems,
+        );
+        let retires = parsed(
+            deprecation.retires_on.as_deref(),
+            &format!("{} retires_on", model.id),
+            &mut problems,
+        );
         if deprecation.status == DeprecationStatus::Deprecated {
-            let lapsed =
-                parsed(deprecation.sunset_date.as_deref()).is_some_and(|date| date < cutoff);
+            let lapsed = sunset.is_some_and(|date| date < cutoff);
             if lapsed && !model.aliases.is_empty() {
                 problems.push(format!(
                     "{} passed its sunset {} but aliases {:?} still select it; remove the aliases",
@@ -40,7 +61,7 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
                     model.aliases
                 ));
             }
-        } else if let Some(retires) = parsed(deprecation.retires_on.as_deref()) {
+        } else if let Some(retires) = retires {
             if retires < cutoff {
                 problems.push(format!(
                     "{} retired on {retires} but is not deprecated; \
@@ -56,7 +77,7 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
 /// The weekly `retirement-sweep` job in provider-contract-probe.yml injects
 /// today's date as `RETIREMENT_SWEEP_DATE` and files an issue when this fails.
 /// Everywhere else the variable is unset and the test does nothing, because a
-/// date-based check must never gate a merge: main would redden on a calendar day.
+/// date-based check does not gate a merge: main would redden on a calendar day.
 #[test]
 fn lapsed_retirements_are_not_left_routable() {
     let Ok(today) = std::env::var("RETIREMENT_SWEEP_DATE") else {
@@ -267,6 +288,47 @@ pricing = { input_per_mtok = 5.0, output_per_mtok = 30.0, promotions = [{ id = "
     assert!(lapsed_retirements(&catalog, early)
         .iter()
         .all(|p| !p.starts_with("fixture/")));
+}
+
+#[test]
+fn malformed_dates_are_reported_by_the_sweep() {
+    let overlay = llm_config::parse_config_toml(
+        r#"
+[models."fixture/bad-sunset"]
+name = "Bad sunset"
+provider = "openai"
+context_window = 8192
+deprecated = true
+sunset_date = "next month"
+
+[models."fixture/bad-retirement"]
+name = "Bad retirement"
+provider = "openai"
+context_window = 8192
+retires_on = "2026-13-01"
+
+[models."fixture/bad-review"]
+name = "Bad review"
+provider = "openai"
+context_window = 8192
+pricing = { input_per_mtok = 5.0, output_per_mtok = 30.0, promotions = [{ id = "intro", starts_on = "2025-01-01", review_after = "later", input_per_mtok = 4.0, output_per_mtok = 20.0, source_url = "https://example.com" }] }
+"#,
+    )
+    .expect("overlay parses");
+    let catalog = artifact_embedded(Some(&overlay), None);
+    let problems = lapsed_retirements(&catalog, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap());
+    for field in [
+        "fixture/bad-sunset sunset_date",
+        "fixture/bad-retirement retires_on",
+        "fixture/bad-review promotion intro review_after",
+    ] {
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.starts_with(field) && problem.contains("invalid date")),
+            "{field}: {problems:?}"
+        );
+    }
 }
 
 #[test]
