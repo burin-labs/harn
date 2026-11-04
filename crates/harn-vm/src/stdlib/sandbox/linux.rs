@@ -39,6 +39,8 @@ mod landlock_support;
 mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
+#[path = "linux_shared_memory.rs"]
+mod shared_memory;
 use filesystem::filesystem_profile;
 pub(crate) use filesystem::installed_write_grants;
 use landlock_support::{AccessFs, FsAccess, LandlockSupport, ABI};
@@ -271,6 +273,12 @@ impl TransferableConfinement {
             .map_err(|err| io::Error::other(format!("failed to install the seccomp filter: {err}")))
     }
 
+    /// Mount the payload's private `/dev/shm` and grant it in the ruleset.
+    /// The namespace helper calls this inside its mount namespace.
+    pub fn mount_private_shared_memory(&self) -> io::Result<()> {
+        shared_memory::mount_private(self.ruleset_fd())
+    }
+
     /// Release the ruleset descriptor so it can be sent across an `exec`.
     pub fn into_ruleset_fd(self) -> Option<RawFd> {
         self.ruleset.map(IntoRawFd::into_raw_fd)
@@ -499,6 +507,7 @@ fn landlock_profile_for(
             false,
         )?;
     }
+    shared_memory::grant_host_fallback(&mut filesystem, private_tmp.is_some())?;
     let ruleset = support
         .populated_ruleset(
             scope_abstract_unix,
