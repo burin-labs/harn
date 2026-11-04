@@ -9,6 +9,92 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.187
+
+### Breaking
+
+- **Cache usage preserves omitted read and write counts separately (#7320).**
+  vLLM cache accounting now recognizes `created_cache_tokens`. Missing counters
+  stay unknown through retries, live notifications, and saved run reports;
+  explicit zeros remain measurements. A combined hit rate requires read counts
+  from every provider call. Atlas and Hunyuan streams now retain terminal
+  usage according to their documented compatibility APIs; their cache contracts
+  remain unverified.
+
+  Migration: Rust consumers constructing `CacheCounts` set `reported` to
+  `ReportedCacheUsage { read_tokens: Some(read), write_tokens: Some(write) }`
+  instead of `true`. Use `None` for each omitted category. Consumers constructing
+  `LlmUsage` or `ProviderUsage` set `reported_cache` to the measured
+  `ReportedCacheTotals`, or `None` when no category was measured. Fold totals with
+  `record(ReportedCacheUsage)` or `merge(&ReportedCacheTotals)`; inspect
+  `read_reported_calls` and `write_reported_calls` for category coverage.
+
+  Generated Swift and Python writers preserve schema-required nulls, including
+  unknown cache usage. Swift decoders now reject missing required nullable keys;
+  supply explicit nulls when constructing wire objects, including plan-step
+  `priority`. Optional fields can still be omitted.
+- **Session recaps retain prompt identities.** Public prompt facts include the caller's message
+  identity when the journal recorded one, allowing hosts to reconnect restored prompts to their
+  workspace checkpoints.
+
+  Migration: Rust consumers constructing `RecapTextFact` literals must provide `message_id`.
+  Use the recorded caller identity for a user prompt, or `None` when it is unavailable or the
+  text is from an assistant. Regenerate strict protocol bindings before consuming the new field.
+
+### Added
+
+- Add an offline Claude thread wire-state primitive with exclusive cursor ownership,
+  full-history recovery and deterministic protocol tests. Existing sessions and
+  provider dispatch do not activate it; live route qualification remains separate.
+
+### Changed
+
+- The pinned Rust toolchain is now 1.99.1 and the workspace minimum supported
+  Rust version is 1.99, so building Harn from source needs Rust 1.99 or newer.
+  The orchestrator container image builds on `rust:1.99-bookworm`.
+
+### Fixed
+
+- Darwin sandbox preparation creates its required temporary alias before scheduling
+  dangling-alias cleanup on a background thread. A nonblocking process lock permits
+  only one cleanup scan at a time; alias validation, creation and per-candidate
+  rechecks retain their existing locks and confinement.
+- Retention sweeps, host-lease wait accounting, and the scheduler no longer treat a start time ahead of "now"
+  (clock skew, restored backup) as an enormous age. The new `harn_clock::elapsed_ms` clamps it to zero, so such
+  sessions are not soft- or hard-deleted early and a lease wait keeps its full budget.
+  `harn_clock::offset_datetime_to_ms` now floors pre-epoch instants.
+- Confined commands now get a credential-free `GH_CONFIG_DIR` stand-in. GitHub CLI exits on the denied
+  `hosts.yml` even when `GH_TOKEN` is set, so `gh` failed with a permission error inside every sandbox.
+  The stand-in carries `config.yml` (aliases, git protocol, editor) and never `hosts.yml`.
+- The Linux process sandbox now lets confined commands use POSIX semaphores, so Python's
+  `multiprocessing.Lock()` and the linters and test runners built on process pools no longer fail
+  with `PermissionError: [Errno 13]`. Bubblewrap and namespaced launches get a private `/dev/shm`;
+  Landlock-only launches can read, write, and delete the same user's shared-memory segments there.
+  Shared values, arrays, and `shared_memory` still need truncation, which stays denied.
+- Skip Apple's Git installer shim during sandbox configuration discovery when no installed Git is available,
+  so starting a session does not request developer tools.
+- The macOS process sandbox now allows POSIX named semaphores, so Python's `multiprocessing.Lock()`
+  and the linters and test runners built on process pools no longer fail with `PermissionError: [Errno 1]`.
+  The network stays closed.
+- A confined child now keeps a toolchain cache variable (`UV_CACHE_DIR`, `GOMODCACHE`, `XDG_CACHE_HOME`, and the rest of
+  the toolchain cache set) that the launcher pointed under one of the policy's `process_sandbox.write_roots`. Before, any
+  inherited cache path outside the workspace was replaced with an empty sandbox cache, so a warm package cache an embedder
+  had granted for writing was never used and an offline resolve failed in the child. A path outside both the workspace
+  and the write roots is still relocated.
+- A confined child's temp dir and toolchain cache no longer live inside the workspace. They moved from `.harn-tmp`
+  and `.harn-toolchain-cache` in the first workspace root to a per-workspace runtime dir in the user cache directory
+  (`~/Library/Caches/harn-sandbox/<digest>` on macOS, `$XDG_CACHE_HOME/harn-sandbox/<digest>` or
+  `~/.cache/harn-sandbox/<digest>` elsewhere), so a linter or test collector walking the project no longer finds the
+  child's temporary files. The runtime dir is owner-only, refuses a symlinked or foreign-owned component, and is
+  granted to every backend, including runs restricted to declared roots. A root that covers a workspace still covers
+  its temp dir, so a policy narrowed to a directory made there stays inside the enclosing policy. A script's own scratch
+  from `harness.fs.workspace_temp_dir()` and `mkdtemp_in_workspace` stays in `.harn-tmp` inside the workspace. Existing
+  `.harn-toolchain-cache` directories are no longer used and can be deleted.
+- **A workspace opened through a symlink stays inside itself.** The command risk scan now treats a path as inside a
+  workspace root when either its written or its resolved spelling sits under the root. A cwd reported by
+  `git rev-parse --show-toplevel` or `pwd -P` (for example `/private/tmp/project` for a root declared as
+  `/tmp/project`) no longer earns an `outside_workspace` label and an approval hold.
+
 ## v0.10.186
 
 ### Breaking
