@@ -16,6 +16,18 @@ fn parsed(date: Option<&str>) -> Option<NaiveDate> {
 fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> Vec<String> {
     let mut problems = Vec::new();
     for model in &catalog.models {
+        if let Some(pricing) = &model.pricing {
+            for promotion in &pricing.promotions {
+                if let Some(review) = parsed(promotion.review_after.as_deref()) {
+                    if review < cutoff {
+                        problems.push(format!(
+                            "{} promotion {} needs review after {review}",
+                            model.id, promotion.id
+                        ));
+                    }
+                }
+            }
+        }
         let deprecation = &model.deprecation;
         if deprecation.status == DeprecationStatus::Deprecated {
             let lapsed =
@@ -53,10 +65,30 @@ fn lapsed_retirements_are_not_left_routable() {
     let today = NaiveDate::parse_from_str(&today, "%Y-%m-%d")
         .expect("RETIREMENT_SWEEP_DATE must be a YYYY-MM-DD date");
     let cutoff = today - Duration::days(GRACE_DAYS);
-    let problems = lapsed_retirements(&artifact_embedded(None, None), cutoff);
+    let catalog = artifact_embedded(None, None);
+    let dated = catalog
+        .models
+        .iter()
+        .filter(|model| {
+            model.deprecation.retires_on.is_some()
+                || model.deprecation.sunset_date.is_some()
+                || model.pricing.as_ref().is_some_and(|pricing| {
+                    pricing
+                        .promotions
+                        .iter()
+                        .any(|promotion| promotion.review_after.is_some())
+                })
+        })
+        .count();
+    assert!(dated > 0, "catalog sweep found no dated models");
+    let problems = lapsed_retirements(&catalog, cutoff);
+    eprintln!(
+        "catalog sweep: {dated} dated models, {} needing review",
+        problems.len()
+    );
     assert!(
         problems.is_empty(),
-        "retirements past their date:\n{}",
+        "catalog dates needing review:\n{}",
         problems.join("\n")
     );
 }
@@ -101,6 +133,46 @@ fn announced_retirements_are_structured_and_recorded() {
             .iter()
             .all(|problem| !problem.starts_with(&silent.id))
     );
+}
+
+#[test]
+fn together_qwen_retirement_keeps_other_provider_route_active() {
+    let catalog = artifact_embedded(None, None);
+    let together = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "Qwen/Qwen3.8-2.4T-A95B" && model.provider == "together")
+        .expect("Together route");
+    assert_eq!(together.deprecation.status, DeprecationStatus::Deprecated);
+    assert_eq!(
+        together.deprecation.sunset_date.as_deref(),
+        Some("2026-11-04")
+    );
+    assert_eq!(
+        together.deprecation.superseded_by.as_deref(),
+        Some("Qwen/Qwen3.7-Max")
+    );
+    assert!(together.aliases.is_empty());
+    let other = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "qwen/qwen3.8-2.4t-a95b" && model.provider == "openrouter")
+        .expect("OpenRouter route");
+    assert_eq!(other.deprecation.status, DeprecationStatus::Active);
+}
+
+#[test]
+fn sol_promotion_review_is_reported_after_its_date() {
+    let catalog = artifact_embedded(None, None);
+    let mentions_sol = |cutoff| {
+        lapsed_retirements(&catalog, cutoff)
+            .iter()
+            .any(|problem| problem.contains("gpt-5.6-sol promotion openai-2026-08-sol"))
+    };
+    assert!(!mentions_sol(
+        NaiveDate::from_ymd_opt(2026, 11, 30).unwrap()
+    ));
+    assert!(mentions_sol(NaiveDate::from_ymd_opt(2026, 12, 1).unwrap()));
 }
 
 #[test]
@@ -160,6 +232,12 @@ name = "Undated"
 provider = "openai"
 context_window = 8192
 deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
+
+[models."fixture/promotion"]
+name = "Promotion"
+provider = "openai"
+context_window = 8192
+pricing = { input_per_mtok = 5.0, output_per_mtok = 30.0, promotions = [{ id = "intro", starts_on = "2025-01-01", review_after = "2026-01-03", input_per_mtok = 4.0, output_per_mtok = 20.0, source_url = "https://example.com" }] }
 "#,
     )
     .expect("overlay parses");
@@ -172,6 +250,12 @@ deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
     );
     assert!(
         problems.iter().any(|p| p.starts_with("fixture/noticed ")),
+        "{problems:?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("fixture/promotion promotion intro")),
         "{problems:?}"
     );
     // A date written only in prose is context, never a retirement.
