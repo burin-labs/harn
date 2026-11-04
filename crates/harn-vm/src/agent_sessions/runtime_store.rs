@@ -33,6 +33,8 @@ impl<T: Copy> SharedValue<T> {
 }
 
 pub struct AgentSessionRuntime {
+    pub(super) closed_transcript:
+        parking_lot::RwLock<Option<super::continuation::ClosedTranscript>>,
     sessions: SharedCell<HashMap<String, SessionState>>,
     inputs: parking_lot::RwLock<
         HashMap<
@@ -50,6 +52,7 @@ pub struct AgentSessionRuntime {
 impl Default for AgentSessionRuntime {
     fn default() -> Self {
         Self {
+            closed_transcript: parking_lot::RwLock::new(None),
             sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
             inputs: parking_lot::RwLock::new(HashMap::new()),
             unknown_host_event_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),

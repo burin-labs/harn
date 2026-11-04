@@ -115,7 +115,7 @@ project scanning — shares one ignore stack, selected per call with
 | Level | Behavior |
 | --- | --- |
 | `"none"` | Raw walk. Nothing is skipped. |
-| `"builtin"` | Harn's built-in directory defaults only (`.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, `.venv`, `venv`, `__pycache__`, `.hg`, `.svn`, and Harn's own `.harn`, `.harn-runs`, `.harn-tmp`, `harn-sandbox`). |
+| `"builtin"` | Harn's built-in directory defaults only (`.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, `.venv`, `venv`, `__pycache__`, `.hg`, `.svn`, and Harn's own `.harn`, `.harn-runs`, `.harn-tmp`, `.harn-sandbox`). |
 | `"project"` | The built-in defaults plus `.gitignore` and `.agentignore`, in that order of increasing precedence. `.ignore` (the ripgrep/fd convention) is not honored: git cannot evaluate it, so a host implementing the same walk cannot reproduce it. |
 
 Defaults differ by surface, deliberately:

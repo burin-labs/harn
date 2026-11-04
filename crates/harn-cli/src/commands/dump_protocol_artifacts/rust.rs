@@ -309,6 +309,7 @@ pub(super) fn generate_rust(
     super::inference_admission::append(&mut out, super::records::Target::Rust);
     super::canonical_history::append(&mut out, super::records::Target::Rust);
     super::prompt_correlation::append(&mut out, super::records::Target::Rust);
+    super::session_continuation::append(&mut out, super::records::Target::Rust);
     super::provider_usage::append(&mut out, super::records::Target::Rust);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep

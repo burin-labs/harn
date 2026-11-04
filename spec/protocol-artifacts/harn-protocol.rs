@@ -5458,6 +5458,12 @@ pub struct HarnACPPromptCorrelation {
     pub message_id: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPSessionContinuation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnProviderUsage {
     pub run_id: String,
     pub parent_session_id: String,
