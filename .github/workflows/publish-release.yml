@@ -3,16 +3,17 @@ name: Publish release
 # Fires on two triggers:
 #
 #   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path.
-#      promote-release.yml creates the tag, at the version commit on main,
+#      promote-release.yml creates the tag, at the requested commit on main,
 #      when it publishes the GitHub release from the files that commit's
 #      build-release-binaries.yml run built and checked. This trigger ships
 #      crates.io from that immutable tag. Release binaries are not built
 #      here or on the tag.
 #
 #   2. workflow_dispatch — manual recovery for the partial-failure case
-#      (tag pushed but crates.io publish was incomplete). With no
-#      drift, dispatch checks out the existing release tag so crates.io,
-#      release notes, and the git tag stay tied to the same commit.
+#      (tag pushed but crates.io publish was incomplete). Dispatch checks out
+#      the existing release tag so crates.io, release notes, and the git tag stay
+#      tied to the same commit, and never main's head, which declares a version
+#      that is not published yet.
 #      release_ship.sh's per-crate publish skips already-published
 #      crates so manual re-fire is idempotent.
 #
@@ -23,8 +24,7 @@ name: Publish release
 # release page with zero artifacts.
 #
 # Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
-# merge-queue CI of the just-landed Release PR ran the same gates a
-# few minutes ago. Set the env var or pass `--reaudit` (workflow input
+# candidate run at this commit ran the same gates. Set the env var or pass `--reaudit` (workflow input
 # `reaudit: true`) to opt back in for paranoid local runs.
 on:
   push:
@@ -61,8 +61,7 @@ on:
       reaudit:
         description: >-
           Re-run the full release-gate audit before finalizing. Defaults
-          off — merge-queue CI of the just-landed Release PR already
-          ran the same gates a few minutes ago.
+          off: the candidate run at this commit already ran the same gates.
         type: boolean
         default: false
       allow_unfolded_fragments:
@@ -81,19 +80,8 @@ permissions:
   attestations: read
 
 concurrency:
-  # Scope by ref so a tag-push run does not contend with concurrent
-  # main-push runs from the same release commit (or vice versa). Without
-  # the ref scope a queued tag-push run could sit behind a long main-push
-  # detect-drift and be silently skipped if the GHA queue policy decides
-  # the queued run is stale — see harn#2547 for the v0.8.47 incident
-  # where the tag-push run was cancelled before reaching the publish
-  # step. Different `group` values run concurrently; crates.io
-  # publication is already idempotent (release_ship.sh skips
-  # already-published crates), and the tag-push and main-push paths can
-  # only ever publish the same version once anyway (the tag-push branch
-  # publishes from the merged-main tag commit; the main-push branch only
-  # publishes when Cargo.toml is *ahead* of the latest tag, which by
-  # definition is a different version).
+  # One lane per tag. crates.io publication is already idempotent:
+  # release_ship.sh skips already-published crates.
   group: publish-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
@@ -146,91 +134,13 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           LATEST_TAG="$(
             git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
               | sed -n '1p'
           )"
-          LATEST_VERSION="${LATEST_TAG#v}"
-          HEAD_SHA="$(git rev-parse HEAD)"
-          MATCHING_TAG="v$CARGO_VERSION"
-          MAIN_DRIFT_PUBLISH_REF=""
-          version_gt() {
-            local left="$1"
-            local right="$2"
-            [[ "$left" != "$right" ]] && [[ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n 1)" == "$left" ]]
-          }
-          resolve_tag_commit() {
-            git rev-list -n 1 "$1" 2>/dev/null || true
-          }
-          # True when HEAD is the legitimate "Release vX.Y.Z" commit for the
-          # current Cargo.toml version, i.e. the merge-queue squash commit
-          # whose subject is `Release v$CARGO_VERSION` (with optional
-          # ` (#N)` squash suffix) AND which is the commit that actually
-          # bumped the workspace version to $CARGO_VERSION. The version-bump
-          # confirmation is what keeps this from rubber-stamping any commit
-          # someone titles "Release …": a forged subject that did not touch
-          # the `version =` line still fails the strict guard below.
-          head_is_release_commit_for_cargo_version() {
-            release_head_is_release_commit_for_version "$CARGO_VERSION"
-          }
-          # Return codes:
-          #   0  -> proceed (tag already at HEAD; recovery can use the tag)
-          #  10  -> expected transient (release commit landed, tag imminent):
-          #         caller should treat as no-op and exit 0
-          #  exit 1 -> genuine drift: hard-fail (preserved protection)
-          require_main_anchored_tag_or_wait() {
-            if [[ "$EVENT_NAME" != "push" || "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
-              return 0
-            fi
-            local matching_tag_commit
-            matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
-            if [[ -z "$matching_tag_commit" ]]; then
-              # Main-anchored publishing has a deliberate handoff window: the
-              # `Release vX.Y.Z` commit lands on main a few seconds
-              # before the immutable `vX.Y.Z` tag is pushed at that same commit.
-              # During that window Cargo.toml is ahead of the latest tag with
-              # no matching tag yet. That transient is EXPECTED and must not
-              # turn main red — the tag push is the real publish trigger.
-              # Only tolerate it when HEAD is the genuine release commit for
-              # this exact version; otherwise a non-release commit bumped the
-              # version without a tag and we still fail loudly.
-              if head_is_release_commit_for_cargo_version; then
-                echo "::notice::Release commit for $CARGO_VERSION detected on main; $MATCHING_TAG not pushed yet. Waiting for the tag push to publish — this main-push run is a no-op, not a failure."
-                return 10
-              fi
-              echo "::error::Cargo.toml=$CARGO_VERSION is ahead of latest tag ${LATEST_TAG:-<none>}, but $MATCHING_TAG does not exist and HEAD is not a 'Release v$CARGO_VERSION' commit. Merge the canonical Release PR and let the release watcher tag that main commit; publish-release.yml will not mint a tag."
-              exit 1
-            fi
-            if [[ "$matching_tag_commit" != "$HEAD_SHA" ]]; then
-              echo "::error::$MATCHING_TAG points at $matching_tag_commit, but the Release main push is $HEAD_SHA. Refusing a tag that does not select the merged Release commit."
-              exit 1
-            fi
-            MAIN_DRIFT_PUBLISH_REF="$MATCHING_TAG"
-            echo "::notice::$MATCHING_TAG already points at this main commit; any publish recovery will use the tag, not main HEAD."
-          }
-          # Wrapper that converts the "expected transient" return code (10)
-          # into a clean no-op: emit drift=false outputs and exit 0 so the
-          # publish job skips and main CI stays green until the tag push
-          # fires the real publish run.
-          guard_main_anchored_tag_or_skip() {
-            local rc=0
-            require_main_anchored_tag_or_wait || rc=$?
-            if [[ "$rc" -eq 10 ]]; then
-              {
-                echo "drift=false"
-                echo "cargo_version=$CARGO_VERSION"
-                echo "latest_tag=$LATEST_TAG"
-                echo "publish_ref=main"
-              } >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            return "$rc"
-          }
-
-          # Tag-push trigger ("tag is truth"). Prove the watcher selected the
-          # matching Release squash commit on main before publishing anything.
+          # Tag-push trigger ("tag is truth"). Prove the tag selects a commit on
+          # main declaring its version before publishing anything.
           if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
             if ! release_tag_is_canonical "$REF_NAME"; then
               echo "::error::Tag push for non-release tag: $REF_NAME"
@@ -249,121 +159,16 @@ jobs:
             exit 0
           fi
 
+          # A tagless dispatch recovers the latest release from its tag. Main's own
+          # version is above it and unpublished, and only promotion publishes that.
           if [[ -z "$LATEST_TAG" ]]; then
-            guard_main_anchored_tag_or_skip
-            DRIFT=true
-            echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
-          elif release_version_is_prerelease "$CARGO_VERSION"; then
-            if [[ -n "$LATEST_TAG" ]] \
-              && release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
-              DRIFT=false
-              echo "::notice::Workspace $CARGO_VERSION is the declared development target after $LATEST_TAG; publish job will skip."
-            elif release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
-              # An at-SHA release can tag its certified candidate without
-              # merging the release commit into main. Until publication and
-              # the subsequent development bump complete, main therefore
-              # remains on X.Y.Z-dev while the immutable vX.Y.Z tag exists on
-              # the certified history line. That is a wait state, not drift.
-              scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"
-              DRIFT=false
-              echo "::notice::Workspace $CARGO_VERSION precedes certified candidate tag $LATEST_TAG. Publication or the post-publication development bump is still pending; this main-push run will skip cleanly."
-            else
-              matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
-              if [[ -z "$matching_tag_commit" ]]; then
-                guard_main_anchored_tag_or_skip
-                echo "::error::Prerelease workspace version $CARGO_VERSION is neither the next-patch -dev target nor backed by a matching immutable tag"
-                exit 1
-              fi
-              DRIFT=false
-              echo "::notice::Prerelease $MATCHING_TAG already owns publication; the main-push path is a no-op."
-            fi
-          elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
-            guard_main_anchored_tag_or_skip
-            DRIFT=true
-            echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
-          elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
-            DRIFT=false
-            echo "::notice::Cargo.toml=$CARGO_VERSION is behind latest tag $LATEST_TAG → publish job will skip."
-          else
-            DRIFT=false
-            # No version drift on push-to-main: tag was already published
-            # by the tag-push trigger of this workflow. Observe release
-            # assets for operator diagnostics, but do not treat missing
-            # binary assets as Cargo publish drift. Promotion owns the
-            # archives, checksum sidecars, and the GitHub release;
-            # re-running release_ship.sh from a main-push publish-release
-            # job cannot produce those assets and only creates redundant
-            # release retries.
-            if [[ "$EVENT_NAME" == "push" ]]; then
-              # Distinguish a genuine incomplete asset set (warn) from a
-              # transient or eventually-consistent query failure. The old
-              # `|| echo 0` collapsed "gh could not answer" into "0 assets", forcing
-              # DRIFT=true → a doomed `release_ship.sh --finalize` from main HEAD
-              # when the tag is an older (squash-orphaned) commit. That produced
-              # a spurious red X on a routine main push right after the tag
-              # publish (harn#2964: a `gh release view` raced the release becoming
-              # visible). Retry briefly; if assets are still missing, leave DRIFT
-              # false and let promotion recover.
-              RELEASE_ASSETS="__query_failed__"
-              for _ in 1 2 3; do
-                if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
-                  break
-                fi
-                RELEASE_ASSETS="__query_failed__"
-                sleep 5
-              done
-              if [[ "$RELEASE_ASSETS" == "__query_failed__" ]]; then
-                echo "::notice::Could not read $LATEST_TAG release assets after retries; assuming the main-anchored tag publish already shipped and skipping (avoids a spurious finalize from main HEAD)."
-              else
-                EXPECTED_ASSETS=(
-                  "harn-aarch64-apple-darwin.tar.xz"
-                  "harn-aarch64-unknown-linux-gnu.tar.xz"
-                  "harn-x86_64-apple-darwin.tar.xz"
-                  "harn-x86_64-pc-windows-msvc.zip"
-                  "harn-x86_64-unknown-linux-gnu.tar.xz"
-                  "harn-aarch64-apple-darwin.tar.gz"
-                  "harn-aarch64-unknown-linux-gnu.tar.gz"
-                  "harn-x86_64-apple-darwin.tar.gz"
-                  "harn-x86_64-unknown-linux-gnu.tar.gz"
-                  "SHA256SUMS"
-                  "release-assets.json"
-                )
-                MISSING_ASSETS=()
-                for ASSET in "${EXPECTED_ASSETS[@]}"; do
-                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
-                    MISSING_ASSETS+=("$ASSET")
-                  fi
-                done
-
-                if (( ${#MISSING_ASSETS[@]} == 0 )); then
-                  echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended main-anchored behavior."
-                else
-                  printf '::warning::%s is missing release assets: %s. Publish job will skip because promotion owns release assets; re-run promotion for %s from its candidate run.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
-                fi
-              fi
-            else
-              echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
-            fi
+            echo "::error::No vX.Y.Z tag exists to recover; promote-release.yml creates the first one."
+            exit 1
           fi
-          PUBLISH_REF=main
-          if [[ -n "$MAIN_DRIFT_PUBLISH_REF" ]]; then
-            PUBLISH_REF="$MAIN_DRIFT_PUBLISH_REF"
-            echo "::notice::Main-anchored tag recovery: publishing from $PUBLISH_REF instead of main."
-          fi
-          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
-            PUBLISH_REF="$LATEST_TAG"
-            echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
-          fi
-          # Self-heal recovery on push-to-main: when DRIFT was forced
-          # true above because the tag exists but the release is
-          # missing assets, the workspace at main may have advanced
-          # past the release commit. Pin the publish to the tag so
-          # crates.io content stays tied to the tagged commit, even if
-          # main moved.
-          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" && "$DRIFT" == "true" && "$CARGO_VERSION" == "$LATEST_VERSION" && -n "$LATEST_TAG" ]]; then
-            PUBLISH_REF="$LATEST_TAG"
-            echo "::notice::Self-heal recovery: publishing from existing tag $LATEST_TAG instead of current main so the release content stays tied to the tagged commit."
-          fi
+          DRIFT=false
+          PUBLISH_REF="$LATEST_TAG"
+          CARGO_VERSION="${LATEST_TAG#v}"
+          echo "::notice::Manual recovery publishes from existing tag $LATEST_TAG, not main."
           {
             echo "drift=$DRIFT"
             echo "cargo_version=$CARGO_VERSION"

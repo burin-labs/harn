@@ -6,7 +6,8 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/workspace"
 bin_dir="$tmp_root/bin"
-mkdir -p "$fixture/crates/example" "$bin_dir"
+mkdir -p "$fixture/crates/example" "$fixture/changelog.d" "$bin_dir"
+touch "$fixture/changelog.d/.gitkeep"
 
 cat > "$fixture/Cargo.toml" <<'EOF'
 [workspace]
@@ -44,9 +45,10 @@ case "$*" in
   *"/release_metadata.harn -- current "*)
     sed -n 's/^version = "\([^"]*\)"/\1/p' "$HARN_RELEASE_ROOT/Cargo.toml"
     ;;
-  *"/release_metadata.harn -- development-target "*) printf '1.2.4-dev\n' ;;
+  *"/release_metadata.harn -- development-target "*) printf '1.2.4\n' ;;
+  *"/release_changelog_fold.harn -- fold-published "*) ;;
   *"/release_metadata.harn -- develop "*)
-    sed 's/version = "1.2.3"/version = "1.2.4-dev"/' \
+    sed 's/version = "1.2.3"/version = "1.2.4"/' \
       "$HARN_RELEASE_ROOT/Cargo.toml" > "$HARN_RELEASE_ROOT/Cargo.toml.next"
     mv "$HARN_RELEASE_ROOT/Cargo.toml.next" "$HARN_RELEASE_ROOT/Cargo.toml"
     ;;
@@ -119,7 +121,7 @@ run_plan() {
 run_plan promoted
 [[ "$plan_status" == 0 ]] || { cat "$tmp_root/promoted.log" >&2; exit 1; }
 grep -Fxq 'required=true' "$plan_outputs"
-grep -Fxq 'version=1.2.4-dev' "$plan_outputs"
+grep -Fxq 'version=1.2.4' "$plan_outputs"
 grep -Fxq 'published_tag=v1.2.3' "$plan_outputs"
 run_plan manual-latest PUBLISHED_TAG=
 [[ "$plan_status" == 0 ]] || { cat "$tmp_root/manual-latest.log" >&2; exit 1; }
@@ -162,7 +164,7 @@ GITHUB_OUTPUT="$outputs" \
 PATH="$bin_dir:$PATH" \
   "$repo_root/scripts/open_development_bump.sh"
 
-grep -Fq 'version = "1.2.4-dev"' "$fixture/Cargo.toml"
+grep -Fq 'version = "1.2.4"' "$fixture/Cargo.toml"
 grep -Fq $'gh\tpr create ' "$record"
 grep -Fq 'pr_url=https://example.invalid/pull/42' "$outputs"
 grep -Fq 'skipped=false' "$outputs"
@@ -197,9 +199,9 @@ git clone --quiet "$origin" "$merged"
 git -C "$merged" config user.name "Development Cutover Test"
 git -C "$merged" config user.email "development-cutover-test@example.com"
 git -C "$merged" config commit.gpgsign false
-sed 's/version = "1.2.3"/version = "1.2.4-dev"/' "$merged/Cargo.toml" > "$merged/Cargo.toml.next"
+sed 's/version = "1.2.3"/version = "1.2.4"/' "$merged/Cargo.toml" > "$merged/Cargo.toml.next"
 mv "$merged/Cargo.toml.next" "$merged/Cargo.toml"
-git -C "$merged" commit --quiet -am "Start 1.2.4-dev development"
+git -C "$merged" commit --quiet -am "Start 1.2.4 development"
 git -C "$merged" push --quiet origin HEAD:refs/heads/main
 
 # Repeated repair after cutover is a measured no-op through the same planner.
@@ -208,7 +210,7 @@ fixture="$merged"
 run_plan repaired
 [[ "$plan_status" == 0 ]] || { cat "$tmp_root/repaired.log" >&2; exit 1; }
 grep -Fxq 'required=false' "$plan_outputs"
-grep -Fxq 'reason=workspace_does_not_match_latest_stable' "$plan_outputs"
+grep -Fxq 'reason=next_version_already_declared' "$plan_outputs"
 fixture="$plan_fixture"
 
 stale_record="$tmp_root/stale.record"
@@ -216,7 +218,7 @@ stale_outputs="$tmp_root/stale.outputs"
 CUTOVER_RECORD="$stale_record" \
 HARN_RELEASE_ROOT="$stale_fixture" \
 HARN_BIN="$bin_dir/harn" \
-EXPECTED_DEVELOPMENT_VERSION=1.2.4-dev \
+EXPECTED_DEVELOPMENT_VERSION=1.2.4 RELEASE_PUBLISHED_VERSION=v1.2.3 \
 GH_TOKEN=fixture-token \
 GITHUB_OUTPUT="$stale_outputs" \
 PATH="$bin_dir:$PATH" \
@@ -239,7 +241,7 @@ broken_record="$tmp_root/broken.record"
 if CUTOVER_RECORD="$broken_record" \
   HARN_RELEASE_ROOT="$broken_fixture" \
   HARN_BIN="$bin_dir/harn" \
-  EXPECTED_DEVELOPMENT_VERSION=1.2.4-dev \
+  EXPECTED_DEVELOPMENT_VERSION=1.2.4 RELEASE_PUBLISHED_VERSION=v1.2.3 \
   GH_TOKEN=fixture-token \
   PATH="$bin_dir:$PATH" \
     "$repo_root/scripts/open_development_bump.sh" 2>/dev/null; then

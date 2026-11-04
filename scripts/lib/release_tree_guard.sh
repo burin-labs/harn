@@ -71,9 +71,8 @@ unfolded_fragment_paths() {
 # Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.
 #
 # `release_ship.sh --prepare` folds fragments into the `## vX.Y.Z` section
-# (scripts/release_changelog_fold.harn) and then runs this guard. Finalizing a
-# tree that still carries fragments would ship a release whose CHANGELOG has no
-# entries for them and whose --finalize renders empty release notes.
+# (scripts/release_changelog_fold.harn) and then runs this guard. Finalize does
+# not: a tag's tree holds its notes as fragments and renders them at build time.
 require_no_unfolded_fragments() {
   local frags=()
   local fragment

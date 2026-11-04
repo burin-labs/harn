@@ -6,46 +6,23 @@
 // "Full Changelog" compare link. Writes to a file with --output or to
 // stdout otherwise.
 //
+// Main declares the next unpublished version and CHANGELOG.md gains its section
+// only in the version commit after publication. For an unpublished version this
+// renders from the source's changelog.d, through the fold that later writes that
+// section, so the signed candidate notes and the crate publication step read the
+// same bytes from the same commit.
+//
 // Usage: harn run scripts/render_release_notes.harn -- \
 //          --version X.Y.Z [--output PATH] [--repo owner/name]
-import { parse_release } from "std/semver"
+import { compare_release } from "std/semver"
+import { changelog_entries, published_changelog_versions } from "./release_changelog_entries.harn"
+import {
+  ReleaseFragmentFile,
+  fold_candidate_changelog,
+  read_fragment_files,
+} from "./release_changelog_fold.harn"
 
 const CHANGELOG = "CHANGELOG.md"
-
-pub type ChangelogEntry = {version: string, never_published: bool}
-
-/** One parser owns version headings, including an explicitly retired candidate. */
-pub fn changelog_entry_heading(line: string) -> ChangelogEntry? {
-  if !line.starts_with("## v") {
-    return nil
-  }
-  const suffix = " (never published)"
-  const retired = line.ends_with(suffix)
-  const version = line.substring(4, retired ? line.len() - suffix.len() : line.len())
-  if parse_release(version) == nil {
-    return nil
-  }
-  return {version: version, never_published: retired}
-}
-
-pub fn changelog_entries(text: string) -> list<ChangelogEntry> {
-  let entries: list<ChangelogEntry> = []
-  for line in text.lines() {
-    const entry = changelog_entry_heading(line)
-    if entry != nil {
-      entries = entries + [entry]
-    }
-  }
-  return entries
-}
-
-/** Install and comparison bases exclude identities that never shipped. */
-pub fn published_changelog_versions(text: string) -> list<string> {
-  return changelog_entries(text).filter({ entry -> !entry.never_published }).map(
-    { entry -> entry.version },
-  )
-    .to_list()
-}
 
 /** Drop a leading `v` so `v0.8.71` and `0.8.71` are equivalent. */
 pub fn normalize_version(version: string) -> string {
@@ -149,6 +126,37 @@ pub fn render_notes(section: string, repo: string?, prev: string?, version: stri
 }
 
 /**
+ * The changelog holding `version`'s notes: as written when it has a section, or
+ * with the fragments folded when `version` is above every published section.
+ * Throws for a retired identity and for an absent version at or below the top.
+ */
+pub fn changelog_with_notes_for(
+  changelog: string,
+  files: list<ReleaseFragmentFile>,
+  version: string,
+) -> string {
+  const refusal = "error: cannot publish notes for an absent or never-published identity"
+  const entries = changelog_entries(changelog)
+  for entry in entries {
+    if entry.version == version {
+      if entry.never_published {
+        throw refusal
+      }
+      return changelog
+    }
+  }
+  const published = published_changelog_versions(changelog)
+  if published.count > 0 && compare_release(version, published[0] ?? "") <= 0 {
+    throw refusal
+  }
+  const fold = fold_candidate_changelog(changelog, files, version)
+  if !fold.success {
+    throw "error: " + fold.findings.join("\n")
+  }
+  return fold.text
+}
+
+/**
  * Read `--flag value` or `--flag=value` style options out of argv.
  * Returns nil when the flag is absent.
  */
@@ -180,19 +188,22 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.eprintln("error: missing ${CHANGELOG}")
     return 1
   }
-  const changelog = harness.fs.read_text(CHANGELOG)
-  const versions = published_changelog_versions(changelog)
-  if !versions.contains(version) {
-    harness.stdio.eprintln("error: cannot publish notes for an absent or never-published identity")
-    return 1
-  }
-  const result = try {
-    extract_section(changelog, version)
+  const section_and_versions = try {
+    const changelog = changelog_with_notes_for(
+      harness.fs.read_text(CHANGELOG),
+      read_fragment_files(harness.fs, "."),
+      version,
+    )
+    {
+      section: extract_section(changelog, version),
+      versions: published_changelog_versions(changelog),
+    }
   } catch (e) {
     harness.stdio.eprintln("${e}")
     return 1
   }
-  const section = result
+  const section = section_and_versions.section
+  const versions = section_and_versions.versions
   const prev = previous_version(versions, version)
   const repo = detect_repo(harness.env, harness.process, flag_value(argv, "--repo"))
   const output = render_notes(section, repo, prev, version)

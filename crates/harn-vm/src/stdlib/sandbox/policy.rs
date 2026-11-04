@@ -9,6 +9,9 @@ pub(super) enum ProcessNetworkGrant {
 
 impl ProcessNetworkGrant {
     pub(super) fn for_policy(policy: &CapabilityPolicy) -> Self {
+        if policy.process_sandbox.deny_network {
+            return Self::Denied;
+        }
         // An explicit child loopback grant is narrower than the host tool ceiling.
         if policy.process_sandbox.allow_tcp_loopback {
             Self::Loopback {
@@ -38,12 +41,20 @@ impl ProcessNetworkGrant {
         )
     }
 
+    /// Linux has no filter that limits a socket's destination, so a child whose
+    /// network stops at loopback or at the proxy needs a private namespace.
     #[cfg(target_os = "linux")]
-    pub(super) fn loopback_only(self) -> bool {
-        matches!(self, Self::Loopback { .. })
+    pub(super) fn needs_private_namespace(self) -> bool {
+        matches!(
+            self,
+            Self::Loopback { .. } | Self::Public { proxy: Some(_) }
+        )
     }
 }
 
+/// The one answer every backend renders. `deny_network` belongs here and not
+/// only in [`ProcessNetworkGrant`], or the filters that read this would give a
+/// child sockets while the grant reports none.
 pub(crate) fn allows_network(policy: &CapabilityPolicy) -> bool {
-    policy.allows_network()
+    !policy.process_sandbox.deny_network && policy.allows_network()
 }

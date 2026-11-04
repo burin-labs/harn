@@ -83,7 +83,6 @@ mod tests {
     use super::resolve_step_judge_json;
     use crate::cli::EvalCodingAgentArgs;
     use crate::commands::eval_model_selector::ModelSelector;
-    use serde_json::Value as JsonValue;
 
     fn default_args() -> EvalCodingAgentArgs {
         EvalCodingAgentArgs {

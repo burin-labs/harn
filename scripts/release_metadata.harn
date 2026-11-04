@@ -155,19 +155,17 @@ pub fn stable_release_version(released: string) -> string {
   return bare
 }
 
-/** Project a stable release into the next patch's development identity. */
-pub fn development_version_from_stable(version: string) -> string {
+/** The version main declares once stable `version` is published. */
+pub fn next_version_from_stable(version: string) -> string {
   const parsed = semver.parse(version)
   if parsed == nil {
-    throw "development version requires stable release SemVer: " + version
+    throw "next version requires stable release SemVer: " + version
   }
   return to_string(parsed.major)
     + "."
     + to_string(parsed.minor)
     + "."
     + to_string(parsed.patch + 1)
-    + "-"
-    + release_development_prerelease()
 }
 
 /** Strip the one prerelease identity admitted at the stable-release boundary. */
@@ -490,27 +488,46 @@ pub fn release_metadata_plan(
   }
 }
 
-/** Advance a just-released stable workspace to its next patch development identity. */
-pub fn apply_development_metadata(fs: HarnessFs, root: string) -> ReleaseMetadataPlan {
+/** Rewrite the workspace to `next`, and name `installable` as the install base. */
+fn apply_next_version(
+  fs: HarnessFs,
+  root: string,
+  next: string,
+  installable: string,
+) -> ReleaseMetadataPlan {
   const current = current_version(fs, root)
-  const next = development_version_from_stable(current)
   const manifests = workspace_package_manifests(fs, root)
   const names = package_names_for_manifests(fs, manifests)
-  const plan: ReleaseMetadataPlan = {
-    current_version: current,
-    next_version: next,
-    manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
-    package_names: names,
-  }
   const root_manifest = cargo_path(root)
   const all_manifests = [root_manifest] + manifests
   const rewrites = planned_manifest_rewrites(fs, all_manifests, root_manifest, current, next, names)
   for rewrite in rewrites {
     fs.write_text(rewrite.path, rewrite.text)
   }
-  return plan
+  // Only a published release has installable archives, so the editor and
+  // embedding docs follow publication, never the version main is declaring.
+  const distribution = distribution_version(fs, root, installable)
+  rewrite_agent_manifest(fs, root, nil, distribution)
+  rewrite_embedding_tags(fs, root, distribution)
+  return {
+    current_version: current,
+    next_version: next,
+    manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
+    package_names: names,
+  }
 }
 
+/** Move the workspace to the next unpublished version after `released` published. */
+pub fn apply_development_metadata(
+  fs: HarnessFs,
+  root: string,
+  released: string,
+) -> ReleaseMetadataPlan {
+  const published = stable_release_version(released)
+  return apply_next_version(fs, root, next_version_from_stable(published), published)
+}
+
+/** Give up the current version, unpublished, and move to the one after it. */
 pub fn apply_unpublished_retirement(
   fs: HarnessFs,
   root: string,
@@ -523,13 +540,9 @@ pub fn apply_unpublished_retirement(
     throw "retirement source does not match the workspace identity"
   }
   const changelog = path_join(root, "CHANGELOG.md")
-  const carried = retire_unpublished_section(fs.read_text(changelog), current, base)
-  const plan = apply_development_metadata(fs, root)
-  fs.write_text(changelog, carried)
-  // The retired candidate has no installable archives. Keep the last real
-  // release as the editor/embedding install base until the next publication.
-  rewrite_agent_manifest(fs, root, distribution_version(fs, root, current), base)
-  rewrite_embedding_tags(fs, root, base)
+  const recorded = retire_unpublished_section(fs.read_text(changelog), current, base)
+  const plan = apply_next_version(fs, root, next_version_from_stable(current), base)
+  fs.write_text(changelog, recorded)
   return plan
 }
 
@@ -652,7 +665,7 @@ fn main(harness: Harness) -> int {
       // cutover after a hand-cut release came to be owed and never opened.
       const released = trim(to_string(parsed.options?.released ?? ""))
       harness.stdio.println(
-        development_version_from_stable(
+        next_version_from_stable(
           if released == "" {
             current_version(harness.fs, root)
           } else {
@@ -691,7 +704,7 @@ fn main(harness: Harness) -> int {
         apply_release_metadata(harness.fs, root, version, bump, preid)
       }
     } else if action == "develop" {
-      apply_development_metadata(harness.fs, root)
+      apply_development_metadata(harness.fs, root, to_string(parsed.options?.released ?? ""))
     } else if action == "retire" {
       apply_unpublished_retirement(
         harness.fs,

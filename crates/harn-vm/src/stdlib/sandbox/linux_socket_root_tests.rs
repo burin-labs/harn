@@ -24,6 +24,47 @@ fn binds_under(policy: CapabilityPolicy, socket: &std::path::Path) -> bool {
     matches!(output, Ok(out) if out.status.success()) && socket.exists()
 }
 
+/// A child told it has no network has none, on the filter and not just in the
+/// report. The side-effect level alone would grant it, so this is the case a
+/// report and a filter reading different answers would get wrong.
+#[test]
+fn a_denied_network_child_cannot_open_a_socket_at_a_level_that_allows_one() {
+    if !live_landlock_available("denied-network-child") {
+        return;
+    }
+    let root = tempfile::tempdir().expect("root");
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+    let port = listener.local_addr().expect("addr").port().to_string();
+    let connects = |deny_network: bool| {
+        crate::orchestration::push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![root.path().display().to_string()],
+            side_effect_level: Some("network".to_string()),
+            process_sandbox: Box::new(ProcessSandboxPolicy {
+                deny_network,
+                ..ProcessSandboxPolicy::default()
+            }),
+            ..CapabilityPolicy::default()
+        });
+        let output = command_output(
+            "/usr/bin/perl",
+            &[
+                "-MSocket".to_string(),
+                "-e".to_string(),
+                "socket(S, PF_INET, SOCK_STREAM, 0) or die \"socket: $!\"; \
+                 connect(S, sockaddr_in($ARGV[0], inet_aton('127.0.0.1'))) or die \"connect: $!\";"
+                    .to_string(),
+                port.clone(),
+            ],
+            &ProcessCommandConfig::default(),
+        );
+        crate::orchestration::pop_execution_policy();
+        matches!(output, Ok(out) if out.status.success())
+    };
+    assert!(connects(false), "control: the level grants this connection");
+    assert!(!connects(true), "deny_network must hold on the filter");
+}
+
 /// A policy permitting networking, with one socket root outside every
 /// writable root, binds a socket file under that root.
 ///

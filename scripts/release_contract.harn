@@ -6,7 +6,7 @@ const DEVELOPMENT_PRERELEASE = "dev"
 
 pub type ReleaseVersionContract = {
   development_prerelease: "dev",
-  workspace_after_release: "next_patch_development",
+  workspace_after_release: "next_patch_stable",
   prior_fold_workspace_shapes: list<"released_version" | "next_patch_development">,
 }
 
@@ -59,13 +59,13 @@ pub type SourceCandidatePolicy = {
 pub type ReleaseContract = {
   schema_version: "harn.release_contract.v1",
   versions: ReleaseVersionContract,
-  changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
+  changelog: {published_heading: "top_version_heading", candidate_fragments: "rendered_at_build"},
   tag: ReleaseTagContract,
 }
 
 pub fn source_candidate_policy() -> SourceCandidatePolicy {
   return {
-    events: ["workflow_dispatch", "schedule"],
+    events: ["workflow_dispatch"],
     ref_type: "branch",
     ref_name: "main",
     runner_profile: "policy",
@@ -80,10 +80,10 @@ pub fn release_contract() -> ReleaseContract {
     schema_version: "harn.release_contract.v1",
     versions: {
       development_prerelease: DEVELOPMENT_PRERELEASE,
-      workspace_after_release: "next_patch_development",
+      workspace_after_release: "next_patch_stable",
       prior_fold_workspace_shapes: ["released_version", "next_patch_development"],
     },
-    changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
+    changelog: {published_heading: "top_version_heading", candidate_fragments: "rendered_at_build"},
     tag: {
       anchor: "certified_candidate_commit",
       release_subject_template: "Release v{version}",
@@ -161,7 +161,7 @@ pub fn release_contract_schema() {
       versions: schema_closed_object(
         {
           development_prerelease: schema_literal("dev"),
-          workspace_after_release: schema_literal("next_patch_development"),
+          workspace_after_release: schema_literal("next_patch_stable"),
           prior_fold_workspace_shapes: schema_list(
             schema_enum(["released_version", "next_patch_development"]),
           ),
@@ -170,7 +170,7 @@ pub fn release_contract_schema() {
       changelog: schema_closed_object(
         {
           published_heading: schema_literal("top_version_heading"),
-          candidate_fragments: schema_literal("must_be_folded"),
+          candidate_fragments: schema_literal("rendered_at_build"),
         },
       ),
       tag: schema_closed_object(
@@ -202,9 +202,6 @@ pub fn release_contract_source_errors(fs: HarnessFs, root: string) -> list<strin
   const version_source_shell = fs.read_text(path_join(root, "scripts/lib/release_version.sh"))
   if !version_source_shell.contains("release_contract.env") {
     errors = errors + ["release_version.sh bypasses the generated shell projection"]
-  }
-  if !version_source_shell.contains("^Release\\ v\"$version\"") {
-    errors = errors + ["release_version.sh no longer enforces the declared release commit subject"]
   }
   return errors
 }
