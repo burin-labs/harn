@@ -16,17 +16,32 @@
 # run does not stop older ones; the pass fails at the end if any run failed. An incomplete or unreadable census fails
 # the pass before any write.
 #
-# Environment: GH_TOKEN (contents and workflows write), GITHUB_REPOSITORY,
-# GREEN_CENSUS_DAYS (default 3), GITHUB_STEP_SUMMARY (optional).
+# A pass can also keep the full release build exercised. With
+# GREEN_SOURCE_CANDIDATE_HOURS set, it dispatches a signed source candidate of
+# main's tip when none is running, the tip has none, and the last one started
+# at least that long ago. Unset starts nothing. With
+# GREEN_REQUIRES_SOURCE_CANDIDATE=true, a run moves green only when its commit
+# has a successful candidate; otherwise older runs are considered.
+#
+# Environment: GH_TOKEN (contents and workflows write, actions write to start
+# candidates), GITHUB_REPOSITORY, GREEN_CENSUS_DAYS (default 3),
+# GREEN_SOURCE_CANDIDATE_HOURS, GREEN_REQUIRES_SOURCE_CANDIDATE,
+# GITHUB_STEP_SUMMARY (optional).
 set -euo pipefail
 
+scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/green_checkpoint.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
+source "$scripts_dir/lib/green_checkpoint.sh"
+# shellcheck source=scripts/lib/release_candidate_run.sh
+source "$scripts_dir/lib/release_candidate_run.sh"
 
 repo=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}
 days=${GREEN_CENSUS_DAYS:-3}
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+candidate_hours=${GREEN_SOURCE_CANDIDATE_HOURS:-}
+require_candidate=${GREEN_REQUIRES_SOURCE_CANDIDATE:-}
 [[ "$days" =~ ^[1-9][0-9]*$ ]] || { echo "::error::GREEN_CENSUS_DAYS must be a positive integer" >&2; exit 1; }
+[[ -z "$candidate_hours" || "$candidate_hours" =~ ^[1-9][0-9]*$ ]] || { echo "::error::GREEN_SOURCE_CANDIDATE_HOURS must be a positive integer" >&2; exit 1; }
 
 refuse() {
   echo "::error title=Green checkpoint::$1" >&2
@@ -109,7 +124,7 @@ advance() {
 }
 
 settle_run() {
-  local run_id=$1 attempt=$2 sha=$3 url=$4 created=$5 completed=$6 relation on_main tag
+  local run_id=$1 attempt=$2 sha=$3 url=$4 created=$5 completed=$6 relation on_main tag candidate
   if [[ -n "$green" ]]; then
     relation=$(green_compare "$repo" "$green" "$sha") || { echo "::error::could not compare $sha with green" >&2; return 1; }
     if [[ "$relation" == behind || "$relation" == identical ]]; then
@@ -127,6 +142,13 @@ settle_run() {
     echo "::error::$sha is on main but diverged from green $green" >&2
     return 1
   fi
+  if [[ "$require_candidate" == true ]]; then
+    candidate=$(release_candidate_run_id "$repo" "$sha") || { echo "::error::could not read the release candidates at $sha" >&2; return 1; }
+    if [[ -z "$candidate" ]]; then
+      held+=("$sha")
+      return 0
+    fi
+  fi
   tag="green-$(tr -d ':-' <<< "$created")-$run_id"
   write_tag "$tag" "$sha" "$run_id" "$attempt" "$url" "$completed" || { echo "::error::could not record $tag" >&2; return 1; }
   advance "$sha" || { echo "::error::could not fast-forward green to $sha" >&2; return 1; }
@@ -135,7 +157,39 @@ settle_run() {
   settled=true
 }
 
+# Dispatch a source candidate of main's tip when one is due, and say why not otherwise.
+start_source_candidate() {
+  local runs tip decision
+  if [[ -z "$candidate_hours" ]]; then
+    echo "Source candidates: not started by this workflow (GREEN_SOURCE_CANDIDATE_HOURS is unset)."
+    return 0
+  fi
+  runs=$(gh api --paginate --slurp \
+    "repos/$repo/actions/workflows/build-release-binaries.yml/runs?branch=main&event=workflow_dispatch&created=%3E%3D$since&per_page=100") || return 1
+  tip=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha') || return 1
+  [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+  decision=$(jq -r --arg tip "$tip" --argjson hours "$candidate_hours" '
+    if type != "array" or length == 0
+      or any(.[]; (.total_count | type) != "number" or (.workflow_runs | type) != "array")
+      or (map(.total_count) | unique | length) != 1
+      or (map(.workflow_runs | length) | add) != .[0].total_count
+    then error("incomplete census") else . end
+    | [.[].workflow_runs[] | select(.display_title == "Build release binaries [source-candidate]")] as $candidates
+    | ($candidates | map(select(.status != "completed")) | length) as $active
+    | if $active > 0 then "skip: \($active) still running"
+      elif any($candidates[]; .head_sha == $tip) then "skip: main'"'"'s tip already has one"
+      elif ($candidates | length) > 0 and (now - ($candidates | map(.created_at | fromdate) | max)) < $hours * 3600
+      then "skip: the last one started under \($hours) h ago"
+      else "start" end' <<< "$runs") || return 1
+  echo "Source candidates: $decision"
+  [[ "$decision" == start ]] || return 0
+  jq -n '{ref: "main", inputs: {source_candidate: "true"}}' \
+    | gh api -X POST "repos/$repo/actions/workflows/build-release-binaries.yml/dispatches" --input - > /dev/null || return 1
+  echo "Source candidates: dispatched at $tip."
+}
+
 failed=()
+held=()
 count=0
 settled=false
 while IFS=$'\t' read -r run_id attempt sha url created completed; do
@@ -147,9 +201,12 @@ while IFS=$'\t' read -r run_id attempt sha url created completed; do
   [[ "$settled" == false ]] || break
 done <<< "$candidates"
 
+start_source_candidate | tee -a "$summary" || failed+=("starting a source candidate")
+
 {
   echo "Green checkpoint: read $count of the successful main runs since $since."
   echo "green: ${initial:-absent} -> ${green:-absent}"
+  echo "requires a release candidate: ${require_candidate:-false}; held commits: ${#held[@]} ${held[*]:-}"
 } | tee -a "$summary"
 if (( ${#failed[@]} > 0 )); then
   printf '::error title=Green checkpoint::%s failed\n' "${failed[@]}" >&2

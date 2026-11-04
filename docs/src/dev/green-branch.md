@@ -31,6 +31,16 @@ The release GitHub App writes the branch and tags. Its token needs
 `contents: write` and `workflows: write`, because green moves across commits
 that change workflow files.
 
+## Release build proof
+
+Two repository variables keep the signed release build exercised between
+releases:
+
+| Variable | Effect |
+| --- | --- |
+| `GREEN_SOURCE_CANDIDATE_HOURS` | Each pass dispatches a `build-release-binaries.yml` source candidate of `main`'s tip when none is running, the tip has none, and the last one started at least this many hours ago. Unset starts nothing. |
+| `GREEN_REQUIRES_SOURCE_CANDIDATE` | When `true`, a run moves green only if its commit has a successful candidate. Commits without one are held and named in the pass summary, and older runs are considered. |
+
 ## Checkpoint record
 
 The last line of each `green-*` tag message is one JSON object:
