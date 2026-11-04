@@ -18,7 +18,9 @@ use crate::orchestration::ProcessNetworkProxy;
 /// Flag naming what the namespace helper's relay forwards, and where to.
 pub const NETNS_EGRESS_RELAY_FLAG: &str = "--egress-relay";
 
+#[cfg(target_os = "linux")]
 pub(crate) const HTTP_SOCKET: &str = "http.sock";
+#[cfg(target_os = "linux")]
 pub(crate) const SOCKS_SOCKET: &str = "socks.sock";
 
 /// The proxy ports a namespace helper relays, and the directory holding the

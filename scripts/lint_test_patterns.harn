@@ -317,6 +317,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
   // Linux namespace ordering and owner-death proof runs the actual CLI.
   "crates/harn-cli/tests/harn_cli_e2e/guardian_namespace_e2e.rs",
+  // Proxy-only egress proof crosses the real CLI, its helper and the proxy.
+  "crates/harn-cli/tests/harn_cli_e2e/managed_proxy_namespace_e2e.rs",
   // Backend selection and inherited-descriptor confinement cross real execs.
   "crates/harn-cli/tests/harn_cli_e2e/bubblewrap_fallback_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/conformance_process_lifetime_e2e.rs",
