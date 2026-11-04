@@ -484,6 +484,11 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                     param: "shell",
                     message,
                 })?;
+            // A command-bound grant reaches only the process it names, so one
+            // plain command naming it runs without the shell.
+            if let Some(argv) = resolved.command_grant_argv() {
+                return parse_argv_program(NAME, argv);
+            }
             if mode == "auto" {
                 if let Some(argv) =
                     harn_vm::shells::plan_invocation(&resolved.program, &resolved.args)

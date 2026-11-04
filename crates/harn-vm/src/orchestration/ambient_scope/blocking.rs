@@ -10,13 +10,18 @@ where
     F: FnOnce() -> R + Send,
 {
     let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    // The host's secret provider is a Tokio task-local, not part of the
+    // swapped thread state, so it is carried beside the scope the same way a
+    // native subtask carries it. Without it a grant backed by the secret
+    // store would fall back to the process-wide chain on the blocking pool.
+    let provider = crate::secrets::active_secret_provider();
     move || {
         scope.swap_in_place();
         let _restore = RestoreGuard {
             scope: &mut scope,
             armed: true,
         };
-        f()
+        crate::secrets::with_secret_provider_poll(&provider, f)
     }
 }
 

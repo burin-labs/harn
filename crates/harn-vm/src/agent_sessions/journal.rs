@@ -33,6 +33,7 @@ pub(crate) fn install_journal(
             )));
         }
         state.canonical_store_dir = Some(journal.state_dir().clone());
+        state.continuation_checkpoint = None;
         state.transcript_journal = Some(journal);
         Ok(())
     })

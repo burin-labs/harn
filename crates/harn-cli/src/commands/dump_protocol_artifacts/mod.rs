@@ -29,6 +29,7 @@ mod provider_usage;
 mod recap_records;
 mod records;
 mod schema_records;
+mod session_continuation;
 mod session_recap;
 mod session_update_payloads;
 mod session_update_rust_validation;

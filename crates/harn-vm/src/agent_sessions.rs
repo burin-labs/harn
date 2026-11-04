@@ -43,6 +43,15 @@ use crate::workspace_anchor::{
 };
 
 mod changed_paths;
+mod continuation;
+pub(crate) use continuation::{
+    cached_transcript, has_continuation_checkpoint, remember_flushed_transcript,
+    validate_continuation_checkpoint, ClosedTranscript,
+};
+pub use continuation::{
+    load_closed_session_continuation, prepare_closed_session_continuation,
+    ClosedSessionContinuation,
+};
 mod health;
 pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
@@ -191,6 +200,7 @@ enum SessionAdmissionRole {
 }
 
 pub struct SessionState {
+    continuation_checkpoint: Option<continuation::TranscriptCheckpoint>,
     admission_role: SessionAdmissionRole,
     transcript_recording_ready: bool,
     retention: Arc<()>,
@@ -349,7 +359,7 @@ mod workspace_roots;
 
 pub(crate) use metadata::prepare_workspace_mount_verified;
 
-pub(crate) use text_tool_call_seq::next_text_tool_call_seq_for_parse;
+pub(crate) use text_tool_call_seq::{next_text_tool_call_seq_for_parse, restore_text_call_seq};
 use text_tool_call_seq::{
     next_text_tool_call_seq_from_json_messages, next_text_tool_call_seq_from_transcript,
 };
@@ -520,6 +530,7 @@ pub fn set_transcript_budget_policy(
 /// Clear the calling thread's session store and its process-global sidecars.
 pub fn reset_session_store() {
     crate::run_tape::note_session_store_reset();
+    *active_session_runtime().closed_transcript.write() = None;
     let retired = SESSIONS.with(|s| retire_all_session_states(&mut s.borrow_mut()));
     let mut owned_session_ids: HashSet<String> = retired
         .into_iter()

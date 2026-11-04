@@ -326,6 +326,130 @@ environment. An `isolated` or `granted` session therefore hands an MCP server
 or ACP provider only the runtime essentials, the grants that reach it, and the
 `env` entries in that server's or provider's own configuration.
 
+#### Command-bound grants and shell commands
+
+A `,for=COMMAND` grant matches the program Harn spawns. A shell-mode command
+spawns the shell, so the shell never matches. When a shell-mode command is
+exactly one plain command whose program a command-bound grant names, Harn
+spawns that command directly, without the shell, and only that process
+receives the grant. `gh issue list --limit 5` run in shell mode is spawned as
+`gh` with the arguments `issue list --limit 5`.
+
+Every other shell command keeps the shell and receives no command-bound grant.
+That covers lists and pipelines (`;`, `&&`, `||`, `|`, `&`), redirects and
+here-strings, command or process substitution, variable and tilde expansion,
+globs, subshells and groups, comments, an assignment prefix such as
+`GH_PAGER=env gh issue list`, a program named by path (`./gh`), and anything
+the parser does not recognize. Shell startup files, aliases, and functions do
+not apply to a direct spawn.
+
+##### Which `gh` receives the grant
+
+A `,for=gh` grant reaches only a `gh` read: `list`, `view`, `status`, `diff`
+and `checks` under `issue`, `pr`, `repo`, `run`, `workflow`, `label` and
+`gist`, plain `gh status`, and a GET `gh api` call without request fields.
+Global `-R`, `--repo` and `--hostname` flags are skipped before the subcommand
+is read. Every other invocation, including `pr checkout`, `repo clone`, `repo
+fork`, an alias, an extension, `--web`, and anything unrecognized, runs without
+the grant. A read reaches it only through a foreground `run_command` that
+inherits the session environment and captures output through pipes. Background commands,
+file capture, `env_mode: "replace"`, and every other spawn path run `gh`
+without the grant. So does a request whose `env` sets `PATH`, `HOME`, a
+`GIT_*`, `GH_*`, `SSH_*`, `LD_*`, `DYLD_*` or `XDG_*` variable, or a pager,
+browser or editor variable.
+
+Harn resolves the program once, to a canonical file, from absolute `PATH`
+entries outside every untrusted root: the workspace and execution roots, the
+spawn and process directories, sandbox write roots, toolchain and package
+caches, the workspace temp directory, and the host temp directory. Relative
+and empty `PATH` entries are ignored. A program named by a relative path
+(`./gh`), a file inside an untrusted root, or an absolute path that is not the
+resolved file runs without the grant. The resolved file must be a native
+executable (ELF, Mach-O or PE). A script, such as a version-manager shim that
+picks the real program from files in the working directory, runs without the
+grant. The grant is exposed only to the resolved file, which Harn spawns by its
+canonical path.
+
+A granted read is refused when any untrusted root contains, or lies inside,
+`~/.gitconfig`, `~/.config/git`, `~/.ssh`, `~/.config/gh`, the resolved `gh`
+config directory, `$GIT_CONFIG_GLOBAL`, `/etc/gitconfig` or `/etc/ssh`. A
+confined process that can write one of them could plant a filter driver, an
+SSH `ProxyCommand` or an alias that a granted `gh` would then run.
+
+##### What a granted `gh` cannot start
+
+| Variable | Value for a granted `gh` | Exec path it closes |
+|---|---|---|
+| `GH_PAGER`, `PAGER` | empty | pager |
+| `GH_BROWSER`, `BROWSER` | `/usr/bin/false` | browser |
+| `GH_EDITOR`, `EDITOR`, `VISUAL` | `/usr/bin/false` | editor |
+| `XDG_DATA_HOME` | an empty private directory | extensions |
+| `GH_CONFIG_DIR` | a private `config.yml` with display settings and inert aliases only, and a private `hosts.yml` with the granted token for github.com only; the user's `hosts.yml` is never copied | shell aliases, configured pager, browser, editor and socket |
+| `GH_HOST` | `github.com` | another default host |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (both cases) | the host's managed egress proxy when one confines the spawn, otherwise empty | routing requests through a caller's proxy |
+| `GH_DEBUG`, `GODEBUG` | empty | request and header logging |
+| `GIT_CONFIG_COUNT` and its keys | `core.hooksPath` to an empty directory, `core.fsmonitor=false`, `protocol.ext.allow=never`, `core.sshCommand=ssh` | repository hooks, filesystem monitor, `ext::` remotes, configured SSH command |
+| `PATH` | the trusted entries only | helpers such as `git` and `ssh` planted in the workspace |
+| `HOME`, `XDG_CONFIG_HOME` | the user's own home and `~/.config` | a workspace home's Git configuration |
+
+The private directory is created fresh for each spawn, owner-only, under
+`$HARN_HOME/grant-spawns` (default `~/.harn/grant-spawns`), and removed when
+the command ends. If that location is inside an untrusted root, is not a
+private directory of the current user, or cannot be prepared, the command is
+refused and the grant is not exposed.
+
+`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, and
+every other `gh auth` subcommand except a plain `gh auth status` are refused,
+because they print or change the credential. A user alias that expands to
+`auth` is dropped from the private config.
+
+A read that would otherwise receive the grant is refused when it names an
+output filter, `--jq`/`-q` or `--template`/`-t` in any spelling (`--jq=...`,
+`-q.`, `-Lq`), or passes arguments on after `--`. gh's jq filters can read the
+environment (`$ENV`, `env`) and print the credential in a form redaction cannot
+match; templates are refused with them because they format the same output.
+gh reads no environment variable that selects a filter or template, and
+`GH_PAGER` and `PAGER` are set empty after every other environment layer. The
+same arguments on a command that is not a read run without the grant and are
+not refused, so `gh pr create -t title` still works.
+
+The token never enters the granted `gh`'s environment: `GH_TOKEN`,
+`GITHUB_TOKEN` and the enterprise variables are absent, and gh finds the token
+only as a github.com login in the private `hosts.yml`. gh therefore sends no
+token to any other host. A `for=gh` grant must expose `GH_TOKEN` or
+`GITHUB_TOKEN`; any other name is refused. A granted read is also refused when
+it names another host: `--hostname`, a `HOST/OWNER/REPO` value for `-R` or
+`--repo`, or a positional repository, URL or SSH remote whose host is not
+github.com. It is also refused when any argument holds a URL whose scheme is
+not `https`, in any case (`http://`, `HTTP://`, `ftp://`), or a
+scheme-relative `//host/...` form, because gh would send the token to
+github.com over that scheme.
+
+A granted `gh` receives no caller or inherited variable except `LANG`,
+`LC_*`, `TERM`, `TMPDIR`, `TZ` and `NO_COLOR`, plus the variables in the
+table above. Proxy, TLS (`SSL_CERT_FILE`, `SSL_CERT_DIR`), debug and token
+variables a caller sets are dropped.
+
+Every value any grant hands to a child, for any program, is redacted from that command's stdout
+and stderr, from events, and from transcripts, including a value printed
+across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
+and its percent-encoded form. Values shorter than 8 bytes are not redacted.
+
+Git configuration that names other programs per repository, such as filter
+drivers or `diff.external`, is not overridden, and no granted read reaches it:
+traced with `GIT_TRACE`, the reads run git only for `config`, `remote -v`,
+`rev-parse` and `symbolic-ref`.
+
+While a granted `gh` runs, its `hosts.yml` is the only place the token is
+stored. Every confined child has `$HARN_HOME/grant-spawns` on its read
+denylist. The granted `gh`'s own profile re-allows only its own directory, so
+neither a confined sibling nor another granted `gh` can read it. The directory
+is removed when the command ends. If the process crashes or is killed first,
+the next granted spawn removes it: any per-spawn directory whose creating
+process is gone, or that is older than 24 hours, is deleted. Links and entries
+that are not owner-only directories are left alone and never followed. An unconfined process of the same user can read
+the file for as long as the granted `gh` runs.
+
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 

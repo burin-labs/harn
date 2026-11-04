@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use super::{
     developer_toolchain_system_read_roots, network_name_service_read_roots,
-    proc_runtime_reads_are_contained, push_rule, read_only_access, standard_device_rules,
-    system_read_roots, workspace_access, AccessFs, FilesystemProfile, FsAccess,
-    ProcessFilesystemScope,
+    proc_runtime_reads_are_contained, push_rule, push_rule_exact, read_only_access,
+    standard_device_rules, system_read_roots, workspace_access, AccessFs, FilesystemProfile,
+    FsAccess, ProcessFilesystemScope,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{
@@ -140,6 +140,11 @@ pub(super) fn filesystem_profile(
                 true,
             )?;
         }
+    }
+    // A granted spawn re-reads its own private directory inside the denied
+    // per-spawn root, and nothing else there.
+    if let Some(own) = super::super::workspace_env::grant_spawn::own_spawn_read_root() {
+        push_rule_exact(&mut profile, own, read_only_access(), false)?;
     }
     report_unheld_read_denials(policy, &profile.unheld_read_denials)?;
     Ok(profile)
