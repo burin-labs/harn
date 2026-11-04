@@ -4557,6 +4557,26 @@ public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable {
     public var text: String
     public var sourceEventId: Int
     public var messageId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case sourceEventId
+        case messageId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        text = try values.decode(String.self, forKey: .text)
+        sourceEventId = try values.decode(Int.self, forKey: .sourceEventId)
+        messageId = try values.decode(String?.self, forKey: .messageId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(text, forKey: .text)
+        try values.encode(sourceEventId, forKey: .sourceEventId)
+        try values.encode(messageId, forKey: .messageId)
+    }
 }
 
 public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable {

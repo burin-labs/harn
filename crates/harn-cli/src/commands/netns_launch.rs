@@ -149,6 +149,11 @@ fn run_impl(
                 dir.display()
             )
         })?;
+        // The same mount namespace gives POSIX semaphores a private home, so
+        // the parent adds no host `/dev/shm` rule for this child.
+        confinement.mount_private_shared_memory().map_err(|error| {
+            format!("namespace helper: could not mount a private /dev/shm: {error}")
+        })?;
     }
 
     let mut command = Command::new(program);
@@ -171,7 +176,8 @@ fn run_impl(
 }
 
 /// Unshare into a new user and network namespace (and a mount namespace when
-/// the child gets a private `/tmp`), keeping the caller's own ids inside.
+/// the child gets a private `/tmp` and `/dev/shm`), keeping the caller's own
+/// ids inside.
 ///
 /// The user namespace is what makes the others available without privilege;
 /// creating it grants this process the capabilities to configure them until

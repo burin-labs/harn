@@ -128,15 +128,38 @@ fn __resolved_model_id(llm: HarnessLlm, model: any) -> string {
   return to_string(unwrap(resolved)?.id ?? model)
 }
 
+/** The first step of the option's model ladder (named or inline), when it has one. */
+fn __first_ladder_step(llm: HarnessLlm, opts: dict) -> dict? {
+  const ladder = opts?.ladder ?? opts?.models
+  const steps = if type_of(ladder) == "string" && trim(ladder) != "" {
+    const named = try {
+      llm.model_ladder(ladder)
+    }
+    is_err(named) ? [] : unwrap(named)?.steps ?? []
+  } else if type_of(ladder) == "list" {
+    ladder
+  } else {
+    []
+  }
+  if len(steps) == 0 {
+    return nil
+  }
+  const first = steps[0]
+  return type_of(first) == "string" ? {model: first} : first
+}
+
 fn __tool_format_route(
   llm: HarnessLlm,
   opts: dict,
 ) -> {pair: {provider: string, model: string}?, unresolved_reason: string?} {
-  const raw_model = opts?.model
+  // A ladder route names no top-level model; its first step is the model that
+  // serves the request, so the tool format follows that step.
+  const step = __first_ladder_step(llm, opts)
+  const raw_model = opts?.model ?? step?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
     return {pair: nil, unresolved_reason: "missing_model"}
   }
-  const provider = __explicit_provider(opts)
+  const provider = __explicit_provider(opts) ?? __explicit_provider(step ?? {})
   if provider != nil {
     return {
       pair: {provider: provider, model: __resolved_model_id(llm, raw_model)},
