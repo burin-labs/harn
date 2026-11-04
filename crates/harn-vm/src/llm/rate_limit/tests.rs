@@ -1011,7 +1011,7 @@ fn breaker_reopens_when_half_open_probe_fails() {
 /// A prompt in session `id` offers the probe and its first request takes it.
 fn prompt_probes(b: &mut NetworkBreaker, now_ms: u128, id: &str) {
     b.offer_interactive_probe(id);
-    b.take_interactive_probe(now_ms, &[id.to_string()]);
+    b.take_interactive_probe(now_ms, Some(id));
 }
 
 #[test]
@@ -1042,7 +1042,7 @@ fn a_prompts_offer_changes_nothing_for_other_callers() {
         b.record_network_failure(0);
     }
     b.offer_interactive_probe("a");
-    b.take_interactive_probe(1, &["background".to_string()]);
+    b.take_interactive_probe(1, Some("background"));
     assert!(b.admit(1).is_some(), "the window still holds");
     assert_eq!(b.interactive_probe, None);
 }
@@ -1058,15 +1058,17 @@ fn a_failed_probe_fails_only_its_own_prompts_turn() {
     b.record_network_failure(9_000);
     let (_, reason) = b.blocked(9_001).expect("reopened");
     assert_eq!(
-        b.reason_for_caller(reason, &["child".to_string(), "a".to_string()]),
-        BreakerOpenReason::InteractiveProbeFailed,
-        "a loop inside the prompt's session is that turn"
+        b.reason_for_caller(reason, Some("a")),
+        BreakerOpenReason::InteractiveProbeFailed
     );
     assert_eq!(
-        b.reason_for_caller(reason, &["background".to_string()]),
+        b.reason_for_caller(reason, Some("background")),
         BreakerOpenReason::Network
     );
-    assert_eq!(b.reason_for_caller(reason, &[]), BreakerOpenReason::Network);
+    assert_eq!(
+        b.reason_for_caller(reason, None),
+        BreakerOpenReason::Network
+    );
 }
 
 #[test]
@@ -1078,16 +1080,16 @@ fn prompts_at_once_send_one_probe_and_the_next_goes_when_it_answers() {
     b.offer_interactive_probe("a");
     b.offer_interactive_probe("b");
     b.offer_interactive_probe("c");
-    b.take_interactive_probe(1, &["a".to_string()]);
+    b.take_interactive_probe(1, Some("a"));
     assert!(b.admit(1).is_none(), "a is the probe");
     for id in ["b", "c"] {
-        b.take_interactive_probe(2, &[id.to_string()]);
+        b.take_interactive_probe(2, Some(id));
         assert_eq!(b.admit(2).expect("in flight").0, Duration::ZERO);
     }
     assert_eq!(b.network_opens, 1);
 
     b.record_network_failure(3);
-    b.take_interactive_probe(4, &["b".to_string()]);
+    b.take_interactive_probe(4, Some("b"));
     assert!(b.admit(4).is_none(), "b's offer survived the wait");
     assert_eq!(
         b.admit(4).expect("in flight").0,
@@ -1140,7 +1142,7 @@ fn interactive_probe_takes_over_a_probe_that_never_reported_and_grows_no_window(
         Duration::ZERO
     );
     let stale = after + u128::from(NETWORK_BREAKER_OPEN_MS);
-    b.take_interactive_probe(stale, &["a".to_string()]);
+    b.take_interactive_probe(stale, Some("a"));
     assert_eq!(b.network_opens, 1, "a grant is not a failure");
     assert!(b.admit(stale).is_none());
 }
@@ -1233,14 +1235,7 @@ fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_f
     }
     assert!(network_breaker_admission(&opts).is_some());
 
-    grant_interactive_network_probe("prompt-session");
-    assert!(
-        network_breaker_admission(&opts).is_some(),
-        "the grant is not this caller's"
-    );
-
-    let prompt_session = crate::agent_sessions::enter_current_session("prompt-session");
-    let loop_session = crate::agent_sessions::enter_current_session("prompt-loop-session");
+    let prompt = begin_interactive_prompt("prompt-session");
     assert!(network_breaker_admission(&opts).is_none(), "probe admitted");
     observe_network_outcome_for_llm_call(&opts, true);
 
@@ -1256,8 +1251,7 @@ fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_f
         crate::value::ErrorCategory::CircuitOpen
     );
     assert!(error.to_string().contains("not answering"), "{error}");
-    drop(loop_session);
-    drop(prompt_session);
+    drop(prompt);
 
     let (_, reason) = network_breaker_admission(&opts).expect("still open");
     assert_eq!(
@@ -1265,6 +1259,66 @@ fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_f
         BreakerOpenReason::Network,
         "another caller on the route waits as usual"
     );
+}
+
+#[test]
+fn prompts_interleaving_on_one_thread_keep_their_own_probe_and_verdict() {
+    use tokio::sync::oneshot::channel;
+
+    let _env = crate::llm::env_guard();
+    let mut opts = crate::llm::api::options::base_opts("interleaved-route");
+    opts.model = "interleaved-model".into();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        observe_network_outcome_for_llm_call(&opts, true);
+    }
+    let (a_begun, a_begun_seen) = channel();
+    let (b_begun, b_begun_seen) = channel();
+    let (a_probing, a_probing_seen) = channel();
+    let (b_waited, b_waited_seen) = channel();
+    let (a_failed, a_failed_seen) = channel();
+
+    let prompt_a = crate::orchestration::scope_ambient_context(async {
+        let _prompt = begin_interactive_prompt("prompt-a");
+        a_begun.send(()).unwrap();
+        b_begun_seen.await.unwrap();
+        assert!(
+            network_breaker_admission(&opts).is_none(),
+            "a's own request takes a's offer, with b's prompt begun on top of it"
+        );
+        a_probing.send(()).unwrap();
+        b_waited_seen.await.unwrap();
+        observe_network_outcome_for_llm_call(&opts, true);
+        a_failed.send(()).unwrap();
+        await_network_breaker_for_llm_call(&opts)
+            .await
+            .expect_err("a's turn fails instead of waiting")
+    });
+    let prompt_b = crate::orchestration::scope_ambient_context(async {
+        a_begun_seen.await.unwrap();
+        let _prompt = begin_interactive_prompt("prompt-b");
+        b_begun.send(()).unwrap();
+        a_probing_seen.await.unwrap();
+        let (remaining, reason) = network_breaker_admission(&opts).expect("a's probe is in flight");
+        assert_eq!(remaining, Duration::ZERO);
+        assert_eq!(reason, BreakerOpenReason::Network);
+        b_waited.send(()).unwrap();
+        a_failed_seen.await.unwrap();
+        assert!(
+            network_breaker_admission(&opts).is_none(),
+            "b is not handed a's verdict and probes with its own offer"
+        );
+    });
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("runtime");
+    let (error, ()) = runtime.block_on(async { tokio::join!(prompt_a, prompt_b) });
+    assert_eq!(
+        crate::value::error_to_category(&error),
+        crate::value::ErrorCategory::CircuitOpen
+    );
+    assert!(error.to_string().contains("not answering"), "{error}");
 }
 
 #[test]

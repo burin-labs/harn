@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::llm::api::LlmCallOptions;
+use std::cell::RefCell;
 
 /// Preserve direct fail-fast checks of the breaker state machine.
 #[cfg(test)]
@@ -25,7 +26,8 @@ pub(super) fn network_breaker_admission(
     ensure_initialized_from_config();
     let keys = limiter_keys(&opts.provider, &opts.model);
     let now_ms = crate::clock_mock::instant_now().as_millis();
-    let sessions = crate::agent_sessions::active_session_ids();
+    let owner = PROMPT_PROBE_OWNER.with(|slot| slot.borrow().clone());
+    let owner = owner.as_deref();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     // Inspect every key before reserving any half-open probe. Otherwise a
     // blocked sibling key strands an earlier reservation with no provider call
@@ -35,9 +37,9 @@ pub(super) fn network_breaker_admission(
     let mut blocked: Option<(Duration, BreakerOpenReason)> = None;
     for key in &keys {
         let limiter = limiter_for_key(&mut registry.limiters, key);
-        limiter.breaker.take_interactive_probe(now_ms, &sessions);
+        limiter.breaker.take_interactive_probe(now_ms, owner);
         if let Some((remaining, reason)) = limiter.breaker.blocked(now_ms) {
-            let reason = limiter.breaker.reason_for_caller(reason, &sessions);
+            let reason = limiter.breaker.reason_for_caller(reason, owner);
             blocked = Some(match blocked {
                 Some((prev, prev_reason)) => (prev.max(remaining), prev_reason.max(reason)),
                 None => (remaining, reason),
@@ -52,15 +54,54 @@ pub(super) fn network_breaker_admission(
     blocked
 }
 
-/// Offer this session's next request on each failing route the chance to probe
-/// it immediately. Call this when a person sends a prompt, once per prompt.
-/// Other callers keep waiting. If the probe fails the route reopens, and calls
-/// in this session's turn fail fast instead of waiting.
-pub fn grant_interactive_network_probe(session_id: &str) {
+thread_local! {
+    /// The session whose prompt the current poll belongs to. Prompts interleave
+    /// on one thread, so the ambient scope swaps this around every poll and
+    /// hands a copy to the workers a turn starts.
+    static PROMPT_PROBE_OWNER: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn swap_prompt_probe_owner(replacement: Option<String>) -> Option<String> {
+    PROMPT_PROBE_OWNER.with(|slot| slot.replace(replacement))
+}
+
+/// One person's prompt, from sending it until its turn ends.
+pub struct InteractivePromptGuard {
+    session_id: String,
+}
+
+/// Offer this prompt's next request on each failing route the chance to probe
+/// it immediately. Other callers keep waiting. If the probe fails the route
+/// reopens, and calls in this prompt's turn fail fast instead of waiting.
+///
+/// Call this inside the turn's ambient scope and hold the guard for the turn.
+pub fn begin_interactive_prompt(session_id: &str) -> InteractivePromptGuard {
     ensure_initialized_from_config();
+    swap_prompt_probe_owner(Some(session_id.to_string()));
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     for limiter in registry.limiters.values_mut() {
         limiter.breaker.offer_interactive_probe(session_id);
+    }
+    InteractivePromptGuard {
+        session_id: session_id.to_string(),
+    }
+}
+
+impl Drop for InteractivePromptGuard {
+    fn drop(&mut self) {
+        // A cancelled turn drops this outside its poll, when the slot belongs
+        // to whoever is polling now.
+        PROMPT_PROBE_OWNER.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.as_deref() == Some(self.session_id.as_str()) {
+                *slot = None;
+            }
+        });
+        if let Ok(mut registry) = registry().lock() {
+            for limiter in registry.limiters.values_mut() {
+                limiter.breaker.probe_offers.remove(&self.session_id);
+            }
+        }
     }
 }
 

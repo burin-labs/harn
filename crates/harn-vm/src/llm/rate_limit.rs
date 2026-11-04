@@ -314,8 +314,8 @@ impl NetworkBreaker {
     /// this session waits for that answer and then probes without sitting out
     /// the window. A probe older than one open window is taken over, because
     /// its owner may have been cancelled without ever reporting an outcome.
-    fn take_interactive_probe(&mut self, now_ms: u128, sessions: &[String]) {
-        let Some(owner) = sessions.iter().find(|id| self.probe_offers.contains(*id)) else {
+    fn take_interactive_probe(&mut self, now_ms: u128, owner: Option<&str>) {
+        let Some(owner) = owner.filter(|id| self.probe_offers.contains(*id)) else {
             return;
         };
         if self.state == BreakerState::HalfOpen
@@ -329,14 +329,14 @@ impl NetworkBreaker {
         }
         if self.state == BreakerState::Closed {
             if self.one_failure_from_tripping() {
-                self.interactive_probe = Some(owner.clone());
+                self.interactive_probe = Some(owner.to_string());
             }
             return;
         }
         self.state = BreakerState::Open { until_ms: now_ms };
         self.open_reason = BreakerOpenReason::Network;
         self.failed_probe_owner = None;
-        self.interactive_probe = Some(owner.clone());
+        self.interactive_probe = Some(owner.to_string());
     }
 
     /// A failed probe ends only its own prompt's turn. Everyone else on the
@@ -344,12 +344,9 @@ impl NetworkBreaker {
     fn reason_for_caller(
         &self,
         reason: BreakerOpenReason,
-        sessions: &[String],
+        owner: Option<&str>,
     ) -> BreakerOpenReason {
-        let owns_verdict = self
-            .failed_probe_owner
-            .as_ref()
-            .is_some_and(|owner| sessions.contains(owner));
+        let owns_verdict = owner.is_some() && self.failed_probe_owner.as_deref() == owner;
         if reason == BreakerOpenReason::InteractiveProbeFailed && !owns_verdict {
             BreakerOpenReason::Network
         } else {
@@ -1210,9 +1207,10 @@ mod network_recovery;
 pub(crate) use network_recovery::await_network_breaker_for_llm_call;
 #[cfg(test)]
 pub(crate) use network_recovery::check_network_breaker_for_llm_call;
-pub use network_recovery::grant_interactive_network_probe;
 #[cfg(test)]
 use network_recovery::network_breaker_admission;
+pub(crate) use network_recovery::swap_prompt_probe_owner;
+pub use network_recovery::{begin_interactive_prompt, InteractivePromptGuard};
 
 /// Feed a terminal unproductive completion (a served turn that delivered no
 /// content, reasoning, or tool call — the zero-token empty completion or the
