@@ -25,6 +25,10 @@ pub(crate) struct NetnsLaunchArgs {
     /// hard-code `/tmp` write the workspace's temp storage instead of the host's.
     #[arg(long = harn_vm::process_sandbox::NETNS_PRIVATE_TMP_FLAG.trim_start_matches('-'), value_name = "PATH", conflicts_with = "close_fd")]
     pub private_tmp: Option<std::path::PathBuf>,
+    /// Relay the host's child egress proxy into the namespace, as
+    /// HTTP-PORT:SOCKS-PORT:socket-directory.
+    #[arg(long = harn_vm::process_sandbox::NETNS_EGRESS_RELAY_FLAG.trim_start_matches('-'), value_name = "TARGET", conflicts_with = "close_fd")]
+    pub egress_relay: Option<harn_vm::process_sandbox::EgressRelayTarget>,
     /// Verify and close one pinned device setup descriptor, as FD:absolute-path.
     /// Bubblewrap has already installed confinement in this mode.
     #[arg(long = harn_vm::process_sandbox::NETNS_CLOSE_FD_FLAG.trim_start_matches('-'))]

@@ -368,7 +368,7 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["process_unix_socket_enforcement"], "not_requested");
     assert_eq!(
         metadata["process_network_mode"],
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
             "managed"
         } else {
             "unsupported_fail_closed"

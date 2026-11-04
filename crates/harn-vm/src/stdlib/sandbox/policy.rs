@@ -38,9 +38,14 @@ impl ProcessNetworkGrant {
         )
     }
 
+    /// Linux has no filter that limits a socket's destination, so a child whose
+    /// network stops at loopback or at the proxy needs a private namespace.
     #[cfg(target_os = "linux")]
-    pub(super) fn loopback_only(self) -> bool {
-        matches!(self, Self::Loopback { .. })
+    pub(super) fn needs_private_namespace(self) -> bool {
+        matches!(
+            self,
+            Self::Loopback { .. } | Self::Public { proxy: Some(_) }
+        )
     }
 }
 

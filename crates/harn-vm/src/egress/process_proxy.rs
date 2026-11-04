@@ -132,6 +132,9 @@ pub struct ProcessEgressProxy {
     shutdown: Arc<AtomicBool>,
     joins: Vec<JoinHandle<()>>,
     audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    /// How a child in a private network namespace reaches these listeners.
+    #[cfg(target_os = "linux")]
+    bridge: Option<super::namespace_bridge::NamespaceBridge>,
 }
 
 impl ProcessEgressProxy {
@@ -229,7 +232,8 @@ impl ProcessEgressProxy {
             }
         };
 
-        Ok(Self {
+        #[allow(unused_mut)]
+        let mut proxy = Self {
             endpoints: ProcessNetworkProxy {
                 http_port,
                 socks_port,
@@ -237,7 +241,18 @@ impl ProcessEgressProxy {
             shutdown,
             joins: vec![http_join, socks_join],
             audit,
-        })
+            #[cfg(target_os = "linux")]
+            bridge: None,
+        };
+        // A failure here drops `proxy`, which stops the listeners.
+        #[cfg(target_os = "linux")]
+        {
+            proxy.bridge = Some(
+                super::namespace_bridge::NamespaceBridge::start(proxy.endpoints)
+                    .map_err(ProcessEgressProxyError::Other)?,
+            );
+        }
+        Ok(proxy)
     }
 
     pub fn endpoints(&self) -> ProcessNetworkProxy {

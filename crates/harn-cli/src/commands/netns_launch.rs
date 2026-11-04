@@ -19,6 +19,10 @@
 //! end. So the confinement travels as data, and this process applies it in
 //! the window between the namespace existing and the payload starting.
 //!
+//! A child whose network stops at the proxy also needs a way to reach it. That
+//! is a relay forked between (1) and (2); see
+//! `harn_vm::process_sandbox::start_namespace_relay`.
+//!
 //! # What the namespace buys
 //!
 //! A private network namespace with only loopback raised is the only
@@ -58,6 +62,7 @@ pub(crate) fn run(args: NetnsLaunchArgs) -> Result<Infallible, String> {
             .as_deref()
             .ok_or("namespace helper: no confinement")?,
         args.private_tmp.as_deref(),
+        args.egress_relay.as_ref(),
         program,
         payload_args,
     )
@@ -120,6 +125,7 @@ fn run_impl(
     ruleset_fd: Option<i32>,
     seccomp_hex: &str,
     private_tmp: Option<&std::path::Path>,
+    egress_relay: Option<&harn_vm::process_sandbox::EgressRelayTarget>,
     program: &str,
     payload_args: &[String],
 ) -> Result<Infallible, String> {
@@ -142,6 +148,11 @@ fn run_impl(
     })?;
     raise_loopback()
         .map_err(|error| format!("namespace helper: could not raise loopback: {error}"))?;
+    if let Some(target) = egress_relay {
+        harn_vm::process_sandbox::start_namespace_relay(target, &confinement).map_err(|error| {
+            format!("namespace helper: could not relay the egress proxy: {error}")
+        })?;
+    }
     if let Some(dir) = private_tmp {
         mount_private_tmp(dir).map_err(|error| {
             format!(
@@ -291,6 +302,7 @@ fn run_impl(
     _ruleset_fd: Option<i32>,
     _seccomp_hex: &str,
     _private_tmp: Option<&std::path::Path>,
+    _egress_relay: Option<&harn_vm::process_sandbox::EgressRelayTarget>,
     _program: &str,
     _payload_args: &[String],
 ) -> Result<Infallible, String> {
