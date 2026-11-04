@@ -123,7 +123,7 @@ fn a_child_reaches_only_what_the_proxy_admits() {
 fn main(harness: Harness) {{
   harness.net.egress_policy({{default: "deny", allow: ["127.0.0.1"], allow_loopback: true}})
   const result = harness.tools.run_command({{argv: ["/usr/bin/python3", "-c", {probe}, "{port}", "{REPLY}"]}})
-  println(json_stringify(result))
+  harness.stdio.println(json_stringify(result))
   assert_eq(result.exit_code, 0)
   assert_eq(trim(result.stdout), "proxy-only-namespace-ok")
   assert_eq(result.sandbox.network.managed_proxy, true)
