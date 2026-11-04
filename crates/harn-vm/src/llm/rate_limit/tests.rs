@@ -1073,6 +1073,29 @@ fn interactive_probe_takes_over_a_probe_that_never_reported_and_grows_no_window(
 }
 
 #[test]
+fn prompt_after_a_failed_turn_below_the_threshold_still_fails_fast_when_the_provider_stays_down() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
+        b.record_network_failure(0);
+    }
+    b.grant_interactive_probe(1);
+    assert!(b.admit(1).is_none(), "the route is still closed");
+    b.record_network_failure(8_000);
+    assert_eq!(
+        b.admit(8_001).expect("the failure trips the breaker").1,
+        BreakerOpenReason::InteractiveProbeFailed
+    );
+
+    let mut healed = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
+        healed.record_network_failure(0);
+    }
+    healed.grant_interactive_probe(1);
+    healed.record_success();
+    assert!(!healed.interactive_probe);
+}
+
+#[test]
 fn interactive_probe_leaves_closed_and_unproductive_routes_alone() {
     let mut closed = NetworkBreaker::default();
     closed.grant_interactive_probe(1);

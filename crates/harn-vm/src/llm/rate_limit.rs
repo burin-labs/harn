@@ -282,10 +282,18 @@ impl NetworkBreaker {
     /// over a half-open probe, whose owner may have been cancelled without ever
     /// reporting an outcome. An unproductive route answers quickly and bills
     /// each probe, so its window stands.
+    ///
+    /// A closed route one failure from tripping is in the same position: the
+    /// last turn failed, and the next failure will open the breaker. Mark that
+    /// request as the probe too, so a provider that stays down fails this turn
+    /// fast whether or not the last turn crossed the threshold.
     fn grant_interactive_probe(&mut self, now_ms: u128) {
-        if self.state == BreakerState::Closed
-            || self.open_reason == BreakerOpenReason::UnproductiveCompletion
-        {
+        if self.open_reason == BreakerOpenReason::UnproductiveCompletion {
+            return;
+        }
+        if self.state == BreakerState::Closed {
+            self.interactive_probe =
+                self.consecutive_network_failures + 1 >= NETWORK_BREAKER_FAILURE_THRESHOLD;
             return;
         }
         self.state = BreakerState::Open { until_ms: now_ms };
@@ -327,15 +335,17 @@ impl NetworkBreaker {
                 2 => NETWORK_BREAKER_OPEN_MS_SECOND,
                 _ => NETWORK_BREAKER_OPEN_MS_MAX,
             };
-            // A straggler failing during the window must not soften the verdict.
-            self.open_reason = if (probe_failed && self.interactive_probe)
+            // A straggler failing during the window neither spends the grant
+            // nor softens the verdict.
+            let straggler = matches!(self.state, BreakerState::Open { .. });
+            self.open_reason = if (!straggler && self.interactive_probe)
                 || self.open_reason == BreakerOpenReason::InteractiveProbeFailed
             {
                 BreakerOpenReason::InteractiveProbeFailed
             } else {
                 BreakerOpenReason::Network
             };
-            if probe_failed {
+            if !straggler {
                 self.interactive_probe = false;
             }
             self.state = BreakerState::Open {
