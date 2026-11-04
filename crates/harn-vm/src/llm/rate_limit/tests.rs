@@ -1116,6 +1116,9 @@ fn interactive_probe_leaves_closed_and_unproductive_routes_alone() {
 #[test]
 fn a_window_opened_through_one_real_clock_holds_when_read_through_a_later_one() {
     let _env = crate::llm::env_guard();
+    // A paused runtime built first would read before the origin, and the
+    // breaker's unsigned reading would clamp the window's opening time.
+    harn_clock::process_monotonic_origin();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
