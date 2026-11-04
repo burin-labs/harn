@@ -85,6 +85,8 @@ mod lint_strict_cli;
 mod llm_fixture_policy;
 mod localization_cli;
 mod managed_command_interrupt;
+#[cfg(target_os = "linux")]
+mod managed_proxy_namespace_e2e;
 mod mcp_lazy_registration;
 mod mcp_server_cli;
 mod merge_captain_cli;

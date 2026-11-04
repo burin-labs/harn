@@ -19,7 +19,9 @@ use super::{
     policy_allows_capability, policy_allows_network, process_sandbox_presets, sandbox_rejection,
     PrepareOutcome, SandboxBackend,
 };
+
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
+use crate::process_sandbox::EgressRelayTarget;
 use crate::value::VmError;
 
 pub(super) struct Backend;
@@ -133,6 +135,9 @@ struct ProcessProfile {
     /// Pre-compiled seccomp program. Built before fork so `pre_exec` only has
     /// to install it — see [`compile_seccomp_program`].
     seccomp: BpfProgram,
+    /// What the namespace helper relays to the host's proxy, when this child's
+    /// network stops there.
+    egress_relay: Option<EgressRelayTarget>,
 }
 
 /// A populated ruleset, ready for the process that will `exec` the payload to
@@ -197,6 +202,7 @@ pub struct TransferableConfinement {
     /// The session temp dir the namespace helper mounts over `/tmp`, decided
     /// with the ruleset; see [`netns::private_tmp_dir`].
     private_tmp: Option<PathBuf>,
+    egress_relay: Option<EgressRelayTarget>,
 }
 
 /// One `sock_filter` on the wire: code, jt, jf, k, little-endian.
@@ -209,6 +215,7 @@ impl TransferableConfinement {
             private_tmp: landlock.as_ref().and_then(|l| l.private_tmp.clone()),
             ruleset: landlock.map(LandlockProfile::take_ruleset),
             seccomp: std::mem::take(&mut prep.seccomp),
+            egress_relay: prep.egress_relay.take(),
         }
     }
 
@@ -258,6 +265,8 @@ impl TransferableConfinement {
             seccomp: program,
             // The helper has already mounted it by the time it rebuilds this.
             private_tmp: None,
+            // The helper starts the relay itself, from its own argument.
+            egress_relay: None,
         })
     }
 
@@ -382,14 +391,8 @@ fn profile_setup_for(
     policy: &CapabilityPolicy,
     support: LandlockSupport,
 ) -> Result<ProcessProfile, VmError> {
-    if policy.process_network_proxy.is_some() {
-        return Err(sandbox_rejection(
-            "managed child-process egress requires a proxy-only Linux network namespace; this build cannot enforce that boundary"
-                .to_string(),
-        ));
-    }
-    // Loopback-only networking is rendered by the namespace helper, not here,
-    // and it is refused rather than approximated when the helper is missing.
+    // Loopback and proxy networking are rendered by the namespace helper, not
+    // here, and they are refused rather than approximated when it is missing.
     // `resolve_netns_launcher` owns that decision so the spawn path and this
     // one cannot disagree about whether the grant is available.
     resolve_netns_launcher(policy)?;
@@ -401,6 +404,9 @@ fn profile_setup_for(
     Ok(ProcessProfile {
         landlock: Some(landlock),
         seccomp: compile_seccomp_program(policy, support.bounds_truncation())?,
+        egress_relay: policy
+            .process_network_proxy
+            .map(EgressRelayTarget::for_proxy),
     })
 }
 
@@ -458,6 +464,18 @@ fn landlock_profile_for(
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
     super::enforcement::validate_ssh_agent(policy)?;
+    // A child behind the proxy gets no new Unix sockets at all (see the namespace
+    // helper), because this kernel interface cannot limit where one connects.
+    // A named root promises what that rule takes away, so it is refused.
+    if policy.process_network_proxy.is_some()
+        && !policy.process_sandbox.unix_socket_roots.is_empty()
+    {
+        return Err(sandbox_rejection(
+            "Unix-domain socket roots cannot be granted to a child behind the egress proxy on \
+             Linux"
+                .into(),
+        ));
+    }
     let scope_unix_paths =
         policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy);
     if scope_unix_paths && support.abi() < ABI::V9 {

@@ -271,13 +271,12 @@ pub(super) fn install_run_sandbox_scope(
         harn_vm::tool_annotations::SideEffectLevel::rank_str(level)
             >= harn_vm::tool_annotations::SideEffectLevel::Network.rank()
     });
-    // Managed child egress is enforceable only on macOS. Starting a proxy on
-    // Linux/Windows attaches `process_network_proxy` and fail-closes every
-    // `process.exec`, including local `git_push` to a file remote. Skip the
-    // proxy off-macOS; `--allow-process-network` still raises the capability
-    // ceiling, and attestation reports `unrestricted` rather than
-    // `unsupported_fail_closed`.
-    let process_proxy = if cfg!(target_os = "macos")
+    // Starting a proxy where it cannot be enforced attaches
+    // `process_network_proxy` and fail-closes every `process.exec`, including
+    // local `git_push` to a file remote. Skip the proxy there;
+    // `--allow-process-network` still raises the capability ceiling, and
+    // attestation reports `unrestricted` rather than `unsupported_fail_closed`.
+    let process_proxy = if can_enforce_process_proxy(options)
         && options.allow_process_network
         && !options.allow_http_read
         && active_allows_process_network
@@ -389,15 +388,14 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
         ));
     }
     if options.allow_process_network {
-        if cfg!(target_os = "macos") {
+        if can_enforce_process_proxy(options) {
             deltas.push("subprocess network allowed".to_string());
         } else {
-            // Off-macOS the CLI does not attach a proxy it cannot enforce, so
-            // the grant is fail-open for child sockets. Name that so a
-            // restrictive `HARN_EGRESS_*` policy is not mistaken for child
-            // confinement.
+            // The CLI does not attach a proxy it cannot enforce, so the grant
+            // is fail-open for child sockets. Name that so a restrictive
+            // `HARN_EGRESS_*` policy is not mistaken for child confinement.
             deltas.push(
-                "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+                "subprocess network allowed (unrestricted sockets; managed proxy needs macOS or a Linux namespace launcher)"
                     .to_string(),
             );
         }
@@ -419,6 +417,12 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
         return None;
     }
     Some(format!("sandbox active; {}\n", deltas.join("; ")))
+}
+
+/// Managed child egress holds on macOS, and on Linux through the namespace helper.
+fn can_enforce_process_proxy(options: &RunSandboxOptions) -> bool {
+    cfg!(target_os = "macos")
+        || (cfg!(target_os = "linux") && options.netns_launcher_path.is_some())
 }
 
 /// Render each grant to the exact path the sandbox jails it to, so the disclosed
@@ -558,6 +562,7 @@ pub(super) fn default_run_capability_policy(
                 .collect(),
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: grants.loopback,
+            deny_network: false,
             unix_socket_roots: process_unix_socket_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
@@ -633,7 +638,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
             .as_ref()
             .and_then(|policy| policy.process_network_proxy)
             .map(|_| {
-                if cfg!(target_os = "macos") {
+                if cfg!(any(target_os = "macos", target_os = "linux")) {
                     "managed"
                 } else {
                     "unsupported_fail_closed"
@@ -738,7 +743,7 @@ mod tests {
             "Linux/Windows must not fail-close child exec behind a proxy they cannot enforce"
         );
         assert!(
-            stderr.contains("unrestricted sockets; managed proxy is macOS-only"),
+            stderr.contains("unrestricted sockets; managed proxy needs macOS or a Linux"),
             "fail-open child sockets must be disclosed: {stderr}"
         );
         drop(_scope);
@@ -788,7 +793,7 @@ mod tests {
         let network = if cfg!(target_os = "macos") {
             "subprocess network allowed"
         } else {
-            "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+            "subprocess network allowed (unrestricted sockets; managed proxy needs macOS or a Linux namespace launcher)"
         };
         let expected = format!(
             "sandbox active; extra write roots: {}, {}; \
@@ -809,11 +814,18 @@ mod tests {
         let expected = if cfg!(target_os = "macos") {
             "sandbox active; subprocess network allowed\n"
         } else {
-            "sandbox active; subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)\n"
+            "sandbox active; subprocess network allowed (unrestricted sockets; managed proxy needs macOS or a Linux namespace launcher)\n"
         };
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
             Some(expected),
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            sandbox_grant_disclosure(&options.with_netns_launcher(Some("/launcher".to_string())))
+                .as_deref(),
+            Some("sandbox active; subprocess network allowed\n"),
+            "a launcher holds the child to the proxy, so the grant is not unrestricted"
         );
     }
 

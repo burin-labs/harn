@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Finds the build run that made a release candidate at one main commit: the
-# version commit's push, or a scheduled or requested source candidate. The
+# Finds the build run that made a release candidate at one main commit: a
+# checkpoint or requested source candidate. The
 # `candidate-manifest-<sha>` artifact is what makes it a candidate rather than
 # a warm or skipped build of the same commit.
 
@@ -64,7 +64,7 @@ release_candidate_artifacts_complete() {
   ' <<< "$artifacts" >/dev/null
 }
 
-# A scheduled source build may reuse only a complete, unexpired artifact set.
+# Unused: a source build may reuse only a complete, unexpired artifact set.
 # Target names come from the producer's resolved matrix, not a parallel list.
 source_candidate_live_run_id() {
   local repository="${1:?repository required}"

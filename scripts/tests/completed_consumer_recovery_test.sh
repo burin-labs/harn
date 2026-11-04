@@ -9,7 +9,7 @@ source_sha=1111111111111111111111111111111111111111
 child_head=2222222222222222222222222222222222222222
 targets="$(candidate_archive_expected_targets_json)"
 producer="$(jq -nc --arg sha "$source_sha" '{id:100,run_attempt:1,
-  repository:{full_name:"burin-labs/harn"},head_repository:{full_name:"burin-labs/harn"},
+  repository:{id:1,full_name:"burin-labs/harn"},head_repository:{id:1,full_name:"burin-labs/harn"},
   head_sha:$sha,path:".github/workflows/build-release-binaries.yml",event:"merge_group",
   status:"completed",conclusion:"failure"}')"
 producer_jobs="$(jq -nc --argjson targets "$targets" '
@@ -109,6 +109,7 @@ fixture_root=$scratch fixture_producer=$producer fixture_child=$child
 fixture_producer_jobs=$producer_jobs fixture_child_jobs=$child_jobs
 gh() {
   local endpoint=${*: -1}
+  [[ "$endpoint" != Accept:* ]] || endpoint=$2
   printf '%s\n' "$endpoint" >> "$fixture_root/api-calls"
   case "$endpoint" in
     repos/burin-labs/harn/*) [[ "$GH_TOKEN" == producer-read ]] || return 1 ;;
@@ -125,6 +126,13 @@ gh() {
         jq -c '.status="in_progress"|.conclusion=null' <<< "$fixture_producer"
       else printf '%s\n' "$fixture_producer"; fi ;;
     'repos/burin-labs/harn/actions/runs/100/jobs?filter=latest&per_page=100') printf '%s\n' "$fixture_producer_jobs" ;;
+    "repos/burin-labs/harn/contents/Cargo.toml?ref=$source_sha") printf '[workspace.package]\nversion = "1.2.3"\n' ;;
+    'repos/burin-labs/harn/actions/runs/100/artifacts?per_page=100')
+      candidate_archive_expected_targets_json | jq -c --arg sha "$source_sha" --arg files "$RELEASE_FILES_ARTIFACT" '
+        [.[] | "harn-" + .] + ["candidate-manifest-" + $sha, $files]
+        | {total_count:length, artifacts:to_entries | map({id:(.key + 1),name:.value,
+            expired:false,size_in_bytes:100,workflow_run:{id:100,repository_id:1,
+              head_repository_id:1,head_sha:$sha,head_branch:"main"}})}' ;;
     repos/burin-labs/harn/actions/jobs/15/logs) cat "$fixture_root/consumer" ;;
     repos/burin-labs/harn/actions/jobs/16/logs) cat "$fixture_root/final" ;;
     repos/burin-labs/harn/compare/*...main)

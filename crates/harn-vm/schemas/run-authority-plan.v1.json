@@ -198,6 +198,9 @@
             "allow_tcp_loopback": {
               "type": "boolean"
             },
+            "deny_network": {
+              "type": "boolean"
+            },
             "unix_socket_roots": {
               "$ref": "#/$defs/stringArray"
             },

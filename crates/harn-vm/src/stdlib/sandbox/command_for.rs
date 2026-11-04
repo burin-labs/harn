@@ -195,7 +195,12 @@ pub fn command_for_reexec(
             }
         }
     };
-    let (command, env_closed) = close_std_command_environment(command, program)?;
+    let (mut command, env_closed) = close_std_command_environment(command, program)?;
+    if let Some(proxy) =
+        active_sandbox_policy().and_then(|(policy, _)| policy.process_network_proxy)
+    {
+        process_output::apply_managed_proxy_env(&mut command, proxy);
+    }
     Ok((command, env_closed, confinement))
 }
 

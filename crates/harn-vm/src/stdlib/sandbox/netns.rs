@@ -15,7 +15,8 @@ use std::process::Command;
 
 use crate::orchestration::CapabilityPolicy;
 use crate::process_sandbox::{
-    NETNS_LAUNCH_SUBCOMMAND, NETNS_PRIVATE_TMP_FLAG, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG,
+    NETNS_EGRESS_RELAY_FLAG, NETNS_LAUNCH_SUBCOMMAND, NETNS_PRIVATE_TMP_FLAG,
+    NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG,
 };
 use crate::stdlib::sandbox::policy::ProcessNetworkGrant;
 use crate::VmError;
@@ -66,14 +67,19 @@ pub(super) fn namespaced_outcome(
 pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     policy: &CapabilityPolicy,
 ) -> Result<Option<PathBuf>, VmError> {
-    if !ProcessNetworkGrant::for_policy(policy).loopback_only() {
+    if !ProcessNetworkGrant::for_policy(policy).needs_private_namespace() {
         return Ok(None);
     }
     match crate::process_sandbox::loopback_support(&policy.process_sandbox) {
         crate::process_sandbox::LoopbackSupport::Supported { launcher } => Ok(launcher),
         crate::process_sandbox::LoopbackSupport::Unavailable(unavailable) => {
+            let grant = if policy.process_network_proxy.is_some() {
+                "managed child-process egress requires a proxy-only Linux network namespace; it"
+            } else {
+                "TCP loopback-only child networking"
+            };
             Err(sandbox_rejection(format!(
-                "TCP loopback-only child networking is refused rather than widened: {}",
+                "{grant} is refused rather than widened: {}",
                 unavailable.notice()
             )))
         }
@@ -102,6 +108,10 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     if let Some(tmp) = &confinement.private_tmp {
         argv.push(NETNS_PRIVATE_TMP_FLAG.to_string());
         argv.push(tmp.display().to_string());
+    }
+    if let Some(relay) = &confinement.egress_relay {
+        argv.push(NETNS_EGRESS_RELAY_FLAG.to_string());
+        argv.push(relay.to_string());
     }
     argv.push(NETNS_SECCOMP_FLAG.to_string());
     argv.push(hex::encode(confinement.seccomp_bytes()));
@@ -198,8 +208,8 @@ fn clear_cloexec_hook(
     })
 }
 
-/// A loopback grant rendered inside a private network namespace, where the
-/// namespace and not the filter is the boundary.
+/// A loopback or proxy grant rendered inside a private network namespace, where
+/// the namespace and not the filter is the boundary.
 ///
 /// The child must be able to create and address sockets or the grant it was
 /// given is worth nothing: a filter that refuses `socket` refuses loopback
@@ -211,11 +221,11 @@ fn clear_cloexec_hook(
 /// its network terms carry no address condition, and they do not mediate
 /// datagrams at all.
 ///
-/// Safe only because the two always travel together. A loopback grant with no
+/// Safe only because the two always travel together. A grant with no
 /// helper to build the namespace is refused outright by
 /// [`resolve_netns_launcher`], on this path as well as on the spawn path, so
 /// this predicate cannot be true for a child that is about to run on the host
 /// network.
 pub(super) fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
-    ProcessNetworkGrant::for_policy(policy).loopback_only()
+    ProcessNetworkGrant::for_policy(policy).needs_private_namespace()
 }
