@@ -745,7 +745,7 @@ impl HostLeaseStore {
                 "only a pending run can acquire its host lease".to_string(),
             ));
         };
-        let elapsed_ms = self.now_ms()?.saturating_sub(requested_at_ms) as u64;
+        let elapsed_ms = harn_clock::elapsed_ms(self.now_ms()?, requested_at_ms);
         let remaining_ms = run.wait_limit_ms.saturating_sub(elapsed_ms);
         let request = HostLeaseRequest {
             host: run.resource.machine,

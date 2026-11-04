@@ -50,8 +50,19 @@ pub trait Clock: Send + Sync + fmt::Debug {
 /// Convert an `OffsetDateTime` to Unix epoch milliseconds. The division
 /// happens in `i128` so timestamps past April 2262 — where nanoseconds
 /// exceed `i64::MAX` — don't silently corrupt when cast.
+///
+/// Floors toward negative infinity so pre-epoch instants stay monotonic with
+/// post-epoch ones (`-1ns` is `-1ms`, not `0ms`).
 pub fn offset_datetime_to_ms(ts: OffsetDateTime) -> i64 {
-    (ts.unix_timestamp_nanos() / 1_000_000) as i64
+    ts.unix_timestamp_nanos().div_euclid(1_000_000) as i64
+}
+
+/// Milliseconds elapsed from `since_ms` to `now_ms`, clamped to zero when
+/// `since_ms` is ahead of `now_ms` (clock skew, restored backup, backward
+/// clock step). A bare `as u64` on the signed difference wraps a negative age
+/// to ~1.8e19, which every "older than N" check then treats as ancient.
+pub fn elapsed_ms(now_ms: i64, since_ms: i64) -> u64 {
+    u64::try_from(now_ms.saturating_sub(since_ms)).unwrap_or(0)
 }
 
 /// Convenience: current wall-clock millis since UNIX_EPOCH.
@@ -404,6 +415,21 @@ impl Clock for RecordedClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elapsed_ms_clamps_a_future_start_to_zero() {
+        assert_eq!(elapsed_ms(5_000, 1_000), 4_000);
+        assert_eq!(elapsed_ms(5_000, 10_000), 0);
+        assert_eq!(elapsed_ms(i64::MIN, i64::MAX), 0);
+    }
+
+    #[test]
+    fn pre_epoch_instants_floor_to_milliseconds() {
+        let at = |ns: i128| OffsetDateTime::from_unix_timestamp_nanos(ns).unwrap();
+        assert_eq!(offset_datetime_to_ms(at(-1)), -1);
+        assert_eq!(offset_datetime_to_ms(at(-1_500_000)), -2);
+        assert_eq!(offset_datetime_to_ms(at(1_500_000)), 1);
+    }
 
     fn epoch() -> OffsetDateTime {
         OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap()

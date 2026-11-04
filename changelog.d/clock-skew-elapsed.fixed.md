@@ -1,0 +1,4 @@
+Retention sweeps, host-lease wait accounting, and the scheduler no longer treat a start time ahead of "now"
+(clock skew, restored backup) as an enormous age. The new `harn_clock::elapsed_ms` clamps it to zero, so such
+sessions are not soft- or hard-deleted early and a lease wait keeps its full budget.
+`harn_clock::offset_datetime_to_ms` now floors pre-epoch instants.
