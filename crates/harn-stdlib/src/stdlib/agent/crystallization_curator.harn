@@ -79,6 +79,37 @@ fn cc_evidence_cards(evidence: list) -> list {
     .to_list()
 }
 
+/**
+ * Sessions that failed a command and then got past it, counted from each card's
+ * command ledger. Empty unless at least two sessions did, since one recovery is
+ * not repetition. Command text is carried verbatim; whether two recoveries are
+ * the same fix stays the curator's judgment.
+ */
+fn cc_repeated_recoveries(cards: list) -> list {
+  let out = []
+  for card in cards {
+    let failed = []
+    let recovered_with = []
+    let last_ok = false
+    for entry in card?.commands ?? [] {
+      if entry?.ok == false {
+        failed = failed + [entry?.command]
+        last_ok = false
+      } else if entry?.ok == true {
+        last_ok = true
+        if len(failed) > 0 {
+          recovered_with = recovered_with + [entry?.command]
+        }
+      }
+    }
+    if last_ok && len(failed) > 0 {
+      out = out
+        + [{session_id: card?.session_id, failed: failed, recovered_with: recovered_with}]
+    }
+  }
+  return len(out) >= 2 ? out : []
+}
+
 fn cc_session_ids(evidence: list) -> list {
   let out = []
   for item in evidence ?? [] {
@@ -174,7 +205,7 @@ Each card's `commands` lists the commands that run executed, in order, with exit
 
 The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
 
-Count recovery across sessions. When two or more cards show a declared check failing and the same kind of step making it pass, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
+Count recovery across sessions. `repeated_recoveries` lists sessions that failed commands and then got past them, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -184,6 +215,10 @@ Review this bounded evidence window and the existing pending capability cards.
 <evidence_cards>
 ${json_stringify(cards)}
 </evidence_cards>
+
+<repeated_recoveries>
+${json_stringify(cc_repeated_recoveries(cards))}
+</repeated_recoveries>
 
 <existing_pending>
 ${json_stringify(pending ?? [])}
@@ -207,7 +242,7 @@ Call submit_crystallization_batch when your analysis is complete.
 fn cc_allowed_session(args: dict, allowed: list) -> string {
   const id = cc_text(args?.session_id)
   if id == "" || !allowed.contains(id) {
-    throw "inspect_session_evidence: session_id is outside this evidence window"
+    throw "inspect_session_evidence: session_id is outside this evidence window. Pass a card's session_id field, not its id."
   }
   return id
 }
