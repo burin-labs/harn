@@ -311,47 +311,6 @@
       ],
       "type": "object"
     },
-    "CompassRoutingDecision": {
-      "properties": {
-        "action": {
-          "type": "string"
-        },
-        "mode": {
-          "type": "string"
-        },
-        "originalTool": {
-          "type": "string"
-        },
-        "path": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "persona": {
-          "type": "string"
-        },
-        "routedTool": {
-          "type": "string"
-        },
-        "targetTool": {
-          "type": "string"
-        },
-        "toolCallId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "toolCallId",
-        "mode",
-        "action",
-        "persona",
-        "originalTool",
-        "routedTool",
-        "targetTool"
-      ],
-      "type": "object"
-    },
     "CompositionChildCall": {
       "properties": {
         "annotations": true,
@@ -2331,21 +2290,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "compass_routing_decision"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/CompassRoutingDecision"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "composition_child_call"
           }
         },
@@ -3136,7 +3080,6 @@
     "cache_miss": "CacheMiss",
     "capability_gap": "CapabilityGap",
     "code_librarian_query_nl_fallback": "CodeLibrarianQueryNlFallback",
-    "compass_routing_decision": "CompassRoutingDecision",
     "composition_child_call": "CompositionChildCall",
     "composition_child_result": "CompositionChildResult",
     "composition_error": "CompositionError",
