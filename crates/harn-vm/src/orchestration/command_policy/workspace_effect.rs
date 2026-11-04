@@ -676,6 +676,8 @@ mod tests {
             "gh api -iXDELETE repos/o/r/git/refs/heads/main",
             "gh api -iX DELETE repos/o/r",
             "gh api -X=DELETE repos/o/r",
+            "gh api -p= -XDELETE repos/o/r",
+            "gh api -p -R -XDELETE -i repos/o/r",
             "gh api --method=POST repos/o/r",
             "gh api -iFname=x repos/o/r",
             "gh api -ifname=x repos/o/r",

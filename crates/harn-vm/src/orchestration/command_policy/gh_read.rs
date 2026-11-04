@@ -53,6 +53,9 @@ const JQ: GhFlag = short_value('q', "jq");
 const JSON: GhFlag = value("json");
 const TEMPLATE: GhFlag = short_value('t', "template");
 
+/// Accepted by every subcommand, anywhere among its flags.
+const GLOBAL: &[GhFlag] = &[short_value('R', "repo"), value("hostname")];
+
 const API: &[GhFlag] = &[
     short_switch('i', "include"),
     switch("paginate"),
@@ -209,26 +212,29 @@ fn read_subcommand_flags(group: &str, verb: &str) -> Option<&'static [GhFlag]> {
 
 /// `gh pr list` and `gh api repos/o/r` read; `gh pr merge`, `gh issue comment`,
 /// `gh pr view -cw`, and `gh api -X POST ...` do not. Global `-R`/`--repo`/
-/// `--hostname` flags are skipped before the subcommand is read.
+/// `--hostname` flags may also come before the subcommand.
 ///
 /// Traced with `GIT_TRACE`, the reads run git only for `config`, `remote -v`,
 /// `rev-parse` and `symbolic-ref`, none of which runs a filter driver, hook or
 /// external diff.
 pub(crate) fn gh_invocation_is_read_only(args: &[String]) -> bool {
-    let mut words = Vec::with_capacity(args.len());
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "-R" | "--repo" | "--hostname" => {
-                iter.next();
+    let mut words = args;
+    loop {
+        match words {
+            [flag, _, rest @ ..] if matches!(flag.as_str(), "-R" | "--repo" | "--hostname") => {
+                words = rest;
             }
-            flag if flag.starts_with("--repo=")
-                || flag.starts_with("--hostname=")
-                || (flag.starts_with("-R") && flag.len() > 2) => {}
-            _ => words.push(arg.clone()),
+            [flag, rest @ ..]
+                if flag.starts_with("--repo=")
+                    || flag.starts_with("--hostname=")
+                    || (flag.starts_with("-R") && flag.len() > 2) =>
+            {
+                words = rest;
+            }
+            _ => break,
         }
     }
-    match words.as_slice() {
+    match words {
         [api, rest @ ..] if api == "api" => {
             positionals_when_read(rest, API, api_value_reads) == Some(1)
         }
@@ -278,7 +284,7 @@ fn long_flag_reads(
         Some((name, value)) => (name, Some(value)),
         None => (long, None),
     };
-    let Some(flag) = flags.iter().find(|flag| flag.long == name) else {
+    let Some(flag) = flags.iter().chain(GLOBAL).find(|flag| flag.long == name) else {
         return false;
     };
     if !flag.takes_value {
@@ -300,14 +306,22 @@ fn short_flags_read(
 ) -> bool {
     let mut letters = cluster.chars();
     while let Some(letter) = letters.next() {
-        let Some(flag) = flags.iter().find(|flag| flag.short == Some(letter)) else {
+        let Some(flag) = flags
+            .iter()
+            .chain(GLOBAL)
+            .find(|flag| flag.short == Some(letter))
+        else {
             return false;
         };
         if !flag.takes_value {
             continue;
         }
         let rest = letters.as_str();
-        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        // `-p=` is an empty value, as gh parses it. It does not take the next
+        // argument, which gh reads as a flag of its own.
+        if let Some(inline) = rest.strip_prefix('=') {
+            return value_reads(flag.long, inline);
+        }
         return Some(rest)
             .filter(|rest| !rest.is_empty())
             .or_else(|| words.next().map(String::as_str))
