@@ -2,10 +2,73 @@
 use serde::{Deserialize, Serialize};
 
 /// Missing categories remain absent; an explicit zero is an observed value.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportedCacheUsage {
     pub read_tokens: Option<i64>,
     pub write_tokens: Option<i64>,
+}
+
+/// Measured cache amounts and the number of calls reporting each category.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct ReportedCacheTotals {
+    pub reported_calls: i64,
+    pub read_reported_calls: i64,
+    pub write_reported_calls: i64,
+    pub read_tokens: i64,
+    pub write_tokens: i64,
+}
+
+impl ReportedCacheTotals {
+    pub fn record(&mut self, usage: ReportedCacheUsage) {
+        if !usage.has_any() {
+            return;
+        }
+        self.reported_calls = self.reported_calls.saturating_add(1);
+        if let Some(tokens) = usage.read_tokens {
+            self.read_reported_calls = self.read_reported_calls.saturating_add(1);
+            self.read_tokens = self.read_tokens.saturating_add(tokens);
+        }
+        if let Some(tokens) = usage.write_tokens {
+            self.write_reported_calls = self.write_reported_calls.saturating_add(1);
+            self.write_tokens = self.write_tokens.saturating_add(tokens);
+        }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.reported_calls = self.reported_calls.saturating_add(other.reported_calls);
+        self.read_reported_calls = self
+            .read_reported_calls
+            .saturating_add(other.read_reported_calls);
+        self.write_reported_calls = self
+            .write_reported_calls
+            .saturating_add(other.write_reported_calls);
+        self.read_tokens = self.read_tokens.saturating_add(other.read_tokens);
+        self.write_tokens = self.write_tokens.saturating_add(other.write_tokens);
+    }
+
+    pub fn since(&self, before: &Self) -> Self {
+        Self {
+            reported_calls: self.reported_calls.saturating_sub(before.reported_calls),
+            read_reported_calls: self
+                .read_reported_calls
+                .saturating_sub(before.read_reported_calls),
+            write_reported_calls: self
+                .write_reported_calls
+                .saturating_sub(before.write_reported_calls),
+            read_tokens: self.read_tokens.saturating_sub(before.read_tokens),
+            write_tokens: self.write_tokens.saturating_sub(before.write_tokens),
+        }
+    }
+
+    pub fn reported_read_tokens(&self) -> Option<i64> {
+        (self.read_reported_calls > 0).then_some(self.read_tokens)
+    }
+
+    pub fn reported_write_tokens(&self) -> Option<i64> {
+        (self.write_reported_calls > 0).then_some(self.write_tokens)
+    }
 }
 
 impl ReportedCacheUsage {

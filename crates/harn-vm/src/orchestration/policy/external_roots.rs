@@ -13,7 +13,7 @@ use std::path::Path;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::stdlib::sandbox::paths::normalize_for_policy;
+pub(crate) use crate::stdlib::sandbox::paths::normalize_for_policy;
 use crate::tool_annotations::SideEffectLevel;
 use crate::workspace_path::WorkspacePathInfo;
 

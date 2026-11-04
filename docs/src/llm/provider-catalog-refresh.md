@@ -804,8 +804,13 @@ Both return the same provider catalog v8 artifact shape:
 `providers`, `models`, `aliases`, `variants`, `families`, `routing_routes`, and
 `qc_defaults`. Each model owns a non-empty `display_name` for compact status
 surfaces alongside its full `name` identity. Each provider's
-`cache_usage_accounting` distinguishes a verified zero-hit cache report from a
-route that does not expose cache usage. The
+`cache_usage_accounting` declares that a provider can report cache usage. It
+does not make omitted counters measured zeros: vLLM, for example, reports
+optional `cached_tokens` and `created_cache_tokens` only when its server enables
+prompt-token details. Normalized usage retains each category's measured subtotal
+and call count in `reported_cache`; `read_reported_calls` and
+`write_reported_calls` describe coverage against `provider_call_count`. A hit
+rate is absent unless every provider call reported its cache-read count. The
 response is already normalized through the server's effective provider
 and capability overlays, so clients can render model pickers, key
 requirements, aliases, local/cloud grouping, context windows, tool

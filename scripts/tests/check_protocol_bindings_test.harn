@@ -84,9 +84,11 @@ pipeline test_supplied_artifact_root_round_trip_passes(harness: Harness, task: u
     { root ->
       write_fixture_artifacts(harness.fs, root)
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
-      assert_eq(report.ok, true)
+      assert(report.ok, "Python binding probe failed at ${report.stage}: ${report.stderr}")
       assert_eq(report.stage, "ok")
       assert(to_string(report.stdout).contains("python bindings: OK"))
+      assert(to_string(report.stdout).contains("typed event required JSON null cases:"))
+      assert(to_string(report.stdout).contains("required JSON fields using shared writer:"))
     },
   )
 }
@@ -108,6 +110,6 @@ pipeline test_method_drift_is_reported_as_round_trip_failure(harness: Harness, t
 @test
 pipeline test_current_repo_python_binding_round_trips(harness: Harness, task: unknown) {
   const report = check_python_protocol_bindings(harness.fs, harness.process)
-  assert_eq(report.ok, true)
+  assert(report.ok, "Python binding probe failed at ${report.stage}: ${report.stderr}")
   assert_eq(report.stage, "ok")
 }

@@ -420,8 +420,9 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   config paths. It doesn't grant all of `.config` or `.cache`. See the
   [measured toolchain paths](./sandbox-config-census.md) and
   [credential denials](./sandbox-read-deny-reference.md).
-- `user_temp`: the session's own temp dir, `.harn-tmp` in the first
-  workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
+- `user_temp`: the session's own temp dir, `tmp` in the workspace's runtime
+  dir (see [the temp dir section](#per-workspace-temp-dir-tmpdirtmptemp)),
+  which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
   Harn supplies a Darwin user-directory suffix that maps ordinary native tools'
   Foundation temporary-directory lookup to the same storage through an exclusive
   symlink in the native temp root. Apple platform executables such as
@@ -430,7 +431,7 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   `_set_user_dir_suffix` before using Foundation's native temporary storage;
   an unmodified platform client can still have an atomic write refused. The
   sandbox conformance probe initializes this binding explicitly and checks that
-  the native path resolves to `.harn-tmp`. The separate SwiftPM product test
+  the native path resolves to that temp dir. The separate SwiftPM product test
   exercises ordinary compiler and XCTest descendants without that probe setup.
   The host's shared temp dirs (`/tmp`, `/var/folders`) are never
   granted: they hold every other process's files. Caches that default there,
@@ -512,10 +513,10 @@ nowhere is explained as the missing grant.
 
 The local process sandbox is meant to run normal developer tools, including
 toolchains that need mutable build and package-manager state. Restricted
-worktree profiles create `.harn-toolchain-cache/` under the writable workspace
+worktree profiles create a `toolchain` cache in the workspace's runtime dir
 and point XDG/cache variables, Go caches, pip/uv caches, and npm/Yarn caches
 into it. Explicit per-command environment values
-win. The directory self-ignores its contents and can be deleted safely.
+win. The directory is outside the workspace and can be deleted safely.
 `HOME`, `PYTHONUSERBASE`, `PNPM_HOME`, `CARGO_HOME`, `RUSTUP_HOME`, and existing package-manager config files keep
 pointing at their narrowly scoped toolchain/config preset roots so installed
 toolchains and private-registry configuration remain usable. `PNPM_HOME`
@@ -533,7 +534,7 @@ the literal `127.0.0.1` is still refused.
 
 On Linux, a loopback grant runs the child in a private network namespace. The
 namespace keeps the caller's own user id, so the JVM finds the real home
-directory, and mounts the workspace's `.harn-tmp` over `/tmp`, so tools that
+directory, and mounts the workspace's temp dir over `/tmp`, so tools that
 write a compiled-in `/tmp` path (the JVM attach socket that Mockito's inline
 mock maker uses) write there instead of the host's `/tmp`. Concurrent runs in
 one workspace share that directory. The mount would hide every host path under
@@ -844,31 +845,47 @@ confine the host.
 
 The child environment admits `GRADLE_USER_HOME` as a cache path. A caller's
 populated Gradle cache is retained only when its resolved path is inside a
-writable workspace root. Otherwise, confined commands use
-`.harn-toolchain-cache/gradle`; an external cache path grants no new writes.
+writable workspace root or the workspace's runtime dir. Otherwise, confined
+commands use `gradle` in the runtime dir's toolchain cache; an external cache
+path grants no new writes.
 Secret-shaped names such as `GRADLE_TOKEN` still require an explicit grant.
 
-## Workspace-local temp dir (`TMPDIR`/`TMP`/`TEMP`)
+## Per-workspace temp dir (`TMPDIR`/`TMP`/`TEMP`)
 
 Every sandboxed child spawned under a restricted profile gets `TMPDIR`,
-`TMP`, and `TEMP` pointed at a `.harn-tmp/` directory inside the first
-writable `workspace_root` (created lazily, with a self-`.gitignore` so its
-churn never leaks into a diff, PR, or eval grading). Compiler linkers
+`TMP`, and `TEMP` pointed at the `tmp` directory of the workspace's runtime
+dir: `~/Library/Caches/harn-sandbox/<digest>` on macOS,
+`$XDG_CACHE_HOME/harn-sandbox/<digest>` or `~/.cache/harn-sandbox/<digest>`
+on Linux, and `%LOCALAPPDATA%\harn-sandbox\<digest>` on Windows, where the
+digest names the canonical first writable `workspace_root`. The runtime dir is
+outside the workspace, so the child's temporary files never reach a diff, a
+PR, eval grading, or a linter or test collector walking the tree. It is created
+lazily and owner-only, a symlinked or foreign-owned component is refused, and
+every backend grants it as a write root, including runs restricted to declared
+roots. The toolchain cache is its sibling `toolchain` directory. Each runtime
+dir records its workspace root, and the first runtime dir a process creates
+removes the runtime dirs of workspaces that no longer exist. A runtime dir
+counts as part of its workspace for the in-process file builtins and policy
+narrowing: a root that covers the workspace covers its runtime dir, so a
+`workspace_roots` entry made inside a child's temp dir narrows the enclosing
+policy rather than falling outside it. `harness.fs.workspace_temp_dir()` is a
+different directory: a script's own scratch stays in `.harn-tmp` inside the
+workspace, so embedder checks on workspace paths accept it. Compiler linkers
 (`rustc`/`cc`/`ld`, Go, Swift, …) and many other toolchains write
 intermediate object/temp files to `$TMPDIR`, defaulting to the system
 `/tmp` when it is unset — which is outside the writable workspace roots, so
 those writes are denied and a build that would otherwise succeed
 FALSE-FAILS for an infrastructure reason (`could not write output to
-/tmp/rustcXXXX/…: Permission denied`). Anchoring temp at an
-already-writable workspace location fixes this for any TMPDIR-honoring
+/tmp/rustcXXXX/…: Permission denied`). Anchoring temp at a
+private, writable runtime location fixes this for any TMPDIR-honoring
 toolchain without widening the sandbox. A `TMPDIR`/`TMP`/`TEMP` the caller
 sets explicitly (via the process call's `env`) is respected; only the
 otherwise-inherited, non-writable value is overridden.
 
 On macOS, Foundation asks Darwin for its temporary directory before consulting
-`TMPDIR`. Harn supplies `DIRHELPER_USER_DIR_SUFFIX` with an alias to `.harn-tmp`,
-so native temporary files use the same workspace storage. The alias is named
-from the canonical workspace temp path, created exclusively, and reused only
+`TMPDIR`. Harn supplies `DIRHELPER_USER_DIR_SUFFIX` with an alias to the temp dir,
+so native temporary files use the same storage. The alias is named
+from the canonical temp dir path, created exclusively, and reused only
 when its stored target matches. Existing host files or different symlink targets
 are refused. No alias subtree or shared `TemporaryItems` directory receives a
 filesystem grant; the kernel still authorizes the resolved workspace path.
@@ -955,6 +972,10 @@ files-only `/proc` grant mounts no procfs at all; a child that reads
 from the sandbox's private PID namespace, which lists only the sandbox's own
 processes. This applies only to hosts without usable Landlock, since every
 image in the table above selects Landlock.
+Bubblewrap also mounts an empty private tmpfs on `/dev/shm`, so POSIX
+semaphores work and the child never sees the host's shared-memory segments.
+The mount sets no size limit, so it takes the tmpfs default of half of RAM,
+charged to the child's memory cgroup.
 An unavailable namespace facility or a failed mount stops the launch before
 the payload runs.
 
@@ -968,6 +989,7 @@ the payload runs.
 | `process_sandbox.allow_child_workspace_write` | the full write set above on `workspace_roots`, plus writable `process_sandbox.write_roots` and toolchain caches | a read-only role's children can build and test; `read_only_roots` keep read-only rules |
 | `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when child writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
+| always | without a mount namespace, Landlock `_MAKE_REG` + `_READ_FILE` + `_WRITE_FILE` + `_REMOVE_FILE` on `/dev/shm`; the loopback namespace helper mounts a private tmpfs there and grants it the same rights | Python `multiprocessing` semaphores, locks, and process pools work; no directories, symlinks, special files, listing, truncation, or execution in `/dev/shm`, so `multiprocessing` shared values, arrays, and `shared_memory` still fail on these paths. On a Landlock-only launch the child, in every role including read-only ones, can read, write, and delete the same user's shared-memory segments in `/dev/shm`; other users' segments stay protected by file permissions |
 | `side_effect_level < network` | seccomp-bpf allowlist excludes addressable socket openers: `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`. `socketpair`, `sendto`, `sendmsg`, `recvfrom`, and `recvmsg` stay allowlisted for inherited anonymous local IPC | addressable-socket / egress syscalls fail with `EPERM`, while local IPC keeps working |
 | always | seccomp-bpf default-deny allowlist omits tier-1 dangerous syscalls including `bpf`, mount/module/kexec/sysctl families, `ptrace`, `process_vm_readv`/`process_vm_writev`, `io_uring_*`, `perf_event_open`, `userfaultfd`, `fanotify_init`, and `open_by_handle_at` | unknown and dangerous syscalls fail with `EPERM` |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
@@ -1010,6 +1032,8 @@ isolated execution host for untrusted repair code that requires that guarantee.
 |---|---|---|
 | always | `(deny default)` | every operation requires an explicit allow |
 | always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
+| always | `(allow signal (target same-sandbox))` | a process can signal its own sandboxed children, not the host's processes |
+| always | `(allow ipc-posix-sem (ipc-posix-name-prefix "/mp-"))` | Python `multiprocessing` locks work; other processes' named semaphores stay out of reach |
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
 | `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |

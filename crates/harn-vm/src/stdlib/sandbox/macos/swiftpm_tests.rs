@@ -117,11 +117,7 @@ fn adapter_creation_refuses_a_symlinked_cache_parent() {
     let outside = tempfile::tempdir().unwrap();
     let marker = outside.path().join("marker");
     std::fs::write(&marker, "outside-stays-unchanged").unwrap();
-    std::os::unix::fs::symlink(
-        outside.path(),
-        workspace.path().join(".harn-toolchain-cache"),
-    )
-    .unwrap();
+    std::os::unix::fs::symlink(outside.path(), workspace.path().join("swiftpm")).unwrap();
     let result = adapted_path(workspace.path(), "/usr/bin:/bin", None);
     assert!(
         result.is_err(),

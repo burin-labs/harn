@@ -21,6 +21,7 @@ pub(crate) struct ProviderUsageReceipt {
     pub(super) cache_accounting_declared: Option<bool>,
     pub(super) cache_supported: bool,
     pub(super) cache_counts_reported: bool,
+    pub(super) reported_cache_usage: Option<super::ReportedCacheUsage>,
     pub(super) provider_cost_usd: Option<f64>,
     pub(super) served_fast: bool,
     pub(super) started_at_ms: Option<i64>,
@@ -45,6 +46,7 @@ impl ProviderUsageReceipt {
             cache_accounting_declared: None,
             cache_supported: true,
             cache_counts_reported: false,
+            reported_cache_usage: None,
             provider_cost_usd: provider_cost_usd.filter(|cost| cost.is_finite() && *cost >= 0.0),
             served_fast,
             started_at_ms: None,
@@ -129,7 +131,8 @@ impl ProviderUsageReceipt {
     ) -> Self {
         self.cache_read_tokens = cache.read_tokens.max(0);
         self.cache_write_tokens = cache.write_tokens.max(0);
-        self.cache_counts_reported = cache.reported;
+        self.cache_counts_reported = cache.reported.has_any();
+        self.reported_cache_usage = cache.reported.has_any().then_some(cache.reported);
         self.cache_accounting_declared = cache_accounting_declared;
         self.cache_supported = cache_supported;
         self
@@ -140,6 +143,18 @@ impl ProviderUsageReceipt {
     /// provider-accounting vocabulary.
     pub(crate) fn to_vm_value(&self) -> VmValue {
         VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("reported_cache_read_tokens"),
+                self.reported_cache_usage
+                    .and_then(|usage| usage.read_tokens)
+                    .map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("reported_cache_write_tokens"),
+                self.reported_cache_usage
+                    .and_then(|usage| usage.write_tokens)
+                    .map_or(VmValue::Nil, VmValue::Int),
+            ),
             (
                 crate::value::intern_key("billing"),
                 self.billing.as_ref().map_or(VmValue::Nil, |billing| {
@@ -242,6 +257,24 @@ impl ProviderUsageReceipt {
             Some(_) => return None,
         };
         let provider_cost_usd = optional_non_negative_float(fields, "provider_cost_usd").ok()?;
+        let reported_cache_usage = super::ReportedCacheUsage {
+            read_tokens: optional_non_negative_int_if_present(fields, "reported_cache_read_tokens")
+                .ok()?,
+            write_tokens: optional_non_negative_int_if_present(
+                fields,
+                "reported_cache_write_tokens",
+            )
+            .ok()?,
+        };
+        if reported_cache_usage
+            .read_tokens
+            .is_some_and(|tokens| tokens != cache_read_tokens)
+            || reported_cache_usage
+                .write_tokens
+                .is_some_and(|tokens| tokens != cache_write_tokens)
+        {
+            return None;
+        }
         let VmValue::Bool(served_fast) = fields.get("served_fast")? else {
             return None;
         };
@@ -255,6 +288,9 @@ impl ProviderUsageReceipt {
             cache_accounting_declared,
             cache_supported: *cache_supported,
             cache_counts_reported,
+            reported_cache_usage: reported_cache_usage
+                .has_any()
+                .then_some(reported_cache_usage),
             provider_cost_usd,
             served_fast: *served_fast,
             started_at_ms: optional_non_negative_int_if_present(fields, "started_at_ms").ok()?,
