@@ -1,5 +1,8 @@
 //! Conservative, cross-platform process-liveness probes.
 
+mod start;
+pub use start::{process_start, ProcessStart};
+
 /// What the operating system proved about a process identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessLiveness {
