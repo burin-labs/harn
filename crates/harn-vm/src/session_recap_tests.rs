@@ -238,8 +238,12 @@ async fn create_session(store: &dyn SessionStore, id: &str) {
 }
 
 async fn append_fixture(store: &dyn SessionStore, id: &str) {
+    let mut prompt = user("Implement durable recaps");
+    prompt
+        .headers
+        .insert("message_id".into(), "caller-prompt-1".into());
     for event in [
-        user("Implement durable recaps"),
+        prompt,
         identified(
             SessionEventKind::Message,
             transcript(
@@ -302,11 +306,16 @@ async fn recap_projects_non_vacuous_typed_turn_facts_without_private_content() {
     let turn = &recap.turns[0];
     assert_eq!(turn.state, RecapCompletionState::Complete);
     assert_eq!(turn.prompts[0].text, "Implement durable recaps");
+    assert_eq!(
+        turn.prompts[0].message_id.as_deref(),
+        Some("caller-prompt-1")
+    );
     assert_eq!(turn.iterations.len(), 2);
     let iteration = &turn.iterations[0];
     assert_eq!(iteration.iteration, Some(0));
     assert_eq!(iteration.state, RecapCompletionState::Complete);
     assert_eq!(iteration.assistant_text.len(), 1);
+    assert_eq!(iteration.assistant_text[0].message_id, None);
     assert_eq!(
         iteration.assistant_text[0].text,
         "I implemented the projection."

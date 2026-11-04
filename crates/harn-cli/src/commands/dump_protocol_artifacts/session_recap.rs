@@ -42,11 +42,11 @@ pub(super) fn session_recap_round_trip_fixture() -> Result<Value, String> {
                 "turnId": "turn-recap-fixture",
                 "runId": "run-recap-fixture",
                 "state": "complete",
-                "prompts": [{"text": "Investigate the incident", "sourceEventId": 1}],
+                "prompts": [{"text": "Investigate the incident", "sourceEventId": 1, "messageId": "prompt-recap-fixture"}],
                 "iterations": [{
                     "iteration": 0,
                     "state": "complete",
-                    "assistantText": [{"text": "I found and fixed the cause.", "sourceEventId": 3}],
+                    "assistantText": [{"text": "I found and fixed the cause.", "sourceEventId": 3, "messageId": null}],
                     "tools": [{
                         "toolCallId": "tool-recap-fixture",
                         "toolName": "write_file",

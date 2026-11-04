@@ -273,9 +273,6 @@ async fn vm_call_completion_openai_style(
             .to_string(),
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
-        cache_read_tokens: cache.read_tokens,
-        cache_write_tokens: cache.write_tokens,
-        cache_counts_reported: cache.reported,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         stop_reason: json["choices"][0]["finish_reason"]
@@ -289,7 +286,8 @@ async fn vm_call_completion_openai_style(
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
         telemetry: Box::new(telemetry),
         ..Default::default()
-    })
+    }
+    .with_cache_counts(cache))
 }
 
 async fn vm_call_completion_ollama(
