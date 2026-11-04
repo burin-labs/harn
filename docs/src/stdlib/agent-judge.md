@@ -376,8 +376,6 @@ the named gap to the next actor turn. Standalone callers can use
 
 ## See also
 
-- [Agent guardrails](./agent-guardrails.md) — the input-side bookend that can
-  stop before the first main model turn.
 - [Completion control](../llm/completion-control.md#completion-gate-agent_completion_gate)
   — the same gate in the context of the loop's other completion seams
   (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).

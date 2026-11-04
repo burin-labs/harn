@@ -63,20 +63,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "{\n        action: \"break\",\n        opts: opts,\n        call_budget: call_budget,\n        stall_state: stall_state,\n        command_hold_cap_tokens: command_hold_cap_tokens,\n        iteration: iteration + 1,\n        final_status: \"input_guardrail\",\n        stop_reason: \"input_guardrail_tripwire\",\n      }",
-    "owner": "__agent_loop_turn_setup",
-    "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "{\n        action: \"break\",\n        opts: opts,\n        call_budget: call_budget,\n        stall_state: stall_state,\n        command_hold_cap_tokens: command_hold_cap_tokens,\n        iteration: iteration + 1,\n        final_status: \"scope_alert\",\n        stop_reason: \"out_of_scope\",\n      }",
-    "owner": "__agent_loop_turn_setup",
-    "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
     "expression": "{\n      action: \"proceed\",\n      opts: opts,\n      iteration: iteration,\n      call_budget: call_budget,\n      stall_state: stall_state,\n      command_hold_cap_tokens: command_hold_cap_tokens,\n      iteration_index: iteration_index,\n      monologue_actuation_prior_read_streak: monologue_actuation_prior_read_streak,\n      turn_opts: turn_opts,\n      turn_llm_opts: turn_llm_opts,\n      turn_prompt: turn_prompt,\n      llm_opts: llm_opts,\n    }",
     "owner": "__agent_loop_turn_setup",
     "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."

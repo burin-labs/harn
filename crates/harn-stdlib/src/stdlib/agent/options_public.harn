@@ -246,8 +246,6 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
   const structural_validator = opts?.structural_validator
-  const input_guardrail = opts?.input_guardrail
-  const pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
   opts = __with_project_context_profile(harness.project, opts)
   opts = agent_refresh_tool_format_for_route(harness.llm, opts)
   if !__has_key(opts, "tool_format")
@@ -307,8 +305,6 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
       _on_delta: on_delta,
       _tool_caller: tool_caller,
       _structural_validator: structural_validator,
-      _input_guardrail: input_guardrail,
-      _pre_turn_scope_classifier: pre_turn_scope_classifier,
     }
   return opts
 }

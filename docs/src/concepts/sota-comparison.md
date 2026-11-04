@@ -17,7 +17,6 @@ table for that system.
 | `max_turns` | `max_iterations` | Both limit model iterations within one loop invocation. |
 | `Session` (`SQLiteSession("id")`) | `session_id` + `harness.agent.open(id)` | Direct match. |
 | `handoff` | persona handoff or `spawn_agent` | Direct match in shape. |
-| `input_guardrails` / `output_guardrails` | `agent_input_guardrail` + tool middleware + completion gates | Harn exposes input guardrails as a named pre-loop bookend; output checks use completion gates, judges, validators, and tool middleware. |
 
 The SDK's [Runner reference](https://openai.github.io/openai-agents-python/ref/run/#agents.run.Runner.run)
 defines a turn as one model invocation. Harn calls the outer user-message cycle

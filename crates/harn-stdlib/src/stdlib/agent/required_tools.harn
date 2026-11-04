@@ -171,7 +171,6 @@ fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
     "blocked",
     "suspended",
     "cancelled",
-    "scope_alert",
   ]
   return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
 }

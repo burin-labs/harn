@@ -17,19 +17,6 @@ import { agent_tool_annotations } from "std/agent/tool_annotations"
 // narrowing via `policy.tools` means a denied call is rejected by harn-vm's
 // native tool-ceiling check, which reports only the ONE tool name the model
 // just attempted — it never enumerates what else is unavailable.
-//
-// `lane_scope_classifier` additionally lowers lane rows onto the EXISTING
-// `pre_turn_scope_classifier` seam (`std/llm/scope_classifier`, consulted by
-// `agent_loop` every turn) — but purely for per-turn observability/telemetry
-// over a long-running lane-scoped session. It always reports `in_scope` and
-// `skip_main_turn: false`, so it never affects loop control; the tool
-// surface is narrowed exclusively by `lane_policy`. Keeping the two apart
-// avoids a dead mechanism: a `pre_turn_scope_classifier` verdict has no live
-// wiring in `agent_loop` beyond the scope-alert skip check, so a lane
-// classifier that ONLY lived there would never actually narrow anything.
-// The classified lane rides the verdict's `evidence` string, not a custom
-// field: the native `scope_classifier_verdict` event has a fixed shape and
-// silently drops keys it does not recognize.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
 
 /**
@@ -361,46 +348,6 @@ pub fn lane_policy(
       policy: __tool_surface_policy_tools(opts?.policy, names),
       tools: __tool_surface_filter_registry(opts?.tools, names),
     }
-}
-
-/**
- * lane_scope_classifier(rows, options?) — build a `pre_turn_scope_classifier`
- * config (see `std/llm/scope_classifier`) that reclassifies the current
- * message into a lane EVERY turn purely for observability: it emits the
- * standard `scope_classifier_verdict` event on every turn, and always
- * returns `label: "in_scope"`/`skip_main_turn: false` — it never skips a
- * turn and never narrows the tool surface (that is `lane_policy`'s job).
- * The classified lane surfaces in the verdict's free-text `evidence` field
- * (`"lane=<name> reason=<reason>"`) rather than a dedicated `lane` key: the
- * native `scope_classifier_verdict` event has a fixed Rust-side shape and
- * silently drops unrecognized keys, so `evidence` (already part of that
- * shape) is the only channel a custom classifier can use to carry extra
- * information through live. Spread the result into `agent_loop` options
- * alongside `lane_policy` when a caller wants a live per-turn audit trail
- * of lane drift over a long-running lane-scoped session.
- *
- * @effects: []
- * @errors: []
- * @api_stability: stable
- * @example: agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
- */
-pub fn lane_scope_classifier(
-  rows: string | bytes | list | dict | set | range | nil,
-  options: dict? = nil,
-) {
-  const validated = __lane_validate_rows(rows)
-  const extra = options ?? {}
-  const classifier = { payload ->
-    const observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
-    const verdict = agent_lane_classify(validated, observed_task, extra)
-    return {
-      confidence: 1.0,
-      evidence: "lane=" + verdict.lane + " reason=" + verdict.reason,
-      label: "in_scope",
-      skip_main_turn: false,
-    }
-  }
-  return {pre_turn_scope_classifier: classifier}
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -74,28 +74,6 @@ tool is rejected by harn-vm's native tool-ceiling/name-resolution denial path,
 which reports only the ONE tool the model just attempted and lists what IS
 available — it never enumerates the other hidden tools by name.
 
-### Per-turn observability (optional)
-
-`lane_scope_classifier(rows, options?)` lowers the same lane rows onto the
-existing `pre_turn_scope_classifier` seam (`std/llm/scope_classifier`,
-consulted by `agent_loop` every turn) purely for telemetry: it emits the
-standard `scope_classifier_verdict` event every turn, and always reports
-`label: "in_scope"` / `skip_main_turn: false` — it never skips a turn and
-never narrows the tool surface itself. The classified lane rides the
-verdict's free-text `evidence` field (`"lane=<name> reason=<reason>"`)
-rather than a dedicated key, because the native event has a fixed Rust-side
-shape that silently drops unrecognized fields. Enforcement is
-`lane_policy`'s job; this is an audit trail for a long-running lane-scoped
-session, spread in alongside it:
-
-```harn,ignore
-agent_loop(
-  harness, task, nil, lane_policy(
-    rows, task, opts,
-  ) + lane_scope_classifier(rows),
-)
-```
-
 ## Overlays: data-driven prompt nudges
 
 `with_overlay(agent_options, rows, mode, options?)` layers mode-specific

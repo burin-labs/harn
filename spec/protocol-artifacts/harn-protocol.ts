@@ -263,7 +263,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "final_wrapup",
   "host_attachment",
   "host_tool_result",
-  "input_guardrail_verdict",
   "iteration_end",
   "iteration_start",
   "judge_decision",
@@ -288,7 +287,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "repair_output_contract_applied",
   "require_successful_tools_violation",
   "reserved_terminal_verify",
-  "scope_classifier_verdict",
   "self_consistency_tie",
   "semantic_cache_hit",
   "semantic_cache_miss",
@@ -2888,18 +2886,6 @@ export interface HarnAgentEventHostToolResult {
   sanitization: ACPValue
 }
 
-export interface HarnAgentEventInputGuardrailVerdict {
-  iteration: number
-  tripwire: boolean
-  reason: string
-  label: string
-  confidence: number
-  confidenceThreshold: number
-  classifierKind: string | null
-  model: string | null
-  error: string | null
-}
-
 export interface HarnAgentEventIterationEnd {
   iteration: number
   iterationInfo: ACPValue
@@ -3044,19 +3030,6 @@ export interface HarnAgentEventRequireSuccessfulToolsViolation {
   metadata: ACPValue
 }
 
-export interface HarnAgentEventScopeClassifierVerdict {
-  iteration: number
-  label: string
-  originalLabel: string
-  confidence: number
-  confidenceThreshold: number
-  evidence: string
-  skipMainTurn: boolean
-  classifierKind: string | null
-  model: string | null
-  error: string | null
-}
-
 export interface HarnAgentEventSelfConsistencyTie {
   answer: string
   total: number
@@ -3191,7 +3164,6 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "final_wrapup" } & HarnAgentEventFinalWrapup)
   | ({ sessionId: string; kind: "host_attachment" } & HarnAgentEventHostAttachment)
   | ({ sessionId: string; kind: "host_tool_result" } & HarnAgentEventHostToolResult)
-  | ({ sessionId: string; kind: "input_guardrail_verdict" } & HarnAgentEventInputGuardrailVerdict)
   | ({ sessionId: string; kind: "iteration_end" } & HarnAgentEventIterationEnd)
   | ({ sessionId: string; kind: "iteration_start" } & HarnAgentEventIterationStart)
   | ({ sessionId: string; kind: "judge_decision" } & HarnAgentEventJudgeDecision)
@@ -3216,7 +3188,6 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "repair_output_contract_applied" } & HarnAgentEventRepairOutputContractApplied)
   | ({ sessionId: string; kind: "require_successful_tools_violation" } & HarnAgentEventRequireSuccessfulToolsViolation)
   | ({ sessionId: string; kind: "reserved_terminal_verify" } & Record<string, ACPValue>)
-  | ({ sessionId: string; kind: "scope_classifier_verdict" } & HarnAgentEventScopeClassifierVerdict)
   | ({ sessionId: string; kind: "self_consistency_tie" } & HarnAgentEventSelfConsistencyTie)
   | ({ sessionId: string; kind: "semantic_cache_hit" } & Record<string, ACPValue>)
   | ({ sessionId: string; kind: "semantic_cache_miss" } & Record<string, ACPValue>)

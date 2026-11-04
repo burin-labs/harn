@@ -187,7 +187,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"final_wrapup",
 	"host_attachment",
 	"host_tool_result",
-	"input_guardrail_verdict",
 	"iteration_end",
 	"iteration_start",
 	"judge_decision",
@@ -212,7 +211,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"repair_output_contract_applied",
 	"require_successful_tools_violation",
 	"reserved_terminal_verify",
-	"scope_classifier_verdict",
 	"self_consistency_tie",
 	"semantic_cache_hit",
 	"semantic_cache_miss",
@@ -2551,18 +2549,6 @@ type HarnAgentEventHostToolResult struct {
 	Sanitization    json.RawMessage `json:"sanitization"`
 }
 
-type HarnAgentEventInputGuardrailVerdict struct {
-	Iteration           uint64  `json:"iteration"`
-	Tripwire            bool    `json:"tripwire"`
-	Reason              string  `json:"reason"`
-	Label               string  `json:"label"`
-	Confidence          float64 `json:"confidence"`
-	ConfidenceThreshold float64 `json:"confidenceThreshold"`
-	ClassifierKind      *string `json:"classifierKind"`
-	Model               *string `json:"model"`
-	Error               *string `json:"error"`
-}
-
 type HarnAgentEventIterationEnd struct {
 	Iteration     uint64          `json:"iteration"`
 	IterationInfo json.RawMessage `json:"iterationInfo"`
@@ -2705,19 +2691,6 @@ type HarnAgentEventRequireSuccessfulToolsViolation struct {
 	RedactedSummary string          `json:"redactedSummary"`
 	RecurrenceHints []string        `json:"recurrenceHints"`
 	Metadata        json.RawMessage `json:"metadata"`
-}
-
-type HarnAgentEventScopeClassifierVerdict struct {
-	Iteration           uint64  `json:"iteration"`
-	Label               string  `json:"label"`
-	OriginalLabel       string  `json:"originalLabel"`
-	Confidence          float64 `json:"confidence"`
-	ConfidenceThreshold float64 `json:"confidenceThreshold"`
-	Evidence            string  `json:"evidence"`
-	SkipMainTurn        bool    `json:"skipMainTurn"`
-	ClassifierKind      *string `json:"classifierKind"`
-	Model               *string `json:"model"`
-	Error               *string `json:"error"`
 }
 
 type HarnAgentEventSelfConsistencyTie struct {

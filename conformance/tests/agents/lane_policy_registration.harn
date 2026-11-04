@@ -19,12 +19,7 @@
 //      harn-vm's native tool-ceiling/name-resolution denial path because
 //      lane_policy narrows via the same `tools`/`policy.tools` seam
 //      `std/agent/stance` already uses.
-//   D. lane_scope_classifier registration: spread alongside lane_policy, it
-//      actually fires on the `pre_turn_scope_classifier` seam every turn and
-//      emits a real `scope_classifier_verdict` event carrying the lane — not
-//      a config value nobody consults.
-import { agent_capture_events } from "std/agent/events"
-import { default_lane_rows, lane_policy, lane_scope_classifier } from "std/agent/lanes"
+import { default_lane_rows, lane_policy } from "std/agent/lanes"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -151,43 +146,6 @@ pipeline default(harness: Harness) {
       )
     },
   )
-  // --- D. lane_scope_classifier fires live on the pre_turn_scope_classifier seam ---
-  with_llm_script(
-    harness.llm,
-    [llm_text("still working"), llm_text("done ##DONE##")],
-    { ->
-      const session = "lane-scope-classifier-" + harness.random.uuid()
-      const opts = lane_policy(
-        default_lane_rows(),
-        "Fix the off-by-one bug in src/widget.py.",
-        {
-          done_sentinel: "##DONE##",
-          loop_until_done: true,
-          max_iterations: 3,
-          provider: "mock",
-          session_id: session,
-          tool_format: "native",
-          tools: lane_test_tools(),
-        },
-      )
-        + lane_scope_classifier(default_lane_rows())
-      const captured = agent_capture_events(
-        harness.agent,
-        session,
-        fn() { return agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts) },
-      )
-      const verdict_events = captured.events.filter(
-        { event -> event.type == "scope_classifier_verdict" },
-      )
-      harness.stdio.println("D.status=" + captured.result.status)
-      harness.stdio.println("D.verdict_count=" + to_string(len(verdict_events)))
-      harness.stdio.println(
-        "D.evidence_names_lane="
-          + to_string(contains(verdict_events[0].evidence, "lane=explicit_patch")),
-      )
-      harness.stdio.println("D.label=" + verdict_events[0].label)
-    },
-  )
 }
 // A: explicit_patch lane keeps look/edit, hides git/run_codemod/glob from the
 //    very first outbound call — no one-turn lag, since lane_policy narrows
@@ -199,9 +157,3 @@ pipeline default(harness: Harness) {
 //    injects a recovery message that lists what IS available (so the model
 //    can retry) without ever mentioning the OTHER hidden tools
 //    (`run_codemod`, `glob`) by name.
-// D: two turns run under `lane_scope_classifier`, and both fire a real
-//    `scope_classifier_verdict` event whose `evidence` names the lane —
-//    proving the observability builder is actually consulted by
-//    `agent_loop` every turn, not a config value nobody reads. (The native
-//    event has a fixed shape and drops unrecognized keys, so `evidence` is
-//    the only channel that carries custom data through live.)

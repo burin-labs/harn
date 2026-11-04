@@ -126,8 +126,8 @@ pub(crate) use dump::{
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
-    EvalPromptMode, EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
-    EvalToolCallsCommand, EvalToolCallsRegressionArgs,
+    EvalPromptMode, EvalPromptOutput, EvalSkillGateArgs, EvalToolCallsArgs, EvalToolCallsCommand,
+    EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::FixArgs;

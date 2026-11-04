@@ -169,62 +169,6 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
   agent_stage(harness.agent, session.session_id, "pre_compact", {iteration: iteration_index + 1})
   agent_autocompact_if_needed(harness.agent, session, turn_llm_opts)
   agent_stage(harness.agent, session.session_id, "post_compact", {iteration: iteration_index + 1})
-  const input_guardrail_verdict = __run_input_guardrail(
-    harness.agent,
-    turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,
-    session,
-    message,
-    turn_llm_opts,
-    iteration_index,
-  )
-  if input_guardrail_verdict != nil && (input_guardrail_verdict.tripwire ?? false) {
-    __input_guardrail_record_skip_turn(
-      harness.agent,
-      harness.llm,
-      session,
-      input_guardrail_verdict,
-      iteration_index,
-    )
-    return state
-      + {
-        action: "break",
-        opts: opts,
-        call_budget: call_budget,
-        stall_state: stall_state,
-        command_hold_cap_tokens: command_hold_cap_tokens,
-        iteration: iteration + 1,
-        final_status: "input_guardrail",
-        stop_reason: "input_guardrail_tripwire",
-      }
-  }
-  const scope_verdict = __run_pre_turn_scope_classifier(
-    harness.agent,
-    turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
-    session,
-    message,
-    turn_llm_opts,
-    iteration_index,
-  )
-  if __scope_classifier_skip_main(scope_verdict) {
-    __scope_classifier_record_skip_turn(
-      harness.agent,
-      harness.llm,
-      session,
-      scope_verdict,
-      iteration_index,
-    )
-    return state
-      + {
-        action: "break",
-        opts: opts,
-        call_budget: call_budget,
-        stall_state: stall_state,
-        command_hold_cap_tokens: command_hold_cap_tokens,
-        iteration: iteration + 1,
-        final_status: "scope_alert",
-        stop_reason: "out_of_scope",
-      }
-  }
   const turn_prompt = __agent_loop_build_turn_prompt(
     harness,
     session,

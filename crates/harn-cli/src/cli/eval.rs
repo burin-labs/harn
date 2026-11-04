@@ -60,9 +60,6 @@ pub enum EvalCommand {
     /// Gate skill/guidance variants on contamination-safe held-out eval results.
     #[command(name = "skill-gate", visible_alias = "skill_gate")]
     SkillGate(EvalSkillGateArgs),
-    /// Measure pre-turn scope-triage savings and false-positive rates.
-    #[command(name = "scope_triage", visible_alias = "scope-triage")]
-    ScopeTriage(EvalScopeTriageArgs),
     /// Run tool-call accuracy, latency, and cost evals over a dataset.
     ToolCalls(EvalToolCallsArgs),
 }
@@ -117,31 +114,6 @@ pub struct EvalSkillGateArgs {
     /// Print the aggregate report JSON to stdout.
     #[arg(long)]
     pub json: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct EvalScopeTriageArgs {
-    /// Scope-triage dataset JSON.
-    #[arg(long, default_value = "evals/scope_triage/dataset.json")]
-    pub dataset: PathBuf,
-    /// Output directory for summary.json, per_case.jsonl, and summary.md.
-    #[arg(long)]
-    pub output: Option<PathBuf>,
-    /// Print the aggregate summary JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Run the live default classifier model instead of the deterministic reference classifier.
-    #[arg(long)]
-    pub live: bool,
-    /// Live classifier model selector.
-    #[arg(long, default_value = "ollama:qwen3:1.7b")]
-    pub model: String,
-    /// Confidence threshold below which labels become escalate.
-    #[arg(long = "confidence-threshold", default_value_t = 0.65)]
-    pub confidence_threshold: f64,
-    /// Stop after N cases, useful for smoke runs.
-    #[arg(long = "max-cases")]
-    pub max_cases: Option<usize>,
 }
 
 #[derive(Debug, Args)]

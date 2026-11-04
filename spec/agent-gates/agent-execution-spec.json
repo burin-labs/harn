@@ -189,27 +189,6 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "absent; no custom input guardrail",
-    "evidence": "options_public.agent_options reads the optional input_guardrail and projects it to internal runner options. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
-    "kind": "callback",
-    "layer": "runner",
-    "name": "AgentSpec.input_guardrail",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "reader": "__agent_loop_turn_setup"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "reader": "__validate_agent_loop_callback_options"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "0, disabled; owner loop_run/loop_finalize/loop_resource_dispatch/loop_call_budget/loop_turn_scope",
     "evidence": "Static declaration/read only; downstream headless binding not observed.",
     "expiry": "2026-09-13",
@@ -618,27 +597,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
         "reader": "__post_turn_callback_verdict"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; no custom pre-turn classifier",
-    "evidence": "options_public.agent_options reads the optional pre_turn_scope_classifier and projects it to internal runner options. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
-    "kind": "callback",
-    "layer": "runner",
-    "name": "AgentSpec.pre_turn_scope_classifier",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-        "reader": "__agent_loop_turn_setup"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "reader": "__validate_agent_loop_callback_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

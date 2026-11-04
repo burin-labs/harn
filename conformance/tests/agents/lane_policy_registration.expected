@@ -12,7 +12,3 @@ B.has_run_codemod=true
 C.status=done
 C.edit_succeeded=true
 C.git_succeeded=false
-D.status=done
-D.verdict_count=2
-D.evidence_names_lane=true
-D.label=in_scope

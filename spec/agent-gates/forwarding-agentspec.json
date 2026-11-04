@@ -728,34 +728,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "__run_input_guardrail(\n    harness.agent,\n    turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,\n    session,\n    message,\n    turn_llm_opts,\n    iteration_index,\n  )",
-    "owner": "__run_input_guardrail",
-    "evidence": "Consumer __run_input_guardrail.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__run_input_guardrail",
-        "parameter": "turn_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "__run_pre_turn_scope_classifier(\n    harness.agent,\n    turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,\n    session,\n    message,\n    turn_llm_opts,\n    iteration_index,\n  )",
-    "owner": "__run_pre_turn_scope_classifier",
-    "evidence": "Consumer __run_pre_turn_scope_classifier.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__run_pre_turn_scope_classifier",
-        "parameter": "turn_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
     "expression": "__turn_llm_opts(harness, session, turn_opts, iteration_index)",
     "owner": "__turn_llm_opts",
     "evidence": "Consumer __turn_llm_opts.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",

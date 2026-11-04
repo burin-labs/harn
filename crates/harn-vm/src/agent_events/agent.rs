@@ -492,37 +492,6 @@ pub enum AgentEvent {
         attempts: usize,
         max_attempts: usize,
     },
-    ScopeClassifierVerdict {
-        session_id: String,
-        iteration: usize,
-        label: String,
-        original_label: String,
-        confidence: f64,
-        confidence_threshold: f64,
-        evidence: String,
-        skip_main_turn: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        classifier_kind: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    InputGuardrailVerdict {
-        session_id: String,
-        iteration: usize,
-        tripwire: bool,
-        reason: String,
-        label: String,
-        confidence: f64,
-        confidence_threshold: f64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        classifier_kind: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
     /// The repair-turn output contract was armed for one turn: the loop forced
     /// a tool-call envelope on a turn the missing-call corrective claimed.
     /// Pairs with `MissingToolCallVerdict` so contract firings and the claims

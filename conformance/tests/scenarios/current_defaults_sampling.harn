@@ -1,4 +1,3 @@
-import { agent_input_guardrail_check } from "std/agent/guardrails"
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
 import { agent_stance_default_consent_check } from "std/agent/stance"
@@ -172,9 +171,6 @@ fn internal_defaults_case(harness: Harness, provider: string, model: string) {
   with_llm_script(
     harness.llm,
     [
-      scripted(
-        json_stringify({tripwire: true, reason: "block", label: "unsafe", confidence: 0.99}),
-      ),
       scripted(json_stringify({consent: "express", reasoning: "explicit permission"})),
       scripted(json_stringify({winner: "A", confidence: 0.9, reasoning: "stronger answer"})),
       scripted("YES"),
@@ -185,15 +181,6 @@ fn internal_defaults_case(harness: Harness, provider: string, model: string) {
       scripted(json_stringify({answer: "fixed"})),
     ],
     { ->
-      const guardrail = agent_input_guardrail_check(
-        harness.agent,
-        harness.llm,
-        "Block this request.",
-        nil,
-        {provider: provider},
-      )
-      assert(guardrail.typed_checkpoint.ok, "guardrail must reach classification")
-      assert(guardrail.tripwire, "reached classifier must block")
       const consent = agent_stance_default_consent_check(
         harness.agent,
         harness.llm,
@@ -242,64 +229,35 @@ fn internal_defaults_case(harness: Harness, provider: string, model: string) {
       assert_eq(validated.result_schema.attempts, 2)
       assert_eq(validated.value.data.answer, "fixed")
       const calls = harness.llm.mock_calls()
-      assert_eq(len(calls), 9, "every helper and both repair attempts must dispatch")
+      assert_eq(len(calls), 8, "every helper and both repair attempts must dispatch")
       for call in calls {
         assert_eq(call.temperature, nil, "unsupported defaults must remain omitted")
       }
     },
   )
-  with_llm_script(
-    harness.llm,
-    [],
-    { ->
-      const refused = try {
-        agent_input_guardrail_check(
-          harness.agent,
-          harness.llm,
-          "Block this request.",
-          nil,
-          {provider: provider, temperature: 0.0, fail_open: false},
-        )
-      }
-      if is_err(refused) {
-        const message = to_string(unwrap_err(refused))
-        assert(contains(message, "temperature") && contains(message, "not supported"))
-      } else {
-        const checkpoint = unwrap(refused).typed_checkpoint
-        assert(!checkpoint.ok)
-        assert_eq(checkpoint.error_category, "invalid_request")
-      }
-      assert_eq(len(harness.llm.mock_calls()), 0, "explicit unsupported setting must refuse")
-    },
-  )
 }
 
 fn declared_sampling_case(harness: Harness) {
+  const verdict = json_stringify({winner: "A", confidence: 0.9, reasoning: "stronger answer"})
   with_llm_script(
     harness.llm,
     [
-      llm_text(json_stringify({tripwire: false, reason: "safe"}))
-        + {provider: "anthropic", model: "claude-haiku-4-5"},
-      llm_text(json_stringify({tripwire: false, reason: "safe"}))
-        + {provider: "anthropic", model: "claude-haiku-4-5"},
+      llm_text(verdict) + {provider: "anthropic", model: "claude-haiku-4-5"},
+      llm_text(verdict) + {provider: "anthropic", model: "claude-haiku-4-5"},
     ],
     { ->
-      const result = agent_input_guardrail_check(
-        harness.agent,
-        harness.llm,
-        "Inspect a file.",
-        nil,
+      const ranked = pairwise_rerank(
+        harness,
+        ["strong", "weak"],
         {provider: "anthropic", model: "claude-haiku-4-5"},
       )
-      assert(result.typed_checkpoint.ok)
-      const explicit = agent_input_guardrail_check(
-        harness.agent,
-        harness.llm,
-        "Inspect a file.",
-        nil,
+      assert_eq(ranked.ranked[0], "strong")
+      const explicit = pairwise_rerank(
+        harness,
+        ["strong", "weak"],
         {provider: "anthropic", model: "claude-haiku-4-5", temperature: 0.25},
       )
-      assert(explicit.typed_checkpoint.ok)
+      assert_eq(explicit.ranked[0], "strong")
       const calls = harness.llm.mock_calls()
       assert_eq(len(calls), 2)
       assert_eq(calls[0].temperature, 0.0, "known supported default proves the measured field")

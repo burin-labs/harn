@@ -100,29 +100,6 @@ groups must share one scrutiny. No shipping row is `light` yet.
 Implementation details and trace schemas live in
 [Agent plane ownership](../dev/agent-loops.md#completion-checkpoints).
 
-## Input guardrail (`agent_input_guardrail`)
-
-`agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
-builds the input-side bookend for `agent_completion_gate`. It runs before the
-first main `agent_loop` model turn and spreads into loop options as
-`input_guardrail`. A tripwire records an `input_guardrail_verdict` event, writes
-a zero-token assistant explanation, and stops the loop with
-`status: "input_guardrail"` and `stop_reason: "input_guardrail_tripwire"`.
-
-```harn,ignore
-import { agent_input_guardrail } from "std/agent/guardrails"
-
-const guardrail_opts = agent_input_guardrail(
-  { payload -> return cheap_policy_classifier(payload.user_message) },
-  {confidence_threshold: 0.8},
-)
-agent_loop(harness, task, system, base_opts + guardrail_opts)
-```
-
-For an explicit preflight verdict instead of loop composition, use
-`agent_input_guardrail_check(task, classifier?, options?)`. It returns the same
-`{tripwire, reason, label, confidence}` shape.
-
 ## Completion gate (`agent_completion_gate`)
 
 `agent_completion_gate(runtime, options)` returns an options fragment for

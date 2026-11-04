@@ -149,8 +149,6 @@ pipeline default(harness: Harness) {
     "cancelled",
     "provider_error",
     "error",
-    "input_guardrail",
-    "scope_alert",
     "blocked",
     "unknown",
   ] {

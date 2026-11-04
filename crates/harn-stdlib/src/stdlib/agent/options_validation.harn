@@ -344,24 +344,6 @@ pub fn __validate_structural_validator(value: any) {
   }
 }
 
-pub fn __validate_pre_turn_scope_classifier(value: any) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `pre_turn_scope_classifier` must be a closure or nil; got " + type_of(value)
-  }
-}
-
-pub fn __validate_input_guardrail(value: any) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `input_guardrail` must be a closure or nil; got " + type_of(value)
-  }
-}
-
 pub fn __validate_missing_tool_call_recovery(value: MissingToolCallRecoveryOptions | bool | nil) {
   if value == nil {
     return
@@ -746,12 +728,6 @@ pub fn __validate_agent_loop_callback_options(opts: any) {
   }
   if __has_key(opts, "structural_validator") {
     __validate_structural_validator(opts.structural_validator)
-  }
-  if __has_key(opts, "input_guardrail") {
-    __validate_input_guardrail(opts.input_guardrail)
-  }
-  if __has_key(opts, "pre_turn_scope_classifier") {
-    __validate_pre_turn_scope_classifier(opts.pre_turn_scope_classifier)
   }
   if __has_key(opts, "missing_tool_call_recovery") {
     __validate_missing_tool_call_recovery(opts.missing_tool_call_recovery)

@@ -383,15 +383,6 @@ harn eval prompt --out-file
 harn eval prompt --output
 harn eval prompt -o
 harn eval prompt <positional 1>
-harn eval scope-triage (alias of harn eval scope_triage)
-harn eval scope_triage
-harn eval scope_triage --confidence-threshold
-harn eval scope_triage --dataset
-harn eval scope_triage --json
-harn eval scope_triage --live
-harn eval scope_triage --max-cases
-harn eval scope_triage --model
-harn eval scope_triage --output
 harn eval skill-gate
 harn eval skill-gate --json
 harn eval skill-gate --output
