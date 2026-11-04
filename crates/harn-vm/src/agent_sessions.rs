@@ -615,6 +615,20 @@ pub fn current_session_id() -> Option<String> {
     })
 }
 
+/// Every session the calling task is running inside, innermost first. A loop
+/// that opened its own session is still inside the prompt's session.
+pub(crate) fn active_session_ids() -> Vec<String> {
+    CURRENT_SESSION_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .filter(|frame| frame.is_active())
+            .map(|frame| frame.session_id.clone())
+            .collect()
+    })
+}
+
 pub fn current_actor_chain() -> Option<ActorChain> {
     current_session_id().as_deref().and_then(actor_chain)
 }

@@ -22,7 +22,7 @@
 //! Retry-After / retry / escalation path. Set it to `0` to restore the old
 //! unbounded wait.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -255,8 +255,16 @@ struct NetworkBreaker {
     unproductive_opens: u32,
     /// Reason the breaker last opened (drives the fail-fast error category).
     open_reason: BreakerOpenReason,
-    /// The next probe was granted by an interactive prompt.
-    interactive_probe: bool,
+    /// Sessions whose prompt offered to probe this route and has not sent a
+    /// request on it yet.
+    probe_offers: BTreeSet<String>,
+    /// The session whose prompt owns the probe, from taking the offer until
+    /// the probe reports.
+    interactive_probe: Option<String>,
+    /// The session whose probe just failed. Only its turn fails fast.
+    failed_probe_owner: Option<String>,
+    /// When the current half-open probe was admitted.
+    half_open_since_ms: u128,
 }
 
 impl NetworkBreaker {
@@ -267,38 +275,86 @@ impl NetworkBreaker {
         let blocked = self.blocked(now_ms);
         if blocked.is_none() && matches!(self.state, BreakerState::Open { .. }) {
             self.state = BreakerState::HalfOpen;
+            self.half_open_since_ms = now_ms;
             // The turn that failed fast has ended; later callers wait as usual.
             if self.open_reason == BreakerOpenReason::InteractiveProbeFailed {
                 self.open_reason = BreakerOpenReason::Network;
+                self.failed_probe_owner = None;
             }
         }
         blocked
     }
 
-    /// A person just sent a prompt: let its first request probe the route now.
+    fn one_failure_from_tripping(&self) -> bool {
+        self.consecutive_network_failures + 1 >= NETWORK_BREAKER_FAILURE_THRESHOLD
+    }
+
+    /// A person just sent a prompt: offer that session this route's next probe.
     ///
     /// A network open window protects unattended callers from hammering a dead
-    /// route, but a person asking again is their own signal to try. Also takes
-    /// over a half-open probe, whose owner may have been cancelled without ever
-    /// reporting an outcome. An unproductive route answers quickly and bills
-    /// each probe, so its window stands.
+    /// route, but a person asking again is their own signal to try. The offer
+    /// changes nothing for other callers until that session's own request takes
+    /// it. An unproductive route answers quickly and bills each probe, so its
+    /// window stands.
     ///
     /// A closed route one failure from tripping is in the same position: the
-    /// last turn failed, and the next failure will open the breaker. Mark that
-    /// request as the probe too, so a provider that stays down fails this turn
-    /// fast whether or not the last turn crossed the threshold.
-    fn grant_interactive_probe(&mut self, now_ms: u128) {
+    /// last turn failed, and the next failure will open the breaker.
+    fn offer_interactive_probe(&mut self, session_id: &str) {
+        if self.open_reason == BreakerOpenReason::UnproductiveCompletion
+            || (self.state == BreakerState::Closed && !self.one_failure_from_tripping())
+        {
+            return;
+        }
+        self.probe_offers.insert(session_id.to_string());
+    }
+
+    /// Let a request from a session holding an offer become the route's probe.
+    ///
+    /// One probe runs at a time. While one is in flight the offer is kept, so
+    /// this session waits for that answer and then probes without sitting out
+    /// the window. A probe older than one open window is taken over, because
+    /// its owner may have been cancelled without ever reporting an outcome.
+    fn take_interactive_probe(&mut self, now_ms: u128, sessions: &[String]) {
+        let Some(owner) = sessions.iter().find(|id| self.probe_offers.contains(*id)) else {
+            return;
+        };
+        if self.state == BreakerState::HalfOpen
+            && now_ms < self.half_open_since_ms + u128::from(NETWORK_BREAKER_OPEN_MS)
+        {
+            return;
+        }
+        self.probe_offers.remove(owner);
         if self.open_reason == BreakerOpenReason::UnproductiveCompletion {
             return;
         }
         if self.state == BreakerState::Closed {
-            self.interactive_probe =
-                self.consecutive_network_failures + 1 >= NETWORK_BREAKER_FAILURE_THRESHOLD;
+            if self.one_failure_from_tripping() {
+                self.interactive_probe = Some(owner.clone());
+            }
             return;
         }
         self.state = BreakerState::Open { until_ms: now_ms };
         self.open_reason = BreakerOpenReason::Network;
-        self.interactive_probe = true;
+        self.failed_probe_owner = None;
+        self.interactive_probe = Some(owner.clone());
+    }
+
+    /// A failed probe ends only its own prompt's turn. Everyone else on the
+    /// route waits out the window as usual.
+    fn reason_for_caller(
+        &self,
+        reason: BreakerOpenReason,
+        sessions: &[String],
+    ) -> BreakerOpenReason {
+        let owns_verdict = self
+            .failed_probe_owner
+            .as_ref()
+            .is_some_and(|owner| sessions.contains(owner));
+        if reason == BreakerOpenReason::InteractiveProbeFailed && !owns_verdict {
+            BreakerOpenReason::Network
+        } else {
+            reason
+        }
     }
 
     fn blocked(&self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
@@ -338,16 +394,14 @@ impl NetworkBreaker {
             // A straggler failing during the window neither spends the grant
             // nor softens the verdict.
             let straggler = matches!(self.state, BreakerState::Open { .. });
-            self.open_reason = if (!straggler && self.interactive_probe)
-                || self.open_reason == BreakerOpenReason::InteractiveProbeFailed
-            {
+            if !straggler {
+                self.failed_probe_owner = self.interactive_probe.take();
+            }
+            self.open_reason = if self.failed_probe_owner.is_some() {
                 BreakerOpenReason::InteractiveProbeFailed
             } else {
                 BreakerOpenReason::Network
             };
-            if !straggler {
-                self.interactive_probe = false;
-            }
             self.state = BreakerState::Open {
                 until_ms: now_ms.saturating_add(u128::from(window)),
             };
@@ -388,7 +442,9 @@ impl NetworkBreaker {
         self.consecutive_unproductive_completions = 0;
         self.unproductive_opens = 0;
         self.open_reason = BreakerOpenReason::Network;
-        self.interactive_probe = false;
+        self.probe_offers.clear();
+        self.interactive_probe = None;
+        self.failed_probe_owner = None;
         self.state = BreakerState::Closed;
     }
 }

@@ -25,6 +25,7 @@ pub(super) fn network_breaker_admission(
     ensure_initialized_from_config();
     let keys = limiter_keys(&opts.provider, &opts.model);
     let now_ms = crate::clock_mock::instant_now().as_millis();
+    let sessions = crate::agent_sessions::active_session_ids();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     // Inspect every key before reserving any half-open probe. Otherwise a
     // blocked sibling key strands an earlier reservation with no provider call
@@ -34,7 +35,9 @@ pub(super) fn network_breaker_admission(
     let mut blocked: Option<(Duration, BreakerOpenReason)> = None;
     for key in &keys {
         let limiter = limiter_for_key(&mut registry.limiters, key);
+        limiter.breaker.take_interactive_probe(now_ms, &sessions);
         if let Some((remaining, reason)) = limiter.breaker.blocked(now_ms) {
+            let reason = limiter.breaker.reason_for_caller(reason, &sessions);
             blocked = Some(match blocked {
                 Some((prev, prev_reason)) => (prev.max(remaining), prev_reason.max(reason)),
                 None => (remaining, reason),
@@ -49,15 +52,15 @@ pub(super) fn network_breaker_admission(
     blocked
 }
 
-/// Let the next request on every network-open route probe it immediately. Call
-/// this when a person sends a prompt, once per prompt. If the probe fails the
-/// route reopens, and calls in that prompt's turn fail fast instead of waiting.
-pub fn grant_interactive_network_probe() {
+/// Offer this session's next request on each failing route the chance to probe
+/// it immediately. Call this when a person sends a prompt, once per prompt.
+/// Other callers keep waiting. If the probe fails the route reopens, and calls
+/// in this session's turn fail fast instead of waiting.
+pub fn grant_interactive_network_probe(session_id: &str) {
     ensure_initialized_from_config();
-    let now_ms = crate::clock_mock::instant_now().as_millis();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     for limiter in registry.limiters.values_mut() {
-        limiter.breaker.grant_interactive_probe(now_ms);
+        limiter.breaker.offer_interactive_probe(session_id);
     }
 }
 

@@ -1008,6 +1008,12 @@ fn breaker_reopens_when_half_open_probe_fails() {
     );
 }
 
+/// A prompt in session `id` offers the probe and its first request takes it.
+fn prompt_probes(b: &mut NetworkBreaker, now_ms: u128, id: &str) {
+    b.offer_interactive_probe(id);
+    b.take_interactive_probe(now_ms, &[id.to_string()]);
+}
+
 #[test]
 fn interactive_probe_skips_the_open_window_and_success_closes_the_breaker() {
     let mut b = NetworkBreaker::default();
@@ -1015,7 +1021,7 @@ fn interactive_probe_skips_the_open_window_and_success_closes_the_breaker() {
         b.record_network_failure(0);
     }
     assert!(b.admit(1).is_some(), "unattended callers still wait");
-    b.grant_interactive_probe(1);
+    prompt_probes(&mut b, 1, "a");
     assert!(
         b.admit(1).is_none(),
         "the prompt's first request is the probe"
@@ -1026,7 +1032,68 @@ fn interactive_probe_skips_the_open_window_and_success_closes_the_breaker() {
     );
     b.record_success();
     assert_eq!(b.state, BreakerState::Closed);
-    assert!(!b.interactive_probe);
+    assert_eq!(b.interactive_probe, None);
+}
+
+#[test]
+fn a_prompts_offer_changes_nothing_for_other_callers() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    b.offer_interactive_probe("a");
+    b.take_interactive_probe(1, &["background".to_string()]);
+    assert!(b.admit(1).is_some(), "the window still holds");
+    assert_eq!(b.interactive_probe, None);
+}
+
+#[test]
+fn a_failed_probe_fails_only_its_own_prompts_turn() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    prompt_probes(&mut b, 1, "a");
+    assert!(b.admit(1).is_none());
+    b.record_network_failure(9_000);
+    let (_, reason) = b.blocked(9_001).expect("reopened");
+    assert_eq!(
+        b.reason_for_caller(reason, &["child".to_string(), "a".to_string()]),
+        BreakerOpenReason::InteractiveProbeFailed,
+        "a loop inside the prompt's session is that turn"
+    );
+    assert_eq!(
+        b.reason_for_caller(reason, &["background".to_string()]),
+        BreakerOpenReason::Network
+    );
+    assert_eq!(b.reason_for_caller(reason, &[]), BreakerOpenReason::Network);
+}
+
+#[test]
+fn prompts_at_once_send_one_probe_and_the_next_goes_when_it_answers() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    b.offer_interactive_probe("a");
+    b.offer_interactive_probe("b");
+    b.offer_interactive_probe("c");
+    b.take_interactive_probe(1, &["a".to_string()]);
+    assert!(b.admit(1).is_none(), "a is the probe");
+    for id in ["b", "c"] {
+        b.take_interactive_probe(2, &[id.to_string()]);
+        assert_eq!(b.admit(2).expect("in flight").0, Duration::ZERO);
+    }
+    assert_eq!(b.network_opens, 1);
+
+    b.record_network_failure(3);
+    b.take_interactive_probe(4, &["b".to_string()]);
+    assert!(b.admit(4).is_none(), "b's offer survived the wait");
+    assert_eq!(
+        b.admit(4).expect("in flight").0,
+        Duration::ZERO,
+        "not c too"
+    );
 }
 
 #[test]
@@ -1035,7 +1102,7 @@ fn failed_interactive_probe_reopens_and_fails_that_turn_fast_then_later_callers_
     for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
         b.record_network_failure(0);
     }
-    b.grant_interactive_probe(1);
+    prompt_probes(&mut b, 1, "a");
     assert!(b.admit(1).is_none());
     b.record_network_failure(9_000);
     let (remaining, reason) = b.admit(9_001).expect("a failed probe reopens the breaker");
@@ -1067,9 +1134,15 @@ fn interactive_probe_takes_over_a_probe_that_never_reported_and_grows_no_window(
         "a probe whose owner is then cancelled"
     );
     assert_eq!(b.admit(after).expect("held").0, Duration::ZERO);
-    b.grant_interactive_probe(after + 1);
+    prompt_probes(&mut b, after + 1, "a");
+    assert_eq!(
+        b.admit(after + 1).expect("still its probe").0,
+        Duration::ZERO
+    );
+    let stale = after + u128::from(NETWORK_BREAKER_OPEN_MS);
+    b.take_interactive_probe(stale, &["a".to_string()]);
     assert_eq!(b.network_opens, 1, "a grant is not a failure");
-    assert!(b.admit(after + 1).is_none());
+    assert!(b.admit(stale).is_none());
 }
 
 #[test]
@@ -1078,7 +1151,7 @@ fn prompt_after_a_failed_turn_below_the_threshold_still_fails_fast_when_the_prov
     for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
         b.record_network_failure(0);
     }
-    b.grant_interactive_probe(1);
+    prompt_probes(&mut b, 1, "a");
     assert!(b.admit(1).is_none(), "the route is still closed");
     b.record_network_failure(8_000);
     assert_eq!(
@@ -1090,23 +1163,24 @@ fn prompt_after_a_failed_turn_below_the_threshold_still_fails_fast_when_the_prov
     for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
         healed.record_network_failure(0);
     }
-    healed.grant_interactive_probe(1);
+    prompt_probes(&mut healed, 1, "a");
     healed.record_success();
-    assert!(!healed.interactive_probe);
+    assert_eq!(healed.interactive_probe, None);
 }
 
 #[test]
 fn interactive_probe_leaves_closed_and_unproductive_routes_alone() {
     let mut closed = NetworkBreaker::default();
-    closed.grant_interactive_probe(1);
+    prompt_probes(&mut closed, 1, "a");
     assert_eq!(closed.state, BreakerState::Closed);
-    assert!(!closed.interactive_probe);
+    assert_eq!(closed.interactive_probe, None);
+    assert!(closed.probe_offers.is_empty());
 
     let mut empty = NetworkBreaker::default();
     for _ in 0..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
         empty.record_unproductive_completion(0);
     }
-    empty.grant_interactive_probe(1);
+    prompt_probes(&mut empty, 1, "a");
     assert_eq!(
         empty.admit(1).expect("still open").1,
         BreakerOpenReason::UnproductiveCompletion
@@ -1159,7 +1233,14 @@ fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_f
     }
     assert!(network_breaker_admission(&opts).is_some());
 
-    grant_interactive_network_probe();
+    grant_interactive_network_probe("prompt-session");
+    assert!(
+        network_breaker_admission(&opts).is_some(),
+        "the grant is not this caller's"
+    );
+
+    let prompt_session = crate::agent_sessions::enter_current_session("prompt-session");
+    let loop_session = crate::agent_sessions::enter_current_session("prompt-loop-session");
     assert!(network_breaker_admission(&opts).is_none(), "probe admitted");
     observe_network_outcome_for_llm_call(&opts, true);
 
@@ -1175,6 +1256,15 @@ fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_f
         crate::value::ErrorCategory::CircuitOpen
     );
     assert!(error.to_string().contains("not answering"), "{error}");
+    drop(loop_session);
+    drop(prompt_session);
+
+    let (_, reason) = network_breaker_admission(&opts).expect("still open");
+    assert_eq!(
+        reason,
+        BreakerOpenReason::Network,
+        "another caller on the route waits as usual"
+    );
 }
 
 #[test]
