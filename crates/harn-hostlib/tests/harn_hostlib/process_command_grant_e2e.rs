@@ -608,6 +608,10 @@ fn only_gh_reads_receive_the_grant() {
         "gh -R o/r pr view 1",
         "gh pr view --repo=o/r 1",
         "gh api repos/o/r",
+        "gh api -i repos/o/r",
+        "gh api -iXGET repos/o/r",
+        "gh api --method=get repos/o/r",
+        "gh api -H Accept:application/json repos/o/r",
     ] {
         assert_granted_without_leak(&fixture.shell(read), read);
     }
@@ -633,6 +637,19 @@ fn only_gh_reads_receive_the_grant() {
         "gh secret list",
         "gh api -X POST repos/o/r/issues",
         "gh api repos/o/r/issues -f title=t",
+        "gh api -iXDELETE repos/o/r/git/refs/heads/main",
+        "gh api -iX DELETE repos/o/r",
+        "gh api -X=DELETE repos/o/r",
+        "gh api --method=POST repos/o/r",
+        "gh api -iFname=x repos/o/r",
+        "gh api -ifname=x repos/o/r",
+        "gh api --raw-field=name=x repos/o/r",
+        "gh api --field=name=x repos/o/r",
+        "gh api repos/o/r --input body.json",
+        "gh api repos/o/r --input=body.json",
+        "gh api --unknown repos/o/r",
+        "gh api -iZ repos/o/r",
+        "gh api -H X-HTTP-Method-Override:DELETE repos/o/r",
         "gh pr view 1 --web",
     ] {
         let out = fixture.shell(other);

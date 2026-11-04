@@ -226,33 +226,85 @@ pub(crate) fn gh_invocation_is_read_only(args: &[String]) -> bool {
     }
 }
 
-/// A `gh api` call reads only with no method other than GET and no request
-/// field or body: gh switches to POST as soon as a field is given.
+/// A `gh api` call reads only when every argument is one this parser knows
+/// keeps it a GET without a body, and it names one endpoint. Anything else,
+/// including a flag gh adds later, counts as a write. Arguments are read the way
+/// gh reads them: short flags can share an argument (`-iXGET`) and a value can
+/// follow the letter, with or without `=`.
 fn gh_api_is_read_only(args: &[String]) -> bool {
-    let mut endpoint = false;
+    let mut endpoints = 0;
     let mut words = args.iter();
     while let Some(arg) = words.next() {
-        let method = match arg.as_str() {
-            "-X" | "--method" => Some(words.next().map(String::as_str).unwrap_or_default()),
-            other => other
-                .strip_prefix("--method=")
-                .or_else(|| other.strip_prefix("-X").filter(|method| !method.is_empty())),
+        let reads = if let Some(long) = arg.strip_prefix("--") {
+            gh_api_long_flag_reads(long, &mut words)
+        } else if let Some(cluster) = arg.strip_prefix('-') {
+            gh_api_short_flags_read(cluster, &mut words)
+        } else {
+            endpoints += 1;
+            true
         };
-        if let Some(method) = method {
-            if !method.eq_ignore_ascii_case("GET") {
-                return false;
-            }
-            continue;
-        }
-        let field = ["-f", "-F", "--field", "--raw-field", "--input"]
-            .iter()
-            .any(|flag| arg == flag || (arg.starts_with(flag) && arg.len() > flag.len()));
-        if field {
+        if !reads {
             return false;
         }
-        endpoint |= !arg.starts_with('-');
     }
-    endpoint
+    endpoints == 1
+}
+
+/// Whether `--name` or `--name=value` keeps a `gh api` call a read. A bare `--`
+/// passes here so the grant refusal can name it.
+fn gh_api_long_flag_reads(flag: &str, words: &mut std::slice::Iter<'_, String>) -> bool {
+    let (name, inline) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    match name {
+        "" | "include" | "paginate" | "silent" | "slurp" => inline.is_none(),
+        _ => gh_api_value_reads(name, inline.or_else(|| words.next().map(String::as_str))),
+    }
+}
+
+/// Whether one argument of short flags keeps a `gh api` call a read. The first
+/// value-taking letter ends the flags: the rest of the argument, or else the
+/// next one, is its value. An empty cluster is a lone `-`, which is not a flag.
+fn gh_api_short_flags_read(cluster: &str, words: &mut std::slice::Iter<'_, String>) -> bool {
+    let mut letters = cluster.chars();
+    while let Some(letter) = letters.next() {
+        let name = match letter {
+            'i' => continue,
+            'H' => "header",
+            'X' => "method",
+            'p' => "preview",
+            'q' => "jq",
+            't' => "template",
+            _ => return false,
+        };
+        let rest = letters.as_str();
+        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        let value = Some(rest)
+            .filter(|rest| !rest.is_empty())
+            .or_else(|| words.next().map(String::as_str));
+        return gh_api_value_reads(name, value);
+    }
+    !cluster.is_empty()
+}
+
+/// Whether the value-taking `gh api` flag `name` keeps the call a read. `--jq`
+/// and `--template` read, and the grant refuses them separately. A header can
+/// ask a server for a different method, so only content negotiation passes.
+fn gh_api_value_reads(name: &str, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    match name {
+        "method" => value.eq_ignore_ascii_case("GET"),
+        "header" => value.split_once(':').is_some_and(|(header, _)| {
+            let header = header.trim();
+            header.eq_ignore_ascii_case("Accept")
+                || header.eq_ignore_ascii_case("X-GitHub-Api-Version")
+        }),
+        "cache" | "jq" | "preview" | "template" => true,
+        _ => false,
+    }
 }
 
 /// `sed -n '1,105p' file` reads; `sed -i`, a `w file` command, or an `e`
@@ -694,6 +746,12 @@ mod tests {
             "gh api repos/o/r/pulls",
             "gh api -X GET repos/o/r/issues",
             "gh api --method=get repos/o/r",
+            "gh api -iXGET repos/o/r",
+            "gh api -X=GET repos/o/r",
+            "gh api --include --paginate --slurp repos/o/r",
+            "gh api -H Accept:application/json repos/o/r",
+            "gh api --header=x-github-api-version:2022-11-28 repos/o/r",
+            "gh api --preview=corsair --cache 1h repos/o/r",
             "gh -R o/r pr view 1",
             "gh pr view --repo=o/r 1",
             "gh --hostname h.example issue list",
@@ -720,6 +778,26 @@ mod tests {
             "gh api repos/o/r/issues -Ftitle=t",
             "gh api graphql --raw-field query=q",
             "gh api repos/o/r --input body.json",
+            "gh api repos/o/r --input=body.json",
+            "gh api -iXDELETE repos/o/r/git/refs/heads/main",
+            "gh api -iX DELETE repos/o/r",
+            "gh api -X=DELETE repos/o/r",
+            "gh api --method=POST repos/o/r",
+            "gh api -iFname=x repos/o/r",
+            "gh api -ifname=x repos/o/r",
+            "gh api -f=name=x repos/o/r",
+            "gh api --raw-field=name=x repos/o/r",
+            "gh api --field=name=x repos/o/r",
+            "gh api --unknown repos/o/r",
+            "gh api --unknown=x repos/o/r",
+            "gh api -Z repos/o/r",
+            "gh api -iZ repos/o/r",
+            "gh api - repos/o/r",
+            "gh api --include=true repos/o/r",
+            "gh api --verbose repos/o/r",
+            "gh api -H X-HTTP-Method-Override:DELETE repos/o/r",
+            "gh api --header=X-HTTP-Method-Override:DELETE repos/o/r",
+            "gh api repos/o/r repos/o/other",
             "gh api -X",
             "gh api",
             "gh pr view 7 --web",
