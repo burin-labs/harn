@@ -12,7 +12,16 @@ pipeline default(harness: Harness) {
           session_id: "completed-session-one",
           prompt: "Verify the widget package before merging it",
           tool_sequence: ["run", "run", "run"],
+          command_ledger: [{tool: "run", command: "make check", exit_code: 0, ok: true}],
           observed_at: "2026-08-13T12:00:00Z",
+        },
+        {
+          id: "run-two",
+          session_id: "completed-session-two",
+          prompt: "Verify the gadget package before merging it",
+          tool_sequence: ["run", "run", "run"],
+          command_ledger: [{tool: "run", command: "make check", exit_code: 0, ok: true}],
+          observed_at: "2026-08-13T13:00:00Z",
         },
       ]
       with_llm_script(
@@ -29,7 +38,7 @@ pipeline default(harness: Harness) {
                   description: "Compiler feedback fixture.",
                   when_to_use: "Never; the source must be repaired first.",
                   body: "This submission must not reach durable memory.",
-                  evidence_ids: ["run-one"],
+                  evidence_ids: ["run-one", "run-two"],
                   artifact: {
                     entrypoint: "server.harn",
                     tool_names: ["invalid_candidate"],
@@ -52,7 +61,7 @@ pipeline default(harness: Harness) {
                   when_to_use: "Use before merging a change scoped to one workspace package.",
                   body:
                     "# Verify Package\n\nUse the generated `verify_package` tool and report its receipt.",
-                  evidence_ids: ["run-one"],
+                  evidence_ids: ["run-one", "run-two"],
                   capabilities: ["process.run"],
                   side_effects: ["process"],
                   artifact: {

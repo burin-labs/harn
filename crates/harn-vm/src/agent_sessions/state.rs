@@ -6,6 +6,7 @@ impl SessionState {
         let now = Instant::now();
         let transcript = empty_transcript(&id);
         Self {
+            continuation_checkpoint: None,
             admission_role: SessionAdmissionRole::Admitted,
             transcript_recording_ready: false,
             retention: Arc::new(()),

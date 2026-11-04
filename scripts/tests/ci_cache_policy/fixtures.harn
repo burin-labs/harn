@@ -423,7 +423,7 @@ pub fn workflows() {
               include: [{kind: "workspace"}, {kind: "lean-lsp"}, {kind: "freshness-checker"}],
             },
           },
-          env: {RUSTFLAGS: "-D warnings"},
+          env: {RUSTFLAGS: "-D warnings", HARN_RUSTC_FRONTEND_THREADS: "1"},
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
@@ -537,7 +537,8 @@ pub fn workflows() {
       },
     },
     "macos-nightly.yml": {
-      env: {RUSTFLAGS: "-D warnings"},
+      on: {push: {branches: ["main"], paths: ["rust-toolchain.toml"]}},
+      env: {RUSTFLAGS: "-D warnings", HARN_RUSTC_FRONTEND_THREADS: "1"},
       permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {

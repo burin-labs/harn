@@ -597,6 +597,92 @@ fn a_confined_child_writes_its_temp_dir_outside_the_workspace() {
     );
 }
 
+/// With no usable user cache directory a confined child still has a temp dir
+/// it can write, and a toolchain cache: both in the workspace. The cache
+/// location resolves once per process, so this re-runs itself with one that
+/// cannot be created.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_confined_child_with_no_usable_cache_dir_writes_temp_in_the_workspace() {
+    const WORKSPACE_ENV: &str = "HARN_TEST_NO_CACHE_DIR_WORKSPACE";
+    if let Some(root) = std::env::var_os(WORKSPACE_ENV) {
+        let root = PathBuf::from(root);
+        let _policy = enter_policy(&root);
+        let written = command_output(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                "printf temp-write > \"$TMPDIR/live-probe\" && printf '%s' \"$GOCACHE\" > \"$TMPDIR/gocache\""
+                    .to_string(),
+            ],
+            &ProcessCommandConfig {
+                cwd: Some(root),
+                ..ProcessCommandConfig::default()
+            },
+        );
+        if crate::sandbox_host::assert_unavailable_result(&written) {
+            crate::sandbox_host::boundary_not_measured(
+                "no_cache_dir_temp_write",
+                "typed host confinement refusal observed; the temp dir write was not measured",
+            );
+            return;
+        }
+        let written = written.expect("confined temp dir write");
+        assert!(
+            written.status.success(),
+            "temp dir write: {}",
+            String::from_utf8_lossy(&written.stderr)
+        );
+        return;
+    }
+
+    let test_name = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, path)| path);
+    // A cache location that cannot be created, and none at all.
+    for home in [Some("/dev/null"), None] {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                &format!(
+                    "{test_name}::a_confined_child_with_no_usable_cache_dir_writes_temp_in_the_workspace"
+                ),
+                "--exact",
+                "--nocapture",
+            ])
+            .env(WORKSPACE_ENV, &root)
+            .env_remove("XDG_CACHE_HOME");
+        match home {
+            Some(home) => command.env("HOME", home),
+            None => command.env_remove("HOME"),
+        };
+        let output = command.output().unwrap();
+        let report = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success(), "HOME={home:?}: {report}");
+        if report.contains("no_cache_dir_temp_write") {
+            continue;
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".harn-tmp/live-probe")).unwrap_or_else(|error| {
+                panic!("HOME={home:?}: the child wrote no temp file: {error}: {report}")
+            }),
+            "temp-write"
+        );
+        let gocache = std::fs::read_to_string(root.join(".harn-tmp/gocache")).unwrap();
+        assert!(
+            Path::new(&gocache).starts_with(root.join(".harn-toolchain-cache")),
+            "HOME={home:?}: {gocache}"
+        );
+        println!("confined temp dir write with HOME={home:?} reached");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn safe_inherited_workspace_cache_reaches_sandboxed_child() {

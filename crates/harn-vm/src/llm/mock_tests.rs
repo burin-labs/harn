@@ -77,13 +77,20 @@ fn cli_mock_tool_call_ids_are_unique_across_responses() {
         .expect("parse mock")
     };
     install_cli_llm_mocks(vec![fixture_tool_call(), fixture_tool_call()]);
-    let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
+    let mut request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
 
     let first = mock_llm_response(&request).expect("first mock response");
     let second = mock_llm_response(&request).expect("second mock response");
 
     assert_eq!(first.tool_calls[0]["id"], "mock_call_1");
     assert_eq!(second.tool_calls[0]["id"], "mock_call_2");
+    request.messages = vec![serde_json::json!({
+        "role": "assistant", "content": "Checking.",
+        "_harn": {"tool_calls": second.tool_calls},
+    })];
+    install_cli_llm_mocks(vec![fixture_tool_call()]);
+    let restored = mock_llm_response(&request).expect("restored fixture response");
+    assert_eq!(restored.tool_calls[0]["id"], "mock_call_3");
     clear_cli_llm_mock_mode();
 }
 

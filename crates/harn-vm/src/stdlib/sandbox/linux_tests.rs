@@ -1252,20 +1252,20 @@ fn a_denial_under_a_missing_directory_costs_nothing() {
     );
 }
 
-/// The relaxation above is bounded: only NotFound and PermissionDenied end
-/// the walk. Any OTHER enumeration error still refuses the spawn, because
-/// "any error means nothing to exclude" is exactly the widening this term
-/// must never acquire.
+/// The relaxation above is bounded: only a missing path, a path below a file
+/// and PermissionDenied end the walk. Any OTHER enumeration error still refuses
+/// the spawn, because "any error means nothing to exclude" is exactly the
+/// widening this term must never acquire.
 ///
-/// A file where a directory is expected reproduces that third shape
-/// (`NotADirectory`) without needing an exotic filesystem.
+/// A symlink to itself reproduces that other shape (`FilesystemLoop`) without
+/// needing an exotic filesystem.
 #[test]
 fn an_unexpected_enumeration_error_still_refuses_the_spawn() {
     let temp = tempfile::TempDir::new().expect("temp");
     let root = temp.path().canonicalize().expect("canonical");
-    std::fs::write(root.join("notadir"), b"x").expect("write file");
+    std::os::unix::fs::symlink(root.join("loop"), root.join("loop")).expect("symlink");
 
-    let result = expand_around_denied(&root, &[root.join("notadir/inner/secret")]);
+    let result = expand_around_denied(&root, &[root.join("loop/inner/secret")]);
 
     assert!(
         result.is_err(),

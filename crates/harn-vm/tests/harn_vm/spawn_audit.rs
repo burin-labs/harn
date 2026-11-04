@@ -22,6 +22,12 @@ use std::path::{Path, PathBuf};
 /// may hold. A new raw spawn anywhere else, or an extra one here, fails.
 const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     (
+        "harn-vm/src/stdlib/sandbox/workspace_env_integration.rs",
+        1,
+        "a test re-executing itself with HOME changed, because the runtime directory is \
+         decided from the process environment",
+    ),
+    (
         "harn-vm/src/stdlib/sandbox/command_for.rs",
         8,
         "the funnel: closes command environments; the fixed native compiler query clears \

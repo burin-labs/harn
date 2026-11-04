@@ -27,8 +27,8 @@ use tokio::sync::mpsc;
 use crate::adapters::acp::{
     run_acp_channel_server_with_existing_handle, AcpChannelHandle, AcpJsonRpcError,
     AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpServerConfig,
-    AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionLoadParams, AcpSessionNewParams,
-    AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
+    AcpSessionCloseResult, AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionLoadParams,
+    AcpSessionNewParams, AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,
     AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
     ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
     ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_RESUME, HARN_AGENT_EVENT_METHOD,
@@ -602,8 +602,8 @@ impl EmbeddedAgentClient {
     pub async fn close_session(
         &mut self,
         session_id: impl Into<String>,
-    ) -> EmbeddedAgentResult<Value> {
-        self.request_value(
+    ) -> EmbeddedAgentResult<AcpSessionCloseResult> {
+        self.request_typed(
             ACP_METHOD_SESSION_CLOSE,
             AcpSessionIdParams::new(session_id.into()),
         )

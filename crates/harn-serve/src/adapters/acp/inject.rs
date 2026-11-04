@@ -178,6 +178,12 @@ impl AcpServer {
             );
             return;
         }
+        let continuation = harn_vm::agent_sessions::prepare_closed_session_continuation(session_id)
+            .await
+            .unwrap_or_else(|error| {
+                harn_vm::events::log_warn("agent.session_continuation", &error.to_string());
+                None
+            });
         if let Err(error) = harn_vm::agent_sessions::close_with_status(
             session_id,
             "client_request",
@@ -195,7 +201,14 @@ impl AcpServer {
             return;
         }
         self.release_session_resources(session_id);
-        self.send_response(id, serde_json::json!({}));
+        let result = AcpSessionCloseResult {
+            continuation: continuation
+                .map(harn_vm::agent_sessions::ClosedSessionContinuation::commit),
+        };
+        self.send_response(
+            id,
+            serde_json::to_value(result).expect("typed close result"),
+        );
     }
 
     pub(super) fn release_session_resources(&mut self, session_id: &str) {

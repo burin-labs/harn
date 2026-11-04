@@ -656,7 +656,9 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
             // * NOT FOUND. Nothing below a missing directory exists, so there
             //   is nothing to subtract. Refusing here blocked every spawn on
             //   any host that simply had no `~/.kube` (measured on a downstream
-            //   host's CI fleet, where it would have taken every run down).
+            //   host's CI fleet, where it would have taken every run down). A
+            //   path below a file is missing too: `HOME` is `/dev/null` for many
+            //   service accounts.
             // * PERMISSION DENIED. We cannot list it, so we cannot grant its
             //   children; granting nothing is exactly right. Refusing here
             //   broke every run whose `$HOME` was not readable by the runtime
@@ -671,7 +673,9 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
                 Err(error)
                     if matches!(
                         error.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                        io::ErrorKind::NotFound
+                            | io::ErrorKind::NotADirectory
+                            | io::ErrorKind::PermissionDenied
                     ) =>
                 {
                     break;
@@ -803,7 +807,9 @@ fn push_rule_exact(
             if optional
                 && matches!(
                     error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::PermissionDenied
                 ) =>
         {
             // A root that EXISTS but cannot be opened is dropped silently
@@ -811,7 +817,8 @@ fn push_rule_exact(
             // reads as success: the agent loses reach with nothing in the
             // transcript to explain it. Missing roots stay quiet, because an
             // absent optional root is the normal case and saying so every time
-            // would bury this.
+            // would bury this. A root below a file is missing too: `HOME` is
+            // `/dev/null` for many service accounts.
             if error.kind() == io::ErrorKind::PermissionDenied {
                 super::warn_once(
                     &format!("sandbox_unreadable_root:{}", path.display()),

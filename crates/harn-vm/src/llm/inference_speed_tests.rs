@@ -12,6 +12,29 @@ fn meter(model: &str) -> InferenceMeter {
     meter
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn local_execution_settles_without_changing_the_recorded_response() {
+    let mut result = LlmResult::default();
+    let live = meter("recorded-response-model");
+    tokio::time::advance(Duration::from_secs(2)).await;
+    live.finish(&mut result);
+    let recorded = serde_json::to_value(&result).unwrap();
+    assert_eq!(recorded["telemetry"]["inference_speed"]["elapsed_ms"], 2000);
+
+    let local = meter("local-response-model");
+    tokio::time::advance(Duration::from_secs(7)).await;
+    local.finish_local(&mut result);
+    assert!(local.lock().finished);
+    assert_eq!(serde_json::to_value(&result).unwrap(), recorded);
+
+    let mut mock = LlmResult::default();
+    let local_mock = meter("local-mock-model");
+    tokio::time::advance(Duration::from_secs(3)).await;
+    local_mock.finish_local(&mut mock);
+    assert!(local_mock.lock().finished);
+    assert!(mock.telemetry.inference_speed.is_none());
+}
+
 /// Stream `chunks` chunks of `tokens_per_chunk` tokens, one every `every`.
 async fn stream(meter: &InferenceMeter, chunks: usize, tokens_per_chunk: usize, every: Duration) {
     for _ in 0..chunks {
