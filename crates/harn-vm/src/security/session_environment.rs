@@ -538,6 +538,26 @@ impl SessionGrant {
         self.audience
     }
 
+    /// Whether this grant's value is a credential to keep out of output.
+    ///
+    /// A secret-store pointer and a grant bound to one command are credentials
+    /// by declaration. A literal never is. A session-wide `env:` grant is also
+    /// how a host passes paths and modes, and hiding those would rewrite
+    /// ordinary output, so its variable name decides.
+    pub(crate) fn carries_credential(&self) -> bool {
+        match self.source_kind {
+            GrantSource::SecretStore => true,
+            GrantSource::Literal => false,
+            GrantSource::Env => {
+                self.for_command.is_some()
+                    || self.expose_as_env.as_deref().is_some_and(|name| {
+                        crate::environment_registry::sensitivity_for(name)
+                            == crate::environment_registry::EnvironmentSensitivity::Credential
+                    })
+            }
+        }
+    }
+
     /// Whether Harn's own process (provider auth, `harness.env`) reads this
     /// grant: session-wide grants and in-process grants, never command-bound
     /// ones.

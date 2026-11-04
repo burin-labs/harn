@@ -17,7 +17,7 @@ debug and token variables are dropped. A granted read is refused when it names `
 `https`, and when
 a write root overlaps the user's git, SSH or gh configuration.
 `gh auth token` and the other `gh auth` subcommands that print the credential are refused. Every
-granted value, for any program, including its base64 and percent-encoded forms, is redacted from
+granted credential, for any program, including its base64 and percent-encoded forms, is redacted from
 command output, events and transcripts. A `secret_store` grant now resolves through the host's
 secret provider on blocking tool calls instead of failing as unavailable. The confined-command
 `GH_CONFIG_DIR` stand-in drops `!` aliases and the pager, browser, editor and socket keys. `gh` read

@@ -729,6 +729,58 @@ fn a_grant_to_an_unprofiled_program_is_redacted_from_its_output() {
     );
 }
 
+/// A host also grants paths and modes for the whole session. Hiding those would
+/// rewrite every command's output that names the project, so only the session
+/// grant named as a credential is redacted.
+#[test]
+fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
+    const PROJECT_ROOT: &str = "/harn-probe/session-project-root";
+    const MODE: &str = "harn-probe-literal-mode";
+    const TOKEN: &str = "harn-probe-session-credential";
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let env_grant = |var: &str| GrantSpec {
+        name: var.to_ascii_lowercase(),
+        source: GrantSourceSpec::Env {
+            var: var.to_string(),
+        },
+        expose_as_env: Some(var.to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    let literal = GrantSpec {
+        name: "probe_mode".to_string(),
+        source: GrantSourceSpec::Literal {
+            value: MODE.to_string(),
+        },
+        expose_as_env: Some("PROBE_MODE".to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![
+            env_grant("PROBE_PROJECT_ROOT"),
+            env_grant("PROBE_SESSION_TOKEN"),
+            literal,
+        ],
+        &|name| match name {
+            "PROBE_PROJECT_ROOT" => Some(PROJECT_ROOT.to_string()),
+            "PROBE_SESSION_TOKEN" => Some(TOKEN.to_string()),
+            _ => std::env::var(name).ok(),
+        },
+    )
+    .expect("the granted policy must launch");
+    harn_vm::stdlib::process::set_session_environment(Some(environment));
+    let out = fixture.argv(&["printenv", "PROBE_PROJECT_ROOT"], &[]);
+    assert!(out.contains(PROJECT_ROOT), "a path was hidden: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_MODE"], &[]);
+    assert!(out.contains(MODE), "a literal was hidden: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_SESSION_TOKEN"], &[]);
+    assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
+    assert!(!out.contains(TOKEN), "a credential was printed: {out}");
+}
+
 /// A script `gh` on a trusted `PATH` entry, such as a version-manager shim
 /// that picks the real program from files in the working directory, gets no
 /// grant.
