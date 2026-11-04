@@ -2156,6 +2156,7 @@ export interface HarnSessionRecapSource {
 export interface HarnSessionRecapTextFact {
   text: string
   sourceEventId: number
+  messageId: string | null
 }
 
 export interface HarnSessionRecapVerificationFact {
@@ -2301,7 +2302,7 @@ function validateHarnSessionRecapSource(value: unknown): void {
 }
 
 function validateHarnSessionRecapTextFact(value: unknown): void {
-  harnSessionRecapObject(value, "HarnSessionRecapTextFact", ["text", "sourceEventId"])
+  harnSessionRecapObject(value, "HarnSessionRecapTextFact", ["text", "sourceEventId", "messageId"])
 }
 
 function validateHarnSessionRecapVerificationFact(value: unknown): void {
@@ -2631,6 +2632,15 @@ export interface HarnProviderUsage {
   usage_unknown_calls: number
   known_cost_usd: number
   cost_usd: number | null
+  reported_cache: HarnReportedCacheTotals | null
+}
+
+export interface HarnReportedCacheTotals {
+  reported_calls: number
+  read_reported_calls: number
+  write_reported_calls: number
+  read_tokens: number
+  write_tokens: number
 }
 
 export type HarnAgentsTaskStatus = "SUBMITTED" | "WORKING" | "INPUT_REQUIRED" | "AUTH_REQUIRED" | "COMPLETED" | "FAILED" | "CANCELED"

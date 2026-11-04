@@ -513,6 +513,11 @@ fn __apply_tool_format(llm: HarnessLlm, opts: dict, kind: string) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
+  // A preset routed by ladder alone stays unstamped, so the format is resolved
+  // for the request instead of pinned here as if the caller had chosen it.
+  if opts?.model == nil {
+    return opts
+  }
   const resolved = agent_tool_format_resolution(llm, opts)
   if resolved?.tool_format == nil {
     return opts

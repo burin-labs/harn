@@ -157,8 +157,17 @@ if [[ "${APPROVE_DRY_RUN:-0}" == 1 ]]; then
   exit 0
 fi
 
+# The last body line names the source this run checked, in the shape a merger
+# binds a bot approval to (review.author_evidence.v1). Without it a bot
+# approval reads as unmeasured and the pull request waits for a person.
+repo_digest=$(printf %s "$repo" | { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1)
+[[ "$repo_digest" =~ ^[0-9a-f]{64}$ ]] || refuse "the repository digest could not be computed"
+evidence=$(jq -cn --arg digest "$repo_digest" --argjson pr "$pr" --arg head "$head_sha" \
+  '{schema: "review.author_evidence.v1", repository_digest: $digest, pr: $pr, head_sha: $head, replies: []}')
+body="Version-only $kind pull request ($new), checked mechanically by scripts/ci/approve_release_pr.sh against head $head_sha.
+<!-- release-review-author-evidence: $evidence -->"
 gh api -X POST "repos/$repo/pulls/$pr/reviews" -f commit_id="$head_sha" -f event=APPROVE \
-  -f body="Version-only $kind pull request ($new), checked mechanically by scripts/ci/approve_release_pr.sh against head $head_sha." > /dev/null \
+  -f body="$body" > /dev/null \
   || refuse "the approval could not be posted"
 decision=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$pr" -f query='
   query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewDecision}}}' \

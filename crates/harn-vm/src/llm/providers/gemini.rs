@@ -458,9 +458,6 @@ pub(crate) fn parse_response(
         tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens: cache.read_tokens,
-        cache_write_tokens: cache.write_tokens,
-        cache_counts_reported: cache.reported,
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: if thinking.is_empty() {
@@ -472,7 +469,8 @@ pub(crate) fn parse_response(
         blocks,
         telemetry: Box::new(telemetry),
         ..Default::default()
-    })
+    }
+    .with_cache_counts(cache))
 }
 
 #[cfg(test)]

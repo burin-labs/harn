@@ -90,6 +90,14 @@ pub type LlmPricingReceipt = {
   monthly_allowance_unapplied: list<string>,
 }
 
+pub type LlmReportedCache = {
+  reported_calls: int,
+  read_reported_calls: int,
+  write_reported_calls: int,
+  read_tokens: int,
+  write_tokens: int,
+}
+
 pub type LlmUsage = {
   input_tokens: int,
   output_tokens: int,
@@ -118,6 +126,7 @@ pub type LlmUsage = {
   usage_unknown_calls: int,
   cache_read_tokens: int,
   cache_write_tokens: int,
+  reported_cache: LlmReportedCache?,
   cache_supported: bool,
   cache_hit_ratio?: float,
   cache_visibility?: string,
