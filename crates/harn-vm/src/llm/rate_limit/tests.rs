@@ -1118,6 +1118,7 @@ fn a_window_opened_through_one_real_clock_holds_when_read_through_a_later_one() 
     let _env = crate::llm::env_guard();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
+        .start_paused(true)
         .build()
         .expect("runtime");
     runtime.block_on(async {
@@ -1129,7 +1130,7 @@ fn a_window_opened_through_one_real_clock_holds_when_read_through_a_later_one() 
             }
         })
         .await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::advance(Duration::from_millis(50)).await;
         let (remaining, _) =
             crate::clock_mock::scope_capability_clock(harn_clock::RealClock::arc(), async {
                 network_breaker_admission(&opts)

@@ -166,10 +166,14 @@ impl Clock for RealClock {
         let origin = tokio::time::Instant::from_std(process_monotonic_origin());
         let now = tokio::time::Instant::now();
         // A paused test runtime created before the origin was pinned reads
-        // slightly earlier than it. Keep the sign so its durations stay exact.
+        // slightly earlier than it. Round down on both sides of the origin so
+        // the difference of two readings stays exact.
         match now.checked_duration_since(origin) {
             Some(elapsed) => elapsed.as_millis() as i64,
-            None => -(origin.saturating_duration_since(now).as_millis() as i64),
+            None => {
+                let behind = origin.saturating_duration_since(now);
+                -(behind.as_nanos().div_ceil(1_000_000) as i64)
+            }
         }
     }
 
@@ -445,17 +449,14 @@ mod tests {
         OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap()
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn real_clocks_created_apart_read_the_same_monotonic_time() {
         let earlier = RealClock::new();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let start = earlier.monotonic_ms();
+        tokio::time::advance(Duration::from_millis(50)).await;
         let later = RealClock::new();
-        let earlier_reading = earlier.monotonic_ms();
-        let later_reading = later.monotonic_ms();
-        assert!(
-            earlier_reading >= 50 && later_reading >= earlier_reading,
-            "earlier {earlier_reading}, later {later_reading}"
-        );
+        assert_eq!(earlier.monotonic_ms() - start, 50);
+        assert_eq!(later.monotonic_ms(), earlier.monotonic_ms());
     }
 
     #[tokio::test]
