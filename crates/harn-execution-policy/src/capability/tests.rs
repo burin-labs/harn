@@ -185,6 +185,18 @@ fn a_disjoint_requested_root_is_dropped() {
     assert!(roots.is_empty(), "{roots:?}");
 }
 
+/// Without the runtime's scratch resolver, a root in a workspace's runtime dir
+/// is just a root outside the host: dropped, never admitted by its shape.
+#[test]
+fn without_the_scratch_resolver_a_runtime_dir_root_is_dropped() {
+    assert!(super::OWNED_SCRATCH.get().is_none());
+    let roots = intersect_roots(
+        &["/home/user/project".to_string()],
+        &["/home/user/.cache/harn-sandbox/0123456789abcdef/tmp/scoped".to_string()],
+    );
+    assert!(roots.is_empty(), "{roots:?}");
+}
+
 #[test]
 fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
     let roots = intersect_roots(&["/repo".to_string()], &["/repo-backup".to_string()]);

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# A machine-wide harn.hooks.noLocalBuild must not change what these hooks are shown to do.
+export GIT_CONFIG_GLOBAL=/dev/null
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)

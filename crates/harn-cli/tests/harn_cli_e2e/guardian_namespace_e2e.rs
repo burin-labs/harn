@@ -229,9 +229,9 @@ fn main(harness: Harness) {{
     await_exit(&child);
     await_exit(&grandchild);
     // The payload's `/tmp` is the session temp dir, never the host's.
-    assert!(root
-        .path()
-        .join(".harn-tmp/harn-private-tmp-probe")
+    assert!(harn_vm::process_sandbox::sandbox_runtime_dir(root.path())
+        .unwrap()
+        .join("tmp/harn-private-tmp-probe")
         .is_file());
     assert!(!std::path::Path::new("/tmp/harn-private-tmp-probe").exists());
 

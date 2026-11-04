@@ -164,10 +164,10 @@ pub(crate) use replace::{
     apply_effect, atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
+pub(crate) use workspace_env::inject_workspace_process_env;
 pub use workspace_env::{
     active_workspace_process_env, is_workspace_runtime_directory, workspace_local_tmpdir,
 };
-pub(crate) use workspace_env::{inject_workspace_process_env, WORKSPACE_TMPDIR_NAME};
 #[cfg(test)]
 pub(crate) use workspace_env::{inject_workspace_tmpdir, TMPDIR_ENV_KEYS};
 
@@ -352,7 +352,8 @@ fn scoped_mutation_target(
         io::Error::new(io::ErrorKind::PermissionDenied, violation.message(builtin))
     })?;
     let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(&policy);
+    let mut roots = normalized_workspace_roots(&policy);
+    roots.extend(workspace_env::owned_runtime_dir_containing(&candidate));
     let Some(root) = roots
         .into_iter()
         .find(|root| path_is_within(&candidate, root))
@@ -1411,13 +1412,8 @@ fn project_root_workspace_root() -> Option<PathBuf> {
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = base_workspace_roots(policy);
-    if declared_path_roots_active() {
-        return roots;
-    }
-    // A linked worktree's git dirs and Harn's own relocated runtime
-    // directories sit outside the working tree and must stay writable.
-    let mut outside = git_scope_extension_for_roots(&roots).read_write;
-    outside.extend(relocated_runtime_roots(&roots));
+    let mut outside = path_scope::topology_extension_roots(&roots);
+    outside.extend(workspace_env::granted_runtime_dir(policy, &roots));
     for dir in outside {
         if !roots.iter().any(|existing| existing == &dir) {
             roots.push(dir);

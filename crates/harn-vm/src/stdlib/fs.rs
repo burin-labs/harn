@@ -1185,12 +1185,14 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
     if let Some(policy) = crate::orchestration::current_execution_policy() {
         if policy.sandbox_profile.enforces_path_scope() {
-            if let Some(path) = crate::stdlib::sandbox::workspace_local_tmpdir(&policy) {
+            if let Some(path) =
+                crate::stdlib::sandbox::workspace_env::workspace_script_scratch_dir(&policy)
+            {
                 return Ok(path);
             }
         }
     }
-    let path = resolve_fs_path(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME)?;
+    let path = resolve_fs_path(crate::stdlib::sandbox::workspace_env::WORKSPACE_TMPDIR_NAME)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "workspace_temp_dir",
         &path,
