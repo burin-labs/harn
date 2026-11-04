@@ -184,16 +184,23 @@ calls keep their separate policy. A pipeline reads what the proxy refused with
 adds a host for the life of the server with `harness.net.child_network_allow(host)`.
 Refusals are per server, so commands running in parallel cannot be told apart.
 
-The native managed boundary is currently available on macOS. On another local
-platform, a CLI `--allow-process-network` grant still raises the capability
-ceiling to network, but Harn does not *start* a proxy it cannot enforce. Child
-processes then have unrestricted sockets; `harn run` discloses that on stderr,
-and run attestation reports `unrestricted` rather than
-`unsupported_fail_closed`. An execution policy that already carries
-`process_network_proxy` (inherited from a host or outer sandbox) is unchanged:
-Linux and Windows still fail-close `process.exec` behind that proxy. Remote
-sandbox backends continue to advertise their own `network_policy` capability.
-An empty allowlist is deny-all everywhere.
+The managed boundary is available on macOS, and on Linux when the policy names
+the namespace launcher (`--netns-launcher`). A Linux child then runs in a private
+network namespace with only loopback. A relay in that namespace listens on the
+proxy's port numbers and forwards to the host proxy over a Unix socket, so raw
+sockets, datagrams, and direct DNS have no route. A daemon that outlives its
+command loses the relay and keeps its loopback. Bubblewrap-only hosts refuse the
+grant.
+
+On another local platform, or on Linux with no launcher, a CLI
+`--allow-process-network` grant still raises the capability ceiling to network,
+but Harn does not *start* a proxy it cannot enforce. Child processes then have
+unrestricted sockets; `harn run` discloses that on stderr, and run attestation
+reports `unrestricted` rather than `unsupported_fail_closed`. An execution policy
+that already carries `process_network_proxy` (inherited from a host or outer
+sandbox) is unchanged: a platform that cannot enforce it fail-closes
+`process.exec` behind that proxy. Remote sandbox backends continue to advertise
+their own `network_policy` capability. An empty allowlist is deny-all everywhere.
 
 The managed proxy records only protocol, normalized host, port, decision, and
 reason. It never records request paths, query strings, headers, bodies, proxy

@@ -427,7 +427,7 @@ impl AcpServer {
             return;
         }
         let mode_policy = modes::ModePolicyScope::new(&current_mode_id, &self.sandbox)
-            .with_child_proxy(self.child_egress.endpoints());
+            .with_child_egress(&self.child_egress);
         // Both scoped spans are boxed before they are awaited. `Scoped` holds the
         // wrapped future inline, so keeping these on the stack would add the whole
         // prompt body's state to this frame, which a nested descent re-enters.

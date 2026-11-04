@@ -16,8 +16,11 @@ pub(super) enum ChildEgress {
     /// The embedder listed no hosts, so the mode policy alone decides.
     Unmanaged,
     Proxied(ProcessEgressProxy),
+    /// This host cannot hold a child to a proxy, so commands run with no
+    /// network. Direct sockets would widen what the embedder asked for.
+    NoRoute,
     /// The embedder asked for the proxy and it would not start. Turns are
-    /// refused: falling back to direct sockets would widen what was asked for.
+    /// refused, for the same reason.
     Unavailable(String),
 }
 
@@ -31,6 +34,9 @@ impl ChildEgress {
         if !sandbox.has_process_confinement() {
             return Self::Unmanaged;
         }
+        if !host_can_hold_a_child_to_the_proxy(sandbox) {
+            return Self::NoRoute;
+        }
         match ProcessEgressProxy::start_allowlist(hosts) {
             Ok(proxy) => Self::Proxied(proxy),
             Err(error) => Self::Unavailable(error.to_string()),
@@ -40,14 +46,18 @@ impl ChildEgress {
     pub(super) fn endpoints(&self) -> Option<ProcessNetworkProxy> {
         match self {
             Self::Proxied(proxy) => Some(proxy.endpoints()),
-            Self::Unmanaged | Self::Unavailable(_) => None,
+            Self::Unmanaged | Self::NoRoute | Self::Unavailable(_) => None,
         }
+    }
+
+    pub(super) fn denies_network(&self) -> bool {
+        matches!(self, Self::NoRoute)
     }
 
     pub(super) fn startup_failure(&self) -> Option<&str> {
         match self {
             Self::Unavailable(reason) => Some(reason),
-            Self::Unmanaged | Self::Proxied(_) => None,
+            Self::Unmanaged | Self::NoRoute | Self::Proxied(_) => None,
         }
     }
 
@@ -55,9 +65,27 @@ impl ChildEgress {
     fn audit(&self) -> Vec<harn_vm::egress::ProcessEgressAudit> {
         match self {
             Self::Proxied(proxy) => proxy.audit_snapshot(),
-            Self::Unmanaged | Self::Unavailable(_) => Vec::new(),
+            Self::Unmanaged | Self::NoRoute | Self::Unavailable(_) => Vec::new(),
         }
     }
+}
+
+/// A Linux child reaches the proxy only from a private network namespace, and
+/// a host may refuse to build one.
+#[cfg(target_os = "linux")]
+fn host_can_hold_a_child_to_the_proxy(sandbox: &AcpSandboxConfig) -> bool {
+    sandbox
+        .process
+        .netns_launcher_path
+        .as_deref()
+        .is_some_and(|launcher| {
+            harn_vm::process_sandbox::private_namespace_available(launcher).is_ok()
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn host_can_hold_a_child_to_the_proxy(_sandbox: &AcpSandboxConfig) -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -77,6 +105,12 @@ mod tests {
             child_network_allow: hosts.map(|hosts| hosts.into_iter().map(String::from).collect()),
             ..Default::default()
         }
+    }
+
+    /// Exercises the proxy whatever this host allows for namespaces.
+    fn proxied(hosts: Vec<&str>) -> ChildEgress {
+        let hosts: Vec<String> = hosts.into_iter().map(String::from).collect();
+        ChildEgress::Proxied(ProcessEgressProxy::start_allowlist(&hosts).expect("proxy starts"))
     }
 
     fn proxied_status(proxy: ProcessNetworkProxy, target: &str) -> String {
@@ -104,7 +138,7 @@ mod tests {
     fn a_session_child_reaches_only_a_listed_host() {
         let server = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = server.local_addr().expect("addr").port();
-        let egress = ChildEgress::start(&confined(Some(vec!["127.0.0.1"])));
+        let egress = proxied(vec!["127.0.0.1"]);
         let proxy = egress.endpoints().expect("proxy runs");
 
         let refused = proxied_status(proxy, "unlisted.invalid:443");
@@ -122,7 +156,7 @@ mod tests {
 
     #[test]
     fn listing_no_hosts_refuses_every_host() {
-        let egress = ChildEgress::start(&confined(Some(Vec::new())));
+        let egress = proxied(Vec::new());
         let proxy = egress
             .endpoints()
             .expect("an empty list still runs the proxy");
@@ -145,20 +179,38 @@ mod tests {
     #[test]
     fn only_a_mode_with_child_network_gets_the_proxy() {
         let sandbox = confined(Some(vec!["example.com"]));
-        let egress = ChildEgress::start(&sandbox);
+        let egress = proxied(vec!["example.com"]);
         let endpoints = egress.endpoints();
         assert!(endpoints.is_some());
 
-        let code = ModePolicyScope::new("code", &sandbox).with_child_proxy(endpoints);
+        let code = ModePolicyScope::new("code", &sandbox).with_child_egress(&egress);
         assert_eq!(
             code.policy()
                 .and_then(|policy| policy.process_network_proxy),
             endpoints
         );
-        let ask = ModePolicyScope::new("ask", &sandbox).with_child_proxy(endpoints);
+        let ask = ModePolicyScope::new("ask", &sandbox).with_child_egress(&egress);
         assert_eq!(
             ask.policy().and_then(|policy| policy.process_network_proxy),
             None
         );
+    }
+
+    /// The negative case the whole design rests on: no way to reach the proxy
+    /// must mean no network, never the direct sockets a grant would otherwise
+    /// give.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_host_that_cannot_build_the_namespace_gives_children_no_network() {
+        let mut sandbox = confined(Some(vec!["example.com"]));
+        sandbox.process.netns_launcher_path = Some("/nonexistent/launcher".to_string());
+        let egress = ChildEgress::start(&sandbox);
+        assert!(egress.denies_network());
+        assert!(egress.endpoints().is_none());
+
+        let scope = ModePolicyScope::new("code", &sandbox).with_child_egress(&egress);
+        let policy = scope.policy().expect("confined mode has a policy");
+        assert!(policy.process_sandbox.deny_network);
+        assert_eq!(policy.process_network_proxy, None);
     }
 }

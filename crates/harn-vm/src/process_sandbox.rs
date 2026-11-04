@@ -177,6 +177,12 @@ pub use crate::stdlib::sandbox::{
     decode_seccomp_hex, transferable_confinement, TransferableConfinement,
 };
 
+pub(crate) mod egress_relay;
+#[cfg(target_os = "linux")]
+pub use egress_relay::start_namespace_relay;
+mod namespace_helper;
+pub use egress_relay::{EgressRelayTarget, NETNS_EGRESS_RELAY_FLAG};
+pub use namespace_helper::{private_namespace_available, run_namespace_helper_if_invoked};
 mod loopback;
 pub(crate) use loopback::reconcile;
 pub use loopback::{

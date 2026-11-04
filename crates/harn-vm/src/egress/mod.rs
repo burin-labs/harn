@@ -38,6 +38,8 @@ pub(crate) use test_support::{
     install_test_policy, test_env_guard, EgressTestConfigGuard, EgressTestEnvGuard,
 };
 
+#[cfg(target_os = "linux")]
+mod namespace_bridge;
 pub use process_proxy::{ProcessEgressAudit, ProcessEgressProxy, ProcessEgressProxyError};
 pub use provider_allow::{
     configured_provider_private_allow_host, install_ssrf_guard_with_private_host_allowlist,

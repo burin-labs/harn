@@ -86,6 +86,10 @@ pub struct ProcessSandboxPolicy {
     /// retaining the deny on non-loopback destinations. Backends that cannot
     /// enforce this distinction reject the spawn rather than widening it.
     pub allow_tcp_loopback: bool,
+    /// Give a confined child no IP networking, whatever the side-effect level
+    /// allows. A host sets this when it wanted the child behind a proxy and
+    /// this machine cannot hold it there; direct sockets would widen the ask.
+    pub deny_network: bool,
     /// Directories under which a confined child may bind and connect
     /// Unix-domain sockets. Path-scoped: a socket outside every root is still
     /// refused, and nothing here grants IP networking. Build servers (sbt,
@@ -259,6 +263,7 @@ impl ProcessSandboxPolicy {
         extend_unique(&mut self.write_roots, &other.write_roots);
         extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
+        self.deny_network |= other.deny_network;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
         if let Some(socket) = &other.ssh_agent_socket {
             self.ssh_agent_socket = Some(socket.clone());
@@ -298,6 +303,7 @@ impl ProcessSandboxPolicy {
             // a nested request may neither invent it nor erase an outer grant.
             // Host configuration still composes additively through `extend`.
             allow_tcp_loopback: self.allow_tcp_loopback,
+            deny_network: self.deny_network || requested.deny_network,
             unix_socket_roots: intersect_roots(
                 &self.unix_socket_roots,
                 &requested.unix_socket_roots,
