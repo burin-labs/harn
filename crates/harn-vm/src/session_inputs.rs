@@ -4,8 +4,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod granted_values;
 #[cfg(test)]
 mod tests;
+
+pub use granted_values::register_granted_value;
 
 pub use harn_execution_policy::session_inputs::{
     InputDescription, InputError, InputKind, InputLifetime, InputSpec, InputUsage, InputUse,
@@ -56,11 +59,12 @@ fn current_store() -> Result<Store, InputError> {
 }
 
 pub(crate) fn has_private_filter() -> bool {
-    current_store().is_ok_and(|store| store.lock().has_secret_filters())
+    granted_values::any() || current_store().is_ok_and(|store| store.lock().has_secret_filters())
 }
 
 /// Retain the filter for one operation, including output received after close.
 /// Dropping the operation releases this reference to the private material.
+/// Values a grant handed to a child are always filtered too, store or not.
 pub struct OutputFilter(Option<Store>);
 
 impl OutputFilter {
@@ -69,25 +73,28 @@ impl OutputFilter {
     }
 
     pub fn redact(&self, text: &str) -> String {
-        match &self.0 {
+        let text = match &self.0 {
             Some(store) => store.lock().redact(text),
             None => text.to_owned(),
+        };
+        match granted_values::redact(text.as_bytes()) {
+            Some(redacted) => String::from_utf8_lossy(&redacted).into_owned(),
+            None => text,
         }
     }
 
     pub fn redact_bytes<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
-        let Some(store) = &self.0 else {
-            return std::borrow::Cow::Borrowed(bytes);
-        };
-        let store = store.lock();
-        if !store.has_secret_filters() {
-            return std::borrow::Cow::Borrowed(bytes);
-        }
-        let redacted = store.redact_bytes(bytes);
-        if redacted == bytes {
-            std::borrow::Cow::Borrowed(bytes)
-        } else {
-            std::borrow::Cow::Owned(redacted)
+        let stored = self.0.as_ref().and_then(|store| {
+            let store = store.lock();
+            store
+                .has_secret_filters()
+                .then(|| store.redact_bytes(bytes))
+                .filter(|redacted| redacted != bytes)
+        });
+        let current = stored.as_deref().unwrap_or(bytes);
+        match granted_values::redact(current).or(stored) {
+            Some(redacted) => std::borrow::Cow::Owned(redacted),
+            None => std::borrow::Cow::Borrowed(bytes),
         }
     }
 }
