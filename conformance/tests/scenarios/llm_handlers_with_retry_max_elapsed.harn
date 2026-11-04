@@ -1,0 +1,34 @@
+// Conformance test for std/llm/handlers::with_retry — max_elapsed_ms lets short
+// failures retry and refuses an attempt that would not fit in the budget.
+import { with_retry } from "std/llm/handlers"
+
+fn __run(harness: Harness, attempt_ms: int) {
+  const counter = harness.runtime.atomic(0)
+  const slow = { _call ->
+    let _ = harness.runtime.atomic_add(counter, 1)
+    harness.clock.sleep_ms(attempt_ms)
+    return {ok: false, status: "timeout", error: "no answer"}
+  }
+  const caller = with_retry(
+    harness,
+    slow,
+    {max_attempts: 3, base_ms: 1, max_ms: 1, jitter: "none", max_elapsed_ms: 150000},
+  )
+  const env = caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(
+    "${harness.runtime.atomic_get(counter)} ${env.status} ${env.retries_attempted} ${env?.retry_budget_exhausted ?? false}",
+  )
+}
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
+  // A 30 s stall keeps every attempt it is allowed.
+  __run(harness, 30000)
+  // A 120 s silence would overrun the budget with a second attempt.
+  __run(harness, 120000)
+  // A 60 s failure fits a second attempt but not a third.
+  __run(harness, 60000)
+  harness.testing.clock_reset()
+}

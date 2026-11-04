@@ -227,10 +227,15 @@ enum BreakerState {
 /// category: an unreachable link is `transient_network`, whereas a route that
 /// keeps serving empty completions is `circuit_open` (failover-eligible where a
 /// chain exists; degraded-onto-primary by the agent loop where it is not).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// A probe granted by an interactive prompt that got no answer is `circuit_open`
+/// too: the prompt's turn should end now instead of sitting out the window.
+///
+/// Ordered weakest to strongest so a blocked route reports its strongest reason.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum BreakerOpenReason {
     #[default]
     Network,
+    InteractiveProbeFailed,
     UnproductiveCompletion,
 }
 
@@ -250,6 +255,8 @@ struct NetworkBreaker {
     unproductive_opens: u32,
     /// Reason the breaker last opened (drives the fail-fast error category).
     open_reason: BreakerOpenReason,
+    /// The next probe was granted by an interactive prompt.
+    interactive_probe: bool,
 }
 
 impl NetworkBreaker {
@@ -260,8 +267,30 @@ impl NetworkBreaker {
         let blocked = self.blocked(now_ms);
         if blocked.is_none() && matches!(self.state, BreakerState::Open { .. }) {
             self.state = BreakerState::HalfOpen;
+            // The turn that failed fast has ended; later callers wait as usual.
+            if self.open_reason == BreakerOpenReason::InteractiveProbeFailed {
+                self.open_reason = BreakerOpenReason::Network;
+            }
         }
         blocked
+    }
+
+    /// A person just sent a prompt: let its first request probe the route now.
+    ///
+    /// A network open window protects unattended callers from hammering a dead
+    /// route, but a person asking again is their own signal to try. Also takes
+    /// over a half-open probe, whose owner may have been cancelled without ever
+    /// reporting an outcome. An unproductive route answers quickly and bills
+    /// each probe, so its window stands.
+    fn grant_interactive_probe(&mut self, now_ms: u128) {
+        if self.state == BreakerState::Closed
+            || self.open_reason == BreakerOpenReason::UnproductiveCompletion
+        {
+            return;
+        }
+        self.state = BreakerState::Open { until_ms: now_ms };
+        self.open_reason = BreakerOpenReason::Network;
+        self.interactive_probe = true;
     }
 
     fn blocked(&self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
@@ -290,16 +319,25 @@ impl NetworkBreaker {
         self.consecutive_network_failures = self.consecutive_network_failures.saturating_add(1);
         // A failed half-open probe (or crossing the threshold while closed)
         // (re)opens the breaker for a fresh window.
-        if matches!(self.state, BreakerState::HalfOpen)
-            || self.consecutive_network_failures >= NETWORK_BREAKER_FAILURE_THRESHOLD
-        {
+        let probe_failed = matches!(self.state, BreakerState::HalfOpen);
+        if probe_failed || self.consecutive_network_failures >= NETWORK_BREAKER_FAILURE_THRESHOLD {
             self.network_opens = self.network_opens.saturating_add(1);
             let window = match self.network_opens {
                 0 | 1 => NETWORK_BREAKER_OPEN_MS,
                 2 => NETWORK_BREAKER_OPEN_MS_SECOND,
                 _ => NETWORK_BREAKER_OPEN_MS_MAX,
             };
-            self.open_reason = BreakerOpenReason::Network;
+            // A straggler failing during the window must not soften the verdict.
+            self.open_reason = if (probe_failed && self.interactive_probe)
+                || self.open_reason == BreakerOpenReason::InteractiveProbeFailed
+            {
+                BreakerOpenReason::InteractiveProbeFailed
+            } else {
+                BreakerOpenReason::Network
+            };
+            if probe_failed {
+                self.interactive_probe = false;
+            }
             self.state = BreakerState::Open {
                 until_ms: now_ms.saturating_add(u128::from(window)),
             };
@@ -340,6 +378,7 @@ impl NetworkBreaker {
         self.consecutive_unproductive_completions = 0;
         self.unproductive_opens = 0;
         self.open_reason = BreakerOpenReason::Network;
+        self.interactive_probe = false;
         self.state = BreakerState::Closed;
     }
 }
@@ -1054,51 +1093,58 @@ fn breaker_open_error(
             ),
             category: crate::value::ErrorCategory::TransientNetwork,
         },
+        BreakerOpenReason::InteractiveProbeFailed => zero_dispatch_circuit_open(
+            format!(
+                "'{route}' is not answering: this turn's first request got no reply, so this \
+                 request was not sent; the next prompt will try again"
+            ),
+            "route_unresponsive",
+            "interactive_probe_failed",
+            remaining,
+        ),
         // Preserve the zero-dispatch fact structurally. Routing uses
         // `attempt_count` to distinguish logical route attempts from physical
         // provider requests when it builds the terminal attempt ledger.
-        BreakerOpenReason::UnproductiveCompletion => {
-            let message = format!(
+        BreakerOpenReason::UnproductiveCompletion => zero_dispatch_circuit_open(
+            format!(
                 "circuit breaker open for '{route}': sustained empty/unproductive completions \
                  (served but delivered no content, reasoning, or tool call); failing fast for \
                  {}ms (a half-open probe will follow)",
                 remaining.as_millis()
-            );
-            crate::value::VmError::Thrown(crate::value::VmValue::dict(
-                std::collections::BTreeMap::from([
-                    (
-                        "category".to_string(),
-                        crate::value::VmValue::string("circuit_open"),
-                    ),
-                    (
-                        "code".to_string(),
-                        crate::value::VmValue::string("route_quarantined"),
-                    ),
-                    (
-                        "reason".to_string(),
-                        crate::value::VmValue::string("unproductive_completion"),
-                    ),
-                    ("attempt_count".to_string(), crate::value::VmValue::Int(0)),
-                    (
-                        "remaining_ms".to_string(),
-                        crate::value::VmValue::Int(
-                            remaining.as_millis().try_into().unwrap_or(i64::MAX),
-                        ),
-                    ),
-                    (
-                        "message".to_string(),
-                        crate::value::VmValue::string(message),
-                    ),
-                ]),
-            ))
-        }
+            ),
+            "route_quarantined",
+            "unproductive_completion",
+            remaining,
+        ),
     }
+}
+
+/// A `circuit_open` error for a call that reached no provider.
+fn zero_dispatch_circuit_open(
+    message: String,
+    code: &str,
+    reason: &str,
+    remaining: Duration,
+) -> crate::value::VmError {
+    use crate::value::VmValue;
+    crate::value::VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
+        ("category".to_string(), VmValue::string("circuit_open")),
+        ("code".to_string(), VmValue::string(code)),
+        ("reason".to_string(), VmValue::string(reason)),
+        ("attempt_count".to_string(), VmValue::Int(0)),
+        (
+            "remaining_ms".to_string(),
+            VmValue::Int(remaining.as_millis().try_into().unwrap_or(i64::MAX)),
+        ),
+        ("message".to_string(), VmValue::string(message)),
+    ])))
 }
 
 mod network_recovery;
 pub(crate) use network_recovery::await_network_breaker_for_llm_call;
 #[cfg(test)]
 pub(crate) use network_recovery::check_network_breaker_for_llm_call;
+pub use network_recovery::grant_interactive_network_probe;
 #[cfg(test)]
 use network_recovery::network_breaker_admission;
 

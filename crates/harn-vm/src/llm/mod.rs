@@ -372,6 +372,7 @@ pub(crate) mod provider_dispatch;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;
+pub use rate_limit::grant_interactive_network_probe;
 pub mod receipts;
 pub(crate) mod route;
 mod stream;

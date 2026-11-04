@@ -165,6 +165,8 @@ impl AcpServer {
             }
         };
         let prompt_text = prompt.text.clone();
+        // A person asking again is the signal to try a route that was failing.
+        harn_vm::llm::grant_interactive_network_probe();
         if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
             if let Some(session) = self.sessions.get(&session_id) {
                 if session.workspace_checkpoint {
