@@ -1,6 +1,24 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The workspace's compiler. Cargo runs each crate's rustc from that crate's directory, so outside
+/// the workspace a rustup proxy would pick the host's default toolchain for registry dependencies.
+fn workspace_rustc() -> PathBuf {
+    let output = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("ask the workspace's toolchain for its sysroot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Path::new(String::from_utf8(output.stdout).unwrap().trim())
+        .join("bin")
+        .join(format!("rustc{}", std::env::consts::EXE_SUFFIX))
+}
 
 fn build(root: &Path) -> (String, Vec<serde_json::Value>) {
     let output = Command::new(env!("CARGO"))
@@ -15,6 +33,7 @@ fn build(root: &Path) -> (String, Vec<serde_json::Value>) {
         .env("CARGO_TARGET_DIR", root.join("target"))
         .env("CARGO_BUILD_BUILD_DIR", root.join("build"))
         .env("CARGO_INCREMENTAL", "0")
+        .env("RUSTC", workspace_rustc())
         .env("RUSTC_WRAPPER", "")
         .env("RUSTC_WORKSPACE_WRAPPER", "")
         .env("CARGO_BUILD_RUSTC_WRAPPER", "")
