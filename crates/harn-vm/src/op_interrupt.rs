@@ -45,8 +45,9 @@ pub const PROCESS_OWNER_TOKEN_ENV: &str = "HARN_INTERNAL_PROCESS_OWNER_TOKEN";
 /// How long a subprocess gets to exit after SIGTERM before the whole
 /// process group is SIGKILLed. Deliberately longer than the interpreter's
 /// 250ms async-op cancel grace (`CANCEL_GRACE_ASYNC_OP`): child processes
-/// often need to flush buffers / remove lock files on SIGTERM.
-pub const SUBPROCESS_TERM_GRACE: Duration = Duration::from_secs(2);
+/// often need to flush buffers / remove lock files on SIGTERM. Short enough
+/// that a child ignoring SIGTERM still stops within two seconds of a request.
+pub const SUBPROCESS_TERM_GRACE: Duration = Duration::from_secs(1);
 #[cfg(unix)]
 const SUBPROCESS_KILL_SETTLE: Duration = Duration::from_millis(250);
 

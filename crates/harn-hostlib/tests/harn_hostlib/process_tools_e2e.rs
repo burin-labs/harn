@@ -1178,6 +1178,61 @@ fn real_run_command_isolates_the_child_in_its_own_session() {
 }
 
 #[test]
+fn real_run_command_child_finishes_its_cleanup_inside_the_grace() {
+    // A child that needs a moment after SIGTERM must complete that work before
+    // the forced kill. 400 ms stands in for removing a lock or flushing a file.
+    let temp = tempfile::tempdir().expect("ready fifo tempdir");
+    let ready_path = temp.path().join("ready.fifo");
+    let cleaned_path = temp.path().join("cleaned");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&ready_path)
+        .status()
+        .expect("spawn mkfifo");
+    assert!(status.success(), "mkfifo failed: {status}");
+    let mut ready_fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&ready_path)
+        .expect("open ready fifo");
+
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    let ready_arg = shell_words::quote(&ready_path.to_string_lossy()).into_owned();
+    let cleaned_arg = shell_words::quote(&cleaned_path.to_string_lossy()).into_owned();
+    let worker = std::thread::spawn(move || {
+        let _guard = harn_vm::op_interrupt::install(Some(worker_cancel), None);
+        let mut req = dict_map();
+        req.insert(
+            "argv".into(),
+            vlist(vec![
+                vm_string("sh"),
+                vm_string("-c"),
+                vm_string(&format!(
+                    "trap 'sleep 0.4; printf done > {cleaned_arg}; exit 0' TERM; \
+                     printf ready > {ready_arg}; while :; do sleep 0.05; done"
+                )),
+            ]),
+        );
+        require_dict(call("hostlib_tools_run_command", req).unwrap())
+    });
+
+    let mut marker = [0_u8; 5];
+    ready_fifo
+        .read_exact(&mut marker)
+        .expect("cleanup child did not signal readiness");
+    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    let resp = worker
+        .join()
+        .expect("interruptible command thread panicked");
+
+    assert_eq!(
+        std::fs::read_to_string(&cleaned_path).ok().as_deref(),
+        Some("done"),
+        "the child's cleanup did not finish before the forced kill: {resp:?}"
+    );
+}
+
+#[test]
 fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
     // A child that ignores SIGTERM must be SIGKILLed once the grace period
     // elapses. Keep the fixture to one process so cleanup observes a stable
