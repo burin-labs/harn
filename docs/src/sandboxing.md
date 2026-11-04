@@ -177,6 +177,13 @@ raw socket cannot bypass the host decision. DNS is resolved by the proxy and
 each connection is pinned to the addresses checked by the existing CIDR, deny,
 and private-address rules.
 
+An ACP server takes its children's hosts from `AcpSandboxConfig::child_network_allow`
+instead of the live policy: the proxy admits only the listed hosts, and Harn's own
+calls keep their separate policy. A pipeline reads what the proxy refused with
+`harness.net.child_network_refusals()`, which returns each destination once, and
+adds a host for the life of the server with `harness.net.child_network_allow(host)`.
+Refusals are per server, so commands running in parallel cannot be told apart.
+
 The native managed boundary is currently available on macOS. On another local
 platform, a CLI `--allow-process-network` grant still raises the capability
 ceiling to network, but Harn does not *start* a proxy it cannot enforce. Child

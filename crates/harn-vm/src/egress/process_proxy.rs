@@ -10,7 +10,7 @@
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -27,6 +27,7 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const IDLE_TIMEOUT: Duration = Duration::from_mins(5);
 const MAX_AUDIT_EVENTS: usize = 256;
+const UNREACHABLE_REASON: &str = "allowed destination was unreachable";
 const MAX_ACTIVE_CONNECTIONS: usize = 128;
 
 /// Why a child egress proxy could not be started.
@@ -124,6 +125,69 @@ pub struct ProcessEgressAudit {
     pub reason: String,
 }
 
+#[derive(Debug, Default)]
+struct AuditLog {
+    entries: Vec<ProcessEgressAudit>,
+    /// Destinations refused since the host last asked. The policy refused
+    /// these; a listed host that failed to connect is not among them.
+    unread_refusals: Vec<ProcessEgressAudit>,
+}
+
+/// What a host can do to a running allowlist proxy, found from the endpoint on
+/// the current execution policy.
+#[derive(Debug)]
+struct AllowlistControl {
+    http_port: u16,
+    policy: Arc<ProcessPolicySource>,
+    audit: Arc<Mutex<AuditLog>>,
+}
+
+static ALLOWLIST_PROXIES: Mutex<Vec<Weak<AllowlistControl>>> = Mutex::new(Vec::new());
+
+fn allowlist_control(proxy: ProcessNetworkProxy) -> Option<Arc<AllowlistControl>> {
+    ALLOWLIST_PROXIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter_map(Weak::upgrade)
+        .find(|control| control.http_port == proxy.http_port)
+}
+
+/// Destinations the allowlist proxy behind `proxy` refused since the last call.
+/// Empty when `proxy` is not an allowlist proxy.
+pub(super) fn take_child_network_refusals(proxy: ProcessNetworkProxy) -> Vec<ProcessEgressAudit> {
+    let Some(control) = allowlist_control(proxy) else {
+        return Vec::new();
+    };
+    let mut log = control
+        .audit
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    std::mem::take(&mut log.unread_refusals)
+}
+
+/// Add a host to the allowlist proxy behind `proxy`, for the life of that proxy.
+/// Returns false when `proxy` is not an allowlist proxy, so nothing was granted.
+pub(super) fn allow_child_network_host(
+    proxy: ProcessNetworkProxy,
+    host: &str,
+) -> Result<bool, String> {
+    let Some(control) = allowlist_control(proxy) else {
+        return Ok(false);
+    };
+    let ProcessPolicySource::Fixed(configured) = control.policy.as_ref() else {
+        return Ok(false);
+    };
+    let rules = parse_rule_list(host).map_err(|error| error.to_string())?;
+    configured
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .policy
+        .allow
+        .extend(rules);
+    Ok(true)
+}
+
 /// A running host-side proxy. Keep this handle alive for at least as long as
 /// every child process whose policy references [`Self::endpoints`].
 #[derive(Debug)]
@@ -131,7 +195,10 @@ pub struct ProcessEgressProxy {
     endpoints: ProcessNetworkProxy,
     shutdown: Arc<AtomicBool>,
     joins: Vec<JoinHandle<()>>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
+    policy: Arc<ProcessPolicySource>,
+    /// Holds the registration that hosts look this proxy up by.
+    _control: Option<Arc<AllowlistControl>>,
 }
 
 impl ProcessEgressProxy {
@@ -171,10 +238,22 @@ impl ProcessEgressProxy {
             block_private: Some(SsrfMode::Off),
             allow_loopback: true,
         };
-        Self::start(ProcessPolicySource::Fixed(ConfiguredPolicy::single(
-            "process_network",
-            policy,
-        )))
+        let mut proxy = Self::start(ProcessPolicySource::Fixed(RwLock::new(
+            ConfiguredPolicy::single("process_network", policy),
+        )))?;
+        let control = Arc::new(AllowlistControl {
+            http_port: proxy.endpoints.http_port,
+            policy: Arc::clone(&proxy.policy),
+            audit: Arc::clone(&proxy.audit),
+        });
+        let mut registered = ALLOWLIST_PROXIES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        registered.retain(|entry| entry.strong_count() > 0);
+        registered.push(Arc::downgrade(&control));
+        drop(registered);
+        proxy._control = Some(control);
+        Ok(proxy)
     }
 
     fn start(policy: ProcessPolicySource) -> Result<Self, ProcessEgressProxyError> {
@@ -198,7 +277,7 @@ impl ProcessEgressProxy {
             .port();
         let shutdown = Arc::new(AtomicBool::new(false));
         let active_connections = Arc::new(AtomicUsize::new(0));
-        let audit = Arc::new(Mutex::new(Vec::new()));
+        let audit = Arc::new(Mutex::new(AuditLog::default()));
         let policy = Arc::new(policy);
 
         let http_join = spawn_listener(
@@ -214,7 +293,7 @@ impl ProcessEgressProxy {
         let socks_join = match spawn_listener(
             "harn-process-socks-proxy",
             socks,
-            policy,
+            Arc::clone(&policy),
             Arc::clone(&shutdown),
             active_connections,
             Arc::clone(&audit),
@@ -237,6 +316,8 @@ impl ProcessEgressProxy {
             shutdown,
             joins: vec![http_join, socks_join],
             audit,
+            policy,
+            _control: None,
         })
     }
 
@@ -248,6 +329,7 @@ impl ProcessEgressProxy {
         self.audit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
             .clone()
     }
 }
@@ -265,11 +347,11 @@ impl Drop for ProcessEgressProxy {
 }
 
 type ClientHandler =
-    fn(TcpStream, Arc<ProcessPolicySource>, Arc<Mutex<Vec<ProcessEgressAudit>>>) -> io::Result<()>;
+    fn(TcpStream, Arc<ProcessPolicySource>, Arc<Mutex<AuditLog>>) -> io::Result<()>;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum ProcessPolicySource {
-    Fixed(ConfiguredPolicy),
+    Fixed(RwLock<ConfiguredPolicy>),
     Live {
         context: Option<EgressPolicyContext>,
         default_block_private: bool,
@@ -298,7 +380,12 @@ fn process_network_grant_policy(default_block_private: bool) -> ConfiguredPolicy
 impl ProcessPolicySource {
     fn configured(&self) -> Result<ConfiguredPolicy, String> {
         let mut configured = match self {
-            Self::Fixed(configured) => Some(configured.clone()),
+            Self::Fixed(configured) => Some(
+                configured
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+            ),
             Self::Live { context, .. } => match context {
                 Some(context) => context
                     .0
@@ -336,7 +423,7 @@ fn spawn_listener(
     policy: Arc<ProcessPolicySource>,
     shutdown: Arc<AtomicBool>,
     active_connections: Arc<AtomicUsize>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
     handler: ClientHandler,
 ) -> Result<JoinHandle<()>, String> {
     crate::runtime_stack::builder()
@@ -385,7 +472,7 @@ impl Drop for ActiveConnection {
 fn handle_http_client(
     mut client: TcpStream,
     policy: Arc<ProcessPolicySource>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
 ) -> io::Result<()> {
     let request = match read_http_head(&mut client) {
         Ok(request) => request,
@@ -547,7 +634,7 @@ fn write_http_error(stream: &mut TcpStream, status: u16, reason: &str) -> io::Re
 fn handle_socks_client(
     mut client: TcpStream,
     policy: Arc<ProcessPolicySource>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
 ) -> io::Result<()> {
     let mut greeting = [0_u8; 2];
     client.read_exact(&mut greeting)?;
@@ -615,7 +702,7 @@ fn connect_allowed(
     host: &str,
     port: u16,
     policy: &ProcessPolicySource,
-    audit: &Mutex<Vec<ProcessEgressAudit>>,
+    audit: &Mutex<AuditLog>,
 ) -> Result<TcpStream, String> {
     let configured = match policy.configured() {
         Ok(configured) => configured,
@@ -641,7 +728,7 @@ fn connect_allowed(
                     return Ok(stream);
                 }
             }
-            let reason = "allowed destination was unreachable".to_string();
+            let reason = UNREACHABLE_REASON.to_string();
             record_audit(audit, protocol, host, port, false, &reason);
             Err(reason)
         }
@@ -732,7 +819,7 @@ fn parse_authority(authority: &str, default_port: u16) -> Result<(String, u16), 
 }
 
 fn record_audit(
-    audit: &Mutex<Vec<ProcessEgressAudit>>,
+    audit: &Mutex<AuditLog>,
     protocol: &'static str,
     host: &str,
     port: u16,
@@ -742,16 +829,27 @@ fn record_audit(
     let mut audit = audit
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if audit.len() == MAX_AUDIT_EVENTS {
-        audit.remove(0);
-    }
-    audit.push(ProcessEgressAudit {
+    let entry = ProcessEgressAudit {
         protocol,
         host: normalize_host(host),
         port,
         allowed,
         reason: reason.to_string(),
-    });
+    };
+    if !allowed
+        && reason != UNREACHABLE_REASON
+        && audit.unread_refusals.len() < MAX_AUDIT_EVENTS
+        && !audit
+            .unread_refusals
+            .iter()
+            .any(|seen| seen.host == entry.host && seen.port == entry.port)
+    {
+        audit.unread_refusals.push(entry.clone());
+    }
+    if audit.entries.len() == MAX_AUDIT_EVENTS {
+        audit.entries.remove(0);
+    }
+    audit.entries.push(entry);
 }
 
 fn relay(left: TcpStream, right: TcpStream) -> io::Result<()> {
@@ -1083,5 +1181,46 @@ mod tests {
             super::super::effective_ssrf_settings(Some(&policy)),
             (SsrfMode::Off, false)
         );
+    }
+
+    /// The grant must change what a running proxy decides, and the refusal
+    /// must read back once, or an approval could not rerun the command.
+    #[test]
+    fn an_approved_host_is_admitted_after_its_refusal_is_read() {
+        let proxy = ProcessEgressProxy::start_allowlist(&[]).expect("start");
+        let endpoints = proxy.endpoints();
+        let connect = |target: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", endpoints.http_port)).expect("reach");
+            write!(
+                stream,
+                "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n"
+            )
+            .expect("send");
+            let mut head = Vec::new();
+            let mut chunk = [0u8; 256];
+            while !head.windows(2).any(|pair| pair == b"\r\n") {
+                let read = stream.read(&mut chunk).expect("read");
+                if read == 0 {
+                    break;
+                }
+                head.extend_from_slice(&chunk[..read]);
+            }
+            String::from_utf8_lossy(&head).into_owned()
+        };
+        let server = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let target = format!("127.0.0.1:{}", server.local_addr().expect("addr").port());
+
+        assert!(connect(&target).contains("403"));
+        let refusals = take_child_network_refusals(endpoints);
+        assert_eq!(refusals.len(), 1, "{refusals:?}");
+        assert_eq!(refusals[0].host, "127.0.0.1");
+        assert!(take_child_network_refusals(endpoints).is_empty());
+
+        assert!(allow_child_network_host(endpoints, "127.0.0.1").expect("grant"));
+        assert!(connect(&target).contains("200"));
+        assert!(take_child_network_refusals(endpoints).is_empty());
+
+        drop(proxy);
+        assert!(!allow_child_network_host(endpoints, "127.0.0.1").expect("gone"));
     }
 }
