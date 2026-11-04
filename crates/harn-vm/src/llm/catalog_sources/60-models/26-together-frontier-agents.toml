@@ -32,6 +32,10 @@ served_variant = "together"
 api_dialect = "openai_chat"
 context_window = 1010000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+deprecated = true
+deprecation_note = "Together removes this model from serverless inference on 2026-11-04 and recommends Qwen/Qwen3.7-Max: https://docs.together.ai/docs/deprecations"
+sunset_date = "2026-11-04"
+superseded_by = "Qwen/Qwen3.7-Max"
 # Together's model library and authenticated inventory agreed on this rate on
 # 2026-08-26. The inventory reports the exact 1,010,000-token window.
 pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.25 }

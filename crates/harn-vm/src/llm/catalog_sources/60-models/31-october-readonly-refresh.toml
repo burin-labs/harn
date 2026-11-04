@@ -155,7 +155,8 @@ models_dev = {provider = "minimax", model = "MiniMax-M3.1-Flash", fields = ["con
 provider = "inception"
 availability = "unknown"
 capabilities = []
-pricing = { input_per_mtok = 0.2, output_per_mtok = 0.7, cache_read_per_mtok = 0.02, promotions = [{ id = "mercury-3-launch", starts_on = "2026-10-21", review_after = "2026-10-28", input_per_mtok = 0.10, output_per_mtok = 0.35, cache_read_per_mtok = 0.01, source_url = "https://docs.inceptionlabs.ai/get-started/models" }] }
+# Provider still lists these discounted rates as of 2026-11-03; review again in a month.
+pricing = { input_per_mtok = 0.2, output_per_mtok = 0.7, cache_read_per_mtok = 0.02, promotions = [{ id = "mercury-3-launch", starts_on = "2026-10-21", review_after = "2026-12-04", input_per_mtok = 0.10, output_per_mtok = 0.35, cache_read_per_mtok = 0.01, source_url = "https://docs.inceptionlabs.ai/get-started/models" }] }
 family = "inception-mercury"
 tier = "mid"
 models_dev = {provider = "inception", model = "mercury-3", fields = ["name", "context_window", "open_weight"]}
