@@ -15,7 +15,8 @@ fn policy(root: &std::path::Path) -> CapabilityPolicy {
 
 /// The runtime dir is the child's to write, so a child can replace its
 /// `tmp` with a symlink. The next spawn must refuse it rather than hand
-/// the next child, or Harn's own writes, a directory somewhere else.
+/// the next child, or Harn's own writes, a directory somewhere else. It gets
+/// the workspace's own temp dir instead.
 #[cfg(unix)]
 #[test]
 fn a_symlinked_runtime_child_is_refused_not_followed() {
@@ -25,6 +26,27 @@ fn a_symlinked_runtime_child_is_refused_not_followed() {
     let tmp = workspace_local_tmpdir(&policy).expect("ordinary temp dir");
     std::fs::remove_dir(&tmp).unwrap();
     std::os::unix::fs::symlink(outside.path(), &tmp).unwrap();
+
+    let redirected = workspace_local_tmpdir(&policy).expect("the workspace fallback");
+    std::fs::remove_dir_all(tmp.parent().unwrap()).unwrap();
+    assert!(redirected.starts_with(workspace.path().canonicalize().unwrap()));
+    assert!(redirected.ends_with(WORKSPACE_TMPDIR_NAME));
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+/// A fallback dir swapped for a symlink is refused too. With both locations
+/// refused there is no temp dir to hand out.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_workspace_fallback_is_refused_not_followed() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let policy = policy(workspace.path());
+    let tmp = workspace_local_tmpdir(&policy).expect("ordinary temp dir");
+    std::fs::remove_dir(&tmp).unwrap();
+    std::os::unix::fs::symlink(outside.path(), &tmp).unwrap();
+    std::os::unix::fs::symlink(outside.path(), workspace.path().join(WORKSPACE_TMPDIR_NAME))
+        .unwrap();
 
     let redirected = workspace_local_tmpdir(&policy);
     std::fs::remove_dir_all(tmp.parent().unwrap()).unwrap();

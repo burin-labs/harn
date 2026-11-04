@@ -1,0 +1,166 @@
+name: macOS PR tests
+
+run-name: macOS PR tests for #${{ inputs.pr }} at ${{ inputs.sha }}
+
+# The workspace nextest run for a pull request from a branch of this repository,
+# on the organization's Apple Silicon runners that hold no signing material. It
+# is dispatched on main by macos-pr-dispatch.yml with the pull request number and
+# head SHA, so the workflow text that picks the runner always comes from main.
+# The runner group admits this workflow at refs/heads/main only
+# (.github/restricted-runner-groups.json), which scripts/check_restricted_runner_routing.harn enforces.
+#
+# `report` publishes the result as the check run "macOS workspace tests (owned)" on
+# the pull request's head SHA. scripts/ci/owned_macos_pr_check.sh reads it back and
+# passes only a success recorded for exactly that SHA; a missing, running or
+# mismatched check is not a pass.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+      sha:
+        description: Head SHA of that pull request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# A newer head SHA for the same pull request supersedes an older run.
+concurrency:
+  group: macos-pr-tests-${{ inputs.pr }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+  CHECK_NAME: macOS workspace tests (owned)
+
+jobs:
+  admit:
+    name: Admit pull request head
+    if: github.repository == 'burin-labs/harn' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Confirm the head is this repository's and current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          pull="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")"
+          [[ "$(jq -r .state <<<"$pull")" == open ]]
+          [[ "$(jq -r .head.repo.full_name <<<"$pull")" == "$REPO" ]]
+          [[ "$(jq -r .head.sha <<<"$pull")" == "$HEAD_SHA" ]]
+
+  nextest:
+    name: Workspace nextest (owned macOS)
+    needs: admit
+    runs-on: ${{ github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-pr-macos"]') || 'macos-latest' }}
+    timeout-minutes: 75
+    steps:
+      # The probe comes from main, not from the pull request, and runs before any pull-request code is fetched.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Prove this runner account is isolated
+        run: bash trusted/scripts/ci/runner_isolation_probe.sh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/rust-toolchain
+      # One workspace target per runner, bounded, exactly as macos-nightly.yml keeps it.
+      - name: Use the runner's persistent workspace target
+        shell: bash
+        run: |
+          target="${HOME}/harn-ci/target/macos-pr-${RUNNER_NAME:?runner name is required}"
+          mkdir -p "${target}"
+          bash scripts/ci/bound_persistent_target.sh "${target}"
+          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
+      - name: Restore macOS workspace warm artifact
+        id: macos-warm-restore
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          ./scripts/ci/workspace_warm_artifact.sh macos download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}"
+          status=$?
+          set -e
+          if [[ "${status}" -eq 0 ]]; then
+            echo "macos_warm_restore=hit" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_warm_restore=miss" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Reuse unchanged workspace crates
+        if: ${{ steps.macos-warm-restore.outputs.macos_warm_restore == 'hit' }}
+        run: ./scripts/ci/reuse_workspace_crates.sh restore
+      - name: Install Go formatter
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.6"
+          cache: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: nextest@0.9.132
+      - name: Measure the build budget
+        id: resource-budget
+        run: bash scripts/ci/rust_resource_budget.sh
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          HARN_BUDGET_PROFILE: producer
+      - name: Run workspace nextest
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
+          RUST_TEST_JOB_LIMIT_MINUTES: 75
+          RUST_TEST_FEEDBACK_BUDGET_SECONDS: "1200"
+        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ci
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
+          "${CARGO_TARGET_DIR:-./target}/debug/harn" run smoke.harn
+
+  report:
+    name: Report the check on the head SHA
+    needs: [admit, nextest]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      checks: write
+    steps:
+      - name: Publish the result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ inputs.sha }}
+          ADMIT: ${{ needs.admit.result }}
+          NEXTEST: ${{ needs.nextest.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Only a run that was admitted and whose tests succeeded is a success; every other outcome is not.
+          if [[ "$ADMIT" == success && "$NEXTEST" == success ]]; then conclusion=success; else conclusion=failure; fi
+          gh api "repos/${REPO}/check-runs" -X POST \
+            -f name="$CHECK_NAME" -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$conclusion" \
+            -f details_url="$RUN_URL" -f "output[title]=${CHECK_NAME}: ${conclusion}" \
+            -f "output[summary]=admit=${ADMIT} nextest=${NEXTEST}"

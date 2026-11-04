@@ -371,7 +371,7 @@ async fn session_store_database_path_impl(
     ))
 }
 
-fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
+pub(crate) fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
     let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
         .map_err(store_error)?;
     let store = SqliteSessionStore::open_with_hooks(&path, store_hooks(Some(&path)))

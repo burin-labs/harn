@@ -377,7 +377,7 @@ test("the shipped workflow sweeps every 30 minutes and exposes a one-PR dispatch
   assert.equal(ship.with.repair, false);
   assert.match(
     ship.uses,
-    /^burin-labs\/\.github\/\.github\/workflows\/smart-ship\.yml@80668ab79200fff018943e50079b6fbc6005b196$/,
+    /^burin-labs\/\.github\/\.github\/workflows\/smart-ship\.yml@b01a881d7565d71bab96f911c8f1f813109cc9bc$/,
   );
   assert.deepEqual(
     JSON.parse(evaluate(ship.with["runs-on"], {}).coerceString()),

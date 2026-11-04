@@ -816,6 +816,15 @@ pub(super) fn transcript_with_session_metadata(
     VmValue::dict(next)
 }
 
+pub fn created_at(id: &str) -> Option<String> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .map(|state| state.created_at.clone())
+    })
+}
+
 /// Materialize the externally-visible view of a session: the transcript
 /// plus session-level metadata (lineage, pinned model, scratchpad, live
 /// clients, checkpoint counts, ...).

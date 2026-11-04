@@ -2,6 +2,7 @@
 """A target with an open artifact stays until its reader exits."""
 
 import os
+import platform
 from pathlib import Path
 import subprocess
 import sys
@@ -34,11 +35,16 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-reader-") as temporary:
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
         require(holder.stdout is not None and holder.stdout.readline().strip() == "ready", "reader did not start")
-        observed = subprocess.run(["lsof", "-t", "--", str(artifact)],
-                                  capture_output=True, text=True, check=True)
-        require(str(holder.pid) in observed.stdout.splitlines(), "reader was not measured")
-        census = subprocess.run(["lsof", "-n", "-Fpfn"], capture_output=True, text=True)
-        fully_measured = (census.returncode == 0 and bool(census.stdout) and not census.stderr
+        # Linux measures from /proc, which needs no lsof and no other user's
+        # process read.
+        linux = platform.system() == "Linux"
+        if not linux:
+            observed = subprocess.run(["lsof", "-t", "--", str(artifact)],
+                                      capture_output=True, text=True, check=True)
+            require(str(holder.pid) in observed.stdout.splitlines(), "reader was not measured")
+            census = subprocess.run(["lsof", "-n", "-Fpfn"], capture_output=True, text=True)
+        fully_measured = linux or (
+                          census.returncode == 0 and bool(census.stdout) and not census.stderr
                           and "fNOFD\n" not in census.stdout
                           and "Permission denied)" not in census.stdout
                           and "Operation not permitted)" not in census.stdout)
@@ -71,30 +77,33 @@ with tempfile.TemporaryDirectory(prefix="harn-gc-reader-") as temporary:
     fake_lsof.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     fake_lsof.chmod(0o755)
     unreadable_env = dict(env, PATH=str(fake_bin) + os.pathsep + env["PATH"])
-    unreadable = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
-    require("keep (process ownership unmeasured): reader" in unreadable.stdout, unreadable.stdout + unreadable.stderr)
-    require("blocked_named_entries=1" in unreadable.stdout, unreadable.stdout + unreadable.stderr)
-    require(target.is_dir(), "unreadable census removed the target")
-    fake_lsof.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    empty = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
-    require("keep (process ownership unmeasured): reader" in empty.stdout, empty.stdout + empty.stderr)
-    require("blocked_named_entries=1" in empty.stdout, empty.stdout + empty.stderr)
-    require(target.is_dir(), "empty census removed the target")
-    fake_lsof.write_text("#!/bin/sh\nprintf 'p999\\nfNOFD\\nn/proc/999/fd (opendir: Permission denied)\\n'\n", encoding="utf-8")
-    partial = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
-    require("keep (process ownership unmeasured): reader" in partial.stdout, partial.stdout + partial.stderr)
-    require("blocked_named_entries=1" in partial.stdout, partial.stdout + partial.stderr)
-    require(target.is_dir(), "partial census removed the target")
-    fake_lsof.write_text(
-        '#!/bin/sh\nif [ -e "$HARN_GC_LSOF_CALLED" ]; then exit 1; fi\n'
-        ': > "$HARN_GC_LSOF_CALLED"\nprintf "p$$\\nfcwd\\nn/\\n"\n',
-        encoding="utf-8",
-    )
-    late_failure_env = dict(unreadable_env, HARN_GC_LSOF_CALLED=str(root / "lsof-called"))
-    late_failure = subprocess.run(command, env=late_failure_env, capture_output=True, text=True)
-    require("process ownership unmeasured before removal" in late_failure.stderr, late_failure.stdout + late_failure.stderr)
-    require("blocked_named_entries=1" in late_failure.stdout, late_failure.stdout + late_failure.stderr)
-    require(target.is_dir(), "late census failure removed the target")
+    # Linux reads /proc instead of lsof; its census failures are covered by
+    # prune_stale_targets_linux_census_test.py.
+    if platform.system() != "Linux":
+        unreadable = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
+        require("keep (process ownership unmeasured): reader" in unreadable.stdout, unreadable.stdout + unreadable.stderr)
+        require("blocked_named_entries=1" in unreadable.stdout, unreadable.stdout + unreadable.stderr)
+        require(target.is_dir(), "unreadable census removed the target")
+        fake_lsof.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        empty = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
+        require("keep (process ownership unmeasured): reader" in empty.stdout, empty.stdout + empty.stderr)
+        require("blocked_named_entries=1" in empty.stdout, empty.stdout + empty.stderr)
+        require(target.is_dir(), "empty census removed the target")
+        fake_lsof.write_text("#!/bin/sh\nprintf 'p999\\nfNOFD\\nn/proc/999/fd (opendir: Permission denied)\\n'\n", encoding="utf-8")
+        partial = subprocess.run(command, env=unreadable_env, capture_output=True, text=True)
+        require("keep (process ownership unmeasured): reader" in partial.stdout, partial.stdout + partial.stderr)
+        require("blocked_named_entries=1" in partial.stdout, partial.stdout + partial.stderr)
+        require(target.is_dir(), "partial census removed the target")
+        fake_lsof.write_text(
+            '#!/bin/sh\nif [ -e "$HARN_GC_LSOF_CALLED" ]; then exit 1; fi\n'
+            ': > "$HARN_GC_LSOF_CALLED"\nprintf "p$$\\nfcwd\\nn/\\n"\n',
+            encoding="utf-8",
+        )
+        late_failure_env = dict(unreadable_env, HARN_GC_LSOF_CALLED=str(root / "lsof-called"))
+        late_failure = subprocess.run(command, env=late_failure_env, capture_output=True, text=True)
+        require("process ownership unmeasured before removal" in late_failure.stderr, late_failure.stdout + late_failure.stderr)
+        require("blocked_named_entries=1" in late_failure.stdout, late_failure.stdout + late_failure.stderr)
+        require(target.is_dir(), "late census failure removed the target")
     fake_ps = fake_bin / "ps"
     fake_ps.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     fake_ps.chmod(0o755)

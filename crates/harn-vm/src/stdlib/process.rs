@@ -741,10 +741,15 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_command_grant.rs"]
+mod command_grant;
 #[path = "process_credential_presence.rs"]
 mod credential_presence;
 #[path = "process_program_resolution.rs"]
 mod program_resolution;
+pub use crate::stdlib::sandbox::workspace_env::grant_spawn::OwnSpawnLaunch;
+pub(crate) use command_grant::ExecProfile;
+pub use command_grant::{command_bound_grant_reaches, granted_spawn, GrantedSpawn};
 pub(crate) use credential_presence::{session_env_presence, SessionEnvPresenceError};
 pub(crate) use program_resolution::{
     find_executable_for_spawn, resolve_program_path, resolve_program_path_for_spawn,
@@ -1250,8 +1255,20 @@ pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError>
 }
 
 /// The environment a spawn of `program` should see under the live session
-/// policy: session-scoped grants plus any `for_command` binding that matches.
+/// policy: session-scoped grants plus any `for_command` binding that matches,
+/// except one whose program can run others with it, which only
+/// [`granted_spawn`] exposes.
 pub(crate) fn session_env_for_command(
+    program: &str,
+) -> Result<Option<BTreeMap<String, String>>, VmError> {
+    let mut env = session_env_with_command_grants(program)?;
+    if let Some(env) = env.as_mut() {
+        command_grant::strip_profiled_grants(program, env);
+    }
+    Ok(env)
+}
+
+fn session_env_with_command_grants(
     program: &str,
 ) -> Result<Option<BTreeMap<String, String>>, VmError> {
     session_env_with(
@@ -1290,6 +1307,19 @@ fn session_env_with(
             .any(|grant| grant.exposed_env_var() == Some(key.as_str()) && grant_owns_key(grant));
         if !grant_owns {
             env.insert(key, value);
+        }
+    }
+    // Every value a grant hands a child is filtered out of what it prints.
+    for grant in environment
+        .grants()
+        .iter()
+        .filter(|grant| grant_owns_key(grant))
+    {
+        let value = grant.exposed_env_var().and_then(|var| env.get(var));
+        if value.is_some_and(|value| !crate::session_inputs::register_granted_value(value)) {
+            return Err(VmError::Thrown(VmValue::string(
+                "[environment_policy.redaction_full] too many granted values to redact",
+            )));
         }
     }
     if let Some((name, socket)) = granted_ssh_agent_env() {
