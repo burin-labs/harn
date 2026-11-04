@@ -7,15 +7,15 @@ use time::OffsetDateTime;
 fn at(second: i64) -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp(1_800_000_000 + second).unwrap()
 }
-fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, second: i64) {
-    let input = SignalInput {
+fn input_for(monitor: &str, summary: String) -> SignalInput {
+    SignalInput {
         key: Some(monitor.into()),
         event: TriageEvent::manual(
             ManualEvent {
                 provider: "fixture".into(),
                 source_kind: "log".into(),
                 source_url: "file:///fixture/log".into(),
-                summary: format!("line {id}"),
+                summary,
                 why_it_matters: "New output".into(),
                 proposed_action: "Inspect output".into(),
                 urgency: String::new(),
@@ -27,7 +27,10 @@ fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, se
         routing: RoutingHints::default(),
         provenance: Provenance::local("fixture"),
         expires_at: None,
-    };
+    }
+}
+fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, second: i64) {
+    let input = input_for(monitor, format!("line {id}"));
     inbox
         .capture_execution(session, epoch, &id.to_string(), input, at(second))
         .unwrap();
@@ -390,56 +393,48 @@ fn a_dead_session_with_unaccepted_captures_stops_pinning_its_record() {
 }
 
 #[test]
-fn a_forgotten_live_session_captures_again_and_keeps_monitoring() {
+fn a_forgotten_live_session_resumes_with_its_start_and_a_late_producer_cannot_reopen_it() {
     let (_dir, inbox) = open();
-    assert!(matches!(
-        inbox.dispatch_claim("A", "run1", at(WEEK)),
-        Err(harn_signals::SignalsError::DispatchForgotten)
-    ));
-
-    let input = SignalInput {
-        key: Some("log".into()),
-        event: TriageEvent::manual(
-            ManualEvent {
-                provider: "fixture".into(),
-                source_kind: "log".into(),
-                source_url: "file:///fixture/log".into(),
-                summary: "line after a quiet week".into(),
-                why_it_matters: "New output".into(),
-                proposed_action: "Inspect output".into(),
-                urgency: String::new(),
-            },
-            "log",
-        )
-        .unwrap(),
-        severity: Severity::Warning,
-        routing: RoutingHints::default(),
-        provenance: Provenance::local("fixture"),
-        expires_at: None,
+    let forgotten = |result: Result<(), harn_signals::SignalsError>| {
+        assert!(matches!(
+            result,
+            Err(harn_signals::SignalsError::DispatchForgotten)
+        ));
     };
+    forgotten(inbox.dispatch_claim("A", "run1", at(WEEK)).map(|_| ()));
+    let late = input_for("log", "a late line".into());
+    forgotten(
+        inbox
+            .capture_execution("A", "run1", "late", late, at(WEEK))
+            .map(|_| ()),
+    );
+    assert!(inbox.snapshot(at(WEEK)).unwrap().dispatch.is_empty());
+    assert_eq!(
+        inbox.dispatch_cancel("A", "run1", None, at(WEEK)).unwrap(),
+        0
+    );
+
+    // The host's poll starts the session before it claims, with its own interval.
     inbox
-        .capture_execution_or_restart("A", "run1", "later", Some(30), input, at(WEEK))
+        .dispatch_start("A", "run1", Some(300), at(WEEK))
         .unwrap();
+    capture(&inbox, "A", "run1", "log", 1, WEEK);
     assert_eq!(
         inbox
-            .dispatch_claim_or_restart("A", "run1", Some(30), at(WEEK + 29))
+            .dispatch_claim("A", "run1", at(WEEK + 60))
             .unwrap()
             .next_due_at,
-        Some(at(WEEK + 30))
+        Some(at(WEEK + 300))
     );
+    inbox
+        .dispatch_start("A", "run1", Some(300), at(WEEK + 300))
+        .unwrap();
     let claim = inbox
-        .dispatch_claim_or_restart("A", "run1", Some(30), at(WEEK + 30))
+        .dispatch_claim("A", "run1", at(WEEK + 300))
         .unwrap()
         .claim
         .unwrap();
     assert_eq!(claim.batch.occurrences.len(), 1);
-
-    // A claim alone restarts too, so a host with nothing captured stays on the books.
-    let poll = inbox
-        .dispatch_claim_or_restart("A", "run1", Some(30), at(3 * WEEK))
-        .unwrap();
-    assert_eq!(poll.pending, 0);
-    assert_eq!(inbox.snapshot(at(3 * WEEK)).unwrap().dispatch.len(), 1);
 }
 
 #[test]

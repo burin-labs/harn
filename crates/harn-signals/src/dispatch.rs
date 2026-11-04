@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
-use crate::{
-    CaptureIdentity, Config, Inbox, InboxSnapshot, Signal, SignalInput, SignalsError, Transition,
-};
+use crate::{CaptureIdentity, Config, Inbox, InboxSnapshot, Signal, SignalsError};
 
 pub const DEFAULT_DISPATCH_INTERVAL_SECONDS: u32 = 60;
 
@@ -242,45 +240,6 @@ impl Inbox {
         })?
     }
 
-    /// Claim for a host that keeps monitoring: a session the inbox forgot while
-    /// it was quiet is started again. Pass the session's interval if it is not
-    /// the default, since the forgotten record held it.
-    pub fn dispatch_claim_or_restart(
-        &self,
-        session_id: &str,
-        execution_id: &str,
-        interval_seconds: Option<u32>,
-        now: OffsetDateTime,
-    ) -> Result<DispatchPoll, SignalsError> {
-        match self.dispatch_claim(session_id, execution_id, now) {
-            Err(SignalsError::DispatchForgotten) => {
-                self.dispatch_start(session_id, execution_id, interval_seconds, now)?;
-                self.dispatch_claim(session_id, execution_id, now)
-            }
-            result => result,
-        }
-    }
-
-    /// Capture for a host that keeps monitoring, on the same terms as
-    /// [`Inbox::dispatch_claim_or_restart`].
-    pub fn capture_execution_or_restart(
-        &self,
-        session_id: &str,
-        execution_id: &str,
-        event_id: &str,
-        interval_seconds: Option<u32>,
-        input: SignalInput,
-        now: OffsetDateTime,
-    ) -> Result<Transition, SignalsError> {
-        match self.capture_execution(session_id, execution_id, event_id, input.clone(), now) {
-            Err(SignalsError::DispatchForgotten) => {
-                self.dispatch_start(session_id, execution_id, interval_seconds, now)?;
-                self.capture_execution(session_id, execution_id, event_id, input, now)
-            }
-            result => result,
-        }
-    }
-
     /// Commit the host's idempotent acceptance of a batch. This is the pacing
     /// boundary, not signal capture, a poll, or a lease. A crashed host must first
     /// query its durable acceptance by batch id before initiating inference.
@@ -350,10 +309,10 @@ impl Inbox {
     ) -> Result<usize, SignalsError> {
         let config = self.config();
         self.transact(now, |state| {
-            let gate = state
-                .dispatch
-                .get(session_id)
-                .ok_or(SignalsError::DispatchForgotten)?;
+            // A forgotten session already has nothing to cancel.
+            let Some(gate) = state.dispatch.get(session_id) else {
+                return Ok(0);
+            };
             if gate.execution_id != execution_id {
                 return Err(invalid("dispatch epoch is stale"));
             }
@@ -450,7 +409,7 @@ fn cancel_session_captures(state: &mut InboxSnapshot, session_id: &str, now: Off
 /// Sessions rarely say they ended. One that has neither polled nor captured for
 /// the retention period is treated as dead: its unaccepted captures are
 /// cancelled and its gate goes the way a settled signal does. A host that was
-/// only silent gets `DispatchForgotten`; the CLI and script adapters restart on it.
+/// only silent gets `DispatchForgotten` and resumes with an idempotent start.
 pub(crate) fn prune_idle_gates(
     state: &mut InboxSnapshot,
     retain_for: Duration,
