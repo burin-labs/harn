@@ -48,7 +48,6 @@ import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-import { agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { AgentStallState } from "std/agent/stall_types"
 import {
   agent_stall_no_net_progress,
@@ -669,19 +668,6 @@ pub fn agent_loop_post_turn_transition(
     if text_only_nudge_budget_exceeded {
       return {action: "break", state: next + {final_status: "stuck", stop_reason: "max_nudges"}}
     }
-    agent_scratchpad_reorganize_if_due(
-      harness.agent,
-      harness.llm,
-      session,
-      next.opts,
-      context.iteration_index,
-      {
-        reason: "iteration_end",
-        outcome_kind: outcome.kind,
-        bridge_step_delivered: context.bridge_step_delivered,
-        tool_count: tool_count,
-      },
-    )
     if next.turns_since_progress >= 2
       && next.turns_since_progress <= turn_max_nudges
       && !(outcome?.nudged_this_turn ?? false)

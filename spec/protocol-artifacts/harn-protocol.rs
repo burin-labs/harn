@@ -1509,7 +1509,6 @@ pub struct ACPSessionRequestPermissionResult {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HarnAgentEventKind {
     AgentLoopStallWarning,
-    AgentScratchpadReorganization,
     AnchorChanged,
     BoundaryFailure,
     BudgetCircuitBreaker,
@@ -1577,7 +1576,6 @@ impl HarnAgentEventKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AgentLoopStallWarning => "agent_loop_stall_warning",
-            Self::AgentScratchpadReorganization => "agent_scratchpad_reorganization",
             Self::AnchorChanged => "anchor_changed",
             Self::BoundaryFailure => "boundary_failure",
             Self::BudgetCircuitBreaker => "budget_circuit_breaker",
@@ -1660,7 +1658,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "agent_loop_stall_warning" => Self::AgentLoopStallWarning,
-            "agent_scratchpad_reorganization" => Self::AgentScratchpadReorganization,
             "anchor_changed" => Self::AnchorChanged,
             "boundary_failure" => Self::BoundaryFailure,
             "budget_circuit_breaker" => Self::BudgetCircuitBreaker,
@@ -2362,8 +2359,6 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 ];
 
 pub const HARN_AGENT_EVENT_KIND_AGENT_LOOP_STALL_WARNING: &str = "agent_loop_stall_warning";
-pub const HARN_AGENT_EVENT_KIND_AGENT_SCRATCHPAD_REORGANIZATION: &str =
-    "agent_scratchpad_reorganization";
 pub const HARN_AGENT_EVENT_KIND_ANCHOR_CHANGED: &str = "anchor_changed";
 pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
@@ -2432,7 +2427,6 @@ pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "agent_loop_stall_warning",
-    "agent_scratchpad_reorganization",
     "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
@@ -5519,13 +5513,6 @@ pub struct HarnAgentsEventProjection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventAgentScratchpadReorganization {
-    pub iteration: u64,
-    pub status: String,
-    pub details: Value,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventAnchorChanged {
     pub previous: Value,
     pub current: Value,
@@ -6292,8 +6279,6 @@ pub struct HarnAgentEventTypedCheckpoint {
 pub enum HarnAgentEventPayload {
     #[serde(rename = "agent_loop_stall_warning")]
     AgentLoopStallWarning(std::collections::BTreeMap<String, Value>),
-    #[serde(rename = "agent_scratchpad_reorganization")]
-    AgentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization),
     #[serde(rename = "anchor_changed")]
     AnchorChanged(HarnAgentEventAnchorChanged),
     #[serde(rename = "boundary_failure")]

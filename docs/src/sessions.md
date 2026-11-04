@@ -70,16 +70,13 @@ the "one-shot" call shape.
 | `harness.agent.session_store_presence(id, opts?)` | `dict` | Bounded durable journal lookup through an already-owned store. Returns `present` with `has_events`, `missing`, `absent`, or `unavailable`; errors remain errors. |
 | `harness.agent.current_id()` | `string` or `nil` | Returns the innermost active session id for the current execution, or `nil` outside any active session. |
 | `harness.agent.length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
-| `harness.agent.snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
+| `harness.agent.snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
 | `harness.agent.ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
 | `harness.agent.actor_chain(id?)` | `dict` or `nil` | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted. |
 | `actor_chain_validate_scope_attenuation(chain, opts?)` | `dict` | Validates monotonic actor-chain scopes. `opts` accepts `policy`, `raise`, `alert`, and `trace_id`. |
 | `harness.agent.reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
 | `harness.agent.fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
 | `harness.agent.fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
-| `harness.agent.scratchpad(id)` | `dict` or `nil` | Returns the small session-local agent scratchpad. Errors if `id` does not exist. |
-| `harness.agent.set_scratchpad(id, scratchpad, opts?)` | `dict` | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata`. |
-| `harness.agent.clear_scratchpad(id, opts?)` | `dict` | Clears the scratchpad and returns `{ok, version, scratchpad: nil}`. |
 | `harness.agent.trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
 | `harness.agent.compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
 | `harness.agent.attach(id, client_id, opts?)` | `dict` | Attaches a live client. `opts.mode` is `"observer"` or `"controller"`; a second controller requires `takeover: true` or `harness.agent.takeover`. |

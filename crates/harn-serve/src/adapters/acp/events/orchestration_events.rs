@@ -89,21 +89,6 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                 },
             );
         }
-        AgentEvent::AgentScratchpadReorganization {
-            session_id,
-            iteration,
-            status,
-            details,
-        } => {
-            sink.emit_agent_event(
-                session_id,
-                &payloads::AgentScratchpadReorganization {
-                    iteration: *iteration,
-                    status: status.clone(),
-                    details: details.clone(),
-                },
-            );
-        }
         AgentEvent::FeedbackInjected {
             session_id,
             kind,

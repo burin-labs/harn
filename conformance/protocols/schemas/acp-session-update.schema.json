@@ -157,7 +157,6 @@
             "kind": {
               "enum": [
                 "agent_loop_stall_warning",
-                "agent_scratchpad_reorganization",
                 "anchor_changed",
                 "boundary_failure",
                 "budget_circuit_breaker",

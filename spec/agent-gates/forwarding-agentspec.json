@@ -492,20 +492,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-    "expression": "agent_scratchpad_init(harness.agent, initialized_session, opts)",
-    "owner": "agent_scratchpad_init",
-    "evidence": "Consumer agent_scratchpad_init.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_scratchpad_init",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "__dict_omit(opts, [\"context_profile\"])",
     "owner": "__dict_omit",
     "evidence": "The dictionary projection removes the loop-owned context profile before session initialization without interpreting option values."
@@ -1383,20 +1369,6 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-    "expression": "agent_scratchpad_options(opts)",
-    "owner": "agent_scratchpad_options",
-    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_scratchpad_options",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration)",
     "owner": "__arbitrate_stalled_toolless_turn",
@@ -2091,20 +2063,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "__agent_projection_with_scratchpad_barrier(\n    agent,\n    session_id,\n    projection_opts,\n    opts,\n  )",
-    "owner": "__agent_projection_with_scratchpad_barrier",
-    "evidence": "Consumer __agent_projection_with_scratchpad_barrier.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__agent_projection_with_scratchpad_barrier",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_text_tool_contract_prompt(harness.fs, harness.llm, opts)",
     "owner": "__agent_text_tool_contract_prompt",
     "evidence": "Consumer __agent_text_tool_contract_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -2168,34 +2126,6 @@
       {
         "scope": "AgentSpec",
         "function": "agent_has_tools",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "agent_scratchpad_options(opts)",
-    "owner": "agent_scratchpad_options",
-    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_scratchpad_options",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "agent_scratchpad_recitation_fragment(harness.agent, session, opts)",
-    "owner": "agent_scratchpad_recitation_fragment",
-    "evidence": "Consumer agent_scratchpad_recitation_fragment.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_scratchpad_recitation_fragment",
         "parameter": "opts"
       }
     ]
@@ -2619,20 +2549,6 @@
     "expression": "type_of(opts)",
     "owner": "type_of",
     "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-    "expression": "agent_scratchpad_options(opts)",
-    "owner": "agent_scratchpad_options",
-    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_scratchpad_options",
-        "parameter": "opts"
-      }
-    ]
   },
   {
     "scope": "AgentSpec",

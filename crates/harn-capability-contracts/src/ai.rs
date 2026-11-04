@@ -1247,21 +1247,6 @@ capability_method!(
     "Read the session system prompt."
 );
 capability_method!(
-    agent_scratchpad,
-    "harness.agent.scratchpad",
-    ["state.read@arg0"],
-    "__cap_agent_scratchpad(id: string) -> dict?",
-    "Read the session scratchpad."
-);
-capability_method!(
-    agent_set_scratchpad,
-    "harness.agent.set_scratchpad",
-    ["state.write@arg0"],
-    "__cap_agent_set_scratchpad(id: string, scratchpad: dict, opts?: dict) -> dict",
-    "Set the session scratchpad.",
-    runtime_control_plane
-);
-capability_method!(
     agent_goal,
     "harness.agent.goal",
     ["state.read@arg0"],
@@ -1298,14 +1283,6 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_end_goal_turn(id: string, cancelled: bool) -> nil",
     "Close a goal turn before terminal sealing.",
-    runtime_control_plane
-);
-capability_method!(
-    agent_clear_scratchpad,
-    "harness.agent.clear_scratchpad",
-    ["state.mutate@arg0"],
-    "__cap_agent_clear_scratchpad(id: string, opts?: dict) -> dict",
-    "Clear the session scratchpad.",
     runtime_control_plane
 );
 capability_method!(

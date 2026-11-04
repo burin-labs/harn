@@ -466,7 +466,6 @@ catalog_entries! {
     "agent/approval_review_calibration" => "stdlib/agent/approval_review_calibration.harn",
     "agent/guardrails" => "stdlib/agent/guardrails.harn",
     "agent/step_judge" => "stdlib/agent/step_judge.harn",
-    "agent/scratchpad" => "stdlib/agent/scratchpad.harn",
     "agent/fact" => "stdlib/agent/fact.harn",
     "agent/hypothesis" => "stdlib/agent/hypothesis.harn",
     "agent/pattern_knowledge_values" => "stdlib/agent/pattern_knowledge_values.harn",

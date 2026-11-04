@@ -69,14 +69,6 @@ open_kinds! {
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentScratchpadReorganization {
-    pub iteration: usize,
-    pub status: String,
-    pub details: Value,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct AnchorChanged {
     pub previous: Option<Value>,
     pub current: Value,
@@ -787,7 +779,6 @@ macro_rules! agent_event_registry {
 
 agent_event_registry! {
     "agent_loop_stall_warning" => AgentLoopStallWarning,
-    "agent_scratchpad_reorganization" => AgentScratchpadReorganization,
     "anchor_changed" => AnchorChanged,
     "boundary_failure" => BoundaryFailure,
     "budget_circuit_breaker" => BudgetCircuitBreaker,

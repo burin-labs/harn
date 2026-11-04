@@ -789,13 +789,6 @@ pub(super) fn transcript_with_session_metadata(
     } else {
         metadata.remove(WORKSPACE_ANCHOR_METADATA_KEY);
     }
-    if let Some(scratchpad) = state.scratchpad.as_ref() {
-        metadata.put("agent_scratchpad", scratchpad.clone());
-        metadata.put_int("agent_scratchpad_version", state.scratchpad_version as i64);
-    } else {
-        metadata.remove("agent_scratchpad");
-        metadata.remove("agent_scratchpad_version");
-    }
     if let Some(last_action) = state.last_transcript_budget_action.as_ref() {
         let usage = transcript_usage(
             &VmValue::dict(next.clone()),
@@ -826,7 +819,7 @@ pub fn created_at(id: &str) -> Option<String> {
 }
 
 /// Materialize the externally-visible view of a session: the transcript
-/// plus session-level metadata (lineage, pinned model, scratchpad, live
+/// plus session-level metadata (lineage, pinned model, live
 /// clients, checkpoint counts, ...).
 ///
 /// `state.subscribers` (closure callbacks registered for agent-loop
@@ -907,8 +900,6 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
         "actor_chain",
         state.actor_chain.as_ref().map(ActorChain::to_vm_value),
     );
-    next.put_nullable("scratchpad", state.scratchpad.clone());
-    next.put_int("scratchpad_version", state.scratchpad_version as i64);
     next.put(
         "goal",
         crate::value::json::json_to_vm_value(

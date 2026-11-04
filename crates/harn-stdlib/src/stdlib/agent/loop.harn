@@ -100,7 +100,6 @@ pub fn agent_loop(
     // prompt. Dynamic fragments must never become the next turn's base.
     opts = opts
       + {_primary_system: __agent_primary_system_text(harness.agent, initialized_session, opts)}
-    agent_scratchpad_init(harness.agent, initialized_session, opts)
     if opts?._tool_format_override != nil {
       agent_emit_event(
         harness.agent,
