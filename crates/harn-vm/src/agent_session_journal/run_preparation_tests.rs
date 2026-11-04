@@ -83,7 +83,7 @@ fn assert_settled_attempts(events: &[Value], expected: usize) {
         expected * 2,
         "every dispatch must settle: {speeds:?}"
     );
-    for pair in speeds.chunks_exact(2) {
+    for pair in speeds.as_chunks::<2>().0 {
         assert_eq!(pair[0]["speed"]["is_final"], false);
         assert_eq!(pair[1]["speed"]["is_final"], true);
         assert_eq!(pair[1]["speed"]["phase"], "complete");
