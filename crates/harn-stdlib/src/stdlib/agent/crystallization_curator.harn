@@ -109,7 +109,9 @@ fn cc_repeated_recoveries(cards: list) -> list {
       }
     }
     if last_ok && failure_rerun_passed {
-      const session = cc_text(card?.session_id) != "" ? cc_text(card?.session_id) : cc_text(card?.id)
+      const session = cc_text(card?.session_id) != "" ? cc_text(card?.session_id) : cc_text(
+        card?.id,
+      )
       if !sessions.contains(session) {
         sessions = sessions + [session]
       }
@@ -879,8 +881,9 @@ fn cc_only_repeats_declared_checks(verify_command: string, declared: list) -> bo
 fn cc_session_passed_command(evidence: list, command: string) -> bool {
   return evidence.any(
     { item ->
-      (item?.command_ledger ?? [])
-        .any({ entry -> entry?.ok == true && to_string(entry?.command ?? "").contains(command) })
+      (item?.command_ledger ?? []).any(
+        { entry -> entry?.ok == true && to_string(entry?.command ?? "").contains(command) },
+      )
     },
   )
 }
@@ -892,8 +895,7 @@ fn cc_session_passed_command(evidence: list, command: string) -> bool {
  * session that ran it shows future sessions pay nothing new for it.
  */
 fn cc_required_declared_checks(declared: list, evidence: list) -> list {
-  return declared
-    .filter(
+  return declared.filter(
     { check ->
       check.intent == "test"
         || (check.intent == "verify" && cc_session_passed_command(evidence, check.command))
@@ -1153,7 +1155,12 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], evidence, options)
+          const proposals = cc_prepare_valid_proposals(
+            harness,
+            args?.proposals ?? [],
+            evidence,
+            options,
+          )
           const result = pattern_learning_record_curated_batch(
             harness,
             args + {proposals: proposals},
