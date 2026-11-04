@@ -539,6 +539,17 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&ancestor)
         ));
     }
+    // A granted spawn re-reads its own private directory inside the denied
+    // per-spawn root. Later rules win, so this follows the denials, and it
+    // names only that one directory.
+    if let Some(own) = super::workspace_env::grant_spawn::own_spawn_read_root() {
+        for path in sandbox_profile_path_aliases(&own.display().to_string()) {
+            profile.push_str(&format!(
+                "(allow file-read* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
+    }
     if let Some(socket) = &policy.process_sandbox.ssh_agent_socket {
         for path in sandbox_profile_path_aliases(socket) {
             let escaped = sandbox_profile_escape(&path);

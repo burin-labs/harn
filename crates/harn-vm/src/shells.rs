@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::value::{VmError, VmValue};
 
+mod command_grant;
 mod command_plan;
 pub use command_plan::{
     plan_invocation, plan_posix_command, plan_posix_sequence,

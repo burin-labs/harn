@@ -90,7 +90,7 @@ jobs:
       ${{ needs.availability.result == 'success'
       && fromJSON(needs.availability.outputs.capacity).linux_big.measured == true
       && fromJSON(needs.availability.outputs.capacity).linux_big.eligible == true }}
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@80668ab79200fff018943e50079b6fbc6005b196
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@b01a881d7565d71bab96f911c8f1f813109cc9bc
     with:
       runs-on: ${{ toJSON(fromJSON('["self-hosted","Linux","X64","harn-ci-big"]')) }}
       repair: false
