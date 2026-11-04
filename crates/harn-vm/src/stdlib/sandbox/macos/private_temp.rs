@@ -79,19 +79,14 @@ const SCAN_LOCK: &str = "harn-aliases-reap.lock";
 fn schedule_alias_cleanup(base: PathBuf) {
     static STARTED: Once = Once::new();
     STARTED.call_once(|| {
-        if let Err(error) = std::thread::Builder::new()
-            .name("harn-temp-alias-cleanup".to_string())
-            .spawn(move || {
-                // SAFETY: this changes only the cleanup thread's scheduling class.
-                unsafe {
-                    let _ = libc::pthread_set_qos_class_self_np(
-                        libc::qos_class_t::QOS_CLASS_UTILITY,
-                        0,
-                    );
-                }
-                reap_dangling_aliases(&base);
-            })
-        {
+        if let Err(error) = crate::task_spawn::named_thread("harn-temp-alias-cleanup", move || {
+            // SAFETY: this changes only the cleanup thread's scheduling class.
+            unsafe {
+                let _ =
+                    libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+            }
+            reap_dangling_aliases(&base);
+        }) {
             tracing::debug!(%error, "cannot start temporary-alias cleanup");
         }
     });
