@@ -57,6 +57,9 @@ pub(crate) struct SignalsFireArgs {
     /// Active monitor execution epoch established by dispatch start.
     #[arg(long, requires_all = ["event_id", "session"])]
     pub execution: Option<String>,
+    /// Pacing to use if the inbox forgot this session and it starts again.
+    #[arg(long, requires = "execution")]
+    pub interval_seconds: Option<u32>,
     /// Capture a distinct occurrence instead of updating a condition. Use a
     /// stable file cursor or producer sequence; identical text may recur.
     #[arg(long, requires = "session")]
@@ -218,7 +221,11 @@ pub(crate) enum SignalsDispatchCommand {
         interval_seconds: Option<u32>,
     },
     /// Claim one due batch only when the host can accept it safely.
-    Claim,
+    Claim {
+        /// Pacing to use if the inbox forgot this session and it starts again.
+        #[arg(long)]
+        interval_seconds: Option<u32>,
+    },
     /// Commit idempotent durable host acceptance, before model dispatch.
     Accept {
         #[arg(long)]

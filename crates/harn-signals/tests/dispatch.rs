@@ -337,7 +337,7 @@ fn end_session_invalidates_claim_and_epoch_and_scope_capacity_is_explicit() {
         .dispatch_start("B", "run1", None, at(63))
         .unwrap_err()
         .to_string();
-    assert!(refused.contains("or raise the cap"));
+    assert!(refused.contains("raise the cap"));
     let gates = bounded.snapshot(at(63)).unwrap().dispatch;
     assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "C"]);
 }
@@ -387,6 +387,59 @@ fn a_dead_session_with_unaccepted_captures_stops_pinning_its_record() {
     assert_eq!(saved.dispatch.keys().collect::<Vec<_>>(), ["B"]);
     let output = saved.signals.values().next().unwrap();
     assert!(!output.is_pending() && output.cancelled_at.is_some());
+}
+
+#[test]
+fn a_forgotten_live_session_captures_again_and_keeps_monitoring() {
+    let (_dir, inbox) = open();
+    assert!(matches!(
+        inbox.dispatch_claim("A", "run1", at(WEEK)),
+        Err(harn_signals::SignalsError::DispatchForgotten)
+    ));
+
+    let input = SignalInput {
+        key: Some("log".into()),
+        event: TriageEvent::manual(
+            ManualEvent {
+                provider: "fixture".into(),
+                source_kind: "log".into(),
+                source_url: "file:///fixture/log".into(),
+                summary: "line after a quiet week".into(),
+                why_it_matters: "New output".into(),
+                proposed_action: "Inspect output".into(),
+                urgency: String::new(),
+            },
+            "log",
+        )
+        .unwrap(),
+        severity: Severity::Warning,
+        routing: RoutingHints::default(),
+        provenance: Provenance::local("fixture"),
+        expires_at: None,
+    };
+    inbox
+        .capture_execution_or_restart("A", "run1", "later", Some(30), input, at(WEEK))
+        .unwrap();
+    assert_eq!(
+        inbox
+            .dispatch_claim_or_restart("A", "run1", Some(30), at(WEEK + 29))
+            .unwrap()
+            .next_due_at,
+        Some(at(WEEK + 30))
+    );
+    let claim = inbox
+        .dispatch_claim_or_restart("A", "run1", Some(30), at(WEEK + 30))
+        .unwrap()
+        .claim
+        .unwrap();
+    assert_eq!(claim.batch.occurrences.len(), 1);
+
+    // A claim alone restarts too, so a host with nothing captured stays on the books.
+    let poll = inbox
+        .dispatch_claim_or_restart("A", "run1", Some(30), at(3 * WEEK))
+        .unwrap();
+    assert_eq!(poll.pending, 0);
+    assert_eq!(inbox.snapshot(at(3 * WEEK)).unwrap().dispatch.len(), 1);
 }
 
 #[test]

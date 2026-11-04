@@ -310,6 +310,13 @@ Replacing the execution cancels its outstanding captures and preserves the
 session's last acceptance time. Producers must supply the active execution ID;
 unscoped or stale output is refused once a session is dispatch-managed.
 
+`signals fire` and `dispatch ... claim`, and their `signal_fire` and
+`signal_dispatch` forms, start a forgotten session again and carry on, so a host
+that was only silent keeps monitoring. Pass `--interval-seconds` (or
+`interval_seconds`) to them if the session does not use the default, because
+the forgotten record held its interval. Accepting or cancelling on a forgotten
+session fails with `DispatchForgotten`.
+
 A successful claim has a stable batch ID, immutable captured occurrences, a claim token,
 and a lease expiry. Another claimant waits. After expiry, recovery claims the
 same batch ID and content with a new token. Captures arriving after a claim
@@ -341,10 +348,10 @@ Cancellation does not retract content a host has already accepted.
 
 The same operations are available to scripts through
 `harness.runtime.signal_dispatch`, with `session_id`, `execution_id`, `dir`,
-and `operation` (`start`, `claim`, `accept`, or `cancel`). Start accepts
+and `operation` (`start`, `claim`, `accept`, or `cancel`). Start and claim accept
 `interval_seconds`, acceptance requires `batch_id` and `token`, and cancellation
 optionally accepts `monitor_key`. `signal_fire` accepts `session_id`,
-`execution_id`, and `event_id` for epoch-scoped capture.
+`execution_id`, `event_id` and `interval_seconds` for epoch-scoped capture.
 
 Pacing, execution state, and outstanding claims survive inbox reopening under
 the must-understand v3 schema. A persisted observed-time high-water mark holds

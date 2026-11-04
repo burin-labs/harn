@@ -107,12 +107,20 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
         SignalsCommand::Fire(fire) => {
             let json = fire.json;
             let execution = fire.execution.clone();
+            let interval_seconds = fire.interval_seconds;
             let event_id = fire.event_id.clone();
             let session = fire.session.clone();
             let input = fire_input(*fire, now)?;
             let transition = match (session, event_id) {
                 (Some(session), Some(event_id)) => match execution {
-                    Some(epoch) => inbox.capture_execution(&session, &epoch, &event_id, input, now),
+                    Some(epoch) => inbox.capture_execution_or_restart(
+                        &session,
+                        &epoch,
+                        &event_id,
+                        interval_seconds,
+                        input,
+                        now,
+                    ),
                     None => inbox.capture(&session, &event_id, input, now),
                 },
                 (None, None) => inbox.fire(input, now),
@@ -131,8 +139,13 @@ fn run_command(args: SignalsArgs) -> Result<(), String> {
                         now,
                     )
                     .map(|()| serde_json::json!({"started": true})),
-                SignalsDispatchCommand::Claim => inbox
-                    .dispatch_claim(&dispatch.session, &dispatch.execution, now)
+                SignalsDispatchCommand::Claim { interval_seconds } => inbox
+                    .dispatch_claim_or_restart(
+                        &dispatch.session,
+                        &dispatch.execution,
+                        interval_seconds,
+                        now,
+                    )
                     .and_then(|poll| {
                         serde_json::to_value(poll)
                             .map_err(|e| harn_signals::SignalsError::InvalidInput(e.to_string()))

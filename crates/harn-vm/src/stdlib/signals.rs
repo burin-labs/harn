@@ -131,6 +131,8 @@ struct FireRequest {
     #[serde(default)]
     execution_id: Option<String>,
     #[serde(default)]
+    interval_seconds: Option<u32>,
+    #[serde(default)]
     event_id: Option<String>,
     #[serde(default)]
     key: Option<String>,
@@ -249,9 +251,14 @@ fn signal_fire_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let transition = match (request.session_id, request.execution_id, request.event_id) {
         (None, None, None) => inbox.fire(input, now),
         (Some(session), None, Some(event)) => inbox.capture(&session, &event, input, now),
-        (Some(session), Some(epoch), Some(event)) => {
-            inbox.capture_execution(&session, &epoch, &event, input, now)
-        }
+        (Some(session), Some(epoch), Some(event)) => inbox.capture_execution_or_restart(
+            &session,
+            &epoch,
+            &event,
+            request.interval_seconds,
+            input,
+            now,
+        ),
         _ => {
             return Err(runtime_error(
                 "signal_fire",
@@ -597,7 +604,7 @@ struct DispatchRequest {
 #[serde(tag = "operation", rename_all = "snake_case")]
 enum DispatchOperation {
     Start { interval_seconds: Option<u32> },
-    Claim,
+    Claim { interval_seconds: Option<u32> },
     Accept { batch_id: String, token: String },
     Cancel { monitor_key: Option<String> },
 }
@@ -621,9 +628,9 @@ fn signal_dispatch_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 .map_err(|e| runtime_error("signal_dispatch", e))?;
             encode(&serde_json::json!({"started": true}))
         }
-        DispatchOperation::Claim => encode(
+        DispatchOperation::Claim { interval_seconds } => encode(
             &inbox
-                .dispatch_claim(session, epoch, now)
+                .dispatch_claim_or_restart(session, epoch, interval_seconds, now)
                 .map_err(|e| runtime_error("signal_dispatch", e))?,
         ),
         DispatchOperation::Accept { batch_id, token } => encode(&serde_json::json!({
