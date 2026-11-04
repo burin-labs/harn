@@ -256,6 +256,17 @@ fn parse_grant_source(source: &str, spec: &str) -> Result<GrantSourceSpec, Strin
             var: var.to_string(),
         });
     }
+    if let Some(var) = source.strip_prefix("secret-env:") {
+        let var = var.trim();
+        if var.is_empty() {
+            return Err(format!(
+                "invalid --grant '{spec}': 'secret-env:' needs a launcher variable name"
+            ));
+        }
+        return Ok(GrantSourceSpec::SecretEnv {
+            var: var.to_string(),
+        });
+    }
     if let Some(pointer) = source.strip_prefix("secret://") {
         let (account, key) = pointer.split_once('/').ok_or_else(|| {
             format!(
@@ -274,7 +285,7 @@ fn parse_grant_source(source: &str, spec: &str) -> Result<GrantSourceSpec, Strin
         });
     }
     Err(format!(
-        "invalid --grant '{spec}': source must be 'env:VAR' or 'secret://ACCOUNT/KEY'"
+        "invalid --grant '{spec}': source must be 'env:VAR', 'secret-env:VAR' or 'secret://ACCOUNT/KEY'"
     ))
 }
 

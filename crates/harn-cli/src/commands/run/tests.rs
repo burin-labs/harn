@@ -861,7 +861,7 @@ pipeline main(harness: Harness) {
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.stdout.lines().collect::<Vec<_>>(),
-        ["delivered [redacted]", "absent"]
+        ["delivered granted-secret-value", "absent"]
     );
     assert!(
         outcome.stderr.contains("environment policy: granted"),

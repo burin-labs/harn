@@ -294,7 +294,7 @@ Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`:
 | Part | Meaning |
 |---|---|
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
-| `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
+| `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret-env:VAR_NAME` does the same and declares the value a credential. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
 | `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
 | `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process, because Harn's own `harness.llm.call` is not an exec. |
 | `,to=in_process` | Optional. Requires `,expose=` and rejects `,for=`. Makes the variable visible to Harn's own process only: provider credentials and configuration for `harness.llm.call`, and `harness.env`. No spawned command sees it, in value or as a secret reference. Use it for provider keys that only the run's model calls need. `,to=session` is the default. |
@@ -430,14 +430,12 @@ A granted `gh` receives no caller or inherited variable except `LANG`,
 table above. Proxy, TLS (`SSL_CERT_FILE`, `SSL_CERT_DIR`), debug and token
 variables a caller sets are dropped.
 
-Every credential a grant hands to a child, for any program, is redacted from that command's stdout
-and stderr, from events, and from transcripts, including a value printed
-across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
-and its percent-encoded form. Values shorter than 8 bytes are not redacted.
-A credential is a `secret_store` grant, any grant bound to one command, or a session-wide `env:`
-grant whose source or exposed variable name contains `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`,
-`OAUTH_KEY`, `HEADERS` or `PRIVATE_KEY`, in any case. Other session-wide `env:` grants and literals
-stay readable.
+Every credential a grant hands to a child, for any program, is redacted from the current session's
+command output, events, and transcripts, including a value printed across several writes. This
+matches exact values and cleans up accidents. It is not a security boundary: a child holding a
+value can encode it past the filter. Values shorter than 8 bytes are not redacted.
+A credential is a `secret_store` grant, a `secret-env:` grant, or any grant bound to one command.
+Plain `env:` grants and literals stay readable, whatever they are named.
 
 Git configuration that names other programs per repository, such as filter
 drivers or `diff.external`, is not overridden, and no granted read reaches it:

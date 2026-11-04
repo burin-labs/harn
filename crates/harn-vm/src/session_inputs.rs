@@ -4,11 +4,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-mod granted_values;
 #[cfg(test)]
 mod tests;
-
-pub use granted_values::register_granted_value;
 
 pub use harn_execution_policy::session_inputs::{
     InputDescription, InputError, InputKind, InputLifetime, InputSpec, InputUsage, InputUse,
@@ -59,12 +56,32 @@ fn current_store() -> Result<Store, InputError> {
 }
 
 pub(crate) fn has_private_filter() -> bool {
-    granted_values::any() || current_store().is_ok_and(|store| store.lock().has_secret_filters())
+    current_store().is_ok_and(|store| store.lock().has_secret_filters())
+}
+
+/// Below this a value is too likely to occur in unrelated output.
+const MIN_FILTERED_VALUE_LEN: usize = 8;
+
+/// Filter a credential a grant is about to hand a child from this session's output.
+///
+/// Value matching is best-effort cleanup of accidents, not a security boundary:
+/// a child holding a value can encode or split it past any filter, and what holds
+/// a secret back is not handing it over. With no current session there is no
+/// output to clean. Returns `false` only when the session's filter is full, so the
+/// caller must not expose the value.
+#[must_use]
+pub fn filter_granted_value(value: &str) -> bool {
+    if value.len() < MIN_FILTERED_VALUE_LEN {
+        return true;
+    }
+    let Some(id) = crate::current_agent_session_id() else {
+        return true;
+    };
+    store(&id, true).map_or(true, |store| store.lock().add_filter(value))
 }
 
 /// Retain the filter for one operation, including output received after close.
 /// Dropping the operation releases this reference to the private material.
-/// Values a grant handed to a child are always filtered too, store or not.
 pub struct OutputFilter(Option<Store>);
 
 impl OutputFilter {
@@ -72,14 +89,16 @@ impl OutputFilter {
         Self(current_store().ok())
     }
 
+    /// Capture for a child about to spawn, whose grants may be the first thing
+    /// this session has to filter. Never call this under the session lock.
+    pub fn capture_for_spawn() -> Self {
+        Self(crate::current_agent_session_id().and_then(|session_id| store(&session_id, true).ok()))
+    }
+
     pub fn redact(&self, text: &str) -> String {
-        let text = match &self.0 {
+        match &self.0 {
             Some(store) => store.lock().redact(text),
             None => text.to_owned(),
-        };
-        match granted_values::redact(text.as_bytes()) {
-            Some(redacted) => String::from_utf8_lossy(&redacted).into_owned(),
-            None => text,
         }
     }
 
@@ -91,8 +110,7 @@ impl OutputFilter {
                 .then(|| store.redact_bytes(bytes))
                 .filter(|redacted| redacted != bytes)
         });
-        let current = stored.as_deref().unwrap_or(bytes);
-        match granted_values::redact(current).or(stored) {
+        match stored {
             Some(redacted) => std::borrow::Cow::Owned(redacted),
             None => std::borrow::Cow::Borrowed(bytes),
         }
