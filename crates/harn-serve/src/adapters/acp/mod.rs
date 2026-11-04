@@ -16,6 +16,7 @@ mod bridge;
 mod builtins;
 mod checkpoint_tracking;
 mod checkpoints;
+mod child_egress;
 mod client_capabilities;
 mod commands;
 mod confinement;
@@ -791,6 +792,12 @@ pub struct AcpSandboxConfig {
     /// to say so and would silently get a confined one. `None` keeps the
     /// historical inference exactly as it was.
     pub requested_profile: Option<harn_vm::orchestration::SandboxProfile>,
+    /// Hosts a confined child may reach. `Some` runs one deny-by-default proxy
+    /// for this server and limits each child with network authority to it, so
+    /// an empty list means no destination at all. `None` leaves child network
+    /// to the mode policy, and the list has no effect without process
+    /// confinement, since nothing would hold a child to the proxy.
+    pub child_network_allow: Option<Vec<String>>,
 }
 
 impl AcpServerConfig {
@@ -973,6 +980,7 @@ impl AcpSandboxConfig {
             read_only_roots: canonicalize_sandbox_roots(roots),
             process: harn_vm::orchestration::ProcessSandboxPolicy::default(),
             requested_profile: None,
+            child_network_allow: None,
         }
     }
 
@@ -981,6 +989,7 @@ impl AcpSandboxConfig {
             read_only_roots: Vec::new(),
             process,
             requested_profile: None,
+            child_network_allow: None,
         }
     }
 
@@ -1091,6 +1100,7 @@ pub struct AcpServer {
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,
     sandbox: AcpSandboxConfig,
+    child_egress: child_egress::ChildEgress,
     /// Active bulk-OAuth driver from the most recent `mcp/authorize_batch`
     /// (harn#3357). Held across requests so a follow-up `mcp/oauth_callback`
     /// whose `state` belongs to a batch flow routes through the driver

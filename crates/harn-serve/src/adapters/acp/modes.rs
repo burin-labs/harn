@@ -506,6 +506,23 @@ impl ModePolicyScope {
         }
     }
 
+    /// Hold this turn's children to the server's egress proxy. A mode below
+    /// the network side-effect level has no child network to hold, and the
+    /// proxy would be what gave it one.
+    pub(super) fn with_child_proxy(
+        mut self,
+        proxy: Option<harn_vm::orchestration::ProcessNetworkProxy>,
+    ) -> Self {
+        if let Some(policy) = self.policy.as_mut() {
+            let level = policy.side_effect_level.as_deref().unwrap_or("none");
+            let network = harn_vm::tool_annotations::SideEffectLevel::Network.rank();
+            if harn_vm::tool_annotations::SideEffectLevel::rank_str(level) >= network {
+                policy.process_network_proxy = proxy;
+            }
+        }
+        self
+    }
+
     /// Run one asynchronous span of the turn with this turn's policy installed
     /// around every poll of `inner`, and nobody else's.
     ///
