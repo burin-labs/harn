@@ -3790,7 +3790,6 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub recap: Value,
     #[serde(rename = "sourceMeasurement")]
     pub source_measurement: Value,
-    pub classification: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
 }
@@ -4306,7 +4305,6 @@ const TRANSCRIPT_COMPACTED_RULES: &[(&str, SessionUpdateRule)] = &[
         ("/_meta/harn", SessionUpdateRule::Present(&[
             ("/_meta/harn/archivedMessages", SessionUpdateRule::Required),
             ("/_meta/harn/archivedMessages", SessionUpdateRule::Minimum(0)),
-            ("/_meta/harn/classification", SessionUpdateRule::Required),
             ("/_meta/harn/compactionPolicy", SessionUpdateRule::Required),
             ("/_meta/harn/engineStrategy", SessionUpdateRule::Required),
             ("/_meta/harn/estimatedTokensAfter", SessionUpdateRule::Required),

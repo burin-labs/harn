@@ -135,12 +135,6 @@ pub(super) async fn transcript_auto_compact_builtin(
         )?,
         ..Default::default()
     };
-    config.classification = options
-        .as_ref()
-        .and_then(|options| options.get("classify"))
-        .map(crate::orchestration::ClassificationConfig::from_value)
-        .transpose()?
-        .map(Box::new);
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("keep_first"))
@@ -249,7 +243,6 @@ pub(super) async fn transcript_auto_compact_builtin(
     let llm_opts = if matches!(
         config.compact_strategy,
         crate::orchestration::CompactStrategy::Llm
-            | crate::orchestration::CompactStrategy::Classify
     ) {
         let projected = options
             .as_ref()

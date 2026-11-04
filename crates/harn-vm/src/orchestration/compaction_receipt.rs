@@ -86,9 +86,6 @@ pub struct CompactionReceipt {
     /// Observation-mask recap metrics; `None` for the LLM/truncate/custom
     /// strategies, which do not spend a recap budget.
     pub recap: Option<RecapMetrics>,
-    /// Per-message decisions and the confidence-floor application. Absent on
-    /// legacy receipts and strategies that did not perform classification.
-    pub classification: Option<Box<super::ClassificationReceipt>>,
     /// Source-window and summary byte measurement for this compaction.
     ///
     /// `None` means this compaction path took no measurement. That is
@@ -229,9 +226,6 @@ impl CompactionReceipt {
             recap: payload
                 .get("recap")
                 .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
-            classification: payload
-                .get("classification")
-                .and_then(|value| serde_json::from_value(value.clone()).ok()),
             // A host script may forward the engine's typed measurement. When it
             // does not, `None` remains "not measured", never a measured zero.
             source_measurement: payload.get("source_measurement").and_then(|value| {
@@ -274,7 +268,6 @@ mod tests {
                 dropped_count: 1,
                 carried_prior_recap: true,
             }),
-            classification: None,
             // A measured zero must round-trip as a measured zero, not collapse
             // into "no measurement".
             source_measurement: Some(CompactionSourceMeasurement {
@@ -315,7 +308,6 @@ mod tests {
             instruction_source: None,
             compaction_policy: None,
             recap: None,
-            classification: None,
             source_measurement: Some(CompactionSourceMeasurement {
                 source_message_count: Some(4),
                 source_bytes: Some(35_583),
