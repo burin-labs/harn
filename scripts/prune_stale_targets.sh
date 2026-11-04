@@ -110,6 +110,9 @@
 #                               host. It receives the lexical and physical
 #                               target paths and must print exactly busy, idle,
 #                               or unknown. Failures and unknown retain targets.
+#                               Without it, Linux reads /proc and Cargo locks
+#                               and other systems use lsof.
+#   HARN_TARGET_GC_PROC_ROOT    the Linux process table (default /proc), for tests
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -563,6 +566,7 @@ is_self_pid() {
 # degrade loudly rather than reading its silence as "no owners".
 probe_mode="process"
 probe_note=""
+proc_root="${HARN_TARGET_GC_PROC_ROOT:-/proc}"
 if ! ps_probe="$(ps -eo pid=,args= 2>/dev/null)" || [ -z "$ps_probe" ]; then
   probe_mode="degraded"
   probe_note="no usable process listing"
@@ -570,6 +574,12 @@ elif [ -n "${HARN_TARGET_GC_HANDLE_PROBE:-}" ] &&
      { [[ "$HARN_TARGET_GC_HANDLE_PROBE" != /* ]] || [ ! -x "$HARN_TARGET_GC_HANDLE_PROBE" ]; }; then
   probe_mode="degraded"
   probe_note="configured handle probe unavailable"
+elif [ -z "${HARN_TARGET_GC_HANDLE_PROBE:-}" ] && [ "$(uname -s)" = Linux ]; then
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v flock >/dev/null 2>&1 ||
+     [ ! -r "$proc_root/self/status" ]; then
+    probe_mode="degraded"
+    probe_note="python3, flock or $proc_root unavailable, cannot see build handles"
+  fi
 elif [ -z "${HARN_TARGET_GC_HANDLE_PROBE:-}" ] && ! command -v lsof >/dev/null 2>&1; then
   probe_mode="degraded"
   probe_note="lsof unavailable, cannot see build locks"
@@ -577,6 +587,144 @@ fi
 if [ "$probe_mode" = "degraded" ]; then
   echo "harn-target GC: process liveness unavailable ($probe_note); targets will be kept"
 fi
+
+# Linux handle census. An unprivileged `lsof` cannot read root's processes,
+# and every Linux host runs some, so a census that needed every process read
+# never completed and retained every entry. This one reads /proc directly:
+#
+# - A process this user can inspect holds the entry when its working
+#   directory, root, executable, an open descriptor or a mapping lies inside.
+# - A process it cannot inspect that runs as another non-root user is out of
+#   scope only when the entry's ancestor permissions deny that user search
+#   access. Otherwise the census is unmeasured and the entry stays.
+# - A privileged process stays unreadable: root, a process the kernel marks
+#   non-dumpable such as `(sd-pam)`, or one holding capabilities this census
+#   lacks such as `systemd --user`. A privileged Cargo build
+#   still holds the entry's `.cargo-lock`, which any user can test, and a
+#   command line naming the entry is matched with every other. A privileged
+#   process reading the entry outside Cargo is the accepted blind spot for a
+#   rebuildable cache.
+linux_entry_handle_pids() {
+  local dir="$1" physical="$2" lock lock_status locks
+  python3 - "$proc_root" "$dir" "$physical" <<'PY' || return 1
+import os
+import stat
+import sys
+
+proc, raw, physical = sys.argv[1:4]
+targets = {raw.rstrip("/") or "/", physical.rstrip("/") or "/"}
+
+
+def inside(path):
+    if path.endswith(" (deleted)"):
+        path = path[: -len(" (deleted)")]
+    return any(path == t or path.startswith(t + "/") for t in targets)
+
+
+def reachable(uid, gids, caps):
+    # CAP_DAC_OVERRIDE or CAP_DAC_READ_SEARCH bypasses search permission.
+    if caps & 0b110:
+        return True
+    current = "/"
+    for part in [p for p in physical.split("/") if p]:
+        # Mode bits cannot rule out a user an access ACL admits.
+        try:
+            if "system.posix_acl_access" in os.listxattr(current):
+                return True
+        except OSError:
+            pass
+        mode = os.stat(current)
+        if uid == mode.st_uid:
+            allowed = mode.st_mode & stat.S_IXUSR
+        elif mode.st_gid in gids:
+            allowed = mode.st_mode & stat.S_IXGRP
+        else:
+            allowed = mode.st_mode & stat.S_IXOTH
+        if not allowed:
+            return False
+        current = os.path.join(current, part)
+    return True
+
+
+def effective_caps(path):
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith("CapEff:"):
+                return int(line.split()[1], 16)
+    return 0
+
+
+own_caps = effective_caps(os.path.join(proc, "self", "status"))
+holders = []
+# A process table that hides other users' processes (hidepid) lists no init.
+if not os.path.isdir(os.path.join(proc, "1")):
+    sys.exit("unmeasured: the process table does not show process 1")
+for name in os.listdir(proc):
+    if not name.isdigit():
+        continue
+    base = os.path.join(proc, name)
+    try:
+        with open(os.path.join(base, "status"), encoding="utf-8", errors="replace") as handle:
+            fields = dict(line.rstrip("\n").split(":\t", 1) for line in handle if ":\t" in line)
+    except (FileNotFoundError, ProcessLookupError):
+        continue
+    try:
+        uid = int(fields["Uid"].split()[1])
+        gids = {int(fields["Gid"].split()[1])} | {int(g) for g in fields.get("Groups", "").split()}
+        caps = int(fields.get("CapEff", "0"), 16)
+    except (KeyError, IndexError, ValueError):
+        sys.exit(f"unmeasured: process {name} has an unreadable status")
+    paths = []
+    try:
+        for link in ("cwd", "root", "exe"):
+            try:
+                paths.append(os.readlink(os.path.join(base, link)))
+            except FileNotFoundError:
+                pass
+        for fd in os.listdir(os.path.join(base, "fd")):
+            try:
+                paths.append(os.readlink(os.path.join(base, "fd", fd)))
+            except FileNotFoundError:
+                pass
+        with open(os.path.join(base, "maps"), encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                columns = line.split(None, 5)
+                if len(columns) == 6:
+                    paths.append(columns[5].strip())
+    except (FileNotFoundError, ProcessLookupError):
+        continue
+    except PermissionError:
+        if any(inside(path) for path in paths):
+            holders.append(name)
+            continue
+        try:
+            # The kernel hands a non-dumpable process's files to root.
+            protected = os.stat(os.path.join(base, "fd")).st_uid == 0
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        privileged = uid == 0 or protected or caps & ~own_caps
+        if privileged or not reachable(uid, gids, caps):
+            continue
+        sys.exit(f"unmeasured: process {name} (uid {uid}) can reach the entry but cannot be inspected")
+    if any(inside(path) for path in paths):
+        holders.append(name)
+for holder in holders:
+    print(holder)
+PY
+  # flock exits 1 only when another holder has the lock; any other failure
+  # leaves the lock unmeasured, as does a lock search that cannot read the tree.
+  locks="$(find "$physical" -maxdepth 3 -name .cargo-lock -type f 2>/dev/null)" || return 1
+  while IFS= read -r lock; do
+    [ -n "$lock" ] || continue
+    lock_status=0
+    flock -n -x "$lock" true 2>/dev/null || lock_status=$?
+    case "$lock_status" in
+      0) ;;
+      1) printf '%s\n' cargo-lock ;;
+      *) return 1 ;;
+    esac
+  done <<< "$locks"
+}
 
 # Pids that own a cache entry, one per line.
 entry_live_pids() {
@@ -591,6 +739,8 @@ entry_live_pids() {
       idle) ;;
       *) return 1 ;;
     esac
+  elif [ "$(uname -s)" = Linux ]; then
+    linux_entry_handle_pids "$dir" "$physical" || return 1
   else
     lsof_out="$(lsof -n -Fpfn 2>&1)" || return 1
     [ -n "$lsof_out" ] || return 1
@@ -630,13 +780,18 @@ entry_live_pids() {
     esac
     is_self_pid "$line" && continue
     printf '%s\n' "$line"
-  done <<< "$(printf '%s\n' "$snapshot" | awk -v d="$dir" '
+  done <<< "$(printf '%s\n' "$snapshot" | awk -v raw="$dir" -v physical="$physical" '
     {
-      i = index($0, d)
-      if (i == 0) next
-      c = substr($0, i + length(d), 1)
-      # Require a boundary so entry "foo" does not match sibling "foo-bar".
-      if (c == "" || c == "/" || c == " " || c == "\t" || c == ":" || c == "\"" || c == "'"'"'") print $1
+      # A command line can name the entry by its lexical or resolved path.
+      paths[1] = raw; paths[2] = physical
+      for (n = 1; n <= 2; n++) {
+        d = paths[n]
+        i = index($0, d)
+        if (i == 0) continue
+        c = substr($0, i + length(d), 1)
+        # Require a boundary so entry "foo" does not match sibling "foo-bar".
+        if (c == "" || c == "/" || c == " " || c == "\t" || c == ":" || c == "\"" || c == "'"'"'") { print $1; next }
+      }
     }')"
 }
 
