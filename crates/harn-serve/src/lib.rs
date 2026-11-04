@@ -71,7 +71,7 @@ pub use adapters::acp::{
     AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId,
     AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptDelivery,
     AcpPromptErrorData, AcpPromptErrorSchema, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer,
-    AcpServerConfig, AcpServerConfinement, AcpSessionCancelToolCallParams,
+    AcpServerConfig, AcpServerConfinement, AcpSessionCancelToolCallParams, AcpSessionCloseResult,
     AcpSessionEnvironmentConfig, AcpSessionIdParams, AcpSessionLoadParams,
     AcpSessionLoadWithCheckpoint, AcpSessionNewParams, AcpSessionProjectRootError,
     AcpSessionPromptParams, AcpSessionPromptReceipt, AcpSessionPromptResult,

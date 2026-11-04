@@ -170,6 +170,7 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
             .iter()
             .any(|arg| arg == "-o" || arg.starts_with("--output=")),
         "sed" => sed_invocation_is_read_only(args),
+        "gh" => gh_invocation_is_read_only(args),
         "yq" => !args.iter().any(|arg| {
             arg == "-i"
                 || arg == "--inplace"
@@ -179,6 +180,130 @@ fn standalone_program_is_read_only(program: &str, args: &[String]) -> bool {
                 || arg.starts_with("--split-exp-file=")
         }),
         _ => READ_ONLY_PROGRAMS.contains(&program),
+    }
+}
+
+/// GitHub CLI command groups whose listed verbs only read. `release` is
+/// absent on purpose: every release subcommand is treated as an effect.
+const GH_READ_GROUPS: &[&str] = &["gist", "issue", "label", "pr", "repo", "run", "workflow"];
+const GH_READ_VERBS: &[&str] = &["checks", "diff", "list", "status", "view"];
+
+/// `gh pr list` and `gh api repos/o/r` read; `gh pr merge`, `gh issue
+/// comment`, and `gh api -X POST ...` change GitHub. Only the listed read verbs
+/// and a GET `gh api` call without request fields are reads. Unknown
+/// subcommands, `--web`, and every write stay unrecognized, which keeps them
+/// out of the observation phase. Global `-R`/`--repo`/`--hostname` flags are
+/// skipped before the subcommand is read.
+///
+/// This is also the only gate on which gh invocations receive a command-bound
+/// credential grant. Traced with `GIT_TRACE`, the reads run git only for
+/// `config`, `remote -v`, `rev-parse` and `symbolic-ref`, none of which runs a
+/// filter driver, hook or external diff.
+pub(crate) fn gh_invocation_is_read_only(args: &[String]) -> bool {
+    if args.iter().any(|arg| arg == "--web" || arg == "-w") {
+        return false;
+    }
+    let mut words = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "-R" | "--repo" | "--hostname" => {
+                iter.next();
+            }
+            flag if flag.starts_with("--repo=")
+                || flag.starts_with("--hostname=")
+                || (flag.starts_with("-R") && flag.len() > 2) => {}
+            _ => words.push(arg.clone()),
+        }
+    }
+    match words.as_slice() {
+        [api, rest @ ..] if api == "api" => gh_api_is_read_only(rest),
+        [status] if status == "status" => true,
+        [group, verb, ..] => {
+            GH_READ_GROUPS.contains(&group.as_str()) && GH_READ_VERBS.contains(&verb.as_str())
+        }
+        _ => false,
+    }
+}
+
+/// A `gh api` call reads only when every argument is one this parser knows
+/// keeps it a GET without a body, and it names one endpoint. Anything else,
+/// including a flag gh adds later, counts as a write. Arguments are read the way
+/// gh reads them: short flags can share an argument (`-iXGET`) and a value can
+/// follow the letter, with or without `=`.
+fn gh_api_is_read_only(args: &[String]) -> bool {
+    let mut endpoints = 0;
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        let reads = if let Some(long) = arg.strip_prefix("--") {
+            gh_api_long_flag_reads(long, &mut words)
+        } else if let Some(cluster) = arg.strip_prefix('-') {
+            gh_api_short_flags_read(cluster, &mut words)
+        } else {
+            endpoints += 1;
+            true
+        };
+        if !reads {
+            return false;
+        }
+    }
+    endpoints == 1
+}
+
+/// Whether `--name` or `--name=value` keeps a `gh api` call a read. A bare `--`
+/// passes here so the grant refusal can name it.
+fn gh_api_long_flag_reads(flag: &str, words: &mut std::slice::Iter<'_, String>) -> bool {
+    let (name, inline) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    match name {
+        "" | "include" | "paginate" | "silent" | "slurp" => inline.is_none(),
+        _ => gh_api_value_reads(name, inline.or_else(|| words.next().map(String::as_str))),
+    }
+}
+
+/// Whether one argument of short flags keeps a `gh api` call a read. The first
+/// value-taking letter ends the flags: the rest of the argument, or else the
+/// next one, is its value. An empty cluster is a lone `-`, which is not a flag.
+fn gh_api_short_flags_read(cluster: &str, words: &mut std::slice::Iter<'_, String>) -> bool {
+    let mut letters = cluster.chars();
+    while let Some(letter) = letters.next() {
+        let name = match letter {
+            'i' => continue,
+            'H' => "header",
+            'X' => "method",
+            'p' => "preview",
+            'q' => "jq",
+            't' => "template",
+            _ => return false,
+        };
+        let rest = letters.as_str();
+        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        let value = Some(rest)
+            .filter(|rest| !rest.is_empty())
+            .or_else(|| words.next().map(String::as_str));
+        return gh_api_value_reads(name, value);
+    }
+    !cluster.is_empty()
+}
+
+/// Whether the value-taking `gh api` flag `name` keeps the call a read. `--jq`
+/// and `--template` read, and the grant refuses them separately. A header can
+/// ask a server for a different method, so only content negotiation passes.
+fn gh_api_value_reads(name: &str, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    match name {
+        "method" => value.eq_ignore_ascii_case("GET"),
+        "header" => value.split_once(':').is_some_and(|(header, _)| {
+            let header = header.trim();
+            header.eq_ignore_ascii_case("Accept")
+                || header.eq_ignore_ascii_case("X-GitHub-Api-Version")
+        }),
+        "cache" | "jq" | "preview" | "template" => true,
+        _ => false,
     }
 }
 
@@ -604,6 +729,96 @@ mod tests {
             "git show --ext-diff HEAD",
             "git grep --open-files-in-pager=touch needle",
             "git ls-remote --upload-pack='touch changed' .",
+        ] {
+            assert_ne!(effect(command), "read_effect", "{command}");
+        }
+    }
+
+    #[test]
+    fn gh_reads_are_observations_and_gh_writes_are_not() {
+        for command in [
+            "gh pr list --state open",
+            "gh issue view 12 --comments",
+            "gh pr checks 7",
+            "gh pr diff 7",
+            "gh run view 99 --log",
+            "gh status",
+            "gh api repos/o/r/pulls",
+            "gh api -X GET repos/o/r/issues",
+            "gh api --method=get repos/o/r",
+            "gh api -iXGET repos/o/r",
+            "gh api -X=GET repos/o/r",
+            "gh api --include --paginate --slurp repos/o/r",
+            "gh api -H Accept:application/json repos/o/r",
+            "gh api --header=x-github-api-version:2022-11-28 repos/o/r",
+            "gh api --preview=corsair --cache 1h repos/o/r",
+            "gh -R o/r pr view 1",
+            "gh pr view --repo=o/r 1",
+            "gh --hostname h.example issue list",
+        ] {
+            assert_eq!(effect(command), "read_effect", "{command}");
+        }
+        for command in [
+            "gh pr create --fill",
+            "gh issue comment 12 --body hi",
+            "gh pr merge 7 --squash",
+            "gh issue close 12",
+            "gh pr edit 7 --title t",
+            "gh issue reopen 12",
+            "gh release list",
+            "gh release create v1",
+            "gh repo create o/r",
+            "gh repo edit --visibility public",
+            "gh repo delete o/r",
+            "gh repo fork o/r",
+            "gh api -X POST repos/o/r/issues",
+            "gh api --method DELETE repos/o/r",
+            "gh api -XPATCH repos/o/r",
+            "gh api repos/o/r/issues -f title=t",
+            "gh api repos/o/r/issues -Ftitle=t",
+            "gh api graphql --raw-field query=q",
+            "gh api repos/o/r --input body.json",
+            "gh api repos/o/r --input=body.json",
+            "gh api -iXDELETE repos/o/r/git/refs/heads/main",
+            "gh api -iX DELETE repos/o/r",
+            "gh api -X=DELETE repos/o/r",
+            "gh api --method=POST repos/o/r",
+            "gh api -iFname=x repos/o/r",
+            "gh api -ifname=x repos/o/r",
+            "gh api -f=name=x repos/o/r",
+            "gh api --raw-field=name=x repos/o/r",
+            "gh api --field=name=x repos/o/r",
+            "gh api --unknown repos/o/r",
+            "gh api --unknown=x repos/o/r",
+            "gh api -Z repos/o/r",
+            "gh api -iZ repos/o/r",
+            "gh api - repos/o/r",
+            "gh api --include=true repos/o/r",
+            "gh api --verbose repos/o/r",
+            "gh api -H X-HTTP-Method-Override:DELETE repos/o/r",
+            "gh api --header=X-HTTP-Method-Override:DELETE repos/o/r",
+            "gh api repos/o/r repos/o/other",
+            "gh api -X",
+            "gh api",
+            "gh pr view 7 --web",
+            "gh extension-name",
+            "gh pr checkout 7",
+            "gh -R o/r pr checkout 7",
+            "gh pr co 7",
+            "gh co 7",
+            "gh repo clone o/r",
+            "gh -R o/r repo clone o/r -- -c filter.a.smudge=x",
+            "gh repo fork o/r --clone",
+            "gh repo sync",
+            "gh gist clone x",
+            "gh workflow run ci",
+            "gh extension install o/gh-x",
+            "gh alias set co 'pr checkout'",
+            "gh codespace ssh",
+            "gh ssh-key add k.pub",
+            "gh secret set X",
+            "gh -R",
+            "gh",
         ] {
             assert_ne!(effect(command), "read_effect", "{command}");
         }

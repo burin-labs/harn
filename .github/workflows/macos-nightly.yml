@@ -101,7 +101,9 @@ jobs:
     # Only trusted main workflow dispatches may execute on the restricted group.
     # PR and scheduled coverage retain the hosted route.
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest' }}
-    timeout-minutes: 75
+    # A cold hosted build plus the complete workspace suite needs this fuse;
+    # the separate feedback budget still reports slow routine PR runs.
+    timeout-minutes: 90
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     steps:
@@ -245,7 +247,7 @@ jobs:
         shell: bash
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-          RUST_TEST_JOB_LIMIT_MINUTES: 75
+          RUST_TEST_JOB_LIMIT_MINUTES: 90
           # Routine feedback gets an early signal, separate from the cold-build fuse.
           RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}
         # The whole workspace runs, less one member that contributes nothing to

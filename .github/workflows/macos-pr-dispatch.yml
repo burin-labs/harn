@@ -1,0 +1,49 @@
+name: macOS PR dispatch
+
+# Starts the owned-runner macOS tests for a pull request from a branch of this
+# repository. This workflow runs from the base branch, never checks out or runs
+# pull-request code, and only reads event fields, so what it decides comes from
+# main. The tests themselves are macos-pr-tests.yml, dispatched on main with the
+# pull request number and head SHA. Pull requests from forks are not dispatched;
+# they keep the hosted macOS route in macos-nightly.yml.
+
+on:
+  # zizmor: ignore[dangerous-triggers] runs the base branch's copy, has no checkout step, and passes event fields only through env
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".config/nextest.toml"
+      - ".config/native-qualification.json"
+      - ".github/workflows/macos-pr-tests.yml"
+      - ".github/workflows/macos-nightly.yml"
+      - ".github/cache-policy.json"
+      - "Makefile"
+      - "scripts/ci/reuse_workspace_crates.sh"
+      - "scripts/ci/workspace_warm_artifact.sh"
+      - "scripts/ci/run_rust_test_lane.sh"
+      - "scripts/lib/rustc_frontend.sh"
+      - "scripts/rustc_frontend_wrapper.sh"
+      - ".github/actions/rust-toolchain/**"
+
+permissions: {}
+
+jobs:
+  dispatch:
+    name: Dispatch owned macOS tests
+    if: github.repository == 'burin-labs/harn' && github.event.pull_request.head.repo.full_name == 'burin-labs/harn' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch macos-pr-tests.yml on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh workflow run macos-pr-tests.yml --repo "$REPO" --ref main -f pr="$PR_NUMBER" -f sha="$HEAD_SHA"
