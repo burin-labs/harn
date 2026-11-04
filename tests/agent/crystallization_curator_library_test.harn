@@ -249,9 +249,9 @@ fn submit_one(proposal: dict) -> list {
 pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
   const declared_command = "python3 check.py --expected \"left  right\""
   for sample in [
-    {command: "python3 check.py --expected \"left right\"", expected: 0},
-    {command: declared_command, expected: 1},
-    {command: "  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
+    {command: "make gen && python3 check.py --expected \"left right\"", expected: 0},
+    {command: "make gen && " + declared_command, expected: 1},
+    {command: "  make gen &&  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
   ] {
     with_temp_dir(
       harness.fs,
@@ -281,8 +281,8 @@ pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
 
 pipeline test_semantic_whitespace_in_declared_directory(harness: Harness) {
   for sample in [
-    {command: "(cd 'web pkg' && npm test)", expected: 0},
-    {command: "(cd 'web  pkg' && npm test)", expected: 1},
+    {command: "make gen && (cd 'web pkg' && npm test)", expected: 0},
+    {command: "make gen && (cd 'web  pkg' && npm test)", expected: 1},
   ] {
     with_temp_dir(
       harness.fs,
@@ -443,18 +443,21 @@ pipeline test_curator_accepts_a_verifier_built_on_the_declared_aggregate_check(h
   with_temp_dir(
     harness.fs,
     { root ->
+      const declared = {
+        declared_checks: [
+          {intent: "verify", command: "just default", cwd: ""},
+          {intent: "test", command: "just test", cwd: ""},
+          {intent: "lint", command: "just lint", cwd: ""},
+        ],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const bare = curate_with(harness, root, submit_one(verify_tool("just default")), declared)
+      assert_eq(bare.proposal_count ?? 0, 0, "a bare declared check teaches later sessions nothing")
       const result = curate_with(
         harness,
         root,
         submit_one(verify_tool("just cog && just default")),
-        {
-          declared_checks: [
-            {intent: "verify", command: "just default", cwd: ""},
-            {intent: "test", command: "just test", cwd: ""},
-            {intent: "lint", command: "just lint", cwd: ""},
-          ],
-          validator: { _source -> {outcome: "pass"} },
-        },
+        declared,
       )
       assert_eq(result.proposal_count, 1, "the aggregate check counts as a declared check")
       return nil

@@ -205,7 +205,7 @@ Each card's `commands` lists the commands that run executed, in order, with exit
 
 The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. When a declared `verify` check aggregates the others, keep it whole so the sequence still runs everything it runs. A submission whose `verify_command` runs none of the declared test or verify checks is rejected.
 
-Count recovery across sessions. `repeated_recoveries` lists sessions that failed commands and then got past them, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
+Count recovery across sessions. `repeated_recoveries` lists sessions that failed commands and then got past them, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -853,6 +853,13 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   return false
 }
 
+/** True when a verifier is exactly a declared check, with no step of its own. */
+fn cc_only_repeats_declared_check(verify_command: string, check: dict) -> bool {
+  return cc_runs_declared_check(verify_command, check)
+    && len(command_sequence_plan(verify_command).steps)
+      == len(command_sequence_plan(check.command, check.cwd).steps)
+}
+
 /**
  * The declared checks a learned verifier must run at least one of: a test check
  * or a verify check, since a repository's aggregate check runs its tests.
@@ -876,8 +883,11 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
     const verify = to_string(proposal?.artifact?.verify_command ?? "")
     if verify != "" && len(required) > 0
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
-      throw "submit_crystallization_batch: `verify_command` must run a declared test or verify check word for word from its cwd, not a broader command. Declared: "
+      throw "submit_crystallization_batch: `verify_command` must run a declared test or verify check word for word from its cwd, not a broader command. A step with a glob or other shell syntax cannot be measured. Declared: "
         + json_stringify(required)
+    }
+    if verify != "" && required.any({ check -> cc_only_repeats_declared_check(verify, check) }) {
+      throw "submit_crystallization_batch: `verify_command` only repeats a declared check, which later sessions already run. Add the steps it needs first, or submit no proposal."
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
