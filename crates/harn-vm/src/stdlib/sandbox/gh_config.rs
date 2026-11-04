@@ -143,14 +143,17 @@ fn names_another_host(args: &[String]) -> bool {
     };
     let mut words = args.iter().map(String::as_str);
     while let Some(arg) = words.next() {
-        let (hostname, repo) = match arg {
-            "--hostname" => (words.next(), None),
-            "-R" | "--repo" => (None, words.next()),
-            _ => (
-                arg.strip_prefix("--hostname="),
-                arg.strip_prefix("--repo=")
-                    .or_else(|| arg.strip_prefix("-R").filter(|rest| !rest.is_empty())),
-            ),
+        // `R` also parses inside a cluster: `-cR HOST/OWNER/REPO`, `-cRHOST/...`.
+        let short_repo = arg
+            .strip_prefix('-')
+            .filter(|flags| !flags.starts_with('-'))
+            .and_then(|flags| flags.split_once('R'))
+            .map(|(_, value)| value);
+        let (hostname, repo) = match (arg, short_repo) {
+            ("--hostname", _) => (words.next(), None),
+            ("--repo", _) | (_, Some("")) => (None, words.next()),
+            (_, Some(value)) => (None, Some(value.strip_prefix('=').unwrap_or(value))),
+            _ => (arg.strip_prefix("--hostname="), arg.strip_prefix("--repo=")),
         };
         if hostname.is_some_and(foreign) {
             return true;
