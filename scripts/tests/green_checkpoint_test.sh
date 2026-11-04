@@ -38,6 +38,14 @@ case "$method $endpoint" in
   "GET repos/o/r/actions/workflows/ci.yml/runs?"*)
     [[ -z "${CENSUS_FAIL:-}" ]] || exit 1
     respond < "$S/census.json" ;;
+  "GET repos/o/r/actions/workflows/build-release-binaries.yml/runs?"*)
+    [[ -z "${BUILD_CENSUS_FAIL:-}" ]] || exit 1
+    cat "$S/builds.json" ;;
+  "POST repos/o/r/actions/workflows/build-release-binaries.yml/dispatches")
+    jq -e '.ref == "main" and .inputs.source_candidate == "true"' <<< "$input" > /dev/null
+    echo "dispatch candidate" >> "$S/writes" ;;
+  "GET repos/o/r/git/ref/heads/main")
+    jq -n --arg sha "$(cat "$S/main")" '{object: {sha: $sha}}' | respond ;;
   "GET repos/o/r/git/matching-refs/heads/green")
     [[ -z "${GREEN_FAIL:-}" ]] || exit 1
     jq -n --arg sha "$(cat "$S/green")" \
@@ -77,6 +85,15 @@ case "$method $endpoint" in
 esac
 EOF
 chmod +x "$work/bin/gh"
+
+# Candidate reader: $S/candidates lists commits with a successful candidate.
+cat > "$work/bin/node" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${CANDIDATE_FAIL:-}" && "$2" == successful ]] || exit 1
+if grep -qx "$4" "$S/candidates" 2>/dev/null; then echo 900; fi
+EOF
+chmod +x "$work/bin/node"
 
 # run <id> <sha> <created> -> one census row.
 run() {
@@ -184,6 +201,75 @@ check "a malformed run writes nothing" 1 "$A" ""
 fresh "$A"
 census < /dev/null > "$S/census.json"
 check "an empty census is a measured quiet main" 0 "$A" ""
+
+# The candidate switch: green waits for a successful candidate at its commit.
+fresh "$A" "$A...$B ahead" "$B...main ahead"
+run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"
+check "a commit without a candidate is held when one is required" 0 "$A" "" GREEN_REQUIRES_SOURCE_CANDIDATE=true
+grep -q "held commits: 1 $B" "$S/out" || { echo "FAIL the held commit is not named"; failures=$((failures + 1)); }
+check "a commit moves without a candidate when none is required" 0 "$B" tag,create,advance
+
+fresh "$A" "$A...$B ahead" "$B...main ahead"
+run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"
+echo "$B" > "$S/candidates"
+check "a commit with a candidate moves when one is required" 0 "$B" tag,create,advance GREEN_REQUIRES_SOURCE_CANDIDATE=true
+
+fresh "$A" "$A...$C ahead" "$C...main ahead" "$A...$B ahead" "$B...main ahead"
+{ run 3 "$C" 2026-10-17T13:00:00Z; run 2 "$B" 2026-10-17T12:00:00Z; } | census > "$S/census.json"
+echo "$B" > "$S/candidates"
+check "a held tip does not stop an older commit that has a candidate" 0 "$B" tag,create,advance GREEN_REQUIRES_SOURCE_CANDIDATE=true
+
+fresh "$A" "$A...$B ahead" "$B...main ahead"
+run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"
+check "an unreadable candidate answer fails rather than reading as none" 1 "$A" "" GREEN_REQUIRES_SOURCE_CANDIDATE=true CANDIDATE_FAIL=1
+
+# build <id> <sha> <created> <status> [title] -> one build census row.
+build() {
+  jq -n --argjson id "$1" --arg sha "$2" --arg created "$3" --arg status "$4" \
+    --arg title "${5:-Build release binaries [source-candidate]}" \
+    '{id: $id, head_sha: $sha, created_at: $created, status: $status, display_title: $title}'
+}
+fresh_builds() { fresh "$B" "$B...$B identical"; run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"; printf '%s' "$C" > "$S/main"; }
+
+# Every recent timestamp is relative, because the cadence reads the clock.
+recent=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+fresh_builds
+census < /dev/null > "$S/builds.json"
+check "no candidate starts while the cadence is unset" 0 "$B" ""
+grep -q "not started by this workflow" "$S/out" || { echo "FAIL the off state is not reported"; failures=$((failures + 1)); }
+check "a due candidate starts on the cadence" 0 "$B" dispatch GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$A" 2020-01-01T00:00:00Z completed | census > "$S/builds.json"
+check "a candidate older than the cadence is due" 0 "$B" dispatch GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$A" "$recent" completed | census > "$S/builds.json"
+check "a candidate inside the cadence defers the next" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$A" 2020-01-01T00:00:00Z in_progress | census > "$S/builds.json"
+check "a running candidate defers the next" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$C" 2020-01-01T00:00:00Z completed | census > "$S/builds.json"
+check "main's tip is never built twice" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$A" "$recent" in_progress "Build release binaries [warm]" | census > "$S/builds.json"
+check "a build that is not a candidate does not defer one" 0 "$B" dispatch GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+build 7 "$A" "$recent" completed | jq -s '[{total_count: 2, workflow_runs: .}]' > "$S/builds.json"
+check "an incomplete build census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+check "an unreadable build census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4 BUILD_CENSUS_FAIL=1
+check "an invalid cadence refuses" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=soon
+check "a cadence longer than the census refuses" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=73
+check "a misspelled hold refuses" 1 "$B" "" GREEN_REQUIRES_SOURCE_CANDIDATE=True
+
+fresh_builds
+build 7 "$C" 2020-01-01T00:00:00Z completed "Build release binaries" | jq '. + {event: "schedule"}' | census > "$S/builds.json"
+check "a scheduled candidate of main's tip counts" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
 
 if (( failures > 0 )); then
   echo "green checkpoint: $failures case(s) failed"
