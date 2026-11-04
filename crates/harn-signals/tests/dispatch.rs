@@ -7,15 +7,15 @@ use time::OffsetDateTime;
 fn at(second: i64) -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp(1_800_000_000 + second).unwrap()
 }
-fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, second: i64) {
-    let input = SignalInput {
+fn input_for(monitor: &str, summary: String) -> SignalInput {
+    SignalInput {
         key: Some(monitor.into()),
         event: TriageEvent::manual(
             ManualEvent {
                 provider: "fixture".into(),
                 source_kind: "log".into(),
                 source_url: "file:///fixture/log".into(),
-                summary: format!("line {id}"),
+                summary,
                 why_it_matters: "New output".into(),
                 proposed_action: "Inspect output".into(),
                 urgency: String::new(),
@@ -27,7 +27,10 @@ fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, se
         routing: RoutingHints::default(),
         provenance: Provenance::local("fixture"),
         expires_at: None,
-    };
+    }
+}
+fn capture(inbox: &Inbox, session: &str, epoch: &str, monitor: &str, id: i64, second: i64) {
+    let input = input_for(monitor, format!("line {id}"));
     inbox
         .capture_execution(session, epoch, &id.to_string(), input, at(second))
         .unwrap();
@@ -329,10 +332,185 @@ fn end_session_invalidates_claim_and_epoch_and_scope_capacity_is_explicit() {
         .signals
         .values()
         .all(|s| !s.is_pending() && s.cancelled_at.is_some()));
+    inbox.dispatch_start("C", "run1", None, at(62)).unwrap();
+    capture(&inbox, "C", "run1", "c-log", 1, 62);
     std::fs::write(dir.path().join("config.toml"), "max_signals = 1\n").unwrap();
     let bounded = Inbox::open(dir.path()).unwrap();
-    assert!(bounded.dispatch_start("B", "run1", None, at(63)).is_err());
-    assert_eq!(bounded.snapshot(at(63)).unwrap().dispatch.len(), 1);
+    let refused = bounded
+        .dispatch_start("B", "run1", None, at(63))
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("raise the cap"));
+    let gates = bounded.snapshot(at(63)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "C"]);
+}
+
+const HOUR: i64 = 60 * 60;
+const WEEK: i64 = 7 * 24 * HOUR;
+
+fn with_max_signals(dir: &tempfile::TempDir, max: usize) -> Inbox {
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!("max_signals = {max}\n"),
+    )
+    .unwrap();
+    Inbox::open(dir.path()).unwrap()
+}
+
+#[test]
+fn a_gate_idle_past_retention_is_forgotten_and_restarts_cleanly() {
+    let (_dir, inbox) = open();
+    inbox.dispatch_start("busy", "run1", None, at(0)).unwrap();
+    capture(&inbox, "busy", "run1", "busy-log", 0, WEEK - 1);
+    let early = inbox.snapshot(at(WEEK - 1)).unwrap().dispatch;
+    assert_eq!(early.len(), 2);
+    let gates = inbox.snapshot(at(WEEK)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["busy"]);
+    inbox.dispatch_start("A", "run1", None, at(WEEK)).unwrap();
+    capture(&inbox, "A", "run1", "log", 1, WEEK);
+    assert!(inbox
+        .dispatch_claim("A", "run1", at(WEEK + 60))
+        .unwrap()
+        .claim
+        .is_some());
+}
+
+#[test]
+fn a_dead_session_with_unaccepted_captures_stops_pinning_its_record() {
+    let (dir, inbox) = open();
+    capture(&inbox, "A", "run1", "log", 0, 0);
+    inbox.dispatch_claim("A", "run1", at(60)).unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded.dispatch_start("B", "run1", None, at(WEEK)).is_err());
+
+    bounded
+        .dispatch_start("B", "run1", None, at(WEEK + 60))
+        .unwrap();
+    let saved = bounded.snapshot(at(WEEK + 60)).unwrap();
+    assert_eq!(saved.dispatch.keys().collect::<Vec<_>>(), ["B"]);
+    let output = saved.signals.values().next().unwrap();
+    assert!(!output.is_pending() && output.cancelled_at.is_some());
+}
+
+#[test]
+fn a_forgotten_live_session_resumes_with_its_start_and_a_late_producer_cannot_reopen_it() {
+    let (_dir, inbox) = open();
+    let forgotten = |result: Result<(), harn_signals::SignalsError>| {
+        assert!(matches!(
+            result,
+            Err(harn_signals::SignalsError::DispatchForgotten)
+        ));
+    };
+    forgotten(inbox.dispatch_claim("A", "run1", at(WEEK)).map(|_| ()));
+    let late = input_for("log", "a late line".into());
+    forgotten(
+        inbox
+            .capture_execution("A", "run1", "late", late, at(WEEK))
+            .map(|_| ()),
+    );
+    assert!(inbox.snapshot(at(WEEK)).unwrap().dispatch.is_empty());
+    assert_eq!(
+        inbox.dispatch_cancel("A", "run1", None, at(WEEK)).unwrap(),
+        0
+    );
+
+    // The host's poll starts the session before it claims, with its own interval.
+    inbox
+        .dispatch_start("A", "run1", Some(300), at(WEEK))
+        .unwrap();
+    capture(&inbox, "A", "run1", "log", 1, WEEK);
+    assert_eq!(
+        inbox
+            .dispatch_claim("A", "run1", at(WEEK + 60))
+            .unwrap()
+            .next_due_at,
+        Some(at(WEEK + 300))
+    );
+    inbox
+        .dispatch_start("A", "run1", Some(300), at(WEEK + 300))
+        .unwrap();
+    let claim = inbox
+        .dispatch_claim("A", "run1", at(WEEK + 300))
+        .unwrap()
+        .claim
+        .unwrap();
+    assert_eq!(claim.batch.occurrences.len(), 1);
+}
+
+#[test]
+fn a_full_inbox_forgets_only_quiet_gates_and_a_refusal_forgets_nothing() {
+    let (dir, inbox) = open();
+    for session in ["B", "C", "D"] {
+        inbox
+            .dispatch_start(session, "run1", None, at(3 * HOUR))
+            .unwrap();
+    }
+    let bounded = with_max_signals(&dir, 2);
+
+    // A is quiet, but forgetting it alone would not make room.
+    assert!(bounded
+        .dispatch_start("E", "run1", None, at(3 * HOUR))
+        .is_err());
+    let gates = bounded.snapshot(at(3 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "B", "C", "D"]);
+
+    bounded
+        .dispatch_start("E", "run1", None, at(6 * HOUR))
+        .unwrap();
+    let gates = bounded.snapshot(at(6 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["D", "E"]);
+    for n in 0..10 {
+        bounded
+            .dispatch_start(&format!("churn{n}"), "run1", None, at((9 + 3 * n) * HOUR))
+            .unwrap();
+    }
+    assert_eq!(bounded.snapshot(at(40 * HOUR)).unwrap().dispatch.len(), 2);
+}
+
+#[test]
+fn a_full_inbox_keeps_a_closed_run_and_an_open_pacing_window() {
+    const DAY: i64 = 24 * HOUR;
+    let (dir, inbox) = open();
+    inbox.dispatch_cancel("A", "run1", None, at(1)).unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded.dispatch_start("B", "run1", None, at(2)).is_err());
+    assert!(bounded.dispatch_start("A", "run1", None, at(2)).is_err());
+
+    let dir = tempfile::tempdir().unwrap();
+    let paced = Inbox::open(dir.path()).unwrap();
+    paced
+        .dispatch_start("P", "run1", Some(86400), at(0))
+        .unwrap();
+    capture(&paced, "P", "run1", "log", 0, 0);
+    let claim = paced
+        .dispatch_claim("P", "run1", at(DAY))
+        .unwrap()
+        .claim
+        .unwrap();
+    paced
+        .dispatch_accept("P", "run1", &claim.batch.id, &claim.token, at(DAY))
+        .unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded
+        .dispatch_start("Q", "run1", None, at(DAY + 3 * HOUR))
+        .is_err());
+    bounded
+        .dispatch_start("Q", "run1", None, at(2 * DAY))
+        .unwrap();
+}
+
+#[test]
+fn cancelling_a_monitor_at_the_cap_makes_room_from_quiet_gates() {
+    let (dir, inbox) = open();
+    inbox
+        .dispatch_start("B", "run1", None, at(3 * HOUR))
+        .unwrap();
+    let bounded = with_max_signals(&dir, 2);
+    bounded
+        .dispatch_cancel("B", "run1", Some("noisy"), at(3 * HOUR))
+        .unwrap();
+    let gates = bounded.snapshot(at(3 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["B"]);
 }
 
 #[test]
