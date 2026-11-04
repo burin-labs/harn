@@ -39,6 +39,8 @@ mod landlock_support;
 mod nesting;
 #[path = "linux_self_confinement.rs"]
 mod self_confinement;
+#[path = "linux_shared_memory.rs"]
+mod shared_memory;
 use filesystem::filesystem_profile;
 pub(crate) use filesystem::installed_write_grants;
 use landlock_support::{AccessFs, FsAccess, LandlockSupport, ABI};
@@ -239,7 +241,9 @@ impl TransferableConfinement {
             ));
         }
         let program = seccomp
-            .chunks_exact(SECCOMP_INSTRUCTION_BYTES)
+            .as_chunks::<SECCOMP_INSTRUCTION_BYTES>()
+            .0
+            .iter()
             .map(|chunk| seccompiler::sock_filter {
                 code: u16::from_le_bytes([chunk[0], chunk[1]]),
                 jt: chunk[2],
@@ -267,6 +271,12 @@ impl TransferableConfinement {
         }
         seccompiler::apply_filter(&self.seccomp)
             .map_err(|err| io::Error::other(format!("failed to install the seccomp filter: {err}")))
+    }
+
+    /// Mount the payload's private `/dev/shm` and grant it in the ruleset.
+    /// The namespace helper calls this inside its mount namespace.
+    pub fn mount_private_shared_memory(&self) -> io::Result<()> {
+        shared_memory::mount_private(self.ruleset_fd())
     }
 
     /// Release the ruleset descriptor so it can be sent across an `exec`.
@@ -497,6 +507,7 @@ fn landlock_profile_for(
             false,
         )?;
     }
+    shared_memory::grant_host_fallback(&mut filesystem, private_tmp.is_some())?;
     let ruleset = support
         .populated_ruleset(
             scope_abstract_unix,
@@ -844,8 +855,7 @@ fn push_rule_exact(
 
 pub(crate) fn proc_runtime_reads_are_contained() -> bool {
     std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
-        .ok()
-        .is_some_and(|value| yama_scope_contains_process_reads(&value))
+        .is_ok_and(|value| yama_scope_contains_process_reads(&value))
 }
 
 fn yama_scope_contains_process_reads(value: &str) -> bool {

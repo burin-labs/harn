@@ -156,6 +156,13 @@ const LITERAL_TIMEOUT_BASELINE = [
   // Deliberate quiescence: after the first OTLP export arrives, drain
   // whatever else is already buffered. Expiry ends the drain, not the test.
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
+  // Hang guard for a reader that must never block on a FIFO marker. The read
+  // cannot be interrupted, so expiry is the failure this test exists to report.
+  {
+    rule: "literal_timeout",
+    path: "crates/harn-vm/src/stdlib/sandbox/workspace_env_owner_tests.rs",
+    count: 1,
+  },
 ]
 
 // External measurements require provider credentials, saved transcripts, or
@@ -217,6 +224,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Signal handling and terminal ordering require the real CLI and its started children.
+  "crates/harn-cli/tests/harn_cli_e2e/managed_command_interrupt.rs",
   // Portal readiness and bind failure must be observed through real process streams and a live listener.
   "crates/harn-cli/tests/harn_cli_e2e/portal_stderr.rs",
   // Agent harnesses run `harn signals hook` as a process and read its stdout,

@@ -16,6 +16,51 @@ use super::values::*;
 
 pub(super) const PYTHON_INIT_STUB: &str = "from .harn_protocol import *  # noqa: F401,F403\n";
 
+pub(super) fn field_ident(name: &str) -> String {
+    if matches!(
+        name,
+        "False"
+            | "None"
+            | "True"
+            | "and"
+            | "as"
+            | "assert"
+            | "async"
+            | "await"
+            | "break"
+            | "class"
+            | "continue"
+            | "def"
+            | "del"
+            | "elif"
+            | "else"
+            | "except"
+            | "finally"
+            | "for"
+            | "from"
+            | "global"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "lambda"
+            | "nonlocal"
+            | "not"
+            | "or"
+            | "pass"
+            | "raise"
+            | "return"
+            | "try"
+            | "while"
+            | "with"
+            | "yield"
+    ) {
+        format!("{name}_")
+    } else {
+        name.to_owned()
+    }
+}
+
 #[cfg(test)]
 pub(super) fn generate_python() -> String {
     generate_python_with_payloads(&SessionUpdatePayloads::load_for_tests())
@@ -30,10 +75,12 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     out.push_str("module. Field names match the wire JSON (camelCase) so dataclass\n");
     out.push_str("instances round-trip through ``json.dumps(asdict(obj))`` without a\n");
     out.push_str("custom encoder. Generic optional fields default to ``None`` and are\n");
-    out.push_str("stripped by :func:`to_wire`; closed recap shapes preserve required nulls.\n");
+    out.push_str("stripped by :func:`to_wire`; schema-required nullable fields retain null.\n");
     out.push_str("\"\"\"\n\n");
     out.push_str("from __future__ import annotations\n\n");
-    out.push_str("from dataclasses import asdict, dataclass, field, fields, is_dataclass\n");
+    out.push_str(
+        "from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass\n",
+    );
     out.push_str("from enum import Enum\n");
     out.push_str("from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union\n\n");
     out.push_str("__all__ = [\n");
@@ -54,6 +101,11 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
         .map(str::to_owned),
     );
     public_names.extend(payloads.records.iter().map(|record| record.name.clone()));
+    public_names.extend(
+        super::provider_usage::records()
+            .into_iter()
+            .map(|record| record.name),
+    );
     for name in &public_names {
         out.push_str("    ");
         out.push_str(&json_string_literal(name));
@@ -364,8 +416,8 @@ _T = TypeVar("_T", bound="_HarnDataclass")
 class _HarnDataclass:
     """Mixin providing wire-faithful ``to_wire`` / ``from_wire`` helpers.
 
-    ``to_wire`` strips fields that are ``None`` so the JSON envelope stays
-    minimal and matches what the Rust adapters emit. ``from_wire`` accepts a
+    ``to_wire`` strips absent optional fields and preserves required nulls
+    declared by a generated schema. ``from_wire`` accepts a
     decoded JSON object plus any unknown extension fields, ignoring keys
     that the static schema does not yet know about so additive enum or
     struct extensions stay forward-compatible.
@@ -375,21 +427,31 @@ class _HarnDataclass:
     def from_wire(cls: Type[_T], data: Mapping[str, Any]) -> _T:
         if not isinstance(data, Mapping):
             raise TypeError(f"{cls.__name__}.from_wire expected a mapping, got {type(data).__name__}")
-        accepted = {f.name for f in fields(cls)}  # type: ignore[arg-type]
-        kwargs = {key: value for key, value in data.items() if key in accepted}
+        accepted = {f.metadata.get("wire_name", f.name): f.name for f in fields(cls)}  # type: ignore[arg-type]
+        kwargs = {accepted[key]: value for key, value in data.items() if key in accepted}
         return cls(**kwargs)
 
     def to_wire(self) -> JsonObject:
         if not is_dataclass(self):
             raise TypeError("to_wire requires a dataclass instance")
-        return _strip_none(asdict(self))
+        return _strip_none(self)
 
 
-def _strip_none(value: Any) -> Any:
+def _strip_none(value: Any, preserve_dict_nulls: bool = False) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        required = getattr(type(value), "__harn_required_fields__", frozenset())
+        return {
+            f.metadata.get("wire_name", f.name): _strip_none(getattr(value, f.name), preserve_dict_nulls or bool(required))
+            for f in fields(value)
+            # A field without a constructor default is required on the wire, even when it is null.
+            if getattr(value, f.name) is not None
+            or f.metadata.get("wire_name", f.name) in required
+            or (f.default is MISSING and f.default_factory is MISSING)
+        }
     if isinstance(value, dict):
-        return {key: _strip_none(item) for key, item in value.items() if item is not None}
+        return {key: _strip_none(item, preserve_dict_nulls) for key, item in value.items() if item is not None or preserve_dict_nulls}
     if isinstance(value, list):
-        return [_strip_none(item) for item in value]
+        return [_strip_none(item, preserve_dict_nulls) for item in value]
     if isinstance(value, Enum):
         return value.value
     return value
@@ -512,7 +574,11 @@ class ACPNotification(_HarnDataclass):
     jsonrpc: str = "2.0"
 
 
-ACPMessage = Union[ACPRequest, ACPResponse, ACPNotification]
+# `params` is caller data, so a null nested inside it is a value, not an absent field.
+ACPNotification.__harn_required_fields__ = frozenset(["method", "jsonrpc"])
+
+
+ACPMessage =Union[ACPRequest, ACPResponse, ACPNotification]
 
 
 def is_request(message: Mapping[str, Any]) -> bool:

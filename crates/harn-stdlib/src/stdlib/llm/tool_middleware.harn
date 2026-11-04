@@ -791,6 +791,7 @@ pub fn with_audit_log(clock: HarnessClock, fs: HarnessFs, sink_or_options: any) 
  *
  * Use to gate destructive tools on host-side approval (e.g. an IDE host).
  * Read-only tools can opt out by returning `{decision: "auto"}`.
+ * Missing, malformed and unrecognized outcomes deny the call.
  *
  * @effects: []
  * @errors: []
@@ -808,16 +809,8 @@ pub fn with_consent(clock: HarnessClock, prompt_fn: any) {
     } else {
       unwrap(outcome)
     }
-    const decision = if type_of(raw) == "bool" {
-      if raw {
-        {decision: "approved"}
-      } else {
-        {decision: "denied"}
-      }
-    } else {
-      __tool_mw_dict(raw)
-    }
-    const verdict = to_string(decision?.decision ?? "denied")
+    const decision = __tool_mw_dict(raw)
+    const verdict = __consent_decision(raw)
     if verdict == "denied" {
       return __tool_mw_short_circuit(
         call,

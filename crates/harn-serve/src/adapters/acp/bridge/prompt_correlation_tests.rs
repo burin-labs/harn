@@ -109,6 +109,7 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: std::sync::Mutex::new(String::new()),
         assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+        host_responder: None,
     };
     let old_acp = acp(old_output.clone(), 200);
     let current_acp = acp(current_output.clone(), 300);

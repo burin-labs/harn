@@ -148,6 +148,16 @@ pub(super) fn generate_manifest_with_vocabularies(
         },
     }));
 
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/orchestration/crystallize/bundle.rs",
+        "artifact": harn_vm::orchestration::CRYSTALLIZATION_BUNDLE_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::orchestration::CrystallizationBundleManifest",
+            "schema": harn_vm::orchestration::BUNDLE_SCHEMA,
+            "schema_version": harn_vm::orchestration::BUNDLE_SCHEMA_VERSION,
+        },
+    }));
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
         "generatedBy": "harn dump-protocol-artifacts",
@@ -346,6 +356,9 @@ pub(super) fn generate_readme() -> String {
          make check-protocol-artifacts\n\
          ```\n\n\
          Files:\n\n\
+         - `crystallization-bundle.schema.json`: serialized candidate manifest\n\
+           derived from Harn's bundle types. The `HarnCrystallization*` bindings\n\
+           preserve effect knowledge, replay evidence, and promotion criteria.\n\
          - `manifest.json`: deterministic summary of protocol versions, advertised Harn\n\
            extension fields, and generated binding vocabulary.\n\
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\
@@ -470,6 +483,26 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
             },
         }
     });
+    let host_tool_result = serde_json::to_value(
+        harn_serve::adapters::acp::agent_event_payloads::HostToolResult {
+            injection_id: "injection-42".into(),
+            tool_call_id: "tool-42".into(),
+            tool_name: "read_file".into(),
+            tool_kind: None,
+            raw_input: json!({"path": "README.md"}),
+            status: "completed".into(),
+            raw_output: None,
+            result_pointer: None,
+            error: None,
+            duration_ms: Some(12),
+            delivery: json!("immediate"),
+            delivered_at_seam: Some("immediate".into()),
+            sequence: 1,
+            provenance: json!({"source": "user_invoked_tool"}),
+            sanitization: json!({"action": "passed"}),
+        },
+    )
+    .map_err(|error| format!("failed to serialize host-tool result fixture: {error}"))?;
     let tool_call_receipt = json!({
         "schema_version": TOOL_CALL_RECEIPT_SCHEMA_VERSION,
         "session_id": "sess-42",
@@ -624,6 +657,8 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         "toolCallReceipt": tool_call_receipt,
         "sessionRecapAvailability": session_recap_availability,
         "planDocument": super::plan_records::round_trip_fixture()?,
+        "providerUsage": super::provider_usage::round_trip_fixtures()?,
+        "hostToolResult": host_tool_result,
     });
 
     serde_json::to_string_pretty(&fixture)

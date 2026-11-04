@@ -209,7 +209,7 @@ jobs:
           go-version: "1.26.6"
           cache: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: nextest@0.9.132
       # The hosted runner is two machines under one label. Most runs land on a
@@ -220,13 +220,10 @@ jobs:
       # same 7 GiB host swapped 47 times less and built in 27 minutes instead
       # of 58 (harn#8599). The shared budget derives that from the box's cores
       # and memory rather than from a literal.
-      #
-      # Hosted only. Exact-source dispatches run on owned hosts whose warm
-      # persistent target builds in minutes, and nothing measured there says
-      # memory binds, so they keep Cargo's default.
-      - name: Measure the hosted build budget
+      # Persistent targets can be absent or invalidated on owned hosts too.
+      # Measure the same CPU, memory and active-job share for every runner.
+      - name: Measure the build budget
         id: resource-budget
-        if: ${{ runner.environment == 'github-hosted' }}
         run: bash scripts/ci/rust_resource_budget.sh
         env:
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
@@ -247,9 +244,7 @@ jobs:
         id: workspace-nextest
         shell: bash
         env:
-          # A skipped budget step yields an empty output, which Cargo rejects,
-          # so non-hosted runs name Cargo's own default explicitly.
-          CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           RUST_TEST_JOB_LIMIT_MINUTES: 75
           # Routine feedback gets an early signal, separate from the cold-build fuse.
           RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}

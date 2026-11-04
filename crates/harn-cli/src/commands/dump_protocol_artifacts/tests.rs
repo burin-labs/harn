@@ -825,6 +825,13 @@ fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts()
         output_tokens: 3,
         cache_read_tokens: 2,
         cache_write_tokens: 0,
+        reported_cache: Some(Box::new(harn_vm::llm::usage::ReportedCacheTotals {
+            reported_calls: 1,
+            read_reported_calls: 1,
+            write_reported_calls: 0,
+            read_tokens: 2,
+            write_tokens: 0,
+        })),
         provider_call_count: 2,
         unpriced_calls: 1,
         usage_unknown_calls: 1,
@@ -839,7 +846,19 @@ fn generated_provider_usage_reads_the_runtime_record_and_rejects_missing_facts()
     assert_eq!(binding.usage_unknown_calls, 1);
     assert!(binding.cost_usd.is_none());
     assert_eq!(binding.known_cost_usd.as_f64(), Some(0.02));
+    let cache = binding
+        .reported_cache
+        .as_ref()
+        .expect("measured cache record");
+    assert_eq!(cache.read_reported_calls, 1);
+    assert_eq!(cache.write_reported_calls, 0);
+    assert_eq!(cache.read_tokens, 2);
     assert_eq!(serde_json::to_value(binding).unwrap(), wire);
+    let mut unknown_cache = wire.clone();
+    unknown_cache["reported_cache"] = serde_json::Value::Null;
+    let binding: generated_rust_binding::HarnProviderUsage =
+        serde_json::from_value(unknown_cache.clone()).expect("unknown cache remains nullable");
+    assert_eq!(serde_json::to_value(binding).unwrap(), unknown_cache);
     wire.as_object_mut().unwrap().remove("known_cost_usd");
     assert!(serde_json::from_value::<generated_rust_binding::HarnProviderUsage>(wire).is_err());
 }

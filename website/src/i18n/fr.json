@@ -1,4 +1,21 @@
 {
+  "contribute": {
+    "pageTitle": "Contribuer | {siteName}",
+    "title": "Aidez à améliorer Harn",
+    "intro": "Partagez vos découvertes, signalez un problème ou contribuez au code et à la documentation.",
+    "reportTitle": "Signaler un problème",
+    "reportBody": "Décrivez le résultat attendu, ce qui s’est passé et comment reproduire le problème. Retirez les secrets et les données privées avant de publier.",
+    "reportLink": "Ouvrir un ticket",
+    "codeTitle": "Contribuer au code ou à la documentation",
+    "codeBody": "Consultez le guide de contribution pour configurer Harn et préparer une modification à faire relire.",
+    "codeLink": "Lire le guide de contribution",
+    "discussTitle": "Partager votre expérience",
+    "discussBody": "Posez une question ou expliquez comment vous utilisez Harn dans les discussions de la communauté.",
+    "discussLink": "Participer à une discussion",
+    "tipTitle": "Laisser un pourboire facultatif",
+    "tipBody": "Si Harn vous a déjà été utile, vous pouvez laisser un pourboire ponctuel à {company}. Aucun bien, service ou avantage n’est fourni en contrepartie.",
+    "tipLink": "Laisser un pourboire avec Stripe"
+  },
   "common": {
     "siteName": "Harn",
     "github": "GitHub",

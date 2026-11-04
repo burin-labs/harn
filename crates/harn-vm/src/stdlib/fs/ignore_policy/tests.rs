@@ -64,6 +64,7 @@ fn builtin_list_omits_vendor() {
         ".harn",
         ".harn-runs",
         ".harn-tmp",
+        "harn-sandbox",
         ".hg",
         ".next",
         ".svn",
@@ -81,7 +82,7 @@ fn builtin_list_omits_vendor() {
             "missing built-in ignored directory {expected}"
         );
     }
-    assert_eq!(BUILTIN_IGNORED_DIRS.len(), 15);
+    assert_eq!(BUILTIN_IGNORED_DIRS.len(), 16);
 }
 
 #[test]
@@ -213,12 +214,34 @@ fn nested_repository_inside_scratch_owns_its_ignore_stack() {
     assert!(has(&entries, "dist/reincluded.txt"), "{entries:?}");
 }
 
+/// A workspace at `$HOME` contains the user cache directory, so its walk would
+/// otherwise reach every confined child's temporary files.
+#[test]
+fn a_walk_of_a_workspace_holding_the_user_cache_skips_the_runtime_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        ".cache/harn-sandbox/0123456789abcdef/tmp/leftover.py",
+        "x\n",
+    );
+    write(dir.path(), "src/main.py", "x\n");
+    let entries = walk(dir.path(), IgnorePolicy::Builtin);
+    assert!(has(&entries, "src/main.py"), "{entries:?}");
+    assert!(
+        !entries.iter().any(|entry| entry.contains("harn-sandbox")),
+        "{entries:?}"
+    );
+}
+
 #[test]
 fn scratch_detection_matches_harn_managed_names() {
     assert!(is_scratch_path(Path::new("/ws/.harn-tmp/run/out.json")));
     assert!(is_scratch_path(Path::new("/ws/.harn-toolchain-cache")));
     assert!(!is_scratch_path(Path::new("/ws/.harn-runs/run")));
     assert!(!is_scratch_path(Path::new("/ws/src")));
+    let runtime =
+        crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir(Path::new("/ws")).unwrap();
+    assert!(is_scratch_path(&runtime.join("tmp/out.json")));
 }
 
 #[test]

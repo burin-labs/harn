@@ -55,7 +55,16 @@ impl ProcessSpawner for RealSpawner {
                 Ok(child) => child,
                 Err(error) => {
                     harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
-                    return Err(map_spawn_error(error));
+                    return Err(match map_spawn_error(error) {
+                        ProcessError::SpawnIo { kind, message } => ProcessError::SpawnIo {
+                            kind,
+                            message: format!(
+                                "starting command supervisor {}: {message}",
+                                command.get_program().to_string_lossy()
+                            ),
+                        },
+                        error => error,
+                    });
                 }
             };
             drop(command);
@@ -376,7 +385,7 @@ pub(crate) fn prepare_command_from(
     // Give the child workspace-local temp, home, and toolchain-cache paths.
     // Applied after `spec.env`; caller-set keys win. The values are workspace
     // paths, not secrets, so this does not widen the scrub surface above.
-    for (key, value) in process_sandbox::active_workspace_process_env() {
+    for (key, value) in process_sandbox::active_workspace_process_env_for(&spec.program) {
         if spec.env.contains_key(&key) {
             continue;
         }
@@ -700,6 +709,25 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn register_scope_cleanup(
+        &self,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Option<harn_vm::op_interrupt::ActiveProcessCleanupGuard> {
+        #[cfg(unix)]
+        {
+            Some(harn_vm::op_interrupt::register_active_process_cleanup(
+                Some(self.pid),
+                &self.cleanup_token,
+                Some(cancel),
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = cancel;
+            None
+        }
+    }
+
     fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
         self.cleanup_report.clone()
     }

@@ -570,19 +570,19 @@ fn test_step_commands() {
     let mut dbg = Debugger::new();
 
     let r = dbg.handle_message(make_request(1, "next", None));
-    assert!(r[0].success == Some(true));
+    assert_eq!(r[0].success, Some(true));
     assert_eq!(dbg.step_mode, StepMode::StepOver);
 
     let r = dbg.handle_message(make_request(2, "stepIn", None));
-    assert!(r[0].success == Some(true));
+    assert_eq!(r[0].success, Some(true));
     assert_eq!(dbg.step_mode, StepMode::StepIn);
 
     let r = dbg.handle_message(make_request(3, "stepOut", None));
-    assert!(r[0].success == Some(true));
+    assert_eq!(r[0].success, Some(true));
     assert_eq!(dbg.step_mode, StepMode::StepOut);
 
     let r = dbg.handle_message(make_request(4, "continue", None));
-    assert!(r[0].success == Some(true));
+    assert_eq!(r[0].success, Some(true));
     assert_eq!(dbg.step_mode, StepMode::Continue);
 }
 

@@ -799,6 +799,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
 	./scripts/tests/hook_registry_harn_bin_test.sh
+	./scripts/tests/hook_no_local_build_test.sh
 	./scripts/tests/hook_agent_gate_census_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/pre_push_signature_census_test.sh
@@ -1777,6 +1778,7 @@ check-rust-test-lane-policy:
 	@echo "=== Checking Rust test lane stack contract ==="
 	@$(HARN_CMD) run scripts/check_rust_test_lane_policy.harn
 	@bash scripts/tests/rust_resource_budget_test.sh
+	@node --test scripts/tests/native_qualification_budget_test.mjs
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/runner_capacity_test.sh
 	@bash scripts/tests/consumer_canary_test.sh

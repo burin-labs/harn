@@ -391,6 +391,8 @@ pub struct Vm {
     pub(crate) denied_builtins: Arc<HashSet<String>>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Retained top-level identity across branch-local cancellation tokens.
+    pub(crate) execution_cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) interrupt_signal_token: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
     /// Remaining instruction-boundary checks before a requested host
     /// cancellation is forcefully raised. This gives `is_cancelled()` loops a
@@ -552,6 +554,7 @@ impl VmBaseline {
             flight_recorder_max_events: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: None,
+            execution_cancel_token: None,
             interrupt_signal_token: None,
             cancel_grace_instructions_remaining: None,
             interrupt_handlers: Vec::new(),
@@ -830,6 +833,7 @@ impl Vm {
             flight_recorder_max_events: None,
             denied_builtins: Arc::new(HashSet::new()),
             cancel_token: None,
+            execution_cancel_token: None,
             interrupt_signal_token: None,
             cancel_grace_instructions_remaining: None,
             interrupt_handlers: Vec::new(),
@@ -1095,6 +1099,7 @@ impl Vm {
             flight_recorder_max_events: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
+            execution_cancel_token: self.execution_cancel_token.clone(),
             interrupt_signal_token: self.interrupt_signal_token.clone(),
             cancel_grace_instructions_remaining: None,
             interrupt_handlers: Vec::new(),

@@ -606,3 +606,44 @@ fn harn_reference_projection_replaces_stale_edges_and_keeps_names_separate() {
     }]);
     assert_eq!(target_path(&graph), vec!["b.harn"]);
 }
+
+#[test]
+fn harn_reference_projection_deduplicates_and_keeps_all_matching_nodes() {
+    let mut graph = SymbolGraph::new();
+    graph.rebuild_file(
+        1,
+        "a.harn",
+        Language::Harn,
+        "fn run() { 1 }\nfn run() { 2 }\n",
+        &[],
+        &[],
+    );
+    graph.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 3 }", &[], &[]);
+    graph.rebuild_file(3, "use.harn", Language::Harn, "fn use_it() {}", &[], &[]);
+    let reference = ResolvedHarnReference {
+        from_path: "use.harn".into(),
+        to_path: "a.harn".into(),
+        to_name: "run".into(),
+    };
+    graph.replace_harn_references(&[
+        reference.clone(),
+        reference,
+        ResolvedHarnReference {
+            from_path: "missing.harn".into(),
+            to_path: "b.harn".into(),
+            to_name: "run".into(),
+        },
+    ]);
+    let module = graph.module_node_for_file(3).unwrap();
+    let targets: Vec<_> = graph
+        .outgoing(module)
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Refs)
+        .map(|edge| graph.node(edge.to).unwrap())
+        .collect();
+    assert_eq!(targets.len(), 2);
+    assert!(targets
+        .iter()
+        .all(|target| target.path.as_ref() == "a.harn"));
+    assert_ne!(targets[0].id, targets[1].id);
+}

@@ -1,8 +1,9 @@
-//! Make Darwin's temporary-directory API use the existing workspace temp root.
+//! Make Darwin's temporary-directory API use the session's existing temp dir.
 //!
 //! Foundation consults confstr before TMPDIR. A native user-directory suffix
-//! names an alias to .harn-tmp; Seatbelt still authorizes the resolved workspace
-//! path. No shared temporary directory or alias subtree receives a grant.
+//! names an alias to the temp dir in the workspace's runtime dir; Seatbelt
+//! still authorizes the resolved path. No shared temporary directory or alias
+//! subtree receives a grant.
 
 use std::ffi::{CStr, OsStr, OsString};
 use std::io;
@@ -29,7 +30,7 @@ pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> 
         .any(|root| target.starts_with(root))
     {
         return Err(io::Error::other(
-            "workspace temporary directory escapes its workspace",
+            "session temporary directory escapes its write roots",
         ));
     }
     let base = native_temp_base()?;
@@ -59,7 +60,7 @@ pub(in crate::stdlib::sandbox) fn inject_env(
         Ok(_) => {}
         Err(error) => super::super::warn_once(
             "handler_sandbox_native_temp",
-            &format!("cannot map Darwin temporary storage into the workspace: {error}; shared temporary storage remains denied"),
+            &format!("cannot map Darwin temporary storage into the session temp dir: {error}; shared temporary storage remains denied"),
         ),
     }
 }

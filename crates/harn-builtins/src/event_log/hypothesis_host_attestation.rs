@@ -141,28 +141,28 @@ fn validate_host_result(value: &VmValue, builtin: &str) -> Result<(), VmError> {
             "{builtin}: native adapter returned an invalid {HOST_CAPABILITY}.{HOST_OPERATION} result"
         ))
     };
-    let outer = value.as_dict().ok_or_else(&expected_error)?;
+    let outer = value.as_dict().ok_or_else(expected_error)?;
     if outer.len() != 1 {
         return Err(expected_error());
     }
     let meta = outer
         .get("_meta")
         .and_then(VmValue::as_dict)
-        .ok_or_else(&expected_error)?;
+        .ok_or_else(expected_error)?;
     if meta.len() != 1 {
         return Err(expected_error());
     }
     let harn = meta
         .get("harn")
         .and_then(VmValue::as_dict)
-        .ok_or_else(&expected_error)?;
+        .ok_or_else(expected_error)?;
     if harn.len() != 1 {
         return Err(expected_error());
     }
     let result = harn
         .get("hostResult")
         .and_then(VmValue::as_dict)
-        .ok_or_else(&expected_error)?;
+        .ok_or_else(expected_error)?;
     if result.len() != 2
         || !matches!(result.get("schema"), Some(VmValue::String(value)) if value.as_str() == HOST_RESULT_SCHEMA)
         || !matches!(result.get("kind"), Some(VmValue::String(value)) if value.as_str() == HOST_RESULT_KIND)
