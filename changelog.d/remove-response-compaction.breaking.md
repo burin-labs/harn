@@ -5,7 +5,7 @@
   "via classified compaction" recap header. `compact_strategy: "classify"` is now an unknown-strategy error, and an
   `auto_compact` strategy label of `classify` falls back to observation masking like any other unrecognized label.
 
-  ## Migration
+  Migration:
 
   Use `observation_mask` or `llm` compaction. Callers that stored large values through `response_compaction` should
   keep the exact value in `std/cache` themselves and summarize it with an ordinary `harness.llm` call. Rust consumers
