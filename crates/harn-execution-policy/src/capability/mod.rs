@@ -967,6 +967,24 @@ pub(super) fn intersect_roots(host: &[String], requested: &[String]) -> Vec<Stri
 /// root's (`/repo-backup` against `/repo`) is not mistaken for a child.
 fn root_is_within(candidate: &str, root: &str) -> bool {
     Path::new(candidate).starts_with(Path::new(root))
+        || OWNED_SCRATCH
+            .get()
+            .is_some_and(|in_owned_scratch| in_owned_scratch(candidate, root))
+}
+
+/// Whether `candidate` lies in scratch space that belongs to the tree `root`
+/// names although it sits outside that tree.
+pub type OwnedScratchResolver = fn(candidate: &str, root: &str) -> bool;
+
+static OWNED_SCRATCH: std::sync::OnceLock<OwnedScratchResolver> = std::sync::OnceLock::new();
+
+/// Install the runtime's answer to which roots outside a tree still belong to
+/// it. A workspace's sandbox temp dir lives outside the workspace but stands
+/// in for scratch space inside it, so a root requested there narrows a host
+/// root that covers the workspace instead of being dropped from the
+/// intersection. The first installation wins.
+pub fn install_owned_scratch_resolver(resolve: OwnedScratchResolver) {
+    let _ = OWNED_SCRATCH.set(resolve);
 }
 
 /// Rank within the confinement ladder, weakest first. Exhaustive so that

@@ -319,22 +319,47 @@ test("the shipped caller admits the actual owned pull request workflow run", () 
   );
 });
 
-test("the shipped workflow exposes a one-PR dispatch and no scheduled sweep", () => {
-  assert.equal(workflow.on.schedule, undefined);
-  assert.deepEqual(workflow.on.workflow_run.workflows, [
-    "CI",
-    "Build release binaries",
-  ]);
-  const producer = load(
-    fs.readFileSync(
-      `${root}/.github/workflows/build-release-binaries.yml`,
-      "utf8",
-    ),
+test("every pull request workflow's completion wakes the merger", () => {
+  // A ship PR whose last pending check comes from an unlisted workflow is never
+  // looked at again once that check passes; harn#10995 waited on macOS tests.
+  const dir = `${root}/.github/workflows`;
+  const producers = fs
+    .readdirSync(dir)
+    .filter((file) => /\.ya?ml$/.test(file))
+    .map((file) => load(fs.readFileSync(`${dir}/${file}`, "utf8")))
+    .filter((wf) => {
+      const on = wf?.on;
+      if (typeof on === "string") return on === "pull_request";
+      if (Array.isArray(on)) return on.includes("pull_request");
+      return on != null && Object.hasOwn(on, "pull_request");
+    })
+    .map((wf) => wf.name)
+    .sort();
+  assert.ok(producers.includes("macOS workspace tests"));
+  assert.deepEqual(
+    [...workflow.on.workflow_run.workflows].sort(),
+    producers,
+    "the wake list must name exactly the workflows with a pull_request trigger",
   );
-  assert.equal(producer.name, "Build release binaries");
-  assert.ok(
-    producer.on.pull_request !== undefined,
-    "the release verdict must run on pull requests to wake Smart Ship",
+});
+
+test("the shipped workflow sweeps every 30 minutes and exposes a one-PR dispatch", () => {
+  assert.deepEqual(workflow.on.schedule, [{ cron: "19,49 * * * *" }]);
+  const sweep = pullRequestContext({ eventName: "schedule" });
+  sweep.github.event = {};
+  assert.equal(admits(sweep), true, "the scheduled sweep is admitted");
+  assert.equal(
+    admits({ ...sweep, vars: { HARN_SMART_SHIP: "off" } }),
+    false,
+    "the stop switch refuses the sweep",
+  );
+  assert.equal(
+    admits({
+      ...sweep,
+      github: { ...sweep.github, repository: "burin-labs/other" },
+    }),
+    false,
+    "another repository's sweep is refused",
   );
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.required, true);
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.default, undefined);

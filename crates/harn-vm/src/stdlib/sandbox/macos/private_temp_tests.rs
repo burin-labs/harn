@@ -44,14 +44,15 @@ fn workspace_temp_symlinks_cannot_select_host_storage() {
     let baseline = prepare(&policy)
         .unwrap()
         .expect("ordinary private storage is admitted");
-    assert_eq!(
-        baseline.directory,
-        workspace.path().canonicalize().unwrap().join(".harn-tmp")
-    );
-    std::fs::remove_dir_all(workspace.path().join(".harn-tmp")).unwrap();
-    std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
+    let runtime =
+        super::super::super::workspace_env::sandbox_runtime_dir(workspace.path()).unwrap();
+    assert_eq!(baseline.directory, runtime.join("tmp"));
+    std::fs::remove_dir_all(runtime.join("tmp")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), runtime.join("tmp")).unwrap();
+    let redirected = prepare(&policy).unwrap();
+    std::fs::remove_dir_all(&runtime).unwrap();
     assert!(
-        prepare(&policy).unwrap().is_none(),
+        redirected.is_none(),
         "a redirected scratch root must supply no binding"
     );
     assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);

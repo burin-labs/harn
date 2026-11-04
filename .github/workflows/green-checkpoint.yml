@@ -12,6 +12,10 @@ name: Green checkpoint
 #
 # The release App writes the branch and tags. Rulesets restrict `green` and
 # `green-*` tags to it and refuse a non-fast-forward or deletion of `green`.
+#
+# Two repository variables keep the release build itself exercised:
+# GREEN_SOURCE_CANDIDATE_HOURS starts a signed source candidate on that cadence,
+# and GREEN_REQUIRES_SOURCE_CANDIDATE=true holds green until a commit has passed one.
 
 on:
   schedule:
@@ -43,17 +47,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The release candidate reader is a node module.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
       # Moving a branch across commits that change workflows needs `workflows`.
       - name: Mint GitHub App installation token
         id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-actions: read
+          permission-actions: write
           permission-contents: write
           permission-workflows: write
       - name: Advance green to the newest certified main commit
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GREEN_SOURCE_CANDIDATE_HOURS: ${{ vars.GREEN_SOURCE_CANDIDATE_HOURS }}
+          GREEN_REQUIRES_SOURCE_CANDIDATE: ${{ vars.GREEN_REQUIRES_SOURCE_CANDIDATE }}
         run: bash scripts/ci/green_checkpoint.sh

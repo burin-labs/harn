@@ -17,6 +17,7 @@
 //! stable, documented surface to depend on without reaching into
 //! `stdlib::*` plumbing.
 
+pub use crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir;
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,
@@ -39,6 +40,7 @@ pub use crate::stdlib::sandbox::{
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
 pub use crate::stdlib::sandbox::command_output_with_declared_roots;
+pub use crate::stdlib::sandbox::workspace_env::active_workspace_process_env_for;
 pub use crate::stdlib::sandbox::workspace_env::rust_toolchain_homes;
 
 impl ProcessSandboxScope {

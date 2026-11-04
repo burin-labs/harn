@@ -36,7 +36,7 @@ fn cache_read_tokens_cover_together_flat_shape() {
 #[test]
 fn an_omitted_cache_counter_is_unreported_and_an_explicit_zero_is_reported() {
     let omitted = extract_cache_counts(&serde_json::json!({"prompt_tokens": 9})).unwrap();
-    assert!(!omitted.reported);
+    assert!(!omitted.reported.has_any());
     assert_eq!((omitted.read_tokens, omitted.write_tokens), (0, 0));
 
     let zero = extract_cache_counts(&serde_json::json!({
@@ -44,7 +44,7 @@ fn an_omitted_cache_counter_is_unreported_and_an_explicit_zero_is_reported() {
         "prompt_tokens_details": {"cached_tokens": 0}
     }))
     .unwrap();
-    assert!(zero.reported);
+    assert!(zero.reported.has_any());
     assert_eq!(zero.read_tokens, 0);
 }
 

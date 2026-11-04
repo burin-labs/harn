@@ -39,7 +39,7 @@ before=0
 cargo install --path "$package" --debug --locked --root "$scratch/installed" \
   --target-dir "$scratch/target" > "$output/before.log" 2>&1 || before=$?
 [[ "$before" != 0 ]] || { echo "Baseline unexpectedly installed." >&2; exit 1; }
-grep -E "couldn't read.*harn-vm/tests/support/sandbox_host.rs" "$output/before.log"
+grep -E "couldn't (read|find file).*harn-vm/tests/support/sandbox_host.rs" "$output/before.log"
 cp "$candidate" "$baseline"
 cargo install --path "$package" --debug --locked --root "$scratch/installed" \
   --target-dir "$scratch/target" > "$output/after.log" 2>&1

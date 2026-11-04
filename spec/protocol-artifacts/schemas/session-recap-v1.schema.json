@@ -443,6 +443,9 @@
     "textFact": {
       "additionalProperties": false,
       "properties": {
+        "messageId": {
+          "$ref": "#/$defs/nullableString"
+        },
         "sourceEventId": {
           "minimum": 0,
           "type": "integer"
@@ -453,7 +456,8 @@
       },
       "required": [
         "text",
-        "sourceEventId"
+        "sourceEventId",
+        "messageId"
       ],
       "type": "object"
     },

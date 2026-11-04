@@ -1195,6 +1195,20 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+    "expression": "__first_ladder_step(llm, opts)",
+    "owner": "__first_ladder_step",
+    "evidence": "Consumer __first_ladder_step.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__first_ladder_step",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__tool_format_route(llm, opts)",
     "owner": "__tool_format_route",
     "evidence": "Consumer __tool_format_route.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",

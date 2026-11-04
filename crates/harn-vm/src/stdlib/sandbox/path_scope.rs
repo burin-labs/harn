@@ -85,6 +85,20 @@ pub(super) fn declared_path_roots_active() -> bool {
     PATH_SCOPE_ROOTS.with(|selection| selection.get() == PathScopeRoots::Declared)
 }
 
+/// Writable roots outside the working tree that its git topology implies: a
+/// linked worktree's git dirs and Harn's own relocated runtime directories.
+/// None under declared roots. The runtime dir is granted separately because
+/// it stays writable even then: a child's `TMPDIR` that its own sandbox
+/// refuses is a broken child.
+pub(super) fn topology_extension_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    if declared_path_roots_active() {
+        return Vec::new();
+    }
+    let mut outside = git_scope_extension_for_roots(roots).read_write;
+    outside.extend(relocated_runtime_roots(roots));
+    outside
+}
+
 fn check_fs_path_scope_with_roots(
     path: &Path,
     access: FsAccess,
@@ -114,7 +128,13 @@ fn check_fs_path_scope_with_roots(
     let scope = match root_selection {
         PathScopeRoots::Assembled => scope_memo::scope_roots(&policy, access),
         PathScopeRoots::Declared => std::rc::Rc::new(scope_memo::ScopeRoots {
-            workspace: base_workspace_roots(&policy),
+            // The declared roots, plus the runtime dir a confined child's
+            // temp dir and toolchain cache live in.
+            workspace: {
+                let mut roots = base_workspace_roots(&policy);
+                roots.extend(workspace_env::granted_runtime_dir(&policy, &roots));
+                roots
+            },
             read_only: read_roots::normalized_declared_read_only_roots(&policy),
             read_deny: process_sandbox_read_deny_roots(&policy),
         }),
@@ -133,9 +153,21 @@ fn check_fs_path_scope_with_roots(
             read_only: false,
         });
     }
+    // A workspace's runtime dir stands in for the scratch dir that once sat
+    // inside it, so every root covering the workspace covers it too. Resolved
+    // once, on the first root that does not contain the path; it reads the
+    // disk only for a path under the runtime base.
+    let owners = std::cell::OnceCell::new();
+    let covers = |root: &PathBuf| {
+        path_is_within(&candidate, root)
+            || owners
+                .get_or_init(|| workspace_env::runtime_dir_owners(&candidate))
+                .iter()
+                .any(|owner| path_is_within(owner, root))
+    };
     let writable_depth = roots
         .iter()
-        .filter(|root| path_is_within(&candidate, root))
+        .filter(|root| covers(root))
         .map(|root| root.components().count())
         .max();
     if let Some(depth) = writable_depth {
@@ -152,10 +184,7 @@ fn check_fs_path_scope_with_roots(
         }
         return Ok(());
     }
-    let within_read_only = scope
-        .read_only
-        .iter()
-        .any(|root| path_is_within(&candidate, root));
+    let within_read_only = scope.read_only.iter().any(covers);
     if within_read_only && access == FsAccess::Read {
         return Ok(());
     }

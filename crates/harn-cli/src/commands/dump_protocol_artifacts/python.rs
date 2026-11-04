@@ -75,10 +75,12 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     out.push_str("module. Field names match the wire JSON (camelCase) so dataclass\n");
     out.push_str("instances round-trip through ``json.dumps(asdict(obj))`` without a\n");
     out.push_str("custom encoder. Generic optional fields default to ``None`` and are\n");
-    out.push_str("stripped by :func:`to_wire`; closed recap shapes preserve required nulls.\n");
+    out.push_str("stripped by :func:`to_wire`; schema-required nullable fields retain null.\n");
     out.push_str("\"\"\"\n\n");
     out.push_str("from __future__ import annotations\n\n");
-    out.push_str("from dataclasses import asdict, dataclass, field, fields, is_dataclass\n");
+    out.push_str(
+        "from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass\n",
+    );
     out.push_str("from enum import Enum\n");
     out.push_str("from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union\n\n");
     out.push_str("__all__ = [\n");
@@ -99,6 +101,11 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
         .map(str::to_owned),
     );
     public_names.extend(payloads.records.iter().map(|record| record.name.clone()));
+    public_names.extend(
+        super::provider_usage::records()
+            .into_iter()
+            .map(|record| record.name),
+    );
     for name in &public_names {
         out.push_str("    ");
         out.push_str(&json_string_literal(name));
@@ -436,7 +443,10 @@ def _strip_none(value: Any, preserve_dict_nulls: bool = False) -> Any:
         return {
             f.metadata.get("wire_name", f.name): _strip_none(getattr(value, f.name), preserve_dict_nulls or bool(required))
             for f in fields(value)
-            if getattr(value, f.name) is not None or f.metadata.get("wire_name", f.name) in required
+            # A field without a constructor default is required on the wire, even when it is null.
+            if getattr(value, f.name) is not None
+            or f.metadata.get("wire_name", f.name) in required
+            or (f.default is MISSING and f.default_factory is MISSING)
         }
     if isinstance(value, dict):
         return {key: _strip_none(item, preserve_dict_nulls) for key, item in value.items() if item is not None or preserve_dict_nulls}
@@ -564,7 +574,11 @@ class ACPNotification(_HarnDataclass):
     jsonrpc: str = "2.0"
 
 
-ACPMessage = Union[ACPRequest, ACPResponse, ACPNotification]
+# `params` is caller data, so a null nested inside it is a value, not an absent field.
+ACPNotification.__harn_required_fields__ = frozenset(["method", "jsonrpc"])
+
+
+ACPMessage =Union[ACPRequest, ACPResponse, ACPNotification]
 
 
 def is_request(message: Mapping[str, Any]) -> bool:
