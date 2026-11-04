@@ -1449,6 +1449,7 @@ pub(crate) use hook_depth::{enter_command_policy_hook, swap_command_policy_hook_
 mod scan;
 mod workspace_effect;
 
+pub(crate) use workspace_effect::gh_invocation_is_read_only;
 pub use workspace_effect::{command_workspace_effect_json, command_workspace_effect_value};
 
 pub use scan::declared_command_hard_denial;

@@ -709,6 +709,21 @@ The ACP server supports these JSON-RPC methods:
 | `workflow/pause` | Mark a workflow paused and enqueue a control message |
 | `workflow/resume` | Mark a workflow resumed and enqueue a control message |
 
+`session/close` can return an opaque `continuation` string for the most recently
+completed transcript in that server process. A client that already holds the
+complete history can pass it to `session/load` with the same `sessionId` and
+`cwd`. If the selected canonical history still matches, Harn restores the
+transcript without reading its events or sending replay notifications; the
+result has an empty `replayed` array. A missing, expired or changed continuation
+takes the ordinary replay path. A history change between load and prompt
+refuses the prompt and requires closing and loading the session again.
+
+The continuation retains transcript data only. Close still flushes the turn,
+retires the runnable session, releases its writer lease and drops controls,
+inputs and native snapshots. Load requires a fresh environment declaration
+and workspace admission. The canonical history remains appendable; sealing a
+session store with `SessionStore::close` is a separate operation.
+
 ACP sessions are conversation/execution contexts. Harn extends `session/new`
 and `session/fork` with an `environmentPolicy`; this field is not part of the
 base ACP specification. A `session/new` that omits it is refused with

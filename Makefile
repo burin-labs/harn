@@ -550,6 +550,7 @@ lint-actions-source:
 
 # Evaluate the admitted Smart Ship workflow predicate with GitHub's expression engine.
 	@node --test scripts/tests/smart_ship_workflow_test.mjs
+	@node --test scripts/tests/macos_pr_dispatch_test.mjs
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
@@ -799,6 +800,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
 	./scripts/tests/hook_registry_harn_bin_test.sh
+	./scripts/tests/owned_macos_pr_check_test.sh
 	./scripts/tests/hook_no_local_build_test.sh
 	./scripts/tests/hook_agent_gate_census_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh

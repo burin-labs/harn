@@ -470,8 +470,8 @@ impl SchedulerState {
                     Some(job) => *job,
                     None => continue,
                 };
-                let age_ms = now_ms.saturating_sub(head.enqueued_at_ms).max(0);
-                if (age_ms as u64) >= threshold
+                let age_ms = harn_clock::elapsed_ms(now_ms, head.enqueued_at_ms);
+                if age_ms >= threshold
                     && oldest
                         .as_ref()
                         .map(|(prev, _, _, _)| head.enqueued_at_ms < *prev)
