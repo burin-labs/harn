@@ -4,37 +4,38 @@
 // (the implementation this module replaces) on these exact inputs, so each
 // comparison is byte for byte against the fold that shipped earlier releases.
 import { with_temp_dir } from "std/testing"
+import { published_changelog_versions } from "../release_changelog_entries.harn"
 import {
   ReleaseFragmentFile,
+  apply_published_changelog_fold,
   apply_release_changelog_fold,
+  fold_candidate_changelog,
   fold_release_changelog,
   is_release_changelog_fragment_name,
   release_section_findings,
   retire_unpublished_section,
 } from "../release_changelog_fold.harn"
-import { extract_section, published_changelog_versions } from "../render_release_notes.harn"
+import { changelog_with_notes_for, extract_section } from "../render_release_notes.harn"
 
 @test
-pipeline test_retired_candidate_carries_notes_without_becoming_an_install_base() {
-  const text =
-    "# Changelog\n\n## v1.2.4\n\n### Fixed\n\n- candidate fix\n\n## v1.2.3\n\n- published fix\n"
+pipeline test_retired_version_is_recorded_and_its_fragments_ship_next() {
+  const text = "# Changelog\n\n## v1.2.3\n\n- published fix\n"
   const retired = retire_unpublished_section(text, "1.2.4", "1.2.3")
-  assert_eq(extract_section(retired, "1.2.4"), "### Fixed\n\n- candidate fix")
+  assert_eq(retired.contains("## v1.2.4 (never published)"), true)
   assert_eq(published_changelog_versions(retired), ["1.2.3"])
-  const folded = fold_release_changelog(retired, [], "1.2.5")
+  const files: list<ReleaseFragmentFile> = [{name: "1.fixed.md", body: "A carried fix.\n"}]
+  const folded = fold_candidate_changelog(retired, files, "1.2.5")
   assert_eq(folded.success, true)
-  assert_eq(extract_section(folded.text, "1.2.5"), "### Fixed\n\n- candidate fix")
-  assert_eq(extract_section(folded.text, "1.2.4"), "### Fixed\n\n- candidate fix")
+  assert_eq(extract_section(folded.text, "1.2.5").contains("A carried fix."), true)
   assert_eq(extract_section(folded.text, "1.2.3"), "- published fix")
   assert_eq(published_changelog_versions(folded.text), ["1.2.5", "1.2.3"])
 }
 
 @test
 pipeline test_retirement_skips_earlier_never_published_identities() {
-  const text =
-    "## v1.2.5\n\n- candidate\n\n## v1.2.4 (never published)\n\n- earlier\n\n## v1.2.3\n\n- published\n"
+  const text = "## v1.2.4 (never published)\n\n- earlier\n\n## v1.2.3\n\n- published\n"
   const retired = retire_unpublished_section(text, "1.2.5", "1.2.3")
-  assert_eq(extract_section(retired, "1.2.5"), "- candidate")
+  assert_eq(retired.starts_with("## v1.2.5 (never published)"), true)
   assert_eq(published_changelog_versions(retired), ["1.2.3"])
   const refused = try {
     retire_unpublished_section(text, "1.2.5", "1.2.4")
@@ -47,7 +48,7 @@ pipeline test_retirement_skips_earlier_never_published_identities() {
 
 @test
 pipeline test_retirement_refuses_wrong_or_missing_published_predecessor() {
-  const text = "## v1.2.4\n\n- candidate\n\n## v1.2.3\n\n- published\n"
+  const text = "## v1.2.3\n\n- published\n"
   for base in ["1.2.2", "1.2.4", ""] {
     const refused = try {
       retire_unpublished_section(text, "1.2.4", base)
@@ -237,4 +238,74 @@ pipeline test_fragment_names_follow_the_category_convention() {
   assert(!is_release_changelog_fragment_name(".gitkeep"))
   assert(!is_release_changelog_fragment_name("8012.unknown.md"))
   assert(!is_release_changelog_fragment_name("8012.fixed.txt"))
+}
+
+/*
+ * The notes signed into a candidate's manifest and the section the version commit
+ * writes after publishing it must be one text, or the changelog disagrees with
+ * what was published.
+ */
+@test
+pipeline test_notes_rendered_at_build_match_the_version_commit(harness: Harness) {
+  const changelog = "# Changelog\n\n## v1.2.3\n\n- published\n"
+  const files: list<ReleaseFragmentFile> = [
+    {name: "1.fixed.md", body: "A fix.\n"},
+    {name: "2.added.md", body: "A feature.\n"},
+  ]
+  const built = changelog_with_notes_for(changelog, files, "1.2.4")
+  const signed = extract_section(built, "1.2.4")
+  assert_eq(signed.contains("A fix."), true)
+  assert_eq(signed.contains("A feature."), true)
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      harness.fs.mkdir(path_join(root, "changelog.d"))
+      harness.fs.write_text(path_join(root, "CHANGELOG.md"), changelog)
+      for file in files {
+        harness.fs.write_text(path_join(root, "changelog.d", file.name), file.body)
+      }
+      // A fragment landed after the tag stays for the next release.
+      const later = harness.fs.mkdtemp("harn-published-fragments")
+      harness.fs.mkdir(path_join(later, "changelog.d"))
+      for file in files {
+        harness.fs.write_text(path_join(later, "changelog.d", file.name), file.body)
+      }
+      harness.fs.write_text(path_join(root, "changelog.d", "3.fixed.md"), "Later.\n")
+      apply_published_changelog_fold(harness.fs, root, later, "1.2.4")
+      const after = harness.fs.read_text(path_join(root, "CHANGELOG.md"))
+      assert_eq(extract_section(after, "1.2.4"), signed)
+      assert_eq(harness.fs.list_dir(path_join(root, "changelog.d")), ["3.fixed.md"])
+      // A section that already exists wins, and its fragments are not consumed:
+      // the same fold twice writes nothing, and 3.fixed.md's entry survives.
+      harness.fs.write_text(path_join(later, "changelog.d", "3.fixed.md"), "Later.\n")
+      assert_eq(apply_published_changelog_fold(harness.fs, root, later, "1.2.4"), [])
+      assert_eq(harness.fs.read_text(path_join(root, "CHANGELOG.md")), after)
+      assert_eq(harness.fs.list_dir(path_join(root, "changelog.d")), ["3.fixed.md"])
+    },
+  )
+}
+
+@test
+pipeline test_notes_prefer_an_existing_section_and_refuse_unpublishable_versions() {
+  const changelog = "## v1.2.4 (never published)\n\n- retired\n\n## v1.2.3\n\n- published\n"
+  const files: list<ReleaseFragmentFile> = [{name: "1.fixed.md", body: "A fix.\n"}]
+  assert_eq(changelog_with_notes_for(changelog, files, "1.2.3"), changelog)
+  for refused_version in ["1.2.4", "1.2.2"] {
+    const refused = try {
+      changelog_with_notes_for(changelog, files, refused_version)
+      false
+    } catch (_) {
+      true
+    }
+    assert_eq(refused, true)
+  }
+  const empty = changelog_with_notes_for(changelog, [], "1.2.5")
+  assert_eq(extract_section(empty, "1.2.5"), "- No user-facing changes.")
+  const malformed = try {
+    changelog_with_notes_for(changelog, [{name: "1.fixed.md", body: ""}], "1.2.5")
+    false
+  } catch (_) {
+    true
+  }
+  assert_eq(malformed, true)
 }

@@ -111,6 +111,7 @@ mod rename;
 mod rename_binding;
 mod rename_go;
 mod rename_java;
+mod rename_python_stub;
 mod rename_reach;
 mod rename_rust_residue;
 mod repo_map;

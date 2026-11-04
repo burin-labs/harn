@@ -178,6 +178,8 @@ impl NetPolicyMethodContract {
             "request" | "sse_connect" => OutboundUrl { argument: 1 },
             "session_request" => OutboundUrl { argument: 2 },
             "egress_policy"
+            | "child_network_refusals"
+            | "child_network_allow"
             | "connector_call"
             | "cookie_delete"
             | "stream_read"

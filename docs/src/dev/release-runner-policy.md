@@ -8,8 +8,8 @@ validates that document and resolves the matrix consumed by
 Each target declares five labels:
 
 - `warm`: routine default-branch cache refreshes.
-- `primary`: release candidate builds on the product critical path (the
-  version commit's push to main; candidate mode resolves to these labels).
+- `primary`: release candidate builds on the product critical path (a checkpoint
+  or requested source candidate; candidate mode resolves to these labels).
 - `recovery`: no workflow path selects it since releases are promoted from the
   candidate run instead of rebuilt; `scripts/release_runner_matrix.sh` still
   validates it.

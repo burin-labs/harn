@@ -100,7 +100,7 @@ if [[ -z "$pr_url" ]]; then
   trap 'rm -f "$body_file"' EXIT
   if [[ -n "$retired_version" ]]; then
     {
-      printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\n' \
+      printf 'Retire failed, never-published v%s and declare %s. Its changelog fragments ship in the next release; %s stays the install and comparison base.\n\n' \
         "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION"
       if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
         printf 'Source %s can never promote: main CI %s at that exact source is not a green full-suite run, whatever producer %s concluded. A complete job census and fresh nonpublication checks authorize retirement.\n' \
@@ -114,9 +114,9 @@ if [[ -z "$pr_url" ]]; then
     } > "$body_file"
   else
     printf '%s\n' \
-      "Automated post-release cutover to the next patch development identity." \
+      "Automated post-release move to the next unpublished version, $actual." \
       "" \
-      "Stable release strings now remain exclusive to immutable release commits; mid-cycle builds self-report $actual." \
+      "Main always declares the next unpublished stable version, so every checkpoint candidate can be published as what it was compiled and signed as. Merging this publishes nothing." \
       > "$body_file"
   fi
   pr_url="$(gh pr create \

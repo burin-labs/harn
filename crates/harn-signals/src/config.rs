@@ -20,7 +20,8 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub struct Config {
     /// A session not seen for this long is dropped from routing.
     pub stale_after: time::Duration,
-    /// Resolved and expired signals are pruned after this long.
+    /// Resolved and expired signals, and dispatch gates that have neither
+    /// polled nor captured, are pruned after this long.
     pub retain_for: time::Duration,
     /// A lease not acked within this long may be redelivered, and a session
     /// silent this long loses its unacked reminders to a responsive session.
