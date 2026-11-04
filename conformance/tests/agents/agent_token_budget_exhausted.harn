@@ -1,0 +1,56 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { with_llm_script } from "std/testing"
+
+// A `token_budget` ceiling ends the run with status `budget_exhausted`, names
+// the ceiling as the stop reason, and emits the `budget_exhausted` event whose
+// kind is the ceiling. The same script under a ceiling it never reaches runs on
+// to the iteration cap, so the first half cannot pass without the ceiling.
+fn run_with_ceiling(harness: Harness, token_budget: int) {
+  const session = "token-budget-" + to_string(token_budget) + "-" + harness.random.uuid()
+  return with_llm_script(
+    harness.llm,
+    [
+      {text: "still working", input_tokens: 6, output_tokens: 6},
+      {text: "still working", input_tokens: 6, output_tokens: 6},
+      {text: "still working", input_tokens: 6, output_tokens: 6},
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        max_nudges: 5,
+        token_budget: token_budget,
+        final_wrapup: false,
+      }
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Keep replying.", nil, opts) },
+      )
+    },
+  )
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  const capped = run_with_ceiling(harness, 10)
+  const events = capped.events.filter({ event -> event.type == "budget_exhausted" })
+  harness.stdio.println("status=" + capped.result.status)
+  harness.stdio.println("stop_reason=" + capped.result.stop_reason)
+  harness.stdio.println("event_count=" + to_string(len(events)))
+  harness.stdio.println("event_kind=" + to_string(events[0]?.kind))
+  assert_eq(capped.result.status, "budget_exhausted")
+  assert_eq(capped.result.stop_reason, "token_budget")
+  assert_eq(len(events), 1)
+  assert_eq(events[0].kind, "token_budget")
+  const roomy = run_with_ceiling(harness, 100000)
+  const roomy_events = roomy.events.filter({ event -> event.kind == "token_budget" })
+  harness.stdio.println("roomy_stop_reason=" + roomy.result.stop_reason)
+  harness.stdio.println("roomy_token_events=" + to_string(len(roomy_events)))
+  assert_ne(roomy.result.stop_reason, "token_budget")
+  assert_eq(len(roomy_events), 0)
+}
