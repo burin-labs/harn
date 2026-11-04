@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# A machine-wide harn.hooks.noLocalBuild must not change what these hooks are shown to do.
+export GIT_CONFIG_GLOBAL=/dev/null
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
@@ -179,6 +181,10 @@ case "$*" in
   "check-ref-format refs/heads/obsolete"|"check-ref-format refs/tags/old"|"check-ref-format refs/heads/current")
     ;;
   "check-ref-format "*)
+    exit 1
+    ;;
+  "config --type=bool --get harn.hooks.noLocalBuild")
+    # The one read of the machine's build setting; unset here.
     exit 1
     ;;
   *)

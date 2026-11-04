@@ -44,15 +44,18 @@ fn workspace_temp_symlinks_cannot_select_host_storage() {
     let baseline = prepare(&policy)
         .unwrap()
         .expect("ordinary private storage is admitted");
-    assert_eq!(
-        baseline.directory,
-        workspace.path().canonicalize().unwrap().join(".harn-tmp")
-    );
-    std::fs::remove_dir_all(workspace.path().join(".harn-tmp")).unwrap();
-    std::os::unix::fs::symlink(outside.path(), workspace.path().join(".harn-tmp")).unwrap();
+    let runtime =
+        super::super::super::workspace_env::sandbox_runtime_dir(workspace.path()).unwrap();
+    assert_eq!(baseline.directory, runtime.join("tmp"));
+    std::fs::remove_dir_all(runtime.join("tmp")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), runtime.join("tmp")).unwrap();
+    let redirected = prepare(&policy).unwrap();
+    std::fs::remove_dir_all(&runtime).unwrap();
+    // A runtime dir it cannot use makes temp fall back into the workspace.
+    let outside_root = outside.path().canonicalize().unwrap();
     assert!(
-        prepare(&policy).unwrap().is_none(),
-        "a redirected scratch root must supply no binding"
+        redirected.is_none_or(|binding| !binding.directory.starts_with(&outside_root)),
+        "a redirected scratch root must not select host storage"
     );
     assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
 }
@@ -134,4 +137,47 @@ fn a_preparing_spawn_excludes_reapers_until_it_releases_the_alias_lock() {
     );
     drop(preparing);
     assert!(exclusive_now(base.path()));
+}
+
+#[test]
+fn a_busy_scan_skips_cleanup_without_blocking_alias_preparation() {
+    let base = tempfile::tempdir().unwrap();
+    let gone = tempfile::tempdir().unwrap();
+    let dangling = prepare_in(base.path(), gone.path()).unwrap();
+    drop(gone);
+    let alias = base.path().join(dangling);
+    assert!(alias.is_symlink());
+    let scan = AliasLock::try_scan(base.path()).unwrap().unwrap();
+    assert!(AliasLock::try_scan(base.path()).unwrap().is_none());
+    reap_dangling_aliases(base.path());
+    assert!(alias.is_symlink(), "a competing scan must stand down");
+    let live = tempfile::tempdir().unwrap();
+    let suffix = prepare_in(base.path(), live.path()).unwrap();
+    assert_eq!(
+        std::fs::read_link(base.path().join(suffix)).unwrap(),
+        live.path()
+    );
+    drop(scan);
+    reap_dangling_aliases(base.path());
+    assert!(
+        !alias.is_symlink(),
+        "the control must reap the known dangling alias"
+    );
+}
+
+#[test]
+fn a_planted_scan_lock_symlink_is_refused_without_blocking_preparation() {
+    let base = tempfile::tempdir().unwrap();
+    let protected = base.path().join("unrelated");
+    std::fs::write(&protected, "untouched").unwrap();
+    std::os::unix::fs::symlink(&protected, base.path().join(SCAN_LOCK)).unwrap();
+    assert!(AliasLock::try_scan(base.path()).is_err());
+    reap_dangling_aliases(base.path());
+    let live = tempfile::tempdir().unwrap();
+    let suffix = prepare_in(base.path(), live.path()).unwrap();
+    assert_eq!(
+        std::fs::read_link(base.path().join(suffix)).unwrap(),
+        live.path()
+    );
+    assert_eq!(std::fs::read_to_string(protected).unwrap(), "untouched");
 }

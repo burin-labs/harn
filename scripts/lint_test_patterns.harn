@@ -37,6 +37,9 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // OS processes; the bounded poll names the surviving process group.
   "crates/harn-vm/src/op_interrupt.rs",
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
+  // Waits, bounded, for a real granted process to start so a sibling can try
+  // to read its login while it runs; a virtual clock cannot start a process.
+  "crates/harn-hostlib/tests/harn_hostlib/process_command_grant_e2e.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
@@ -123,6 +126,9 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
 const SYSTEM_TIME_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/http/tests.rs",
   "crates/harn-hostlib/tests/harn_hostlib/scanner_e2e.rs",
+  // Names leftover per-spawn directories with the host time the production
+  // sweep reads back, so the age check runs against a real timestamp.
+  "crates/harn-hostlib/tests/harn_hostlib/process_command_grant_e2e.rs",
 ]
 
 // `tokio::time::timeout(Duration::…)` / `.recv_timeout(Duration::…)` with a
@@ -156,6 +162,13 @@ const LITERAL_TIMEOUT_BASELINE = [
   // Deliberate quiescence: after the first OTLP export arrives, drain
   // whatever else is already buffered. Expiry ends the drain, not the test.
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
+  // Hang guard for a reader that must never block on a FIFO marker. The read
+  // cannot be interrupted, so expiry is the failure this test exists to report.
+  {
+    rule: "literal_timeout",
+    path: "crates/harn-vm/src/stdlib/sandbox/workspace_env_owner_tests.rs",
+    count: 1,
+  },
 ]
 
 // External measurements require provider credentials, saved transcripts, or
@@ -677,6 +690,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // as supervisor/triggers entries above.
   "crates/harn-builtins/src/postgres/circuit.rs",
   "crates/harn-vm/src/stdlib/process.rs",
+  // A per-spawn credential directory carries its creation time so a later
+  // process can remove it past the age bound. Host time must survive process
+  // death, so the real clock is the source of truth.
+  "crates/harn-vm/src/stdlib/sandbox/grant_spawn.rs",
   "crates/harn-vm/src/stdlib/supervisor.rs",
   "crates/harn-vm/src/stdlib/tracing.rs",
   "crates/harn-vm/src/stdlib/triggers_stdlib.rs",

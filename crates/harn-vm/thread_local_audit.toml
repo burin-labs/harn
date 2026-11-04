@@ -794,6 +794,14 @@ statics = ["FORCE_DISCARDED_PRODUCES_VALUE"]
 category = "thread_private"
 plan = "thread_private_test"
 
+# Names the one per-spawn directory a confined program may read while that
+# program is launched on this thread, and is cleared before the launch returns.
+[[thread_local]]
+path = "src/stdlib/sandbox/grant_spawn.rs"
+statics = ["OWN_SPAWN_LAUNCHING"]
+category = "thread_private"
+plan = "thread_private_sync_scope"
+
 [[thread_local]]
 path = "src/stdlib/sandbox/mod.rs"
 statics = ["WARNED_KEYS"]

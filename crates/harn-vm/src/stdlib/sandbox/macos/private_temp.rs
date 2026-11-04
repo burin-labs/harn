@@ -1,8 +1,9 @@
-//! Make Darwin's temporary-directory API use the existing workspace temp root.
+//! Make Darwin's temporary-directory API use the session's existing temp dir.
 //!
 //! Foundation consults confstr before TMPDIR. A native user-directory suffix
-//! names an alias to .harn-tmp; Seatbelt still authorizes the resolved workspace
-//! path. No shared temporary directory or alias subtree receives a grant.
+//! names an alias to the temp dir in the workspace's runtime dir; Seatbelt
+//! still authorizes the resolved path. No shared temporary directory or alias
+//! subtree receives a grant.
 
 use std::ffi::{CStr, OsStr, OsString};
 use std::io;
@@ -29,13 +30,12 @@ pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> 
         .any(|root| target.starts_with(root))
     {
         return Err(io::Error::other(
-            "workspace temporary directory escapes its workspace",
+            "session temporary directory escapes its write roots",
         ));
     }
     let base = native_temp_base()?;
-    static REAPED: Once = Once::new();
-    REAPED.call_once(|| reap_dangling_aliases(&base));
     let suffix = prepare_in(&base, &target)?;
+    schedule_alias_cleanup(base);
     Ok(Some(Binding {
         directory: target,
         suffix,
@@ -59,7 +59,7 @@ pub(in crate::stdlib::sandbox) fn inject_env(
         Ok(_) => {}
         Err(error) => super::super::warn_once(
             "handler_sandbox_native_temp",
-            &format!("cannot map Darwin temporary storage into the workspace: {error}; shared temporary storage remains denied"),
+            &format!("cannot map Darwin temporary storage into the session temp dir: {error}; shared temporary storage remains denied"),
         ),
     }
 }
@@ -75,6 +75,23 @@ const ALIAS_DIGEST_HEX: usize = 16;
 /// holds it exclusive while it re-checks and unlinks one alias, so an alias that
 /// a spawn just found live is never unlinked under it.
 const ALIAS_LOCK: &str = "harn-aliases.lock";
+const SCAN_LOCK: &str = "harn-aliases-reap.lock";
+
+fn schedule_alias_cleanup(base: PathBuf) {
+    static STARTED: Once = Once::new();
+    STARTED.call_once(|| {
+        if let Err(error) = crate::task_spawn::named_thread("harn-temp-alias-cleanup", move || {
+            // SAFETY: this changes only the cleanup thread's scheduling class.
+            unsafe {
+                let _ =
+                    libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+            }
+            reap_dangling_aliases(&base);
+        }) {
+            tracing::debug!(%error, "cannot start temporary-alias cleanup");
+        }
+    });
+}
 
 /// Closing the file releases the lock, so the field is held, never read.
 struct AliasLock {
@@ -83,6 +100,26 @@ struct AliasLock {
 
 impl AliasLock {
     fn acquire(base: &Path, exclusive: bool) -> io::Result<Self> {
+        Self::acquire_named(
+            base,
+            ALIAS_LOCK,
+            if exclusive {
+                libc::LOCK_EX
+            } else {
+                libc::LOCK_SH
+            },
+        )
+    }
+
+    fn try_scan(base: &Path) -> io::Result<Option<Self>> {
+        match Self::acquire_named(base, SCAN_LOCK, libc::LOCK_EX | libc::LOCK_NB) {
+            Ok(lock) => Ok(Some(lock)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn acquire_named(base: &Path, name: &str, operation: libc::c_int) -> io::Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
         use std::os::unix::io::AsRawFd;
         let file = std::fs::OpenOptions::new()
@@ -90,12 +127,7 @@ impl AliasLock {
             .append(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(base.join(ALIAS_LOCK))?;
-        let operation = if exclusive {
-            libc::LOCK_EX
-        } else {
-            libc::LOCK_SH
-        };
+            .open(base.join(name))?;
         loop {
             // SAFETY: the descriptor is open for the life of `file`.
             if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
@@ -132,6 +164,10 @@ fn is_dangling_symlink(path: &Path) -> bool {
 /// each candidate is re-checked and unlinked under the exclusive lock. Best
 /// effort: a failure leaves the entry for the next process.
 fn reap_dangling_aliases(base: &Path) {
+    // A scan is best-effort cleanup, never a prerequisite for a confined spawn.
+    let Ok(Some(_scan)) = AliasLock::try_scan(base) else {
+        return;
+    };
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
     };

@@ -170,9 +170,8 @@ fn select_trusted_git(
         }
     }
     if macos {
-        if let Some(git) = path.and_then(|path| trusted_git_from_path(workspaces, path, true)) {
-            return Some(git);
-        }
+        // The system shim starts the developer-tools installer when Git is absent.
+        return path.and_then(|path| trusted_git_from_path(workspaces, path, true));
     }
     #[cfg(unix)]
     if Path::new("/usr/bin/git").is_file() {
@@ -296,8 +295,9 @@ mod tests {
                 Some(&only_workspace),
                 true
             ),
-            Some(PathBuf::from("/usr/bin/git"))
+            None
         );
+        assert_eq!(select_trusted_git(&[], &[], None, true), None);
     }
 
     #[test]

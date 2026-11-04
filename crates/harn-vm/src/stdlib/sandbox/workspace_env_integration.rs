@@ -7,7 +7,12 @@ use crate::orchestration::{
 };
 use crate::tool_annotations::SideEffectLevel;
 
-use super::{command_output, ProcessCommandConfig, WORKSPACE_TMPDIR_NAME};
+use super::{command_output, ProcessCommandConfig};
+
+/// The runtime dir the sandbox keeps a workspace's temp dir and caches in.
+fn runtime_dir(workspace: &Path) -> PathBuf {
+    super::workspace_env::sandbox_runtime_dir(workspace).expect("a user cache directory")
+}
 
 struct PolicyGuard;
 
@@ -55,7 +60,9 @@ final class PrivateTempTests: XCTestCase {
         },
     );
     if crate::sandbox_host::assert_unavailable_result(&result) {
-        assert!(!workspace.path().join(".harn-tmp/foundation-write").exists());
+        assert!(!runtime_dir(workspace.path())
+            .join("tmp/foundation-write")
+            .exists());
         return;
     }
     let output = result.expect("confined project script");
@@ -72,7 +79,8 @@ final class PrivateTempTests: XCTestCase {
         "Swift test was not executed: {stdout}"
     );
     assert_eq!(
-        std::fs::read_to_string(workspace.path().join(".harn-tmp/foundation-write")).unwrap(),
+        std::fs::read_to_string(runtime_dir(workspace.path()).join("tmp/foundation-write"))
+            .unwrap(),
         "PRIVATE-FOUNDATION-TEMP"
     );
 }
@@ -247,7 +255,8 @@ fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
     // child environment for every read rewrote toolchain launchers per step.
     let tmpdir = read("TMPDIR").expect("the workspace temp dir is a default");
     let root = workspace.path().canonicalize().unwrap();
-    assert_eq!(Path::new(&tmpdir), root.join(WORKSPACE_TMPDIR_NAME));
+    assert_eq!(Path::new(&tmpdir), runtime_dir(&root).join("tmp"));
+    assert!(!Path::new(&tmpdir).exists(), "a read created the temp dir");
     assert!(read("GOCACHE").is_some());
     let created: Vec<_> = std::fs::read_dir(workspace.path())
         .unwrap()
@@ -475,7 +484,7 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     let values = output_environment(output);
 
     let root = workspace.path().canonicalize().unwrap();
-    let cache = root.join(".harn-toolchain-cache");
+    let cache = runtime_dir(&root).join("toolchain");
     for key in [
         "XDG_CACHE_HOME",
         "GOCACHE",
@@ -507,8 +516,171 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     );
     assert_eq!(
         PathBuf::from(values.get("TMPDIR").unwrap()),
-        root.join(WORKSPACE_TMPDIR_NAME)
+        runtime_dir(&root).join("tmp")
     );
+}
+
+/// A confined child's temp dir is private and writable, and it is not in the
+/// workspace: a linter or test collector walking the tree must never meet the
+/// child's temporary files. The grant is the workspace's own runtime dir and
+/// nothing beside it, so the directory that holds every workspace's runtime
+/// dir stays unwritable.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_confined_child_writes_its_temp_dir_outside_the_workspace() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().canonicalize().unwrap();
+    let runtime = runtime_dir(&root);
+    let sibling = runtime.with_file_name(format!(
+        "{}-sibling-probe",
+        runtime.file_name().unwrap().to_string_lossy()
+    ));
+    let _policy = enter_policy(&root);
+    let run = |source: &str, target: &Path| {
+        command_output(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                source.to_string(),
+                "runtime-probe".to_string(),
+                target.display().to_string(),
+            ],
+            &ProcessCommandConfig {
+                cwd: Some(root.clone()),
+                ..ProcessCommandConfig::default()
+            },
+        )
+    };
+    let written = run(
+        "printf temp-write > \"$TMPDIR/live-probe\" && printf '%s' \"$TMPDIR\"",
+        Path::new(""),
+    );
+    if crate::sandbox_host::assert_unavailable_result(&written) {
+        crate::sandbox_host::boundary_not_measured(
+            "runtime_dir_temp_write",
+            "typed host confinement refusal observed; the temp dir write was not measured",
+        );
+        return;
+    }
+    let written = written.expect("confined temp dir write");
+    assert!(
+        written.status.success(),
+        "temp dir write: {}",
+        String::from_utf8_lossy(&written.stderr)
+    );
+    let tmpdir = PathBuf::from(String::from_utf8(written.stdout).unwrap());
+    assert_eq!(tmpdir, runtime.join("tmp"));
+    assert_eq!(
+        std::fs::read_to_string(tmpdir.join("live-probe")).unwrap(),
+        "temp-write"
+    );
+    assert!(!tmpdir.starts_with(&root), "{tmpdir:?} is in the workspace");
+    assert_eq!(
+        std::fs::read_dir(&root).unwrap().count(),
+        0,
+        "the child left something in the workspace"
+    );
+
+    let denied = run("printf escaped > \"$1\"", &sibling);
+    assert!(
+        !denied.as_ref().is_ok_and(|output| output.status.success()),
+        "a write beside the runtime dir must be denied: {denied:?}"
+    );
+    assert!(!sibling.exists(), "the sibling write landed");
+    std::fs::remove_dir_all(&runtime).unwrap();
+    let refusal = match &denied {
+        Ok(output) => format!("child exit {}", output.status),
+        Err(error) => format!("refused: {error}"),
+    };
+    println!(
+        "confined temp dir write outside the workspace and sibling denial reached ({refusal})"
+    );
+}
+
+/// With no usable user cache directory a confined child still has a temp dir
+/// it can write, and a toolchain cache: both in the workspace. The cache
+/// location resolves once per process, so this re-runs itself with one that
+/// cannot be created.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_confined_child_with_no_usable_cache_dir_writes_temp_in_the_workspace() {
+    const WORKSPACE_ENV: &str = "HARN_TEST_NO_CACHE_DIR_WORKSPACE";
+    if let Some(root) = std::env::var_os(WORKSPACE_ENV) {
+        let root = PathBuf::from(root);
+        let _policy = enter_policy(&root);
+        let written = command_output(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                "printf temp-write > \"$TMPDIR/live-probe\" && printf '%s' \"$GOCACHE\" > \"$TMPDIR/gocache\""
+                    .to_string(),
+            ],
+            &ProcessCommandConfig {
+                cwd: Some(root),
+                ..ProcessCommandConfig::default()
+            },
+        );
+        if crate::sandbox_host::assert_unavailable_result(&written) {
+            crate::sandbox_host::boundary_not_measured(
+                "no_cache_dir_temp_write",
+                "typed host confinement refusal observed; the temp dir write was not measured",
+            );
+            return;
+        }
+        let written = written.expect("confined temp dir write");
+        assert!(
+            written.status.success(),
+            "temp dir write: {}",
+            String::from_utf8_lossy(&written.stderr)
+        );
+        return;
+    }
+
+    let test_name = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, path)| path);
+    // A cache location that cannot be created, and none at all.
+    for home in [Some("/dev/null"), None] {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                &format!(
+                    "{test_name}::a_confined_child_with_no_usable_cache_dir_writes_temp_in_the_workspace"
+                ),
+                "--exact",
+                "--nocapture",
+            ])
+            .env(WORKSPACE_ENV, &root)
+            .env_remove("XDG_CACHE_HOME");
+        match home {
+            Some(home) => command.env("HOME", home),
+            None => command.env_remove("HOME"),
+        };
+        let output = command.output().unwrap();
+        let report = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success(), "HOME={home:?}: {report}");
+        if report.contains("no_cache_dir_temp_write") {
+            continue;
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".harn-tmp/live-probe")).unwrap_or_else(|error| {
+                panic!("HOME={home:?}: the child wrote no temp file: {error}: {report}")
+            }),
+            "temp-write"
+        );
+        let gocache = std::fs::read_to_string(root.join(".harn-tmp/gocache")).unwrap();
+        assert!(
+            Path::new(&gocache).starts_with(root.join(".harn-toolchain-cache")),
+            "HOME={home:?}: {gocache}"
+        );
+        println!("confined temp dir write with HOME={home:?} reached");
+    }
 }
 
 #[cfg(unix)]
@@ -516,11 +688,20 @@ fn spawned_process_observes_workspace_toolchain_environment() {
 fn safe_inherited_workspace_cache_reaches_sandboxed_child() {
     let workspace = tempfile::tempdir().unwrap();
     let workspace = workspace.path().canonicalize().unwrap();
-    let cache = workspace.join(".outer-harness-cache/go-mod");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(cache.join("prewarmed"), "cache-hit\n").unwrap();
+    // An outer harness's prewarmed cache in the workspace, and the one a
+    // confined parent run handed down from the workspace's runtime dir.
+    let in_workspace = workspace.join(".outer-harness-cache/go-mod");
+    let in_runtime = runtime_dir(&workspace).join("toolchain/outer-go-mod");
+    for cache in [&in_workspace, &in_runtime] {
+        std::fs::create_dir_all(cache).unwrap();
+        std::fs::write(cache.join("prewarmed"), "cache-hit\n").unwrap();
+    }
 
-    for key in ["GOMODCACHE", "XDG_CACHE_HOME"] {
+    for (key, cache) in [
+        ("GOMODCACHE", &in_workspace),
+        ("XDG_CACHE_HOME", &in_workspace),
+        ("GOMODCACHE", &in_runtime),
+    ] {
         let environment = isolated_environment([(key.to_string(), cache.display().to_string())]);
         let _policy = enter_policy_with_environment(&workspace, environment);
 
@@ -538,7 +719,7 @@ fn safe_inherited_workspace_cache_reaches_sandboxed_child() {
 }
 
 #[test]
-fn external_inherited_cache_is_relocated_inside_workspace() {
+fn external_inherited_cache_is_relocated_into_the_runtime_dir() {
     let workspace = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let workspace = workspace.path().canonicalize().unwrap();
@@ -556,7 +737,7 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
         let observed = PathBuf::from(values.get(key).unwrap_or_else(|| panic!("{key} missing")));
         assert_eq!(
             observed,
-            workspace.join(".harn-toolchain-cache").join(suffix)
+            runtime_dir(&workspace).join("toolchain").join(suffix)
         );
         assert!(!observed.starts_with(&outside));
     }
@@ -590,7 +771,7 @@ fn gradle_cache_child_preserves_workspace_paths_or_reports_unavailable_confineme
         let expected = if inherited == &warm {
             warm.clone()
         } else {
-            workspace.join(".harn-toolchain-cache/gradle")
+            runtime_dir(&workspace).join("toolchain/gradle")
         };
         let mode = if inherited == &warm {
             "warm"
@@ -712,11 +893,7 @@ fn installed_toolchains_use_the_workspace_owned_state() {
     if run(&env, &[], workspace.path()).is_none() {
         return;
     }
-    let cache = workspace
-        .path()
-        .canonicalize()
-        .unwrap()
-        .join(".harn-toolchain-cache");
+    let cache = runtime_dir(workspace.path()).join("toolchain");
 
     if let Some(go) = find_program("go") {
         std::fs::write(

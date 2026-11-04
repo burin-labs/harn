@@ -1,15 +1,31 @@
 import { crystallization_curate } from "std/agent/crystallization_curator"
-import { llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+import { llm_calls, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+
+const CITED_RUNS = ["run-one", "run-two"]
+
+fn run_card(id: string, session_id: string, ledger: list) -> dict {
+  return {
+    id: id,
+    session_id: session_id,
+    prompt: "Verify the widget package",
+    tool_sequence: ["run"],
+    command_ledger: ledger,
+    observed_at: "2026-08-13T12:00:00Z",
+  }
+}
+
+fn passed(command: string) -> dict {
+  return {tool: "run", command: command, exit_code: 0, ok: true}
+}
+
+fn failed(command: string) -> dict {
+  return {tool: "run", command: command, exit_code: 1, ok: false}
+}
 
 fn curate_with(harness: Harness, root: string, script: list, extra: dict) -> dict {
   const evidence = [
-    {
-      id: "run-one",
-      session_id: "",
-      prompt: "Verify the widget package",
-      tool_sequence: ["run"],
-      observed_at: "2026-08-13T12:00:00Z",
-    },
+    run_card("run-one", "session-one", [passed("make gen")]),
+    run_card("run-two", "session-two", [passed("make gen")]),
   ]
   return with_llm_script(
     harness.llm,
@@ -84,18 +100,9 @@ pipeline test_curator_skips_without_new_evidence(harness: Harness) {
         {
           require_new_evidence: true,
           evidence: [
-            {
-              id: "run-one",
-              session_id: "",
-              prompt: "Verify the widget package",
-              tool_sequence: ["run"],
-            },
-            {
-              id: "run-two",
-              session_id: "",
-              prompt: "Verify the widget again",
-              tool_sequence: ["run"],
-            },
+            run_card("run-one", "session-one", [passed("make gen")]),
+            run_card("run-two", "session-two", [passed("make gen")]),
+            run_card("run-three", "session-three", [passed("make gen")]),
           ],
         },
       )
@@ -197,7 +204,7 @@ pipeline test_curator_drops_a_proposal_matching_an_installed_capability(harness:
         description: "Run the widget checks.",
         when_to_use: "Before merging widget changes.",
         body: "# Verify Widget\n\nRun the checks.",
-        evidence_ids: ["run-one"],
+        evidence_ids: CITED_RUNS,
       }
       const result = curate_with(
         harness,
@@ -231,7 +238,7 @@ fn verify_tool(verify_command: string) -> dict {
     description: "Generate, then run the widget checks.",
     when_to_use: "Before finishing a widget change.",
     body: "# Verify Widget\n\nCall the tool.",
-    evidence_ids: ["run-one"],
+    evidence_ids: CITED_RUNS,
     artifact: {
       entrypoint: "server.harn",
       tool_names: ["verify_widget"],
@@ -249,9 +256,9 @@ fn submit_one(proposal: dict) -> list {
 pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
   const declared_command = "python3 check.py --expected \"left  right\""
   for sample in [
-    {command: "python3 check.py --expected \"left right\"", expected: 0},
-    {command: declared_command, expected: 1},
-    {command: "  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
+    {command: "make gen && python3 check.py --expected \"left right\"", expected: 0},
+    {command: "make gen && " + declared_command, expected: 1},
+    {command: "  make gen &&  python3\tcheck.py   --expected 'left  right'  ", expected: 1},
   ] {
     with_temp_dir(
       harness.fs,
@@ -281,8 +288,8 @@ pipeline test_semantic_whitespace_in_declared_arguments(harness: Harness) {
 
 pipeline test_semantic_whitespace_in_declared_directory(harness: Harness) {
   for sample in [
-    {command: "(cd 'web pkg' && npm test)", expected: 0},
-    {command: "(cd 'web  pkg' && npm test)", expected: 1},
+    {command: "make gen && (cd 'web pkg' && npm test)", expected: 0},
+    {command: "make gen && (cd 'web  pkg' && npm test)", expected: 1},
   ] {
     with_temp_dir(
       harness.fs,
@@ -433,6 +440,193 @@ pipeline test_curator_matches_the_effective_check_directory(harness: Harness) {
         web.proposals.any({ proposal -> proposal.name == "verify-web" }),
         "an earlier cd still applies after a prerequisite",
       )
+      return nil
+    },
+  )
+}
+
+/**
+ * A proposal counts only when it cites two real sessions that ran commands, whatever
+ * the model claims. Each case differs from the accepted one only in its evidence.
+ */
+pipeline test_curator_requires_counted_evidence_from_two_sessions(harness: Harness) {
+  const ran = [passed("make gen")]
+  const validated = {validator: { _source -> {outcome: "pass"} }}
+  const skill = {
+    kind: "skill",
+    name: "lint-widget",
+    title: "Lint Widget",
+    description: "Run the widget lint.",
+    when_to_use: "Before merging widget changes.",
+    body: "# Lint Widget\n\nRun the lint.",
+    evidence_ids: CITED_RUNS,
+  }
+  const two_sessions = [
+    run_card("run-one", "session-one", ran),
+    run_card("run-two", "session-two", ran),
+  ]
+  for sample in [
+    {why: "two sessions", evidence: two_sessions, cited: CITED_RUNS, expected: 1},
+    {
+      why: "one session",
+      evidence: [run_card("run-one", "session-one", ran)],
+      cited: ["run-one"],
+      expected: 0,
+    },
+    {
+      why: "the second session is not cited",
+      evidence: two_sessions,
+      cited: ["run-one"],
+      expected: 0,
+    },
+    {
+      why: "no ledger",
+      evidence: [run_card("run-one", "session-one", []), run_card("run-two", "session-two", [])],
+      cited: CITED_RUNS,
+      expected: 0,
+    },
+    {
+      why: "one session has no ledger",
+      evidence: [run_card("run-one", "session-one", ran), run_card("run-two", "session-two", [])],
+      cited: CITED_RUNS,
+      expected: 0,
+    },
+    {
+      why: "a duplicated session id",
+      evidence: [run_card("run-one", "session-one", ran), run_card("run-two", "session-one", ran)],
+      cited: CITED_RUNS,
+      expected: 0,
+    },
+    {
+      why: "blank session ids",
+      evidence: [run_card("run-one", "", ran), run_card("run-two", " ", ran)],
+      cited: CITED_RUNS,
+      expected: 0,
+    },
+  ] {
+    for proposal in [skill, verify_tool("make gen && make check")] {
+      with_temp_dir(
+        harness.fs,
+        { root ->
+          const result = curate_with(
+            harness,
+            root,
+            submit_one(proposal + {evidence_ids: sample.cited}),
+            validated + {evidence: sample.evidence},
+          )
+          assert_eq(result.proposal_count ?? 0, sample.expected, sample.why + ": " + proposal.kind)
+          return nil
+        },
+      )
+    }
+  }
+}
+
+fn recoveries_shown_to_the_model(harness: Harness, root: string, evidence: list) -> string {
+  return with_llm_script(
+    harness.llm,
+    priced_empty_batch(),
+    { ->
+      crystallization_curate(
+        harness,
+        {
+          project_root: root,
+          memory_root: path_join(root, "memory"),
+          session_store_root: root,
+          evidence: evidence,
+          now: "2026-08-13T12:05:00Z",
+          agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 2},
+        },
+      )
+      const prompt = json_stringify(llm_calls(harness.llm))
+      return prompt.split("<repeated_recoveries>")[1].split("</repeated_recoveries>")[0]
+    },
+  )
+}
+
+/** Only recoveries from two identifiable sessions are told to the model as repetition. */
+pipeline test_curator_counts_recoveries_across_identifiable_sessions(harness: Harness) {
+  const recovered = [failed("just default"), passed("just cog"), passed("just default")]
+  const blank_failure = [failed(""), passed("just cog")]
+  for sample in [
+    {
+      why: "two sessions recovered",
+      cards: [run_card("a", "session-one", recovered), run_card("b", "session-two", recovered)],
+      counted: true,
+    },
+    {
+      why: "one session recovered",
+      cards: [run_card("a", "session-one", recovered)],
+      counted: false,
+    },
+    {
+      why: "two cards from one session",
+      cards: [run_card("a", "session-one", recovered), run_card("b", "session-one", recovered)],
+      counted: false,
+    },
+    {
+      why: "two cards with no session id",
+      cards: [run_card("a", "", recovered), run_card("b", "", recovered)],
+      counted: false,
+    },
+    {
+      why: "a failure with no command text matches nothing",
+      cards: [
+        run_card("a", "session-one", blank_failure),
+        run_card("b", "session-two", blank_failure),
+      ],
+      counted: false,
+    },
+  ] {
+    with_temp_dir(
+      harness.fs,
+      { root ->
+        const shown = recoveries_shown_to_the_model(harness, root, sample.cards)
+        assert_eq(shown.contains("just cog"), sample.counted, sample.why)
+        return nil
+      },
+    )
+  }
+}
+
+/** A prerequisite ahead of a declared aggregate check keeps everything that check runs. */
+pipeline test_curator_accepts_a_verifier_built_on_the_declared_aggregate_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const declared = {
+        declared_checks: [
+          {intent: "verify", command: "just default", cwd: ""},
+          {intent: "test", command: "just test", cwd: ""},
+          {intent: "lint", command: "just lint", cwd: ""},
+        ],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const unrun = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("just cog && just default")),
+        declared,
+      )
+      assert_eq(unrun.proposal_count ?? 0, 0, "a verify check no session passed may be wider")
+      const ran_aggregate = declared
+        + {
+          evidence: [
+            run_card("run-one", "session-one", [passed("just default 2>&1 | tail -5")]),
+            run_card("run-two", "session-two", [passed("just test")]),
+          ],
+        }
+      for repeated in ["just default", "just test && just lint", "just test && just default"] {
+        const bare = curate_with(harness, root, submit_one(verify_tool(repeated)), ran_aggregate)
+        assert_eq(bare.proposal_count ?? 0, 0, "declared checks alone teach nothing: " + repeated)
+      }
+      const result = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("just cog && just default")),
+        ran_aggregate,
+      )
+      assert_eq(result.proposal_count, 1, "the aggregate check counts as a declared check")
       return nil
     },
   )

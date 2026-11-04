@@ -53,6 +53,7 @@ mod parser_agreement_corpus;
 mod prepared_source_verifier;
 mod process_adoption_e2e;
 mod process_artifact_retention;
+mod process_command_grant_e2e;
 mod process_owner_death_e2e;
 #[cfg(target_os = "linux")]
 mod process_reexec_e2e;

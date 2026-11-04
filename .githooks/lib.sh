@@ -102,12 +102,19 @@ hook_paths_need_highlight() {
   return 1
 }
 
+# A machine with local builds off always runs the fast default, whatever
+# HARN_HOOKS_FULL_LOCAL says: every gate that needs a build already sits behind
+# this mode, so none of them can reach hook_build_harn_bin and fail the hook.
 hook_fast_default_mode() {
-  [ "${HARN_HOOKS_FULL_LOCAL:-0}" != "1" ]
+  [ "${HARN_HOOKS_FULL_LOCAL:-0}" != "1" ] || ! hook_local_build_allowed
 }
 
 hook_skip_no_local_build() {
   label=$1
+  if ! hook_local_build_allowed; then
+    echo "=== Hook: SKIPPING $label (local builds are off on this machine; this is a skip, not a pass; remote CI remains required) ===" >&2
+    return 0
+  fi
   if hook_fast_default_mode; then
     echo "=== Hook: skipping $label (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in; remote CI remains required) ==="
     return 0
@@ -288,7 +295,21 @@ hook_export_cargo_target_dir() {
   hook_export_cargo_build_dir
 }
 
+# A machine that must not compile from a hook (a workstation whose cores belong
+# to the person using it) sets HARN_HOOKS_NO_LOCAL_BUILD=1 or, once for every
+# checkout, `git config --global harn.hooks.noLocalBuild true`. Every hook build
+# goes through hook_build_harn_bin, so this is the one place the rule is
+# enforced; a gate that needs a build skips there instead of starting one.
+hook_local_build_allowed() {
+  [ "${HARN_HOOKS_NO_LOCAL_BUILD:-0}" != "1" ] || return 1
+  [ "$(git config --type=bool --get harn.hooks.noLocalBuild 2>/dev/null || echo false)" != "true" ]
+}
+
 hook_build_harn_bin() {
+  if ! hook_local_build_allowed; then
+    echo "    no local build on this machine (HARN_HOOKS_NO_LOCAL_BUILD or harn.hooks.noLocalBuild); not starting one." >&2
+    return 97
+  fi
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
   HARN_BIN='' HARN_BIN_NO_BUILD="${HARN_BIN_NO_BUILD:-0}" \
     RUSTC_WRAPPER='' RUSTC_WORKSPACE_WRAPPER='' \

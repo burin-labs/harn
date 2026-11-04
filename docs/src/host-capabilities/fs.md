@@ -90,7 +90,8 @@ or storage hardware provides. Import the typed `replace_text[_result]` and
 `harness.fs.workspace_temp_dir()` returns a workspace-local scratch directory,
 creating it lazily. Sandboxed runs place the directory inside the active
 workspace root; unsandboxed runs use `.harn-tmp` relative to the script source
-root.
+root. A confined child's `TMPDIR` is a different directory, outside the
+workspace (see [Sandboxing](../sandboxing.md)).
 
 `harness.fs.mkdtemp_in_workspace(prefix?)` creates a uniquely named directory
 under `harness.fs.workspace_temp_dir()`. Prefer this for intermediate files
@@ -114,7 +115,7 @@ project scanning — shares one ignore stack, selected per call with
 | Level | Behavior |
 | --- | --- |
 | `"none"` | Raw walk. Nothing is skipped. |
-| `"builtin"` | Harn's built-in directory defaults only (`.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, `.venv`, `venv`, `__pycache__`, `.hg`, `.svn`, and Harn's own `.harn`, `.harn-runs`, `.harn-tmp`). |
+| `"builtin"` | Harn's built-in directory defaults only (`.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, `.venv`, `venv`, `__pycache__`, `.hg`, `.svn`, and Harn's own `.harn`, `.harn-runs`, `.harn-tmp`, `.harn-sandbox`). |
 | `"project"` | The built-in defaults plus `.gitignore` and `.agentignore`, in that order of increasing precedence. `.ignore` (the ripgrep/fd convention) is not honored: git cannot evaluate it, so a host implementing the same walk cannot reproduce it. |
 
 Defaults differ by surface, deliberately:

@@ -550,6 +550,7 @@ lint-actions-source:
 
 # Evaluate the admitted Smart Ship workflow predicate with GitHub's expression engine.
 	@node --test scripts/tests/smart_ship_workflow_test.mjs
+	@node --test scripts/tests/macos_pr_dispatch_test.mjs
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
@@ -799,6 +800,8 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
 	./scripts/tests/hook_registry_harn_bin_test.sh
+	./scripts/tests/owned_macos_pr_check_test.sh
+	./scripts/tests/hook_no_local_build_test.sh
 	./scripts/tests/hook_agent_gate_census_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/pre_push_signature_census_test.sh
@@ -849,6 +852,7 @@ test-pr-gate-scripts:
 	./scripts/tests/prune_stale_targets_test.sh
 	bash ./scripts/tests/prune_stale_targets_lock_test.sh
 	python3 ./scripts/tests/prune_stale_targets_reader_test.py
+	python3 ./scripts/tests/prune_stale_targets_linux_census_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
