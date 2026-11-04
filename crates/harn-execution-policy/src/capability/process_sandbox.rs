@@ -89,6 +89,7 @@ pub struct ProcessSandboxPolicy {
     /// Give a confined child no IP networking, whatever the side-effect level
     /// allows. A host sets this when it wanted the child behind a proxy and
     /// this machine cannot hold it there; direct sockets would widen the ask.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub deny_network: bool,
     /// Directories under which a confined child may bind and connect
     /// Unix-domain sockets. Path-scoped: a socket outside every root is still

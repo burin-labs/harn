@@ -258,7 +258,6 @@
         "capabilities": {},
         "process_sandbox": {
           "allow_tcp_loopback": false,
-          "deny_network": false,
           "presets": null,
           "read_deny_roots": [],
           "read_roots": [],
