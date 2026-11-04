@@ -126,8 +126,6 @@ fn routing_exhaustion_preserves_structured_attempt_chain() {
             input_tokens: None,
             output_tokens: None,
             error: Some(snapshot.clone()),
-            verifier_signals: Vec::new(),
-            verifier_outcome: None,
         }],
         selected: None,
         terminal: None,
@@ -175,8 +173,6 @@ fn routing_exhaustion_preserves_structured_attempt_chain() {
         input_tokens: None,
         output_tokens: None,
         error: None,
-        verifier_signals: Vec::new(),
-        verifier_outcome: None,
     });
     assert_eq!(
         physical_request_attempt_count(&trace),
@@ -202,8 +198,6 @@ fn routing_exhaustion_preserves_structured_attempt_chain() {
             message: "route is quarantined".to_string(),
             status: None,
         }),
-        verifier_signals: Vec::new(),
-        verifier_outcome: None,
     });
     assert_eq!(
         physical_request_attempt_count(&trace),
@@ -704,8 +698,6 @@ fn failed_attempt(index: usize, provider: &str, model: &str) -> RoutingAttempt {
         input_tokens: None,
         output_tokens: None,
         error: None,
-        verifier_signals: Vec::new(),
-        verifier_outcome: None,
     }
 }
 

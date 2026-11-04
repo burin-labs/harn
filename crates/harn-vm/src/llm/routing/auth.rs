@@ -1,6 +1,6 @@
 use super::{
     AttemptStatus, ChainLink, LlmCallOptions, RoutingAttempt, RoutingErrorSnapshot,
-    RoutingPolicyConfig, VerifierOutcome,
+    RoutingPolicyConfig,
 };
 use crate::llm::api::LlmRoutePolicy;
 
@@ -125,7 +125,5 @@ pub(super) fn skipped_attempt_record(
         input_tokens: None,
         output_tokens: None,
         error: Some(error),
-        verifier_signals: Vec::new(),
-        verifier_outcome: None::<VerifierOutcome>,
     }
 }
