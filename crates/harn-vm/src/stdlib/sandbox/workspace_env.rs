@@ -391,7 +391,7 @@ fn toolchain_env_at(
         env.push((
             "NPM_CONFIG_USERCONFIG".to_string(),
             if seed {
-                seed_sanitized_npmrc(&home.join(".npmrc"), &root.join("npm/npmrc"))
+                seed_sanitized_npmrc(&home.join(".npmrc"), root, "npm/npmrc")
             } else {
                 root.join("npm/npmrc")
             }
@@ -405,9 +405,25 @@ fn toolchain_env_at(
         env.push((
             "COMPOSER_HOME".to_string(),
             if seed {
-                seed_composer_home(&home, &root.join("composer/home"))
+                seed_composer_home(&home, root, "composer/home")
             } else {
                 root.join("composer/home")
+            }
+            .display()
+            .to_string(),
+        ));
+        // GitHub CLI reads `hosts.yml` on every command and exits on the EPERM
+        // even when GH_TOKEN is set; a missing file is fine. `hosts.yml` is on
+        // the credential denylist, so the stand-in carries `config.yml`
+        // (aliases, git protocol, editor) and never `hosts.yml`. A host that
+        // grants GH_TOKEN then gets a working `gh`; without one, gh prints its
+        // own "gh auth login" message instead of a permission error.
+        env.push((
+            "GH_CONFIG_DIR".to_string(),
+            if seed {
+                seed_gh_config_dir(&gh_config_source(&home), root, "gh")
+            } else {
+                root.join("gh")
             }
             .display()
             .to_string(),
@@ -416,22 +432,147 @@ fn toolchain_env_at(
     env
 }
 
-/// Write the credential-free projection of `source` to `stand_in` and return
-/// the stand-in path. The path is returned even when `source` is absent (npm
-/// treats a missing userconfig as empty), and the file is rewritten only when
-/// its content would change, so a spawn on a warm workspace touches nothing.
-fn seed_sanitized_npmrc(source: &Path, stand_in: &Path) -> PathBuf {
-    let Ok(raw) = std::fs::read_to_string(source) else {
-        return stand_in.to_path_buf();
+/// The user's GitHub CLI config directory: GH_CONFIG_DIR, then
+/// `$XDG_CONFIG_HOME/gh`, then `~/.config/gh`, the order gh itself uses. Read
+/// from the session's launcher environment, like the cache paths above, so an
+/// embedding host seeds from the session it serves rather than its own process.
+fn gh_config_source(operator_home: &Path) -> PathBuf {
+    let launcher = |key: &str| match crate::stdlib::process::current_session_environment() {
+        Some(environment) => environment.launcher_value(key).map(str::to_string),
+        None => crate::test_env::env_var_seamed(key),
     };
-    let sanitized = sanitize_npmrc(&raw);
-    if std::fs::read_to_string(stand_in).ok().as_deref() != Some(sanitized.as_str()) {
-        if let Some(parent) = stand_in.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(stand_in, sanitized);
+    if let Some(dir) = launcher("GH_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir);
     }
-    stand_in.to_path_buf()
+    if let Some(dir) = launcher("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir).join("gh");
+    }
+    operator_home.join(".config/gh")
+}
+
+/// Copy the credential-free `config.yml` into the stand-in. gh releases before
+/// 1.0 kept `oauth_token` in `config.yml`; such a file is not copied, and a copy
+/// left from an earlier spawn is removed.
+fn seed_gh_config_dir(source: &Path, cache: &Path, relative: &str) -> PathBuf {
+    let raw = std::fs::read_to_string(source.join("config.yml"))
+        .ok()
+        .filter(|raw| !raw.contains("oauth_token"));
+    let _ = publish_stand_in(
+        cache,
+        &Path::new(relative).join("config.yml"),
+        raw.as_deref(),
+    );
+    cache.join(relative)
+}
+
+/// Write the credential-free projection of `source` to the stand-in and return
+/// its path. The path is returned even when `source` is absent (npm treats a
+/// missing userconfig as empty).
+fn seed_sanitized_npmrc(source: &Path, cache: &Path, relative: &str) -> PathBuf {
+    let sanitized = std::fs::read_to_string(source)
+        .ok()
+        .map(|raw| sanitize_npmrc(&raw));
+    let _ = publish_stand_in(cache, Path::new(relative), sanitized.as_deref());
+    cache.join(relative)
+}
+
+/// Workspace-local Composer home: copy non-credential files, never `auth.json`.
+fn seed_composer_home(operator_home: &Path, cache: &Path, relative: &str) -> PathBuf {
+    for name in ["config.json", "composer.json"] {
+        let raw = [".composer", ".config/composer"]
+            .iter()
+            .find_map(|dir| std::fs::read_to_string(operator_home.join(dir).join(name)).ok());
+        let _ = publish_stand_in(cache, &Path::new(relative).join(name), raw.as_deref());
+    }
+    cache.join(relative)
+}
+
+/// Publish `contents` at `relative` under the toolchain `cache`, or remove the
+/// file when `contents` is `None`, so a stand-in never outlives its source.
+///
+/// This runs in the unconfined host process, and confined children can write
+/// the cache. Every step therefore refuses to follow a symlink: the cache
+/// directory and each component under it are opened without following, the
+/// existing file is read with `O_NOFOLLOW`, and the new content is published
+/// by renaming a staged file over the name, which replaces a planted link
+/// rather than writing through it. A spawn on a warm workspace whose stand-in
+/// already matches touches nothing.
+#[cfg(unix)]
+fn publish_stand_in(cache: &Path, relative: &Path, contents: Option<&str>) -> std::io::Result<()> {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+
+    let (Some(root), Some(name)) = (cache.parent(), cache.file_name()) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "toolchain cache has no parent directory",
+        ));
+    };
+    let (parent, leaf) = super::ensure_parent_dirs_scoped(&super::ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: Path::new(name).join(relative),
+    })?;
+    let parent = parent.as_raw_fd();
+    let Some(contents) = contents else {
+        return match super::unlinkat_name(parent, &leaf, 0) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    };
+    // O_NONBLOCK keeps a planted FIFO from stalling the spawn.
+    if let Ok(mut existing) = super::openat_file(
+        parent,
+        &leaf,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        0,
+    ) {
+        // Compare the length first so a planted huge file is never read in.
+        let mut current = String::new();
+        if existing
+            .metadata()
+            .is_ok_and(|meta| meta.is_file() && meta.len() == contents.len() as u64)
+            && existing.read_to_string(&mut current).is_ok()
+            && current == contents
+        {
+            return Ok(());
+        }
+    }
+    // A per-spawn staging name, so concurrent seeds never rename each other's
+    // half-written file into place.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staging = format!(".{leaf}.harn-staging.{}.{counter}", std::process::id());
+    let mut staged = super::openat_file(
+        parent,
+        &staging,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o600,
+    )?;
+    let published = staged
+        .write_all(contents.as_bytes())
+        .and_then(|()| super::renameat_name(parent, &staging, parent, &leaf));
+    if published.is_err() {
+        let _ = super::unlinkat_name(parent, &staging, 0);
+    }
+    published
+}
+
+#[cfg(not(unix))]
+fn publish_stand_in(cache: &Path, relative: &Path, contents: Option<&str>) -> std::io::Result<()> {
+    let path = cache.join(relative);
+    let Some(contents) = contents else {
+        return match std::fs::remove_file(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    };
+    if std::fs::read_to_string(&path).ok().as_deref() == Some(contents) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, contents)
 }
 
 /// Drop every npmrc line that carries a credential. npm scopes auth to a
@@ -440,26 +581,6 @@ fn seed_sanitized_npmrc(source: &Path, stand_in: &Path) -> PathBuf {
 /// forms are `_auth`, `_authToken`, and `_password`. Any key whose final
 /// segment begins with `_`, or any registry-scoped (`//…/:`) key, goes; plain
 /// settings (`registry=`, `@scope:registry=`, `store-dir=`) stay.
-/// Workspace-local Composer home: copy non-credential files, never `auth.json`.
-fn seed_composer_home(operator_home: &Path, dest: &Path) -> PathBuf {
-    let _ = std::fs::create_dir_all(dest);
-    for name in ["config.json", "composer.json"] {
-        for source in [
-            operator_home.join(".composer").join(name),
-            operator_home.join(".config/composer").join(name),
-        ] {
-            if let Ok(raw) = std::fs::read_to_string(&source) {
-                let dest_file = dest.join(name);
-                if std::fs::read_to_string(&dest_file).ok().as_deref() != Some(raw.as_str()) {
-                    let _ = std::fs::write(&dest_file, raw);
-                }
-                break;
-            }
-        }
-    }
-    dest.to_path_buf()
-}
-
 fn sanitize_npmrc(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for line in raw.lines() {
@@ -612,6 +733,23 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
     };
     let mut env = Vec::new();
     inject_workspace_process_env(&mut env, &policy);
+    env
+}
+
+/// [`active_workspace_process_env`] for one spawn of `program`, without the
+/// keys a session grant reaching that spawn already owns. Spawn seams apply
+/// these defaults on top of the session-closed environment, so without the
+/// filter a workspace default would overwrite a host grant for the same name
+/// (for example a `GH_CONFIG_DIR` granted to `gh`).
+pub fn active_workspace_process_env_for(program: &str) -> Vec<(String, String)> {
+    let mut env = active_workspace_process_env();
+    if let Some(environment) = crate::stdlib::process::current_session_environment() {
+        env.retain(|(key, _)| {
+            !environment.grants().iter().any(|grant| {
+                grant.exposed_env_var() == Some(key.as_str()) && grant.reaches_spawn(Some(program))
+            })
+        });
+    }
     env
 }
 
@@ -940,22 +1078,65 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join(".npmrc");
-        let stand_in = dir.path().join("cache/npm/npmrc");
-        assert_eq!(seed_sanitized_npmrc(&source, &stand_in), stand_in);
+        let cache = dir.path().join("cache");
+        let stand_in = cache.join("npm/npmrc");
+        assert_eq!(seed_sanitized_npmrc(&source, &cache, "npm/npmrc"), stand_in);
         assert!(
             !stand_in.exists(),
             "no source, no file: npm treats absent as empty"
         );
         std::fs::write(&source, raw).unwrap();
-        seed_sanitized_npmrc(&source, &stand_in);
+        seed_sanitized_npmrc(&source, &cache, "npm/npmrc");
         assert_eq!(std::fs::read_to_string(&stand_in).unwrap(), sanitized);
         let written = std::fs::metadata(&stand_in).unwrap().modified().unwrap();
-        seed_sanitized_npmrc(&source, &stand_in);
+        seed_sanitized_npmrc(&source, &cache, "npm/npmrc");
         assert_eq!(
             std::fs::metadata(&stand_in).unwrap().modified().unwrap(),
             written,
             "an unchanged stand-in is not rewritten"
         );
+        std::fs::remove_file(&source).unwrap();
+        seed_sanitized_npmrc(&source, &cache, "npm/npmrc");
+        assert!(!stand_in.exists(), "a stand-in never outlives its source");
+    }
+
+    /// Confined children can write the cache, and the seed runs unconfined. A
+    /// link a child plants at the stand-in's name must be replaced, never
+    /// written through, and must not leak the target's content.
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_symlink_never_turns_a_stand_in_seed_into_a_host_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("hosts.yml");
+        std::fs::write(&victim, "github.com:\n  oauth_token: gho_victim\n").unwrap();
+        let source = dir.path().join("gh");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("config.yml"), "git_protocol: ssh\n").unwrap();
+        let cache = dir.path().join("cache");
+        std::fs::create_dir_all(cache.join("gh")).unwrap();
+        std::os::unix::fs::symlink(&victim, cache.join("gh/config.yml")).unwrap();
+
+        seed_gh_config_dir(&source, &cache, "gh");
+
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "github.com:\n  oauth_token: gho_victim\n",
+            "the link's target must be untouched"
+        );
+        let planted = std::fs::symlink_metadata(cache.join("gh/config.yml")).unwrap();
+        assert!(planted.file_type().is_file(), "the link is replaced");
+        assert_eq!(
+            std::fs::read_to_string(cache.join("gh/config.yml")).unwrap(),
+            "git_protocol: ssh\n"
+        );
+
+        // A linked directory component is refused rather than followed.
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir_all(cache.join("gh")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, cache.join("gh")).unwrap();
+        seed_gh_config_dir(&source, &cache, "gh");
+        assert!(!elsewhere.join("config.yml").exists());
     }
 
     #[test]
@@ -990,6 +1171,43 @@ mod tests {
             !composer_home.join("auth.json").exists(),
             "the stand-in must never carry auth.json"
         );
+        let gh_config = PathBuf::from(env.get("GH_CONFIG_DIR").unwrap());
+        assert!(
+            gh_config.starts_with(&cache),
+            "GH_CONFIG_DIR must be the workspace stand-in: {gh_config:?}"
+        );
+    }
+
+    #[test]
+    fn the_gh_stand_in_carries_config_but_never_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("gh");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("config.yml"), "git_protocol: ssh\n").unwrap();
+        std::fs::write(
+            source.join("hosts.yml"),
+            "github.com:\n  oauth_token: gho_x\n",
+        )
+        .unwrap();
+        let cache = dir.path().join("cache");
+        let stand_in = seed_gh_config_dir(&source, &cache, "gh");
+        assert_eq!(
+            std::fs::read_to_string(stand_in.join("config.yml")).unwrap(),
+            "git_protocol: ssh\n"
+        );
+        assert!(!stand_in.join("hosts.yml").exists());
+
+        // A pre-1.0 config.yml that still holds a token is not copied, and the
+        // copy the earlier seed left is removed rather than kept.
+        let legacy = tempfile::tempdir().unwrap();
+        std::fs::write(
+            legacy.path().join("config.yml"),
+            "hosts:\n  github.com:\n    oauth_token: gho_x\n",
+        )
+        .unwrap();
+        let stand_in = seed_gh_config_dir(legacy.path(), &cache, "gh");
+        assert!(stand_in.is_dir());
+        assert!(!stand_in.join("config.yml").exists());
     }
 
     #[test]

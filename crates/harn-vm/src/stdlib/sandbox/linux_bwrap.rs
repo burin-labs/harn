@@ -115,11 +115,24 @@ pub(in crate::stdlib::sandbox) fn prepare(
             "could not pin the bubblewrap syscall filter: {error}"
         ))
     })?;
+    let shared_memory_granted = filesystem.rules.iter().any(|rule| {
+        rule.path
+            .starts_with(super::shared_memory::SHARED_MEMORY_DIR)
+    });
     let MountPlan {
         mut argv,
         mut descriptors,
         device_descriptors,
     } = mounts(filesystem)?;
+    // POSIX semaphores live in /dev/shm. The child gets an empty private one,
+    // the only writable tmpfs this launch adds, so it never sees the host's
+    // segments. An explicit grant beneath it keeps the host path instead.
+    if !shared_memory_granted {
+        argv.extend([
+            "--tmpfs".into(),
+            super::shared_memory::SHARED_MEMORY_DIR.into(),
+        ]);
+    }
     argv.splice(
         0..0,
         [
@@ -303,7 +316,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
         descriptors.push(rule.file.into());
     }
     // Workspace scratch is a named existing writable grant, not a broad host
-    // /tmp bind or an unreported extra writable tmpfs.
+    // /tmp bind or an unreported extra writable tmpfs. The private /dev/shm
+    // tmpfs `prepare` adds is the one named exception.
     Ok(MountPlan {
         argv,
         descriptors,
@@ -512,6 +526,69 @@ mod tests {
             [("GLIBC_TUNABLES".into(), Some("glibc.malloc.check=3".into()))],
         )
         .is_err());
+    }
+
+    /// The child's semaphores live in its own `/dev/shm`: a host segment is
+    /// invisible to it, and its segment never reaches the host.
+    #[test]
+    fn posix_semaphores_use_a_private_dev_shm() {
+        use super::super::shared_memory::tests::{LOCK_AND_POOL, PYTHON};
+        if !live() {
+            return;
+        }
+        if !Path::new(PYTHON).is_file() {
+            eprintln!("[linux-bwrap] exercised=0: {PYTHON} is absent");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let policy = policy(root.path());
+        let tag = format!("harn-shm-test-{}", std::process::id());
+        let host_segment = Path::new("/dev/shm").join(&tag);
+        std::fs::write(&host_segment, "host").unwrap();
+        let child_semaphore = Path::new("/dev/shm").join(format!("sem.{tag}-child"));
+        let code = format!(
+            "{LOCK_AND_POOL}
+import os, sys, _multiprocessing
+host, name = sys.argv[1:3]
+assert host not in os.listdir('/dev/shm'), os.listdir('/dev/shm')
+try:
+    open('/dev/shm/' + host)
+    print('host:visible')
+except FileNotFoundError:
+    print('host:hidden')
+_multiprocessing.SemLock(1, 1, 1, '/' + name, False)
+assert 'sem.' + name in os.listdir('/dev/shm')
+print('sem:private')
+"
+        );
+        let args = vec![
+            "-I".into(),
+            "-c".into(),
+            code,
+            tag.clone(),
+            format!("{tag}-child"),
+        ];
+        let prepared = prepare(PYTHON, &args, &policy, policy.sandbox_profile).unwrap();
+        let PrepareOutcome::BubblewrapExec { args: argv, .. } = &prepared else {
+            panic!("the bubblewrap owner did not prepare a pinned launch")
+        };
+        assert!(argv.windows(2).any(|pair| pair == ["--tmpfs", "/dev/shm"]));
+        eprintln!("[linux-bwrap] mechanism=LinuxBubblewrap with a private /dev/shm tmpfs");
+        let output = launch(prepared, root.path());
+        std::fs::remove_file(&host_segment).unwrap();
+        assert!(
+            output.status.success(),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "pool:ok\nhost:hidden\nsem:private\n"
+        );
+        assert!(
+            !child_semaphore.exists(),
+            "the child's semaphore leaked into the host /dev/shm"
+        );
     }
 
     #[test]

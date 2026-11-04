@@ -27,7 +27,10 @@ for a in "$@"; do
 done
 emit() { if [[ -n "$jq_program" ]]; then jq -r "$jq_program" "$1"; else cat "$1"; fi; }
 case "$args" in
-  *"-X POST"*"/reviews"*) echo "$args" >> "$FIXTURE/approvals"; echo '{}' ;;
+  *"-X POST"*"/reviews"*)
+    echo "$args" >> "$FIXTURE/approvals"
+    for a in "$@"; do [[ "$a" == body=* ]] && printf '%s' "${a#body=}" > "$FIXTURE/review_body"; done
+    echo '{}' ;;
   *graphql*"reviewDecision"*"reviewThreads"*) emit "$FIXTURE/review_state.json" ;;
   *graphql*) emit "$FIXTURE/decision.json" ;;
   *"/releases/latest"*) emit "$FIXTURE/latest.json" ;;
@@ -85,6 +88,16 @@ expect_approved() {
   "$name"
   run "$dir" || { cat "$dir/out" >&2; fail "$name: expected approval"; }
   grep -q "commit_id=$sha" "$dir/approvals" || fail "$name: approval not bound to the head SHA"
+  # A merger counts a bot approval only through this last line; the digest is sha256 of the repository name.
+  local evidence
+  evidence=$(tail -n 1 "$dir/review_body")
+  [[ "$evidence" == "<!-- release-review-author-evidence: "*" -->" ]] \
+    || fail "$name: the approval's last line is not author evidence: $evidence"
+  evidence=${evidence#<!-- release-review-author-evidence: }
+  jq -e --arg sha "$sha" '. == {schema: "review.author_evidence.v1",
+      repository_digest: "68eb7a4567526e3bfea15dc55e24ac5f3ef8fcef1b459ce53011347f530b8c8d",
+      pr: 7, head_sha: $sha, replies: []}' <<< "${evidence% -->}" > /dev/null \
+    || fail "$name: author evidence does not name this repository, pull request and head: $evidence"
 }
 
 # expect_refused <case> <phrase the refusal must contain> [posted]
