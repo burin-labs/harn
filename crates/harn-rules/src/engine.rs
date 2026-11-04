@@ -716,7 +716,10 @@ mod tests {
         assert!(result.edits.iter().all(|e| e.before == "let"));
         assert!(result.changed);
         // Re-running is a no-op (there are no more `let` keywords).
-        assert!(compiled.apply(&result.rewritten).unwrap().rewritten == result.rewritten);
+        assert_eq!(
+            compiled.apply(&result.rewritten).unwrap().rewritten,
+            result.rewritten
+        );
     }
 
     #[test]

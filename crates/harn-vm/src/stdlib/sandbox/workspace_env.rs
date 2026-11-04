@@ -126,10 +126,31 @@ fn inherited_workspace_cache_path(policy: &CapabilityPolicy, key: &str) -> Optio
         return None;
     }
     let resolved = normalize_for_policy(&candidate);
+    // A path under one of the policy's own process write roots is kept too.
+    // The operator already made that directory writable for every confined
+    // child, so pointing the toolchain at it grants nothing new. Relocating it
+    // instead hid an existing cache: a warm package cache the embedder had
+    // granted for exactly this purpose was replaced by an empty one, and an
+    // offline resolve that works in the operator's terminal failed in the
+    // child.
+    if granted_write_root_contains(policy, &resolved) {
+        return Some(resolved.display().to_string());
+    }
     base_workspace_roots(policy)
         .iter()
         .any(|root| path_is_within(&resolved, root))
         .then(|| resolved.display().to_string())
+}
+
+/// Whether `path` lies under one of the policy's explicit process write roots.
+fn granted_write_root_contains(policy: &CapabilityPolicy, path: &Path) -> bool {
+    policy
+        .process_sandbox
+        .write_roots
+        .iter()
+        .map(|root| PathBuf::from(root.trim()))
+        .filter(|root| root.is_absolute())
+        .any(|root| path_is_within(path, &normalize_for_policy(&root)))
 }
 
 /// Where a toolchain home came from, so a caller can say which it did rather

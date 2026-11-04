@@ -20,6 +20,8 @@ pub struct ProviderUsage {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
+    #[serde(default)]
+    pub reported_cache: Option<Box<super::ReportedCacheTotals>>,
     pub provider_call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
@@ -43,6 +45,7 @@ impl ProviderUsage {
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_tokens,
             cache_write_tokens: usage.cache_write_tokens,
+            reported_cache: usage.reported_cache.clone(),
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
@@ -57,13 +60,14 @@ impl ProviderUsage {
 pub fn provider_usage_schema() -> serde_json::Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(ProviderUsage))
         .expect("provider usage schema serializes");
-    // Serde always emits this nullable field. Keep it present when generated
-    // clients encode an unpriced ledger.
+    // Serde always emits these nullable fields, including unknown measurements.
     let required = schema["required"]
         .as_array_mut()
         .expect("provider usage has required fields");
-    if !required.iter().any(|field| field == "cost_usd") {
-        required.push("cost_usd".into());
+    for field in ["cost_usd", "reported_cache"] {
+        if !required.iter().any(|required| required == field) {
+            required.push(field.into());
+        }
     }
     schema
 }

@@ -149,7 +149,7 @@ impl Drop for ExecutionDeadlinePauseGuard {
             let add = u64::try_from(paused_for_ms)
                 .unwrap_or_default()
                 .saturating_mul(1_000_000);
-            let _ = self.state.deadline_offset.fetch_update(
+            let _ = self.state.deadline_offset.try_update(
                 Ordering::AcqRel,
                 Ordering::Acquire,
                 |encoded| (encoded != 0).then(|| encoded.saturating_add(add)),

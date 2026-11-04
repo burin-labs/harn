@@ -125,14 +125,15 @@ fn cc_record_review(fs: HarnessFs, evidence: list, options: any = nil) {
  * True when a session paid a workflow discovery cost the installed library
  * does not already remove: a command failed, or it ran a command no installed
  * check runs. A session that only ran installed checks, and passed, teaches
- * nothing new. A session with no command ledger counts as new.
+ * nothing new. A session that ran no command counts as new: persistence stores
+ * an absent ledger as an empty one, and no installed check covers a session
+ * that never ran one.
  */
 fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
   const checks = installed.map({ entry -> entry.verify_command }).filter({ text -> text != "" })
     .to_list()
   const ledger = item?.command_ledger
-  if type_of(ledger) != "list" {
-    // An unmeasured session is never read as covered.
+  if type_of(ledger) != "list" || len(ledger) == 0 {
     return true
   }
   for entry in ledger {

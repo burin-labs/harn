@@ -845,7 +845,7 @@ impl<'a> Machine<'a> {
                 let count = read_u16(frame)?;
                 let values = pop_args(frame, count * 2)?;
                 let mut map = BTreeMap::new();
-                for pair in values.chunks_exact(2) {
+                for pair in values.as_chunks::<2>().0 {
                     let key = self.render_value(&pair[0]).map_err(OpStep::Error)?;
                     map.insert(key, pair[1].clone());
                 }

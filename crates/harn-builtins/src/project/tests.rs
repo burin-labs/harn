@@ -502,7 +502,7 @@ fn project_fingerprint_detects_scala_sbt_profile() {
     let fingerprint = detect_project_fingerprint(dir.path());
     assert_eq!(fingerprint.primary_language, "scala");
     assert!(fingerprint.languages.contains(&"scala".to_string()));
-    assert!(fingerprint.build_tool.as_deref() == Some("sbt"));
+    assert_eq!(fingerprint.build_tool.as_deref(), Some("sbt"));
 }
 
 #[test]
@@ -523,7 +523,7 @@ fn project_fingerprint_detects_kotlin_gradle_kts_profile() {
     let fingerprint = detect_project_fingerprint(dir.path());
     assert_eq!(fingerprint.primary_language, "kotlin");
     assert!(fingerprint.languages.contains(&"kotlin".to_string()));
-    assert!(fingerprint.build_tool.as_deref() == Some("gradle"));
+    assert_eq!(fingerprint.build_tool.as_deref(), Some("gradle"));
 }
 
 #[test]

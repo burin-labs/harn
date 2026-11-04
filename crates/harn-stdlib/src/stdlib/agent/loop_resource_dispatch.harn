@@ -267,15 +267,13 @@ fn __tool_batch_deferred_result(
 ) {
   const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
   const name = __tool_registry_name(entry.call)
-  const observation = "[deferred `" + name + "` tool call]\n"
-    + "This call was NOT executed. The current response crossed from effect phase `"
-    + plan.selected_phase
-    + "` into `"
-    + entry.phase
-    + "`. Harn executed every independent `"
-    + plan.selected_phase
-    + "` call in this batch so the next inference can observe those results. Reconsider this "
-    + "call and re-propose it only if it is still needed."
+  // The model tends to repeat this text to the person it is helping, so it
+  // reads as plain sequencing, not as an error or internal mechanics.
+  const observation = "[`" + name + "` not run yet]\n"
+    + "This call was held back so the earlier calls in this response could finish first; "
+    + "their results are above. Nothing went wrong. If the call is still needed after reading "
+    + "those results, make it again. This is routine ordering; do not mention it in your "
+    + "reply."
   const result = {
     ok: false,
     status: "deferred",

@@ -202,6 +202,28 @@ pub fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
   return false
 }
 
+/**
+ * The completion owner's goal assessment recorded on the run's natural terminal.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn pl_run_goal_outcome(events: list) -> any {
+  for event in events ?? [] {
+    const transcript_event = pl_session_transcript_event(event)
+    if pl_session_event_kind(event) != "agent_run_terminal"
+      && pl_text(transcript_event?.kind)
+        != "agent_run_terminal" {
+      continue
+    }
+    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural" {
+      return transcript_event?.metadata?.goal_outcome
+    }
+  }
+  return nil
+}
+
 pub fn pl_run_observed_at(events: list, fallback: string) -> string {
   if len(events) == 0 {
     return fallback

@@ -1036,11 +1036,10 @@ async fn receive_builtin(
                 }
             }
         }
-    } else {
-        Err(VmError::Thrown(VmValue::string(
-            "receive: first argument must be a channel",
-        )))
     }
+    Err(VmError::Thrown(VmValue::string(
+        "receive: first argument must be a channel",
+    )))
 }
 
 #[harn_builtin(

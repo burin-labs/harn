@@ -9,6 +9,197 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.186
+
+### Breaking
+
+- **Run-tape tool records include runtime store mutations (#10793).** Branches
+  replay ordered store writes before continuing live execution, preserve them
+  across later writes, and leave the recording's store unchanged. Tape format 6
+  requires a new full recording for exact branching; older tapes remain readable.
+
+  Migration: Rust consumers constructing `TapeRecordKind::ToolCall` must include
+  `store_changes`; use `None` for legacy records without mutation evidence.
+  Exhaustive matches must bind that field or use `..`. Let the runtime record a
+  new full tape to obtain measured store operations for exact branching.
+- Run-tape branches replay reminder revocation and expiry state alongside
+  transcript changes. Later revocation requests retain their recorded status;
+  incompatible initial state refuses before file or transcript effects.
+  Unaccounted reminder retirements make the dispatch unservable.
+
+  Migration: Rust consumers must handle the new `TranscriptChange::Reminders`
+  variant in exhaustive matches. Record a new full tape in format 7 for exact
+  branching. Older tapes remain readable for inspection.
+- Run-tape branches refuse tool dispatches that create or use session-scoped
+  dynamic permission grants before replaying their effects. Serving those calls
+  without their grant cache could ask for approval again in the live tail.
+  Live permission decisions and replay of once-only grants are unchanged.
+
+  ## Migration
+
+  Record a new full tape with format 8 before branching. Older formats remain
+  inspectable but lack evidence that the session permission checks ran.
+- `ApiServerConfig::with_host_responder` now takes an
+  `Arc<dyn ApiHostResponderBinder>` instead of a single responder, so each
+  session is answered for its own workspace root.
+
+  Migration: implement `HostResponderBinder::bind(&self, session_root)` to return
+  the `Arc<dyn HostResponder>` for that root (cache by root if building one is
+  expensive) and pass the binder where the responder was passed.
+- `harn_modules::ReferenceIndex::file_edges()` was removed. File-level reference
+  graphs now collect edges directly without constructing a positional index.
+
+  Migration: replace `index.file_edges()` with
+  `harn_modules::file_reference_edges(&graph, &sources)`. Retain the module graph
+  and parsed sources used to build the positional index, or rebuild them with
+  `harn_modules::build_for_reference_index` when they are no longer available.
+- **Replay validates complete fixture expectations (#10955).** Replay checks both recorded runs
+  and the declared match or drift expectation in trace fixtures, rejects unknown fixture kinds,
+  and reports how many expectations it compared.
+
+  Migration: Rust consumers constructing `ReplayEvalReport` literals must provide the new
+  `expectations_compared` field with the number of predicates actually evaluated. Consumers
+  obtaining reports from the replay evaluator need no change.
+
+### Added
+
+- Add `preflight_inference_admission` for embedders and use it in `harn provider admission`
+  to report typed, value-free provider endpoint configuration errors before inference-boundary decisions.
+- An ACP server embedder can answer `host/capabilities` and `host/call` itself
+  with `AcpServerConfig::with_host_responder`. The server binds a responder to
+  each session's workspace root for every prompt turn, so a session is never
+  answered with another session's workspace, and its host requests never reach
+  the connected client. A standard editor that is not a host can therefore run a
+  full turn over stdio or WebSocket. The agents API server uses the same binder
+  through the ACP bridge instead of a separate interception path.
+- Agents API embedders can supply a typed environment declaration for new and
+  restored sessions. HTTP callers cannot override it; default sessions stay isolated.
+- The website now offers a localized contribution page with ways to report issues, improve code and documentation,
+  join discussions, and leave an optional tip. Page titles and descriptions follow language changes without reloading.
+- Export the crystallization bundle JSON Schema and generated host bindings from the manifest's wire types,
+  including replay evidence and promotion safety fields.
+- Crystallization evidence cards now carry each session's command ledger (bounded, redacted commands with exit codes), and
+  the curator's `inspect_session_evidence` reads a bounded, redacted transcript from the session store through the new
+  `pattern_learning_session_transcript`, so it works for sessions that ended in earlier processes.
+
+  Credential redaction consumes the whole concatenated shell value. Uncertain
+  shell expansion suppresses the remaining command rather than leaking a suffix.
+- The crystallization curator's `scaffold_harn_tool` accepts `steps`, a learned command sequence, and returns a complete,
+  tested MCP tool that runs it in order with failure receipts. It also returns the same sequence as one shell line
+  (`artifact.verify_command`) that a host can adopt as the project's verifier. The renderer is
+  `crystallization_command_sequence_package`.
+
+  Template insertion preserves literal arguments, directories and descriptions,
+  including text that resembles a template placeholder.
+  Inserted data is decoded at runtime, preserving interpolation-like text,
+  backslashes and control characters without interpreting them as Harn source.
+- `crystallization_curate` accepts `declared_checks`, the checks the repository states, and rejects a learned verifier
+  unless it includes at least one declared test check word for word from its directory. Command-sequence steps take
+  an optional repository-relative `cwd`.
+  `scaffold_harn_tool` accepts optional `fast_steps` and returns the quick in-progress check as `fast_verify_command`
+  beside the full `verify_command`.
+- `crystallization_curate` accepts `installed` (the host's installed capabilities) and never stages a proposal that
+  matches one by name or verifier line. With `require_new_evidence: true`, it skips the model call when all evidence
+  was already reviewed or when every unseen session only ran installed checks and passed.
+
+### Changed
+
+- Hyperbolic uses its current text inference endpoint and requests final streaming token counts.
+  Completion calls use the chat endpoint because native base completions are no longer offered.
+  Existing integrations need a current `sk_live_` key and a model ID from Hyperbolic's current catalog;
+  cache accounting remains unverified.
+- Fetch independent locked package sources concurrently while preserving atomic package generation publication.
+- **A held-back tool call reads as routine ordering.** When a response mixes read and write calls, the call the agent
+  loop holds for the next turn now tells the model in plain words that nothing went wrong and that it should not
+  mention the hold in its reply. The old note named internal phases and read like an error, and models repeated it
+  to users.
+- Speed up restoring a workspace reference graph by avoiding duplicate file-level edges while preserving every positional
+  reference for editor operations.
+
+### Removed
+
+- **Provider catalog:** remove GitHub Models and its pending accounting and
+  data-control audit entries after GitHub
+  [retired the service on July 30, 2026](https://github.blog/changelog/2026-07-01-github-models-is-being-fully-retired-on-July-30-2026/)
+  (#7320).
+
+### Fixed
+
+- Release promotion now rejects candidate and consumer rehearsal evidence from different build attempts or incomplete
+  artifact inventories.
+- On Unix, interrupted runs retire foreground commands and their children before exiting.
+- Worker snapshots now resolve their storage folder through the session environment,
+  so replay branches remap the same folder that worker persistence uses.
+- A run-tape branch now replays the prefix of an agent that warms the code index before its first model call.
+  Code-index maintenance of the restored workspace (`rebuild`, `reindex_file`, `add_readonly_roots`, agent and
+  lock bookkeeping) runs in the prefix, and reads of command handles and their output are served from the
+  recording. A rebuild of a root outside the restored workspace, the source-writing refactors, and host leases
+  are still refused.
+- Avoid repeated definition resolution while indexing a file's references.
+- Keep workspace code references available when a project imports standard-library or external modules.
+- Speed up reference indexing for large source files.
+- Structured model calls no longer retry content-policy, authentication or context refusals as unsupported output formats.
+  Invalid-request format rejections retain the validated text fallback.
+- ACP servers read project provider settings without installing unrelated packages
+  before accepting requests. Package validation remains part of session execution.
+- Embedded ACP host responders no longer block message routing while binding to a
+  session. In-process host answers use the same deadlines as client callbacks,
+  including the timeout override and the exception for human input. Workspace
+  reanchoring during a turn takes effect for both the responder and the filesystem
+  on the next turn.
+- Agents API tasks now report runtime and provider failures as failed tasks,
+  preserving the runtime diagnostic instead of reporting successful completion.
+- Cancelled native tool calls now receive a repair message before the terminal record and a matching raw tool-result
+  receipt, including when cleanup outlives the original transcript scope. The receipt identifies the harness as its author,
+  so transcript readers can distinguish cancellation repair from a tool's own failure.
+- Keep JSON run terminal state on the heap so nested CLI execution futures do not multiply its stack cost.
+  Managed commands still retire before the terminal event.
+- Reject missing, malformed and unknown consent decisions before command or tool
+  execution, using one shared decision contract while preserving explicit approval
+  and automatic opt-out.
+- `crystallization_curate` now returns `usage`, the curator run's physical provider ledger (tokens and cost). Hosts that
+  read usage from the outcome previously found none and reported an empty record. It is absent when the run measured
+  nothing.
+- Crystallization compares declared checks using literal shell arguments and
+  working-directory scopes. Printing a check, running it after an earlier
+  directory change, or using unsupported shell context cannot satisfy admission.
+  `std/command.command_sequence_plan` exposes the same structural observation
+  without executing commands.
+  Incomplete curator runs keep their evidence eligible for a later review.
+  Command evidence, declared checks and verifier deduplication preserve whitespace
+  inside literal arguments and directory names.
+- Pre-push checks honor `HARN_BIN_NO_BUILD=1`: they refuse when no proven worktree runtime is available,
+  without compiling, bootstrapping a compiler wrapper, or signing a replacement.
+  Proven runtimes still run the required reader census.
+- Keep references inside interpolated strings in the workspace symbol graph,
+  including nested expressions and locally shadowed names.
+- Native release qualification measures CPU, memory, and active jobs on owned
+  Macs before compiling, including when their persistent target is cold.
+- Registered host hooks can run for child agents started inside a tool handler.
+  Hooks retain their registration context, so tool-registered hooks remain restricted
+  and the parent tool's restrictions resume after the callback, including when the hook fails.
+- **Confined children run a project's installed pinned pnpm.** When `package.json` pins `packageManager: "pnpm@X"`
+  and X is installed under `$PNPM_HOME/.tools`, it comes first on the child's PATH, so `pnpm` no longer needs the
+  registry to switch versions and works without network.
+- Keep Linux command supervision working when the running host executable is replaced during a session.
+- Provider credential resolution failures preserve their structured authentication class and local origin, so callers
+  can offer setup recovery instead of treating them as generic runtime errors.
+- Correct Python import bindings in undefined-name diagnostics, including future
+  features and aliases.
+- Release rehearsals preserve consumer pairings from included feature commits
+  and bind promotion to the measured source and artifacts. Ordinary canaries keep
+  their own source pairing instead of inheriting historical release pairings.
+- Release pull request rehearsals honor the paired consumer declared in the
+  pull request description even before a CLI artifact is available.
+- Replay oracle checks now refuse to pass when the allowlist removes every comparable value, including in shadow comparisons.
+- Run views and reports preserve unavailable model-call timing as null, including session totals.
+  A measured zero remains zero, and combining measured timing with unavailable timing keeps the total unavailable.
+- Content search skips binary files by default; callers can opt into binary
+  search independently of project ignore rules.
+- Complementary reviewer selection now excludes models that cannot generate text.
+- Saved-session run reports hash the recorded tool arguments when a provider message arrives before the execution
+  record, keeping different commands distinct in tool fixtures.
+
 ## v0.10.185
 
 ### Breaking
