@@ -315,9 +315,41 @@ pub fn macos_warm_errors(
       ]
   }
   errors = errors + macos_producer_bootstrap_errors(job, "${warm.workflow}:${warm.job}")
+  // A consumer restores the artifact only when its manifest matches the
+  // toolchain pin, so a pin change leaves every pull request cold until some
+  // producer run publishes again. The producer must republish on main when an
+  // input the manifest binds changes, not wait for the nightly schedule.
+  const push_paths = nightly_workflow["on"]?.push?.paths ?? []
+  for input in MACOS_WARM_MANIFEST_PUSH_INPUTS {
+    if !push_paths.contains(input) {
+      errors = errors
+        + [
+          "${warm.workflow} must republish the warm artifact on a push to main that changes ${input}, which its manifest binds",
+        ]
+    }
+  }
+  // The artifact name binds the workspace compiler wrapper, which the toolchain
+  // action exports only when the host's core and memory count selects the
+  // parallel front end. Producer and consumer must pin the thread count or a
+  // run on a different hosted machine shape names an artifact nobody can find.
+  const producer_threads = trim(
+    to_string(nightly_workflow?.env?.[MACOS_WARM_FRONTEND_THREADS_ENV] ?? "<unset>"),
+  )
+  if producer_threads != "1" {
+    errors = errors
+      + [
+        "${warm.workflow} must pin ${MACOS_WARM_FRONTEND_THREADS_ENV}=1 so the warm artifact name does not depend on the host shape",
+      ]
+  }
   // The blocking pull-request lane is the one this exists to speed up, so its
   // consumer is part of the contract rather than an optional extra.
   const ci_job = ci_workflow?.jobs?.["macos-lint"]
+  if trim(to_string(ci_job?.env?.[MACOS_WARM_FRONTEND_THREADS_ENV] ?? "<unset>")) != "1" {
+    errors = errors
+      + [
+        "ci.yml:macos-lint must pin ${MACOS_WARM_FRONTEND_THREADS_ENV}=1 to match the warm artifact producer",
+      ]
+  }
   const ci_restores = matching_run_steps(ci_job, MACOS_WARM_RESTORE_MARKER)
   if len(ci_restores) != 1
     || trim(ci_restores[0]?.id ?? "") != MACOS_WARM_RESTORE_STEP_ID
