@@ -371,7 +371,7 @@ fn managed_scratch_root(path: &Path) -> Option<&Path> {
         matches!(
             ancestor.file_name().and_then(|name| name.to_str()),
             Some(workspace_env::WORKSPACE_TMPDIR_NAME)
-                | Some(workspace_env::LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
+                | Some(workspace_env::WORKSPACE_TOOLCHAIN_CACHE_NAME)
         ) || runtime_base.as_deref() == Some(*ancestor)
     })
 }

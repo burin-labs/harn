@@ -19,10 +19,9 @@ pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 /// `harness.fs.workspace_temp_dir()`. A confined child's `TMPDIR` is not here.
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 
-/// The name the toolchain cache had when it lived inside the first workspace
-/// root. Nothing creates it any more; a checkout that still holds one keeps it
-/// out of walks and replay snapshots.
-pub(crate) const LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
+/// The self-ignored toolchain cache in the first workspace root, used only when
+/// the runtime dir cannot be created.
+pub(crate) const WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
 
 /// The temp dir and toolchain cache, as children of the runtime dir.
 const RUNTIME_TMPDIR_NAME: &str = "tmp";
@@ -35,8 +34,7 @@ const RUNTIME_DIR_DIGEST_HEX: usize = 16;
 
 /// Reserved workspace directory names owned by the runtime rather than the application.
 pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
-    name == OsStr::new(WORKSPACE_TMPDIR_NAME)
-        || name == OsStr::new(LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
+    name == OsStr::new(WORKSPACE_TMPDIR_NAME) || name == OsStr::new(WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
 /// The file in a runtime dir that names the canonical workspace root it
@@ -47,7 +45,7 @@ const RUNTIME_DIR_MARKER: &str = "workspace-root";
 const RUNTIME_DIR_MARKER_MAX: u64 = 4096;
 
 /// The per-workspace runtime directory a confined child's temp dir and
-/// toolchain cache live in: `<user cache>/harn-sandbox/<digest>`, the digest
+/// toolchain cache live in: `<user cache>/.harn-sandbox/<digest>`, the digest
 /// taken over the canonical workspace root. It sits outside every workspace,
 /// so a linter or test collector walking the tree never meets a child's
 /// temporary files, and is stable, so caches survive across runs. Computed
@@ -56,7 +54,7 @@ pub fn sandbox_runtime_dir(workspace_root: &Path) -> Option<PathBuf> {
     Some(runtime_base()?.join(runtime_digest(&normalize_for_policy(workspace_root))))
 }
 
-/// `<user cache>/harn-sandbox`, which holds every workspace's runtime dir.
+/// `<user cache>/.harn-sandbox`, which holds every workspace's runtime dir.
 fn runtime_base() -> Option<PathBuf> {
     // Resolved once: a spawn and the grant that admits its writes must name
     // the same directory, even if something in the process later changes
@@ -223,6 +221,24 @@ fn planned_runtime_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
     sandbox_runtime_dir(base_workspace_roots(policy).first()?)
 }
 
+/// Where [`create_runtime_dir`] would put a child's directory, without creating
+/// it. A user cache directory that resolves but turns out unusable is only
+/// found by creating, so this names the runtime dir until a spawn falls back.
+fn planned_child_dir(
+    policy: &CapabilityPolicy,
+    name: &str,
+    workspace_name: &str,
+) -> Option<PathBuf> {
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return None;
+    }
+    let root = base_workspace_roots(policy).into_iter().next()?;
+    Some(match sandbox_runtime_dir(&root) {
+        Some(runtime) => runtime.join(name),
+        None => root.join(workspace_name),
+    })
+}
+
 /// The runtime dir as a write root, created when missing. Every backend and
 /// the in-process scope check grant it beside the workspace roots, including
 /// when only declared roots are in force. `None` when it cannot be created
@@ -255,9 +271,15 @@ pub(super) fn granted_runtime_dir(
     Some(dir)
 }
 
+/// The runtime dir's `name`, or the self-ignored `workspace_name` in the first
+/// workspace root when the runtime dir cannot be created: no usable user cache
+/// directory, a refused component, or a nested run the outer sandbox keeps out
+/// of it. The workspace root is already writable, so a child still gets a
+/// temp dir it can use. The inherited one may be outside the child's grants.
 fn create_runtime_dir(
     policy: &CapabilityPolicy,
     name: &str,
+    workspace_name: &str,
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
@@ -265,13 +287,28 @@ fn create_runtime_dir(
         return None;
     }
     let root = base_workspace_roots(policy).into_iter().next()?;
-    match ensure_runtime_dir(&root, Some(name)) {
-        Ok(path) => Some(path),
-        Err(error) => {
+    let error = match ensure_runtime_dir(&root, Some(name)) {
+        Ok(path) => return Some(path),
+        Err(error) => error,
+    };
+    match initialize_workspace_dir(&root, workspace_name) {
+        Ok(()) => {
             warn_once(
                 warning_key,
                 &format!(
                     "could not create the sandbox {label} for '{}': {error}; \
+                     using '{workspace_name}' in the workspace",
+                    root.display()
+                ),
+            );
+            Some(root.join(workspace_name))
+        }
+        Err(fallback_error) => {
+            warn_once(
+                warning_key,
+                &format!(
+                    "could not create the sandbox {label} for '{}': {error}; \
+                     '{workspace_name}' in the workspace failed too: {fallback_error}; \
                      leaving the child's inherited environment in place",
                     root.display()
                 ),
@@ -282,7 +319,7 @@ fn create_runtime_dir(
 }
 
 /// Create the runtime dir for `workspace_root`, and `child` inside it, and
-/// return the deepest. `harn-sandbox`, the digest dir, and the child are
+/// return the deepest. `.harn-sandbox`, the digest dir, and the child are
 /// owner-only. The user cache directory above them is the user's own and may
 /// be a symlink; every owned component is opened without following one, and
 /// a component owned by another user is refused rather than shared. The
@@ -451,7 +488,7 @@ pub(crate) fn workspace_script_scratch_dir(policy: &CapabilityPolicy) -> Option<
         return None;
     }
     let root = base_workspace_roots(policy).into_iter().next()?;
-    if let Err(error) = initialize_script_scratch_dir(&root) {
+    if let Err(error) = initialize_workspace_dir(&root, WORKSPACE_TMPDIR_NAME) {
         warn_once(
             "handler_sandbox_workspace_scratch",
             &format!(
@@ -464,14 +501,16 @@ pub(crate) fn workspace_script_scratch_dir(policy: &CapabilityPolicy) -> Option<
     Some(root.join(WORKSPACE_TMPDIR_NAME))
 }
 
+/// Create the self-ignored directory `name` in the workspace root, without
+/// following a symlink at any component.
 #[cfg(unix)]
-fn initialize_script_scratch_dir(root: &Path) -> std::io::Result<()> {
+fn initialize_workspace_dir(root: &Path, name: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::fd::AsRawFd;
 
     let (parent, leaf) = super::ensure_parent_dirs_scoped(&super::ScopedMutationTarget {
         root: root.to_path_buf(),
-        relative: Path::new(WORKSPACE_TMPDIR_NAME).join(".gitignore"),
+        relative: Path::new(name).join(".gitignore"),
     })?;
     // Retain the directory descriptor through publication: replacing the
     // workspace path after mkdir-p must never create a host ignore file.
@@ -487,23 +526,24 @@ fn initialize_script_scratch_dir(root: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn initialize_script_scratch_dir(root: &Path) -> std::io::Result<()> {
+fn initialize_workspace_dir(root: &Path, name: &str) -> std::io::Result<()> {
     super::create_dir_all_scoped_target(&super::ScopedMutationTarget {
         root: root.to_path_buf(),
-        relative: PathBuf::from(WORKSPACE_TMPDIR_NAME),
+        relative: PathBuf::from(name),
     })?;
-    let _ = crate::runtime_paths::ensure_self_ignored_dir(&root.join(WORKSPACE_TMPDIR_NAME));
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&root.join(name));
     Ok(())
 }
 
 /// The session's own temp dir, `tmp` in the [`sandbox_runtime_dir`] of the
 /// first writable workspace root, created on first use. A confined child's
-/// `TMPDIR`, `TMP`, and `TEMP` point here. `None` when the profile does not
-/// scope paths.
+/// `TMPDIR`, `TMP`, and `TEMP` point here. Falls back as [`create_runtime_dir`]
+/// says. `None` when the profile does not scope paths.
 pub fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
     create_runtime_dir(
         policy,
         RUNTIME_TMPDIR_NAME,
+        WORKSPACE_TMPDIR_NAME,
         "handler_sandbox_workspace_tmpdir",
         "temp dir",
     )
@@ -514,6 +554,7 @@ pub(super) fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Opti
     create_runtime_dir(
         policy,
         RUNTIME_TOOLCHAIN_CACHE_NAME,
+        WORKSPACE_TOOLCHAIN_CACHE_NAME,
         "handler_sandbox_workspace_toolchain_cache",
         "toolchain cache",
     )
@@ -1064,11 +1105,14 @@ pub(crate) fn inject_workspace_process_env(
 /// absent here.
 fn workspace_process_env_for_read(policy: &CapabilityPolicy) -> Vec<(String, String)> {
     let mut env = Vec::new();
-    let runtime = planned_runtime_dir(policy);
-    if let Some(tmpdir) = runtime.as_ref().map(|dir| dir.join(RUNTIME_TMPDIR_NAME)) {
+    if let Some(tmpdir) = planned_child_dir(policy, RUNTIME_TMPDIR_NAME, WORKSPACE_TMPDIR_NAME) {
         push_tmpdir(&mut env, &tmpdir);
     }
-    if let Some(root) = runtime.map(|dir| dir.join(RUNTIME_TOOLCHAIN_CACHE_NAME)) {
+    if let Some(root) = planned_child_dir(
+        policy,
+        RUNTIME_TOOLCHAIN_CACHE_NAME,
+        WORKSPACE_TOOLCHAIN_CACHE_NAME,
+    ) {
         push_absent(
             &mut env,
             toolchain_env_at(policy, &root, crate::user_dirs::package_cache_dir(), false),

@@ -192,7 +192,7 @@ fn without_the_scratch_resolver_a_runtime_dir_root_is_dropped() {
     assert!(super::OWNED_SCRATCH.get().is_none());
     let roots = intersect_roots(
         &["/home/user/project".to_string()],
-        &["/home/user/.cache/harn-sandbox/0123456789abcdef/tmp/scoped".to_string()],
+        &["/home/user/.cache/.harn-sandbox/0123456789abcdef/tmp/scoped".to_string()],
     );
     assert!(roots.is_empty(), "{roots:?}");
 }
