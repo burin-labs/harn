@@ -211,10 +211,6 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-        "reader": "__completion_claim_requirement_ids"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "reader": "__completion_boundary_requirements"
       },

@@ -99,34 +99,6 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-    "expression": "__completion_claim_requirement_ids(opts)",
-    "owner": "__completion_claim_requirement_ids",
-    "evidence": "Consumer __completion_claim_requirement_ids.opts in crates/harn-stdlib/src/stdlib/agent/completion_claim.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__completion_claim_requirement_ids",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-    "expression": "__with_prompt_fragment(\n    opts + {tools: agent_completion_claim_tool(registry)},\n    {\n      id: \"completion_claim\",\n      source: \"std/agent/completion_claim\",\n      body: \"When the task is complete, call task_complete exactly once and by itself, after the tool calls it cites have finished. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: \"\n        + json_stringify(requirement_ids)\n        + \". A tool-free final response remains available as a compatibility fallback.\",\n    },\n  )",
-    "owner": "__with_prompt_fragment",
-    "evidence": "Consumer __with_prompt_fragment.agent_options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__with_prompt_fragment",
-        "parameter": "agent_options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_review.harn",
     "expression": "__agent_completion_review(llm, opts)",
     "owner": "__agent_completion_review",
@@ -464,20 +436,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-    "expression": "agent_completion_claim_apply_options(options)",
-    "owner": "agent_completion_claim_apply_options",
-    "evidence": "Consumer agent_completion_claim_apply_options.options in crates/harn-stdlib/src/stdlib/agent/completion_claim.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_completion_claim_apply_options",
-        "parameter": "options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "agent_lifecycle_tools(harness.agent, opts?.tools, opts)",
     "owner": "agent_lifecycle_tools",
     "evidence": "Consumer agent_lifecycle_tools.options in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -485,6 +443,34 @@
       {
         "scope": "AgentSpec",
         "function": "agent_lifecycle_tools",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "agent_loop_options(\n      harness,\n      agent_progress_apply_options(harness.agent, options),\n    )",
+    "owner": "agent_loop_options",
+    "evidence": "Consumer agent_loop_options.options in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_loop_options",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+    "expression": "agent_progress_apply_options(harness.agent, options)",
+    "owner": "agent_progress_apply_options",
+    "evidence": "Consumer agent_progress_apply_options.options in crates/harn-stdlib/src/stdlib/agent/progress.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_progress_apply_options",
         "parameter": "options"
       }
     ]
