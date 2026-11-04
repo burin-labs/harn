@@ -319,7 +319,7 @@ pub fn macos_warm_errors(
   // toolchain pin, so a pin change leaves every pull request cold until some
   // producer run publishes again. The producer must republish on main when an
   // input the manifest binds changes, not wait for the nightly schedule.
-  const push_paths = nightly_workflow?.["on"]?.push?.paths ?? []
+  const push_paths = nightly_workflow["on"]?.push?.paths ?? []
   for input in MACOS_WARM_MANIFEST_PUSH_INPUTS {
     if !push_paths.contains(input) {
       errors = errors
