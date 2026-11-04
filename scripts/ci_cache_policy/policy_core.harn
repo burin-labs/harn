@@ -85,7 +85,7 @@ pub const RELEASE_PATH_FILTER_OUTPUT = "$"
 pub const RELEASE_PATH_FILTER_BRANCH = "[[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]"
 
 pub const RELEASE_WORKFLOW_CONCURRENCY_GROUP = "build-release-binaries-$"
-  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
+  + "{{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || (github.event_name == 'workflow_dispatch' && inputs.source_candidate && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}"
 
 pub const RELEASE_WORKFLOW_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only }}"
@@ -487,7 +487,7 @@ pub const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
 pub const RELEASE_CACHE_SOURCE_KEY = "$" + "{{ matrix.rust_cache_broad_restore_prefix }}"
 
 pub const RELEASE_CACHE_SAVE_ENV = "$"
-  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
+  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
 
 pub const RELEASE_CACHE_SAVE_REQUEST = "$"
   + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"

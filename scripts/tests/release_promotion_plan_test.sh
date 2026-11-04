@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Execute promote-release.yml's real plan step against fixture build runs. Any
-# main source declaring an unpublished stable version, with that version's
-# transition proved in its first-parent history, is promoted automatically
-# from its successful candidate; a failed candidate at the version commit
-# strands nothing. A red source is still refused, a release already published
-# from any source is a no-op, and an unpublished tag at another commit is
-# refused.
+# Execute promote-release.yml's real plan step against fixture build runs. A
+# dispatch names a commit. It publishes only a stable version that commit declares,
+# with no release, above the latest published one, whose candidate qualifies and
+# whose full CI passed. Every other request is refused rather than passed as a
+# no-op, and an older commit may publish.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,15 +18,8 @@ fail() {
 
 awk '/        id: plan/{found=1} found && /        run: \|/{body=1;next} body && /^  [^ ]/{exit} body && /^      - /{exit} body{print substr($0,11)}' \
   "$workflow" > "$tmp/plan.sh"
-grep -Fq 'release_push_is_stable_version_change' "$tmp/plan.sh" \
+grep -Fq 'release_require_promotable_version' "$tmp/plan.sh" \
   || fail "could not extract the plan step from $workflow"
-# The plan must make the same decision as the build that made the candidate.
-# The plan sees only HEAD^; the build judges the whole push and refuses a push
-# whose release commit is not its head, so every push the plan promotes is one
-# where HEAD^ is the previous version.
-grep -Fq 'release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA"' \
-  "$root/.github/workflows/build-release-binaries.yml" \
-  || fail "build-release-binaries.yml no longer decides candidates with release_range_release_commits"
 
 repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
@@ -45,13 +36,13 @@ git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
 git -C "$repo" config user.email "release-promotion-test@example.com"
 git -C "$repo" config commit.gpgsign false
+printf '# Changelog\n\n## v0.10.141\n\n- Earlier.\n' > "$repo/CHANGELOG.md"
 
 # gh stub: FAKE_TAG_SHA is the commit the tag points at (unset: no tag),
-# FAKE_RELEASE=1 means the release exists, FAKE_CANDIDATE_RUN is the run that
-# built the candidate (default 9001, this push's own run; empty: none), and
-# FAKE_RUNS_FAIL=1 makes the run listing unreadable. FAKE_GREEN is how green
-# relates to the head (default identical; absent: no green branch), and every
-# call is appended to $GH_CALLS.
+# FAKE_RELEASE=1 means the release exists, FAKE_LATEST is the latest published tag
+# (default v0.10.141), and FAKE_CANDIDATE_RUN is the run that built the candidate
+# (default 9001). FAKE_GREEN is how green relates to the head (default identical;
+# absent: no green branch), and every call is appended to $GH_CALLS.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
@@ -63,6 +54,9 @@ case "$2" in
     else printf '[{"ref":"refs/heads/green","object":{"sha":"%040d"}}]\n' 0; fi
     exit 0 ;;
   */compare/*\?per_page=1) printf '{"status":"%s"}\n' "${FAKE_GREEN:-identical}"; exit 0 ;;
+  */releases/latest)
+    [[ "${FAKE_LATEST_FAIL:-0}" != 1 ]] || exit 1
+    printf '%s\n' "${FAKE_LATEST:-v0.10.141}"; exit 0 ;;
 esac
 if [[ "$*" == *"/jobs?filter=latest"* ]]; then
   if [[ -n "${FAKE_JOB_CENSUS:-}" ]]; then
@@ -130,13 +124,6 @@ case "$1 $2" in
       '{total_count:1,jobs:[{id:42,name:"Consumer release rehearsal / Consumer canary",run_id:$run,
         run_attempt:1,head_sha:$sha,status:"completed",conclusion:"success"}]}' ;;
   "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
-  "api "*/build-release-binaries.yml/runs\?*)
-    [[ "${FAKE_RUNS_FAIL:-0}" != 1 ]] || exit 1
-    run="${FAKE_CANDIDATE_RUN-9001}"
-    if [[ -n "$run" ]]; then
-      sha="${2#*head_sha=}"; sha="${sha%%&*}"
-      jq -n --argjson run "$run" --arg sha "$sha" '{total_count:1,workflow_runs:[{id:$run,run_attempt:1,event:"push",head_branch:"main",head_sha:$sha,status:"completed",conclusion:"success",path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},head_repository:{full_name:"burin-labs/harn"}}]}'
-    else echo '{"total_count":0,"workflow_runs":[]}'; fi ;;
   "api "*/artifacts\?name=candidate-manifest-*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
     jq -n --arg sha "$sha" --argjson run "${FAKE_CANDIDATE_RUN-9001}" '{total_count:1,artifacts:[{id:78,name:("candidate-manifest-"+$sha),expired:false,size_in_bytes:100,digest:("sha256:"+("b"*64)),workflow_run:{id:$run,head_sha:$sha}}]}' ;;
@@ -145,10 +132,7 @@ case "$1 $2" in
       '{id:$id,head_sha:$sha,run_attempt:1,event:"push",head_branch:"main",
         path:".github/workflows/build-release-binaries.yml",repository:{full_name:"burin-labs/harn"},
         head_repository:{full_name:"burin-labs/harn"},status:"completed",conclusion:"success"}' ;;
-  "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
   "api "*/releases\?per_page=50) [[ "${FAKE_RELEASE:-0}" == 1 ]] && echo true || echo false ;;
-  "issue list") ;;
-  "issue create") echo "issue create $*" >> "${FAKE_ISSUE_LOG:-/dev/null}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -184,38 +168,50 @@ output() {
 }
 
 commit_version 0.10.142-dev "Start 0.10.142 development"
-commit_version 0.10.142-dev "Change something"
-plan warm
-[[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false &&
-   "$(output warm reconcile)" == true ]] \
-  || fail "a development push was promoted or skipped reconciliation: $(cat "$tmp/warm.log")"
-# Only a version commit waits on green; an ordinary push never reads it.
-! grep -Fq 'matching-refs/heads/green' "$tmp/warm.calls" || fail "a development push read green"
-plan warm_red FAKE_GREEN=ahead
-[[ "$(cat "$tmp/warm_red.status")" == 0 && "$(output warm_red promote)" == false ]] \
-  || fail "an uncertified development push failed instead of passing as a no-op"
-plan recovery_warm RECOVERY=true
-[[ "$(cat "$tmp/recovery_warm.status")" != 0 && -z "$(output recovery_warm promote)" ]] \
-  || fail "manual recovery accepted a warm run"
+# A prerelease is refused by name, never passed as a no-op.
+plan development
+[[ "$(cat "$tmp/development.status")" != 0 && -z "$(output development promote)" ]] \
+  || fail "a development source passed: $(cat "$tmp/development.log")"
+grep -Fq 'not a stable release version' "$tmp/development.log" \
+  || fail "the development refusal does not say why: $(cat "$tmp/development.log")"
 
-commit_version 0.10.142 "Bump the workspace version"
+commit_version 0.10.142 "Declare the next version"
 head_sha="$(git -C "$repo" rev-parse HEAD)"
 plan candidate
 [[ "$(cat "$tmp/candidate.status")" == 0 && "$(output candidate promote)" == true ]] \
-  || fail "the version commit was not promoted: $(cat "$tmp/candidate.log") calls: $(cat "$tmp/candidate.calls")"
+  || fail "the requested commit was not promoted: $(cat "$tmp/candidate.log") calls: $(cat "$tmp/candidate.calls")"
 [[ "$(output candidate tag)" == v0.10.142 && "$(output candidate version)" == 0.10.142 &&
    "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"
-grep -Fq 'matching-refs/heads/green' "$tmp/candidate.calls" || fail "the version commit skipped the green check"
+grep -Fq 'matching-refs/heads/green' "$tmp/candidate.calls" || fail "the plan skipped the green check"
 for green in ahead diverged absent bogus; do
   plan "green_$green" "FAKE_GREEN=$green"
   [[ "$(cat "$tmp/green_$green.status")" != 0 && "$(output "green_$green" promote)" != true ]] \
-    || fail "a version commit green does not contain ($green) was promoted"
+    || fail "a commit green does not contain ($green) was promoted"
 done
+
+# Falsifier: a dispatch for a commit declaring a published version is refused,
+# whichever commit asks and wherever the tag points, and so is a lower one.
+plan rerun "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1 FAKE_LATEST=v0.10.142
+[[ "$(cat "$tmp/rerun.status")" != 0 && "$(output rerun promote)" != true ]] \
+  || fail "a published version was promoted again: $(cat "$tmp/rerun.log")"
+grep -Fq 'v0.10.142 is already published' "$tmp/rerun.log" \
+  || fail "the published refusal does not say why: $(cat "$tmp/rerun.log")"
+! grep -Fq 'matching-refs/heads/green' "$tmp/rerun.calls" || fail "a published version waited on green"
+plan published_elsewhere FAKE_TAG_SHA=1111111111111111111111111111111111111111 FAKE_RELEASE=1
+[[ "$(cat "$tmp/published_elsewhere.status")" != 0 ]] \
+  || fail "a version published from another commit was promoted"
+plan lower FAKE_LATEST=v0.10.150
+[[ "$(cat "$tmp/lower.status")" != 0 && "$(output lower promote)" != true ]] \
+  || fail "a version below the latest release was promoted"
+grep -Fq 'not above the latest published release v0.10.150' "$tmp/lower.log" \
+  || fail "the lower refusal does not say why: $(cat "$tmp/lower.log")"
+plan latest_unread FAKE_LATEST_FAIL=1
+[[ "$(cat "$tmp/latest_unread.status")" != 0 ]] || fail "an unread latest release admitted a version"
 
 # The workflow run itself is green in every fixture, including a legacy
 # tolerated consumer failure. Promotion must read the real job before arming.
-for verdict in missing pending failure cancelled; do
+for verdict in pending failure cancelled; do
   plan "consumer_$verdict" "FAKE_CONSUMER=$verdict"
   [[ "$(cat "$tmp/consumer_$verdict.status")" != 0 &&
      "$(output "consumer_$verdict" promote)" != true ]] \
@@ -268,67 +264,53 @@ plan default_current FAKE_DEFAULT_STATUS=identical
 plan consumer_unread CONSUMER_READ_TOKEN=
 refused_by consumer_unread consumer_read_authority_missing
 
-# The release's merge group built the candidate, so this push's run built
-# nothing: the queue's run is the one promoted.
-plan from_queue FAKE_CANDIDATE_RUN=4242
-[[ "$(output from_queue promote)" == true && "$(output from_queue run_id)" == 4242 ]] \
-  || fail "the merge group's candidate run was not promoted: $(cat "$tmp/from_queue.log")"
+# The plan publishes the run it was handed, which the resolver validated.
+plan named_run BUILD_RUN_ID=4242 FAKE_CANDIDATE_RUN=4242
+[[ "$(output named_run promote)" == true && "$(output named_run run_id)" == 4242 ]] \
+  || fail "the requested candidate run was not retained: $(cat "$tmp/named_run.log")"
 
-# Recovery retains the requested producer rather than selecting another run
-# of the same source; normal verification still reads its consumer result.
-plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
-[[ "$(output recovery promote)" == true && "$(output recovery run_id)" == 9001 ]] \
-  || fail "recovery did not retain its certified run: $(cat "$tmp/recovery.log")"
-plan standalone RECOVERY=true STANDALONE_HARN=true FAKE_CONSUMER=failure
+plan standalone STANDALONE_HARN=true FAKE_CONSUMER=failure
 [[ "$(output standalone promote)" == true && "$(output standalone requires_rehearsal)" == false ]] \
   || fail "standalone publication incorrectly requires downstream acceptance"
 ! grep -Fq '/jobs?filter=latest' "$tmp/standalone.calls" \
   || fail "standalone plan incorrectly reads a consumer verdict"
-plan standalone_automatic STANDALONE_HARN=true
-[[ "$(cat "$tmp/standalone_automatic.status")" != 0 ]] \
-  || fail "automatic publication accepted standalone scope"
-plan standalone_red_source RECOVERY=true STANDALONE_HARN=true FAKE_GREEN=ahead
+plan standalone_red_source STANDALONE_HARN=true FAKE_GREEN=ahead
 [[ "$(cat "$tmp/standalone_red_source.status")" != 0 ]] \
   || fail "standalone publication bypassed source CI admission"
-plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
-[[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
+# A checkpoint candidate has no rehearsal, so promotion measures one.
+plan no_rehearsal FAKE_CONSUMER=missing
+[[ "$(output no_rehearsal promote)" == true && "$(output no_rehearsal requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"
-[[ "$(output recovery_missing expected_attempt)" == 1 && "$(output recovery_missing expected_manifest_id)" == 78 &&
-   "$(output recovery_missing expected_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]] \
+[[ "$(output no_rehearsal expected_attempt)" == 1 && "$(output no_rehearsal expected_manifest_id)" == 78 &&
+   "$(output no_rehearsal expected_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]] \
   || fail "fresh rehearsal did not capture the actual producer manifest identity"
-plan recovery_missing_other_source RECOVERY=true FAKE_CONSUMER=missing FAKE_RUN_SHA=1111111111111111111111111111111111111111
-[[ "$(cat "$tmp/recovery_missing_other_source.status")" != 0 && -z "$(output recovery_missing_other_source promote)" ]] \
+plan no_rehearsal_other_source FAKE_CONSUMER=missing FAKE_RUN_SHA=1111111111111111111111111111111111111111
+[[ "$(cat "$tmp/no_rehearsal_other_source.status")" != 0 && -z "$(output no_rehearsal_other_source promote)" ]] \
   || fail "fresh rehearsal accepted another source's producer"
-plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
-[[ "$(output recovery_explicit_pair promote)" == true && "$(output recovery_explicit_pair requires_rehearsal)" == true ]] \
+plan explicit_pair FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
+[[ "$(output explicit_pair promote)" == true && "$(output explicit_pair requires_rehearsal)" == true ]] \
   || fail "explicit consumer repair did not require actual measurement"
-plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
-[[ "$(cat "$tmp/recovery_existing_pair.status")" != 0 ]] \
+plan existing_pair CONSUMER_PULL_REQUEST=7
+[[ "$(cat "$tmp/existing_pair.status")" != 0 ]] \
   || fail "explicit pair replaced an existing measured rehearsal"
-plan verified_repair RECOVERY=true REQUIRES_CONSUMER_REPAIR=true CONSUMER_PULL_REQUEST=7 FAKE_CONSUMER=failure
+plan verified_repair REQUIRES_CONSUMER_REPAIR=true CONSUMER_PULL_REQUEST=7 FAKE_CONSUMER=failure
 [[ "$(cat "$tmp/verified_repair.status")" == 0 && "$(output verified_repair requires_rehearsal)" == true ]] \
   || fail "verified archive repair did not require a fresh consumer measurement"
 [[ -z "$(output verified_repair expected_attempt)" ]] \
   || fail "archive repair received an unrelated ordinary-producer identity"
-for invalid in no_pull nonnumeric_pull not_manual; do
+for invalid in no_pull nonnumeric_pull; do
   case "$invalid" in
-    no_pull) extras=(RECOVERY=true) ;;
-    nonnumeric_pull) extras=(RECOVERY=true CONSUMER_PULL_REQUEST=other) ;;
-    not_manual) extras=(RECOVERY=false CONSUMER_PULL_REQUEST=7) ;;
+    no_pull) extras=() ;;
+    nonnumeric_pull) extras=(CONSUMER_PULL_REQUEST=other) ;;
   esac
-  plan "repair_$invalid" REQUIRES_CONSUMER_REPAIR=true "${extras[@]}"
+  plan "repair_$invalid" REQUIRES_CONSUMER_REPAIR=true ${extras[@]+"${extras[@]}"}
   [[ "$(cat "$tmp/repair_$invalid.status")" != 0 ]] || fail "repair $invalid was admitted"
-done
-for verdict in pending failure cancelled; do
-  plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
-  [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \
-    || fail "recovery replaced a measured $verdict consumer with a new rehearsal"
 done
 
 # A complete page count is not a complete measurement when records cannot
-# identify the jobs. Exercise the actual recovery decision, not just a parser.
+# identify the jobs. Exercise the actual decision, not just a parser.
 census='[{"total_count":2,"jobs":[{"id":41,"name":"Build","status":"completed","conclusion":"success"},{"id":42,"name":"Consumer release rehearsal / Consumer canary","status":"completed","conclusion":"success"}]}]'
-plan valid_census RECOVERY=true "FAKE_JOB_CENSUS=$census"
+plan valid_census "FAKE_JOB_CENSUS=$census"
 [[ "$(output valid_census promote)" == true && "$(output valid_census requires_rehearsal)" == false ]] \
   || fail 'complete named job census refused'
 for defect in missing_name empty_name whitespace_name numeric_name missing_id zero_id fractional_id string_id duplicate_id missing_status missing_conclusion partial_page empty_census; do
@@ -348,39 +330,17 @@ for defect in missing_name empty_name whitespace_name numeric_name missing_id ze
     empty_census) filter='.[0] = {total_count:0,jobs:[]}' ;;
   esac
   malformed="$(jq -c "$filter" <<< "$census")"
-  plan "malformed_$defect" RECOVERY=true "FAKE_JOB_CENSUS=$malformed"
+  plan "malformed_$defect" "FAKE_JOB_CENSUS=$malformed"
   [[ "$(cat "$tmp/malformed_$defect.status")" != 0 &&
      "$(output "malformed_$defect" promote)" != true &&
      "$(output "malformed_$defect" requires_rehearsal)" != true ]] \
-    || fail "malformed $defect census authorized recovery"
+    || fail "malformed $defect census authorized publication"
 done
-
-# Historical candidates need not contain today's publication policy helpers.
-# The controller owns those helpers; the candidate supplies only version facts.
-git clone --quiet --no-hardlinks "$repo" "$tmp/old-source"
-rm -rf "$tmp/old-source/scripts"
-plan historical_source RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source"
-[[ "$(output historical_source promote)" == true ]] \
-  || fail "historical source required current controller helpers: $(cat "$tmp/historical_source.log")"
-
-# Negative controls: no run holds a candidate, or the runs cannot be read. A
-# release with nothing to publish is a failure, never a green no-op.
-plan no_candidate FAKE_CANDIDATE_RUN=
-[[ "$(cat "$tmp/no_candidate.status")" != 0 ]] || fail "a release with no candidate run was not refused"
-grep -Fq "No successful build run holds a v0.10.142 candidate" "$tmp/no_candidate.log" \
-  || fail "the missing candidate is not named: $(cat "$tmp/no_candidate.log")"
-plan runs_unread FAKE_RUNS_FAIL=1
-[[ "$(cat "$tmp/runs_unread.status")" != 0 ]] || fail "an unreadable run listing was not refused"
 
 # A tag at this commit with no release yet is a promotion that stopped before
 # publishing; it is promoted again.
 plan resume "FAKE_TAG_SHA=$head_sha"
 [[ "$(output resume promote)" == true ]] || fail "a tag without a release was not resumed: $(cat "$tmp/resume.log") calls: $(cat "$tmp/resume.calls")"
-
-# Rerun after the release exists: no-op.
-plan rerun "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1
-[[ "$(cat "$tmp/rerun.status")" == 0 && "$(output rerun promote)" == false ]] \
-  || fail "an existing release was promoted again: $(cat "$tmp/rerun.log")"
 
 # Negative control: the tag already names another commit.
 plan conflict FAKE_TAG_SHA=1111111111111111111111111111111111111111
@@ -388,79 +348,35 @@ plan conflict FAKE_TAG_SHA=1111111111111111111111111111111111111111
 grep -Fq "not the candidate commit $head_sha" "$tmp/conflict.log" \
   || fail "the tag conflict does not name the candidate: $(cat "$tmp/conflict.log")"
 
-# The class falsifier: the version commit's candidate failed, so no run holds a
-# candidate there, and main moved on while still declaring v0.10.142. A later
-# main commit's successful candidate, whatever event built it, publishes the
-# version automatically. Before this invariant, it was a no-op and the version
-# stayed stranded until a person recovered it.
-commit_version 0.10.142 "Fix the cause of the failed candidate"
-descendant_sha="$(git -C "$repo" rev-parse HEAD)"
-plan descendant_without_candidate FAKE_CANDIDATE_RUN=
-[[ "$(cat "$tmp/descendant_without_candidate.status")" == 0 &&
-   "$(output descendant_without_candidate promote)" == false &&
-   "$(output descendant_without_candidate reconcile)" == true ]] \
-  || fail "a descendant without a candidate did not hand off to reconciliation: $(cat "$tmp/descendant_without_candidate.log")"
-! grep -Fq 'matching-refs/heads/green' "$tmp/descendant_without_candidate.calls" \
-  || fail "a descendant without a candidate waited on green"
-plan descendant FAKE_CANDIDATE_RUN=5150
-[[ "$(cat "$tmp/descendant.status")" == 0 && "$(output descendant promote)" == true &&
-   "$(output descendant tag)" == v0.10.142 && "$(output descendant run_id)" == 5150 &&
-   -z "$(output descendant reconcile)" ]] \
-  || fail "a qualified descendant candidate of the unpublished version was not promoted: $(cat "$tmp/descendant.log")"
-grep -Fq "Promoting descendant $descendant_sha of v0.10.142 version commit $head_sha" "$tmp/descendant.log" \
-  || fail "the descendant promotion does not name its version commit: $(cat "$tmp/descendant.log")"
-# Negative control: a red descendant never publishes, candidate or not.
-for green in ahead diverged absent; do
-  plan "descendant_green_$green" FAKE_CANDIDATE_RUN=5150 "FAKE_GREEN=$green"
-  [[ "$(cat "$tmp/descendant_green_$green.status")" != 0 &&
-     "$(output "descendant_green_$green" promote)" != true ]] \
-    || fail "a descendant green does not contain ($green) was promoted"
-done
-plan descendant_failed_consumer FAKE_CANDIDATE_RUN=5150 FAKE_CONSUMER=failure
-[[ "$(cat "$tmp/descendant_failed_consumer.status")" != 0 ]] \
-  || fail "a descendant bypassed its failed consumer rehearsal"
-# Newest-wins: once any candidate published the version, the rest are no-ops.
-plan descendant_after_publication FAKE_CANDIDATE_RUN=5150 "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1
-[[ "$(cat "$tmp/descendant_after_publication.status")" == 0 &&
-   "$(output descendant_after_publication promote)" == false ]] \
-  || fail "a candidate after publication from another source was not a no-op: $(cat "$tmp/descendant_after_publication.log")"
-# An unproved transition is never promoted automatically.
-git clone --quiet --depth 1 "file://$repo" "$tmp/unproved-source"
-plan descendant_unproved FAKE_CANDIDATE_RUN=5150 "SOURCE_DIRECTORY=$tmp/unproved-source"
-[[ "$(cat "$tmp/descendant_unproved.status")" != 0 ]] \
-  || fail "a descendant without a proved transition was promoted"
-plan corrected_source RECOVERY=true
-[[ "$(cat "$tmp/corrected_source.status")" == 0 && "$(output corrected_source promote)" == true ]] \
-  || fail "certified corrected stable source was refused: $(cat "$tmp/corrected_source.log")"
-plan corrected_source_failed_consumer RECOVERY=true FAKE_CONSUMER=failure
-[[ "$(cat "$tmp/corrected_source_failed_consumer.status")" != 0 ]] \
-  || fail "corrected source bypassed its failed consumer rehearsal"
-plan corrected_source_conflicting_tag RECOVERY=true "FAKE_TAG_SHA=$head_sha"
-[[ "$(cat "$tmp/corrected_source_conflicting_tag.status")" != 0 ]] \
-  || fail "corrected source replaced a tag at the original source"
-git clone --quiet --depth 2 "file://$repo" "$tmp/shallow-source"
-plan corrected_source_unproved RECOVERY=true "SOURCE_DIRECTORY=$tmp/shallow-source"
-[[ "$(cat "$tmp/corrected_source_unproved.status")" != 0 ]] \
-  || fail "missing transition history authorized corrected-source recovery"
-commit_version 0.10.143-rc.1 "Prerelease"
-plan prerelease
-[[ "$(cat "$tmp/prerelease.status")" == 0 && "$(output prerelease promote)" == false ]] \
-  || fail "a prerelease was promoted"
-plan recovery_prerelease RECOVERY=true
-[[ "$(cat "$tmp/recovery_prerelease.status")" != 0 ]] \
-  || fail "manual recovery accepted a prerelease run"
+# Main moved on, and the requested commit stays releasable. Historical candidates
+# need not contain today's publication helpers: the controller owns those, and the
+# candidate supplies only its version. An older commit may not skip any proof.
+git clone --quiet --no-hardlinks "$repo" "$tmp/old-source"
+rm -rf "$tmp/old-source/scripts"
+commit_version 0.10.143 "Hand-declare a later version"
+older=(SOURCE_DIRECTORY="$tmp/old-source" HEAD_SHA="$head_sha")
+plan older_commit "${older[@]}"
+[[ "$(cat "$tmp/older_commit.status")" == 0 && "$(output older_commit promote)" == true &&
+   "$(output older_commit tag)" == v0.10.142 ]] \
+  || fail "an older commit's unpublished version was refused: $(cat "$tmp/older_commit.log")"
+plan older_commit_red "${older[@]}" FAKE_GREEN=ahead
+[[ "$(cat "$tmp/older_commit_red.status")" != 0 ]] || fail "an older commit skipped the green check"
+plan older_commit_failed_consumer "${older[@]}" FAKE_CONSUMER=failure
+[[ "$(cat "$tmp/older_commit_failed_consumer.status")" != 0 ]] \
+  || fail "an older commit bypassed its failed consumer rehearsal"
+plan older_commit_lower "${older[@]}" FAKE_LATEST=v0.10.143
+[[ "$(cat "$tmp/older_commit_lower.status")" != 0 ]] \
+  || fail "an older commit published below the latest release"
 
-# Main has retired the older unpublished source. Recovery must not resurrect
-# it, but an actually published tag still takes the existing follow-through
-# path before the superseded-source guard.
-commit_version 0.10.143-dev "Retire unpublished v0.10.142"
-plan retired_unpublished RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source" "HEAD_SHA=$head_sha"
-[[ "$(cat "$tmp/retired_unpublished.status")" != 0 &&
-   "$(output retired_unpublished promote)" != true ]] || fail "retired unpublished source was resurrected"
-grep -Fq 'superseded by main' "$tmp/retired_unpublished.log" || fail 'retirement was not the refusal reason'
-plan published_after_cutover RECOVERY=true "SOURCE_DIRECTORY=$tmp/old-source" "HEAD_SHA=$head_sha" \
-  "FAKE_TAG_SHA=$head_sha" FAKE_RELEASE=1
-[[ "$(cat "$tmp/published_after_cutover.status")" == 0 &&
-   "$(output published_after_cutover promote)" == false ]] || fail 'published source lost its existing completion path'
+# Main retired the version on purpose: its changelog records that, and promotion
+# does not resurrect it. The record's absence is read, not assumed.
+printf '# Changelog\n\n## v0.10.142 (never published)\n\n- Retired.\n\n## v0.10.141\n\n- Earlier.\n' > "$repo/CHANGELOG.md"
+plan retired "${older[@]}"
+[[ "$(cat "$tmp/retired.status")" != 0 && "$(output retired promote)" != true ]] \
+  || fail "a retired version was resurrected: $(cat "$tmp/retired.log")"
+grep -Fq 'retired as never published' "$tmp/retired.log" || fail 'retirement was not the refusal reason'
+rm "$repo/CHANGELOG.md"
+plan changelog_unread "${older[@]}"
+[[ "$(cat "$tmp/changelog_unread.status")" != 0 ]] || fail "an unread changelog passed as not retired"
 
 echo "release_promotion_plan_test: ok"

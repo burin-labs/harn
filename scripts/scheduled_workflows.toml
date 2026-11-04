@@ -23,15 +23,6 @@ job_ids = ["zizmor-online"]
 health_failures = 3
 
 [[workflow]]
-path = ".github/workflows/build-release-binaries.yml"
-name = "Build release binaries"
-claim = "Exact main has a complete live signed candidate or passes the full candidate producer"
-crons = ["17 5 * * *"]
-cadence_reason = "Daily gives native tracking one signed exact-source bundle per day, including commits outside the warm-cache path filter, at the spend of the daily warm it replaces. A full candidate is about four runner-hours, so a faster cadence is a spend decision."
-job_ids = ["setup", "candidate-verdict"]
-health_failures = 3
-
-[[workflow]]
 path = ".github/workflows/bump-release.yml"
 name = "Open release PR"
 claim = "Unreleased changelog fragments on main have an open Release vX.Y.Z pull request"
@@ -173,9 +164,9 @@ health_failures = 3
 [[workflow]]
 path = ".github/workflows/repository-state-reconciliation.yml"
 name = "Repository state reconciliation"
-claim = "Superseded speculative runs are cancelled and post-release development state is restored promptly"
+claim = "Superseded speculative runs are cancelled and main moves to the next unpublished version promptly after a release"
 crons = ["*/5 * * * *"]
-cadence_reason = "Five minutes is the recovery objective for scarce runner capacity and a stable-version main branch."
+cadence_reason = "Five minutes is the recovery objective for scarce runner capacity and a main branch still declaring a published version."
 job_ids = ["cancel-obsolete-runs", "check"]
 health_failures = 6
 

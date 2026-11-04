@@ -18,6 +18,9 @@ export PATH="$fixture/bin:$PATH"
 source "$root/scripts/lib/full_suite_jobs.sh"
 FULL_SUITE_JOBS="$(printf '%s\n' "${RELEASE_FULL_SUITE_JOBS[@]}")"
 export FULL_SUITE_JOBS
+source "$root/scripts/lib/candidate_archive_contract.sh"
+CANDIDATE_TARGETS_JSON="$(candidate_archive_expected_targets_json)"
+export CANDIDATE_TARGETS_JSON
 
 cat > "$fixture/bin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -100,6 +103,13 @@ case "${endpoint:?}" in
   */contents/Cargo.toml\?*)
     [[ "${MUTATION:-}" != source_version_mismatch ]] || { printf '[workspace.package]\nversion = "1.2.5"\n'; exit 0; }
     printf '[workspace.package]\nversion = "1.2.4"\n' ;;
+  */actions/runs/3/artifacts\?per_page=*)
+    # The resolver's inventory: a retired candidate's archives still exist.
+    jq -nc --argjson targets "$CANDIDATE_TARGETS_JSON" --arg source "$RETIRE_SOURCE_SHA" '$targets
+      | [.[] | "harn-" + .] + ["candidate-manifest-" + $source, "harn-release-files"]
+      | {total_count:length, artifacts:to_entries | map({id:(.key + 100),name:.value,
+          expired:false,size_in_bytes:100,workflow_run:{id:3,repository_id:1,
+            head_repository_id:1,head_sha:$source,head_branch:"main"}})}' ;;
   */actions/runs/3/artifacts\?*)
     count=1; [[ "${MUTATION:-}" != duplicate_manifest ]] || count=2
     jq -n --arg source "$RETIRE_SOURCE_SHA" --argjson count "$count" '
@@ -114,7 +124,7 @@ case "${endpoint:?}" in
       producer_cancelled) conclusion=cancelled ;;
       producer_pending) conclusion=null ;;
     esac
-    jq -n --arg sha "$sha" --arg conclusion "$conclusion" '{id:3,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
+    jq -n --arg sha "$sha" --arg conclusion "$conclusion" '{id:3,repository:{id:1,full_name:"example/harn"},head_repository:{id:1,full_name:"example/harn"},
       path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1} |
       if $conclusion == "null" then .status="in_progress" | .conclusion=null else . end' ;;
   */actions/runs/11)
@@ -244,7 +254,7 @@ chmod +x "$fixture/bin/gh" "$fixture/bin/git"
 export GITHUB_OUTPUT="$fixture/output"
 bash "$root/scripts/plan_development_bump.sh" > "$fixture/valid.log"
 grep -Fxq required=true "$GITHUB_OUTPUT"
-grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
+grep -Fxq version=1.2.5 "$GITHUB_OUTPUT"
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 grep -Fxq published_tag=v1.2.3 "$GITHUB_OUTPUT"
 # The first-run gauntlet leg retires an identity the same way as the linked suite.
@@ -282,7 +292,7 @@ for accepted in '' producer_success producer_cancelled ci_success_missing_family
     cat "$fixture/producer-valid-$accepted.log" >&2; echo "FAIL: unpromotable source refused: ${accepted:-default}" >&2; exit 1;
   }
   grep -Fxq required=true "$GITHUB_OUTPUT"
-  grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
+  grep -Fxq version=1.2.5 "$GITHUB_OUTPUT"
   grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 done
 grep -Fq '"reason":"source_ci_failed"' "$fixture/producer-valid-producer_success.log"
@@ -314,9 +324,9 @@ cat > "$fixture/bin/harn" <<'EOF'
 set -euo pipefail
 case "$*" in
   *'/release_metadata.harn -- current '*) sed -n 's/^version = "\([^"]*\)"/\1/p' "$HARN_RELEASE_ROOT/Cargo.toml" ;;
-  *'/release_metadata.harn -- development-target '*) printf '1.2.5-dev\n' ;;
+  *'/release_metadata.harn -- development-target '*) printf '1.2.5\n' ;;
   *'/release_metadata.harn -- retire '*)
-    printf '[workspace.package]\nversion = "1.2.5-dev"\n' > "$HARN_RELEASE_ROOT/Cargo.toml"
+    printf '[workspace.package]\nversion = "1.2.5"\n' > "$HARN_RELEASE_ROOT/Cargo.toml"
     touch "$FIXTURE_ROOT/prepared" ;;
   *'/sync_protocol_fixture_runtime_versions.harn '*|*'/sync_grammar_fitness_receipt.harn'|'dump-protocol-artifacts') ;;
   *'/bump-driver/publish_branch_commit.harn') touch "$FIXTURE_ROOT/branch_published" ;;
@@ -328,7 +338,7 @@ cat > "$fixture/bin/cargo" <<'EOF'
 [[ "$*" == 'metadata --format-version=1' || "$*" == 'metadata --format-version=1 --locked' ]]
 EOF
 chmod +x "$fixture/bin/harn" "$fixture/bin/cargo"
-if HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5-dev RELEASE_PUBLISHED_VERSION=v1.2.3 \
+if HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5 RELEASE_PUBLISHED_VERSION=v1.2.3 \
   bash "$root/scripts/open_development_bump.sh" > "$fixture/action-boundary.log" 2>&1; then
   echo 'FAIL: opener accepted publication that appeared during preparation' >&2; exit 1
 fi
@@ -339,7 +349,7 @@ rm "$fixture/prepared"
 printf '[workspace.package]\nversion = "1.2.4"\n' > "$fixture/workspace/Cargo.toml"
 ALLOW_OPEN=1 RETIRE_SOURCE_CI_RUN=11 RETIRE_PROMOTION_RUN='' RETIRE_RESOLVER_JOB='' \
   RETIRE_CONSUMER_JOB='' RETIRE_AUTHORIZATION_JOB='' RETIRE_CONSUMER_RUN='' RETIRE_FAILED_JOB='' \
-  HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5-dev RELEASE_PUBLISHED_VERSION=v1.2.3 \
+  HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5 RELEASE_PUBLISHED_VERSION=v1.2.3 \
   bash "$root/scripts/open_development_bump.sh" > "$fixture/producer-open.log" 2>&1
 [[ -e "$fixture/branch_published" && -s "$fixture/opened-body" ]]
 grep -Fq 'Source aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa can never promote: main CI 11' "$fixture/opened-body"

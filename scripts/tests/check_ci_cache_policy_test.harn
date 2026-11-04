@@ -280,15 +280,12 @@ pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Ha
 }
 
 @test
-pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+pipeline test_changes_admission_is_checked_before_expensive_ci(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   const steps = ci.jobs.changes.steps
   assert_eq(steps[0].with["fetch-depth"], 0)
-  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
-  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
-  assert(steps[1].run.contains("release_range_release_commits"))
-  assert_eq(steps[2].id, "merged_base")
-  assert_eq(steps[3].id, "filter")
+  assert_eq(steps[1].id, "merged_base")
+  assert_eq(steps[2].id, "filter")
   // Every compile, artifact consumer, and product proof depends directly on
   // admission. Capacity measurement and inexpensive hygiene can stay parallel.
   for name in [
@@ -322,15 +319,6 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   const aggregate = ci.jobs["ci-status"].steps[aggregate_index(ci)].run
   assert(aggregate.contains("CI tier was not measured."))
   assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
-  assert_eq(
-    len(
-      ci.jobs["release-contract"].steps.filter(
-        { step -> step?.name == "Keep a release commit last in its merge group" },
-      )
-        .to_list(),
-    ),
-    0,
-  )
 }
 
 @test

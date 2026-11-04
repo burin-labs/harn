@@ -26,7 +26,7 @@ on:
         description: Explicit failed unpublished source to retire, never a published tag
         type: string
       retire_release_pr:
-        description: Merged owning release PR binding immutable attempt head to certified source
+        description: Merged pull request whose merge commit is the source being retired
         type: string
       retire_producer_run:
         description: Retained canonical producer run
