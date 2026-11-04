@@ -317,7 +317,7 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
     }
 }
 
-fn sensitivity_for(name: &str) -> EnvironmentSensitivity {
+pub(crate) fn sensitivity_for(name: &str) -> EnvironmentSensitivity {
     if [
         "TOKEN",
         "SECRET",

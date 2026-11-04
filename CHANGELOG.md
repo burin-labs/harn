@@ -9,6 +9,151 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.187
+
+### Breaking
+
+- **Cache usage preserves omitted read and write counts separately (#7320).**
+  vLLM cache accounting now recognizes `created_cache_tokens`. Missing counters
+  stay unknown through retries, live notifications, and saved run reports;
+  explicit zeros remain measurements. A combined hit rate requires read counts
+  from every provider call. Atlas and Hunyuan streams now retain terminal
+  usage according to their documented compatibility APIs; their cache contracts
+  remain unverified.
+
+  Migration: Rust consumers constructing `CacheCounts` set `reported` to
+  `ReportedCacheUsage { read_tokens: Some(read), write_tokens: Some(write) }`
+  instead of `true`. Use `None` for each omitted category. Consumers constructing
+  `LlmUsage` or `ProviderUsage` set `reported_cache` to the measured
+  `ReportedCacheTotals`, or `None` when no category was measured. Fold totals with
+  `record(ReportedCacheUsage)` or `merge(&ReportedCacheTotals)`; inspect
+  `read_reported_calls` and `write_reported_calls` for category coverage.
+
+  Generated Swift and Python writers preserve schema-required nulls, including
+  unknown cache usage. Swift decoders now reject missing required nullable keys;
+  supply explicit nulls when constructing wire objects, including plan-step
+  `priority`. Optional fields can still be omitted.
+- **ACP closed-session continuations (#11006).** Clients can return a closed
+  turn's continuation when loading the same conversation to reuse unchanged
+  history without duplicate replay. Reopening still admits fresh workspace
+  and environment authority; changed history uses ordinary replay, and private
+  inputs remain retired. Ordinary replay also restores the model's conversation
+  and tool-call ID sequence.
+
+  Migration: Rust callers constructing `AcpSessionLoadParams` literals must add
+  `continuation: None`, or use `AcpSessionLoadParams::new` and optionally
+  `with_continuation`. `EmbeddedAgentClient::close_session` now returns
+  `AcpSessionCloseResult`; callers can retain its continuation or discard the
+  result. Obtain `CanonicalSessionReplay` through the canonical replay loader
+  rather than constructing a literal, because it now carries validated model
+  history as well as client events. ACP clients that omit continuation keep
+  the ordinary replay protocol.
+- **Session recaps retain prompt identities.** Public prompt facts include the caller's message
+  identity when the journal recorded one, allowing hosts to reconnect restored prompts to their
+  workspace checkpoints.
+
+  Migration: Rust consumers constructing `RecapTextFact` literals must provide `message_id`.
+  Use the recorded caller identity for a user prompt, or `None` when it is unavailable or the
+  text is from an assistant. Regenerate strict protocol bindings before consuming the new field.
+
+### Added
+
+- Add an offline Claude thread wire-state primitive with exclusive cursor ownership,
+  full-history recovery and deterministic protocol tests. Existing sessions and
+  provider dispatch do not activate it; live route qualification remains separate.
+
+### Changed
+
+- The pinned Rust toolchain is now 1.99.1 and the workspace minimum supported
+  Rust version is 1.99, so building Harn from source needs Rust 1.99 or newer.
+  The orchestrator container image builds on `rust:1.99-bookworm`.
+
+### Fixed
+
+- Darwin sandbox preparation creates its required temporary alias before scheduling
+  dangling-alias cleanup on a background thread. A nonblocking process lock permits
+  only one cleanup scan at a time; alias validation, creation and per-candidate
+  rechecks retain their existing locks and confinement.
+- The Together Qwen3.8 serverless route now records its November 4 retirement
+  and replacement. OpenAI GPT-5.6 Sol cost estimates return to standard rates on
+  November 30.
+- Retention sweeps, host-lease wait accounting, and the scheduler no longer treat a start time ahead of "now"
+  (clock skew, restored backup) as an enormous age. The new `harn_clock::elapsed_ms` clamps it to zero, so such
+  sessions are not soft- or hard-deleted early and a lease wait keeps its full budget.
+  `harn_clock::offset_datetime_to_ms` now floors pre-epoch instants.
+- Confined commands now get a credential-free `GH_CONFIG_DIR` stand-in. GitHub CLI exits on the denied
+  `hosts.yml` even when `GH_TOKEN` is set, so `gh` failed with a permission error inside every sandbox.
+  The stand-in carries `config.yml` (aliases, git protocol, editor) and never `hosts.yml`.
+- Output redaction now covers only credentials a grant hands to a child. A session-wide `env:` grant
+  that carries a path or a mode, and a literal grant, stay readable in command output, events and
+  transcripts.
+- The Linux process sandbox now lets confined commands use POSIX semaphores, so Python's
+  `multiprocessing.Lock()` and the linters and test runners built on process pools no longer fail
+  with `PermissionError: [Errno 13]`. Bubblewrap and namespaced launches get a private `/dev/shm`;
+  Landlock-only launches can read, write, and delete the same user's shared-memory segments there.
+  Shared values, arrays, and `shared_memory` still need truncation, which stays denied.
+- Skip Apple's Git installer shim during sandbox configuration discovery when no installed Git is available,
+  so starting a session does not request developer tools.
+- The macOS process sandbox now allows POSIX named semaphores, so Python's `multiprocessing.Lock()`
+  and the linters and test runners built on process pools no longer fail with `PermissionError: [Errno 1]`.
+  The network stays closed.
+- A confined child now keeps a toolchain cache variable (`UV_CACHE_DIR`, `GOMODCACHE`, `XDG_CACHE_HOME`, and the rest of
+  the toolchain cache set) that the launcher pointed under one of the policy's `process_sandbox.write_roots`. Before, any
+  inherited cache path outside the workspace was replaced with an empty sandbox cache, so a warm package cache an embedder
+  had granted for writing was never used and an offline resolve failed in the child. A path outside both the workspace
+  and the write roots is still relocated.
+- A confined child keeps a working temp dir and toolchain cache when the sandbox runtime dir cannot be created, such as
+  in a container with `HOME` unset or unwritable. It warns and uses the self-ignored `.harn-tmp` and
+  `.harn-toolchain-cache` in the first workspace root. The runtime dir is now named `.harn-sandbox`, so a project's own
+  `harn-sandbox` directory is no longer skipped by file walks.
+- A confined child's temp dir and toolchain cache no longer live inside the workspace. They moved from `.harn-tmp`
+  and `.harn-toolchain-cache` in the first workspace root to a per-workspace runtime dir in the user cache directory
+  (`~/Library/Caches/.harn-sandbox/<digest>` on macOS, `$XDG_CACHE_HOME/.harn-sandbox/<digest>` or
+  `~/.cache/.harn-sandbox/<digest>` elsewhere), so a linter or test collector walking the project no longer finds the
+  child's temporary files. The runtime dir is owner-only, refuses a symlinked or foreign-owned component, and is
+  granted to every backend, including runs restricted to declared roots. A root that covers a workspace still covers
+  its temp dir, so a policy narrowed to a directory made there stays inside the enclosing policy. A script's own scratch
+  from `harness.fs.workspace_temp_dir()` and `mkdtemp_in_workspace` stays in `.harn-tmp` inside the workspace. Existing
+  `.harn-toolchain-cache` directories are no longer used and can be deleted.
+- A `for_command` grant now reaches a shell-mode command that is exactly one plain command naming that
+  program: Harn spawns the command directly, without the shell, so `gh issue list` in shell mode
+  receives a `for_command: "gh"` grant and nothing else does. Compound commands keep the shell and get
+  no command-bound grant. A `gh` grant reaches only `gh` reads (`list`, `view`, `status`, `diff`,
+  `checks`, and GET `gh api`), after skipping `-R`, `--repo` and `--hostname`; checkouts, clones,
+  forks, writes, aliases, extensions and unrecognized subcommands run without it. It reaches only the
+  native `gh` executable resolved from trusted `PATH` entries outside every workspace and write root,
+  through a foreground `run_command`, and never a script or version-manager shim. The granted `gh`
+  gets a fresh owner-only config and extension directory outside those roots, an empty pager, a
+  refusing browser and editor, a trusted `PATH`, and git hooks, fsmonitor and `ext::` remotes turned
+  off. The token is never in gh's environment: it is stored as a github.com login in the per-spawn
+  `hosts.yml`, which every other confined child is denied, so gh sends it to no other host. A granted
+  spawn removes directories a crashed spawn left behind. A granted
+  `gh` keeps only `LANG`, `LC_*`, `TERM`, `TMPDIR`, `TZ` and `NO_COLOR` from its caller; proxy, TLS,
+  debug and token variables are dropped. A granted read is refused when it names `--jq`, `-q`,
+  `--template` or `-t`, passes arguments after `--`, names a host other than github.com, or names a URL scheme other than
+  `https`, and when
+  a write root overlaps the user's git, SSH or gh configuration.
+  `gh auth token` and the other `gh auth` subcommands that print the credential are refused. Every
+  granted credential, for any program, including its base64 and percent-encoded forms, is redacted from
+  command output, events and transcripts. A `secret_store` grant now resolves through the host's
+  secret provider on blocking tool calls instead of failing as unavailable. The confined-command
+  `GH_CONFIG_DIR` stand-in drops `!` aliases and the pager, browser, editor and socket keys. `gh` read
+  subcommands now count as workspace reads for tool-batch phase planning, including after a global
+  `-R`; writes and unknown subcommands do not.
+- **Startup observations use the actual dispatch boundary.** Deterministic
+  mocks and served calls publish the same inference start and completion
+  events as live provider requests. A refused request publishes no dispatch.
+  Host adapters can also observe the operating system's process birth on a
+  monotonic clock, including work before the executable entry point, with
+  the native clock resolution retained.
+- The harn-target collector now removes idle entries on Linux hosts. It reads
+  `/proc` and Cargo's build locks instead of an unprivileged `lsof`, which could
+  never read root's processes and so kept every entry.
+- **A workspace opened through a symlink stays inside itself.** The command risk scan now treats a path as inside a
+  workspace root when either its written or its resolved spelling sits under the root. A cwd reported by
+  `git rev-parse --show-toplevel` or `pwd -P` (for example `/private/tmp/project` for a root declared as
+  `/tmp/project`) no longer earns an `outside_workspace` label and an approval hold.
+
 ## v0.10.186
 
 ### Breaking

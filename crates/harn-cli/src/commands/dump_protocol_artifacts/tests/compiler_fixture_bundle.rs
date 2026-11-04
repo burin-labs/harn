@@ -38,15 +38,13 @@ fn digest(path: &Path) -> String {
         .collect()
 }
 
-fn fingerprint(path: &Path) -> u64 {
+fn fingerprint(path: &Path) -> Option<u64> {
     let encoded = std::fs::read_to_string(path).expect("Cargo library fingerprint");
     let encoded = encoded.trim();
-    assert_eq!(encoded.len(), 16, "Cargo library fingerprint width");
-    let mut bytes = [0; 8];
-    for (index, pair) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        bytes[index] = u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap();
+    if encoded.len() != 16 {
+        return None;
     }
-    u64::from_le_bytes(bytes)
+    u64::from_str_radix(encoded, 16).ok().map(u64::swap_bytes)
 }
 
 fn metadata(path: &Path) -> serde_json::Value {
@@ -63,6 +61,10 @@ struct Compilation {
 impl Compilation {
     fn read() -> Self {
         let executable = std::env::current_exe().expect("test binary");
+        Self::read_from(executable)
+    }
+
+    fn read_from(executable: PathBuf) -> Self {
         let dependencies = executable
             .parent()
             .expect("dependency directory")
@@ -102,8 +104,13 @@ impl Compilation {
                     dependencies.join(format!("{name}-{hash}.dll")),
                 ];
                 if let Some(artifact) = candidates.into_iter().find(|path| path.is_file()) {
+                    // Unfinished builds can leave artifacts without an identity.
+                    // Required dependencies still bind through the test metadata.
+                    let Some(identity) = fingerprint(&file.path()) else {
+                        continue;
+                    };
                     libraries
-                        .entry(fingerprint(&file.path()))
+                        .entry(identity)
                         .or_default()
                         .push((file.path(), artifact));
                 }
@@ -309,4 +316,61 @@ pub(super) fn stage_if_requested() {
         std::fs::remove_dir_all(&directory).expect("replace own reproducible compiler fixture");
     }
     std::fs::rename(staging.path(), &directory).expect("publish complete compiler fixture");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(required_fingerprint: &str) -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let debug = root.path().join("debug");
+        let dependencies = debug.join("deps");
+        let fingerprints = debug.join(".fingerprint");
+        std::fs::create_dir_all(&dependencies).unwrap();
+        let test = fingerprints.join("harn-cli-fixture");
+        std::fs::create_dir_all(&test).unwrap();
+        std::fs::write(
+            test.join("test-lib-harn_cli.json"),
+            r#"{"deps":[[0,"serde",false,42]]}"#,
+        )
+        .unwrap();
+        for (name, identity, value) in [
+            ("serde", "required", required_fingerprint),
+            ("unrelated", "incomplete", ""),
+        ] {
+            let entry = fingerprints.join(format!("{name}-{identity}"));
+            std::fs::create_dir_all(&entry).unwrap();
+            std::fs::write(entry.join(format!("lib-{name}")), value).unwrap();
+            std::fs::write(
+                dependencies.join(format!("lib{name}-{identity}.rmeta")),
+                "fixture metadata",
+            )
+            .unwrap();
+        }
+        (root, dependencies.join("harn_cli-fixture"))
+    }
+
+    #[test]
+    fn an_incomplete_unrelated_fingerprint_does_not_hide_the_bound_dependency() {
+        let (_root, executable) = fixture("2a00000000000000");
+        let compilation = Compilation::read_from(executable);
+        assert_eq!(compilation.root("serde"), 42);
+        assert_eq!(
+            compilation
+                .library(compilation.root("serde"))
+                .1
+                .file_name()
+                .unwrap(),
+            "libserde-required.rmeta"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "bound compiler dependency")]
+    fn an_incomplete_required_fingerprint_still_refuses_the_compiler_fixture() {
+        let (_root, executable) = fixture("");
+        let compilation = Compilation::read_from(executable);
+        compilation.library(compilation.root("serde"));
+    }
 }

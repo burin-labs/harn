@@ -240,12 +240,14 @@ pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism().as_str(), policy) {
         return Err(refusal.into_error());
     }
-    #[cfg(target_os = "macos")]
+    // Linux decides per spawn: the namespace helper renders the proxy grant, and
+    // a host with no helper or no Landlock refuses it where that is known.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let _ = std::marker::PhantomData::<B>;
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         if policy.process_network_proxy.is_some() {
             return Err(super::sandbox_rejection(format!(
