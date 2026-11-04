@@ -46,6 +46,16 @@ fn write_grants(profile: &str) -> Vec<String> {
     grants
 }
 
+/// `roots` plus the workspace's runtime dir, which holds the child's temp dir
+/// and toolchain cache and is always granted beside the workspace, sorted.
+fn with_runtime_dir(workspace: &str, roots: &[&str]) -> Vec<String> {
+    let runtime = super::super::workspace_env::sandbox_runtime_dir(Path::new(workspace)).unwrap();
+    let mut grants: Vec<String> = roots.iter().map(|root| root.to_string()).collect();
+    grants.push(runtime.display().to_string());
+    grants.sort();
+    grants
+}
+
 #[test]
 fn empty_write_root_lists_grant_no_write_beyond_the_workspace() {
     let policy = system_runtime_only_policy("/ws");
@@ -55,7 +65,11 @@ fn empty_write_root_lists_grant_no_write_beyond_the_workspace() {
         !profile.lines().any(|line| line == "(allow file-write*)"),
         "empty write-root lists must not render an unqualified write grant: {profile}"
     );
-    assert_eq!(write_grants(&profile), vec!["/ws".to_string()], "{profile}");
+    assert_eq!(
+        write_grants(&profile),
+        with_runtime_dir("/ws", &["/ws"]),
+        "{profile}"
+    );
 }
 
 #[test]
@@ -72,7 +86,7 @@ fn one_write_root_grants_exactly_that_root_and_the_workspace() {
     );
     assert_eq!(
         write_grants(&profile),
-        vec!["/opt/vendor-cache".to_string(), "/ws".to_string()],
+        with_runtime_dir("/ws", &["/opt/vendor-cache", "/ws"]),
         "{profile}"
     );
 }
