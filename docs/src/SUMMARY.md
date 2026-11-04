@@ -180,7 +180,7 @@
 - [Pace cut rules](./stdlib/cut-rules.md)
 - [Soft-landing cut rules](./stdlib/soft-landing.md)
 - [Agent guardrails](./stdlib/agent-guardrails.md)
-- [Completion gate](./stdlib/agent-judge.md)
+- [Completion judge](./stdlib/agent-judge.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)

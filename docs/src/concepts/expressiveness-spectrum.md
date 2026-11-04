@@ -110,7 +110,6 @@ stays the loop.
 ```harn,ignore
 import { agent_preset } from "std/agent/presets"
 import { with_governance } from "std/agent/governors"
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { lane_policy } from "std/agent/lanes"
 import { with_overlay } from "std/agent/overlays"
 
@@ -126,12 +125,8 @@ opts = with_governance(opts, {
   detectors: {no_progress: {messages: 3}, stuck: {same_diagnostic: 3}},
 })
 
-// An independent "are we actually done?"
-// gate, not the model's own say-so.
-opts = {...opts, ...agent_completion_gate(harness.runtime, {
-  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-  verify_command: fn() { return host_run_verify() },
-})}
+// An independent "are we actually done?" check, not the model's own say-so.
+opts = {...opts, verify_completion: fn(ctx) { return host_completion_verdict(ctx) }}
 
 // Hide tools this task can't need, and fill in a prompt nudge — both are
 // fill-nil, so they never override anything you set explicitly.
@@ -143,8 +138,8 @@ const run = agent_loop(harness, task, opts?.system, opts)
 
 Every one of those lines is opt-in. Governors bound spend
 ([`std/agent/governors`](../stdlib/governors.md)). Detectors catch loops and
-stalls. The completion gate ([`std/agent/completion_gate`](../stdlib/agent-judge.md))
-is a deterministic veto plus an optional bounded judge, so "done" is a fact you
+stalls. The `verify_completion` callback plus an optional bounded judge
+([completion judge](../stdlib/agent-judge.md)) is a deterministic veto, so "done" is a fact you
 control, not a mood the model is in. Lanes narrow the tool surface; overlays add
 data-driven prompt nudges ([`std/agent/lanes` and `std/agent/overlays`](../stdlib/agent-lanes-overlays.md)).
 Leave any of them out and the loop still runs. You add guardrails one at a

@@ -23,8 +23,8 @@
 //              passing verifier stands; and (c) the same refusal against a gate
 //              that could not read facts at all stands.
 //
-// Clause (c) is the load-bearing one. `__completion_gate_evaluate` returns
-// `{confirm: true, reason: "facts_unavailable"}` when its facts closure is
+// Clause (c) is the load-bearing one. A host gate may return
+// `{confirm: true, reason: "facts_unavailable"}` when its facts are
 // unavailable — a confirm that means "I could not look", not "I looked and it
 // passed". Keying the conversion on `confirm` would let a run whose gate never
 // read anything overrule a legitimate refusal, which is the blanket weakening
@@ -44,7 +44,6 @@
 // green verifier with no source write behind it — is the reading that isolates
 // the mechanism under test from that skip. Every clause below and every line of
 // the `.expected` beside it is unchanged.
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
@@ -83,9 +82,9 @@ fn toolset() {
 }
 
 /**
- * A gate that reports exactly one reading. The real `agent_completion_gate` owns
- * deriving these from host facts; a case that needs a specific reading states it
- * directly so the clause under test is the arbitration and not the ladder.
+ * A gate that reports exactly one reading. A case that needs a specific reading
+ * states it directly so the clause under test is the arbitration and not how a
+ * host derives the reading.
  */
 fn gate_observing(observed: string, reason: string) {
   return { _payload ->
@@ -96,6 +95,22 @@ fn gate_observing(observed: string, reason: string) {
         oracle_expected: true,
         command: "run the project checks",
         observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+/** A gate that could not read facts: its `confirm: true` means "I could not look". */
+fn gate_facts_unavailable() {
+  return { _payload ->
+    {
+      confirm: true,
+      reason: "facts_unavailable",
+      verification: {
+        oracle_expected: false,
+        command: "",
+        observed: "not_run",
         observed_at_evidence_index: nil,
       },
     }
@@ -234,7 +249,7 @@ pipeline default(harness: Harness) {
     harness,
     "blind",
     working_script(judge_refusing("failed_verification", refusal)),
-    agent_completion_gate(harness.runtime, {}),
+    {verify_completion: gate_facts_unavailable()},
   )
   harness.stdio.println("blind_accepted=" + to_string(blind.accepted))
   harness.stdio.println("blind_conversions=" + to_string(blind.conversions))
