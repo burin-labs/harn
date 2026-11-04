@@ -291,7 +291,11 @@ fi
 hook_timing_phase full-local
 
 if hook_fast_default_mode; then
-  echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="
+  if ! hook_local_build_allowed; then
+    echo "=== Pre-push: SKIPPING expensive local checks (local builds are off on this machine; a skip, not a pass) ===" >&2
+  else
+    echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="
+  fi
   echo "    Signature, merge-queue, and fast drift guards passed; remote CI remains required."
   exit 0
 fi
