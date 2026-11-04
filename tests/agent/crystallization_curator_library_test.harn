@@ -438,6 +438,30 @@ pipeline test_curator_matches_the_effective_check_directory(harness: Harness) {
   )
 }
 
+/** A prerequisite ahead of a declared aggregate check keeps everything that check runs. */
+pipeline test_curator_accepts_a_verifier_built_on_the_declared_aggregate_check(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const result = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("just cog && just default")),
+        {
+          declared_checks: [
+            {intent: "verify", command: "just default", cwd: ""},
+            {intent: "test", command: "just test", cwd: ""},
+            {intent: "lint", command: "just lint", cwd: ""},
+          ],
+          validator: { _source -> {outcome: "pass"} },
+        },
+      )
+      assert_eq(result.proposal_count, 1, "the aggregate check counts as a declared check")
+      return nil
+    },
+  )
+}
+
 /** A learned verifier must run a declared test check word for word, never only a broader suite. */
 pipeline test_curator_rejects_a_verifier_wider_than_the_declared_check(harness: Harness) {
   with_temp_dir(

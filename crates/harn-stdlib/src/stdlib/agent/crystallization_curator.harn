@@ -203,7 +203,7 @@ These examples define breadth, not templates:
 
 Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
 
-The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. When a declared `verify` check aggregates the others, keep it whole so the sequence still runs everything it runs. A submission whose `verify_command` runs none of the declared test or verify checks is rejected.
 
 Count recovery across sessions. `repeated_recoveries` lists sessions that failed commands and then got past them, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
@@ -854,12 +854,11 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
 }
 
 /**
- * The declared checks a learned verifier must run at least one of: the test
- * checks, or the verify checks when none is a test.
+ * The declared checks a learned verifier must run at least one of: a test check
+ * or a verify check, since a repository's aggregate check runs its tests.
  */
 fn cc_required_declared_checks(declared: list) -> list {
-  const tests = declared.filter({ check -> check.intent == "test" }).to_list()
-  return len(tests) > 0 ? tests : declared.filter({ check -> check.intent == "verify" }).to_list()
+  return declared.filter({ check -> check.intent == "test" || check.intent == "verify" }).to_list()
 }
 
 fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
@@ -877,7 +876,7 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
     const verify = to_string(proposal?.artifact?.verify_command ?? "")
     if verify != "" && len(required) > 0
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
-      throw "submit_crystallization_batch: `verify_command` must run a declared test check word for word from its cwd, not a broader command. Declared: "
+      throw "submit_crystallization_batch: `verify_command` must run a declared test or verify check word for word from its cwd, not a broader command. Declared: "
         + json_stringify(required)
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
