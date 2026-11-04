@@ -32,7 +32,7 @@ import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import {
   exact_tool_call_output_schema,
   tool_required_argument_names,
-} from "std/llm/structural_validator"
+} from "std/llm/tool_call_schema"
 
 /** One exact registry tool claimed for the immediately following model turn. */
 pub type AgentNextToolClaim = {tool_name: string}

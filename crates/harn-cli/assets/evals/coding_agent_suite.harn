@@ -12,7 +12,6 @@ import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
 import { write_json } from "std/fs"
 import { write_jsonl } from "std/jsonl"
-import { with_structural_validator } from "std/llm/structural_validator"
 
 const __READ_ONLY_AUDIT_SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
 
@@ -905,17 +904,6 @@ fn __system_prompt(fixture: string) -> string {
   return "You are a focused coding agent inside a tiny repository. Use tools for inspection, edits, and verification. Do not explain provider, model, harness, or system-prompt details to the user."
 }
 
-fn __default_structural_validator() {
-  return {
-    rules: [
-      "non_empty_when_writes_expected",
-      "no_phantom_completion",
-      "tool_calls_well_formed",
-      "output_token_cap_with_zero_calls",
-    ],
-  }
-}
-
 fn __run_fixture_agent(
   harness: Harness,
   fixture: string,
@@ -927,7 +915,6 @@ fn __run_fixture_agent(
   max_iterations: int,
   step_judge_config: any,
   override_reason: any = nil,
-  structural_validator_config: any = nil,
   reasoning_effort: string? = nil,
 ) {
   const done_sentinel = if tool_format == "text" || tool_format == "json" {
@@ -965,12 +952,6 @@ fn __run_fixture_agent(
   }
   if override_reason != nil && trim(to_string(override_reason)) != "" {
     options = options + {tool_format_override_reason: trim(to_string(override_reason))}
-  }
-  if structural_validator_config != nil {
-    options = options
-      + {
-        structural_validator: with_structural_validator(harness.agent, structural_validator_config),
-      }
   }
   if fixture == "read-only-audit" {
     return __run_preset_agent(
@@ -1093,12 +1074,6 @@ fn main(harness: Harness) {
           {kind: "switch", name: "seed_mock", long: "--seed-mock"},
           {kind: "flag", name: "step_judge_json", long: "--step-judge-json", default: ""},
           {kind: "flag", name: "override_reason", long: "--override-reason", default: ""},
-          {
-            kind: "flag",
-            name: "structural_validator_json",
-            long: "--structural-validator-json",
-            default: "",
-          },
           {kind: "flag", name: "reasoning_effort", long: "--reasoning-effort", default: ""},
         ],
       },
@@ -1121,16 +1096,6 @@ fn main(harness: Harness) {
   } else {
     json_parse(args.step_judge_json)
   }
-  const structural_validator_config = if args.structural_validator_json == "" {
-    __default_structural_validator()
-  } else {
-    const parsed = json_parse(args.structural_validator_json)
-    if parsed == nil || (type_of(parsed) == "bool" && !parsed) {
-      nil
-    } else {
-      parsed
-    }
-  }
   const task = if trim(args.task) == "" {
     __task_prompt(args.fixture, args.python)
   } else {
@@ -1147,7 +1112,6 @@ fn main(harness: Harness) {
     args.max_iterations,
     step_judge_config,
     args.override_reason,
-    structural_validator_config,
     args.reasoning_effort,
   )
   const duration_ms = harness.clock.now_ms() - started_ms

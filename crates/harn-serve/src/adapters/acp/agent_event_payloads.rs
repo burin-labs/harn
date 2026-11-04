@@ -636,21 +636,6 @@ pub struct StepJudgeDecision {
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct StructuralValidatorDecision {
-    pub iteration: usize,
-    pub rule: String,
-    pub diagnostic: String,
-    pub recommended_action: String,
-    pub vetoed: bool,
-    pub skipped: bool,
-    pub reason: Option<String>,
-    pub on_failure: String,
-    pub attempts: usize,
-    pub max_attempts: usize,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct SubagentJoin {
     pub parent_session_id: String,
     pub parent_run_id: String,
@@ -840,7 +825,6 @@ agent_event_registry! {
     "session_closed" => SessionClosed,
     "session_health" => SessionHealth,
     "step_judge_decision" => StepJudgeDecision,
-    "structural_validator_decision" => StructuralValidatorDecision,
     "subagent_join" => SubagentJoin,
     "subagent_stop" => SubagentStop,
     "tool_batch_disposition" => ToolBatchDisposition,

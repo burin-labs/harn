@@ -44,9 +44,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::cli::EvalCodingAgentArgs;
-use crate::commands::eval_coding_agent_preset::{
-    resolve_step_judge_json, resolve_structural_validator_json,
-};
+use crate::commands::eval_coding_agent_preset::resolve_step_judge_json;
 use crate::commands::eval_model_selector::{
     resolve_selector, selector_is_local, selector_label, ModelSelector,
 };
@@ -514,10 +512,6 @@ fn script_argv(
     {
         argv.push("--override-reason".to_string());
         argv.push(reason.to_string());
-    }
-    if let Some(json) = resolve_structural_validator_json(args) {
-        argv.push("--structural-validator-json".to_string());
-        argv.push(json);
     }
     if let Some(effort) = args.reasoning_effort.as_deref() {
         argv.push("--reasoning-effort".to_string());

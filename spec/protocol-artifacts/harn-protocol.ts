@@ -295,7 +295,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "session_closed",
   "session_health",
   "step_judge_decision",
-  "structural_validator_decision",
   "subagent_join",
   "subagent_stop",
   "tool_batch_disposition",
@@ -3090,19 +3089,6 @@ export interface HarnAgentEventStepJudgeDecision {
   model: string
 }
 
-export interface HarnAgentEventStructuralValidatorDecision {
-  iteration: number
-  rule: string
-  diagnostic: string
-  recommendedAction: string
-  vetoed: boolean
-  skipped: boolean
-  reason: string | null
-  onFailure: string
-  attempts: number
-  maxAttempts: number
-}
-
 export interface HarnAgentEventSubagentJoin {
   parentSessionId: string
   parentRunId: string
@@ -3223,7 +3209,6 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "session_closed" } & HarnAgentEventSessionClosed)
   | ({ sessionId: string; kind: "session_health" } & Record<string, ACPValue>)
   | ({ sessionId: string; kind: "step_judge_decision" } & HarnAgentEventStepJudgeDecision)
-  | ({ sessionId: string; kind: "structural_validator_decision" } & HarnAgentEventStructuralValidatorDecision)
   | ({ sessionId: string; kind: "subagent_join" } & HarnAgentEventSubagentJoin)
   | ({ sessionId: string; kind: "subagent_stop" } & HarnAgentEventSubagentStop)
   | ({ sessionId: string; kind: "tool_batch_disposition" } & HarnAgentEventToolBatchDisposition)

@@ -1859,62 +1859,6 @@
       ],
       "type": "object"
     },
-    "StructuralValidatorDecision": {
-      "properties": {
-        "attempts": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "diagnostic": {
-          "type": "string"
-        },
-        "iteration": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "maxAttempts": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "onFailure": {
-          "type": "string"
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "recommendedAction": {
-          "type": "string"
-        },
-        "rule": {
-          "type": "string"
-        },
-        "skipped": {
-          "type": "boolean"
-        },
-        "vetoed": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "iteration",
-        "rule",
-        "diagnostic",
-        "recommendedAction",
-        "vetoed",
-        "skipped",
-        "reason",
-        "onFailure",
-        "attempts",
-        "maxAttempts"
-      ],
-      "type": "object"
-    },
     "SubagentJoin": {
       "properties": {
         "childRunId": {
@@ -2991,21 +2935,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "structural_validator_decision"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/StructuralValidatorDecision"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "subagent_join"
           }
         },
@@ -3180,7 +3109,6 @@
     "session_closed": "SessionClosed",
     "session_health": "SessionHealth",
     "step_judge_decision": "StepJudgeDecision",
-    "structural_validator_decision": "StructuralValidatorDecision",
     "subagent_join": "SubagentJoin",
     "subagent_stop": "SubagentStop",
     "tool_batch_disposition": "ToolBatchDisposition",

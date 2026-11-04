@@ -2214,7 +2214,6 @@
   "Streamable HTTP endpoint path": "Ruta del punto final de HTTP transmisible",
   "Streamable HTTP endpoint path for the embedded MCP server": "Ruta del punto final de HTTP transmisible para el servidor MCP integrado",
   "Strong trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint": "Identidad sólida del entrenador como KIND=VALUE. Tipos: version, revision, lockfile_sha256, container_digest, backend_fingerprint",
-  "Structural-validator config applied to every run in this invocation. Omit to use the suite default (currently the 4-rule validator). Accepts `on` / `default`, `off` / `none`, or `custom:<json>` for a literal JSON object passed to `with_structural_validator(...)`": "Configuración del validador estructural aplicada a cada ejecución en esta invocación. Omita para usar el valor predeterminado del conjunto (actualmente el validador de 4 reglas). Acepta `on` / `default`, `off` / `none`, o `custom:<json>` para un objeto literal JSON pasado a `with_structural_validator(...)`",
   "Submission or status receipt containing provider batch ids": "Envío o recibo de estado que contiene identificadores de lote del proveedor",
   "Submission receipt produced by `harn models batch submit`": "Recibo de envío producido por `harn models batch submit`",
   "Submit prepared provider-native batch jobs and write a submission receipt": "Enviar trabajos por lotes nativos del proveedor preparados y escribir un recibo de envío",

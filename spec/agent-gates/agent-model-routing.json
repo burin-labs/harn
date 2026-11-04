@@ -145,10 +145,6 @@
         "reader": "__tool_envelope"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
         "reader": "agent_loop_demote_empty_turn"
       },
@@ -315,10 +311,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "reader": "__tool_envelope"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",

@@ -138,7 +138,6 @@ public enum HarnProtocolConstants {
         "session_closed",
         "session_health",
         "step_judge_decision",
-        "structural_validator_decision",
         "subagent_join",
         "subagent_stop",
         "tool_batch_disposition",
@@ -6875,60 +6874,6 @@ public struct HarnAgentEventStepJudgeDecision: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnAgentEventStructuralValidatorDecision: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var rule: String
-    public var diagnostic: String
-    public var recommendedAction: String
-    public var vetoed: Bool
-    public var skipped: Bool
-    public var reason: String?
-    public var onFailure: String
-    public var attempts: Int
-    public var maxAttempts: Int
-
-    enum CodingKeys: String, CodingKey {
-        case iteration
-        case rule
-        case diagnostic
-        case recommendedAction
-        case vetoed
-        case skipped
-        case reason
-        case onFailure
-        case attempts
-        case maxAttempts
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        iteration = try values.decode(Int.self, forKey: .iteration)
-        rule = try values.decode(String.self, forKey: .rule)
-        diagnostic = try values.decode(String.self, forKey: .diagnostic)
-        recommendedAction = try values.decode(String.self, forKey: .recommendedAction)
-        vetoed = try values.decode(Bool.self, forKey: .vetoed)
-        skipped = try values.decode(Bool.self, forKey: .skipped)
-        reason = try values.decode(String?.self, forKey: .reason)
-        onFailure = try values.decode(String.self, forKey: .onFailure)
-        attempts = try values.decode(Int.self, forKey: .attempts)
-        maxAttempts = try values.decode(Int.self, forKey: .maxAttempts)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(iteration, forKey: .iteration)
-        try values.encode(rule, forKey: .rule)
-        try values.encode(diagnostic, forKey: .diagnostic)
-        try values.encode(recommendedAction, forKey: .recommendedAction)
-        try values.encode(vetoed, forKey: .vetoed)
-        try values.encode(skipped, forKey: .skipped)
-        try values.encode(reason, forKey: .reason)
-        try values.encode(onFailure, forKey: .onFailure)
-        try values.encode(attempts, forKey: .attempts)
-        try values.encode(maxAttempts, forKey: .maxAttempts)
-    }
-}
-
 public struct HarnAgentEventSubagentJoin: Codable, Sendable, Equatable {
     public var parentSessionId: String
     public var parentRunId: String
@@ -7153,7 +7098,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case sessionClosed(HarnAgentEventSessionClosed)
     case sessionHealth([String: HarnACPValue])
     case stepJudgeDecision(HarnAgentEventStepJudgeDecision)
-    case structuralValidatorDecision(HarnAgentEventStructuralValidatorDecision)
     case subagentJoin(HarnAgentEventSubagentJoin)
     case subagentStop(HarnAgentEventSubagentStop)
     case toolBatchDisposition(HarnAgentEventToolBatchDisposition)
@@ -7222,7 +7166,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case sessionClosed = "session_closed"
         case sessionHealth = "session_health"
         case stepJudgeDecision = "step_judge_decision"
-        case structuralValidatorDecision = "structural_validator_decision"
         case subagentJoin = "subagent_join"
         case subagentStop = "subagent_stop"
         case toolBatchDisposition = "tool_batch_disposition"
@@ -7286,7 +7229,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "session_closed",
             "session_health",
             "step_judge_decision",
-            "structural_validator_decision",
             "subagent_join",
             "subagent_stop",
             "tool_batch_disposition",
@@ -7369,7 +7311,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .sessionClosed: self.payload = .sessionClosed(try container.decode(HarnAgentEventSessionClosed.self))
         case .sessionHealth: self.payload = .sessionHealth(fields)
         case .stepJudgeDecision: self.payload = .stepJudgeDecision(try container.decode(HarnAgentEventStepJudgeDecision.self))
-        case .structuralValidatorDecision: self.payload = .structuralValidatorDecision(try container.decode(HarnAgentEventStructuralValidatorDecision.self))
         case .subagentJoin: self.payload = .subagentJoin(try container.decode(HarnAgentEventSubagentJoin.self))
         case .subagentStop: self.payload = .subagentStop(try container.decode(HarnAgentEventSubagentStop.self))
         case .toolBatchDisposition: self.payload = .toolBatchDisposition(try container.decode(HarnAgentEventToolBatchDisposition.self))

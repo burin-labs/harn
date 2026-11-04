@@ -898,10 +898,6 @@
         "name": "turn_opts"
       },
       {
-        "function": "__run_structural_validator",
-        "name": "turn_opts"
-      },
-      {
         "function": "__stack_pack_options",
         "name": "base"
       },
@@ -1052,10 +1048,6 @@
       {
         "function": "agent_stall_turn_end_judge_due",
         "name": "opts"
-      },
-      {
-        "function": "__run_structural_validator",
-        "name": "llm_opts"
       },
       {
         "function": "__sync_tool_search_state",

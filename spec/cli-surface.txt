@@ -361,7 +361,6 @@ harn eval coding-agent --run-label
 harn eval coding-agent --step-judge
 harn eval coding-agent --step-judge-adversarial
 harn eval coding-agent --step-judge-on-veto
-harn eval coding-agent --structural-validator
 harn eval coding-agent --tool-format
 harn eval context
 harn eval context --json

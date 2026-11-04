@@ -418,7 +418,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "session_closed",
     "session_health",
     "step_judge_decision",
-    "structural_validator_decision",
     "subagent_join",
     "subagent_stop",
     "tool_batch_disposition",
@@ -2960,19 +2959,6 @@ class HarnAgentEventStepJudgeDecision(_HarnDataclass):
     costUsd: float
     provider: str
     model: str
-
-@dataclass
-class HarnAgentEventStructuralValidatorDecision(_HarnDataclass):
-    iteration: int
-    rule: str
-    diagnostic: str
-    recommendedAction: str
-    vetoed: bool
-    skipped: bool
-    reason: Optional[str]
-    onFailure: str
-    attempts: int
-    maxAttempts: int
 
 @dataclass
 class HarnAgentEventSubagentJoin(_HarnDataclass):

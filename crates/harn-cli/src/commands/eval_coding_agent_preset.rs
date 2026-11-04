@@ -78,49 +78,9 @@ pub(super) fn resolve_step_judge_json(
     Some(JsonValue::Object(obj).to_string())
 }
 
-pub(super) fn resolve_structural_validator_json(args: &EvalCodingAgentArgs) -> Option<String> {
-    let raw = args.structural_validator.as_deref()?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    match raw {
-        "on" | "default" => Some(
-            serde_json::json!({
-                "rules": [
-                    "non_empty_when_writes_expected",
-                    "no_phantom_completion",
-                    "tool_calls_well_formed",
-                    "output_token_cap_with_zero_calls"
-                ]
-            })
-            .to_string(),
-        ),
-        "off" | "none" => Some(JsonValue::Bool(false).to_string()),
-        _ => {
-            if let Some(rest) = raw.strip_prefix("custom:") {
-                return match serde_json::from_str::<JsonValue>(rest) {
-                    Ok(JsonValue::Object(map)) => Some(JsonValue::Object(map).to_string()),
-                    _ => Some(
-                        serde_json::json!({
-                            "on_failure": "__invalid_custom_structural_validator__"
-                        })
-                        .to_string(),
-                    ),
-                };
-            }
-            Some(
-                serde_json::json!({
-                    "on_failure": "__unknown_structural_validator_preset__"
-                })
-                .to_string(),
-            )
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{resolve_step_judge_json, resolve_structural_validator_json};
+    use super::resolve_step_judge_json;
     use crate::cli::EvalCodingAgentArgs;
     use crate::commands::eval_model_selector::ModelSelector;
     use serde_json::Value as JsonValue;
@@ -147,43 +107,9 @@ mod tests {
             step_judge_on_veto: None,
             step_judge_adversarial: false,
             override_reason: None,
-            structural_validator: None,
             run_label: String::new(),
             baseline_comparison_against: None,
         }
-    }
-
-    #[test]
-    fn structural_validator_presets_translate_to_json() {
-        let mut args = default_args();
-        args.structural_validator = Some("on".to_string());
-
-        let on = resolve_structural_validator_json(&args).expect("on preset");
-        let on_value: JsonValue = serde_json::from_str(&on).expect("on preset parses");
-        assert_eq!(
-            on_value["rules"],
-            serde_json::json!([
-                "non_empty_when_writes_expected",
-                "no_phantom_completion",
-                "tool_calls_well_formed",
-                "output_token_cap_with_zero_calls"
-            ])
-        );
-
-        args.structural_validator = Some("off".to_string());
-        assert_eq!(
-            resolve_structural_validator_json(&args),
-            Some("false".to_string())
-        );
-
-        args.structural_validator =
-            Some("custom:{\"rules\":[\"tool_calls_well_formed\"]}".to_string());
-        let custom = resolve_structural_validator_json(&args).expect("custom preset");
-        let custom_value: JsonValue = serde_json::from_str(&custom).expect("custom preset parses");
-        assert_eq!(
-            custom_value["rules"],
-            serde_json::json!(["tool_calls_well_formed"])
-        );
     }
 
     #[test]

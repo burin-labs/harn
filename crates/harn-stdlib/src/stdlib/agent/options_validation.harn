@@ -335,15 +335,6 @@ pub fn __validate_tool_caller(value: any) {
   }
 }
 
-pub fn __validate_structural_validator(value: any) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `structural_validator` must be a closure or nil; got " + type_of(value)
-  }
-}
-
 pub fn __validate_pre_turn_scope_classifier(value: any) {
   if value == nil {
     return
@@ -743,9 +734,6 @@ pub fn __validate_agent_loop_callback_options(opts: any) {
   }
   if __has_key(opts, "tool_caller") {
     __validate_tool_caller(opts.tool_caller)
-  }
-  if __has_key(opts, "structural_validator") {
-    __validate_structural_validator(opts.structural_validator)
   }
   if __has_key(opts, "input_guardrail") {
     __validate_input_guardrail(opts.input_guardrail)
