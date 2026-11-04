@@ -51,9 +51,11 @@ fn workspace_temp_symlinks_cannot_select_host_storage() {
     std::os::unix::fs::symlink(outside.path(), runtime.join("tmp")).unwrap();
     let redirected = prepare(&policy).unwrap();
     std::fs::remove_dir_all(&runtime).unwrap();
+    // A runtime dir it cannot use makes temp fall back into the workspace.
+    let outside_root = outside.path().canonicalize().unwrap();
     assert!(
-        redirected.is_none(),
-        "a redirected scratch root must supply no binding"
+        redirected.is_none_or(|binding| !binding.directory.starts_with(&outside_root)),
+        "a redirected scratch root must not select host storage"
     );
     assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
 }
