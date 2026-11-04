@@ -123,9 +123,7 @@ impl Inbox {
                     ));
                 }
             }
-            if metadata_size(state) >= max_scopes {
-                return Err(invalid("dispatch metadata capacity reached"));
-            }
+            make_gate_room(state, session_id, max_scopes, now)?;
             for signal in state.signals.values_mut() {
                 if signal.is_pending()
                     && signal
@@ -326,7 +324,7 @@ impl Inbox {
             if let Some(key) = monitor_key {
                 validate_identity(key)?;
                 if !gate.cancelled_monitors.contains(key) && metadata_count >= max_monitors {
-                    return Err(invalid("cancelled monitor capacity reached"));
+                    return Err(SignalsError::DispatchFull(metadata_count));
                 }
             }
             if gate.execution_id != execution_id {
@@ -365,6 +363,77 @@ impl DispatchState {
         self.closed = true;
         self.claim = None;
     }
+
+    /// Forgetting this gate changes nothing a host can observe: no claim is out
+    /// and the pacing window is over, so a later start paces the same way. A
+    /// clock behind the high-water mark keeps it, since that mark is the guard.
+    fn is_settled(&self, now: OffsetDateTime) -> bool {
+        let interval = Duration::seconds(i64::from(self.interval_seconds));
+        self.claim.is_none()
+            && self.observed_at <= now
+            && self.accepted_at.is_none_or(|last| last + interval <= now)
+    }
+}
+
+fn sessions_with_pending_captures(state: &InboxSnapshot) -> std::collections::BTreeSet<String> {
+    state
+        .signals
+        .values()
+        .filter(|signal| signal.is_pending())
+        .filter_map(|signal| signal.capture.as_ref())
+        .map(|capture| capture.session_id.clone())
+        .collect()
+}
+
+/// Sessions rarely say they ended, so a gate left idle past retention goes the
+/// way a settled signal does. A live host restarts its gate at its next poll.
+pub(crate) fn prune_idle_gates(
+    state: &mut InboxSnapshot,
+    retain_for: Duration,
+    now: OffsetDateTime,
+) {
+    if !state
+        .dispatch
+        .values()
+        .any(|gate| now - gate.observed_at >= retain_for)
+    {
+        return;
+    }
+    let busy = sessions_with_pending_captures(state);
+    state.dispatch.retain(|session_id, gate| {
+        now - gate.observed_at < retain_for || !gate.is_settled(now) || busy.contains(session_id)
+    });
+}
+
+/// Make room for one more gate: forget the longest-idle settled gates first,
+/// and refuse only when every remaining record is still in use.
+fn make_gate_room(
+    state: &mut InboxSnapshot,
+    starting: &str,
+    max_records: usize,
+    now: OffsetDateTime,
+) -> Result<(), SignalsError> {
+    if metadata_size(state) < max_records {
+        return Ok(());
+    }
+    let busy = sessions_with_pending_captures(state);
+    while metadata_size(state) >= max_records {
+        let oldest = state
+            .dispatch
+            .iter()
+            .filter(|(session_id, gate)| {
+                session_id.as_str() != starting
+                    && gate.is_settled(now)
+                    && !busy.contains(session_id.as_str())
+            })
+            .min_by_key(|(_, gate)| gate.observed_at)
+            .map(|(session_id, _)| session_id.clone());
+        match oldest {
+            Some(session_id) => state.dispatch.remove(&session_id),
+            None => return Err(SignalsError::DispatchFull(metadata_size(state))),
+        };
+    }
+    Ok(())
 }
 
 fn metadata_size(state: &InboxSnapshot) -> usize {

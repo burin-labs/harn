@@ -23,6 +23,8 @@ pub enum SignalsError {
     InvalidInput(String),
     #[error("signals: the inbox already holds {0} fired signals (max_signals); resolve some or raise the cap")]
     Full(usize),
+    #[error("signals: the inbox already tracks {0} monitor records still in use (max_signals); end a monitored session or raise the cap")]
+    DispatchFull(usize),
     #[error("signals: `{key}` was reported with a {stored} signature; a report with a {offered} one cannot change it")]
     WeakerSignature {
         key: String,

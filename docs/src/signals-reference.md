@@ -177,7 +177,7 @@ old inbox and its reader for any remaining old-format work.
 | Key | Default | Meaning |
 |---|---|---|
 | `stale_after_seconds` | `7200` | A session not seen for this long is removed, and its unacked reminders are routed again. |
-| `retain_for_seconds` | `604800` | Resolved and expired signals are pruned this long after their last change. |
+| `retain_for_seconds` | `604800` | Resolved and expired signals are pruned this long after their last change, and idle dispatch sessions this long after their last poll. |
 | `lease_seconds` | `600` | How long a lease runs before an unacked reminder is leased again, to its holder while that session is responsive, otherwise to a responsive session. A session silent this long loses its unleased reminders to a responsive session. |
 | `fired_ttl_seconds` | `86400` | A fired signal that is not fired again within this long expires, unless the producer set its own expiry. |
 | `max_signals` | `1000` | The most signals the inbox keeps. The oldest settled signal is pruned to make room; with every signal still fired, firing a new key fails. |
@@ -348,6 +348,9 @@ Pacing, execution state, and outstanding claims survive inbox reopening under
 the must-understand v3 schema. A persisted observed-time high-water mark holds
 dispatch during wall-clock rollback; hosts should use a reliable clock.
 Session scopes, retired execution identities, and cancelled-monitor identities
-share a `max_signals` metadata bound and refuse new entries at capacity. A
-replayed start cannot reactivate a retired execution. Native command restart, process termination,
+share a `max_signals` metadata bound. A session with no claim, no pending capture
+and no open pacing window is forgotten after `retain_for_seconds` idle, or sooner,
+longest idle first, when a new session needs the room. New entries are refused
+only when every record is still in use. A replayed start cannot reactivate a
+retired execution while its session is remembered. Native command restart, process termination,
 and host model-wake integration are separate responsibilities.

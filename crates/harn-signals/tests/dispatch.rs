@@ -329,10 +329,63 @@ fn end_session_invalidates_claim_and_epoch_and_scope_capacity_is_explicit() {
         .signals
         .values()
         .all(|s| !s.is_pending() && s.cancelled_at.is_some()));
+    inbox.dispatch_start("C", "run1", None, at(62)).unwrap();
+    capture(&inbox, "C", "run1", "c-log", 1, 62);
     std::fs::write(dir.path().join("config.toml"), "max_signals = 1\n").unwrap();
     let bounded = Inbox::open(dir.path()).unwrap();
-    assert!(bounded.dispatch_start("B", "run1", None, at(63)).is_err());
-    assert_eq!(bounded.snapshot(at(63)).unwrap().dispatch.len(), 1);
+    let refused = bounded
+        .dispatch_start("B", "run1", None, at(63))
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("end a monitored session or raise the cap"));
+    let gates = bounded.snapshot(at(63)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["C"]);
+}
+
+#[test]
+fn a_gate_idle_past_retention_is_forgotten_and_restarts_cleanly() {
+    const WEEK: i64 = 7 * 24 * 60 * 60;
+    let (_dir, inbox) = open();
+    inbox.dispatch_start("busy", "run1", None, at(0)).unwrap();
+    capture(&inbox, "busy", "run1", "busy-log", 0, 0);
+    let early = inbox.snapshot(at(WEEK - 1)).unwrap().dispatch;
+    assert_eq!(early.len(), 2);
+    let gates = inbox.snapshot(at(WEEK)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["busy"]);
+    inbox.dispatch_start("A", "run1", None, at(WEEK)).unwrap();
+    capture(&inbox, "A", "run1", "log", 1, WEEK);
+    assert!(inbox
+        .dispatch_claim("A", "run1", at(WEEK + 60))
+        .unwrap()
+        .claim
+        .is_some());
+}
+
+#[test]
+fn a_full_inbox_forgets_the_longest_idle_gate_but_never_an_open_pacing_window() {
+    let (dir, inbox) = open();
+    capture(&inbox, "A", "run1", "log", 0, 0);
+    accept(&inbox, 60);
+    inbox.dispatch_start("B", "run1", None, at(61)).unwrap();
+    std::fs::write(dir.path().join("config.toml"), "max_signals = 2\n").unwrap();
+    let bounded = Inbox::open(dir.path()).unwrap();
+
+    // A is the longest idle, but accepted at 60 it is inside its 60 second window.
+    bounded.dispatch_start("C", "run1", None, at(62)).unwrap();
+    let gates = bounded.snapshot(at(62)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "C"]);
+
+    // The window over, A goes first and repeated starts keep working.
+    bounded.dispatch_start("D", "run1", None, at(120)).unwrap();
+    let gates = bounded.snapshot(at(120)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["C", "D"]);
+    for n in 0..10 {
+        let session = format!("churn{n}");
+        bounded
+            .dispatch_start(&session, "run1", None, at(121))
+            .unwrap();
+    }
+    assert_eq!(bounded.snapshot(at(121)).unwrap().dispatch.len(), 2);
 }
 
 #[test]
