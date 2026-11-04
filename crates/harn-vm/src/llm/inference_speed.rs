@@ -13,6 +13,13 @@
 //! GenAI client metrics: `time_to_first_token_ms` corresponds to
 //! `gen_ai.client.inference.time_to_first_chunk`, and the rate is the inverse
 //! of `gen_ai.client.inference.time_per_output_chunk` measured in tokens.
+//!
+//! Mock, scripted fake and tape-served attempts publish start and settlement;
+//! failures settle without a rate. Predicate-cache hits and legacy hash-fixture
+//! replay do not dispatch, so they publish neither. Each real-provider retry
+//! starts its own measurement. Recorded mock results retain measured elapsed
+//! time: exact tape hashes require the testbench's virtual clock, not wall-time
+//! execution of the same fixture.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};

@@ -1,16 +1,20 @@
 use std::time::{Duration, Instant};
 
-/// An operating-system birth boundary anchored to the caller's monotonic clock.
-/// Wall-clock changes after observation do not move this boundary. The native
-/// clock's resolution is retained rather than implying nanosecond precision.
+/// An approximate operating-system birth boundary anchored to `Instant`.
+/// Native birth timestamps use a wall or boot clock. Clock steps and suspend
+/// before observation can skew this projection onto the monotonic clock;
+/// changes after observation do not move it. `resolution` describes the native
+/// timestamp's granularity, not a bound on the projection's error.
 #[derive(Clone, Copy, Debug)]
 pub struct ProcessStart {
     pub instant: Instant,
     pub resolution: Duration,
 }
 
-/// Observe the real process birth, including work before the entry point.
-/// Unsupported or inaccessible measurements remain absent.
+/// Observe process age, including work before the entry point, and project it
+/// approximately onto the caller's monotonic clock. This is not an exact
+/// duration across suspend or clock changes. Unsupported, inaccessible or
+/// unrepresentable measurements remain absent.
 pub fn process_start(pid: u32) -> Option<ProcessStart> {
     let observed = Instant::now();
     let (age, resolution) = native_age(pid)?;

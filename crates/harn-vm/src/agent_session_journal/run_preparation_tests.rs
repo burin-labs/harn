@@ -73,6 +73,78 @@ async fn project(root: &std::path::Path) -> crate::orchestration::RunRecord {
         .expect("project the actual journal")
 }
 
+fn assert_settled_attempts(events: &[Value], expected: usize) {
+    let speeds: Vec<_> = events
+        .iter()
+        .filter(|event| event["type"] == "inference_speed")
+        .collect();
+    assert_eq!(
+        speeds.len(),
+        expected * 2,
+        "every dispatch must settle: {speeds:?}"
+    );
+    for pair in speeds.chunks_exact(2) {
+        assert_eq!(pair[0]["speed"]["is_final"], false);
+        assert_eq!(pair[1]["speed"]["is_final"], true);
+        assert_eq!(pair[1]["speed"]["phase"], "complete");
+        assert_eq!(pair[0]["call_id"], pair[1]["call_id"]);
+    }
+}
+
+#[test]
+fn failed_mock_and_fake_dispatches_settle_their_meters() {
+    let _env = env_guard();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let transport =
+        crate::agent_events::AgentEventTransport::new(Arc::new(UsageEvents(events.clone())));
+    let runtime = crate::test_support::current_thread_runtime();
+    runtime.block_on(
+        tokio::task::LocalSet::new().run_until(transport.scope(async {
+            execute(
+                root.path(),
+                r#"
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({error: {category: "auth", message: "mock rejected"}})
+  harness.agent.with_run(session, options, { ->
+    const result = try { harness.llm.call("Reject this call.", nil, call_options) }
+    require is_err(result), "the dispatched mock must fail"
+    assert_eq(len(harness.llm.mock_calls()), 1)
+  })
+"#,
+            )
+            .await
+            .expect("the mock failure is caught");
+            assert_settled_attempts(&events.lock().unwrap(), 1);
+            events.lock().unwrap().clear();
+            crate::llm::mock::reset_llm_mock_state();
+            let _fake = crate::llm::fake::install_fake_llm_script(
+                crate::llm::fake::FakeLlmScript::erroring(
+                    crate::value::ErrorCategory::Auth,
+                    "fake rejected",
+                ),
+            );
+            execute(
+                root.path(),
+                r#"
+  harness.agent.with_run(session, options, { ->
+    const result = try { harness.llm.call("Reject this call.", nil,
+      {provider: "fake", model: "test", session_id: session, stream: false}) }
+    require is_err(result), "the dispatched fake must fail"
+  })
+"#,
+            )
+            .await
+            .expect("the fake failure is caught");
+            assert_eq!(crate::llm::fake::fake_llm_captured_calls().len(), 1);
+            assert_settled_attempts(&events.lock().unwrap(), 1);
+        })),
+    );
+}
+
 #[test]
 fn mock_dispatch_reports_the_same_first_attempt_boundary_and_refusal_reports_none() {
     let _env = env_guard();
@@ -188,6 +260,7 @@ fn preparation_and_actor_publish_each_settled_provider_usage() {
         "all three provider calls reached the wire"
     );
     let events = events.lock().unwrap();
+    assert_settled_attempts(&events, 3);
     let usage: Vec<_> = events
         .iter()
         .filter(|event| event["type"] == "provider_usage")
@@ -395,6 +468,7 @@ fn an_unpriced_retry_keeps_the_later_priced_subtotal_in_the_durable_run() {
         "both attempts reached the provider"
     );
     let events = events.lock().unwrap();
+    assert_settled_attempts(&events, 2);
     let usage: Vec<_> = events
         .iter()
         .filter(|event| event["type"] == "provider_usage")

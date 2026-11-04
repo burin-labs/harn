@@ -496,7 +496,9 @@ async fn vm_call_llm_full_inner_request(
         super::admission::preflight(opts, observed.token_projection())?;
         observed.record_provider_dispatch();
         request.emit_reminder_lifecycle();
-        let mut result = mock_llm_response(request)?;
+        let mut result = mock_llm_response(request).inspect_err(|_| {
+            observed.inference_speed().abandon();
+        })?;
         observed.inference_speed().finish(&mut result);
         super::trigger_predicate::note_result(request, &result);
         let chunks = delta_tx
@@ -513,7 +515,10 @@ async fn vm_call_llm_full_inner_request(
         request.emit_reminder_lifecycle();
         let mut result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
-            .await?;
+            .await
+            .inspect_err(|_| {
+                observed.inference_speed().abandon();
+            })?;
         super::mock::mark_live_after_mock_prefix(request, &mut result);
         observed.inference_speed().finish(&mut result);
         super::trigger_predicate::note_result(request, &result);
