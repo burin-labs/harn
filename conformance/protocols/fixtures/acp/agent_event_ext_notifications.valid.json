@@ -731,6 +731,7 @@
           "output_tokens": 1,
           "parent_session_id": "",
           "provider_call_count": 2,
+          "reported_cache": null,
           "run_id": "run-1",
           "unpriced_calls": 1,
           "usage_unknown_calls": 1

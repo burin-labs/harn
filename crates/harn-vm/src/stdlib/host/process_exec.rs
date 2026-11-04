@@ -544,7 +544,7 @@ impl ProcessExecLaunch {
         }
         let mut env_remove = optional_string_list(params, "env_remove").unwrap_or_default();
         caller_env_keys.extend(env_remove.iter().cloned());
-        for (key, value) in crate::process_sandbox::active_workspace_process_env() {
+        for (key, value) in crate::process_sandbox::active_workspace_process_env_for(&program) {
             if !caller_env_keys.contains(&key) {
                 env.push((key, value));
             }

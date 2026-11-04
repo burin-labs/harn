@@ -198,6 +198,15 @@ job_ids = ["gitleaks"]
 health_failures = 2
 
 [[workflow]]
+path = ".github/workflows/smart-ship.yml"
+name = "Smart Ship"
+claim = "Every approved, green pull request labeled ship is looked at even when its completion wake never fires"
+crons = ["19,49 * * * *"]
+cadence_reason = "Every 30 minutes bounds the cost of a missed wake to minutes, and each look only reads the pull request through the API since repair is off."
+job_ids = ["availability", "ship"]
+health_failures = 3
+
+[[workflow]]
 path = ".github/workflows/stack-frame-banking.yml"
 name = "Stack-frame budget freshness"
 claim = "The compiler stack-frame budget is banked from a current full measurement"

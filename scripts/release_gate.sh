@@ -61,7 +61,9 @@ release_gate_stale_out_dir_packages() {
   local line remainder component package
   : > "$output"
   while IFS= read -r line; do
-    [[ "$line" == *"No such file or directory"* ]] || continue
+    # rustc before 1.99 reports a missing include as "couldn't read PATH: No such
+    # file or directory"; rustc 1.99 reports "couldn't find file `PATH`".
+    [[ "$line" == *"No such file or directory"* || "$line" == *"couldn't find file"* ]] || continue
     remainder="${line#*"$build_prefix"}"
     [[ "$remainder" != "$line" ]] || continue
     component="${remainder%%/out/*}"

@@ -3,17 +3,38 @@ name: Smart Ship
 # Each same-repository pull request wakes the shared protected merger on its own
 # events; the merger lands only approved, green heads labeled `ship`. Set the
 # repository variable HARN_SMART_SHIP to anything but `on` to stop admission.
-# No scheduled sweep or repair runs.
+# Repair stays off. The shared loop waits on every pending check at the head
+# and `workflow_run` cannot wildcard, so the list below names every workflow
+# with a `pull_request` trigger; scripts/tests/smart_ship_workflow_test.mjs
+# fails when one is missing. A sweep every 30 minutes looks at each ship PR,
+# so a wake that never fires costs minutes, not hours.
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] same-repository PRs only; with repair off the shared loop reads the PR through the API and never checks out its code
     types: [labeled, unlabeled, ready_for_review]
   pull_request_review:
     types: [submitted]
-  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned same-repository pull request CI run, reads metadata through the API, and never checks out the parent-run ref
-    # A release PR's last required check, Release candidate verdict, finishes in the second.
-    workflows: [CI, Build release binaries]
+  workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned same-repository pull request run, reads metadata through the API, and never checks out the parent-run ref
+    workflows:
+      - Agent shell guard
+      - All features compile
+      - Build release binaries
+      - CI
+      - CLI end-to-end behavior
+      - Lean embedding surface
+      - macOS workspace tests
+      - Merge override dispatch
+      - Portable kernel browser Wasm
+      - PR gates
+      - Release PR drift check
+      - SDK codegen
+      - Secret exposure report
+      - Supply chain
+      - Windows installer
+      - Windows workspace tests
     types: [completed]
+  schedule:
+    - cron: "19,49 * * * *"
   workflow_dispatch:
     inputs:
       pr:
@@ -26,12 +47,14 @@ permissions:
 
 jobs:
   availability:
-    # Every route names one PR, so the shared workflow's hosted sweep is
-    # unreachable. Then count the exact large Linux pool used by the merger.
+    # A schedule sweeps every ship PR; every other route names one PR, so a
+    # blank dispatch never reaches the sweep. Then count the exact large Linux
+    # pool used by the merger.
     if: >-
       github.repository == 'burin-labs/harn'
       && vars.HARN_SMART_SHIP == 'on'
-      && ((github.event_name == 'workflow_dispatch'
+      && (github.event_name == 'schedule'
+      || (github.event_name == 'workflow_dispatch'
       && github.ref == 'refs/heads/main'
       && inputs.pr != ''
       && format('{0}', fromJSON(inputs.pr)) == inputs.pr
