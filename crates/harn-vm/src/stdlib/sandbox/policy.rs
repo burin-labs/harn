@@ -52,6 +52,9 @@ impl ProcessNetworkGrant {
     }
 }
 
+/// The one answer every backend renders. `deny_network` belongs here and not
+/// only in [`ProcessNetworkGrant`], or the filters that read this would give a
+/// child sockets while the grant reports none.
 pub(crate) fn allows_network(policy: &CapabilityPolicy) -> bool {
-    policy.allows_network()
+    !policy.process_sandbox.deny_network && policy.allows_network()
 }

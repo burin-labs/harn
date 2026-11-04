@@ -464,6 +464,18 @@ fn landlock_profile_for(
     // cannot express it, so the grant is refused there rather than issued
     // half-enforced.
     super::enforcement::validate_ssh_agent(policy)?;
+    // A child behind the proxy gets no new Unix sockets at all (see the namespace
+    // helper), because this kernel interface cannot limit where one connects.
+    // A named root promises what that rule takes away, so it is refused.
+    if policy.process_network_proxy.is_some()
+        && !policy.process_sandbox.unix_socket_roots.is_empty()
+    {
+        return Err(sandbox_rejection(
+            "Unix-domain socket roots cannot be granted to a child behind the egress proxy on \
+             Linux"
+                .into(),
+        ));
+    }
     let scope_unix_paths =
         policy.process_sandbox.ssh_agent_socket.is_some() && !policy_allows_network(policy);
     if scope_unix_paths && support.abi() < ABI::V9 {

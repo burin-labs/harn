@@ -281,6 +281,10 @@ fn run_impl(
         })?;
     }
 
+    let no_new_unix_sockets = egress_relay
+        .map(|_| refuse_new_unix_sockets())
+        .transpose()?;
+
     let mut command = Command::new(program);
     command.args(payload_args);
     // The confinement is entered in the child of this fork, immediately before
@@ -289,15 +293,58 @@ fn run_impl(
     // own error reporting, so a failure to exec could no longer be explained.
     //
     // SAFETY: `pre_exec` may only call async-signal-safe functions. `enter`
-    // makes two raw Landlock syscalls and one seccomp syscall and performs no
-    // allocation, locking, or I/O.
+    // makes two raw Landlock syscalls and one seccomp syscall, the added filter
+    // one more, and neither allocates, locks, or does I/O.
     unsafe {
-        command.pre_exec(move || confinement.enter());
+        command.pre_exec(move || {
+            confinement.enter()?;
+            if let Some(filter) = &no_new_unix_sockets {
+                seccompiler::apply_filter(filter).map_err(|error| {
+                    io::Error::other(format!("failed to install the socket filter: {error}"))
+                })?;
+            }
+            Ok(())
+        });
     }
     Err(format!(
         "namespace helper: could not exec {program}: {}",
         command.exec()
     ))
+}
+
+/// A network namespace does not separate filesystem Unix sockets, and Landlock
+/// on most kernels cannot limit where one connects, so a payload that could make
+/// one could leave through any service on the host that listens on a socket file.
+/// The relay needs them and keeps them: it reaches the host's proxy no other way,
+/// which is why this is an extra filter on the payload and not part of the
+/// transferred one. Inherited descriptors and `socketpair` are unaffected.
+#[cfg(target_os = "linux")]
+fn refuse_new_unix_sockets() -> Result<seccompiler::BpfProgram, String> {
+    use seccompiler::{
+        SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule,
+    };
+    let fail = |error: &dyn std::fmt::Display| {
+        format!("namespace helper: could not build the socket filter: {error}")
+    };
+    let unix = SeccompCondition::new(
+        0,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::Eq,
+        libc::AF_UNIX as u64,
+    )
+    .map_err(|error| fail(&error))?;
+    let rule = SeccompRule::new(vec![unix]).map_err(|error| fail(&error))?;
+    let arch = std::env::consts::ARCH
+        .try_into()
+        .map_err(|error: seccompiler::BackendError| fail(&error))?;
+    let filter = SeccompFilter::new(
+        std::collections::BTreeMap::from([(libc::SYS_socket, vec![rule])]),
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32),
+        arch,
+    )
+    .map_err(|error| fail(&error))?;
+    seccompiler::BpfProgram::try_from(filter).map_err(|error| fail(&error))
 }
 
 /// Unshare into a new user and network namespace (and a mount namespace when

@@ -178,6 +178,16 @@ pub(super) fn allow_child_network_host(
     let ProcessPolicySource::Fixed(configured) = control.policy.as_ref() else {
         return Ok(false);
     };
+    // The rule grammar takes lists and wildcards. A caller naming one host from
+    // a refusal means one host, whatever its string turns out to hold.
+    let one_host = host.parse::<std::net::IpAddr>().is_ok()
+        || (!host.is_empty()
+            && host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'));
+    if !one_host {
+        return Err(format!("`{host}` is not one host name"));
+    }
     let rules = parse_rule_list(host).map_err(|error| error.to_string())?;
     configured
         .write()
@@ -241,9 +251,9 @@ impl ProcessEgressProxy {
             block_private: Some(SsrfMode::Off),
             allow_loopback: true,
         };
-        let mut proxy = Self::start(ProcessPolicySource::Fixed(RwLock::new(
+        let mut proxy = Self::start(ProcessPolicySource::Fixed(Box::new(RwLock::new(
             ConfiguredPolicy::single("process_network", policy),
-        )))?;
+        ))))?;
         let control = Arc::new(AllowlistControl {
             http_port: proxy.endpoints.http_port,
             policy: Arc::clone(&proxy.policy),
@@ -366,7 +376,7 @@ type ClientHandler =
 
 #[derive(Debug)]
 enum ProcessPolicySource {
-    Fixed(RwLock<ConfiguredPolicy>),
+    Fixed(Box<RwLock<ConfiguredPolicy>>),
     Live {
         context: Option<EgressPolicyContext>,
         default_block_private: bool,
@@ -1237,5 +1247,26 @@ mod tests {
 
         drop(proxy);
         assert!(!allow_child_network_host(endpoints, "127.0.0.1").expect("gone"));
+    }
+
+    /// One approval names one host. The rule parser takes lists and wildcards, so
+    /// a card showing one name must not be able to grant more than that.
+    #[test]
+    fn an_approval_grants_exactly_one_host() {
+        let proxy = ProcessEgressProxy::start_allowlist(&[]).expect("start");
+        let endpoints = proxy.endpoints();
+        for wider in [
+            "a.example,b.example",
+            "*",
+            "*.example",
+            "a.example b.example",
+            "",
+        ] {
+            assert!(
+                allow_child_network_host(endpoints, wider).is_err(),
+                "{wider:?} must be refused"
+            );
+        }
+        assert!(allow_child_network_host(endpoints, "registry.example").expect("grant"));
     }
 }

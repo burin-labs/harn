@@ -51,9 +51,9 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     ),
     (
         "harn-vm/src/process_sandbox/namespace_helper.rs",
-        2,
+        3,
         "namespace helper: execs the payload the funnel already closed, with the argv and \
-         environment it was handed",
+         environment it was handed, and probes itself with no payload",
     ),
     (
         "harn-hostlib/src/process/owner_death.rs",

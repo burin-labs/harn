@@ -31,8 +31,14 @@ impl ChildEgress {
         let Some(hosts) = sandbox.child_network_allow.as_ref() else {
             return Self::Unmanaged;
         };
+        // A list only holds if a child is confined to it. Without confinement the
+        // child would have direct sockets while the embedder believes it listed
+        // where they go.
         if !sandbox.has_process_confinement() {
-            return Self::Unmanaged;
+            return Self::Unavailable(
+                "a child network list needs process confinement, and this server has none"
+                    .to_string(),
+            );
         }
         if !host_can_hold_a_child_to_the_proxy(sandbox) {
             return Self::NoRoute;
@@ -134,22 +140,32 @@ mod tests {
 
     /// A proxy that admitted everything would pass every check on the mode
     /// policy, so the decision is read from a real request through it.
+    ///
+    /// The refused address reaches a listener that would answer, not a name that
+    /// fails to resolve: a proxy admitting everything would connect to it. Only
+    /// the name is listed, and an address rule would admit that name too, so the
+    /// list holds the name and the request names the address.
     #[test]
     fn a_session_child_reaches_only_a_listed_host() {
         let server = TcpListener::bind("127.0.0.1:0").expect("bind");
+        server.set_nonblocking(true).expect("nonblocking");
         let port = server.local_addr().expect("addr").port();
-        let egress = proxied(vec!["127.0.0.1"]);
+        let egress = proxied(vec!["localhost"]);
         let proxy = egress.endpoints().expect("proxy runs");
 
-        let refused = proxied_status(proxy, "unlisted.invalid:443");
+        let refused = proxied_status(proxy, &format!("127.0.0.1:{port}"));
         assert!(refused.contains("403"), "unlisted host: {refused}");
-        let admitted = proxied_status(proxy, &format!("127.0.0.1:{port}"));
+        assert!(
+            server.accept().is_err(),
+            "a refused host must receive no connection"
+        );
+        let admitted = proxied_status(proxy, &format!("localhost:{port}"));
         assert!(admitted.contains("200"), "listed host: {admitted}");
 
         let audit = egress.audit();
         let refusal = audit
             .iter()
-            .find(|entry| entry.host == "unlisted.invalid")
+            .find(|entry| entry.host == "127.0.0.1")
             .expect("refusal recorded");
         assert!(!refusal.allowed);
     }
@@ -160,18 +176,20 @@ mod tests {
         let proxy = egress
             .endpoints()
             .expect("an empty list still runs the proxy");
-        let refused = proxied_status(proxy, "example.com:443");
+        let refused = proxied_status(proxy, "127.0.0.1:9");
         assert!(refused.contains("403"), "{refused}");
     }
 
     #[test]
-    fn no_list_or_no_confinement_starts_nothing() {
+    fn a_list_without_confinement_refuses_turns_instead_of_widening() {
         assert!(ChildEgress::start(&confined(None)).endpoints().is_none());
         let unconfined = AcpSandboxConfig {
             child_network_allow: Some(vec!["example.com".to_string()]),
             ..Default::default()
         };
-        assert!(ChildEgress::start(&unconfined).endpoints().is_none());
+        let egress = ChildEgress::start(&unconfined);
+        assert!(egress.endpoints().is_none());
+        assert!(egress.startup_failure().is_some());
     }
 
     /// A read-only mode has no child network to manage. Handing it the proxy

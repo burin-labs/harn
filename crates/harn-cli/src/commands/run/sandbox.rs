@@ -560,6 +560,7 @@ pub(super) fn default_run_capability_policy(
                 .collect(),
             read_deny_roots: Vec::new(),
             allow_tcp_loopback: grants.loopback,
+            deny_network: false,
             unix_socket_roots: process_unix_socket_roots
                 .iter()
                 .map(|path| normalize_run_workspace_root(path.as_path()))
