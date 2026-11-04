@@ -21,7 +21,7 @@
 //!
 //! A child whose network stops at the proxy also needs a way to reach it. That
 //! is a relay forked between (1) and (2); see
-//! `harn_vm::process_sandbox::start_namespace_relay`.
+//! `super::start_namespace_relay`.
 //!
 //! # What the namespace buys
 //!
@@ -36,19 +36,96 @@
 //! no route off the host to deny in the first place.
 
 use std::convert::Infallible;
+#[cfg(target_os = "linux")]
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
-use crate::cli::NetnsLaunchArgs;
+use super::{
+    DeviceMountFinalization, EgressRelayTarget, NETNS_CLOSE_FD_FLAG, NETNS_EGRESS_RELAY_FLAG,
+    NETNS_LAUNCH_SUBCOMMAND, NETNS_PRIVATE_TMP_FLAG, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG,
+};
 
-/// Exec the payload inside a private network namespace, confined.
+/// Run the helper if this process was started as one, or return `None` so the
+/// program carries on.
+///
+/// Call this first in `main`, before any runtime or thread exists. Creating a
+/// user namespace refuses a multi-threaded caller outright, and that refusal
+/// is a bare "invalid argument" that reads as a host forbidding namespaces.
+/// Any binary that names itself as a policy's namespace launcher must call it.
 ///
 /// The success type is uninhabited on purpose: a launch that worked has
 /// replaced this process, so there is no "finished successfully" state for a
-/// caller to mishandle. Every return is a failure.
-pub(crate) fn run(args: NetnsLaunchArgs) -> Result<Infallible, String> {
+/// caller to mishandle. `Some` is always a failure to report.
+pub fn run_namespace_helper_if_invoked(raw_args: &[String]) -> Option<Result<Infallible, String>> {
+    if raw_args.get(1).map(String::as_str) != Some(NETNS_LAUNCH_SUBCOMMAND) {
+        return None;
+    }
+    Some(HelperArgs::parse(&raw_args[2..]).and_then(run))
+}
+
+#[derive(Debug, Default)]
+struct HelperArgs {
+    ruleset_fd: Option<i32>,
+    seccomp_hex: Option<String>,
+    private_tmp: Option<std::path::PathBuf>,
+    egress_relay: Option<EgressRelayTarget>,
+    close_fd: Vec<DeviceMountFinalization>,
+    payload: Vec<String>,
+}
+
+impl HelperArgs {
+    /// Flags, then the payload. Only the sandbox backend writes this argv, so
+    /// anything it would not write is refused rather than interpreted.
+    fn parse(args: &[String]) -> Result<Self, String> {
+        let mut parsed = Self::default();
+        let mut rest = args.iter();
+        while let Some(arg) = rest.next() {
+            if arg == "--" {
+                break;
+            }
+            if !arg.starts_with('-') {
+                parsed.payload.push(arg.clone());
+                break;
+            }
+            let value = rest
+                .next()
+                .ok_or_else(|| format!("namespace helper: {arg} needs a value"))?;
+            let invalid = |error: String| format!("namespace helper: {arg}: {error}");
+            match arg.as_str() {
+                NETNS_RULESET_FD_FLAG => {
+                    let fd = value
+                        .parse()
+                        .map_err(|_| invalid("not a descriptor".into()))?;
+                    parsed.ruleset_fd = Some(fd);
+                }
+                NETNS_SECCOMP_FLAG => parsed.seccomp_hex = Some(value.clone()),
+                NETNS_PRIVATE_TMP_FLAG => parsed.private_tmp = Some(value.into()),
+                NETNS_EGRESS_RELAY_FLAG => {
+                    parsed.egress_relay = Some(value.parse().map_err(invalid)?);
+                }
+                NETNS_CLOSE_FD_FLAG => parsed.close_fd.push(value.parse().map_err(invalid)?),
+                _ => return Err(format!("namespace helper: unknown argument {arg}")),
+            }
+        }
+        parsed.payload.extend(rest.cloned());
+        let builds_namespace = parsed.ruleset_fd.is_some()
+            || parsed.seccomp_hex.is_some()
+            || parsed.private_tmp.is_some()
+            || parsed.egress_relay.is_some();
+        if builds_namespace && !parsed.close_fd.is_empty() {
+            return Err(format!(
+                "namespace helper: {NETNS_CLOSE_FD_FLAG} finalizes a mount that is already \
+                 confined and takes no namespace arguments"
+            ));
+        }
+        Ok(parsed)
+    }
+}
+
+fn run(args: HelperArgs) -> Result<Infallible, String> {
     let (program, payload_args) = args
         .payload
         .split_first()
@@ -70,7 +147,7 @@ pub(crate) fn run(args: NetnsLaunchArgs) -> Result<Infallible, String> {
 
 #[cfg(target_os = "linux")]
 fn finalize_exec(
-    descriptors: &[harn_vm::process_sandbox::DeviceMountFinalization],
+    descriptors: &[DeviceMountFinalization],
     program: &str,
     args: &[String],
 ) -> Result<Infallible, String> {
@@ -113,7 +190,7 @@ fn finalize_exec(
 
 #[cfg(not(target_os = "linux"))]
 fn finalize_exec(
-    _descriptors: &[harn_vm::process_sandbox::DeviceMountFinalization],
+    _descriptors: &[DeviceMountFinalization],
     _program: &str,
     _args: &[String],
 ) -> Result<Infallible, String> {
@@ -125,13 +202,13 @@ fn run_impl(
     ruleset_fd: Option<i32>,
     seccomp_hex: &str,
     private_tmp: Option<&std::path::Path>,
-    egress_relay: Option<&harn_vm::process_sandbox::EgressRelayTarget>,
+    egress_relay: Option<&EgressRelayTarget>,
     program: &str,
     payload_args: &[String],
 ) -> Result<Infallible, String> {
-    use harn_vm::process_sandbox::TransferableConfinement;
+    use super::TransferableConfinement;
 
-    let seccomp = harn_vm::process_sandbox::decode_seccomp_hex(seccomp_hex)
+    let seccomp = super::decode_seccomp_hex(seccomp_hex)
         .map_err(|error| format!("namespace helper: {error}"))?;
     // Built before the namespace so the allocation it needs happens while
     // allocation is still unambiguously safe, and so a malformed handover is
@@ -149,7 +226,7 @@ fn run_impl(
     raise_loopback()
         .map_err(|error| format!("namespace helper: could not raise loopback: {error}"))?;
     if let Some(target) = egress_relay {
-        harn_vm::process_sandbox::start_namespace_relay(target, &confinement).map_err(|error| {
+        super::start_namespace_relay(target, &confinement).map_err(|error| {
             format!("namespace helper: could not relay the egress proxy: {error}")
         })?;
     }
@@ -302,10 +379,64 @@ fn run_impl(
     _ruleset_fd: Option<i32>,
     _seccomp_hex: &str,
     _private_tmp: Option<&std::path::Path>,
-    _egress_relay: Option<&harn_vm::process_sandbox::EgressRelayTarget>,
+    _egress_relay: Option<&EgressRelayTarget>,
     _program: &str,
     _payload_args: &[String],
 ) -> Result<Infallible, String> {
-    let _ = (io::ErrorKind::Unsupported, Command::new("true"));
     Err("namespace helper: private network namespaces are a Linux mechanism".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
+
+    /// Drift between this parser and the argv the backend builds is silent and
+    /// total, so the payload must survive with its own flags intact.
+    #[test]
+    fn flags_stop_at_the_payload() {
+        let parsed = HelperArgs::parse(&argv(&[
+            NETNS_SECCOMP_FLAG,
+            "00",
+            "--",
+            "/bin/tool",
+            "--seccomp-hex",
+            "ff",
+        ]))
+        .expect("parses");
+        assert_eq!(parsed.seccomp_hex.as_deref(), Some("00"));
+        assert_eq!(parsed.payload, ["/bin/tool", "--seccomp-hex", "ff"]);
+    }
+
+    #[test]
+    fn a_program_that_is_not_the_helper_carries_on() {
+        assert!(run_namespace_helper_if_invoked(&argv(&["tool", "run"])).is_none());
+        assert!(run_namespace_helper_if_invoked(&argv(&["tool"])).is_none());
+    }
+
+    #[test]
+    fn an_argument_the_backend_would_not_write_is_refused() {
+        let unknown = HelperArgs::parse(&argv(&["--unknown", "x", "--", "/bin/true"]));
+        assert!(unknown.is_err());
+        let conflict = HelperArgs::parse(&argv(&[
+            NETNS_SECCOMP_FLAG,
+            "00",
+            NETNS_CLOSE_FD_FLAG,
+            "3:/dev/null",
+            "--",
+            "/bin/true",
+        ]));
+        assert!(conflict.is_err());
+    }
+
+    #[test]
+    fn the_helper_refuses_to_run_without_a_payload_or_confinement() {
+        let no_payload = HelperArgs::parse(&argv(&[NETNS_SECCOMP_FLAG, "00"])).expect("parses");
+        assert!(run(no_payload).is_err());
+        let no_confinement = HelperArgs::parse(&argv(&["--", "/bin/true"])).expect("parses");
+        assert!(run(no_confinement).is_err());
+    }
 }

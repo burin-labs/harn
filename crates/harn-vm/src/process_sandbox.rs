@@ -180,7 +180,9 @@ pub use crate::stdlib::sandbox::{
 pub(crate) mod egress_relay;
 #[cfg(target_os = "linux")]
 pub use egress_relay::start_namespace_relay;
+mod namespace_helper;
 pub use egress_relay::{EgressRelayTarget, NETNS_EGRESS_RELAY_FLAG};
+pub use namespace_helper::run_namespace_helper_if_invoked;
 mod loopback;
 pub(crate) use loopback::reconcile;
 pub use loopback::{
