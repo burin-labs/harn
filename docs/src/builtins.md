@@ -840,7 +840,7 @@ builtins were deleted.
 | `harness.fs.mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `harness.fs.stat(path, options?)` | path: string, options?: `{follow_symlinks?: bool}` | `{size, is_file, is_dir, is_symlink, readonly, modified?, mode?, identity?}` | File metadata. Follows symbolic links by default; set `follow_symlinks: false` to inspect the link itself. Unix hosts report permission bits in `mode` and an opaque file `identity`; other hosts omit both. Throws on failure |
 | `harness.fs.temp_dir()` | none | string | System temporary directory path |
-| `harness.fs.workspace_temp_dir()` | none | string | Return a sandbox-writable per-workspace scratch directory outside the workspace, creating it lazily |
+| `harness.fs.workspace_temp_dir()` | none | string | Return a workspace-local scratch directory, creating it lazily |
 | `harness.fs.mkdtemp_in_workspace(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named directory under `harness.fs.workspace_temp_dir()` |
 | `harness.fs.mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a uniquely named host-temp directory. The caller owns cleanup; prefer the workspace form for sandbox-visible scratch files |
 | `harness.fs.render_prompt(path, bindings?)` | path: string, bindings: dict | string | Read and render a prompt asset. Supports source-relative, `@/<rel>`, `@<alias>/<rel>`, and embedded `std/...harn.prompt` paths |

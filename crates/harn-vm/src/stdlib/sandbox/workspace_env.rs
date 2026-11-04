@@ -15,10 +15,13 @@ mod owner_tests;
 
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 
-/// The names the temp dir and toolchain cache had when they lived inside the
-/// first workspace root. Nothing creates them any more; a checkout that still
-/// holds one keeps it out of walks and replay snapshots.
-pub(crate) const LEGACY_WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
+/// The self-ignored scratch dir a Harn script gets inside its workspace, from
+/// `harness.fs.workspace_temp_dir()`. A confined child's `TMPDIR` is not here.
+pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
+
+/// The name the toolchain cache had when it lived inside the first workspace
+/// root. Nothing creates it any more; a checkout that still holds one keeps it
+/// out of walks and replay snapshots.
 pub(crate) const LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME: &str = ".harn-toolchain-cache";
 
 /// The temp dir and toolchain cache, as children of the runtime dir.
@@ -32,7 +35,7 @@ const RUNTIME_DIR_DIGEST_HEX: usize = 16;
 
 /// Reserved workspace directory names owned by the runtime rather than the application.
 pub fn is_workspace_runtime_directory(name: &OsStr) -> bool {
-    name == OsStr::new(LEGACY_WORKSPACE_TMPDIR_NAME)
+    name == OsStr::new(WORKSPACE_TMPDIR_NAME)
         || name == OsStr::new(LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
 }
 
@@ -439,15 +442,58 @@ fn ensure_runtime_dir(workspace_root: &Path, child: Option<&str>) -> std::io::Re
     Ok(path)
 }
 
-/// The temp dir of the runtime dir for `workspace_root`, without creating it.
-/// For callers with no path-scoping policy to read the root from.
-pub(crate) fn runtime_tmpdir_path(workspace_root: &Path) -> Option<PathBuf> {
-    Some(sandbox_runtime_dir(workspace_root)?.join(RUNTIME_TMPDIR_NAME))
+/// A script's scratch dir, `.harn-tmp` in the first writable workspace root,
+/// created on first use. Its paths are inside the workspace, which is what
+/// `mkdtemp_in_workspace` promises: an embedder's workspace-root checks accept
+/// them. `None` when the profile does not scope paths.
+pub(crate) fn workspace_script_scratch_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return None;
+    }
+    let root = base_workspace_roots(policy).into_iter().next()?;
+    if let Err(error) = initialize_script_scratch_dir(&root) {
+        warn_once(
+            "handler_sandbox_workspace_scratch",
+            &format!(
+                "could not create the workspace scratch dir in '{}': {error}",
+                root.display()
+            ),
+        );
+        return None;
+    }
+    Some(root.join(WORKSPACE_TMPDIR_NAME))
 }
 
-/// Create the temp dir [`runtime_tmpdir_path`] names.
-pub(crate) fn create_runtime_tmpdir(workspace_root: &Path) -> std::io::Result<PathBuf> {
-    ensure_runtime_dir(workspace_root, Some(RUNTIME_TMPDIR_NAME))
+#[cfg(unix)]
+fn initialize_script_scratch_dir(root: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+
+    let (parent, leaf) = super::ensure_parent_dirs_scoped(&super::ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: Path::new(WORKSPACE_TMPDIR_NAME).join(".gitignore"),
+    })?;
+    // Retain the directory descriptor through publication: replacing the
+    // workspace path after mkdir-p must never create a host ignore file.
+    if let Ok(mut file) = super::openat_file(
+        parent.as_raw_fd(),
+        &leaf,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        0o600,
+    ) {
+        let _ = file.write_all(crate::runtime_paths::SELF_IGNORE_CONTENTS.as_bytes());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn initialize_script_scratch_dir(root: &Path) -> std::io::Result<()> {
+    super::create_dir_all_scoped_target(&super::ScopedMutationTarget {
+        root: root.to_path_buf(),
+        relative: PathBuf::from(WORKSPACE_TMPDIR_NAME),
+    })?;
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&root.join(WORKSPACE_TMPDIR_NAME));
+    Ok(())
 }
 
 /// The session's own temp dir, `tmp` in the [`sandbox_runtime_dir`] of the

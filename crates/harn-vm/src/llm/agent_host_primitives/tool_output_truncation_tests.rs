@@ -159,25 +159,17 @@ async fn oversized_result_spills_and_the_model_sees_a_bounded_excerpt() {
     assert!(result["dropped_bytes"].as_u64().unwrap_or(0) > 1_900_000);
     let spill = std::path::PathBuf::from(result["full_output_path"].as_str().expect("spill path"));
     assert!(rendered.contains(&format!("full output saved to {}]", spill.display())));
-    // <runtime dir>/tmp/tool-results/<session>/<file>, outside the workspace,
-    // so spills never show in git status or a linter's walk.
+    // <workspace>/.harn-tmp/tool-results/<session>/<file>
     let temp_root = spill.ancestors().nth(3).expect("workspace temp root");
-    // Asserted by shape rather than by re-resolving the base: the runtime
-    // resolves it once per process, and tests that run beside this one move
-    // `HOME`. The exact per-workspace digest is covered by the sandbox tests.
-    assert_eq!(temp_root.file_name(), Some(std::ffi::OsStr::new("tmp")));
-    let base_name = temp_root
-        .parent()
-        .and_then(std::path::Path::parent)
-        .and_then(std::path::Path::file_name);
     assert_eq!(
-        base_name,
-        Some(std::ffi::OsStr::new(
-            harn_vm_core::user_dirs::SANDBOX_RUNTIME_DIR_NAME
-        ))
+        temp_root.file_name(),
+        Some(std::ffi::OsStr::new(".harn-tmp"))
     );
-    let cwd = std::env::current_dir().expect("cwd");
-    assert!(!temp_root.starts_with(std::fs::canonicalize(&cwd).unwrap_or(cwd)));
+    let ignore = std::fs::read_to_string(temp_root.join(".gitignore")).expect("self-ignore");
+    assert!(
+        ignore.lines().any(|line| line.trim() == "*"),
+        "spills stay out of git status: {ignore:?}"
+    );
     let spill_root = temp_root.join("tool-results");
     assert!(
         spill.starts_with(&spill_root),

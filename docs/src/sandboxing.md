@@ -867,8 +867,10 @@ dir records its workspace root, and the first runtime dir a process creates
 removes the runtime dirs of workspaces that no longer exist. A runtime dir
 counts as part of its workspace for the in-process file builtins and policy
 narrowing: a root that covers the workspace covers its runtime dir, so a
-`workspace_roots` entry made inside `harness.fs.workspace_temp_dir()` narrows
-the enclosing policy rather than falling outside it. Compiler linkers
+`workspace_roots` entry made inside a child's temp dir narrows the enclosing
+policy rather than falling outside it. `harness.fs.workspace_temp_dir()` is a
+different directory: a script's own scratch stays in `.harn-tmp` inside the
+workspace, so embedder checks on workspace paths accept it. Compiler linkers
 (`rustc`/`cc`/`ld`, Go, Swift, …) and many other toolchains write
 intermediate object/temp files to `$TMPDIR`, defaulting to the system
 `/tmp` when it is unset — which is outside the writable workspace roots, so

@@ -357,8 +357,8 @@ pub fn is_scratch_path(path: &Path) -> bool {
     managed_scratch_root(path).is_some()
 }
 
-/// Nearest ancestor (inclusive) that is Harn-managed scratch: a legacy
-/// in-workspace runtime directory, or the directory holding the sandbox
+/// Nearest ancestor (inclusive) that is Harn-managed scratch: an in-workspace
+/// scratch or legacy cache directory, or the directory holding the sandbox
 /// runtime dirs, which a workspace containing the user cache directory would
 /// otherwise lend its ignore stack.
 ///
@@ -370,7 +370,7 @@ fn managed_scratch_root(path: &Path) -> Option<&Path> {
     path.ancestors().find(|ancestor| {
         matches!(
             ancestor.file_name().and_then(|name| name.to_str()),
-            Some(workspace_env::LEGACY_WORKSPACE_TMPDIR_NAME)
+            Some(workspace_env::WORKSPACE_TMPDIR_NAME)
                 | Some(workspace_env::LEGACY_WORKSPACE_TOOLCHAIN_CACHE_NAME)
         ) || runtime_base.as_deref() == Some(*ancestor)
     })

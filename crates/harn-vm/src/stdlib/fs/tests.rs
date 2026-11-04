@@ -415,7 +415,7 @@ fn path_status_distinguishes_missing_scope_and_read_only_denials() {
 }
 
 #[test]
-fn workspace_temp_dir_is_the_sandbox_runtime_temp_dir() {
+fn workspace_temp_dir_is_inside_sandbox_workspace() {
     use crate::orchestration::{
         clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
         CapabilityPolicy, SandboxProfile,
@@ -436,6 +436,9 @@ fn workspace_temp_dir_is_the_sandbox_runtime_temp_dir() {
     let child = call(&mut vm, "mkdtemp_in_workspace", vec![s("receipts/")])
         .unwrap()
         .display();
+    let child_process_tmp = crate::orchestration::current_execution_policy()
+        .and_then(|policy| crate::stdlib::sandbox::workspace_local_tmpdir(&policy))
+        .expect("a confined child's temp dir");
 
     pop_execution_policy();
     clear_execution_policy_stacks();
@@ -449,14 +452,13 @@ fn workspace_temp_dir_is_the_sandbox_runtime_temp_dir() {
     let workspace_root = PathBuf::from(temp_dir_path_string(
         &workspace.path().canonicalize().unwrap(),
     ));
-    let runtime =
-        crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir(workspace.path()).unwrap();
-    assert!(!root.starts_with(&workspace_root));
-    assert_eq!(
-        root,
-        PathBuf::from(temp_dir_path_string(&runtime.join("tmp")))
-    );
+    // An embedder checks a script's scratch against its workspace root, so it
+    // must stay inside; only a confined child's temp dir moves out.
+    assert!(root.starts_with(&workspace_root));
+    assert!(!child_process_tmp.starts_with(&workspace_root));
+    assert!(root.ends_with(crate::stdlib::sandbox::workspace_env::WORKSPACE_TMPDIR_NAME));
     assert!(root.is_dir());
+    assert!(root.join(".gitignore").is_file());
     assert!(child.starts_with(&root));
     assert!(child.is_dir());
     assert!(child

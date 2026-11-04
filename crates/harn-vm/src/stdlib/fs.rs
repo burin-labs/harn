@@ -1124,7 +1124,7 @@ fn temp_dir_path_string(path: &Path) -> String {
     exposure = "runtime_internal",
     sig = "workspace_temp_dir() -> string",
     category = "fs",
-    doc = "Return a sandbox-writable per-workspace scratch directory outside the workspace, creating it lazily."
+    doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
 )]
 fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(temp_dir_path_string(
@@ -1185,25 +1185,20 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
     if let Some(policy) = crate::orchestration::current_execution_policy() {
         if policy.sandbox_profile.enforces_path_scope() {
-            if let Some(path) = crate::stdlib::sandbox::workspace_local_tmpdir(&policy) {
+            if let Some(path) =
+                crate::stdlib::sandbox::workspace_env::workspace_script_scratch_dir(&policy)
+            {
                 return Ok(path);
             }
         }
     }
-    let root = resolve_fs_path(".")?;
-    let path =
-        crate::stdlib::sandbox::workspace_env::runtime_tmpdir_path(&root).ok_or_else(|| {
-            VmError::Runtime(format!(
-                "workspace_temp_dir: no user cache directory for the temp dir of {}",
-                root.display()
-            ))
-        })?;
+    let path = resolve_fs_path(crate::stdlib::sandbox::workspace_env::WORKSPACE_TMPDIR_NAME)?;
     crate::stdlib::sandbox::enforce_fs_path(
         "workspace_temp_dir",
         &path,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    crate::stdlib::sandbox::workspace_env::create_runtime_tmpdir(&root).map_err(|error| {
+    std::fs::create_dir_all(&path).map_err(|error| {
         io_error_thrown(
             format!(
                 "workspace_temp_dir: failed to create {}: {error}",
@@ -1211,7 +1206,9 @@ pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
             ),
             &error,
         )
-    })
+    })?;
+    let _ = crate::runtime_paths::ensure_self_ignored_dir(&path);
+    Ok(path)
 }
 
 fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {

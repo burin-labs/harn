@@ -481,8 +481,8 @@ under `/tmp` sits below it, the fixture's own files become in-scope, and a case
 asserting that a pass-through read is refused fails deterministically — while
 the same case passes everywhere else (#6030).
 
-Use `harness.fs.workspace_temp_dir()`, which resolves to a per-workspace
-directory in the user cache directory, outside the checkout:
+Use `harness.fs.workspace_temp_dir()`, which resolves to a workspace-owned
+`.harn-tmp/` child of the checkout:
 
 ```harn,ignore
 const jail = harness.fs.workspace_temp_dir()
