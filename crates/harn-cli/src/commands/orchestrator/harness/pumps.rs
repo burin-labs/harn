@@ -1006,7 +1006,5 @@ async fn wait_for_test_release_file(path: &Path) {
 }
 
 fn pending_pump_test_should_fail() -> bool {
-    std::env::var(TEST_FAIL_PENDING_PUMP_ENV)
-        .ok()
-        .is_some_and(|value| value != "0")
+    std::env::var(TEST_FAIL_PENDING_PUMP_ENV).is_ok_and(|value| value != "0")
 }

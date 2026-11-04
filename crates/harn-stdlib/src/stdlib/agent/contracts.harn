@@ -91,7 +91,7 @@ pub type AgentRecapCompletionState = "open" | "complete" | "incomplete" | "unass
 
 pub type AgentRecapToolState = "open" | "completed" | "failed" | "incomplete"
 
-pub type AgentRecapTextFact = {text: string, sourceEventId: int}
+pub type AgentRecapTextFact = {text: string, sourceEventId: int, messageId: string?}
 
 pub type AgentRecapVerificationFact = {
   schema: string,

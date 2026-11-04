@@ -92,11 +92,7 @@ pub(super) fn parse_credentials(value: &VmValue) -> BTreeSet<String> {
 pub(super) fn env_credentials() -> BTreeSet<String> {
     GITHUB_CREDENTIAL_ENV_KEYS
         .iter()
-        .filter(|key| {
-            std::env::var(key)
-                .ok()
-                .is_some_and(|value| !value.is_empty())
-        })
+        .filter(|key| std::env::var(key).is_ok_and(|value| !value.is_empty()))
         .map(|key| credential_alias(key))
         .collect()
 }

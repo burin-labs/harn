@@ -230,14 +230,12 @@ struct SkillRuntimePolicy {
 }
 
 fn env_requires_signed_skills() -> bool {
-    std::env::var(REQUIRE_SIGNED_SKILLS_ENV)
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
+    std::env::var(REQUIRE_SIGNED_SKILLS_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn should_warn_about_provenance(report: &VerificationReport) -> bool {
