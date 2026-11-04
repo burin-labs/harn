@@ -75,3 +75,12 @@ test("the check is reported by a hosted job that holds the only write permission
   assert.equal(tests.jobs.nextest.permissions, undefined, "the owned job keeps the read-only default");
   assert.equal(tests.permissions.contents, "read");
 });
+
+test("the isolation probe is fetched from main and runs before any pull-request code", () => {
+  const steps = tests.jobs.nextest.steps;
+  assert.equal(steps[0].with.ref, "main");
+  assert.equal(steps[0].with.path, "trusted");
+  assert.match(steps[1].run, /trusted\/scripts\/ci\/runner_isolation_probe\.sh/);
+  const firstPullRequestFetch = steps.findIndex((step) => String(step.with?.ref).includes("inputs.sha"));
+  assert.ok(firstPullRequestFetch > 1, "the pull request head is checked out only after the probe");
+});

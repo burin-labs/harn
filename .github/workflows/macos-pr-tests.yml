@@ -69,6 +69,14 @@ jobs:
     runs-on: ${{ github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-pr-macos"]') || 'macos-latest' }}
     timeout-minutes: 75
     steps:
+      # The probe comes from main, not from the pull request, and runs before any pull-request code is fetched.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Prove this runner account is isolated
+        run: bash trusted/scripts/ci/runner_isolation_probe.sh
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
