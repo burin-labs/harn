@@ -266,7 +266,8 @@ release_unpromotable_source_observation() (
     .head_sha == $source and .status == "completed" and
     (.conclusion as $c | ["success","failure","cancelled","timed_out"] | index($c) != null) and
     (.run_attempt | type == "number" and . > 0 and . == floor) and
-    (.event == "merge_group" or (.event == "push" and .head_branch == "main"))
+    .event == "workflow_dispatch" and .head_branch == "main" and
+    .display_title == "Build release binaries [source-candidate]"
   ' <<< "$producer_run" >/dev/null
   run="$(gh api "repos/$repository/actions/runs/$ci")"
   jq -e --arg repository "$repository" --arg source "$source" --arg id "$ci" '

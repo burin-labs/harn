@@ -125,8 +125,9 @@ case "${endpoint:?}" in
       producer_pending) conclusion=null ;;
     esac
     jq -n --arg sha "$sha" --arg conclusion "$conclusion" '{id:3,repository:{id:1,full_name:"example/harn"},head_repository:{id:1,full_name:"example/harn"},
-      path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1} |
-      if $conclusion == "null" then .status="in_progress" | .conclusion=null else . end' ;;
+      path:".github/workflows/build-release-binaries.yml",event:"workflow_dispatch",head_branch:"main",display_title:"Build release binaries [source-candidate]",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1} |
+      if $conclusion == "null" then .status="in_progress" | .conclusion=null else . end |
+      if $ENV.MUTATION == "producer_warm_run" then .display_title="Build release binaries [warm]" else . end' ;;
   */actions/runs/11)
     jq -n --arg sha "$RETIRE_SOURCE_SHA" --arg mutation "${MUTATION:-}" '
       {id:11,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
@@ -208,8 +209,8 @@ case "${endpoint:?}" in
     step='Run the harn-linked TUI suite against the candidate'
     case "$id" in
       6) name='Resolve certified source'; conclusion=success ;;
-      7) name='Recover missing consumer rehearsal / Consumer canary' ;;
-      8) name='Require measured consumer completion' ;;
+      7) name='Measure consumer rehearsal / Consumer canary' ;;
+      8) name='Require publication qualification' ;;
       10) name='Prove the candidate against the harn-linked TUI suite'; run=9; repo=example/consumer ;;
       *) exit 2 ;;
     esac
@@ -301,7 +302,7 @@ grep -Fq '"missing_full_suite_jobs":["Windows cross-compile check"]' "$fixture/p
 # A promotable source (green full suite, with any producer outcome) and every
 # unmeasured observation refuse.
 for mutation in ci_success ci_success_producer_failed ci_cancelled ci_first_attempt_failure producer_pending \
-  producer_wrong_source ci_wrong_source ci_foreign_workflow \
+  producer_warm_run producer_wrong_source ci_wrong_source ci_foreign_workflow \
   ci_foreign_repo ci_pending ci_pr_event empty_jobs partial_jobs pending_jobs zero_failures \
   foreign_job_run replaced_job_attempt duplicate_jobs aggregate_only_failure \
   tags_unreadable known_tag_absent tag_present conflicting_attempt misnamed_attempt merged_closed_attempt foreign_closed_attempt release_unreadable empty_releases \

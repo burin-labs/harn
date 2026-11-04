@@ -190,10 +190,13 @@ jobs:
           fi
           # An unpublished tag at this commit is a promotion that stopped before
           # publishing; at another commit it is a conflict a person must resolve.
-          if tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha 2>/dev/null)" &&
-            [[ "$tag_sha" != "$HEAD_SHA" ]]; then
-            echo "::error::$tag already points at $tag_sha, not the candidate commit $HEAD_SHA."
-            exit 1
+          tag_refs="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")"
+          if jq -e --arg ref "refs/tags/$tag" 'any(.[]; .ref == $ref)' <<< "$tag_refs" >/dev/null; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+            if [[ "$tag_sha" != "$HEAD_SHA" ]]; then
+              echo "::error::$tag already points at $tag_sha, not the candidate commit $HEAD_SHA."
+              exit 1
+            fi
           fi
           # A retired version stays retired; main records it in its changelog.
           main_changelog="$(cat CHANGELOG.md)"

@@ -123,6 +123,9 @@ case "$1 $2" in
     jq -n --argjson run "${FAKE_CANDIDATE_RUN-9001}" --arg sha "$HEAD_SHA" \
       '{total_count:1,jobs:[{id:42,name:"Consumer release rehearsal / Consumer canary",run_id:$run,
         run_attempt:1,head_sha:$sha,status:"completed",conclusion:"success"}]}' ;;
+  "api "*/git/matching-refs/tags/*)
+    [[ "${FAKE_TAG_LOOKUP_FAIL:-0}" != 1 ]] || exit 1
+    if [[ -n "${FAKE_TAG_SHA:-}" ]]; then printf '[{"ref":"refs/tags/%s"}]\n' "${2##*/}"; else echo '[]'; fi ;;
   "api "*/commits/*) [[ -n "${FAKE_TAG_SHA:-}" ]] || exit 1; printf '%s\n' "$FAKE_TAG_SHA" ;;
   "api "*/artifacts\?name=candidate-manifest-*)
     sha="${2#*candidate-manifest-}"; sha="${sha%%&*}"
@@ -347,6 +350,10 @@ plan conflict FAKE_TAG_SHA=1111111111111111111111111111111111111111
 [[ "$(cat "$tmp/conflict.status")" != 0 ]] || fail "a tag at another commit was not refused"
 grep -Fq "not the candidate commit $head_sha" "$tmp/conflict.log" \
   || fail "the tag conflict does not name the candidate: $(cat "$tmp/conflict.log")"
+
+# A failed tag lookup is not an absent tag.
+plan tag_lookup_failed FAKE_TAG_LOOKUP_FAIL=1
+[[ "$(cat "$tmp/tag_lookup_failed.status")" != 0 ]] || fail "a failed tag lookup read as no tag"
 
 # Main moved on, and the requested commit stays releasable. Historical candidates
 # need not contain today's publication helpers: the controller owns those, and the
