@@ -260,6 +260,10 @@ fi
 # input, which a moved stdlib reader always is.
 if ! hook_agent_gate_sources_changed "$changed" "$(git rev-parse --show-toplevel)"; then
   echo "=== Pre-push: skipping agent gate census (no recorded reader sources changed) ==="
+elif ! hook_local_build_allowed; then
+  # The census needs this worktree's own build, which this machine does not compile from a hook.
+  echo "=== Pre-push: SKIPPING agent gate census (local builds are off on this machine) ===" >&2
+  echo "    This is a skip, not a pass: main CI still runs the census, so run 'make check-agent-gates' on a build host." >&2
 else
   echo "=== Pre-push: checking the agent gate census ==="
   if ! hook_export_registry_harn_bin "$changed"; then
@@ -287,7 +291,11 @@ fi
 hook_timing_phase full-local
 
 if hook_fast_default_mode; then
-  echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="
+  if ! hook_local_build_allowed; then
+    echo "=== Pre-push: SKIPPING expensive local checks (local builds are off on this machine; a skip, not a pass) ===" >&2
+  else
+    echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="
+  fi
   echo "    Signature, merge-queue, and fast drift guards passed; remote CI remains required."
   exit 0
 fi
