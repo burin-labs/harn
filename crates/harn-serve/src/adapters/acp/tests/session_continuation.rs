@@ -4,25 +4,41 @@ use harn_session_store::{AppendEvent, SessionEventKind, SessionStore, SessionWri
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_does_not_reissue_a_text_tool_call_id() {
+    continuation_tool_call_ids("text").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn continuation_does_not_reissue_a_native_tool_call_id() {
+    continuation_tool_call_ids("native").await;
+}
+
+async fn continuation_tool_call_ids(format: &str) {
     let _reset = ResetActiveEventLog;
     harn_vm::reset_thread_local_state();
     tokio::task::LocalSet::new().run_until(async {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path().canonicalize().unwrap();
         let pipeline = project.join("text.harn");
-        std::fs::write(&pipeline, r#"import { agent_loop } from "std/agent/loop"
+        let source = r#"import { agent_loop } from "std/agent/loop"
 pipeline default(harness: Harness) {
   harness.llm.mock_clear()
-  harness.llm.mock_enqueue({text: "<tool_call>{\"name\":\"noop\",\"arguments\":{}}</tool_call>"})
+  harness.llm.mock_enqueue(MOCK_TOOL_RESPONSE)
   harness.llm.mock_enqueue({text: "tool continuation reply"})
   const tools = tool_define(tool_registry(), "noop", "Read a fixture", {
     handler: { args -> "actual tool result" }, parameters: {}, returns: {type: "string"},
     annotations: {kind: "read"},
   })
-  agent_loop(harness, prompt, nil, {provider: "mock", tools: tools, tool_format: "text"})
+  agent_loop(harness, prompt, nil, {provider: "mock", tools: tools, tool_format: "TOOL_FORMAT"})
   assert_eq(len(harness.llm.mock_calls()), 2)
 }
-"#).unwrap();
+"#;
+        let mock_response = if format == "native" {
+            r#"{tool_calls: [{name: "noop", arguments: {}}]}"#
+        } else {
+            r#"{text: "<tool_call>{\"name\":\"noop\",\"arguments\":{}}</tool_call>"}"#
+        };
+        let source = source.replace("MOCK_TOOL_RESPONSE", mock_response).replace("TOOL_FORMAT", format);
+        std::fs::write(&pipeline, source).unwrap();
         let config = AcpServerConfig::for_pipeline(pipeline.display().to_string())
             .with_launcher_environment(harn_vm::security::LauncherEnvironment::from_snapshot(Default::default()));
         let (tx, mut rx, server, session) = start_acp_code_session_with_config(config, serde_json::json!(project)).await;
@@ -47,7 +63,7 @@ pipeline default(harness: Harness) {
                 let update = &event["params"]["update"];
                 (update["sessionUpdate"] == "tool_call").then(|| update["toolCallId"].as_str().unwrap().to_owned())
             }).collect();
-            assert_eq!(ids.len(), 1, "the actual text tool must fire: {events:?}");
+            assert_eq!(ids.len(), 1, "the actual {format} tool must fire: {events:?}");
             call_ids.extend(ids);
             let (closed, _) = request(&tx, &mut rx, 10 * turn + 4, "session/close", serde_json::json!({"sessionId":session})).await;
             continuation = closed["continuation"].clone();
