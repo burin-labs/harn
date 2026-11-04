@@ -451,13 +451,35 @@ pipeline test_curator_accepts_a_verifier_built_on_the_declared_aggregate_check(h
         ],
         validator: { _source -> {outcome: "pass"} },
       }
-      const bare = curate_with(harness, root, submit_one(verify_tool("just default")), declared)
-      assert_eq(bare.proposal_count ?? 0, 0, "a bare declared check teaches later sessions nothing")
-      const result = curate_with(
+      const unrun = curate_with(
         harness,
         root,
         submit_one(verify_tool("just cog && just default")),
         declared,
+      )
+      assert_eq(unrun.proposal_count ?? 0, 0, "a verify check no session passed may be wider")
+      const passed = declared
+        + {
+        evidence: [
+          {
+            id: "run-one",
+            session_id: "",
+            prompt: "Add a feature",
+            tool_sequence: ["run"],
+            command_ledger: [{command: "just default 2>&1 | tail -5", exit_code: 0, ok: true, tool: "run"}],
+            observed_at: "2026-08-13T12:00:00Z",
+          },
+        ],
+      }
+      for repeated in ["just default", "just test && just lint", "just test && just default"] {
+        const bare = curate_with(harness, root, submit_one(verify_tool(repeated)), passed)
+        assert_eq(bare.proposal_count ?? 0, 0, "declared checks alone teach nothing: " + repeated)
+      }
+      const result = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("just cog && just default")),
+        passed,
       )
       assert_eq(result.proposal_count, 1, "the aggregate check counts as a declared check")
       return nil

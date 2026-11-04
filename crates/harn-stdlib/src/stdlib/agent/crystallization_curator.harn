@@ -80,34 +80,44 @@ fn cc_evidence_cards(evidence: list) -> list {
 }
 
 /**
- * Sessions that failed a command and then got past it, counted from each card's
- * command ledger. Empty unless at least two sessions did, since one recovery is
- * not repetition. Command text is carried verbatim; whether two recoveries are
- * the same fix stays the curator's judgment.
+ * Sessions that failed a command, later passed that same command, and ended on a
+ * pass, counted from each card's command ledger. Empty unless at least two
+ * distinct sessions did, since one recovery is not repetition. Command text is
+ * carried verbatim; whether two recoveries are the same fix stays the curator's
+ * judgment.
  */
 fn cc_repeated_recoveries(cards: list) -> list {
   let out = []
+  let sessions = []
   for card in cards {
     let failed = []
     let recovered_with = []
     let last_ok = false
+    let failure_rerun_passed = false
     for entry in card?.commands ?? [] {
+      const command = to_string(entry?.command ?? "")
       if entry?.ok == false {
-        failed = failed + [entry?.command]
+        failed = failed + [command]
         last_ok = false
       } else if entry?.ok == true {
         last_ok = true
         if len(failed) > 0 {
-          recovered_with = recovered_with + [entry?.command]
+          recovered_with = recovered_with + [command]
+          failure_rerun_passed = failure_rerun_passed
+            || failed.any({ failure -> command.contains(failure) })
         }
       }
     }
-    if last_ok && len(failed) > 0 {
+    if last_ok && failure_rerun_passed {
+      const session = cc_text(card?.session_id) != "" ? cc_text(card?.session_id) : cc_text(card?.id)
+      if !sessions.contains(session) {
+        sessions = sessions + [session]
+      }
       out = out
         + [{session_id: card?.session_id, failed: failed, recovered_with: recovered_with}]
     }
   }
-  return len(out) >= 2 ? out : []
+  return len(sessions) >= 2 ? out : []
 }
 
 fn cc_session_ids(evidence: list) -> list {
@@ -203,9 +213,9 @@ These examples define breadth, not templates:
 
 Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
 
-The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. When a declared `verify` check aggregates the others, keep it whole so the sequence still runs everything it runs. A submission whose `verify_command` runs none of the declared test or verify checks is rejected.
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. When a declared `verify` check that sessions already passed aggregates the others, keep it whole so the sequence still runs everything it runs. A submission whose `verify_command` runs neither a declared test check nor such a verify check is rejected.
 
-Count recovery across sessions. `repeated_recoveries` lists sessions that failed commands and then got past them, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
+Count recovery across sessions. `repeated_recoveries` lists sessions that failed a command, later passed that same command, and ended on a pass, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -853,25 +863,55 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   return false
 }
 
-/** True when a verifier is exactly a declared check, with no step of its own. */
-fn cc_only_repeats_declared_check(verify_command: string, check: dict) -> bool {
-  return cc_runs_declared_check(verify_command, check)
-    && len(command_sequence_plan(verify_command).steps)
-      == len(command_sequence_plan(check.command, check.cwd).steps)
+/** True when every step of a verifier already belongs to a declared check. */
+fn cc_only_repeats_declared_checks(verify_command: string, declared: list) -> bool {
+  const observed = command_sequence_plan(verify_command)
+  if observed.status != "measured" || len(observed.steps) == 0 {
+    return false
+  }
+  let declared_steps = []
+  for check in declared {
+    declared_steps = declared_steps + command_sequence_plan(check.command, check.cwd).steps
+  }
+  return observed.steps.all({ step -> declared_steps.any({ known -> known == step }) })
+}
+
+fn cc_session_passed_command(evidence: list, command: string) -> bool {
+  return evidence.any(
+    { item ->
+      (item?.command_ledger ?? [])
+        .any({ entry -> entry?.ok == true && to_string(entry?.command ?? "").contains(command) })
+    },
+  )
 }
 
 /**
- * The declared checks a learned verifier must run at least one of: a test check
- * or a verify check, since a repository's aggregate check runs its tests.
+ * The declared checks a learned verifier must run at least one of: any test
+ * check, or a verify check a session in the window already passed. A verify
+ * check can be wider than the test checks, so naming one is not enough; a
+ * session that ran it shows future sessions pay nothing new for it.
  */
-fn cc_required_declared_checks(declared: list) -> list {
-  return declared.filter({ check -> check.intent == "test" || check.intent == "verify" }).to_list()
+fn cc_required_declared_checks(declared: list, evidence: list) -> list {
+  return declared
+    .filter(
+    { check ->
+      check.intent == "test"
+        || (check.intent == "verify" && cc_session_passed_command(evidence, check.command))
+    },
+  )
+    .to_list()
 }
 
-fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
+fn cc_prepare_valid_proposals(
+  harness: Harness,
+  proposals: list,
+  evidence: list,
+  options: any = nil,
+) -> list {
   let prepared = []
   const installed = cc_installed(harness.fs, options)
-  const required = cc_required_declared_checks(cc_declared_checks(options))
+  const declared = cc_declared_checks(options)
+  const required = cc_required_declared_checks(declared, evidence)
   for proposal in proposals ?? [] {
     if cc_duplicates_installed(proposal, installed) {
       continue
@@ -883,11 +923,11 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
     const verify = to_string(proposal?.artifact?.verify_command ?? "")
     if verify != "" && len(required) > 0
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
-      throw "submit_crystallization_batch: `verify_command` must run a declared test or verify check word for word from its cwd, not a broader command. A step with a glob or other shell syntax cannot be measured. Declared: "
+      throw "submit_crystallization_batch: `verify_command` must run a declared test check, or a verify check a session already passed, word for word from its cwd, not a broader command. A step with a glob or other shell syntax cannot be measured. Declared: "
         + json_stringify(required)
     }
-    if verify != "" && required.any({ check -> cc_only_repeats_declared_check(verify, check) }) {
-      throw "submit_crystallization_batch: `verify_command` only repeats a declared check, which later sessions already run. Add the steps it needs first, or submit no proposal."
+    if verify != "" && cc_only_repeats_declared_checks(verify, declared) {
+      throw "submit_crystallization_batch: `verify_command` only repeats declared checks, which later sessions already run. Add the steps it needs first, or submit no proposal."
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
@@ -1113,7 +1153,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], options)
+          const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], evidence, options)
           const result = pattern_learning_record_curated_batch(
             harness,
             args + {proposals: proposals},
