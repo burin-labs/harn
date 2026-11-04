@@ -69,6 +69,14 @@ const PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
+    pattern: "scripts/tests/prune_stale_targets_linux_census_test.py",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason:
+      "Holds real descriptors, mappings, working directories and Cargo locks against disposable targets to verify the Linux process-table census.",
+  },
+  {
+    kind: "exact",
     pattern: "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
     category: "fixture",
     owner: "Prepared source verifier",
@@ -129,6 +137,21 @@ const EMBEDDED_PYTHON_ALLOWLIST = [
     category: "subprocess-fixture",
     owner: "Target-cache collector",
     reason: "Runs the process-handle regression in the repository shell gate.",
+  },
+  {
+    path: "Makefile",
+    pattern: r"^\s*python3\s+\./scripts/tests/prune_stale_targets_linux_census_test\.py(?:\s|$)",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason: "Runs the Linux process-table census regression in the repository shell gate.",
+  },
+  {
+    path: "scripts/prune_stale_targets.sh",
+    pattern: r#"^\s*python3\s+-\s+"\$proc_root"\s+"\$dir"\s+"\$physical"\s+<<'PY'"#,
+    category: "foreign-runtime-bootstrap",
+    owner: "Target-cache collector",
+    reason:
+      "Reads the Linux process table from setup before any Harn binary exists; the collector must not depend on the build cache it prunes.",
   },
   {
     path: "scripts/generate_sdk_clients.sh",
