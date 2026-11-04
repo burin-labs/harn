@@ -65,8 +65,8 @@ directories rather than the user's:
 
 | | default `harn run` | `harn run --no-sandbox` |
 | --- | --- | --- |
-| config | `<workspace>/.harn-toolchain-cache/Library/Application Support/harn` | `~/Library/Application Support/harn` |
-| cache | `<workspace>/.harn-toolchain-cache/xdg-cache/harn` | `~/Library/Caches/harn` |
+| config | `<runtime dir>/toolchain/Library/Application Support/harn` | `~/Library/Application Support/harn` |
+| cache | `<runtime dir>/toolchain/xdg-cache/harn` | `~/Library/Caches/harn` |
 
 That is the intended isolation: a script cannot reach the real user
 directories unless the caller lifts the sandbox. Do not assume a path these

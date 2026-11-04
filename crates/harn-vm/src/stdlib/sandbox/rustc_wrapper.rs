@@ -359,7 +359,7 @@ fn measure(
         return decision(
             RustcWrapperDisposition::Unmeasured,
             None,
-            "no workspace-local scratch directory to build the probe crate in",
+            "no sandbox scratch directory to build the probe crate in",
             cwd,
         );
     };

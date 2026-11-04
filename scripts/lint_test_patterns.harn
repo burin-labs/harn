@@ -156,6 +156,13 @@ const LITERAL_TIMEOUT_BASELINE = [
   // Deliberate quiescence: after the first OTLP export arrives, drain
   // whatever else is already buffered. Expiry ends the drain, not the test.
   {rule: "literal_timeout", path: "crates/harn-vm/tests/harn_vm/otel_sink_export.rs", count: 1},
+  // Hang guard for a reader that must never block on a FIFO marker. The read
+  // cannot be interrupted, so expiry is the failure this test exists to report.
+  {
+    rule: "literal_timeout",
+    path: "crates/harn-vm/src/stdlib/sandbox/workspace_env_owner_tests.rs",
+    count: 1,
+  },
 ]
 
 // External measurements require provider credentials, saved transcripts, or

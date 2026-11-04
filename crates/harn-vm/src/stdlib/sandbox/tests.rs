@@ -852,7 +852,7 @@ fn sandboxed_process_config_rejects_explicit_cwd_outside_workspace() {
 }
 
 #[test]
-fn workspace_local_tmpdir_lands_inside_the_first_writable_root() {
+fn workspace_local_tmpdir_lands_in_the_runtime_dir_outside_the_workspace() {
     let workspace = tempfile::tempdir().unwrap();
     let policy = CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
@@ -861,29 +861,49 @@ fn workspace_local_tmpdir_lands_inside_the_first_writable_root() {
     };
 
     let tmpdir = workspace_local_tmpdir(&policy).expect("a writable root yields a temp dir");
+    let runtime =
+        workspace_env::sandbox_runtime_dir(workspace.path()).expect("a user cache directory");
 
-    // The temp dir is created, lives under the writable workspace root, and
-    // is named by the documented convention.
+    // The temp dir is created in the workspace's runtime dir, and nowhere in
+    // the workspace a linter or test collector would walk.
     assert!(tmpdir.is_dir(), "temp dir must be created: {tmpdir:?}");
+    assert_eq!(tmpdir, runtime.join("tmp"));
     assert!(
-        path_is_within(&tmpdir, &normalize_for_policy(workspace.path())),
-        "temp dir {tmpdir:?} must be inside the writable workspace root"
+        !path_is_within(&tmpdir, &normalize_for_policy(workspace.path())),
+        "temp dir {tmpdir:?} must be outside the workspace"
     );
-    assert!(tmpdir.ends_with(WORKSPACE_TMPDIR_NAME));
-    // It self-ignores so its churn never shows in a git diff.
-    let ignore = std::fs::read_to_string(tmpdir.join(".gitignore")).unwrap_or_default();
-    assert!(
-        ignore.lines().any(|line| line.trim() == "*"),
-        "temp dir must carry a self-ignoring .gitignore, got {ignore:?}"
-    );
-    // It is within the sandbox's writable scope: a write under it passes the
-    // same path-scope check the OS sandbox enforces.
+    assert_eq!(std::fs::read_dir(workspace.path()).unwrap().count(), 0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [&tmpdir, &runtime] {
+            let mode = std::fs::metadata(dir).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700, "{dir:?} must be owner-only");
+        }
+    }
+    // It is within the sandbox's writable scope, with assembled and with
+    // declared roots: a write under it passes the same path-scope check the
+    // OS sandbox enforces.
     push_execution_policy(policy);
+    let write = tmpdir.join("rustcXXXX/intermediate.o");
     assert!(
-        check_fs_path_scope(&tmpdir.join("rustcXXXX/intermediate.o"), FsAccess::Write).is_ok(),
-        "writes under the workspace-local temp dir must be in sandbox scope"
+        check_fs_path_scope(&write, FsAccess::Write).is_ok(),
+        "writes under the session temp dir must be in sandbox scope"
+    );
+    assert!(
+        with_declared_path_roots(|| check_fs_path_scope(&write, FsAccess::Write)).is_ok(),
+        "declared roots must keep the session temp dir writable"
+    );
+    assert!(
+        check_fs_path_scope(
+            &runtime.with_file_name("other-workspace/x"),
+            FsAccess::Write
+        )
+        .is_err(),
+        "a sibling runtime dir is another workspace's and stays out of scope"
     );
     pop_execution_policy();
+    std::fs::remove_dir_all(runtime).unwrap();
 }
 
 #[test]

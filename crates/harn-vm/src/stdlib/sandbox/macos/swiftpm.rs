@@ -12,11 +12,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::orchestration::CapabilityPolicy;
 
 use super::super::{
-    ensure_parent_dirs_scoped, normalized_workspace_roots, openat_file, renameat_name,
-    unlinkat_name, warn_once, ScopedMutationTarget,
+    ensure_parent_dirs_scoped, openat_file, renameat_name, unlinkat_name, warn_once,
+    workspace_env::workspace_local_toolchain_cache, ScopedMutationTarget,
 };
 
-const ADAPTER_ROOT: &str = ".harn-toolchain-cache/swiftpm";
+/// Under the workspace's toolchain cache, which every adapter path is relative to.
+const ADAPTER_ROOT: &str = "swiftpm";
 const SUBCOMMANDS: &[&str] = &["build", "test", "run", "package"];
 const XCRUN_VALUE_OPTIONS: &[&str] = &["--sdk", "--toolchain"];
 const XCRUN_SWITCHES: &[&str] = &[
@@ -104,7 +105,7 @@ pub(super) fn prepare_args(
     if subcommand_offset(program, args).is_none_or(|offset| !accepts_toolset(args, offset)) {
         return Ok(compatible_args(program, args));
     }
-    let Some(root) = normalized_workspace_roots(policy).into_iter().next() else {
+    let Some(root) = workspace_local_toolchain_cache(policy) else {
         return Ok(compatible_args(program, args));
     };
     let Some(binding) = super::private_temp::prepare(policy)? else {
@@ -216,7 +217,7 @@ pub(in crate::stdlib::sandbox) fn inject_env(
     {
         return;
     }
-    let Some(root) = normalized_workspace_roots(policy).into_iter().next() else {
+    let Some(root) = workspace_local_toolchain_cache(policy) else {
         return;
     };
     let inherited = env
