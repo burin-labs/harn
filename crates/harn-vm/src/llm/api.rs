@@ -481,7 +481,7 @@ async fn vm_call_llm_full_inner_request(
             consume_served_mock(request);
             super::trigger_predicate::note_result(request, &served);
             observed.record_provider_dispatch();
-            observed.inference_speed().finish(&mut served);
+            observed.inference_speed().finish_local(&mut served);
         }
         request.emit_reminder_lifecycle();
         return Ok(complete_bypass_result(request, served, delta_tx, None));
@@ -499,7 +499,7 @@ async fn vm_call_llm_full_inner_request(
         let mut result = mock_llm_response(request).inspect_err(|_| {
             observed.inference_speed().abandon();
         })?;
-        observed.inference_speed().finish(&mut result);
+        observed.inference_speed().finish_local(&mut result);
         super::trigger_predicate::note_result(request, &result);
         let chunks = delta_tx
             .as_ref()
@@ -520,7 +520,7 @@ async fn vm_call_llm_full_inner_request(
                 observed.inference_speed().abandon();
             })?;
         super::mock::mark_live_after_mock_prefix(request, &mut result);
-        observed.inference_speed().finish(&mut result);
+        observed.inference_speed().finish_local(&mut result);
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         return Ok(settle_completed_call(None, result));
