@@ -45,14 +45,14 @@ capability_method!(
     "harness.net.child_network_refusals",
     ["state.mutate@const=egress-policy"],
     "__cap_net_child_network_refusals() -> list",
-    "Take the destinations the session's child egress proxy refused since the last call."
+    "Take the destinations the server's child egress proxy refused since the last call, across every session."
 );
 capability_method!(
     net_child_network_allow,
     "harness.net.child_network_allow",
     ["state.mutate@const=egress-policy"],
     "__cap_net_child_network_allow(host: string) -> bool",
-    "Admit a host through the session's child egress proxy for the life of that proxy."
+    "Admit one public DNS name through the server's child egress proxy for every session until it stops; a server holds one user and one trust domain."
 );
 capability_method!(
     net_post,

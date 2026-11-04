@@ -796,7 +796,9 @@ pub struct AcpSandboxConfig {
     /// for this server and limits each child with network authority to it, so
     /// an empty list means no destination at all. `None` leaves child network
     /// to the mode policy, and the list has no effect without process
-    /// confinement, since nothing would hold a child to the proxy.
+    /// confinement, since nothing would hold a child to the proxy. Sessions
+    /// share the proxy and its approvals, so a server using this holds one user
+    /// and one trust domain.
     pub child_network_allow: Option<Vec<String>>,
 }
 
