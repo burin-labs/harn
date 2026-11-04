@@ -3,10 +3,12 @@ import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
-// A `token_budget` ceiling ends the run with status `budget_exhausted`, names
-// the ceiling as the stop reason, and emits the `budget_exhausted` event whose
-// kind is the ceiling. The same script under a ceiling it never reaches runs on
-// to the iteration cap, so the first half cannot pass without the ceiling.
+/**
+ * A `token_budget` ceiling ends the run with status `budget_exhausted`, names
+ * the ceiling as the stop reason, and emits the `budget_exhausted` event whose
+ * kind is the ceiling. The same script under a ceiling it never reaches runs on
+ * to the iteration cap, so the first half cannot pass without the ceiling.
+ */
 fn run_with_ceiling(harness: Harness, token_budget: int) {
   const session = "token-budget-" + to_string(token_budget) + "-" + harness.random.uuid()
   return with_llm_script(
