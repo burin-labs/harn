@@ -436,8 +436,6 @@ catalog_entries! {
     "agent/turn_end" => "stdlib/agent/turn_end.harn",
     "agent/tool_surface" => "stdlib/agent/tool_surface.harn",
     "agent/stance" => "stdlib/agent/stance.harn",
-    "agent/lanes" => "stdlib/agent/lanes.harn",
-    "agent/overlays" => "stdlib/agent/overlays.harn",
     "agent/sitrep" => "stdlib/agent/sitrep.harn",
     "agent/verdict" => "stdlib/agent/verdict.harn",
     "agent/judge_internals" => "stdlib/agent/judge_internals.harn",

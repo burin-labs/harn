@@ -20,7 +20,6 @@
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
-# count   11  crates/harn-stdlib/src/stdlib/agent/lanes.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
@@ -35,7 +34,6 @@
 # count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   22  crates/harn-stdlib/src/stdlib/agent/options_public.harn
 # count   46  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
-# count    5  crates/harn-stdlib/src/stdlib/agent/overlays.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/pins.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/postturn.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/preflight.harn
@@ -223,17 +221,6 @@ crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_ladd
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_classify_verdict
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_leading_word
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_verdict_token
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::agent_lane_classify
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::agent_lane_explicit_target_paths
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::agent_lane_match
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::default_lane_rows
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::lane_policy
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::lane_scope_classifier
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::stage_gate_allows
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::stage_gate_denial
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::stage_gate_from_session
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::stage_gate_label
-crates/harn-stdlib/src/stdlib/agent/lanes.harn::stage_gate_parse
 crates/harn-stdlib/src/stdlib/agent/loop.harn::__progress_nudge_text
 crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn::__filter_blank_name_tool_calls
 crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn::__resolve_tool_calls
@@ -453,11 +440,6 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_verify_c
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__with_project_context_profile
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__with_resolved_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__with_task_ledger_shorthand
-crates/harn-stdlib/src/stdlib/agent/overlays.harn::agent_overlay_match
-crates/harn-stdlib/src/stdlib/agent/overlays.harn::default_overlay_rows
-crates/harn-stdlib/src/stdlib/agent/overlays.harn::overlay_context_fragment
-crates/harn-stdlib/src/stdlib/agent/overlays.harn::overlay_policy
-crates/harn-stdlib/src/stdlib/agent/overlays.harn::with_overlay
 crates/harn-stdlib/src/stdlib/agent/pins.harn::agent_pin
 crates/harn-stdlib/src/stdlib/agent/pins.harn::pin
 crates/harn-stdlib/src/stdlib/agent/pins.harn::pin_compaction_policy

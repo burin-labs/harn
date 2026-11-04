@@ -163,8 +163,7 @@ fn __collect_unread_keys(value: any, node: any, path: string) -> list<string> {
   let unread = []
   for key in keys(value) {
     // Runtime-internal plumbing. The stdlib writes these into an option dict
-    // itself — `std/agent/lanes` adds `_lane_verdict`, `std/workflow/stage`
-    // adds `_nested_kind` — and they arrive here as ordinary caller keys.
+    // itself — `std/workflow/stage` adds `_nested_kind` — and they arrive here as ordinary caller keys.
     // Declaring them on the public type would advertise private plumbing as
     // API. The cost is that a typo inside the underscore namespace is still
     // accepted, which is a smaller surface than the one this check closes.
