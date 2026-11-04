@@ -337,17 +337,28 @@ fn end_session_invalidates_claim_and_epoch_and_scope_capacity_is_explicit() {
         .dispatch_start("B", "run1", None, at(63))
         .unwrap_err()
         .to_string();
-    assert!(refused.contains("end a monitored session or raise the cap"));
+    assert!(refused.contains("or raise the cap"));
     let gates = bounded.snapshot(at(63)).unwrap().dispatch;
-    assert_eq!(gates.keys().collect::<Vec<_>>(), ["C"]);
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "C"]);
+}
+
+const HOUR: i64 = 60 * 60;
+const WEEK: i64 = 7 * 24 * HOUR;
+
+fn with_max_signals(dir: &tempfile::TempDir, max: usize) -> Inbox {
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!("max_signals = {max}\n"),
+    )
+    .unwrap();
+    Inbox::open(dir.path()).unwrap()
 }
 
 #[test]
 fn a_gate_idle_past_retention_is_forgotten_and_restarts_cleanly() {
-    const WEEK: i64 = 7 * 24 * 60 * 60;
     let (_dir, inbox) = open();
     inbox.dispatch_start("busy", "run1", None, at(0)).unwrap();
-    capture(&inbox, "busy", "run1", "busy-log", 0, 0);
+    capture(&inbox, "busy", "run1", "busy-log", 0, WEEK - 1);
     let early = inbox.snapshot(at(WEEK - 1)).unwrap().dispatch;
     assert_eq!(early.len(), 2);
     let gates = inbox.snapshot(at(WEEK)).unwrap().dispatch;
@@ -362,30 +373,96 @@ fn a_gate_idle_past_retention_is_forgotten_and_restarts_cleanly() {
 }
 
 #[test]
-fn a_full_inbox_forgets_the_longest_idle_gate_but_never_an_open_pacing_window() {
+fn a_dead_session_with_unaccepted_captures_stops_pinning_its_record() {
     let (dir, inbox) = open();
     capture(&inbox, "A", "run1", "log", 0, 0);
-    accept(&inbox, 60);
-    inbox.dispatch_start("B", "run1", None, at(61)).unwrap();
-    std::fs::write(dir.path().join("config.toml"), "max_signals = 2\n").unwrap();
-    let bounded = Inbox::open(dir.path()).unwrap();
+    inbox.dispatch_claim("A", "run1", at(60)).unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded.dispatch_start("B", "run1", None, at(WEEK)).is_err());
 
-    // A is the longest idle, but accepted at 60 it is inside its 60 second window.
-    bounded.dispatch_start("C", "run1", None, at(62)).unwrap();
-    let gates = bounded.snapshot(at(62)).unwrap().dispatch;
-    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "C"]);
+    bounded
+        .dispatch_start("B", "run1", None, at(WEEK + 60))
+        .unwrap();
+    let saved = bounded.snapshot(at(WEEK + 60)).unwrap();
+    assert_eq!(saved.dispatch.keys().collect::<Vec<_>>(), ["B"]);
+    let output = saved.signals.values().next().unwrap();
+    assert!(!output.is_pending() && output.cancelled_at.is_some());
+}
 
-    // The window over, A goes first and repeated starts keep working.
-    bounded.dispatch_start("D", "run1", None, at(120)).unwrap();
-    let gates = bounded.snapshot(at(120)).unwrap().dispatch;
-    assert_eq!(gates.keys().collect::<Vec<_>>(), ["C", "D"]);
-    for n in 0..10 {
-        let session = format!("churn{n}");
-        bounded
-            .dispatch_start(&session, "run1", None, at(121))
+#[test]
+fn a_full_inbox_forgets_only_quiet_gates_and_a_refusal_forgets_nothing() {
+    let (dir, inbox) = open();
+    for session in ["B", "C", "D"] {
+        inbox
+            .dispatch_start(session, "run1", None, at(3 * HOUR))
             .unwrap();
     }
-    assert_eq!(bounded.snapshot(at(121)).unwrap().dispatch.len(), 2);
+    let bounded = with_max_signals(&dir, 2);
+
+    // A is quiet, but forgetting it alone would not make room.
+    assert!(bounded
+        .dispatch_start("E", "run1", None, at(3 * HOUR))
+        .is_err());
+    let gates = bounded.snapshot(at(3 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["A", "B", "C", "D"]);
+
+    bounded
+        .dispatch_start("E", "run1", None, at(6 * HOUR))
+        .unwrap();
+    let gates = bounded.snapshot(at(6 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["D", "E"]);
+    for n in 0..10 {
+        bounded
+            .dispatch_start(&format!("churn{n}"), "run1", None, at((9 + 3 * n) * HOUR))
+            .unwrap();
+    }
+    assert_eq!(bounded.snapshot(at(40 * HOUR)).unwrap().dispatch.len(), 2);
+}
+
+#[test]
+fn a_full_inbox_keeps_a_closed_run_and_an_open_pacing_window() {
+    const DAY: i64 = 24 * HOUR;
+    let (dir, inbox) = open();
+    inbox.dispatch_cancel("A", "run1", None, at(1)).unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded.dispatch_start("B", "run1", None, at(2)).is_err());
+    assert!(bounded.dispatch_start("A", "run1", None, at(2)).is_err());
+
+    let dir = tempfile::tempdir().unwrap();
+    let paced = Inbox::open(dir.path()).unwrap();
+    paced
+        .dispatch_start("P", "run1", Some(86400), at(0))
+        .unwrap();
+    capture(&paced, "P", "run1", "log", 0, 0);
+    let claim = paced
+        .dispatch_claim("P", "run1", at(DAY))
+        .unwrap()
+        .claim
+        .unwrap();
+    paced
+        .dispatch_accept("P", "run1", &claim.batch.id, &claim.token, at(DAY))
+        .unwrap();
+    let bounded = with_max_signals(&dir, 1);
+    assert!(bounded
+        .dispatch_start("Q", "run1", None, at(DAY + 3 * HOUR))
+        .is_err());
+    bounded
+        .dispatch_start("Q", "run1", None, at(2 * DAY))
+        .unwrap();
+}
+
+#[test]
+fn cancelling_a_monitor_at_the_cap_makes_room_from_quiet_gates() {
+    let (dir, inbox) = open();
+    inbox
+        .dispatch_start("B", "run1", None, at(3 * HOUR))
+        .unwrap();
+    let bounded = with_max_signals(&dir, 2);
+    bounded
+        .dispatch_cancel("B", "run1", Some("noisy"), at(3 * HOUR))
+        .unwrap();
+    let gates = bounded.snapshot(at(3 * HOUR)).unwrap().dispatch;
+    assert_eq!(gates.keys().collect::<Vec<_>>(), ["B"]);
 }
 
 #[test]

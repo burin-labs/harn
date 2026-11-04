@@ -69,8 +69,10 @@ split output into bounded chunks or reference the full output. Capture does not
 start a process, schedule a model call, or introduce a wake-rate guarantee.
 
 Acknowledged captures may be pruned to make room under `max_signals`; pending
-captures are never evicted to accept new input. Producers must retain cursors
-and stop or retry on explicit capacity errors.
+captures are never evicted to accept new input. A dispatch session that neither
+polls nor captures for `retain_for_seconds` is treated as dead, and its pending
+captures are cancelled. Producers must retain cursors and stop or retry on
+explicit capacity errors.
 
 ## Hook adapter
 
@@ -177,7 +179,7 @@ old inbox and its reader for any remaining old-format work.
 | Key | Default | Meaning |
 |---|---|---|
 | `stale_after_seconds` | `7200` | A session not seen for this long is removed, and its unacked reminders are routed again. |
-| `retain_for_seconds` | `604800` | Resolved and expired signals are pruned this long after their last change, and idle dispatch sessions this long after their last poll. |
+| `retain_for_seconds` | `604800` | Resolved and expired signals are pruned this long after their last change, and dispatch sessions this long after their last poll or capture, cancelling any captures they left unaccepted. |
 | `lease_seconds` | `600` | How long a lease runs before an unacked reminder is leased again, to its holder while that session is responsive, otherwise to a responsive session. A session silent this long loses its unleased reminders to a responsive session. |
 | `fired_ttl_seconds` | `86400` | A fired signal that is not fired again within this long expires, unless the producer set its own expiry. |
 | `max_signals` | `1000` | The most signals the inbox keeps. The oldest settled signal is pruned to make room; with every signal still fired, firing a new key fails. |
@@ -348,9 +350,11 @@ Pacing, execution state, and outstanding claims survive inbox reopening under
 the must-understand v3 schema. A persisted observed-time high-water mark holds
 dispatch during wall-clock rollback; hosts should use a reliable clock.
 Session scopes, retired execution identities, and cancelled-monitor identities
-share a `max_signals` metadata bound. A session with no claim, no pending capture
-and no open pacing window is forgotten after `retain_for_seconds` idle, or sooner,
-longest idle first, when a new session needs the room. New entries are refused
-only when every record is still in use. A replayed start cannot reactivate a
-retired execution while its session is remembered. Native command restart, process termination,
+share a `max_signals` metadata bound. A session that has not polled or captured
+for `retain_for_seconds` is forgotten, once its pacing window and any claim lease
+have lapsed. Under pressure, a session with no claim, no pending capture and no
+open pacing window is forgotten sooner, longest idle first, once it has been
+quiet for `stale_after_seconds`. A new entry is refused when that cannot free
+enough, and a refusal forgets nothing. A replayed start cannot reactivate a
+retired or closed execution while its session is remembered. Native command restart, process termination,
 and host model-wake integration are separate responsibilities.
