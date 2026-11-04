@@ -420,9 +420,9 @@ pub(crate) fn process_sandbox_read_deny_roots(policy: &CapabilityPolicy) -> Vec<
         }
     }
     // Per-spawn directories hold a granted credential while their spawn runs.
-    denied.push(normalize_for_policy(
-        &super::workspace_env::grant_spawn::denied_read_root(),
-    ));
+    if let Some(root) = super::workspace_env::grant_spawn::denied_read_root() {
+        denied.push(normalize_for_policy(&root));
+    }
     for root in &policy.process_sandbox.read_deny_roots {
         let normalized = normalize_for_policy(Path::new(root));
         if !denied.contains(&normalized) {

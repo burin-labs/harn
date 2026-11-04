@@ -822,6 +822,24 @@ fn confined<T>(fixture: &Fixture, body: impl FnOnce() -> T) -> T {
     body()
 }
 
+/// Whether this host cannot confine a spawn. Such a host must refuse a granted
+/// gh with the measured refusal, never run it unconfined, so that is what a
+/// confined proof asserts there before it stops.
+fn host_refuses_confinement(fixture: &Fixture) -> bool {
+    let Some(refusal) = super::sandbox_host::unavailable_worktree_sandbox() else {
+        return false;
+    };
+    let result = confined(fixture, || {
+        fixture.shell_in(fixture.workspace.path(), "gh issue list")
+    });
+    let error = result.err().unwrap_or_else(|| {
+        panic!("an unconfinable host ran a granted gh instead of refusing {refusal}")
+    });
+    assert!(error.contains(&refusal.to_string()), "{error}");
+    eprintln!("[process-command-grant] exercised=0: {refusal}");
+    true
+}
+
 /// A caller variable that would route, intercept or log gh's requests never
 /// reaches a granted gh: everything but a short allowlist is dropped, and the
 /// proxy and debug variables are set empty. Needs a live process sandbox.
@@ -829,6 +847,9 @@ fn confined<T>(fixture: &Fixture, body: impl FnOnce() -> T) -> T {
 fn caller_proxy_tls_and_debug_variables_never_reach_a_granted_gh() {
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
+    if host_refuses_confinement(&fixture) {
+        return;
+    }
     let blocked = [
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -879,6 +900,9 @@ fn caller_proxy_tls_and_debug_variables_never_reach_a_granted_gh() {
 fn a_confined_sibling_cannot_read_a_running_granted_gh_credential() {
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
+    if host_refuses_confinement(&fixture) {
+        return;
+    }
     let hosts = fixture
         .user
         .path()
@@ -1009,39 +1033,22 @@ fn a_granted_spawn_sweeps_directories_a_crashed_spawn_left_behind() {
 /// The same proof through a confined spawn. Needs a live process sandbox.
 #[test]
 fn a_confined_plain_gh_shell_command_receives_only_the_grant() {
-    use harn_vm::orchestration::{
-        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
-    };
-
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
-    let mut policy = CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        workspace_roots: vec![fixture.workspace.path().display().to_string()],
-        ..CapabilityPolicy::default()
-    };
-    policy
-        .process_sandbox
-        .read_roots
-        .push(fixture.user.path().display().to_string());
-    push_execution_policy(policy);
-    struct PopPolicy;
-    impl Drop for PopPolicy {
-        fn drop(&mut self) {
-            pop_execution_policy();
-        }
+    if host_refuses_confinement(&fixture) {
+        return;
     }
-    let _policy = PopPolicy;
-
-    let out = fixture.shell("gh issue list");
-    assert_granted_without_leak(&out, "confined");
-    assert!(
-        out.contains("pager=[] editor=[/usr/bin/false]"),
-        "stdout:\n{out}"
-    );
-    let out = fixture.shell("gh issue list; env");
-    assert!(out.contains("gh-grant=absent"), "stdout:\n{out}");
-    assert_env_ran_without_grant(&out, "confined gh issue list; env");
+    confined(&fixture, || {
+        let out = fixture.shell("gh issue list");
+        assert_granted_without_leak(&out, "confined");
+        assert!(
+            out.contains("pager=[] editor=[/usr/bin/false]"),
+            "stdout:\n{out}"
+        );
+        let out = fixture.shell("gh issue list; env");
+        assert!(out.contains("gh-grant=absent"), "stdout:\n{out}");
+        assert_env_ran_without_grant(&out, "confined gh issue list; env");
+    });
 }
 
 /// The GitHub CLI itself, when the host has it: `gh auth token` is refused,

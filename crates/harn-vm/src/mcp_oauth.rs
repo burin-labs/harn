@@ -1431,12 +1431,15 @@ fn default_oauth_lock_dir() -> PathBuf {
 }
 
 pub(crate) fn harn_home_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os(HARN_HOME_ENV) {
-        return PathBuf::from(path);
-    }
-    crate::user_dirs::home_dir()
-        .map(|home| home.join(".harn"))
-        .unwrap_or_else(|| std::env::temp_dir().join("harn"))
+    configured_harn_home_dir().unwrap_or_else(|| std::env::temp_dir().join("harn"))
+}
+
+/// The Harn home this process was given or can derive, without the temp-dir
+/// fallback a process with no user home gets.
+pub(crate) fn configured_harn_home_dir() -> Option<PathBuf> {
+    std::env::var_os(HARN_HOME_ENV)
+        .map(PathBuf::from)
+        .or_else(|| crate::user_dirs::home_dir().map(|home| home.join(".harn")))
 }
 
 /// Persist a token (under the refresh lock) and record it as the active client.

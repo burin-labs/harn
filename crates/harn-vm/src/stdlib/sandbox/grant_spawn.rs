@@ -193,14 +193,18 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The per-spawn root every confined child is denied.
-pub(crate) fn denied_read_root() -> PathBuf {
-    grant_spawns_root()
+/// The per-spawn root every confined child is denied. A process with neither a
+/// Harn home nor a user home has none: its fallback is the temp dir, where
+/// [`create_spawn_dir`] always refuses, so no credential can land there, and
+/// denying it would refuse every hardened spawn whose workspace holds that dir.
+pub(crate) fn denied_read_root() -> Option<PathBuf> {
+    crate::mcp_oauth::configured_harn_home_dir().map(|home| home.join("grant-spawns"))
 }
 
 /// The one per-spawn directory the spawn this thread is launching may read:
 /// its own, re-allowed inside the denied root by the backend that builds its
 /// profile. Every other spawn's directory stays denied to it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn own_spawn_read_root() -> Option<PathBuf> {
     OWN_SPAWN_LAUNCHING.with(|own| own.borrow().clone())
 }
