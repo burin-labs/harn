@@ -224,7 +224,8 @@ impl HostBridge {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
-    use std::time::Duration;
+
+    use harn_clock::test_support::recv_within;
 
     use super::*;
 
@@ -256,11 +257,10 @@ mod tests {
                     let environment =
                         crate::security::session_environment::current_session_environment();
                     started.store(true, Ordering::SeqCst);
-                    let live = acked
-                        .lock()
-                        .unwrap()
-                        .recv_timeout(Duration::from_secs(5))
-                        .is_ok();
+                    // The sibling's acknowledgement arrives by construction when the polling
+                    // thread is live; a blocked thread hits the hang ceiling and fails here.
+                    recv_within("sibling acknowledgement", &acked.lock().unwrap());
+                    let live = true;
                     stages
                         .lock()
                         .unwrap()
@@ -277,7 +277,7 @@ mod tests {
                     if started.swap(false, Ordering::SeqCst) && ack.send(()).is_err() {
                         return;
                     }
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    tokio::task::yield_now().await;
                 }
             });
 
