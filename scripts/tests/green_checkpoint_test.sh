@@ -264,6 +264,12 @@ build 7 "$A" "$recent" completed | jq -s '[{total_count: 2, workflow_runs: .}]' 
 check "an incomplete build census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
 check "an unreadable build census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4 BUILD_CENSUS_FAIL=1
 check "an invalid cadence refuses" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=soon
+check "a cadence longer than the census refuses" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=73
+check "a misspelled hold refuses" 1 "$B" "" GREEN_REQUIRES_SOURCE_CANDIDATE=True
+
+fresh_builds
+build 7 "$C" 2020-01-01T00:00:00Z completed "Build release binaries" | jq '. + {event: "schedule"}' | census > "$S/builds.json"
+check "a scheduled candidate of main's tip counts" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
 
 if (( failures > 0 )); then
   echo "green checkpoint: $failures case(s) failed"

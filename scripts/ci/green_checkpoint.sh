@@ -41,7 +41,16 @@ summary=${GITHUB_STEP_SUMMARY:-/dev/null}
 candidate_hours=${GREEN_SOURCE_CANDIDATE_HOURS:-}
 require_candidate=${GREEN_REQUIRES_SOURCE_CANDIDATE:-}
 [[ "$days" =~ ^[1-9][0-9]*$ ]] || { echo "::error::GREEN_CENSUS_DAYS must be a positive integer" >&2; exit 1; }
-[[ -z "$candidate_hours" || "$candidate_hours" =~ ^[1-9][0-9]*$ ]] || { echo "::error::GREEN_SOURCE_CANDIDATE_HOURS must be a positive integer" >&2; exit 1; }
+# A cadence longer than the census would lose sight of the last candidate and start one every pass.
+if [[ -n "$candidate_hours" ]] && { [[ ! "$candidate_hours" =~ ^[1-9][0-9]*$ ]] || (( candidate_hours > days * 24 )); }; then
+  echo "::error::GREEN_SOURCE_CANDIDATE_HOURS must be a positive integer of at most $((days * 24)) hours" >&2
+  exit 1
+fi
+# A misspelling must not read as off, which would let green pass an unbuilt commit.
+case "$require_candidate" in
+  "" | true | false) ;;
+  *) echo "::error::GREEN_REQUIRES_SOURCE_CANDIDATE must be true or false" >&2; exit 1 ;;
+esac
 
 refuse() {
   echo "::error title=Green checkpoint::$1" >&2
@@ -165,7 +174,7 @@ start_source_candidate() {
     return 0
   fi
   runs=$(gh api --paginate --slurp \
-    "repos/$repo/actions/workflows/build-release-binaries.yml/runs?branch=main&event=workflow_dispatch&created=%3E%3D$since&per_page=100") || return 1
+    "repos/$repo/actions/workflows/build-release-binaries.yml/runs?branch=main&created=%3E%3D$since&per_page=100") || return 1
   tip=$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha') || return 1
   [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
   decision=$(jq -r --arg tip "$tip" --argjson hours "$candidate_hours" '
@@ -174,7 +183,8 @@ start_source_candidate() {
       or (map(.total_count) | unique | length) != 1
       or (map(.workflow_runs | length) | add) != .[0].total_count
     then error("incomplete census") else . end
-    | [.[].workflow_runs[] | select(.display_title == "Build release binaries [source-candidate]")] as $candidates
+    # A scheduled run builds the same candidate under the plain run name.
+    | [.[].workflow_runs[] | select(.display_title == "Build release binaries [source-candidate]" or .event == "schedule")] as $candidates
     | ($candidates | map(select(.status != "completed")) | length) as $active
     | if $active > 0 then "skip: \($active) still running"
       elif any($candidates[]; .head_sha == $tip) then "skip: main'"'"'s tip already has one"
