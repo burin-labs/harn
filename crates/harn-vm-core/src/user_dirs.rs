@@ -96,7 +96,7 @@ pub fn package_cache_dir() -> Option<PathBuf> {
 
 /// The directory under the user cache directory that holds every workspace's
 /// sandbox runtime dir.
-pub const SANDBOX_RUNTIME_DIR_NAME: &str = "harn-sandbox";
+pub const SANDBOX_RUNTIME_DIR_NAME: &str = ".harn-sandbox";
 
 /// Where confined children's per-workspace runtime directories live, resolved
 /// from explicit values.
@@ -105,10 +105,10 @@ pub const SANDBOX_RUNTIME_DIR_NAME: &str = "harn-sandbox";
 /// writable developer-toolchain root, so a child granted it could write every
 /// other workspace's temp dir and caches. Resolution order:
 ///
-/// 1. On macOS, `~/Library/Caches/harn-sandbox`.
-/// 2. On Windows, `%LOCALAPPDATA%\harn-sandbox`.
-/// 3. `$XDG_CACHE_HOME/harn-sandbox`, when absolute.
-/// 4. `~/.cache/harn-sandbox`.
+/// 1. On macOS, `~/Library/Caches/.harn-sandbox`.
+/// 2. On Windows, `%LOCALAPPDATA%\.harn-sandbox`.
+/// 3. `$XDG_CACHE_HOME/.harn-sandbox`, when absolute.
+/// 4. `~/.cache/.harn-sandbox`.
 pub fn sandbox_runtime_base_from_environment(
     os: &str,
     home: Option<&Path>,

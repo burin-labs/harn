@@ -858,9 +858,9 @@ Secret-shaped names such as `GRADLE_TOKEN` still require an explicit grant.
 
 Every sandboxed child spawned under a restricted profile gets `TMPDIR`,
 `TMP`, and `TEMP` pointed at the `tmp` directory of the workspace's runtime
-dir: `~/Library/Caches/harn-sandbox/<digest>` on macOS,
-`$XDG_CACHE_HOME/harn-sandbox/<digest>` or `~/.cache/harn-sandbox/<digest>`
-on Linux, and `%LOCALAPPDATA%\harn-sandbox\<digest>` on Windows, where the
+dir: `~/Library/Caches/.harn-sandbox/<digest>` on macOS,
+`$XDG_CACHE_HOME/.harn-sandbox/<digest>` or `~/.cache/.harn-sandbox/<digest>`
+on Linux, and `%LOCALAPPDATA%\.harn-sandbox\<digest>` on Windows, where the
 digest names the canonical first writable `workspace_root`. The runtime dir is
 outside the workspace, so the child's temporary files never reach a diff, a
 PR, eval grading, or a linter or test collector walking the tree. It is created
@@ -868,8 +868,10 @@ lazily and owner-only, a symlinked or foreign-owned component is refused, and
 every backend grants it as a write root, including runs restricted to declared
 roots. The toolchain cache is its sibling `toolchain` directory. Each runtime
 dir records its workspace root, and the first runtime dir a process creates
-removes the runtime dirs of workspaces that no longer exist. A runtime dir
-counts as part of its workspace for the in-process file builtins and policy
+removes the runtime dirs of workspaces that no longer exist. When the runtime
+dir cannot be created, such as in a container with `HOME` unset or unwritable,
+Harn warns and uses the self-ignored `.harn-tmp` and `.harn-toolchain-cache` in
+the first workspace root instead. A runtime dir counts as part of its workspace for the in-process file builtins and policy
 narrowing: a root that covers the workspace covers its runtime dir, so a
 `workspace_roots` entry made inside a child's temp dir narrows the enclosing
 policy rather than falling outside it. `harness.fs.workspace_temp_dir()` is a
