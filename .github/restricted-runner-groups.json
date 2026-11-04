@@ -21,11 +21,10 @@
     },
     {
       "label": "harn-pr-macos",
-      "admits_pull_requests_from": "burin-labs/harn",
       "admits": [
         {
-          "workflow": ".github/workflows/macos-nightly.yml",
-          "ref": "pull_request"
+          "workflow": ".github/workflows/macos-pr-tests.yml",
+          "ref": "refs/heads/main"
         }
       ]
     }

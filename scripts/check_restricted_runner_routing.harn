@@ -29,12 +29,7 @@ const REGISTRY_PATH = ".github/restricted-runner-groups.json"
 
 pub type Admission = {workflow: string, ref: string}
 
-/**
- * `pr_repo` is empty for a group that admits exact refs. For a pull-request group
- * it names the one repository whose branches may run there; the group cannot
- * select a pull request ref, so the job's own condition is the only gate.
- */
-pub type RestrictedGroup = {label: string, admits: list<Admission>, pr_repo: string}
+pub type RestrictedGroup = {label: string, admits: list<Admission>}
 
 fn text_of(value: any) -> string {
   if value == nil {
@@ -60,27 +55,19 @@ pub fn registry_groups(raw: any) -> list<RestrictedGroup> {
     if type_of(group?.admits) != "list" || len(group.admits) == 0 {
       throw REGISTRY_PATH + ": group " + label + " admits nothing"
     }
-    const pr_repo = group?.admits_pull_requests_from ?? ""
-    if type_of(pr_repo) != "string" {
-      throw REGISTRY_PATH + ": group " + label + " needs admits_pull_requests_from to be a string"
-    }
     let admits: list<Admission> = []
     for admission in group.admits {
       const workflow = admission?.workflow
       const ref = admission?.ref
       if type_of(workflow) != "string" || !workflow.starts_with(".github/workflows/")
         || type_of(ref) != "string"
-        || !(if pr_repo != "" {
-          ref == "pull_request"
-        } else {
-          ref.starts_with("refs/")
-        }) {
+        || !ref.starts_with("refs/") {
         throw REGISTRY_PATH + ": group " + label
           + " needs each admission to name a .github/workflows/ path and an exact refs/ ref"
       }
       admits = admits + [{workflow: workflow, ref: ref}]
     }
-    groups = groups + [{label: label, admits: admits, pr_repo: pr_repo}]
+    groups = groups + [{label: label, admits: admits}]
   }
   return groups
 }
@@ -97,11 +84,6 @@ fn admitted_refs(group: RestrictedGroup, workflow: string) -> list<string> {
  * positive admitted-ref equality. Other expression forms fail closed.
  */
 pub fn requires_admitted_ref(condition: string, refs: list<string>) -> bool {
-  return requires_equality(condition, "github.ref", refs)
-}
-
-/** The same conjunction rule for any property: one positive equality to a listed value. */
-pub fn requires_equality(condition: string, property: string, values: list<string>) -> bool {
   let expression = condition.trim()
   if expression.starts_with("$" + "{{") && expression.ends_with("}}") {
     expression = expression.substring(3, expression.len() - 2).trim()
@@ -118,8 +100,8 @@ pub fn requires_equality(condition: string, property: string, values: list<strin
     const equality = atom.split("==")
     const left = equality[0]
     const right = equality[1]
-    if len(equality) == 2 && left != nil && right != nil && left.trim() == property {
-      for ref in values {
+    if len(equality) == 2 && left != nil && right != nil && left.trim() == "github.ref" {
+      for ref in refs {
         if right.trim() == "'${ref}'" {
           admitted = true
         }
@@ -139,10 +121,7 @@ pub fn runs_on_condition(runs_on: string, label: string) -> string {
   if at < 0 || !runs_on.trim().starts_with("$" + "{{") {
     return ""
   }
-  // Each `||` alternative carries its own condition, so a label is judged only
-  // by the conjunction directly in front of it.
-  const alternatives = runs_on.substring(0, at).split("||")
-  const head = alternatives[len(alternatives) - 1]
+  const head = runs_on.substring(0, at)
   const call = head.index_of("fromJSON(")
   if call < 0 || head.substring(call, head.len()).contains(")") {
     return ""
@@ -195,31 +174,8 @@ pub fn routing_errors(groups: list<RestrictedGroup>, workflows: dict) -> list<st
             ]
           continue
         }
-        const route_gate = runs_on_condition(runs_on, group.label)
-        const job_gate = text_of(job?.get("if"))
-        const gate_texts = [route_gate, job_gate]
-        if group.pr_repo != "" {
-          // The group cannot select a pull request ref, so the condition must pin the
-          // event and the head repository; a fork's head repository never matches.
-          const pinned = gate_texts.any(
-            { text ->
-              requires_equality(text, "github.event_name", ["pull_request"])
-                && requires_equality(text, "github.event.pull_request.head.repo.full_name", [group.pr_repo])
-            },
-          )
-          if !pinned {
-            errors = errors
-              + [
-                where + " can route to " + group.label + " for a pull request from a fork;"
-                  + " gate it on github.event_name == 'pull_request' and"
-                  + " github.event.pull_request.head.repo.full_name == '"
-                  + group.pr_repo
-                  + "' with no || alternative",
-              ]
-          }
-          continue
-        }
-        if !requires_admitted_ref(route_gate, refs) && !requires_admitted_ref(job_gate, refs) {
+        if !requires_admitted_ref(runs_on_condition(runs_on, group.label), refs)
+          && !requires_admitted_ref(text_of(job?.get("if")), refs) {
           errors = errors
             + [
               where + " can route to " + group.label + " on a ref its runner group refuses;"

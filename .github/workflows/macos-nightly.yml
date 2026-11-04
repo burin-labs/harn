@@ -9,10 +9,8 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Native qualifi
 # and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
 # in CI today (only on a contributor's local Mac). This nightly closes that
 # gap. Scheduled cache-warming runs use GitHub's Apple Silicon runner; exact
-# source dispatches and pull requests from branches of this repository use the
-# organization's Apple Silicon runners. A fork's pull request stays on the
-# hosted runner. All of them give arm64 coverage through this one workflow and
-# job identity.
+# source dispatches use the organization's Apple Silicon runners. Both give
+# arm64 coverage through this one workflow and job identity.
 #
 # Scheduled failures are informational and do not gate `ci-status`.
 # Release-certification dispatches are blocking exact-source proof. When a
@@ -101,14 +99,8 @@ jobs:
   nextest:
     name: Workspace nextest (macos-latest)
     # Only trusted main workflow dispatches may execute on the restricted group.
-    # A pull request from a branch of this repository runs on the owned PR
-    # runners, which hold no signing material and never run a trusted job. A
-    # fork's pull request, and the scheduled coverage, stay on the hosted route:
-    # this repository is public, so fork code must never reach a self-hosted
-    # runner. The head-repository comparison is the whole gate, and
-    # scripts/check_restricted_runner_routing.harn refuses a route to the label
-    # without it.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'burin-labs/harn' && fromJSON('["self-hosted","harn-pr-macos"]') || 'macos-latest' }}
+    # PR and scheduled coverage retain the hosted route.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest' }}
     timeout-minutes: 75
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
