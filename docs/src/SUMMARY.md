@@ -176,7 +176,7 @@
 - [Run-record observability outputs](./observability/run-record-outputs.md)
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
-- [Agent governors and detectors](./stdlib/governors.md)
+- [Agent detectors](./stdlib/detectors.md)
 - [Pace cut rules](./stdlib/cut-rules.md)
 - [Soft-landing cut rules](./stdlib/soft-landing.md)
 - [Agent guardrails](./stdlib/agent-guardrails.md)

@@ -89,7 +89,7 @@ fn scan_node(
 fn options_arg<'a>(name: &str, args: &'a [SNode]) -> Option<(CallSurface, &'a SNode)> {
     let (surface, index) = match name {
         "agent_options" | "agent_loop_options" | "agent_preset_options" => (CallSurface::Agent, 0),
-        "agent_preset" | "agent_governed_preset" => (CallSurface::Agent, 1),
+        "agent_preset" => (CallSurface::Agent, 1),
         "agent_loop" | "agent_stream_call" => (CallSurface::Agent, 2),
         "llm_call"
         | "llm_call_safe"
