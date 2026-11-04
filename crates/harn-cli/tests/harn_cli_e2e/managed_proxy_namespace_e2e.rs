@@ -17,7 +17,7 @@ const REPLY: &str = "reached-through-proxy";
 /// no AppArmor grant of its own, so an ordinary runner cannot run this.
 const LAUNCHER_ENV: &str = "HARN_EXT_OWNER_DEATH_NETNS_LAUNCHER";
 
-const PROBE: &str = r#"
+const PROBE: &str = r"
 import errno, os, socket, sys, urllib.error, urllib.request
 port = int(sys.argv[1])
 assert os.environ['HTTP_PROXY'].startswith('http://127.0.0.1:'), os.environ['HTTP_PROXY']
@@ -51,7 +51,7 @@ for kind in [socket.SOCK_STREAM, socket.SOCK_DGRAM]:
         raise AssertionError('a raw socket left the namespace')
     remote.close()
 print('proxy-only-namespace-ok', flush=True)
-"#;
+";
 
 fn namespace_authority(launcher: &str) -> bool {
     Command::new(launcher)
