@@ -17,6 +17,7 @@
 //! stable, documented surface to depend on without reaching into
 //! `stdlib::*` plumbing.
 
+pub use crate::stdlib::sandbox::workspace_env::sandbox_runtime_dir;
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,

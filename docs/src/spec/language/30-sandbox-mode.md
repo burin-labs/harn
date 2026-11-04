@@ -74,8 +74,8 @@ populate `process_sandbox.read_roots` and `process_sandbox.write_roots`
 respectively while leaving the rest of the default sandbox active. Neither
 flag can be combined with `--no-sandbox`.
 
-Restricted worktree profiles also create a self-ignored
-`.harn-toolchain-cache/` directory under the first writable workspace root.
+Restricted worktree profiles also create a toolchain cache directory in the
+workspace's runtime dir, outside the workspace in the user cache directory.
 The spawned-process environment points mutable home, compiler-cache,
 package-manager-cache, and Python user-site state into this directory unless
 the caller explicitly supplies the corresponding environment variable.

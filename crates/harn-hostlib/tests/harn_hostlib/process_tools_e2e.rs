@@ -870,18 +870,21 @@ fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
 }
 
 #[test]
-fn real_run_command_points_child_tmpdir_inside_the_workspace() {
+fn real_run_command_points_child_tmpdir_at_the_workspace_runtime_dir() {
     // Under a restricted sandbox profile, the agent `run_command` tool must
-    // hand its child a writable, workspace-local TMPDIR so compiler linkers
+    // hand its child a writable, per-workspace TMPDIR so compiler linkers
     // (rustc/cc/ld, Go, Swift, …) write intermediates somewhere the sandbox
-    // permits instead of the unwritable system /tmp. Spawn `env` and confirm
-    // TMPDIR/TMP/TEMP resolve to <workspace>/.harn-tmp.
+    // permits instead of the unwritable system /tmp, and outside the tree a
+    // linter or test collector walks. Spawn `env` and confirm TMPDIR/TMP/TEMP
+    // resolve to <runtime dir>/tmp.
     use harn_vm::orchestration::{
         pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
     };
 
     let workspace = tempfile::tempdir().expect("workspace");
-    let expected = workspace.path().join(".harn-tmp");
+    let expected = harn_vm::process_sandbox::sandbox_runtime_dir(workspace.path())
+        .expect("a user cache directory")
+        .join("tmp");
 
     // OS confinement is irrelevant to this assertion (we observe the injected
     // env, not enforcement) and is unavailable on some CI hosts, so disable it.
@@ -910,18 +913,18 @@ fn real_run_command_points_child_tmpdir_inside_the_workspace() {
 
     let child_env = require_str(&resp, "stdout");
     let expected =
-        std::fs::canonicalize(&expected).expect("workspace-local temp dir should canonicalize");
+        std::fs::canonicalize(&expected).expect("the runtime temp dir should canonicalize");
     let expected_line = format!("TMPDIR={}", expected.display());
     assert!(
         child_env.lines().any(|line| line == expected_line),
-        "child TMPDIR must be the workspace-local .harn-tmp dir.\n\
+        "child TMPDIR must be the workspace's runtime temp dir.\n\
          expected line: {expected_line}\nchild env:\n{child_env}"
     );
     for key in ["TMP", "TEMP"] {
         let line = format!("{key}={}", expected.display());
         assert!(
             child_env.lines().any(|candidate| candidate == line),
-            "{key} must also point at the workspace-local temp dir:\n{child_env}"
+            "{key} must also point at the runtime temp dir:\n{child_env}"
         );
     }
     assert!(

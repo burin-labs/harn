@@ -36,7 +36,7 @@ pub(super) fn prepare(root: &Path, swift: &Path, binding: &Binding) -> io::Resul
         shell_quote(&compiler.to_string_lossy()),
     );
     let identity = harn_kernel::pure::sha256_hex(source.as_bytes());
-    let relative = PathBuf::from(".harn-toolchain-cache/swiftpm/toolsets").join(identity);
+    let relative = PathBuf::from("swiftpm/toolsets").join(identity);
     write_adapter_file(
         &ScopedMutationTarget {
             root: root.to_path_buf(),
@@ -118,7 +118,7 @@ fn query_system_compiler(
 ) -> io::Result<PathBuf> {
     let cache = ScopedMutationTarget {
         root: root.to_path_buf(),
-        relative: PathBuf::from(".harn-toolchain-cache/xcrun/xcrun_db"),
+        relative: PathBuf::from("xcrun/xcrun_db"),
     };
     let _ = ensure_parent_dirs_scoped(&cache)?;
     let output = command

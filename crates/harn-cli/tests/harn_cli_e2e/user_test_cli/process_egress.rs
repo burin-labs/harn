@@ -47,7 +47,7 @@ pub(crate) async fn connector_http_get_uses_read_authority_and_preserves_retry()
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().to_path_buf();
-    let child_marker = root.path().join(".harn-tmp/http-child-launched");
+    let child_marker = root.path().join("child-probe/http-child-launched");
     std::fs::create_dir_all(child_marker.parent().unwrap()).unwrap();
     #[cfg(target_os = "macos")]
     let child_refusal = crate::test_util::sandbox_host::unavailable_worktree_sandbox();
