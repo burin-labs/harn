@@ -17,23 +17,26 @@ fi
 
 metadata="$script_dir/release_metadata.harn"
 current="$($harn_bin run "$metadata" -- current --root "$root")"
-# The published release is the authority for what comes next when the caller
-# knows it. Deriving the target from the workspace assumes the release pull
-# request already merged, which a hand-cut tag never does, and the derivation
-# then refuses on the old development identity and leaves main stranded on it.
+# The published release is the authority for what comes next: it may come from any
+# older main commit, so the workspace alone cannot say.
 released="${RELEASE_PUBLISHED_VERSION:-}"
-if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
-  target="$($harn_bin run "$metadata" -- development-target --root "$root")"
-elif [[ -n "$released" ]]; then
-  target="$($harn_bin run "$metadata" -- development-target --root "$root" --released "$released")"
-else
-  target="$($harn_bin run "$metadata" -- development-target --root "$root")"
+if [[ -z "$released" ]]; then
+  echo "error: RELEASE_PUBLISHED_VERSION must name the published release" >&2
+  exit 1
 fi
-
 if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
+  target="$($harn_bin run "$metadata" -- development-target --root "$root")"
   "$harn_bin" run "$metadata" -- retire --root "$root" --version "$current" --released "$released"
 else
-  "$harn_bin" run "$metadata" -- develop --root "$root"
+  target="$($harn_bin run "$metadata" -- development-target --root "$root" --released "$released")"
+  "$harn_bin" run "$metadata" -- develop --root "$root" --released "$released"
+  # Record exactly what the release published: the fragments in its tag's tree.
+  # Fragments landed on main since then belong to the next release.
+  published_fragments="$(mktemp -d)"
+  trap 'rm -rf "$published_fragments"' EXIT
+  git archive "v${released#v}" changelog.d | tar -x -C "$published_fragments"
+  "$harn_bin" run --no-sandbox "$script_dir/release_changelog_fold.harn" -- fold-published \
+    --root "$root" --version "${released#v}" --fragments-root "$published_fragments"
 fi
 
 # Cargo owns Cargo.lock. The first resolution applies the manifest rewrite;
@@ -48,7 +51,7 @@ cargo metadata --format-version=1 --locked >/dev/null
 
 actual="$($harn_bin run "$metadata" -- current --root "$root")"
 if [[ "$actual" != "$target" ]]; then
-  echo "error: expected development version $target, got $actual" >&2
+  echo "error: expected next version $target, got $actual" >&2
   exit 1
 fi
-echo "Development version updated: $current -> $target"
+echo "Next version declared: $current -> $target"
