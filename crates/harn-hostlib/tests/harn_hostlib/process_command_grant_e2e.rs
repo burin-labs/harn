@@ -740,6 +740,7 @@ fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
     const PROJECT_ROOT: &str = "/harn-probe/session-project-root";
     const MODE: &str = "harn-probe-literal-mode";
     const TOKEN: &str = "harn-probe-session-credential";
+    const RENAMED: &str = "harn-probe-renamed-credential";
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
     let env_grant = |var: &str| GrantSpec {
@@ -760,6 +761,16 @@ fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
         for_command: None,
         expose_to: Default::default(),
     };
+    // Exposed under a plain name, the source variable still names a credential.
+    let renamed = GrantSpec {
+        name: "probe_renamed".to_string(),
+        source: GrantSourceSpec::Env {
+            var: "PROBE_UPSTREAM_TOKEN".to_string(),
+        },
+        expose_as_env: Some("PROBE_UPSTREAM".to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
     // The name says nothing about a credential: the source alone decides.
     let stored = GrantSpec {
         name: "probe_stored".to_string(),
@@ -777,11 +788,13 @@ fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
             env_grant("PROBE_PROJECT_ROOT"),
             env_grant("PROBE_SESSION_TOKEN"),
             literal,
+            renamed,
             stored,
         ],
         &|name| match name {
             "PROBE_PROJECT_ROOT" => Some(PROJECT_ROOT.to_string()),
             "PROBE_SESSION_TOKEN" => Some(TOKEN.to_string()),
+            "PROBE_UPSTREAM_TOKEN" => Some(RENAMED.to_string()),
             _ => std::env::var(name).ok(),
         },
     )
@@ -794,6 +807,15 @@ fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
     let out = fixture.argv(&["printenv", "PROBE_SESSION_TOKEN"], &[]);
     assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
     assert!(!out.contains(TOKEN), "a credential was printed: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_UPSTREAM"], &[]);
+    assert!(
+        out.contains("[redacted]"),
+        "the rename never arrived: {out}"
+    );
+    assert!(
+        !out.contains(RENAMED),
+        "a renamed credential was printed: {out}"
+    );
     let out = fixture.argv(&["printenv", "PROBE_STORED"], &[]);
     assert!(
         out.contains("[redacted]"),
