@@ -1248,7 +1248,6 @@ impl AgentEventSink for AcpAgentEventSink {
             }
             event @ (AgentEvent::PurposeLabel { .. }
             | AgentEvent::ProgressReported { .. }
-            | AgentEvent::CompassRoutingDecision { .. }
             | AgentEvent::AgentScratchpadReorganization { .. }
             | AgentEvent::FeedbackInjected { .. }
             | AgentEvent::BudgetExhausted { .. }

@@ -1,8 +1,8 @@
 //! Canonical file-language registry.
 //!
 //! One table answers "what language is this path" for every Harn surface:
-//! the code index, the project scanner, the file outline tool, the project
-//! fingerprint, and the edit compass. Each [`LanguageSpec`] row carries the
+//! the code index, the project scanner, the file outline tool, and the project
+//! fingerprint. Each [`LanguageSpec`] row carries the
 //! canonical wire name, accepted aliases, file extensions, exact file names
 //! (`Dockerfile`, `Makefile`), a coarse [`LanguageClass`], and the
 //! structural (tree-sitter) edit support the host library provides.
