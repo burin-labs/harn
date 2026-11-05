@@ -393,10 +393,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
         "reader": "__invoke_llm_with_autocontinue"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -1287,10 +1283,6 @@
         "reader": "__detect_native_fallback"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
         "reader": "agent_direct_llm_options"
       },
@@ -1411,10 +1403,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "reader": "__parse_feedback_has_non_structural_tools"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_projection.harn",

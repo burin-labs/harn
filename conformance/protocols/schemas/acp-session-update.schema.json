@@ -208,7 +208,6 @@
                 "session_closed",
                 "session_health",
                 "step_judge_decision",
-                "structural_validator_decision",
                 "subagent_join",
                 "subagent_stop",
                 "tool_batch_disposition",

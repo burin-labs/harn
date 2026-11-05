@@ -449,24 +449,6 @@ pub enum AgentEvent {
         provider: String,
         model: String,
     },
-    /// Deterministic pre-dispatch critique emitted by the structural
-    /// validator middleware. Fires before any LLM-backed judge so hosts
-    /// can distinguish "$0 structural retry" from semantic critique.
-    StructuralValidatorDecision {
-        session_id: String,
-        iteration: usize,
-        rule: String,
-        diagnostic: String,
-        recommended_action: String,
-        vetoed: bool,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        skipped: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-        on_failure: String,
-        attempts: usize,
-        max_attempts: usize,
-    },
     ScopeClassifierVerdict {
         session_id: String,
         iteration: usize,

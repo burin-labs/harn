@@ -41,7 +41,6 @@ impl AgentEvent {
             | Self::JudgeStarted { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
-            | Self::StructuralValidatorDecision { session_id, .. }
             | Self::ScopeClassifierVerdict { session_id, .. }
             | Self::InputGuardrailVerdict { session_id, .. }
             | Self::MissingToolCallVerdict { session_id, .. }

@@ -78,15 +78,6 @@ Requires an OpenRouter API key in the environment or `HARN_EXT_EXPERIMENT_ENV_FI
 
 # Just one cell (for debugging)
 ./experiments/step-judge/run.sh --cell asymmetric --replicates 1
-
-# Validator-vs-judge ablation against the pinned v3 native summaries
-./experiments/step-judge/run.sh \
-  --replicates 1 \
-  --no-probes \
-  --step-judge off \
-  --structural-validator on \
-  --baseline-results-dir experiments/step-judge/results/<baseline-timestamp> \
-  --output-dir experiments/step-judge/results/<validator-timestamp>
 ```
 
 Outputs land under `experiments/step-judge/results/<timestamp>/`,
@@ -107,8 +98,7 @@ sandbox from inside an existing one.
 
 - `run.harn` invokes `harn eval coding-agent` once
   per cell × replicate, with the right `--step-judge`,
-  `--structural-validator`, `--tool-format`, `--model`, and
-  `--run-label` flags.
+  `--tool-format`, `--model`, and `--run-label` flags.
 - `run.sh` starts the Harn driver through the repository's binary resolver.
 - `summary.harn` checks that each report contains all expected fixture outcomes.
 - `aggregate.harn` — reads each invocation's `summary.json`, groups

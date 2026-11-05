@@ -142,10 +142,6 @@
         "reader": "__tool_envelope"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
         "reader": "__with_mcp_tool_ceiling"
       },

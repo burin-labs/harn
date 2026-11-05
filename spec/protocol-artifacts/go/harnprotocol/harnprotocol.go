@@ -217,7 +217,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"session_closed",
 	"session_health",
 	"step_judge_decision",
-	"structural_validator_decision",
 	"subagent_join",
 	"subagent_stop",
 	"tool_batch_disposition",
@@ -2731,19 +2730,6 @@ type HarnAgentEventStepJudgeDecision struct {
 	CostUsd           float64 `json:"costUsd"`
 	Provider          string  `json:"provider"`
 	Model             string  `json:"model"`
-}
-
-type HarnAgentEventStructuralValidatorDecision struct {
-	Iteration         uint64  `json:"iteration"`
-	Rule              string  `json:"rule"`
-	Diagnostic        string  `json:"diagnostic"`
-	RecommendedAction string  `json:"recommendedAction"`
-	Vetoed            bool    `json:"vetoed"`
-	Skipped           bool    `json:"skipped"`
-	Reason            *string `json:"reason"`
-	OnFailure         string  `json:"onFailure"`
-	Attempts          uint64  `json:"attempts"`
-	MaxAttempts       uint64  `json:"maxAttempts"`
 }
 
 type HarnAgentEventSubagentJoin struct {
