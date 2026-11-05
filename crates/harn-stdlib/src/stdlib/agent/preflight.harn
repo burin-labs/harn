@@ -622,8 +622,7 @@ fn __agent_push_system_fragment(fragments: list, id: string, body: string?) {
  * `context_profile.prompt_fragments` harness.runtime.channel(#2631) — the write-side twin of
  * `agent_build_turn_system_fragments`, preserving any profile and fragments the
  * caller already set. A nil `fragment` is a no-op that still normalizes a
- * non-dict `agent_options` to `{}`. Shared by the fold family (`with_goal`,
- * `with_overlay`) so the append shape lives in exactly one place.
+ * non-dict `agent_options` to `{}`. Shared by the fold family (`with_goal`) so the append shape lives in exactly one place.
  *
  * @effects: []
  * @errors: []

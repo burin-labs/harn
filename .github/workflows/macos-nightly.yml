@@ -290,8 +290,11 @@ jobs:
       - name: Smoke test harn run
         shell: bash
         run: |
+          harn_bin="${CARGO_TARGET_DIR:-./target}/debug/harn"
+          HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh "$harn_bin"
+          ./scripts/sign_local_macos.sh --verify "$harn_bin"
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          "${CARGO_TARGET_DIR:-./target}/debug/harn" run smoke.harn
+          test "$("$harn_bin" run smoke.harn)" = ok
       # Release certification selects a reviewed main ancestor. The wall-clock
       # ratchet re-measures up to
       # three rounds and judges the best, which is what lets it run on a

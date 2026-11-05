@@ -376,8 +376,9 @@ hook_ensure_harn() {
   hook_export_cargo_target_dir
   resolved_harn=$(hook_build_harn_bin) || return $?
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
-    HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2 || return $?
+    HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh "$resolved_harn" >&2 || return $?
     HARN_BIN='' ./scripts/harn_bin.sh --record-receipt >&2 || return $?
+    ./scripts/sign_local_macos.sh --verify "$resolved_harn" >&2 || return $?
   fi
   printf '%s\n' "$resolved_harn"
 }

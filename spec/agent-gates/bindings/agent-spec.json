@@ -370,10 +370,6 @@
         "name": "opts"
       },
       {
-        "function": "__completion_claim_requirement_ids",
-        "name": "opts"
-      },
-      {
         "function": "__invoke_tool",
         "name": "options"
       },
@@ -551,10 +547,6 @@
       },
       {
         "function": "agent_collapse_duplicate_read_calls",
-        "name": "options"
-      },
-      {
-        "function": "agent_completion_claim_apply_options",
         "name": "options"
       },
       {

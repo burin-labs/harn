@@ -7,11 +7,6 @@ import {
   command_ledger_should_hold,
 } from "std/agent/command_ledger"
 import {
-  agent_completion_claim_disposition,
-  completion_claim_evidence_refs,
-  completion_claim_implicit,
-} from "std/agent/completion_claim"
-import {
   AgentLoopBudget,
   AgentLoopBudgetDecision,
   agent_loop_apply_command,
@@ -294,11 +289,6 @@ pub fn agent_loop_post_turn_transition(
     next.opts,
     context.successful_tools_seen,
   )
-  const completion_claim = agent_completion_claim_disposition(
-    agent_session_messages(harness.agent, session.session_id),
-    context.dispatch,
-    context.turn_opts,
-  )
   // Outcome facts as of this callback; the later snapshot re-reads them after
   // the callback may have settled a reverify.
   const callback_no_net_progress = agent_stall_no_net_progress(
@@ -348,9 +338,6 @@ pub fn agent_loop_post_turn_transition(
       _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
         || context.had_parse_errors,
     }
-  if completion_claim.kind == "valid" {
-    post_turn_opts = post_turn_opts + {_completion_claim: completion_claim.claim}
-  }
   let outcome = __agent_loop_with_llm_render_context(
     harness,
     context.turn_llm_opts,
@@ -366,67 +353,8 @@ pub fn agent_loop_post_turn_transition(
       )
     },
   )
-  let adjudication_opts = context.turn_opts + {_completion_signal: outcome.completion_signal}
-  if completion_claim.kind == "valid" {
-    agent_emit_event(
-      harness.agent,
-      session.session_id,
-      "typed_checkpoint",
-      {
-        schema: "harn.completion_claim_observation.v1",
-        source: "tool",
-        disposition: "valid",
-        requirement_count: len(completion_claim.claim?.requirements ?? []),
-        evidence_ref_count: len(completion_claim_evidence_refs(completion_claim.claim)),
-      },
-    )
-    adjudication_opts = adjudication_opts + {_completion_claim: completion_claim.claim}
-    outcome = outcome
-      + {
-        kind: "break",
-        needs_verify: true,
-        stop_reason: "explicit_completion_claim",
-        turn_end_judge_due: true,
-      }
-  } else if completion_claim.kind == "absent"
-    && context.turn_opts?.completion_tool == true
-    && outcome.kind != "continue" {
-    const implicit_claim = completion_claim_implicit()
-    agent_emit_event(
-      harness.agent,
-      session.session_id,
-      "typed_checkpoint",
-      {
-        schema: "harn.completion_claim_observation.v1",
-        source: "implicit",
-        disposition: "valid",
-        requirement_count: 0,
-        evidence_ref_count: 0,
-      },
-    )
-    adjudication_opts = adjudication_opts + {_completion_claim: implicit_claim}
-  } else if completion_claim.kind == "invalid" {
-    agent_emit_event(
-      harness.agent,
-      session.session_id,
-      "typed_checkpoint",
-      {
-        schema: "harn.completion_claim_observation.v1",
-        source: "tool",
-        disposition: "invalid",
-        reason: completion_claim.reason ?? "completion_claim_invalid",
-      },
-    )
-    agent_session_inject_feedback(
-      harness.agent,
-      session.session_id,
-      completion_claim.reason ?? "completion_claim_invalid",
-      completion_claim.feedback ?? "The completion claim is invalid.",
-      1,
-    )
-    outcome = outcome + {kind: "continue", needs_verify: false}
-  }
-  const verified_completion = if outcome.kind == "continue" && completion_claim.kind != "invalid"
+  const adjudication_opts = context.turn_opts + {_completion_signal: outcome.completion_signal}
+  const verified_completion = if outcome.kind == "continue"
     && context.bridge_step_delivered == 0
     && len(turn_rejected) == 0
     && trim(context.visible_text) == ""
@@ -469,7 +397,6 @@ pub fn agent_loop_post_turn_transition(
   let verdict_record = nil
   let post_edit_reverify_confirmed = false
   if should_continue
-    && completion_claim.kind != "invalid"
     && reverify_mandated
     && next.verify_attempts < max_verify_attempts {
     const reverdict = agent_evaluate_completion(
@@ -637,19 +564,7 @@ pub fn agent_loop_post_turn_transition(
       should_continue = true
     }
     if !should_continue {
-      // An accepted explicit claim is a clean completion, not an unattributed
-      // empty status for session finalization to infer later. Seal it here,
-      // where the claim and its judge verdict are both still typed, so terminal
-      // projection and wrap-up eligibility read the same decision.
-      const settled_status = if completion_claim.kind == "valid" {
-        "done"
-      } else {
-        next.final_status
-      }
-      return {
-        action: "break",
-        state: next + {final_status: settled_status, stop_reason: outcome.stop_reason},
-      }
+      return {action: "break", state: next + {stop_reason: outcome.stop_reason}}
     }
   }
   if should_continue && post_edit_reverify_confirmed && context.iteration >= next.current_max {

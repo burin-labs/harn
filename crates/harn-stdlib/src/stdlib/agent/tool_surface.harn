@@ -2,7 +2,7 @@
 // after a turn, and project that decision onto a registry and a policy.
 //
 // The post-turn seam calls in with the turn's attempted tools; `std/agent/stance`
-// and `std/agent/lanes` reuse the registry/policy projections directly.
+// reuses the registry/policy projections directly.
 import "std/agent/loop_result_status"
 import { agent_session_record_skill_event } from "std/agent/state"
 

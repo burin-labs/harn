@@ -46,7 +46,6 @@ struct TranscriptCompactOptions {
     custom_compactor: Option<VmValue>,
     policy: CompactionPolicy,
     recap_budget_bytes: usize,
-    classification: Option<Box<harn_vm::orchestration::ClassificationConfig>>,
 }
 
 async fn compact_transcript_impl(
@@ -69,17 +68,12 @@ async fn compact_transcript_impl(
         },
         keep_last: parsed_options.keep_last,
         compact_strategy: parsed_options.strategy.clone(),
-        hard_limit_strategy: if parsed_options.strategy == CompactStrategy::Classify {
-            CompactStrategy::Llm
-        } else {
-            parsed_options.strategy.clone()
-        },
+        hard_limit_strategy: parsed_options.strategy.clone(),
         summarize_prompt: parsed_options.summarize_prompt.clone(),
         custom_compactor: parsed_options.custom_compactor.clone(),
         policy: parsed_options.policy.clone(),
         policy_strategy: compact_strategy_name(&parsed_options.strategy).to_string(),
         recap_budget_bytes: parsed_options.recap_budget_bytes,
-        classification: parsed_options.classification.clone(),
         ..Default::default()
     };
     if let Some(target_tokens) = parsed_options.target_tokens {
@@ -100,15 +94,11 @@ async fn compact_transcript_impl(
         }
     }
 
-    let llm_opts = if matches!(
-        config.compact_strategy,
-        CompactStrategy::Llm | CompactStrategy::Classify
-    ) {
+    let llm_opts = if matches!(config.compact_strategy, CompactStrategy::Llm) {
         let projected = options
             .map(|options| {
                 let mut llm_options = options.clone();
                 llm_options.remove("strategy");
-                llm_options.remove("classify");
                 project_llm_options(&llm_options)
             })
             .transpose()?
@@ -192,11 +182,6 @@ fn parse_options(
             "transcript_compact",
         )?,
         recap_budget_bytes: harn_vm::orchestration::AutoCompactConfig::default().recap_budget_bytes,
-        classification: options
-            .and_then(|options| options.get("classify"))
-            .map(harn_vm::orchestration::ClassificationConfig::from_value)
-            .transpose()?
-            .map(Box::new),
     };
     if let Some(value) = options
         .and_then(|dict| {
@@ -271,14 +256,9 @@ fn parse_options(
             "transcript_compact: custom_compactor is required with strategy 'custom'".into(),
         ));
     }
-    if parsed.summarize_prompt.is_some()
-        && !matches!(
-            parsed.strategy,
-            CompactStrategy::Llm | CompactStrategy::Classify
-        )
-    {
+    if parsed.summarize_prompt.is_some() && !matches!(parsed.strategy, CompactStrategy::Llm) {
         return Err(VmError::Runtime(
-            "transcript_compact: summarize_prompt requires strategy 'llm' or 'classify'".into(),
+            "transcript_compact: summarize_prompt requires strategy 'llm'".into(),
         ));
     }
     Ok(parsed)

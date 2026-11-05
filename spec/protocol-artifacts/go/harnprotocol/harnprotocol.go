@@ -1584,7 +1584,6 @@ type ACPTranscriptCompactedUpdateMetaHarn struct {
 	CompactionPolicy        json.RawMessage `json:"compactionPolicy"`
 	Recap                   json.RawMessage `json:"recap"`
 	SourceMeasurement       json.RawMessage `json:"sourceMeasurement"`
-	Classification          json.RawMessage `json:"classification"`
 	Replayed                *bool           `json:"replayed,omitempty"`
 }
 
