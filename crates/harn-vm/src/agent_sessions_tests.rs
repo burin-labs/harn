@@ -55,8 +55,6 @@ mod linked_observation_tests;
 mod mount_tests;
 #[path = "agent_sessions/physical_usage_tests.rs"]
 mod physical_usage;
-#[path = "agent_sessions_tests/scratchpad_tests.rs"]
-mod scratchpad_tests;
 #[path = "agent_sessions/tool_channel_admission_tests.rs"]
 mod tool_channel_admission_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
@@ -69,30 +67,6 @@ fn make_msg(role: &str, content: &str) -> VmValue {
     m.put_str("role", role);
     m.put_str("content", content);
     VmValue::dict(m)
-}
-
-fn scratchpad_value(note: &str) -> VmValue {
-    VmValue::dict([
-        (
-            "schema".to_string(),
-            VmValue::string("harn.agent_scratchpad.v1"),
-        ),
-        (
-            "facts".to_string(),
-            VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
-                crate::value::DictMap::from_iter([
-                    ("text".to_string(), VmValue::string(note.to_string())),
-                    ("source_ref".to_string(), VmValue::string("turn:1")),
-                ]),
-            ))]),
-        ),
-        (
-            "refs".to_string(),
-            VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
-                crate::value::DictMap::from_iter([("id".to_string(), VmValue::string("turn:1"))]),
-            ))]),
-        ),
-    ])
 }
 
 fn message_count(id: &str) -> usize {

@@ -251,16 +251,6 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
-    /// Emitted after an agent scratchpad reorganization attempt. The
-    /// scratchpad body itself stays in session state; this event carries
-    /// status and count/error metadata so live UIs and eval harnesses can
-    /// audit whether reorganization helped or damaged the working set.
-    AgentScratchpadReorganization {
-        session_id: String,
-        iteration: usize,
-        status: String,
-        details: serde_json::Value,
-    },
     /// A renderable, declarative artifact spec emitted by an agent. Harn
     /// validates the payload and transports it; host surfaces own rendering
     /// and may fall back to the plain-text representation.

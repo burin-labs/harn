@@ -60,7 +60,6 @@ pub import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-pub import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 pub import { agent_skills_match } from "std/agent/skills"
 pub import {
   agent_stall_apply_result,

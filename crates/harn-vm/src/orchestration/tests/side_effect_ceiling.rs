@@ -451,7 +451,7 @@ fn agent_session_control_plane_survives_a_read_only_ceiling() {
     pop_execution_policy();
 
     assert!(
-        results.len() >= 40,
+        results.len() >= 39,
         "the control-plane census collapsed to {} entries; a census that measured \
          nothing would pass this test vacuously",
         results.len()
@@ -649,7 +649,7 @@ fn the_marker_does_not_bypass_a_restricted_capability_ceiling() {
 fn every_agent_session_control_plane_write_declares_the_marker() {
     let census = agent_session_control_plane_writes();
     assert!(
-        census.len() >= 40,
+        census.len() >= 39,
         "the control-plane census collapsed to {} entries; it must not read empty \
          and pass vacuously",
         census.len()

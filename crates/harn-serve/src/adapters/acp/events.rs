@@ -1300,7 +1300,6 @@ impl AgentEventSink for AcpAgentEventSink {
             }
             event @ (AgentEvent::PurposeLabel { .. }
             | AgentEvent::ProgressReported { .. }
-            | AgentEvent::AgentScratchpadReorganization { .. }
             | AgentEvent::FeedbackInjected { .. }
             | AgentEvent::BudgetExhausted { .. }
             | AgentEvent::BudgetCircuitBreaker { .. }

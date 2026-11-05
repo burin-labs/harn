@@ -31,7 +31,6 @@ impl AgentEvent {
             | Self::OrchestrationDecision { session_id, .. }
             | Self::ProgressReported { session_id, .. }
             | Self::PurposeLabel { session_id, .. }
-            | Self::AgentScratchpadReorganization { session_id, .. }
             | Self::Artifact { session_id, .. }
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }

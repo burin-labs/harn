@@ -85,7 +85,6 @@ public enum HarnProtocolConstants {
     ]
     public static let harnAgentEventKinds: [String] = [
         "agent_loop_stall_warning",
-        "agent_scratchpad_reorganization",
         "anchor_changed",
         "boundary_failure",
         "budget_circuit_breaker",
@@ -5659,12 +5658,6 @@ public struct HarnAgentsEventProjection: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnAgentEventAgentScratchpadReorganization: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var status: String
-    public var details: HarnACPValue
-}
-
 public struct HarnAgentEventAnchorChanged: Codable, Sendable, Equatable {
     public var previous: HarnACPValue
     public var current: HarnACPValue
@@ -7083,7 +7076,6 @@ public struct HarnAgentEventTypedCheckpoint: Codable, Sendable, Equatable {
 /// The typed body of one `_harn/agentEvent` notification.
 public enum HarnAgentEventPayload: Sendable, Equatable {
     case agentLoopStallWarning([String: HarnACPValue])
-    case agentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization)
     case anchorChanged(HarnAgentEventAnchorChanged)
     case boundaryFailure(HarnAgentEventBoundaryFailure)
     case budgetCircuitBreaker(HarnAgentEventBudgetCircuitBreaker)
@@ -7151,7 +7143,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
 public struct HarnAgentEventParams: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case agentLoopStallWarning = "agent_loop_stall_warning"
-        case agentScratchpadReorganization = "agent_scratchpad_reorganization"
         case anchorChanged = "anchor_changed"
         case boundaryFailure = "boundary_failure"
         case budgetCircuitBreaker = "budget_circuit_breaker"
@@ -7214,7 +7205,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
 
         public static let allCases: [Self] = [
             "agent_loop_stall_warning",
-            "agent_scratchpad_reorganization",
             "anchor_changed",
             "boundary_failure",
             "budget_circuit_breaker",
@@ -7296,7 +7286,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         self.fields = fields
         switch kind {
         case .agentLoopStallWarning: self.payload = .agentLoopStallWarning(fields)
-        case .agentScratchpadReorganization: self.payload = .agentScratchpadReorganization(try container.decode(HarnAgentEventAgentScratchpadReorganization.self))
         case .anchorChanged: self.payload = .anchorChanged(try container.decode(HarnAgentEventAnchorChanged.self))
         case .boundaryFailure: self.payload = .boundaryFailure(try container.decode(HarnAgentEventBoundaryFailure.self))
         case .budgetCircuitBreaker: self.payload = .budgetCircuitBreaker(try container.decode(HarnAgentEventBudgetCircuitBreaker.self))

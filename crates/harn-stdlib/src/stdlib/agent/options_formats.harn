@@ -8,7 +8,6 @@ import "std/agent/options_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
-import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 

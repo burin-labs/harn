@@ -166,7 +166,6 @@ type HarnAgentEventKind string
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
 var HarnAgentEventKinds = []HarnAgentEventKind{
 	"agent_loop_stall_warning",
-	"agent_scratchpad_reorganization",
 	"anchor_changed",
 	"boundary_failure",
 	"budget_circuit_breaker",
@@ -2318,12 +2317,6 @@ type HarnAgentsEventProjection struct {
 	Payload   JSONObject `json:"payload"`
 	SessionID *string    `json:"session_id,omitempty"`
 	TaskID    *string    `json:"task_id,omitempty"`
-}
-
-type HarnAgentEventAgentScratchpadReorganization struct {
-	Iteration uint64          `json:"iteration"`
-	Status    string          `json:"status"`
-	Details   json.RawMessage `json:"details"`
 }
 
 type HarnAgentEventAnchorChanged struct {

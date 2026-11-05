@@ -365,7 +365,6 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
     "agent_loop_stall_warning",
-    "agent_scratchpad_reorganization",
     "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
@@ -2527,12 +2526,6 @@ class HarnAgentsEventProjection(_HarnDataclass):
     payload: Dict[str, JsonValue]
     session_id: Optional[str] = None
     task_id: Optional[str] = None
-
-@dataclass
-class HarnAgentEventAgentScratchpadReorganization(_HarnDataclass):
-    iteration: int
-    status: str
-    details: JsonValue
 
 @dataclass
 class HarnAgentEventAnchorChanged(_HarnDataclass):

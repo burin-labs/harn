@@ -107,7 +107,6 @@
     "spec/agent-gates/agent-completion-policy.json",
     "spec/agent-gates/nested-policy-options.json",
     "spec/agent-gates/runtime-environment.json",
-    "spec/agent-gates/scratchpad-options.json",
     "spec/agent-gates/completion-prompt-options.json",
     "spec/agent-gates/step-judge-options.json",
     "spec/agent-gates/agent-budget.json",
