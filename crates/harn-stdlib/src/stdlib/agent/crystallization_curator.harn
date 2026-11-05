@@ -973,13 +973,47 @@ fn cc_session_passed_command(evidence: list, command: string) -> bool {
  * session that ran it shows future sessions pay nothing new for it.
  */
 fn cc_required_declared_checks(declared: list, evidence: list) -> list {
+  const broken = cc_steps_that_only_failed(evidence)
   return declared.filter(
     { check ->
-      check.intent == "test"
-        || (check.intent == "verify" && cc_session_passed_command(evidence, check.command))
+      (check.intent == "test"
+        || (check.intent == "verify" && cc_session_passed_command(evidence, check.command)))
+        && len(cc_broken_steps(check.command, broken, check.cwd)) == 0
     },
   )
     .to_list()
+}
+
+/**
+ * Steps the window saw fail on their own and never saw pass. A failed entry of
+ * several steps does not say which one failed, so only a single step counts.
+ */
+fn cc_steps_that_only_failed(evidence: list) -> list {
+  let failed = []
+  let passed = []
+  for item in evidence {
+    for entry in item?.command_ledger ?? [] {
+      const plan = command_sequence_plan(to_string(entry?.command ?? ""))
+      if plan.status != "measured" {
+        continue
+      }
+      if entry?.ok == true {
+        passed = passed + plan.steps
+      } else if entry?.ok == false && len(plan.steps) == 1 {
+        failed = failed + plan.steps
+      }
+    }
+  }
+  return failed.filter({ step -> !passed.any({ known -> cc_same_step(known, step) }) }).to_list()
+}
+
+/** The steps of a command that the window only ever saw fail. */
+fn cc_broken_steps(command: string, broken: list, cwd: any = nil) -> list {
+  const plan = command_sequence_plan(command, cwd)
+  if plan.status != "measured" {
+    return []
+  }
+  return plan.steps.filter({ step -> broken.any({ known -> cc_same_step(step, known) }) }).to_list()
 }
 
 /**
@@ -1021,6 +1055,11 @@ fn cc_prepare_valid_proposals(
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
       throw "submit_crystallization_batch: `verify_command` must run a declared test check, or a verify check a session already passed, word for word from its cwd, not a broader command. A step with a glob or other shell syntax cannot be measured. Declared: "
         + json_stringify(required)
+    }
+    const broken_steps = cc_broken_steps(verify, cc_steps_that_only_failed(evidence))
+    if len(broken_steps) > 0 {
+      throw "submit_crystallization_batch: `verify_command` includes a step the sessions saw fail and never saw pass, so the tool would fail the same way. Use steps a session ran successfully. Failing steps: "
+        + json_stringify(broken_steps)
     }
     if verify != "" && cc_only_repeats_declared_checks(verify, declared) {
       throw "submit_crystallization_batch: `verify_command` only repeats declared checks, which later sessions already run. Add the steps it needs first, or submit no proposal."

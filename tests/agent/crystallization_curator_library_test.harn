@@ -383,6 +383,55 @@ pipeline test_semantic_whitespace_in_proposal_duplicates(harness: Harness) {
   }
 }
 
+/** A declared check sessions only saw fail cannot be required, and a tool cannot include it. */
+pipeline test_curator_refuses_a_step_that_only_ever_failed(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const options = {
+        declared_checks: [{intent: "test", command: "make check", cwd: ""}],
+        validator: { _source -> {outcome: "pass"} },
+      }
+      const broken = options
+        + {
+        evidence: [
+          run_card("run-one", "session-one", [failed("make check"), passed("venv/bin/pytest")]),
+          run_card("run-two", "session-two", [failed("make check"), passed("venv/bin/pytest")]),
+        ],
+      }
+      const refused = curate_with(
+        harness,
+        root,
+        submit_one(verify_tool("make check && venv/bin/pytest")),
+        broken,
+      )
+      assert_eq(refused.proposal_count ?? 0, 0, "the failing step is refused")
+      const accepted = curate_with(
+        harness,
+        path_join(root, "accepted"),
+        submit_one(verify_tool("make gen && venv/bin/pytest")),
+        broken,
+      )
+      assert_eq(accepted.proposal_count, 1, "no declared check is required once it only failed")
+      const passing = options
+        + {
+        evidence: [
+          run_card("run-one", "session-one", [failed("make check"), passed("make check")]),
+          run_card("run-two", "session-two", [passed("make check")]),
+        ],
+      }
+      const still_required = curate_with(
+        harness,
+        path_join(root, "required"),
+        submit_one(verify_tool("make gen && venv/bin/pytest")),
+        passing,
+      )
+      assert_eq(still_required.proposal_count ?? 0, 0, "a check that passes here stays required")
+      return nil
+    },
+  )
+}
+
 /** Printed commands and shell control flow cannot substitute for a declared check. */
 pipeline test_curator_rejects_printed_checks_and_unknown_shell_context(harness: Harness) {
   with_temp_dir(
