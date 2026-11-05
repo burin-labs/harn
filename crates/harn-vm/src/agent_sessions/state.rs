@@ -27,8 +27,6 @@ impl SessionState {
             last_withdrawal_reason: None,
             workspace_policy: WorkspacePolicy::default(),
             workspace_anchor: None,
-            scratchpad: None,
-            scratchpad_version: 0,
             goal: SessionGoalState::default(),
             goal_pending_fork: false,
             transcript_budget_policy: default_transcript_budget_policy(),

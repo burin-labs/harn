@@ -31,7 +31,6 @@ impl AgentEvent {
             | Self::OrchestrationDecision { session_id, .. }
             | Self::ProgressReported { session_id, .. }
             | Self::PurposeLabel { session_id, .. }
-            | Self::AgentScratchpadReorganization { session_id, .. }
             | Self::Artifact { session_id, .. }
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }
@@ -42,7 +41,6 @@ impl AgentEvent {
             | Self::JudgeStarted { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
-            | Self::StructuralValidatorDecision { session_id, .. }
             | Self::MissingToolCallVerdict { session_id, .. }
             | Self::RepairOutputContractApplied { session_id, .. }
             | Self::RequireSuccessfulToolsViolation { session_id, .. }

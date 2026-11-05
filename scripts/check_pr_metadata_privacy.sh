@@ -23,10 +23,14 @@ touch "$sources"
 event_kind=""
 base_sha=""
 head_sha=""
+# A pull-request event always carries `body`, as null when the description is
+# empty. An absent key means the event was not the one GitHub sends, so it is
+# unmeasured rather than an empty body.
 if jq -e '
   (.pull_request | type) == "object"
   and (.pull_request.title | type) == "string"
   and (.pull_request.title | length) > 0
+  and (.pull_request | has("body"))
   and ((.pull_request.body == null) or ((.pull_request.body | type) == "string"))
   and (.pull_request.base.sha | strings | test("^[0-9a-fA-F]{40,64}$"))
   and (.pull_request.head.sha | strings | test("^[0-9a-fA-F]{40,64}$"))

@@ -25,13 +25,13 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
-# count   28  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
+# count   26  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   16  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   22  crates/harn-stdlib/src/stdlib/agent/options_public.harn
-# count   44  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
+# count   43  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/pins.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/postturn.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/preflight.harn
@@ -44,7 +44,6 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/result_text.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/resume_by.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/retry.harn
-# count    5  crates/harn-stdlib/src/stdlib/agent/scratchpad.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/sitrep.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/skills.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn
@@ -90,7 +89,6 @@
 # count    3  crates/harn-stdlib/src/stdlib/llm/refine.harn
 # count    2  crates/harn-stdlib/src/stdlib/llm/resilience.harn
 # count   18  crates/harn-stdlib/src/stdlib/llm/safe.harn
-# count    1  crates/harn-stdlib/src/stdlib/llm/structural_validator.harn
 # count    3  crates/harn-stdlib/src/stdlib/llm/tool_binder.harn
 # count   17  crates/harn-stdlib/src/stdlib/llm/tool_middleware.harn
 # count    6  crates/harn-stdlib/src/stdlib/llm/tool_telemetry.harn
@@ -282,9 +280,7 @@ crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__native_fallback_feed
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_diagnostics
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_protocol_violations
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_tool_annotations
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__run_structural_validator
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__strip_internal_verdict_json
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__structural_validator_pass_result
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__tool_envelope
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__tool_registry_entry
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__tool_resource_annotations
@@ -398,7 +394,6 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_optional
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_prefetch_next_turn
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_removed_agent_loop_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_string_list
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_structural_validator
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_terminal_callback
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_tool_caller
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_tool_surface_mode
@@ -479,11 +474,6 @@ crates/harn-stdlib/src/stdlib/agent/required_tools.harn::agent_required_tools_in
 crates/harn-stdlib/src/stdlib/agent/result_text.harn::workflow_result_text
 crates/harn-stdlib/src/stdlib/agent/resume_by.harn::ResumeBy
 crates/harn-stdlib/src/stdlib/agent/retry.harn::agent_apply_default_retry
-crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_init
-crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_options
-crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_recitation_fragment
-crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_reorganize
-crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_reorganize_if_due
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep_append
 crates/harn-stdlib/src/stdlib/agent/skills.harn::agent_skills_match
@@ -725,7 +715,6 @@ crates/harn-stdlib/src/stdlib/llm/safe.harn::structured_envelope_or_default
 crates/harn-stdlib/src/stdlib/llm/safe.harn::structured_min_max_tokens
 crates/harn-stdlib/src/stdlib/llm/safe.harn::verdict_normalize
 crates/harn-stdlib/src/stdlib/llm/safe.harn::with_case_insensitive_keys
-crates/harn-stdlib/src/stdlib/llm/structural_validator.harn::with_structural_validator
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::natural_language_executor_middleware
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::natural_language_executor_schema_transform
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::with_natural_language_executor

@@ -262,23 +262,6 @@ schemas and validators for the normalized payload/event/config shapes:
 `agent_progress_tool_config_schema`, their paired `*_report` / `*_value`
 helpers, and `agent_progress_tool_config_normalize` for defaulted config.
 
-#### Agent scratchpad
-
-`agent_loop(..., {scratchpad: true})` initializes a session-local
-`harn.agent_scratchpad.v1` value with `goals`, `open_items`, `facts`, and
-`refs`. The current scratchpad is recited as a prompt-tail fragment every turn
-and, by default, reorganized every three continuing turns through a
-structured-output LLM call. Dict form may set `enabled`, `recite`,
-`reorganize_every`, `max_recent_messages`, `schema_retries`, `initial`, and
-`reorganizer`; the reorganizer options may select a different provider/model
-from the worker.
-
-Reorganization is required to keep heavy content by reference. Returned facts
-must cite `source_ref` values present in the current scratchpad or recent
-session messages; a reorganization that invents refs is rejected and the prior
-scratchpad remains active. Successful and failed reorganization attempts emit
-`agent_scratchpad_reorganization` events with status and count metadata.
-
 `agent_loop(harness, prompt, system?, options?)` is the single public loop
 entrypoint for a complete agent request. Its typed `AgentSpec` composes model,
 execution, capability, lifecycle, context, and observability records. The loop

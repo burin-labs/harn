@@ -365,7 +365,6 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
     "agent_loop_stall_warning",
-    "agent_scratchpad_reorganization",
     "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
@@ -415,7 +414,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "session_closed",
     "session_health",
     "step_judge_decision",
-    "structural_validator_decision",
     "subagent_join",
     "subagent_stop",
     "tool_batch_disposition",
@@ -2527,12 +2525,6 @@ class HarnAgentsEventProjection(_HarnDataclass):
     task_id: Optional[str] = None
 
 @dataclass
-class HarnAgentEventAgentScratchpadReorganization(_HarnDataclass):
-    iteration: int
-    status: str
-    details: JsonValue
-
-@dataclass
 class HarnAgentEventAnchorChanged(_HarnDataclass):
     previous: JsonValue
     current: JsonValue
@@ -2920,19 +2912,6 @@ class HarnAgentEventStepJudgeDecision(_HarnDataclass):
     costUsd: float
     provider: str
     model: str
-
-@dataclass
-class HarnAgentEventStructuralValidatorDecision(_HarnDataclass):
-    iteration: int
-    rule: str
-    diagnostic: str
-    recommendedAction: str
-    vetoed: bool
-    skipped: bool
-    reason: Optional[str]
-    onFailure: str
-    attempts: int
-    maxAttempts: int
 
 @dataclass
 class HarnAgentEventSubagentJoin(_HarnDataclass):

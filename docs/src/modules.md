@@ -83,7 +83,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`, `std/cha
 `std/slug`, `std/edit`, `std/identity`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/envelope`, `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
-`std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
+`std/agent/fact`, `std/agent/probe`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
@@ -2174,18 +2174,6 @@ Agent progress events for hosts that render live agent status:
 | `agent_progress_tool_config_report(value, apply_defaults?)` | Validate progress-tool config and return a structured schema report |
 | `agent_progress_tool_config_schema()` | Return the schema for progress-tool config dictionaries |
 | `agent_progress_tool_config_value(value, apply_defaults?)` | Validate progress-tool config and return it, throwing on failure |
-
-### std/agent/scratchpad
-
-Live, session-local working memory for `agent_loop`:
-
-| Function | Description |
-|---|---|
-| `agent_scratchpad_options(opts?)` | Normalize the public `agent_loop(harness, ..., {scratchpad})` option |
-| `agent_scratchpad_init(session, opts)` | Initialize the session scratchpad from the task or `scratchpad.initial` |
-| `agent_scratchpad_recitation_fragment(session, opts)` | Return the prompt-tail `_system_fragments` entry that recites the current scratchpad |
-| `agent_scratchpad_reorganize(session, opts, iteration, context?)` | Run the structured reorganization pass, validate source refs, and persist the compacted scratchpad |
-| `agent_scratchpad_reorganize_if_due(session, opts, iteration_index, context?)` | Apply the configured reorganization cadence after a completed turn |
 
 ### std/agent/user
 

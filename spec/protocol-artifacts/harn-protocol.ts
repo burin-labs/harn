@@ -242,7 +242,6 @@ export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSIO
 
 export const HARN_AGENT_EVENT_KINDS = [
   "agent_loop_stall_warning",
-  "agent_scratchpad_reorganization",
   "anchor_changed",
   "boundary_failure",
   "budget_circuit_breaker",
@@ -292,7 +291,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "session_closed",
   "session_health",
   "step_judge_decision",
-  "structural_validator_decision",
   "subagent_join",
   "subagent_stop",
   "tool_batch_disposition",
@@ -2655,12 +2653,6 @@ export interface HarnAgentsEventProjection {
   task_id?: string | null
 }
 
-export interface HarnAgentEventAgentScratchpadReorganization {
-  iteration: number
-  status: string
-  details: ACPValue
-}
-
 export interface HarnAgentEventAnchorChanged {
   previous: ACPValue
   current: ACPValue
@@ -3050,19 +3042,6 @@ export interface HarnAgentEventStepJudgeDecision {
   model: string
 }
 
-export interface HarnAgentEventStructuralValidatorDecision {
-  iteration: number
-  rule: string
-  diagnostic: string
-  recommendedAction: string
-  vetoed: boolean
-  skipped: boolean
-  reason: string | null
-  onFailure: string
-  attempts: number
-  maxAttempts: number
-}
-
 export interface HarnAgentEventSubagentJoin {
   parentSessionId: string
   parentRunId: string
@@ -3130,7 +3109,6 @@ export interface HarnAgentEventTypedCheckpoint {
 /** The params of one `_harn/agentEvent` notification, discriminated by `kind`. */
 export type HarnAgentEvent =
   | ({ sessionId: string; kind: "agent_loop_stall_warning" } & Record<string, ACPValue>)
-  | ({ sessionId: string; kind: "agent_scratchpad_reorganization" } & HarnAgentEventAgentScratchpadReorganization)
   | ({ sessionId: string; kind: "anchor_changed" } & HarnAgentEventAnchorChanged)
   | ({ sessionId: string; kind: "boundary_failure" } & HarnAgentEventBoundaryFailure)
   | ({ sessionId: string; kind: "budget_circuit_breaker" } & HarnAgentEventBudgetCircuitBreaker)
@@ -3180,7 +3158,6 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "session_closed" } & HarnAgentEventSessionClosed)
   | ({ sessionId: string; kind: "session_health" } & Record<string, ACPValue>)
   | ({ sessionId: string; kind: "step_judge_decision" } & HarnAgentEventStepJudgeDecision)
-  | ({ sessionId: string; kind: "structural_validator_decision" } & HarnAgentEventStructuralValidatorDecision)
   | ({ sessionId: string; kind: "subagent_join" } & HarnAgentEventSubagentJoin)
   | ({ sessionId: string; kind: "subagent_stop" } & HarnAgentEventSubagentStop)
   | ({ sessionId: string; kind: "tool_batch_disposition" } & HarnAgentEventToolBatchDisposition)

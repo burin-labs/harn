@@ -1,0 +1,140 @@
+import "../check_required_checks.harn"
+
+const PATH = ".github/workflows/privacy.yml"
+
+fn row(overrides: dict = {}) -> dict {
+  return {
+    context: "Public metadata privacy",
+    ruleset: "main protection",
+    workflow: PATH,
+    job: "scan",
+    events: ["pull_request", "merge_group"],
+    pull_request_types: ["opened", "reopened", "synchronize", "edited"],
+    reason: "Public text is scanned at the merge head.",
+  }
+    + overrides
+}
+
+fn aggregate() -> dict {
+  return {
+    context: "CI status",
+    ruleset: "main protection",
+    workflow: ".github/workflows/ci.yml",
+    job: "ci-status",
+    events: ["pull_request", "merge_group"],
+    reason: "Aggregate.",
+  }
+}
+
+fn workflow(overrides: dict = {}) -> dict {
+  return {
+    name: "Public metadata privacy",
+    on: {
+      pull_request: {branches: ["main"], types: ["opened", "reopened", "synchronize", "edited"]},
+      merge_group: nil,
+    },
+    jobs: {scan: {name: "Public metadata privacy", steps: []}},
+  }
+    + overrides
+}
+
+fn ci() -> dict {
+  return {
+    on: {pull_request: nil, merge_group: nil},
+    jobs: {"ci-status": {name: "CI status", if: "always()", steps: []}},
+  }
+}
+
+fn errors_for(document: dict, record: dict = row()) -> list<string> {
+  let documents: dict = {".github/workflows/ci.yml": ci()}
+  documents[PATH] = document
+  return required_check_errors([aggregate(), record], documents)
+}
+
+fn single_error(errors: list<string>, fragment: string) {
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", fragment))
+}
+
+@test
+pipeline test_matching_registry_and_workflows_pass() {
+  assert_eq(errors_for(workflow()), [])
+}
+
+@test
+pipeline test_a_deleted_workflow_does_not_read_as_required() {
+  const errors = required_check_errors([aggregate(), row()], {".github/workflows/ci.yml": ci()})
+  single_error(errors, "was not readable")
+}
+
+@test
+pipeline test_a_renamed_job_no_longer_reports_the_required_name() {
+  single_error(
+    errors_for(workflow({jobs: {scan: {name: "Metadata scan", steps: []}}})),
+    "not the required name",
+  )
+  single_error(errors_for(workflow({jobs: {other: {steps: []}}})), "has no job scan")
+}
+
+@test
+pipeline test_a_skippable_job_is_a_vacuous_pass() {
+  const guarded = {name: "Public metadata privacy", if: "github.event_name == 'pull_request'"}
+  single_error(errors_for(workflow({jobs: {scan: guarded}})), "can skip it")
+}
+
+@test
+pipeline test_an_edit_must_rerun_a_metadata_check() {
+  const pushes_only = workflow(
+    {on: {pull_request: {types: ["opened", "synchronize"]}, merge_group: nil}},
+  )
+  const errors = errors_for(pushes_only)
+  assert_eq(len(errors), 2)
+  assert(errors.any({ error -> return contains(error, "does not run on edited") }))
+  assert(errors.any({ error -> return contains(error, "does not run on reopened") }))
+  // GitHub's default activity types exclude `edited`.
+  single_error(
+    errors_for(workflow({on: {pull_request: nil, merge_group: nil}})),
+    "does not run on edited",
+  )
+}
+
+@test
+pipeline test_missing_events_and_path_filters_are_reported() {
+  single_error(
+    errors_for(
+      workflow({on: {pull_request: {types: ["edited", "opened", "reopened", "synchronize"]}}}),
+    ),
+    "not triggered by merge_group",
+  )
+  single_error(
+    errors_for(
+      workflow(
+        {
+          on: {
+            pull_request: {
+              paths: ["src/**"],
+              types: ["opened", "reopened", "synchronize", "edited"],
+            },
+            merge_group: nil,
+          },
+        },
+      ),
+    ),
+    "filters by paths",
+  )
+}
+
+@test
+pipeline test_pinned_checks_cannot_leave_the_registry() {
+  const errors = required_check_errors([aggregate()], {".github/workflows/ci.yml": ci()})
+  single_error(errors, "Public metadata privacy: pinned required check is missing")
+}
+
+@test
+pipeline test_duplicate_and_incomplete_rows_are_reported() {
+  let documents: dict = {".github/workflows/ci.yml": ci()}
+  documents[PATH] = workflow()
+  const duplicate = required_check_errors([aggregate(), row(), row()], documents)
+  single_error(duplicate, "duplicate registry row")
+  single_error(errors_for(workflow(), row({reason: ""})), "reason is empty")
+}

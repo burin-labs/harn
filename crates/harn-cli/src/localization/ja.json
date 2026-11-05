@@ -2205,7 +2205,6 @@
   "Streamable HTTP endpoint path": "ストリーミング可能なHTTPエンドポイントのパス",
   "Streamable HTTP endpoint path for the embedded MCP server": "埋め込みMCPサーバー用のストリーミング可能なHTTPエンドポイントのパス",
   "Strong trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint": "KIND=VALUEとしての強いトレーナーID。種類: version、revision、lockfile_sha256、container_digest、backend_fingerprint",
-  "Structural-validator config applied to every run in this invocation. Omit to use the suite default (currently the 4-rule validator). Accepts `on` / `default`, `off` / `none`, or `custom:<json>` for a literal JSON object passed to `with_structural_validator(...)`": "この呼び出しでのすべての実行に適用される構造バリデーター設定。省略するとスイートの既定値（現在は4ルールのバリデーター）を使用する。`on` / `default`、`off` / `none`、または`custom:<json>`を受け入れ、`with_structural_validator(...)`に渡すリテラルなJSONオブジェクトを指定できる",
   "Submission or status receipt containing provider batch ids": "プロバイダーのバッチIDを含む送信またはステータス受領書",
   "Submission receipt produced by `harn models batch submit`": "`harn models batch submit`が生成する送信受領書",
   "Submit prepared provider-native batch jobs and write a submission receipt": "準備済みのプロバイダー固有のバッチジョブを送信し、送信受領書を書き出す",

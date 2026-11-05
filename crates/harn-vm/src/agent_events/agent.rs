@@ -251,16 +251,6 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
-    /// Emitted after an agent scratchpad reorganization attempt. The
-    /// scratchpad body itself stays in session state; this event carries
-    /// status and count/error metadata so live UIs and eval harnesses can
-    /// audit whether reorganization helped or damaged the working set.
-    AgentScratchpadReorganization {
-        session_id: String,
-        iteration: usize,
-        status: String,
-        details: serde_json::Value,
-    },
     /// A renderable, declarative artifact spec emitted by an agent. Harn
     /// validates the payload and transports it; host surfaces own rendering
     /// and may fall back to the plain-text representation.
@@ -458,24 +448,6 @@ pub enum AgentEvent {
         cost_usd: f64,
         provider: String,
         model: String,
-    },
-    /// Deterministic pre-dispatch critique emitted by the structural
-    /// validator middleware. Fires before any LLM-backed judge so hosts
-    /// can distinguish "$0 structural retry" from semantic critique.
-    StructuralValidatorDecision {
-        session_id: String,
-        iteration: usize,
-        rule: String,
-        diagnostic: String,
-        recommended_action: String,
-        vetoed: bool,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        skipped: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-        on_failure: String,
-        attempts: usize,
-        max_attempts: usize,
     },
     /// The repair-turn output contract was armed for one turn: the loop forced
     /// a tool-call envelope on a turn the missing-call corrective claimed.

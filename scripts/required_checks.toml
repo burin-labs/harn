@@ -1,0 +1,43 @@
+# The status checks the repository rulesets require before a pull request can
+# merge into main. `make check-required-checks` holds each row to the workflow
+# that reports it: the workflow exists, a job reports exactly this name, the
+# job is never skipped (GitHub counts a skipped required job as passing), and
+# the workflow runs on every event the row lists.
+#
+# A required check that never reports blocks the merge, which is the safe
+# direction: disabling or deleting a workflow named here stops merges instead
+# of letting them through unscanned. A check that is not required has no such
+# property, so a gate that must hold on every merge belongs in this list.
+#
+# This file declares the rulesets; it does not configure them. After adding or
+# removing a row, apply the same change to the named ruleset in the repository
+# settings, or the declaration and the enforcement disagree.
+#
+# `pull_request_types` lists activity types the workflow must run on beyond
+# GitHub's defaults (opened, synchronize, reopened), for a check whose verdict
+# depends on something other than the pushed commits.
+
+[[check]]
+context = "CI status"
+ruleset = "main protection"
+workflow = ".github/workflows/ci.yml"
+job = "ci-status"
+events = ["pull_request", "merge_group"]
+reason = "Aggregates every required build, test and policy job for the head commit."
+
+[[check]]
+context = "drift"
+ruleset = "release drift required"
+workflow = ".github/workflows/release-pr-drift-check.yml"
+job = "drift"
+events = ["pull_request", "merge_group"]
+reason = "Stops a release pull request from publishing a changelog that omits newer main commits."
+
+[[check]]
+context = "Public metadata privacy"
+ruleset = "main protection"
+workflow = ".github/workflows/public-metadata-privacy.yml"
+job = "public-metadata-privacy"
+events = ["pull_request", "merge_group"]
+pull_request_types = ["opened", "reopened", "synchronize", "edited"]
+reason = "A squash merge copies the title and body to public main, so they are scanned again after every edit."

@@ -2205,7 +2205,6 @@
   "Streamable HTTP endpoint path": "可流式传输的 HTTP 端点路径",
   "Streamable HTTP endpoint path for the embedded MCP server": "嵌入式 MCP 服务器的可流式传输 HTTP 端点路径",
   "Strong trainer identity as KIND=VALUE. Kinds: version, revision, lockfile_sha256, container_digest, backend_fingerprint": "作为 KIND=VALUE 的强训练器身份。类型：version、revision、lockfile_sha256、container_digest、backend_fingerprint",
-  "Structural-validator config applied to every run in this invocation. Omit to use the suite default (currently the 4-rule validator). Accepts `on` / `default`, `off` / `none`, or `custom:<json>` for a literal JSON object passed to `with_structural_validator(...)`": "应用于本次调用中每次运行的结构验证器配置。省略则使用套件默认值（当前为 4 规则验证器）。接受 `on` / `default`、`off` / `none`，或用于传递给 `with_structural_validator(...)` 的字面量 JSON 对象 `custom:<json>`",
   "Submission or status receipt containing provider batch ids": "包含提供方批次 ID 的提交或状态回执",
   "Submission receipt produced by `harn models batch submit`": "由 `harn models batch submit` 生成的提交回执",
   "Submit prepared provider-native batch jobs and write a submission receipt": "提交已准备好的提供方原生批处理作业并写入提交回执",

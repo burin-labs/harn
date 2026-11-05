@@ -1063,33 +1063,6 @@ impl AgentEventSink for AcpAgentEventSink {
                     model: model.clone(),
                 },
             ),
-            AgentEvent::StructuralValidatorDecision {
-                session_id,
-                iteration,
-                rule,
-                diagnostic,
-                recommended_action,
-                vetoed,
-                skipped,
-                reason,
-                on_failure,
-                attempts,
-                max_attempts,
-            } => self.emit_agent_event(
-                session_id,
-                &payloads::StructuralValidatorDecision {
-                    iteration: *iteration,
-                    rule: rule.clone(),
-                    diagnostic: diagnostic.clone(),
-                    recommended_action: recommended_action.clone(),
-                    vetoed: *vetoed,
-                    skipped: *skipped,
-                    reason: reason.clone(),
-                    on_failure: on_failure.clone(),
-                    attempts: *attempts,
-                    max_attempts: *max_attempts,
-                },
-            ),
             AgentEvent::MissingToolCallVerdict { session_id, .. } => {
                 if let Some(payload) = ext_payloads::missing_tool_call_verdict(event) {
                     self.emit_agent_event(session_id, &payload);
@@ -1248,7 +1221,6 @@ impl AgentEventSink for AcpAgentEventSink {
             }
             event @ (AgentEvent::PurposeLabel { .. }
             | AgentEvent::ProgressReported { .. }
-            | AgentEvent::AgentScratchpadReorganization { .. }
             | AgentEvent::FeedbackInjected { .. }
             | AgentEvent::BudgetExhausted { .. }
             | AgentEvent::BudgetCircuitBreaker { .. }

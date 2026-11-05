@@ -85,7 +85,6 @@ public enum HarnProtocolConstants {
     ]
     public static let harnAgentEventKinds: [String] = [
         "agent_loop_stall_warning",
-        "agent_scratchpad_reorganization",
         "anchor_changed",
         "boundary_failure",
         "budget_circuit_breaker",
@@ -135,7 +134,6 @@ public enum HarnProtocolConstants {
         "session_closed",
         "session_health",
         "step_judge_decision",
-        "structural_validator_decision",
         "subagent_join",
         "subagent_stop",
         "tool_batch_disposition",
@@ -5657,12 +5655,6 @@ public struct HarnAgentsEventProjection: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnAgentEventAgentScratchpadReorganization: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var status: String
-    public var details: HarnACPValue
-}
-
 public struct HarnAgentEventAnchorChanged: Codable, Sendable, Equatable {
     public var previous: HarnACPValue
     public var current: HarnACPValue
@@ -6752,60 +6744,6 @@ public struct HarnAgentEventStepJudgeDecision: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnAgentEventStructuralValidatorDecision: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var rule: String
-    public var diagnostic: String
-    public var recommendedAction: String
-    public var vetoed: Bool
-    public var skipped: Bool
-    public var reason: String?
-    public var onFailure: String
-    public var attempts: Int
-    public var maxAttempts: Int
-
-    enum CodingKeys: String, CodingKey {
-        case iteration
-        case rule
-        case diagnostic
-        case recommendedAction
-        case vetoed
-        case skipped
-        case reason
-        case onFailure
-        case attempts
-        case maxAttempts
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        iteration = try values.decode(Int.self, forKey: .iteration)
-        rule = try values.decode(String.self, forKey: .rule)
-        diagnostic = try values.decode(String.self, forKey: .diagnostic)
-        recommendedAction = try values.decode(String.self, forKey: .recommendedAction)
-        vetoed = try values.decode(Bool.self, forKey: .vetoed)
-        skipped = try values.decode(Bool.self, forKey: .skipped)
-        reason = try values.decode(String?.self, forKey: .reason)
-        onFailure = try values.decode(String.self, forKey: .onFailure)
-        attempts = try values.decode(Int.self, forKey: .attempts)
-        maxAttempts = try values.decode(Int.self, forKey: .maxAttempts)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(iteration, forKey: .iteration)
-        try values.encode(rule, forKey: .rule)
-        try values.encode(diagnostic, forKey: .diagnostic)
-        try values.encode(recommendedAction, forKey: .recommendedAction)
-        try values.encode(vetoed, forKey: .vetoed)
-        try values.encode(skipped, forKey: .skipped)
-        try values.encode(reason, forKey: .reason)
-        try values.encode(onFailure, forKey: .onFailure)
-        try values.encode(attempts, forKey: .attempts)
-        try values.encode(maxAttempts, forKey: .maxAttempts)
-    }
-}
-
 public struct HarnAgentEventSubagentJoin: Codable, Sendable, Equatable {
     public var parentSessionId: String
     public var parentRunId: String
@@ -6977,7 +6915,6 @@ public struct HarnAgentEventTypedCheckpoint: Codable, Sendable, Equatable {
 /// The typed body of one `_harn/agentEvent` notification.
 public enum HarnAgentEventPayload: Sendable, Equatable {
     case agentLoopStallWarning([String: HarnACPValue])
-    case agentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization)
     case anchorChanged(HarnAgentEventAnchorChanged)
     case boundaryFailure(HarnAgentEventBoundaryFailure)
     case budgetCircuitBreaker(HarnAgentEventBudgetCircuitBreaker)
@@ -7027,7 +6964,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case sessionClosed(HarnAgentEventSessionClosed)
     case sessionHealth([String: HarnACPValue])
     case stepJudgeDecision(HarnAgentEventStepJudgeDecision)
-    case structuralValidatorDecision(HarnAgentEventStructuralValidatorDecision)
     case subagentJoin(HarnAgentEventSubagentJoin)
     case subagentStop(HarnAgentEventSubagentStop)
     case toolBatchDisposition(HarnAgentEventToolBatchDisposition)
@@ -7043,7 +6979,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
 public struct HarnAgentEventParams: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case agentLoopStallWarning = "agent_loop_stall_warning"
-        case agentScratchpadReorganization = "agent_scratchpad_reorganization"
         case anchorChanged = "anchor_changed"
         case boundaryFailure = "boundary_failure"
         case budgetCircuitBreaker = "budget_circuit_breaker"
@@ -7093,7 +7028,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case sessionClosed = "session_closed"
         case sessionHealth = "session_health"
         case stepJudgeDecision = "step_judge_decision"
-        case structuralValidatorDecision = "structural_validator_decision"
         case subagentJoin = "subagent_join"
         case subagentStop = "subagent_stop"
         case toolBatchDisposition = "tool_batch_disposition"
@@ -7104,7 +7038,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
 
         public static let allCases: [Self] = [
             "agent_loop_stall_warning",
-            "agent_scratchpad_reorganization",
             "anchor_changed",
             "boundary_failure",
             "budget_circuit_breaker",
@@ -7154,7 +7087,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "session_closed",
             "session_health",
             "step_judge_decision",
-            "structural_validator_decision",
             "subagent_join",
             "subagent_stop",
             "tool_batch_disposition",
@@ -7184,7 +7116,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         self.fields = fields
         switch kind {
         case .agentLoopStallWarning: self.payload = .agentLoopStallWarning(fields)
-        case .agentScratchpadReorganization: self.payload = .agentScratchpadReorganization(try container.decode(HarnAgentEventAgentScratchpadReorganization.self))
         case .anchorChanged: self.payload = .anchorChanged(try container.decode(HarnAgentEventAnchorChanged.self))
         case .boundaryFailure: self.payload = .boundaryFailure(try container.decode(HarnAgentEventBoundaryFailure.self))
         case .budgetCircuitBreaker: self.payload = .budgetCircuitBreaker(try container.decode(HarnAgentEventBudgetCircuitBreaker.self))
@@ -7234,7 +7165,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .sessionClosed: self.payload = .sessionClosed(try container.decode(HarnAgentEventSessionClosed.self))
         case .sessionHealth: self.payload = .sessionHealth(fields)
         case .stepJudgeDecision: self.payload = .stepJudgeDecision(try container.decode(HarnAgentEventStepJudgeDecision.self))
-        case .structuralValidatorDecision: self.payload = .structuralValidatorDecision(try container.decode(HarnAgentEventStructuralValidatorDecision.self))
         case .subagentJoin: self.payload = .subagentJoin(try container.decode(HarnAgentEventSubagentJoin.self))
         case .subagentStop: self.payload = .subagentStop(try container.decode(HarnAgentEventSubagentStop.self))
         case .toolBatchDisposition: self.payload = .toolBatchDisposition(try container.decode(HarnAgentEventToolBatchDisposition.self))

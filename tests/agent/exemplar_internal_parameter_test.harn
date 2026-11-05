@@ -15,7 +15,7 @@ import { agent_render_tool_call_exemplar } from "std/agent/preflight"
 import {
   tool_required_argument_exemplar,
   tool_required_argument_names,
-} from "std/llm/structural_validator"
+} from "std/llm/tool_call_schema"
 
 fn _look(params: dict) {
   return tool_define(

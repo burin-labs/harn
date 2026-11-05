@@ -1,5 +1,4 @@
 import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
-import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
 import { agent_stance_default_consent_check } from "std/agent/stance"
 import { self_consistency } from "std/llm/ensemble"
 import { with_repair, with_result_schema } from "std/llm/handlers"
@@ -10,16 +9,6 @@ import { llm_text, with_llm_script } from "std/testing"
 
 fn run_case(harness: Harness, provider: string, model: string) {
   const session = harness.agent.open("current-defaults-" + harness.random.uuid())
-  harness.agent.set_scratchpad(
-    session,
-    {
-      schema: "harn.agent_scratchpad.v1",
-      goals: [{text: "Inspect a file", source_ref: "user:initial"}],
-      open_items: [],
-      facts: [],
-      refs: [{id: "user:initial", kind: "user_input", label: "Inspect a file"}],
-    },
-  )
   const request = {
     session_id: session,
     iteration: 1,
@@ -32,18 +21,6 @@ fn run_case(harness: Harness, provider: string, model: string) {
     harness.llm,
     [
       llm_text("Write a concise welcome.\nDIFF: shortened.")
-        + {provider: provider, model: model},
-      llm_text(
-        json_stringify(
-          {
-            schema: "harn.agent_scratchpad.v1",
-            goals: [{text: "Inspect a file", source_ref: "user:initial"}],
-            open_items: [],
-            facts: [],
-            refs: [{id: "user:initial", kind: "user_input", label: "Inspect a file"}],
-          },
-        ),
-      )
         + {provider: provider, model: model},
       llm_text(
         json_stringify(
@@ -64,20 +41,12 @@ fn run_case(harness: Harness, provider: string, model: string) {
       )
       assert(refined.ok, "refinement must reach the current provider default")
       assert_eq(refined.model, model)
-      const reorganized = agent_scratchpad_reorganize(
-        harness.agent,
-        harness.llm,
-        {session_id: session, task: "Inspect a file"},
-        {provider: provider, scratchpad: {enabled: true}},
-        1,
-      )
-      assert(reorganized.ok, "scratchpad reorganization must reach the provider")
       const classified = missing_tool_call_classifier(harness, {provider: provider})(request)
       assert(classified != nil)
       assert_eq(classified.action, "tool_call_intended")
       assert_eq(classified.tool_name, "inspect")
       assert_eq(classified.decision?.kind, "answered")
-      assert_eq(len(harness.llm.mock_calls()), 3, "all three public callers must dispatch")
+      assert_eq(len(harness.llm.mock_calls()), 2, "both public callers must dispatch")
     },
   )
   with_llm_script(
@@ -88,14 +57,6 @@ fn run_case(harness: Harness, provider: string, model: string) {
         refine_prompt(harness.llm, "Write a welcome.", {provider: provider, temperature: 0.0})
       }
       assert(is_err(explicit_refine), "explicit unsupported sampling must refuse")
-      const explicit_scratchpad = agent_scratchpad_reorganize(
-        harness.agent,
-        harness.llm,
-        {session_id: session, task: "Inspect a file"},
-        {provider: provider, scratchpad: {enabled: true, reorganizer: {temperature: 0.0}}},
-        2,
-      )
-      assert_eq(explicit_scratchpad.status, "llm_error")
       const explicit_classified = missing_tool_call_classifier(
         harness,
         {provider: provider, temperature: 0.0},

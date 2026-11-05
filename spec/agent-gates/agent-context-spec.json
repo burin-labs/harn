@@ -165,27 +165,6 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "disabled",
-    "evidence": "scratchpad.agent_scratchpad_options returns disabled default options when scratchpad is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
-    "kind": "boolean option",
-    "layer": "runner",
-    "name": "AgentSpec.scratchpad",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "reader": "__validate_agent_loop_callback_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "reader": "agent_scratchpad_options"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "empty configuration: catalog strategy, top_n 1, sticky true",
     "evidence": "skills.__match_config defaults to an empty object; the strategy/top_n/sticky consumers supply these fallbacks. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",

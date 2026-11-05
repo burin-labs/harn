@@ -8,6 +8,9 @@ name: PR gates
 # refactor, dep bump). Detection logic lives in the per-gate scripts under
 # `.github/scripts/`; this workflow is the shared CI wrapper.
 #
+# The required `Public metadata privacy` check lives in its own workflow,
+# public-metadata-privacy.yml, so turning this one off cannot turn it off.
+#
 # Neither gate is wired into ci.yml's required "CI status" job yet — promote
 # to a required check via the merge-queue ruleset once the false-positive
 # rate has been observed on real PRs. The `merge_group` no-op branch keeps
@@ -56,25 +59,6 @@ jobs:
         with:
           areas: "Parser|VM|LLM|Models|Stdlib|Agent|CLI|Modules|Orchestrator|ACP|Evals|Docs|CI|Release"
           area-suggestions: "Build=CI|Lint=CI"
-
-  public-metadata-privacy:
-    name: Public metadata privacy
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Commit messages are public PR metadata. The scanner fails closed if
-          # either range endpoint is absent; keep the exact range available for
-          # pull-request and merge-group events.
-          fetch-depth: 0
-
-      - name: Prepare exact event commit range
-        run: bash .github/scripts/prepare-pr-gate-range.sh
-
-      - name: Scan public metadata
-        env:
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
-        run: ./scripts/check_pr_metadata_privacy.sh
 
   gate:
     # The matrix value becomes the check-run name, so these render as

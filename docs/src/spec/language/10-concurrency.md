@@ -398,17 +398,6 @@ mailboxes are shared by every task that receives or resolves the handle.
 mailboxes, shared state handles, `agent_state_*`, or host storage for data
 exchange outside the transcript.
 
-Named sessions may also carry a small `scratchpad` dict plus a monotonic
-`scratchpad_version`. The scratchpad is live session-local working memory, not a
-replayable transcript message. `harness.agent.scratchpad(id)`,
-`harness.agent.set_scratchpad(id, scratchpad, opts?)`, and
-`harness.agent.clear_scratchpad(id, opts?)` are the direct state boundary.
-Updates append compact `agent_scratchpad` transcript events that include
-action, version, source, reason, counts, and caller metadata without copying the
-full scratchpad into the event. Snapshots expose `scratchpad` and
-`scratchpad_version`; final transcripts also mirror the current values under
-`metadata.agent_scratchpad` and `metadata.agent_scratchpad_version`.
-
 Named sessions may carry an RFC 8693 actor chain describing who the session is
 acting as and on whose behalf. `harness.agent.actor_chain(id?)` returns the
 canonical `{sub, act}` dict for an explicit session id, or for the current

@@ -148,7 +148,6 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("judge_started", None),
     host_event("judge_decision", None),
     host_event("step_judge_decision", None),
-    host_event("structural_validator_decision", None),
     host_event("missing_tool_call_verdict", None),
     host_event("require_successful_tools_violation", ASSISTANT),
     host_event("final_wrapup", ASSISTANT),
@@ -194,7 +193,6 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event_whole("llm_shadow_diff", None),
     host_event_whole("semantic_cache_hit", None),
     host_event_whole("semantic_cache_miss", None),
-    host_event_whole("agent_scratchpad_reorganization", None),
     host_event("stance_armed", None),
     host_event("stance_write_access_granted", None),
     host_event("stance_write_access_denied", None),
@@ -707,19 +705,6 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             nearest_similarity: obj_f64(payload, "nearest_similarity"),
             payload: payload.clone(),
         },
-        "agent_scratchpad_reorganization" => {
-            let mut details = payload.clone();
-            if let Some(object) = details.as_object_mut() {
-                object.remove("iteration");
-                object.remove("status");
-            }
-            AgentEvent::AgentScratchpadReorganization {
-                session_id: sid(),
-                iteration: obj_usize(payload, "iteration"),
-                status: obj_string(payload, "status"),
-                details,
-            }
-        }
         // Read-only stance lifecycle (std/agent/stance). The four stdlib
         // event names map onto one typed variant distinguished by `phase`
         // so trace consumers match on a single event type.

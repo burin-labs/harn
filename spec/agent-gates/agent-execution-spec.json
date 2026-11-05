@@ -705,7 +705,7 @@
   },
   {
     "default": "internal _run_id fallback; otherwise absent",
-    "evidence": "loop_tool_calls.__tool_envelope and __run_structural_validator project this precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "loop_tool_calls.__tool_envelope projects this precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -719,10 +719,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
         "reader": "__tool_envelope"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
-        "reader": "__run_structural_validator"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -757,27 +753,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
         "reader": "agent_build_turn_system_fragments"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; no custom structural validator",
-    "evidence": "options_public.agent_options reads the optional structural_validator and projects it to internal runner options. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
-    "kind": "configuration",
-    "layer": "runner",
-    "name": "AgentSpec.structural_validator",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-        "reader": "__agent_loop_run"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "reader": "__validate_agent_loop_callback_options"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

@@ -39,7 +39,6 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         step_judge: None,
         step_judge_on_veto: None,
         step_judge_adversarial: false,
-        structural_validator: None,
         run_label: String::new(),
         override_reason: None,
         baseline_comparison_against: None,
@@ -238,7 +237,6 @@ fn json_tool_run_stops_after_required_tool_and_final_answer() {
         step_judge: None,
         step_judge_on_veto: None,
         step_judge_adversarial: false,
-        structural_validator: None,
         run_label: String::new(),
         override_reason: None,
         baseline_comparison_against: None,
@@ -297,7 +295,6 @@ fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
         step_judge: None,
         step_judge_on_veto: None,
         step_judge_adversarial: false,
-        structural_validator: None,
         run_label: String::new(),
         override_reason: None,
         baseline_comparison_against: None,
@@ -365,7 +362,6 @@ fn mock_matrix_output_dir_can_be_workspace_root() {
         step_judge: None,
         step_judge_on_veto: None,
         step_judge_adversarial: false,
-        structural_validator: None,
         run_label: String::new(),
         override_reason: None,
         baseline_comparison_against: None,
@@ -440,108 +436,6 @@ fn no_tool_diagnosis_verifier_grades_substance_not_phrasing() {
     assert_eq!(
         outcome.stdout,
         "reported=true\nverbatim_line=true\nhint_only=false\nused_a_tool=false\nwrong_operator=false\n"
-    );
-}
-
-#[test]
-fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let workspace = tmp.path().join("workspace");
-    fs::create_dir_all(&workspace).expect("workspace");
-    let fixture_path = tmp.path().join("llm-mocks.jsonl");
-    fs::write(
-        &fixture_path,
-        r#"{"text":"I fixed it already.","model":"mock"}
-{"text":"","tool_calls":[{"name":"read_file","args":{"path":"math_utils.py"}}],"model":"mock"}
-{"text":"","tool_calls":[{"name":"replace_in_file","args":{"path":"math_utils.py","old_text":"def add(a, b):\n    return a - b\n","new_text":"def add(a, b):\n    return a + b\n"}}],"model":"mock"}
-{"text":"","tool_calls":[{"name":"run_command","args":{"argv":["python3","-m","unittest","discover","-s","tests"],"capture":{"max_inline_bytes":4000}}}],"model":"mock"}
-{"text":"Fixed add and verified the unittest suite passes.","model":"mock"}
-"#,
-    )
-    .expect("write llm mock fixture");
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let suite = manifest_dir.join("assets/evals/coding_agent_suite.harn");
-    let output_dir = workspace.join("out");
-    let output_dir_for_run = output_dir.clone();
-    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = harn_state_lock::lock_harn_state_async().await;
-        harn_vm::reset_thread_local_state();
-        execute_run_with_sandbox_options(
-            &suite.to_string_lossy(),
-            false,
-            HashSet::new(),
-            vec![
-                "--fixture".to_string(),
-                "python-add".to_string(),
-                "--output-dir".to_string(),
-                output_dir_for_run.display().to_string(),
-                "--provider".to_string(),
-                "mock".to_string(),
-                "--model".to_string(),
-                "mock".to_string(),
-                "--tool-format".to_string(),
-                "native".to_string(),
-                "--max-iterations".to_string(),
-                "6".to_string(),
-                "--python".to_string(),
-                "python3".to_string(),
-            ],
-            Vec::new(),
-            CliLlmMockMode::Replay { fixture_path },
-            None,
-            RunProfileOptions::default(),
-            RunSandboxOptions::default().with_workspace_root(workspace),
-        )
-        .await
-    });
-    assert_eq!(
-        outcome.exit_code, 0,
-        "suite failed\nstdout={}\nstderr={}",
-        outcome.stdout, outcome.stderr
-    );
-    let transcript = fs::read_to_string(output_dir.join("transcript_events.jsonl"))
-        .expect("transcript events exist");
-    let transcript_events: Vec<serde_json::Value> = transcript
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("transcript event parses"))
-        .collect();
-    let corrective_messages: Vec<&serde_json::Value> = transcript_events
-        .iter()
-        .filter(|event| {
-            event["text"].as_str().is_some_and(|text| {
-                text.contains("<directive authority=\"corrective\" ttl_turns=\"1\">")
-            })
-        })
-        .collect();
-    assert_eq!(
-        corrective_messages.len(),
-        1,
-        "default validator should persist one typed corrective directive; got:\n{transcript}"
-    );
-    let corrective = corrective_messages[0];
-    assert_eq!(corrective["kind"], "message");
-    assert_eq!(corrective["role"], "user");
-    assert_eq!(corrective["visibility"], "internal");
-    let blocks = corrective["blocks"].as_array().expect("corrective blocks");
-    assert!(
-        !blocks.is_empty(),
-        "the corrective directive must retain its content"
-    );
-    assert!(
-        blocks.iter().all(|block| block["visibility"] == "internal"),
-        "corrective directive blocks must not leak into public presentation: {corrective}"
-    );
-    assert!(
-        !transcript.contains("<runtime_feedback"),
-        "internal feedback markup must not be persisted as model-visible content; got:\n{transcript}"
-    );
-    assert!(
-        corrective["text"]
-            .as_str()
-            .expect("corrective text")
-            .contains("\"rule\":\"non_empty_when_writes_expected\""),
-        "phantom completion should trip the write-expected rule; got:\n{transcript}"
     );
 }
 

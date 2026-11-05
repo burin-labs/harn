@@ -188,12 +188,6 @@ pub struct EvalCodingAgentArgs {
     /// Free-form reason attached when forcing a tool format against catalog guidance.
     #[arg(long = "override-reason")]
     pub override_reason: Option<String>,
-    /// Structural-validator config applied to every run in this invocation.
-    /// Omit to use the suite default (currently the 4-rule validator).
-    /// Accepts `on` / `default`, `off` / `none`, or `custom:<json>` for a
-    /// literal JSON object passed to `with_structural_validator(...)`.
-    #[arg(long = "structural-validator")]
-    pub structural_validator: Option<String>,
     /// Pin the reasoning effort every run in this invocation asks for, instead
     /// of letting the reasoning policy pick one from task and scale. Set this
     /// to A/B effort rungs on the agentic suite; the value reaches the model as

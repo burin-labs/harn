@@ -310,22 +310,6 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             metadata: serde_json::json!({"idle_ms": 5000}),
         },
         observation_fixtures::fixture_judge_decision(),
-        AgentEvent::StructuralValidatorDecision {
-            session_id: "session-1".to_string(),
-            iteration: 1,
-            rule: "non_empty_when_writes_expected".to_string(),
-            diagnostic: "Assistant emitted no tool calls while writable tools were available."
-                .to_string(),
-            recommended_action:
-                "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete."
-                    .to_string(),
-            vetoed: true,
-            skipped: false,
-            reason: None,
-            on_failure: "regenerate_with_feedback".to_string(),
-            attempts: 0,
-            max_attempts: 3,
-        },
         AgentEvent::TypedCheckpoint {
             session_id: "session-1".to_string(),
             checkpoint: serde_json::json!({

@@ -1021,8 +1021,6 @@ fn apply_reset(state: &mut SessionState, plan: goal::ResetPlan) -> Result<(), St
     state.goal = plan.goal;
     state.tool_format = None;
     state.system_prompt = None;
-    state.scratchpad = None;
-    state.scratchpad_version = 0;
     state.last_transcript_budget_action = None;
     state.completed_turn_checkpoints.clear();
     state.redo_stack.clear();
