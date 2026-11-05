@@ -1,0 +1,80 @@
+import {
+  completion_requirement_contract,
+  completion_requirement_pending_feedback,
+  completion_requirement_report,
+} from "std/agent/completion_requirements"
+
+/**
+ * A minimal `verify_completion` callback for loop fixtures. It stands in for a host
+ * that reads its own facts and answers the stop question; the loop, the judge and
+ * the requirement roster under test are the real ones. `facts` receives the stop
+ * context and returns `{verify?, source_write_count?, verification_command?,
+ * verification_discovery?, requirement_assessments?, requirement_evidence?}`.
+ */
+pub fn fixture_verify_completion(
+  facts: fn(dict) -> dict,
+  requirement_contract: dict? = nil,
+) -> fn(dict) -> dict {
+  return { payload ->
+    const task = to_string(payload?.task ?? "")
+    const ctx = {
+      session_id: to_string(payload?.session_id ?? ""),
+      task: task,
+      stop_reason: to_string(payload?.stop_reason ?? ""),
+      text: to_string(payload?.text ?? ""),
+      messages: json_parse(to_string(payload?.transcript ?? "[]")) ?? [],
+    }
+    const observed = facts(ctx) ?? {}
+    const verify = observed?.verify
+    const passed = verify != nil && (verify?.ok ?? false)
+    const command = trim(to_string(verify?.command ?? observed?.verification_command ?? ""))
+    const verification = {
+      oracle_expected: observed?.oracle_expected ?? (verify != nil),
+      command: command,
+      observed: if verify == nil {
+        "not_run"
+      } else if passed {
+        "passed"
+      } else {
+        "failed"
+      },
+      observed_at_evidence_index: nil,
+      discovery: observed?.verification_discovery,
+    }
+    const report = completion_requirement_report(
+      completion_requirement_contract(requirement_contract),
+      observed?.requirement_assessments,
+      {requirement_evidence: observed?.requirement_evidence ?? []},
+    )
+    if report != nil && !report.complete {
+      return {
+        confirm: false,
+        reason: "requirements_unmet",
+        message: completion_requirement_pending_feedback(report),
+        verification: verification,
+        requirement_report: report,
+      }
+    }
+    if verify != nil && !passed {
+      return {
+        confirm: false,
+        reason: "failed_verification",
+        message: "Verification is still failing. " + to_string(verify?.findings ?? ""),
+        verification: verification,
+        requirement_report: report,
+      }
+    }
+    return {
+      confirm: true,
+      reason: if passed && (observed?.source_write_count ?? 0) > 0 {
+        "verified_after_write"
+      } else if passed {
+        "verified"
+      } else {
+        "no_oracle"
+      },
+      verification: verification,
+      requirement_report: report,
+    }
+  }
+}

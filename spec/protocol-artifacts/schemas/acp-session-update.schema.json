@@ -166,7 +166,6 @@
                 "cache_miss",
                 "capability_gap",
                 "code_librarian_query_nl_fallback",
-                "compass_routing_decision",
                 "composition_child_call",
                 "composition_child_result",
                 "composition_error",

@@ -6,7 +6,7 @@ know whether your test runner just went green, whether the fix it delivered
 actually landed, or how much longer this particular job deserves. Only your host
 knows those things.
 
-Harn's detectors and governors own the *mechanism*: when to warn, when to cut a
+Harn's detectors own the *mechanism*: when to warn, when to cut a
 run that's spinning in place. Your host owns the *facts* that mechanism runs on.
 You supply those facts through three callbacks. Each one gets the loop's
 per-turn payload and returns one small answer; Harn does the rest.
@@ -163,8 +163,8 @@ that's stalled gets cut at the checkpoint instead of at the wall.
 ## See also
 
 - [Pace cut rules](./cut-rules.md) covers the decision contract.
-- [Agent governors and detectors](./governors.md) covers the budget governor
-  and detector surface these facts feed.
+- [Agent detectors](./detectors.md) covers the detector surface these facts
+  feed.
 - [Steering seams](../concepts/steering-seams.md) covers the broader picture of
   out-of-band influence on a running loop, and where host-supplied facts fit.
 - [Typed facts](../memory.md#typed-facts) covers durable, queryable claims an agent

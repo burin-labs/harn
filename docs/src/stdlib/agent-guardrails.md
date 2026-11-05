@@ -1,7 +1,6 @@
 # Agent guardrails (`std/agent/guardrails`)
 
-Input guardrails are the input-side pair to
-[`agent_completion_gate`](./agent-judge.md): they decide whether a request should
+Input guardrails decide whether a request should
 stop before the main agent loop spends a model turn. Harn owns the orchestration
 shape and event contract; callers own the policy classifier.
 

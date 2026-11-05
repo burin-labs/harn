@@ -93,9 +93,8 @@ one of these is a plain stdlib module that composes onto `agent_loop` options
 
 | Concern | Lives in | Reach for |
 |---|---|---|
-| **"Are we actually done?"** completion gate | [`std/agent/completion_gate`](../llm/completion-control.md#completion-gate-agent_completion_gate) | `agent_completion_gate(runtime, options)` checks host write and verification facts and can add a bounded LLM judge. |
-| **Pace / budget governors** | [`std/agent/governors`](../stdlib/governors.md) | `with_governance(...)`, `governor_decision(...)` — bound cost and cadence. |
-| **Progress / stall detectors** (unified) | [`std/agent/stall`](../stdlib/governors.md#unified-detectors) | `agent_stall_initial_state()` + `agent_stall_observe_tool_calls(...)` / `agent_stall_no_net_progress(...)` — ping-pong, no-net-progress, and repeated-verified-pass detection in one place. |
+| **"Are we actually done?"** completion check | [`verify_completion`](../llm/completion-control.md) | A host callback checks write and verification facts; `verify_completion_judge` can add a bounded LLM judge. |
+| **Progress / stall detectors** (unified) | [`std/agent/stall`](../stdlib/detectors.md#unified-detectors) | `agent_stall_initial_state()` + `agent_stall_observe_tool_calls(...)` / `agent_stall_no_net_progress(...)` — ping-pong, no-net-progress, and repeated-verified-pass detection in one place. |
 | **Tool-surface narrowing** (lanes) | [`std/agent/lanes`](../stdlib/agent-lanes-overlays.md) | `lane_policy(rows, task, opts)` — classify the task, hide the tools it can't need. |
 | **Prompt overlays** (data-driven nudges) | [`std/agent/overlays`](../stdlib/agent-lanes-overlays.md#overlays-data-driven-prompt-nudges) | `with_overlay(opts, rows, mode)` — fill-nil prompt fragments, never overriding explicit input. |
 | **Auto-compaction** (*when* to compact) | [`std/agent/autocompact`](../llm/agent_loop.md#agent-loop-compaction) | `compaction_policy(...)`, `agent_autocompact_if_needed(session, opts)` — keep the transcript under the context ceiling. |

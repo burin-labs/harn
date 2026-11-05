@@ -27,6 +27,7 @@ fn check_change_and_restore(harness: Harness, root: string) -> nil {
     record: false,
     reuse: {
       scope: "change-and-restore/${root}",
+      skip_effects_safe: true,
       inputs: { ->
         const inputs = {
           revision: revision,
@@ -115,6 +116,7 @@ pipeline test(harness: Harness) {
         record: false,
         reuse: {
           scope: "verification-reuse/${root}",
+          skip_effects_safe: true,
           inputs: inputs,
           accept: { result -> result.success && acceptable },
         },

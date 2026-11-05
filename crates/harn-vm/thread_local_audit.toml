@@ -49,6 +49,7 @@ captured = [
   "CURRENT_LOOP_SINKS",
   "CURRENT_AGENT_EVENT_TRANSPORT",
   "CURRENT_SESSION_STACK",
+  "PROMPT_PROBE_OWNER",
   "LLM_CONFIG_OVERRIDES_CONTEXT",
   "SCOPE",
   "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
@@ -382,6 +383,12 @@ plan = "thread_private_cache"
 [[thread_local]]
 path = "src/llm/provider.rs"
 statics = ["PROVIDER_NAMES", "DEFAULTS_REGISTERED"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/rate_limit/network_recovery.rs"
+statics = ["PROMPT_PROBE_OWNER"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

@@ -534,6 +534,45 @@ pipeline test_command_ledger_reads_host_commands_and_settles_background_runs() {
   )
 }
 
+fn host_check(status: string, command: string?) -> dict {
+  return {
+    payload: {
+      transcript_event: {
+        kind: "typed_checkpoint",
+        metadata: {kind: "post_edit_check", status: status, command: command},
+      },
+    },
+  }
+}
+
+/** A check the host ran itself keeps its place among the agent's commands. */
+pipeline test_command_ledger_reads_checks_the_host_ran() {
+  const ledger = pl_session_command_ledger(
+    [
+      host_check("opportunity", "make check"),
+      host_check("failed", "make check"),
+      tool_update(
+        "r1",
+        "run",
+        {command_id: "h1", command_exit_code: 0},
+        {command: "make gen"},
+        nil,
+      ),
+      host_check("passed", "make check"),
+      host_check("rejected", "make check"),
+      host_check("failed", nil),
+    ],
+  )
+  assert_eq(
+    ledger,
+    [
+      {tool: "post_edit_check", command: "make check", exit_code: nil, ok: false},
+      {tool: "run", command: "make gen", exit_code: 0, ok: true},
+      {tool: "post_edit_check", command: "make check", exit_code: nil, ok: true},
+    ],
+  )
+}
+
 pipeline test_command_ledger_preserves_semantic_whitespace() {
   const command = "python3 check.py --expected \"left  right\""
   const ledger = pl_sanitize_command_ledger(

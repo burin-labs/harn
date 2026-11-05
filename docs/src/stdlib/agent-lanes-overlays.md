@@ -101,7 +101,7 @@ agent_loop(
 `with_overlay(agent_options, rows, mode, options?)` layers mode-specific
 (and optionally lane-specific) guidance lines onto the outbound system prompt,
 generalizing the host's flag-gated `mode_overlay_lines`. Its `agent_options`-first
-arg order matches the rest of the fold family (`with_goal`, `with_governance`);
+arg order matches the rest of the fold family (`with_goal`);
 `overlay_policy(rows, mode, agent_options?, options?)` remains as a deprecated
 alias with the old `rows`-first order.
 
@@ -140,7 +140,7 @@ with_overlay(opts, rows, "agent", {
 
 `agent_preset`/`agent_preset_register` accept `lane_policy` and
 `overlay_policy` pack keys (alongside `budget`, `models`,
-`completion_gate`, `stall_diagnostics`, `iteration_budget`, ...) via the
+`stall_diagnostics`, `iteration_budget`, ...) via the
 existing fill-nil pack mechanism
 (`std/agent/presets`): a pack row fills the option only when the caller left
 it nil, and a consumer explicitly lowers it —

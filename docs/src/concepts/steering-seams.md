@@ -182,7 +182,7 @@ and cuts a stalled one.
 
 The callbacks, their signatures, and the exact decisions they drive live in
 [Host-supplied facts](../stdlib/fact-intake-seams.md). The mechanism they feed
-(governors and detectors) is [Agent governors and detectors](../stdlib/governors.md).
+(detectors) is [Agent detectors](../stdlib/detectors.md).
 
 ## Cross-references
 
