@@ -17,7 +17,6 @@ use crate::value::{VmError, VmValue};
 
 use super::api::LlmCallOptions;
 use super::cost::LlmBudgetEnvelope;
-use super::routing_verifier::{parse_escalate_on, verifiers_summary, Verifier};
 
 mod auth;
 
@@ -204,8 +203,6 @@ fn linear_failover_policy(
         latency: LatencyRules::default(),
         budget: BudgetRules::default(),
         observe: ObserveRules::default(),
-        escalate_on: Vec::new(),
-        max_refines_per_link: 0,
         label,
         chain,
         is_ladder: false,
@@ -338,16 +335,6 @@ pub struct RoutingPolicyConfig {
     pub latency: LatencyRules,
     pub budget: BudgetRules,
     pub observe: ObserveRules,
-    /// Verifier chain that gates frontier-tier escalation. Each
-    /// verifier inspects the candidate's text after a successful
-    /// link; the first non-`accept` signal drives the next decision
-    /// (refine = retry same link with a nudge; escalate = advance).
-    pub escalate_on: Vec<Verifier>,
-    /// Maximum number of refine retries permitted **per link**.
-    /// Refines also count against `failover.max_attempts`, so the
-    /// effective cap is `min(refines_per_link, remaining_attempts)`.
-    /// Defaults to 1.
-    pub max_refines_per_link: usize,
     /// Stable identifier — short label or the full
     /// `routing_policy(chain=N)` summary. Forwarded into tape events so
     /// transcripts can correlate attempts back to the policy that drove
@@ -775,8 +762,6 @@ pub(crate) fn build_model_ladder_policy(
         latency: LatencyRules::default(),
         budget: BudgetRules::default(),
         observe: ObserveRules::default(),
-        escalate_on: Vec::new(),
-        max_refines_per_link: 0,
         label,
         chain,
         is_ladder: true,
@@ -1037,17 +1022,6 @@ pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmV
     let latency = parse_latency(config.get("latency"))?;
     let budget = parse_budget(config.get("budget"))?;
     let observe = parse_observe(config.get("observe"))?;
-    let escalate_on = parse_escalate_on(config.get("escalate_on"))?;
-    let max_refines_per_link = match config.get("max_refines_per_link") {
-        None | Some(VmValue::Nil) => 1usize,
-        Some(VmValue::Int(n)) if *n >= 0 => *n as usize,
-        Some(other) => {
-            return Err(runtime_error(format!(
-                "routing_policy.max_refines_per_link: expected a non-negative integer, got {}",
-                other.type_name()
-            )));
-        }
-    };
     let label_text = parse_label(config, "label")?;
     let label = if label_text.is_empty() {
         format!("routing_policy(chain={})", chain.len())
@@ -1065,13 +1039,6 @@ pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmV
     summary.insert("failover".to_string(), failover_value(&failover));
     summary.insert("latency".to_string(), latency_value(&latency));
     summary.insert("observe".to_string(), observe_value(&observe));
-    if !escalate_on.is_empty() {
-        summary.insert("escalate_on".to_string(), verifiers_summary(&escalate_on));
-        summary.insert(
-            "max_refines_per_link".to_string(),
-            VmValue::Int(max_refines_per_link as i64),
-        );
-    }
 
     let parsed = RoutingPolicyConfig {
         chain,
@@ -1079,8 +1046,6 @@ pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmV
         latency,
         budget,
         observe,
-        escalate_on,
-        max_refines_per_link,
         label,
         is_ladder: false,
     };
@@ -1246,7 +1211,7 @@ mod tests;
 
 pub(crate) use execution::{
     execute_with_routing, provider_exhausted_error, trace_to_decision, trace_to_vm_attempts,
-    AttemptStatus, RoutingAttempt, RoutingErrorSnapshot, RoutingTrace, VerifierOutcome,
+    AttemptStatus, RoutingAttempt, RoutingErrorSnapshot, RoutingTrace,
 };
 
 #[cfg(test)]
