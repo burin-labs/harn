@@ -163,7 +163,6 @@ mod rerank;
 pub mod resolved_dispatch;
 pub mod response_tool_calls;
 pub(crate) mod routing;
-pub(crate) mod routing_verifier;
 pub(crate) mod schema_recover;
 pub(crate) mod serving_tiers;
 pub(crate) mod skill_score;

@@ -207,14 +207,13 @@ fn routing_policy_demo_runs_end_to_end_against_bundled_tape() {
     );
     assert!(
         outcome.stdout.contains("=== task smoke ===")
-            && outcome.stdout.contains("=== task rate-lim ===")
-            && outcome.stdout.contains("=== task lint-fail ==="),
-        "routing-policy demo should exercise all three tasks:\n{}",
+            && outcome.stdout.contains("=== task rate-lim ==="),
+        "routing-policy demo should exercise both tasks:\n{}",
         outcome.stdout
     );
     assert!(
-        outcome.stdout.contains("\"escalations\":2"),
-        "routing-policy demo should record two escalations (rate-lim + lint-fail):\n{}",
+        outcome.stdout.contains("\"escalations\":1"),
+        "routing-policy demo should record one escalation (rate-lim):\n{}",
         outcome.stdout
     );
 }
