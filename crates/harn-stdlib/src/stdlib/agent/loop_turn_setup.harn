@@ -22,10 +22,10 @@ import "std/agent/loop_turn_scope"
 // owned siblings — call resolution, denial cutoff, tool calls, the terminal
 // boundary — and this is the same treatment for the phase that runs first.
 //
-// WHAT IT OWNS. Four guards that can end the run before a request is made
-// (iteration budget, a suspend checkpoint, the pre-call budget block, and the
-// input guardrail / pre-turn scope classifier pair), and the assembly of the
-// options, prompt and prefill that the request is built from.
+// WHAT IT OWNS. Three guards that can end the run before a request is made
+// (iteration budget, a suspend checkpoint, and the pre-call budget block), and
+// the assembly of the options, prompt and prefill that the request is built
+// from.
 //
 // CONTROL FLOW CONTRACT. Same shape as `std/agent/loop_terminal`: the caller
 // gets an explicit `action` rather than a `break` smuggled across a module

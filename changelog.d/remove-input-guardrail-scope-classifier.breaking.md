@@ -13,6 +13,6 @@
   through tool policy.
 
   Migration: delete `input_guardrail` and `pre_turn_scope_classifier` from
-  `agent_loop` options (an unknown key is now ignored at run time and rejected
-  by `harn check` on typed options), and drop handling of the two event kinds
+  `agent_loop` options (either key is now an unknown option, and `agent_loop`
+  refuses the run with `no option reads`), and drop handling of the two event kinds
   and the two terminal statuses. Regenerate protocol bindings.

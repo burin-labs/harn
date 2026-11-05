@@ -1,8 +1,10 @@
 # Completion control
 
-Agent loops combine mode-aware completion instructions, optional judges, input
-guardrails, and a deterministic completion gate. These controls share the loop
-contract but can be configured independently.
+Agent loops combine mode-aware completion instructions, optional judges, and a
+deterministic completion gate. These controls share the loop contract but can
+be configured independently. The input guardrail and pre-turn scope classifier
+are removed; check a request in the caller before starting `agent_loop`, or deny
+it through tool policy.
 
 ## Completion instructions
 
