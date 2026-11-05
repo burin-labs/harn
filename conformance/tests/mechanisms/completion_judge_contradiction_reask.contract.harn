@@ -61,10 +61,9 @@ const CONVERSION = "gap_contradicts_done_survived_reask_over_passing_verifier"
 const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
 
 /**
- * A gate that reports exactly one reading. The real `agent_completion_gate`
- * owns deriving these from host facts; a case that needs a specific reading
- * states it directly so the clause under test is the arbitration and not the
- * ladder.
+ * A gate that reports exactly one reading. A case that needs a specific reading
+ * states it directly so the clause under test is the arbitration and not how a
+ * host derives the reading.
  */
 fn gate_observing(observed: string, reason: string) {
   return { _payload ->

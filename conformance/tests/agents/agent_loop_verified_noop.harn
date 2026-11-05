@@ -1,8 +1,8 @@
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { with_llm_script } from "std/testing"
+import { fixture_verify_completion } from "../../fixtures/agents/verify_completion_fixture"
 
 const NOOP_REPLY =
   "File already exists with identical content. No change is needed; proceed to the next step."
@@ -107,22 +107,9 @@ fn observe(
       harness.fs.mkdir(root, true)
       const path = path_join(root, "answer.txt")
       const gate = if pending {
-        agent_completion_gate(
-          harness.runtime,
-          {
-            require_source_write: false,
-            requires_write: false,
-            max_vetoes: 0,
-            requirement_contract: {
-              requirements: [
-                {
-                  requirement_id: "independent",
-                  name: "Independent acceptance",
-                  evidence_roles: ["deterministic_verification"],
-                },
-              ],
-            },
-            facts: { _ ->
+        {
+          verify_completion: fixture_verify_completion(
+            { _ ->
               {
                 verify: {
                   ok: harness.fs.read_text(path) == "correct answer\n",
@@ -132,8 +119,17 @@ fn observe(
                 requirement_evidence: [],
               }
             },
-          },
-        )
+            {
+              requirements: [
+                {
+                  requirement_id: "independent",
+                  name: "Independent acceptance",
+                  evidence_roles: ["deterministic_verification"],
+                },
+              ],
+            },
+          ),
+        }
       } else {
         {}
       }

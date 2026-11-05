@@ -78,9 +78,9 @@ fn toolset() {
 }
 
 /**
- * A gate that reports exactly one reading. The real `agent_completion_gate` owns
- * deriving these from host facts; a case that needs a specific reading states it
- * directly so the clause under test is the skip and not the ladder.
+ * A gate that reports exactly one reading. A case that needs a specific reading
+ * states it directly so the clause under test is the skip and not how a host
+ * derives the reading.
  */
 fn gate_observing(observed: string, reason: string) {
   return { _payload ->
