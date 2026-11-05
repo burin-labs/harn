@@ -99,7 +99,6 @@ harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.188-dev"
 harn-flock = { path = "../harn-flock", version = "=0.10.188-dev" }
 harn-signals = { path = "../harn-signals", version = "=0.10.188-dev" }
 harn-glob = { path = "../harn-glob", version = "=0.10.188-dev" }
-harn-languages = { path = "../harn-languages", version = "=0.10.188-dev" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.188-dev" }
 harn-sqlite = { path = "../harn-sqlite", version = "=0.10.188-dev" }
 harn-ir = { path = "../harn-ir", version = "=0.10.188-dev" }

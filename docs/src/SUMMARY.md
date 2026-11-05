@@ -57,7 +57,6 @@
 - [Structured refactorings cookbook](./cookbooks/structured-refactorings.md)
 - [Rule engine cookbook](./cookbooks/rules-engine.md)
 - [Destructure with defaults cookbook](./cookbooks/destructure-with-defaults.md)
-- [Burin compass cookbook](./cookbooks/burin-compass.md)
 - [Replay time-travel cookbook](./cookbooks/replay-time-travel.md)
 - [Run a FLUX.2 Klein image job with ComfyUI](./cookbooks/run-comfyui-model-job.md)
 - [Run an OpenAI image job](./cookbooks/run-openai-image-job.md)
