@@ -209,7 +209,7 @@ pub struct DaemonEventRecord {
     pub payload_summary: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 #[derive(ts_rs::TS)]
 #[ts(rename = "RunObservability")]
