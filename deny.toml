@@ -26,6 +26,7 @@ all-features = true
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. Review by 2027-01-24. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils 0.1 unmaintained after upstream archived it; no vulnerability, no safe upgrade. Transitive through aws-smithy-http. Review by 2027-02-05. https://rustsec.org/advisories/RUSTSEC-2026-0441" },
     # Linux keyring adapters still require zbus 5; zbus 6 absorbed these crates.
     # Remove these informational exceptions when both adapters support zbus 6.
     { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. Review by 2027-01-17. https://github.com/z-galaxy/zbus/issues/2043" },
