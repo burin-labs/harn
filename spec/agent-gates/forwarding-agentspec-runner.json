@@ -327,7 +327,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_post_turn.harn",
-    "expression": "agent_compute_post_turn(\n        render_harness,\n        session,\n        context.normalized\n          + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},\n        context.dispatch,\n        post_turn_opts,\n        context.iteration_index,\n      )",
+    "expression": "agent_compute_post_turn(\n        render_harness,\n        session,\n        context.normalized\n          + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},\n        context.dispatch,\n        post_turn_opts,\n        context.iteration_index,\n        context.tool_calls,\n      )",
     "owner": "agent_compute_post_turn",
     "evidence": "Consumer agent_compute_post_turn.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
