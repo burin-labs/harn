@@ -89,8 +89,15 @@ jq -n \
   --arg head "$clean_head" \
   '{pull_request: {title: $title, body: $body, base: {sha: $base}, head: {sha: $head}}}' \
   >"$body_event"
-if "$repo/scripts/check_pr_metadata_privacy.sh" "$body_event" >"$captured" 2>&1; then
-  echo "error: a matched pull-request body must fail" >&2
+# The workflow passes the event through GITHUB_EVENT_PATH, not an argument, so
+# the body arm runs through that same entry. Title and commits are clean: the
+# body alone must fail the gate, because a squash merge copies it to main.
+body_status=0
+GITHUB_EVENT_PATH="$body_event" "$repo/scripts/check_pr_metadata_privacy.sh" \
+  >"$captured" 2>&1 || body_status=$?
+if [[ "$body_status" -ne 1 ]]; then
+  echo "error: a matched pull-request body must fail with status 1, got $body_status" >&2
+  cat "$captured" >&2
   exit 1
 fi
 if ! grep -q '^pending sources: pull-request-body$' "$captured"; then
@@ -98,6 +105,35 @@ if ! grep -q '^pending sources: pull-request-body$' "$captured"; then
   cat "$captured" >&2
   exit 1
 fi
+if ! GITHUB_EVENT_PATH="$clean_event" "$repo/scripts/check_pr_metadata_privacy.sh" \
+  >"$captured" 2>&1; then
+  echo "error: a clean body through the workflow entry must pass" >&2
+  cat "$captured" >&2
+  exit 1
+fi
+
+# An empty description arrives as `body: null` and is an empty body. An event
+# without a title or without the body key is unmeasured, never clean.
+jq '.pull_request.body = null' "$clean_event" >"$fixture_root/null-body.json"
+if ! "$repo/scripts/check_pr_metadata_privacy.sh" "$fixture_root/null-body.json" \
+  >"$captured" 2>&1; then
+  echo "error: an empty pull-request description must pass" >&2
+  cat "$captured" >&2
+  exit 1
+fi
+for shape in 'del(.pull_request.body)' 'del(.pull_request.title)' '.pull_request.title = ""'; do
+  jq "$shape" "$clean_event" >"$fixture_root/incomplete.json"
+  incomplete_status=0
+  "$repo/scripts/check_pr_metadata_privacy.sh" "$fixture_root/incomplete.json" \
+    >"$captured" 2>&1 || incomplete_status=$?
+  if [[ "$incomplete_status" -ne 2 ]] \
+    || ! grep -q '^public metadata: sources=0 commits=unmeasured pending=commit-enumeration$' \
+      "$captured"; then
+    echo "error: an event shaped by \`$shape\` must fail as unmeasured" >&2
+    cat "$captured" >&2
+    exit 1
+  fi
+done
 
 # The hash-only arm must inspect the commit body, identify it without exposing
 # the denied token, and count the source as pending.
@@ -259,22 +295,20 @@ if ! grep -q '^public metadata: sources=0 commits=unmeasured pending=commit-enum
   exit 1
 fi
 
-workflow="$root/.github/workflows/pr-gates.yml"
-if ! grep -q 'check_pr_metadata_privacy.sh' "$workflow"; then
-  echo "error: PR gates workflow must invoke the metadata privacy owner" >&2
+# The workflow's name, job and triggers are owned by scripts/required_checks.toml
+# (`make check-required-checks`). These lines pin only how it calls the scanner.
+workflow="$root/.github/workflows/public-metadata-privacy.yml"
+if ! grep -q 'run: ./scripts/check_pr_metadata_privacy.sh$' "$workflow" \
+  || ! grep -q 'GITHUB_EVENT_PATH: ${{ github.event_path }}' "$workflow"; then
+  echo "error: the privacy workflow must pass its event to the metadata privacy owner" >&2
   exit 1
 fi
-if ! grep -A12 'public-metadata-privacy:' "$workflow" | grep -q 'fetch-depth: 0'; then
+if ! grep -q 'fetch-depth: 0' "$workflow"; then
   echo "error: metadata privacy checkout must include the exact commit range" >&2
   exit 1
 fi
-if grep -A20 'public-metadata-privacy:' "$workflow" | grep -q 'Skip merge-group replay'; then
-  echo "error: merge-group metadata must not bypass the scanner" >&2
-  exit 1
-fi
-if ! grep -q 'types: \[opened, reopened, synchronize, edited, labeled, unlabeled\]' \
-  "$workflow"; then
-  echo "error: editing public pull-request metadata must retrigger the gate" >&2
+if grep -q -e 'Skip merge-group replay' -e 'if:' "$workflow"; then
+  echo "error: no event may bypass the metadata privacy scanner" >&2
   exit 1
 fi
 

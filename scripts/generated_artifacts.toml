@@ -62,6 +62,7 @@ exempt_checks = [
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
+  "check-required-checks",           # validates the required-status-check registry against its workflows
   "check-e2e-trigger-contract",      # validates the E2E suite's own pull-request trigger contract and its reporter, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
@@ -822,6 +823,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"
 "check-scheduled-workflows" = "source"
+"check-required-checks" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"
