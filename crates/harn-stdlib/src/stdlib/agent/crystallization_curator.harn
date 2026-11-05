@@ -1354,7 +1354,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     && route?.model == nil
     && route?.models == nil
     && route?.ladder == nil {
-    agent_options = agent_options + {ladder: "frugal"}
+    agent_options = agent_options + {ladder: "crystallization_curator"}
   }
   const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
   if (result?.tools?.successful ?? []).contains("submit_crystallization_batch") {

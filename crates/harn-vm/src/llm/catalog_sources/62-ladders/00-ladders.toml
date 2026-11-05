@@ -32,6 +32,16 @@ steps = [
   { model = "gpt-6-luna", provider = "openai", label = "cheap" },
 ]
 
+# The workflow curator decides whether recurring session evidence is worth a
+# tool. It runs rarely and costs cents per review; the cheap tier declines real
+# evidence that the mid tier acts on.
+[model_ladders.crystallization_curator]
+label = "workflow curator route with transport fallback"
+steps = [
+  { model = "sonnet", label = "mid" },
+  { model = "opus", label = "frontier" },
+]
+
 # The sitrep, judge and approval-reviewer rows below (and the Anthropic QC
 # default) use the current generation: Claude Haiku 5.5 and GPT-6 Luna. Both
 # reject non-default sampling parameters, so these roles send no default
