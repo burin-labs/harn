@@ -212,6 +212,27 @@ impl SessionInputs {
                 .any(|entry| entry.spec.kind == InputKind::Secret)
     }
 
+    /// Filter a value this store holds no input for, until the store is reset.
+    /// Returns `false` only when the bounded redaction set has no room left.
+    #[must_use]
+    pub fn add_filter(&mut self, value: &str) -> bool {
+        if self.retired.iter().any(|retired| retired.as_str() == value)
+            || self.entries.values().any(|active| {
+                active.spec.kind == InputKind::Secret && active.value.as_str() == value
+            })
+        {
+            return true;
+        }
+        if self.entries.len().saturating_add(self.retired.len()) >= 4096
+            || self.retained_bytes.saturating_add(value.len()) > MAX_SESSION_BYTES
+        {
+            return false;
+        }
+        self.retained_bytes += value.len();
+        self.retired.push(Zeroizing::new(value.to_owned()));
+        true
+    }
+
     pub fn put(
         &mut self,
         spec: InputSpec,

@@ -180,3 +180,19 @@ fn session_input_filter_reaches_the_actual_provider_body_only_in_its_session() {
         assert!(crate::agent_sessions::close(&session));
     }
 }
+
+/// A current session id the runtime holds no session for cannot get a store.
+/// A grant handed to a child there is still filtered, never exposed in clear.
+#[test]
+fn a_granted_value_is_filtered_when_the_current_session_has_no_store() {
+    const SESSION: &str = "session-inputs-test-never-opened";
+    const VALUE: &str = "granted-value-without-a-session-store";
+    let _session = crate::agent_sessions::enter_current_session(SESSION);
+    assert_eq!(crate::current_agent_session_id().as_deref(), Some(SESSION));
+    assert!(super::store(SESSION, true).is_err());
+    assert!(crate::session_inputs::filter_granted_value(VALUE));
+    let out =
+        crate::session_inputs::OutputFilter::capture_for_spawn().redact(&format!("out {VALUE}"));
+    assert!(!out.contains(VALUE), "a granted value was printed: {out}");
+    assert!(out.contains("[redacted]"), "nothing was filtered: {out}");
+}

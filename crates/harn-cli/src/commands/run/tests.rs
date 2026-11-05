@@ -8,7 +8,7 @@ use super::{
     split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProcessGrants,
     RunProfileOptions, RunSandboxOptions,
 };
-// Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
+// Every user is a `#[cfg(unix)]` test (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
 // `-D warnings`. Mirrors the local `use super::EnvironmentPolicyArg;` already
 // inside one of those tests.
@@ -19,13 +19,13 @@ use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 mod command_grant_diagnostic;
+#[cfg(unix)]
+mod command_grants;
 mod eval_source;
 mod evidence;
 mod exit_status;
 mod host_dispatch;
 mod network;
-#[cfg(unix)]
-use command_grant_diagnostic::COMMAND_GRANT_FAILURE_DIAGNOSTIC;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
@@ -775,99 +775,6 @@ pipeline main(harness: Harness) {{
     }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert!(marker.is_file(), "the supported child must actually start");
-    harn_vm::reset_thread_local_state();
-}
-
-/// A command-bound grant injects its snapshotted value into the matching child.
-/// The same policy withholds it from a neighboring executable. The parent
-/// holds SRC but not CHILD, so the matching child's value proves injection.
-#[cfg(unix)]
-#[tokio::test]
-async fn execute_run_granted_policy_injects_into_subprocess_env() {
-    harn_vm::reset_thread_local_state();
-    let src = "HARN_TEST_LANE_GRANT_SRC";
-    // SAFETY: this test process mutates its own env; the vars are unique to it
-    // and removed before returning.
-    std::env::set_var(src, "granted-secret-value");
-    std::env::remove_var("HARN_TEST_CHILD_VAR");
-
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let project = temp.path().join("project");
-    std::fs::create_dir(&project).expect("create project");
-    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
-    let script = project.join("main.harn");
-    std::fs::write(
-        &script,
-        [
-            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
-            r#"
-import { command_run } from "std/command"
-
-pipeline main(harness: Harness) {
-  const result = command_run(
-    harness.tools,
-    {argv: ["sh", "-c", "[ \"$HARN_TEST_CHILD_VAR\" = granted-secret-value ] && printf delivered; printf ' %s' \"$HARN_TEST_CHILD_VAR\""]},
-    {capture: {max_inline_bytes: 64}},
-  )
-  if !result.success {
-    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
-  }
-  harness.stdio.println(result.stdout)
-  const neighbor = command_run(
-    harness.tools,
-    {argv: ["env"]},
-    {capture: {max_inline_bytes: 65536}},
-  )
-  if !neighbor.success {
-    throw "neighbor command failed: ${json_stringify(command_grant_failure(neighbor))}"
-  }
-  harness.stdio.println(neighbor.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
-}
-"#,
-        ]
-        .concat(),
-    )
-    .expect("write script");
-
-    let config = EnvironmentPolicyConfig::from_flags(
-        None,
-        &[format!(
-            "grant_source=env:{src},expose=HARN_TEST_CHILD_VAR,for=sh"
-        )],
-    )
-    .expect("valid grant");
-
-    let outcome = execute_run_with_harnpack_and_sandbox_options(
-        &script.to_string_lossy(),
-        false,
-        HashSet::new(),
-        Vec::new(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-        RunSandboxOptions::default().with_environment_policy(config),
-        HarnpackRunOptions::default(),
-    )
-    .await;
-
-    std::env::remove_var(src);
-
-    #[cfg(target_os = "macos")]
-    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
-        harn_vm::reset_thread_local_state();
-        return;
-    }
-    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(
-        outcome.stdout.lines().collect::<Vec<_>>(),
-        ["delivered [redacted]", "absent"]
-    );
-    assert!(
-        outcome.stderr.contains("environment policy: granted"),
-        "the grant must be disclosed; stderr:\n{}",
-        outcome.stderr
-    );
     harn_vm::reset_thread_local_state();
 }
 

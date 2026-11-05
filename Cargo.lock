@@ -4460,7 +4460,6 @@ dependencies = [
  "landlock",
  "libc",
  "md-5",
- "memchr",
  "notify",
  "opentelemetry",
  "opentelemetry-otlp",

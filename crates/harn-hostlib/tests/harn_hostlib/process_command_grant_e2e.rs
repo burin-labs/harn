@@ -32,16 +32,19 @@ use super::support::*;
 
 const GRANTED: &str = "GH_TOKEN";
 const PROBE: &str = "harn-probe-gh-grant";
-const PROBE_BASE64: &str = "aGFybi1wcm9iZS1naC1ncmFudA";
 const SECRET_ACCOUNT: &str = "gh-grant-e2e";
 const SECRET_KEY: &str = "token";
-/// A second value, never granted to gh, so the process-wide redaction set
-/// holds it only if the unprofiled grant registered it.
+/// A second value, never granted to gh, so the session's filter holds it only
+/// if the unprofiled grant added it.
 const OTHER_KEY: &str = "other";
 const OTHER_PROBE: &str = "harn-probe-unprofiled-grant";
-const SESSION_KEY: &str = "session";
-const SESSION_PROBE: &str = "harn-probe-session-secret";
-const PROBE_BASIC: &str = "eC1hY2Nlc3MtdG9rZW46aGFybi1wcm9iZS1naC1ncmFudA";
+
+/// Grant filtering belongs to the current session's input store.
+fn in_session() -> harn_vm::agent_sessions::CurrentSessionGuard {
+    harn_vm::agent_sessions::enter_current_session(
+        harn_vm::agent_sessions::open_or_create(None).expect("open a session"),
+    )
+}
 
 const FAKE_GH: &str = r#"#!/bin/sh
 token=$(sed -n "s/^    oauth_token: '\(.*\)'\$/\1/p" "${GH_CONFIG_DIR:-/nonexistent}/hosts.yml" 2>/dev/null | head -n 1)
@@ -65,8 +68,6 @@ case "$1 $2" in
   "api leak")
     printf 'token=%s' "$(printf '%s' "$token" | cut -c1-9)"; sleep 0.2
     printf '%s\n' "$(printf '%s' "$token" | cut -c10-)"
-    printf 'b64=%s\n' "$(printf '%s' "$token" | base64)"
-    printf 'basic=%s\n' "$(printf 'x-access-token:%s' "$token" | base64)"
     printf 'err=%s\n' "$token" >&2
     exit 0 ;;
 esac
@@ -310,8 +311,7 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
     let provider: std::sync::Arc<dyn SecretProvider> = std::sync::Arc::new(
         MemorySecretProvider::new(SECRET_ACCOUNT)
             .with_secret(SecretId::new(SECRET_ACCOUNT, SECRET_KEY), PROBE)
-            .with_secret(SecretId::new(SECRET_ACCOUNT, OTHER_KEY), OTHER_PROBE)
-            .with_secret(SecretId::new(SECRET_ACCOUNT, SESSION_KEY), SESSION_PROBE),
+            .with_secret(SecretId::new(SECRET_ACCOUNT, OTHER_KEY), OTHER_PROBE),
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -513,20 +513,19 @@ fn gh_auth_token_is_refused_and_printed_credentials_are_redacted() {
     assert!(fixture.shell("gh auth status").contains("gh-grant=absent"));
 
     // A granted program that prints its credential anyway, split across
-    // writes and encoded, has every form redacted from both streams.
+    // writes, has it redacted from both streams.
+    let _session = in_session();
     let out = fixture
         .shell_in(fixture.workspace.path(), "gh api leak")
         .unwrap();
     assert!(out.stdout.contains("gh-grant=present"), "{}", out.stdout);
     assert!(out.stdout.contains("token=[redacted]"), "{}", out.stdout);
-    for form in [PROBE, PROBE_BASE64, PROBE_BASIC] {
-        assert!(
-            !out.stdout.contains(form) && !out.stderr.contains(form),
-            "a granted value survived in output:\n{}\n{}",
-            out.stdout,
-            out.stderr
-        );
-    }
+    assert!(
+        !out.stdout.contains(PROBE) && !out.stderr.contains(PROBE),
+        "a granted value survived in output:\n{}\n{}",
+        out.stdout,
+        out.stderr
+    );
     assert!(out.stderr.contains("err=[redacted]"), "{}", out.stderr);
 }
 
@@ -736,6 +735,7 @@ fn a_grant_to_an_unprofiled_program_is_redacted_from_its_output() {
         })
         .expect("the granted policy must launch");
     harn_vm::stdlib::process::set_session_environment(Some(environment));
+    let _session = in_session();
     let out = fixture.argv(&["printenv", "PRINTENV_PROBE"], &[]);
     assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
     assert!(
@@ -744,96 +744,51 @@ fn a_grant_to_an_unprofiled_program_is_redacted_from_its_output() {
     );
 }
 
-/// A host also grants paths and modes for the whole session. Hiding those would
-/// rewrite every command's output that names the project, so only a secret-store
-/// grant and a session grant named as a credential are redacted.
+/// A declared credential is redacted, and an ordinary long value is untouched
+/// whatever its variable is named.
 #[test]
-fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
-    const PROJECT_ROOT: &str = "/harn-probe/session-project-root";
-    const MODE: &str = "harn-probe-literal-mode";
-    const TOKEN: &str = "harn-probe-session-credential";
-    const RENAMED: &str = "harn-probe-renamed-credential";
+fn a_session_grant_is_redacted_only_when_declared_a_credential() {
+    const CACHE: &str = "/harn-probe/tokenizers-cache";
+    const DECLARED: &str = "harn-probe-declared-credential";
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
-    let env_grant = |var: &str| GrantSpec {
+    let grant = |var: &str, source| GrantSpec {
         name: var.to_ascii_lowercase(),
-        source: GrantSourceSpec::Env {
-            var: var.to_string(),
-        },
+        source,
         expose_as_env: Some(var.to_string()),
-        for_command: None,
-        expose_to: Default::default(),
-    };
-    let literal = GrantSpec {
-        name: "probe_mode".to_string(),
-        source: GrantSourceSpec::Literal {
-            value: MODE.to_string(),
-        },
-        expose_as_env: Some("PROBE_MODE".to_string()),
-        for_command: None,
-        expose_to: Default::default(),
-    };
-    // Exposed under a plain name, the source variable still names a credential.
-    let renamed = GrantSpec {
-        name: "probe_renamed".to_string(),
-        source: GrantSourceSpec::Env {
-            var: "PROBE_UPSTREAM_TOKEN".to_string(),
-        },
-        expose_as_env: Some("PROBE_UPSTREAM".to_string()),
-        for_command: None,
-        expose_to: Default::default(),
-    };
-    // The name says nothing about a credential: the source alone decides.
-    let stored = GrantSpec {
-        name: "probe_stored".to_string(),
-        source: GrantSourceSpec::SecretStore {
-            account: SECRET_ACCOUNT.to_string(),
-            key: SESSION_KEY.to_string(),
-        },
-        expose_as_env: Some("PROBE_STORED".to_string()),
         for_command: None,
         expose_to: Default::default(),
     };
     let environment = SessionEnvironment::launch(
         EnvironmentPolicyKind::Granted,
         vec![
-            env_grant("PROBE_PROJECT_ROOT"),
-            env_grant("PROBE_SESSION_TOKEN"),
-            literal,
-            renamed,
-            stored,
+            grant(
+                "TOKENIZERS_CACHE",
+                GrantSourceSpec::Env {
+                    var: "TOKENIZERS_CACHE".to_string(),
+                },
+            ),
+            grant(
+                "PROBE_DECLARED",
+                GrantSourceSpec::SecretEnv {
+                    var: "PROBE_DECLARED".to_string(),
+                },
+            ),
         ],
         &|name| match name {
-            "PROBE_PROJECT_ROOT" => Some(PROJECT_ROOT.to_string()),
-            "PROBE_SESSION_TOKEN" => Some(TOKEN.to_string()),
-            "PROBE_UPSTREAM_TOKEN" => Some(RENAMED.to_string()),
+            "TOKENIZERS_CACHE" => Some(CACHE.to_string()),
+            "PROBE_DECLARED" => Some(DECLARED.to_string()),
             _ => std::env::var(name).ok(),
         },
     )
     .expect("the granted policy must launch");
     harn_vm::stdlib::process::set_session_environment(Some(environment));
-    let out = fixture.argv(&["printenv", "PROBE_PROJECT_ROOT"], &[]);
-    assert!(out.contains(PROJECT_ROOT), "a path was hidden: {out}");
-    let out = fixture.argv(&["printenv", "PROBE_MODE"], &[]);
-    assert!(out.contains(MODE), "a literal was hidden: {out}");
-    let out = fixture.argv(&["printenv", "PROBE_SESSION_TOKEN"], &[]);
+    let _session = in_session();
+    let out = fixture.argv(&["printenv", "TOKENIZERS_CACHE"], &[]);
+    assert!(out.contains(CACHE), "an ordinary value was hidden: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_DECLARED"], &[]);
     assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
-    assert!(!out.contains(TOKEN), "a credential was printed: {out}");
-    let out = fixture.argv(&["printenv", "PROBE_UPSTREAM"], &[]);
-    assert!(
-        out.contains("[redacted]"),
-        "the rename never arrived: {out}"
-    );
-    assert!(
-        !out.contains(RENAMED),
-        "a renamed credential was printed: {out}"
-    );
-    let out = fixture.argv(&["printenv", "PROBE_STORED"], &[]);
-    assert!(
-        out.contains("[redacted]"),
-        "the secret never arrived: {out}"
-    );
-    assert!(!out.contains(SESSION_PROBE), "a secret was printed: {out}");
+    assert!(!out.contains(DECLARED), "a credential was printed: {out}");
 }
 
 /// A script `gh` on a trusted `PATH` entry, such as a version-manager shim

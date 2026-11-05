@@ -1316,7 +1316,7 @@ fn session_env_with(
         .filter(|grant| grant_owns_key(grant) && grant.carries_credential())
     {
         let value = grant.exposed_env_var().and_then(|var| env.get(var));
-        if value.is_some_and(|value| !crate::session_inputs::register_granted_value(value)) {
+        if value.is_some_and(|value| !crate::session_inputs::filter_granted_value(value)) {
             return Err(VmError::Thrown(VmValue::string(
                 "[environment_policy.redaction_full] too many granted values to redact",
             )));

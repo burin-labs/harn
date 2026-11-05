@@ -251,6 +251,9 @@ impl GrantSource {
 pub enum GrantSourceSpec {
     /// Snapshot the named launcher environment variable at launch.
     Env { var: String },
+    /// An [`GrantSourceSpec::Env`] snapshot the host declares to be a secret, so
+    /// its value is filtered from what a child prints.
+    SecretEnv { var: String },
     /// A `secret_store` account/key pointer, resolved lazily on exposure.
     SecretStore { account: String, key: String },
     /// A value the declaration states outright, used verbatim.
@@ -274,7 +277,7 @@ pub enum GrantSourceSpec {
 impl GrantSourceSpec {
     fn kind(&self) -> GrantSource {
         match self {
-            GrantSourceSpec::Env { .. } => GrantSource::Env,
+            GrantSourceSpec::Env { .. } | GrantSourceSpec::SecretEnv { .. } => GrantSource::Env,
             GrantSourceSpec::SecretStore { .. } => GrantSource::SecretStore,
             GrantSourceSpec::Literal { .. } => GrantSource::Literal,
         }
@@ -413,7 +416,7 @@ impl GrantSpec {
         let source_kind = self.source.kind();
         let source_spec = self.source.clone();
         let resolved_ref = match self.source {
-            GrantSourceSpec::Env { var } => {
+            GrantSourceSpec::Env { var } | GrantSourceSpec::SecretEnv { var } => {
                 let var = var.trim();
                 if var.is_empty() {
                     return Err(EnvironmentPolicyError::EmptyEnvVar {

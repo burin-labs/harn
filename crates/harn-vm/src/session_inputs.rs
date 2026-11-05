@@ -4,11 +4,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-mod granted_values;
 #[cfg(test)]
 mod tests;
-
-pub use granted_values::register_granted_value;
 
 pub use harn_execution_policy::session_inputs::{
     InputDescription, InputError, InputKind, InputLifetime, InputSpec, InputUsage, InputUse,
@@ -58,41 +55,75 @@ fn current_store() -> Result<Store, InputError> {
     store(&id, false)
 }
 
+/// The filter for output produced while no agent session is current, such as a
+/// plain `harn run --grant`. It holds only values added by
+/// [`filter_granted_value`] and lasts for the process.
+fn process_store() -> Store {
+    static PROCESS: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
+    PROCESS.get_or_init(Store::default).clone()
+}
+
+/// The filter that applies to output produced here: the current session's
+/// store when one is current (created on demand with `create`), otherwise the
+/// process store. A current session the runtime has no store for, such as one
+/// already removed, also falls back to the process store, so a granted value
+/// is never exposed unfiltered.
+fn filter_store(create: bool) -> Store {
+    crate::current_agent_session_id()
+        .and_then(|id| store(&id, create).ok())
+        .unwrap_or_else(process_store)
+}
+
 pub(crate) fn has_private_filter() -> bool {
-    granted_values::any() || current_store().is_ok_and(|store| store.lock().has_secret_filters())
+    filter_store(false).lock().has_secret_filters()
+}
+
+/// Below this a value is too likely to occur in unrelated output.
+const MIN_FILTERED_VALUE_LEN: usize = 8;
+
+/// Filter a credential a grant is about to hand a child from this session's
+/// output, or from the process's output when no session store is available.
+///
+/// Value matching is best-effort cleanup of accidents, not a security boundary:
+/// a child holding a value can encode or split it past any filter, and what holds
+/// a secret back is not handing it over. Returns `false` only when the filter is
+/// full, so the caller must not expose the value.
+#[must_use]
+pub fn filter_granted_value(value: &str) -> bool {
+    if value.len() < MIN_FILTERED_VALUE_LEN {
+        return true;
+    }
+    filter_store(true).lock().add_filter(value)
 }
 
 /// Retain the filter for one operation, including output received after close.
 /// Dropping the operation releases this reference to the private material.
-/// Values a grant handed to a child are always filtered too, store or not.
-pub struct OutputFilter(Option<Store>);
+pub struct OutputFilter(Store);
 
 impl OutputFilter {
     pub fn capture() -> Self {
-        Self(current_store().ok())
+        Self(filter_store(false))
+    }
+
+    /// Capture for a child about to spawn, whose grants may be the first thing
+    /// this session has to filter. Never call this under the session lock.
+    pub fn capture_for_spawn() -> Self {
+        Self(filter_store(true))
     }
 
     pub fn redact(&self, text: &str) -> String {
-        let text = match &self.0 {
-            Some(store) => store.lock().redact(text),
-            None => text.to_owned(),
-        };
-        match granted_values::redact(text.as_bytes()) {
-            Some(redacted) => String::from_utf8_lossy(&redacted).into_owned(),
-            None => text,
-        }
+        self.0.lock().redact(text)
     }
 
     pub fn redact_bytes<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
-        let stored = self.0.as_ref().and_then(|store| {
-            let store = store.lock();
+        let stored = {
+            let store = self.0.lock();
             store
                 .has_secret_filters()
                 .then(|| store.redact_bytes(bytes))
                 .filter(|redacted| redacted != bytes)
-        });
-        let current = stored.as_deref().unwrap_or(bytes);
-        match granted_values::redact(current).or(stored) {
+        };
+        match stored {
             Some(redacted) => std::borrow::Cow::Owned(redacted),
             None => std::borrow::Cow::Borrowed(bytes),
         }
@@ -133,8 +164,9 @@ pub(crate) fn http_header(
         .with_value(name, usage, now_ms(), |value| format!("{prefix}{value}"))
 }
 
-/// Exact-value filtering complements the shared pattern policy. No store or
-/// active session is a real empty set, not an ambient credential fallback.
+/// Exact-value filtering complements the shared pattern policy. Without a
+/// session store, the process store applies; it holds only credentials a grant
+/// handed a child, never an ambient credential fallback.
 pub fn redact(text: &str) -> String {
     OutputFilter::capture().redact(text)
 }

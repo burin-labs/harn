@@ -145,7 +145,10 @@ impl CommandStatus {
 /// `HostlibError::Backend` so the surrounding builtin gets a uniform
 /// `Thrown` dict on the script side.
 pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
-    run_with_filter(req, harn_vm::session_inputs::OutputFilter::capture())
+    run_with_filter(
+        req,
+        harn_vm::session_inputs::OutputFilter::capture_for_spawn(),
+    )
 }
 
 pub(crate) fn run_with_filter(

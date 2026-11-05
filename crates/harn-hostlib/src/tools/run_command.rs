@@ -122,7 +122,7 @@ pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
 }
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let private_filter = harn_vm::session_inputs::OutputFilter::capture();
+    let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
     let map = require_dict_arg(NAME, args)?;
     let (program, args_tail) = parse_command(&map)?;
     let cwd_raw = optional_string(NAME, &map, "cwd")?;
