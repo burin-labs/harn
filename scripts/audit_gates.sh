@@ -197,6 +197,7 @@ GATES=(
   check-ci-cache-policy
   check-rust-test-lane-policy
   check-scheduled-workflows
+  check-required-checks
   check-crate-sibling-versions
   check-dependabot-groups
   check-release-contract
