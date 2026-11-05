@@ -63,9 +63,32 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 base=https://github.com/burin-labs/harn/releases/download/v$version
+api=https://api.github.com/repos/burin-labs/harn/releases
+api_mode=0
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fLsS --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 -H "Accept: $3" "$1" -o "$2"
+  else
+    wget -q --tries=3 --timeout=120 --header="Accept: $3" "$1" -O "$2"
+  fi
+}
 download() {
-  if command -v curl >/dev/null 2>&1; then curl -fLsS --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 "$1" -o "$2"
-  else wget -q --tries=3 --timeout=120 "$1" -O "$2"; fi
+  if [ "$api_mode" = 0 ] && fetch "$1" "$2" application/octet-stream; then
+    return 0
+  fi
+  if [ "$api_mode" = 0 ]; then
+    command -v jq >/dev/null 2>&1 || { echo 'release download failed; API fallback requires jq' >&2; return 1; }
+    echo 'direct seed download failed; trying the GitHub release asset API' >&2
+    fetch "$api/tags/v$version" "$work/release.json" application/vnd.github+json || return 1
+    api_mode=1
+  fi
+  id=$(jq -er --arg name "${1##*/}" '
+    [.assets[] | select(.name == $name)]
+    | if length == 1 and (.[0].id | type) == "number"
+      then .[0].id else error("expected one release asset") end
+  ' "$work/release.json") || return 1
+  case "$id" in ''|0|*[!0-9]*) echo 'invalid release asset ID' >&2; return 1;; esac
+  fetch "$api/assets/$id" "$2" application/octet-stream
 }
 digest() {
   # Hash standard input: with a file name, sha256sum escapes a Windows path and

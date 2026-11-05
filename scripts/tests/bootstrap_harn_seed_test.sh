@@ -21,6 +21,7 @@ else
 fi
 checksum=${checksum%% *}
 printf '%s  %s\n' "$checksum" harn-x86_64-unknown-linux-gnu.tar.xz > "$fixture/SHA256SUMS"
+printf '%s\n' '{"assets":[{"name":"SHA256SUMS","id":101},{"name":"harn-x86_64-unknown-linux-gnu.tar.xz","id":102}]}' > "$fixture/release.json"
 
 cat > "$tools/uname" <<'EOF'
 #!/bin/sh
@@ -41,6 +42,16 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
+if [ "${HARN_SEED_TEST_API_FALLBACK:-0}" = 1 ]; then
+  printf '%s\n' "$url" >> "$HARN_SEED_TEST_API_LOG"
+  case "$url" in
+    https://github.com/*) exit 22 ;;
+    */releases/tags/*) cp "$HARN_SEED_TEST_FIXTURE/release.json" "$output"; exit ;;
+    */releases/assets/101) cp "$HARN_SEED_TEST_FIXTURE/SHA256SUMS" "$output"; exit ;;
+    */releases/assets/102) cp "$HARN_SEED_TEST_FIXTURE/harn-x86_64-unknown-linux-gnu.tar.xz" "$output"; exit ;;
+    *) exit 1 ;;
+  esac
+fi
 [ "${HARN_SEED_TEST_INTERRUPT:-0}" != 1 ] || [ "${url##*/}" = SHA256SUMS ] || {
   printf '%s' partial > "$output"
   exit 1
@@ -148,6 +159,40 @@ if PATH="$tools:$PATH" XDG_CACHE_HOME="$scratch/cache-home" \
   exit 1
 fi
 test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+
+if command -v jq >/dev/null 2>&1; then
+  rm -rf "$scratch/cache-home"
+  export HARN_SEED_TEST_API_FALLBACK=1 HARN_SEED_TEST_API_LOG="$scratch/api.log"
+  run_seed >/dev/null
+  cmp "$fixture/SHA256SUMS" "$cache/SHA256SUMS"
+  cmp "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+  [ "$(grep -c '/releases/download/' "$HARN_SEED_TEST_API_LOG")" = 1 ]
+  [ "$(grep -c '/releases/tags/' "$HARN_SEED_TEST_API_LOG")" = 1 ]
+  [ "$(grep -c '/releases/assets/' "$HARN_SEED_TEST_API_LOG")" = 2 ]
+  rm -f "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+  cp "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz" "$fixture/archive.valid"
+  printf '%s\n' corrupt > "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz"
+  if run_seed > "$scratch/api-corrupt.stdout" 2> "$scratch/api-corrupt.stderr"; then
+    echo 'corrupt API fallback seed unexpectedly passed verification' >&2
+    exit 1
+  fi
+  grep -F 'seed checksum mismatch' "$scratch/api-corrupt.stderr" >/dev/null
+  test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+  cp "$fixture/archive.valid" "$fixture/harn-x86_64-unknown-linux-gnu.tar.xz"
+  cp "$fixture/release.json" "$fixture/release.valid"
+  printf '%s\n' '{"assets":[{"name":"SHA256SUMS","id":101},{"name":"SHA256SUMS","id":103}]}' > "$fixture/release.json"
+  if run_seed > "$scratch/api-duplicate.stdout" 2> "$scratch/api-duplicate.stderr"; then
+    echo 'ambiguous API assets unexpectedly passed selection' >&2
+    exit 1
+  fi
+  grep -F 'expected one release asset' "$scratch/api-duplicate.stderr" >/dev/null
+  test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+  cp "$fixture/release.valid" "$fixture/release.json"
+  unset HARN_SEED_TEST_API_FALLBACK HARN_SEED_TEST_API_LOG
+  echo 'Seed API fallback: exact assets, checksum and ambiguity controls passed.'
+else
+  echo 'API fallback tests skipped: jq is unavailable' >&2
+fi
 
 rm -rf "$scratch/cache-home"
 run_seed >/dev/null &
