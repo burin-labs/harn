@@ -305,10 +305,14 @@ harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
 # Snapshot a provider key for this run's own model calls. No spawned
 # command, including one the agent runs, can read it. `secret-env:` declares
-# the value a credential, so it is redacted from output; `env:` is not.
+# the value a credential, so a child it is handed to has it redacted from its
+# output; `env:` is not. With `to=in_process` no child receives it, so nothing
+# filters it from what the run itself prints.
 harn run --grant fireworks=secret-env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
 
-# The same key for model calls and every spawned command.
+# The same key for model calls and every spawned command. Filtering starts at
+# the first spawn that receives it; output printed in-process before then is
+# not filtered.
 harn run --grant fireworks=secret-env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
 
