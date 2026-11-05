@@ -415,7 +415,7 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     for (const [workflow, jobName] of [
       ['consumer-canary.yml', 'Declare consumer observer'],
       ['build-release-binaries.yml', 'Consumer release rehearsal / Declare consumer observer'],
-      ['promote-release.yml', 'Recover missing consumer rehearsal / Declare consumer observer'],
+      ['promote-release.yml', 'Measure consumer rehearsal / Declare consumer observer'],
     ]) {
       const negative = execute({ missing: 0, jobName, parent: { ...parent, path: `.github/workflows/${workflow}` } });
       assert.equal(negative.run.status, 1);

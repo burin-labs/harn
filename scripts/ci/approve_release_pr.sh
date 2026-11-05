@@ -2,8 +2,8 @@
 # Approve the release bot's own version-only pull requests.
 #
 # Two pull requests exist only to move the workspace version: `Release vX.Y.Z`
-# (release-attempt/vX.Y.Z/<head>, written by scripts/open_release_pr.sh) and `Start X.Y.Z-dev
-# development` (automation/development-X.Y.Z-dev). The bot that opens them
+# (release-attempt/vX.Y.Z/<head>, written by scripts/open_release_pr.sh) and `Start X.Y.Z
+# development` (automation/development-X.Y.Z). The bot that opens them
 # cannot approve its own pull request, and the automatic reviewer skips
 # bot-authored pull requests, so each waited for a person. This script approves
 # one only when the diff is provably nothing but that move.
@@ -55,8 +55,9 @@ title=$(jq -r '.title' <<< "$meta")
 # The branch names the version; the title must say the same thing. Docs and
 # manifests mention the new version, the patch before it, or the latest
 # published release (which differs from the patch before it after a retired,
-# never-published version), in stable or -dev form. Those are the only strings
-# a version-only change may rewrite.
+# never-published version), in stable or -dev form, and the release before that
+# one, which the agent manifest names until a newer release is published. Those
+# are the only strings a version-only change may rewrite.
 if [[ "$head_ref" =~ ^release-attempt/v([0-9]+)\.([0-9]+)\.([0-9]+)/([0-9a-f]{40})$ ]]; then
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
   [[ "${BASH_REMATCH[4]}" == "$head_sha" ]] || refuse "immutable attempt ref does not name its head"
@@ -66,9 +67,9 @@ elif [[ "$head_ref" =~ ^release/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
   [[ "$title" == "Release v$major.$minor.$patch" ]] || refuse "title '$title' does not match branch $head_ref"
   kind=release
-elif [[ "$head_ref" =~ ^automation/development-([0-9]+)\.([0-9]+)\.([0-9]+)-dev$ ]]; then
+elif [[ "$head_ref" =~ ^automation/development-([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
-  [[ "$title" == "[Release] Start $major.$minor.$patch-dev development" ]] || refuse "title '$title' does not match branch $head_ref"
+  [[ "$title" == "[Release] Start $major.$minor.$patch development" ]] || refuse "title '$title' does not match branch $head_ref"
   kind=development
 else
   refuse "branch $head_ref is not a release or development-bump branch"
@@ -81,6 +82,12 @@ old="$major.$minor.$((patch - 1))"
 published=$(gh api "repos/$repo/releases/latest" --jq '.tag_name' 2> /dev/null || true)
 published=${published#v}
 [[ "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$published" != "$new" ]] || published=$old
+# The version bump after a publication moves the agent manifest from the release
+# before it up to the one just published.
+prior=$(gh api "repos/$repo/releases?per_page=10" \
+  --jq '[.[] | select(.draft == false and .prerelease == false) | .tag_name][1] // ""' 2> /dev/null || true)
+prior=${prior#v}
+[[ "$prior" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || prior=$published
 
 commits=$(gh api --paginate --slurp "repos/$repo/pulls/$pr/commits?per_page=100" | jq 'add // []') \
   || refuse "the commits could not be read"
@@ -97,10 +104,10 @@ count=$(jq 'length' <<< "$files")
 # lines is a behavior change, not a version move. Patch lines starting `---`/`+++`
 # are content here, not headers, because the API patch carries only hunks.
 version_only() {
-  jq -r --arg old "$old" --arg new "$new" --arg published "$published" '
+  jq -r --arg old "$old" --arg new "$new" --arg published "$published" --arg prior "$prior" '
     # Longest first: X.Y.Z-dev contains X.Y.Z.
     def lit($v): "(?<![0-9.])" + ($v | gsub("\\."; "\\.")) + "(?![0-9])";
-    def norm: reduce ([$new + "-dev", $old + "-dev", $published + "-dev", $new, $old, $published] | .[]) as $v (.; gsub(lit($v); "@V@"));
+    def norm: reduce ([$new + "-dev", $old + "-dev", $published + "-dev", $new, $old, $published, $prior] | .[]) as $v (.; gsub(lit($v); "@V@"));
     def hunk_lines: split("\n") | map(select(test("^[-+]") ));
     .[]
     | select(.filename != "CHANGELOG.md" and (.filename | test("^changelog\\.d/[^/]+\\.md$") | not))
@@ -116,9 +123,12 @@ version_only() {
 }
 
 # A release folds the parked or fragment-built `## Unreleased` heading into
-# `## v<new>`: that one removed line is allowed, and only when the very next
-# patch line is its replacement, so the notes under it keep their heading.
-problems=$(jq -r --arg new "$new" '
+# `## v<new>`, and a version bump folds it into the release just published: that
+# one removed line is allowed, and only when the very next patch line is its
+# replacement, so the notes under it keep their heading.
+folded=$new
+[[ "$kind" != development ]] || folded=$published
+problems=$(jq -r --arg folded "$folded" '
   .[]
   | if .filename == "CHANGELOG.md" then
       # No patch means a truncated or binary diff that cannot be shown to add only lines.
@@ -127,18 +137,14 @@ problems=$(jq -r --arg new "$new" '
             | [$l[] | select(test("^-") and . != "-## Unreleased")] | length > 0
          then "CHANGELOG.md: removes lines"
        elif (.patch | split("\n")) as $l
-            | [range(0; $l | length) | select($l[.] == "-## Unreleased") | select($l[. + 1] != "+## v" + $new)]
+            | [range(0; $l | length) | select($l[.] == "-## Unreleased") | select($l[. + 1] != "+## v" + $folded)]
             | length > 0
-         then "CHANGELOG.md: drops the Unreleased heading without renaming it in place to v\($new)"
+         then "CHANGELOG.md: drops the Unreleased heading without renaming it in place to v\($folded)"
        else empty end)
     elif (.filename | test("^changelog\\.d/[^/]+\\.md$")) then
       (if .status == "removed" then empty else "\(.filename): not a deletion" end)
     else empty end' <<< "$files")
 problems+=$'\n'$(version_only)
-if [[ "$kind" == development ]]; then
-  # A development bump folds no changelog.
-  problems+=$'\n'$(jq -r '.[] | select(.filename == "CHANGELOG.md" or (.filename | startswith("changelog.d/"))) | "\(.filename): a development bump touches no changelog"' <<< "$files")
-fi
 problems=$(sed '/^$/d' <<< "$problems")
 [[ -z "$problems" ]] || refuse "the diff is not version-only: $(head -3 <<< "$problems" | paste -sd ';' -)"
 

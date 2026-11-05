@@ -3,50 +3,35 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Build release 
 
 # Triggers, in order of importance:
 #
-#   1. push main that changes the workspace version to a stable X.Y.Z —
-#      candidate mode. Builds, signs, notarizes, packages, and attests the
-#      full five-target matrix at exactly github.sha, builds the
-#      target-independent release files (SHA256SUMS, release-assets.json,
-#      release notes) from those archives, writes the candidate manifest
-#      (burin-labs.candidate_manifest.v1), and runs the late release checks
-#      (the residual audit lanes and release smoke) on those same files. The
-#      run is green only when the files it built passed every check. A
-#      separate promotion workflow publishes exactly these files; nothing here
-#      creates a tag, a GitHub release, or a container.
+#   1. workflow_dispatch source_candidate on main: candidate mode.
+#      green-checkpoint.yml requests one on its cadence, and a maintainer may
+#      request one. Builds, signs, notarizes, packages, and attests the full
+#      five-target matrix at exactly github.sha, builds the target-independent
+#      release files (SHA256SUMS, release-assets.json, release notes) from those
+#      archives, writes the candidate manifest (burin-labs.candidate_manifest.v1),
+#      and runs native qualification and the late release checks (the residual
+#      audit lanes and release smoke) on those same files. The run is green only
+#      when the files it built passed every check. A separate promotion workflow
+#      publishes exactly these files, and only on request; nothing here creates a
+#      tag, a GitHub release, or a container. The consumer rehearsal belongs to
+#      promotion, so a checkpoint does not spend one.
 #
 #      The macOS smoke runs on a trusted host whose runner group admits this
 #      workflow only on refs/heads/main, so a candidate built on any other ref
 #      could never finish (.github/restricted-runner-groups.json).
 #
-#   2. push main, any other commit — warm-cache-only mode. Runs the same build
-#      matrix to populate the per-target Swatinem rust-cache on main so the
-#      next candidate restores warm via restore-keys prefix matching. Skips
-#      sign/notarize/package/upload. The setup job short-circuits this mode
-#      unless the push changed a compile or build-topology input declared in
-#      .github/release-warm-cache-paths.yml.
+#   2. push main: warm-cache-only mode, whatever version the commit declares.
+#      Runs the same build matrix to populate the per-target Swatinem rust-cache
+#      on main so the next candidate restores warm via restore-keys prefix
+#      matching. Skips sign/notarize/package/upload. The setup job short-circuits
+#      this mode unless the push changed a compile or build-topology input
+#      declared in .github/release-warm-cache-paths.yml.
 #
-#   3. schedule, daily — signed exact-main source candidates, including commits
-#      outside the warm-cache path filter. A live candidate is reused. The
-#      cadence is a spend decision; scripts/scheduled_workflows.toml records it.
+#   3. workflow_dispatch warm_cache_only or benchmark_only: cache refresh and
+#      size gates.
 #
-#   4. workflow_dispatch — warm_cache_only, benchmark_only size gates, or an
-#      explicit source_candidate on main. Source candidates reuse the full
-#      signed producer and checks. Promotion requests one itself while main
-#      owes a release and no candidate is in flight.
-#
-#      While main declares an unpublished stable version, a source candidate
-#      (trigger 3 or 4) is a release candidate of that version: it runs the
-#      consumer rehearsal and native qualification, and promotion publishes
-#      whichever main candidate of the version qualifies first.
-#
-#   5. merge_group — builds nothing. A group whose head is a release commit
-#      runs the exact-source consumer rehearsal at the commit that lands, and
-#      `Release candidate verdict` requires it to pass. The candidate itself is
-#      built by the push (trigger 1).
-#
-#   6. pull_request — builds nothing. It exists so `Release candidate verdict`
-#      reports on every pull request and can be a required check, which makes
-#      the merge queue hold a release until its candidate passed.
+#   4. merge_group and pull_request: build nothing. They exist so `Release
+#      candidate verdict` reports everywhere and can be a required check.
 #
 # Cache architecture note. GitHub Actions caches are scoped per-ref. Main warm
 # events and main candidate builds own saves; each target prunes old
@@ -56,8 +41,6 @@ on:
     branches: [main]
   merge_group:
   pull_request:
-  schedule:
-    - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
       source_candidate:
@@ -111,15 +94,13 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
-  # Candidate runs are push runs, so they get a run-qualified lane and a later
-  # main push can never cancel a release candidate. An immutable-source
-  # benchmark has a source-and-policy-qualified lane, including when its source
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || (github.event_name == 'workflow_dispatch' && inputs.source_candidate && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name }}
+  # Candidates share one lane that never cancels, so a later main push can never
+  # cancel a release candidate. An immutable-source benchmark has a source-and-policy-qualified lane, including when its source
   # defaults to the dispatched commit. Setup may resolve a push to a no-op;
   # the build job below gives only real per-target warms a shared, preemptible
-  # lane, so a docs-only push cannot destroy useful cache work. Scheduled and
-  # manual source candidates serialize without cancellation. Manual warms may supersede an
-  # older manual warm in their separate group.
+  # lane, so a docs-only push cannot destroy useful cache work. Manual warms may
+  # supersede an older manual warm in their separate group.
   cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only }}
 
 env:
@@ -167,7 +148,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install the source candidate decision runtime
-        if: inputs.source_candidate || github.event_name == 'schedule'
+        if: inputs.source_candidate
         uses: ./.github/actions/setup-harn
         with:
           version-file: .harn-bootstrap-version
@@ -202,7 +183,7 @@ jobs:
       - name: Resolve release context
         id: resolve
         env:
-          INPUT_SOURCE_CANDIDATE: ${{ (inputs.source_candidate || github.event_name == 'schedule') && 'true' || 'false' }}
+          INPUT_SOURCE_CANDIDATE: ${{ inputs.source_candidate && 'true' || 'false' }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
@@ -213,18 +194,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GH_TOKEN: ${{ github.token }}
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
-          # shellcheck source=scripts/lib/release_candidate_run.sh
-          source scripts/lib/release_candidate_run.sh
           # Freeze the source before jobs fan out. A branch name can advance
           # between the AOT checkout and the later per-target checkout.
           REF="$GITHUB_SHA"
@@ -288,16 +262,6 @@ jobs:
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             SHOULD_BUILD_BINARIES=true
             SHOULD_PACKAGE_ARCHIVES=true
-            if [[ "$EVENT_NAME" == schedule ]]; then
-              LIVE_CANDIDATE_RUN="$(source_candidate_live_run_id "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$BUILD_MATRIX")"
-              if [[ -n "$LIVE_CANDIDATE_RUN" ]]; then
-                BUILD_MODE=queued
-                SHOULD_BUILD_BINARIES=false
-                SHOULD_PACKAGE_ARCHIVES=false
-                echo "reused_source_run_id=$LIVE_CANDIDATE_RUN" >> "$GITHUB_OUTPUT"
-                echo "::notice::Reusing live source candidate run $LIVE_CANDIDATE_RUN at $GITHUB_SHA."
-              fi
-            fi
             echo "::notice::Signed source candidate $GITHUB_SHA uses the existing full candidate producer."
           elif [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
@@ -361,98 +325,31 @@ jobs:
             echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload."
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
             RUNNER_PROFILE=policy
-            # The version commit is the release: a push whose workspace version
-            # changes to a stable X.Y.Z builds the candidate at exactly this
-            # commit. The decision reads the version, never the commit subject.
-            # A merge queue lands several entries in one push, so the push is
-            # judged from the previous main, not from HEAD^: a release commit
-            # buried under a later entry is refused, never built as a warm cache.
-            PREVIOUS_VERSION="$(git show HEAD^:Cargo.toml | release_workspace_version)"
-            PUSH_BASE="$PUSH_BEFORE"
-            if [[ ! "$PUSH_BASE" =~ ^[0-9a-f]{40}$ || "$PUSH_BASE" =~ ^0+$ ]] ||
-               ! git cat-file -e "$PUSH_BASE^{commit}" 2>/dev/null; then
-              PUSH_BASE="$(git rev-parse HEAD^)"
-            fi
-            RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
-            if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Promotion requests a source candidate of main while the version is unpublished (docs/src/maintainer-release.md)."
-              exit 1
-            fi
-            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
-              BUILD_MODE=candidate
-              REF="$GITHUB_SHA"
-              CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
-              BUILD_MATRIX="$(resolve_runner_matrix candidate policy)"
+            # A version commit publishes nothing and builds no candidate. The
+            # parsed path policy owns which changes rotate a build cache or alter
+            # release-build topology. For all other pushes the previous warm
+            # cache still keys cleanly and a rebuild adds no signal.
+            BUILD_MODE=warm
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
+            if [[ "$RELEASE_BUILD_INPUTS_CHANGED" == "true" ]]; then
               SHOULD_BUILD_BINARIES=true
-              SHOULD_PACKAGE_ARCHIVES=true
-              echo "::notice::Workspace version changed from $PREVIOUS_VERSION to $VERSION. Building release candidate v$VERSION at $GITHUB_SHA: sign, notarize, package, attest, then run the release checks on those files."
+              echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml. No sign/notarize/package/upload."
             else
-              # The parsed path policy owns which changes rotate a build cache
-              # or alter release-build topology. For all other pushes the
-              # previous warm cache still keys cleanly and a rebuild adds no
-              # signal.
-              BUILD_MODE=warm
-              BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" policy)"
-              if [[ "$RELEASE_BUILD_INPUTS_CHANGED" == "true" ]]; then
-                SHOULD_BUILD_BINARIES=true
-                echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml. No sign/notarize/package/upload."
-              else
-                BUILD_MATRIX="[]"
-                echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml, and is not a stable version change. Skipping build matrix."
-              fi
+              BUILD_MATRIX="[]"
+              echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml. Skipping build matrix."
             fi
           elif [[ "$EVENT_NAME" == "merge_group" ]]; then
             RUNNER_PROFILE=policy
             # A merge group never builds a candidate: the trusted macOS smoke
-            # host admits only refs/heads/main, so a queue-ref candidate would
-            # wait for it forever. A group whose head is a release commit still
-            # rehearses the consumer at the commit that lands, and the verdict
-            # requires that pass. The required release-contract job refuses a
-            # group that buries a release commit.
+            # host admits only refs/heads/main.
             BUILD_MODE=none
-            RELEASE_COMMITS="$(release_range_release_commits "$MERGE_GROUP_BASE" "$GITHUB_SHA")"
-            if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
-              CANDIDATE_PURPOSE=release
-              REHEARSAL_SOURCE_SHA="$GITHUB_SHA"
-              echo "::notice::Merge group lands release v$VERSION at $GITHUB_SHA. Rehearsing the consumer here; the push to main builds the candidate."
-            else
-              echo "::notice::Merge group lands no release commit at its head. Nothing to build."
-            fi
+            echo "::notice::Merge groups build nothing; candidates come from checkpoints."
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             BUILD_MODE=none
-            PR_VERSION="$(git show "$PR_HEAD_SHA:Cargo.toml" | release_workspace_version)"
-            # Main may have advanced its development version since this branch
-            # forked. Only the branch's own version change owes a rehearsal.
-            PR_MERGE_BASE="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
-            PR_BASE_VERSION="$(git show "$PR_MERGE_BASE:Cargo.toml" | release_workspace_version)"
-            if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
-              REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
-            fi
-            echo "::notice::Pull requests build nothing; the release's push to main builds its candidate."
+            echo "::notice::Pull requests build nothing; candidates come from checkpoints."
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "::error::workflow_dispatch requires source_candidate=true, warm_cache_only=true or benchmark_only=true"
             exit 1
-          fi
-
-          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == none ]]; then
-            CANDIDATE_PURPOSE=release
-          fi
-          # The source's version decides the purpose, never the event: while
-          # main owes an unpublished stable version, a scheduled or requested
-          # main candidate is a release candidate and earns the same proofs.
-          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == source ]]; then
-            owed=0
-            release_version_is_owed "$GITHUB_REPOSITORY" "$VERSION" || owed=$?
-            case "$owed" in
-              0)
-                CANDIDATE_PURPOSE=release
-                echo "::notice::Main owes unpublished v$VERSION; this source candidate is a release candidate." ;;
-              1) ;;
-              *) echo "::error::Cannot read whether v$VERSION is published; candidate purpose is unproven."; exit 1 ;;
-            esac
-          fi
-          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == release ]]; then
-            REHEARSAL_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
           fi
 
           {
@@ -645,7 +542,7 @@ jobs:
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
     # only the same target from an older real warm. Candidates, benchmarks,
-    # schedules, and manual warms use run-qualified lanes; their workflow-level
+    # and manual warms use run-qualified lanes; their workflow-level
     # concurrency owns any allowed cancellation.
     concurrency:
       group: build-release-binaries-build-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}
@@ -677,7 +574,7 @@ jobs:
       # one build identity. Step-scoping this value made the growth signal
       # misclassify required-AOT release binaries as non-comparable.
       HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && '1' || '0' }}
-      HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
+      HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
     strategy:
       # If one leg fails (for example a size-budget ratchet or a
       # platform-specific signer outage), keep the other legs running so the
@@ -1753,8 +1650,8 @@ jobs:
             --artifacts-dir "$archives" \
             --tag "v$VERSION" \
             --output "$release_files/release-assets.json"
-          # Stable source candidates can recover an unpublished stable cut;
-          # retain its publication notes in the certified manifest.
+          # A stable candidate's certified notes are what the release publishes.
+          # Only a prerelease source, which promotion refuses, has none.
           source scripts/lib/release_version.sh
           if [[ "$CANDIDATE_PURPOSE" == source ]] && release_version_is_prerelease "$VERSION"; then
             printf 'Unreleased source candidate %s at %s.\n' "$VERSION" "$SOURCE_COMMIT" \
@@ -1959,7 +1856,7 @@ jobs:
   native-qualification:
     name: Qualify native release source
     needs: [setup, source-ci]
-    if: needs.setup.outputs.build_mode == 'candidate' && (github.event_name != 'schedule' || needs.setup.outputs.candidate_purpose == 'release')
+    if: needs.setup.outputs.build_mode == 'candidate'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -1995,11 +1892,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # One check for the whole candidate, so the merge queue can require it. A
-  # release's merge group passes only after its exact-source consumer
-  # rehearsal passes; every other group passes as soon as setup finds nothing
-  # to build. On the push, it is the candidate run's verdict that promotion
-  # reads.
+  # One check for the whole candidate. A run with nothing to build passes as soon
+  # as setup says so. On a candidate it is the verdict that promotion reads.
   candidate-verdict:
     name: Release candidate verdict
     needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
@@ -2015,7 +1909,6 @@ jobs:
           REHEARSAL_SOURCE_SHA: ${{ needs.setup.outputs.rehearsal_source_sha }}
           CONSUMER_RESULT: ${{ needs.consumer-rehearsal.result }}
           NATIVE_RESULT: ${{ needs.native-qualification.result }}
-          EVENT_NAME: ${{ github.event_name }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
@@ -2036,7 +1929,7 @@ jobs:
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi
-          if [[ ( "$EVENT_NAME" != schedule || "$CANDIDATE_PURPOSE" == release ) && "$NATIVE_RESULT" != success ]]; then
+          if [[ "$NATIVE_RESULT" != success ]]; then
             echo "::error::Native release qualification finished ${NATIVE_RESULT:-missing}; candidate refused."
             exit 1
           fi

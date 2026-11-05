@@ -1,7 +1,7 @@
 name: Approve release PR
 
 # Approves the release bot's own version-only pull requests (`Release vX.Y.Z`
-# and `Start X.Y.Z-dev development`) once scripts/ci/approve_release_pr.sh has
+# and `Start X.Y.Z development`) once scripts/ci/approve_release_pr.sh has
 # proved from the pull request's data that the diff only moves the version and
 # folds the changelog. The bot that opens them cannot approve its own pull
 # request and the automatic reviewer skips bot authors, so each used to wait

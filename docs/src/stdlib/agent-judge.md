@@ -124,6 +124,8 @@ outside the agent. The target identity must stay the same, its digest must chang
 between the checks, and the current digest must match the second check. Missing
 or unreadable inputs, an absent baseline, stale source, a replaced goal, or
 another session leave the ordinary strict veto in place.
+Effect admission controls reuse only; an executed check can bind its observation
+even when skipping its effects has not been authorized.
 Run a fresh check after further changes. Neither a write nor a passing pair proves
 that behavior is preserved; the declaration and verifier express the caller's
 intent and evidence. `behavior_change` and `unknown` retain the strict rule.

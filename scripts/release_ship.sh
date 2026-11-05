@@ -680,12 +680,10 @@ elif [[ "$MODE" == "finalize" ]]; then
     EXPECTED_VERSION="$(current_version)"
     sync_base_branch "$BASE_BRANCH"
   else
-    # The canonical publish path is already detached at the immutable tag.
-    # Prove that tree identity with Git alone, then reject its fragments before
-    # resolving release metadata can trigger a cold Harn build.
+    # The canonical publish path is already detached at the immutable tag. Prove
+    # that tree identity with Git alone. Its changelog.d is the release's notes.
     require_existing_release_tag_checkout "$BASE_BRANCH"
   fi
-  require_no_unfolded_fragments
   if [[ -n "$FINALIZE_TAG" ]]; then
     EXPECTED_VERSION="$(current_version)"
     if [[ "$FINALIZE_TAG" != "v$EXPECTED_VERSION" ]]; then

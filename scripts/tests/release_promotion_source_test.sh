@@ -54,28 +54,27 @@ resolve || fail "successful main push refused"
 jq '.event="workflow_dispatch" | .head_branch="main"' "$tmp/good-run.json" > "$tmp/run.json"
 cp "$tmp/run.json" "$tmp/good-manual.json"
 cp "$tmp/artifacts.json" "$tmp/good-artifacts.json"
-RECOVERY=true resolve || fail "successful stable manual main candidate refused"
+resolve || fail "successful stable manual main candidate refused"
 grep -Fxq "source_sha=$sha" "$tmp/output" || fail "wrong manual source"
-# Any successful main producer is a candidate source, whatever event built it.
-for event in schedule workflow_dispatch; do
-  jq --arg event "$event" '.event=$event' "$tmp/good-manual.json" > "$tmp/run.json"
-  resolve || fail "automatic $event main producer refused"
-  RECOVERY=true resolve || fail "recovered $event main producer refused"
-done
-# An automatic run of a producer that built no candidate is the planner's
-# decision, not a resolver failure.
+# A candidate comes from a checkpoint or an explicit request, never a retired
+# schedule, and a producer that built no candidate is refused for every event.
+jq '.event="schedule"' "$tmp/good-manual.json" > "$tmp/run.json"
+refuse 'scheduled producer'
 cp "$tmp/good-manual.json" "$tmp/run.json"
 printf '{"total_count":0,"artifacts":[]}\n' > "$tmp/artifacts.json"
-resolve || fail "automatic producer without a candidate failed before planning"
+refuse 'producer without a candidate'
+jq '.event="push"' "$tmp/good-manual.json" > "$tmp/run.json"
+refuse 'push producer without a candidate'
+cp "$tmp/good-manual.json" "$tmp/run.json"
 cp "$tmp/good-artifacts.json" "$tmp/artifacts.json"
 for mutation in '.head_branch="feature"' '.event="pull_request"'; do
   jq "$mutation" "$tmp/good-manual.json" > "$tmp/run.json"
-  RECOVERY=true refuse "manual producer $mutation"
+  refuse "manual producer $mutation"
 done
 cp "$tmp/good-manual.json" "$tmp/run.json"
 for version in 0.10.159-dev 0.10.159-rc.1 0.010.159 invalid ''; do
   printf '[workspace.package]\nversion = "%s"\n' "$version" > "$tmp/Cargo.toml"
-  RECOVERY=true refuse "manual candidate version $version"
+  refuse "manual candidate version $version"
 done
 printf '[workspace.package]\nversion = "0.10.159"\n' > "$tmp/Cargo.toml"
 for mutation in '.total_count=8' '.artifacts=[] | .total_count=0' \
@@ -87,12 +86,12 @@ for mutation in '.total_count=8' '.artifacts=[] | .total_count=0' \
   'del(.artifacts[0].workflow_run)' '.artifacts[0].name="unrelated"' \
   '.artifacts[0].name=.artifacts[1].name' 'del(.artifacts[-1]) | .total_count-=1' '{}'; do
   jq "$mutation" "$tmp/good-artifacts.json" > "$tmp/artifacts.json"
-  RECOVERY=true refuse "manual artifacts $mutation"
+  refuse "manual artifacts $mutation"
 done
 printf 'not json\n' > "$tmp/artifacts.json"
-RECOVERY=true refuse 'malformed manual artifacts'
+refuse 'malformed manual artifacts'
 : > "$tmp/artifacts.json"
-RECOVERY=true refuse 'empty manual artifacts'
+refuse 'empty manual artifacts'
 cp "$tmp/good-artifacts.json" "$tmp/artifacts.json"
 for mutation in '.conclusion="failure"' '.status="in_progress"' '.event="pull_request"' \
   '.repository.full_name="foreign/repo"' '.head_repository.full_name="fork/harn"' \
@@ -117,6 +116,30 @@ cp "$tmp/good-compare.json" "$tmp/compare.json"
 : > "$tmp/run.json"
 refuse 'empty producer'
 cp "$tmp/good-run.json" "$tmp/run.json"
+# Naming only the commit resolves its newest successful candidate run, by reading.
+cat > "$tmp/bin/node" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == */release-candidate-state.mjs && "$2" == successful ]] || exit 71
+[[ "${FIXTURE_RUNS_FAIL:-false}" == false ]] || exit 1
+printf '%s' "${FIXTURE_RUN-4242}"
+EOF
+chmod +x "$tmp/bin/node"
+resolve_by_commit() {
+  : > "$tmp/output"
+  env PATH="$tmp/bin:$PATH" FIXTURE="$tmp" GITHUB_REPOSITORY=burin-labs/harn \
+    CANDIDATE_RUN_ID= GITHUB_OUTPUT="$tmp/output" EXPECTED_SOURCE_SHA="$sha" \
+    bash "${RELEASE_PROMOTION_SOURCE_SCRIPT:-$root/scripts/resolve-release-promotion-source.sh}" > "$tmp/log" 2>&1
+}
+resolve_by_commit || fail "a commit with a candidate run did not resolve: $(cat "$tmp/log")"
+grep -Fxq 'run_id=4242' "$tmp/output" || fail "the commit's candidate run was not selected"
+if FIXTURE_RUN= resolve_by_commit; then fail 'a commit with no candidate run resolved'; fi
+[[ ! -s "$tmp/output" ]] || fail 'a commit with no candidate run emitted a source'
+grep -Fq "No successful build run holds a candidate at $sha" "$tmp/log" \
+  || fail "the missing candidate is not named: $(cat "$tmp/log")"
+if FIXTURE_RUNS_FAIL=true resolve_by_commit; then fail 'an unread run listing resolved'; fi
+[[ ! -s "$tmp/output" ]] || fail 'an unread run listing emitted a source'
+rm "$tmp/bin/node"
+
 if resolve '4242/../../other'; then fail 'invalid run accepted'; fi
 [[ ! -s "$tmp/output" ]] || fail 'invalid run emitted output'
 if resolve 4242 0000000000000000000000000000000000000000; then
@@ -159,7 +182,7 @@ jq --arg policy "$policy" '.event="workflow_dispatch" | .head_branch="main" |
 cp "$tmp/good-compare.json" "$tmp/lineage.json"
 jq --arg policy "$policy" '.artifacts[].workflow_run.head_sha=$policy' \
   "$tmp/good-artifacts.json" > "$tmp/artifacts.json"
-RECOVERY=true CONSUMER_PULL_REQUEST=7 resolve || fail 'authenticated historical repair refused'
+CONSUMER_PULL_REQUEST=7 resolve || fail 'authenticated historical repair refused'
 grep -Fxq "source_sha=$sha" "$tmp/output" || fail 'historical repair exported policy as source'
 refuse 'historical producer without repair'
 STANDALONE_HARN=true refuse 'historical standalone producer'

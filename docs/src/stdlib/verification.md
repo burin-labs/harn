@@ -165,15 +165,20 @@ accepts a `VerificationReuse` record:
   detect a change and restore during execution. Supply digests instead of secrets.
 - `accept`: the check's verdict callback over `CommandResult`, for example
   rejecting an exit-zero test run that collected no tests.
+- `skip_effects_safe`: set to `true` only when the caller has established that
+  omitting this invocation does not omit any required effects. A successful
+  exit or unchanged input identity does not establish that. `false` or an
+  omitted value forces the next invocation to execute.
 
 The helper adds the complete supplied invocation and options to that identity.
 It reuses only an accepted successful result whose input state was unchanged
 across execution and still matches now. A hit returns the original result and
 observation with `execution: "reused"`; it launches no child and adds no timing
-sample. Missing identities, changed inputs, failed commands and rejected
-verdicts execute again. A changed input during execution prevents reuse of
-that result. This contract does not make an incomplete dependency census or a
-nondeterministic check safe to cache.
+sample. Missing effect admission or identities, changed inputs, failed commands
+and rejected verdicts execute again. A stable successful check can still carry
+its input binding as evidence when effect admission is absent. A changed input
+during execution prevents reuse of that result. This contract does not make an
+incomplete dependency census or a nondeterministic check safe to cache.
 
 `verification_start_check(row_id, spec, options)` starts a check in the
 background after capturing optional launch-time hashes. It returns a receipt

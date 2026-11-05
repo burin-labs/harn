@@ -1156,6 +1156,226 @@ fn python_server_renames_through_annotations_and_imports() {
     );
 }
 
+const PY_STUBBED: &[(&str, &str)] = &[
+    ("pyproject.toml", "[project]\nname = \"pkg\"\nversion = \"0.1.0\"\n"),
+    ("pkg/__init__.py", "from .mod import *\n"),
+    ("pkg/__init__.pyi", "from .mod import *\n"),
+    (
+        "pkg/mod.py",
+        "__all__ = [\"tee_all\", \"Box\"]\n\n\ndef tee_all(x):\n    return x\n\n\ndef helper():\n    return tee_all(1)\n\n\nclass Box:\n    def load(self):\n        return 1\n",
+    ),
+    (
+        "pkg/mod.pyi",
+        "from typing import overload\n\n__all__ = [\"tee_all\", \"Box\"]\n\n@overload\ndef tee_all(x: int) -> int: ...\n@overload\ndef tee_all(x: str) -> str: ...\n\ndef helper() -> int: ...\n\nclass Box:\n    def load(self) -> int: ...\n",
+    ),
+    (
+        "pkg/user.py",
+        "import pkg\nimport pkg.mod\nfrom pkg.mod import Box, tee_all\n\nprint(tee_all(1), pkg.mod.tee_all(2), pkg.tee_all(3))\nprint(Box().load())\n",
+    ),
+];
+
+/// Rename the declaration of `name` on `line`, through the server only.
+fn server_rename_at(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    line: i64,
+    new_name: &str,
+    backend: &str,
+) -> Option<VmValue> {
+    server_answer(|| {
+        let request = dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string(name)),
+                    ("path", vm_string(path)),
+                    ("line", VmValue::Int(line)),
+                ]),
+            ),
+            ("new_name", vm_string(new_name)),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string(backend)),
+        ]);
+        crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
+    })
+}
+
+#[test]
+fn python_server_renames_a_declaration_and_its_sibling_stub() {
+    let _env = crate::process::test_support::declare_inherited();
+    // Each overload is a seed too; the implementation is one, the stub another.
+    let seeds = [("pkg/mod.py", 4), ("pkg/mod.pyi", 6), ("pkg/mod.pyi", 8)];
+    for (path, line) in seeds {
+        let dir = tempdir().unwrap();
+        write_tree(dir.path(), PY_STUBBED);
+        let capability = index(dir.path());
+        let Some(result) = server_rename_at(
+            &capability,
+            path,
+            "tee_all",
+            line,
+            "fan_out",
+            "language_server",
+        ) else {
+            return;
+        };
+        assert_eq!(
+            s(field(&result, "result")),
+            "applied",
+            "{path}:{line}: {result:?}"
+        );
+        assert_eq!(s(field(field(&result, "backend"), "server")), "pyright");
+        let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+        assert_eq!(
+            read("pkg/mod.py"),
+            "__all__ = [\"fan_out\", \"Box\"]\n\n\ndef fan_out(x):\n    return x\n\n\ndef helper():\n    return fan_out(1)\n\n\nclass Box:\n    def load(self):\n        return 1\n",
+            "{path}:{line}"
+        );
+        assert_eq!(
+            read("pkg/mod.pyi"),
+            "from typing import overload\n\n__all__ = [\"fan_out\", \"Box\"]\n\n@overload\ndef fan_out(x: int) -> int: ...\n@overload\ndef fan_out(x: str) -> str: ...\n\ndef helper() -> int: ...\n\nclass Box:\n    def load(self) -> int: ...\n",
+            "{path}:{line}"
+        );
+        assert_eq!(
+            read("pkg/user.py"),
+            "import pkg\nimport pkg.mod\nfrom pkg.mod import Box, fan_out\n\nprint(fan_out(1), pkg.mod.fan_out(2), pkg.fan_out(3))\nprint(Box().load())\n",
+            "{path}:{line}"
+        );
+    }
+
+    // A method pairs with the stub's method of the same class.
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), PY_STUBBED);
+    let capability = index(dir.path());
+    let Some(result) = server_rename_at(
+        &capability,
+        "pkg/mod.py",
+        "load",
+        13,
+        "fetch",
+        "language_server",
+    ) else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert!(read("pkg/mod.py").contains("def fetch(self):"));
+    assert!(read("pkg/mod.pyi").contains("def fetch(self) -> int: ..."));
+    assert!(read("pkg/user.py").contains("print(Box().fetch())"));
+}
+
+#[test]
+fn a_same_named_declaration_that_is_not_the_sibling_stubs_is_left_alone() {
+    let _env = crate::process::test_support::declare_inherited();
+    let unrelated: [(&str, &str); 5] = [
+        (
+            "pkg/other.py",
+            "def tee_all():\n    return 0\n\n\nprint(tee_all())\n",
+        ),
+        ("pkg/other.pyi", "def tee_all() -> int: ...\n"),
+        // The same stem in another directory is not a sibling.
+        ("elsewhere/mod.pyi", "def tee_all() -> str: ...\n"),
+        ("elsewhere/__init__.py", ""),
+        (
+            "pkg/uses_other.py",
+            "from pkg.other import tee_all\n\nprint(tee_all())\n",
+        ),
+    ];
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), PY_STUBBED);
+    write_tree(dir.path(), &unrelated);
+    let capability = index(dir.path());
+    let Some(result) = server_rename_at(
+        &capability,
+        "pkg/mod.py",
+        "tee_all",
+        4,
+        "fan_out",
+        "language_server",
+    ) else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert!(read("pkg/mod.pyi").contains("def fan_out(x: int)"));
+    for (path, text) in unrelated {
+        assert_eq!(read(path), text, "{path}");
+    }
+
+    // The sibling's name at another scope is a different declaration: a stub's
+    // module function describes neither a method nor a function-local one.
+    let stub = "def load() -> int: ...\n\ndef run() -> int: ...\n\nclass Box: ...\n";
+    let cases: [(&str, i64, &str); 2] = [
+        (
+            "load",
+            2,
+            "class Box:\n    def load(self):\n        return 1\n\n\ndef run():\n    return 1\n\n\ndef load():\n    return 2\n",
+        ),
+        (
+            "run",
+            2,
+            "def outer():\n    def run():\n        return 1\n    return run()\n\n\ndef run():\n    return 2\n",
+        ),
+    ];
+    for (name, line, module) in cases {
+        let dir = tempdir().unwrap();
+        write_tree(
+            dir.path(),
+            &[
+                (
+                    "pyproject.toml",
+                    "[project]\nname = \"pkg\"\nversion = \"0.1.0\"\n",
+                ),
+                ("pkg/__init__.py", ""),
+                ("pkg/mod.py", module),
+                ("pkg/mod.pyi", stub),
+            ],
+        );
+        let capability = index(dir.path());
+        let Some(result) = server_rename_at(
+            &capability,
+            "pkg/mod.py",
+            name,
+            line,
+            "renamed",
+            "language_server",
+        ) else {
+            return;
+        };
+        assert_eq!(s(field(&result, "result")), "applied", "{name}: {result:?}");
+        let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+        assert_eq!(read("pkg/mod.pyi"), stub, "{name}");
+        assert!(
+            read("pkg/mod.py").contains(&format!("def {name}():\n    return 2\n")),
+            "{name}"
+        );
+    }
+
+    // Without the server's binding answers the syntax engine still refuses.
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), PY_STUBBED);
+    let capability = index(dir.path());
+    let refused = server_rename_at(
+        &capability,
+        "pkg/mod.py",
+        "tee_all",
+        4,
+        "fan_out",
+        "syntax_tree",
+    )
+    .unwrap();
+    assert_eq!(
+        s(field(&refused, "result")),
+        "ambiguous_symbol",
+        "{refused:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("pkg/mod.py")).unwrap(),
+        PY_STUBBED[3].1
+    );
+}
+
 const GO_MODULE: &[(&str, &str)] = &[
     ("go.mod", "module example.com/readings\n\ngo 1.22\n"),
     (
