@@ -6,8 +6,10 @@
   `tool_call_output_schema`, and `exact_tool_call_output_schema` move unchanged
   to `std/llm/tool_call_schema`.
 
-  Migration: stop passing `structural_validator` to `agent_loop`; the loop no
-  longer reads it, and passing it has no effect. Import the four registry readers from `std/llm/tool_call_schema`.
-  Hosts that match on the `structural_validator_decision` event kind or the
-  generated `StructuralValidatorDecision` type must drop that case after
-  regenerating their protocol bindings.
+  Migration: stop passing `structural_validator` to `agent_loop`; it is now an
+  unknown option, and `agent_loop` refuses the run with `no option reads`.
+  Import the four registry readers from `std/llm/tool_call_schema`. Hosts that
+  match on the removed `structural_validator_decision` host event kind, or on
+  its generated payload type (`HarnAgentEventStructuralValidatorDecision` in
+  Swift and Go, the `StructuralValidatorDecision` variant in Rust), must drop
+  that case after regenerating their protocol bindings.
