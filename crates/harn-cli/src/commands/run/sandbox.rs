@@ -15,8 +15,8 @@ pub struct RunSandboxOptions {
     /// sandbox. These extend the write jail without disabling path
     /// enforcement or egress policy.
     pub write_roots: Vec<PathBuf>,
-    /// Extra read-only filesystem roots. `path` resolving under one of
-    /// these entries is scoped for reads, but writes still fail.
+    /// Extra filesystem read roots. On Linux, subprocesses may write a root
+    /// nested inside a writable root; Landlock grants are additive.
     pub read_only_roots: Vec<PathBuf>,
     /// Extra roots readable only by spawned subprocesses.
     pub process_read_roots: Vec<PathBuf>,

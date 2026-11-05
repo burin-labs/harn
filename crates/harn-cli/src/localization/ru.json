@@ -899,7 +899,7 @@
   "Extra host capability schema for bundle contract validation": "Дополнительная схема возможностей хоста для проверки контракта bundle",
   "Extra host capability schema for preflight validation": "Дополнительная схема возможностей хоста для проверки preflight",
   "Extra host capability schema to merge into the default manifest": "Дополнительная схема возможностей хоста для слияния с манифестом по умолчанию",
-  "Extra read-only filesystem roots. Repeatable; each path is readable but never writable": "Дополнительные корни файловой системы только для чтения. Можно повторять; каждый путь доступен только для чтения и никогда — для записи",
+  "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root": "Дополнительные корни файловой системы только для чтения. Можно повторять; в Linux подпроцессы могут записывать данные в корень внутри другого корня, доступного для записи",
   "Extra runtime environment variable to include and sync, as KEY=VALUE": "Дополнительная переменная среды времени выполнения для включения и синхронизации, в формате KEY=VALUE",
   "Extra runtime secret to sync through the provider CLI, as KEY=VALUE": "Дополнительный секрет времени выполнения для синхронизации через CLI провайдера, в формате KEY=VALUE",
   "Extra skill-discovery roots (repeatable)": "Дополнительные корни обнаружения навыков (можно повторять)",

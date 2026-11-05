@@ -899,7 +899,7 @@
   "Extra host capability schema for bundle contract validation": "用于捆绑合约验证的额外主机能力模式",
   "Extra host capability schema for preflight validation": "用于预检验证的额外主机能力模式",
   "Extra host capability schema to merge into the default manifest": "要合并到默认清单中的额外主机能力模式",
-  "Extra read-only filesystem roots. Repeatable; each path is readable but never writable": "额外的只读文件系统根目录。可重复；每个路径都可读但绝不可写",
+  "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root": "额外的只读文件系统根目录。可重复指定；在 Linux 上，子进程可能写入位于可写根目录内的根目录",
   "Extra runtime environment variable to include and sync, as KEY=VALUE": "要包含并同步的额外运行时环境变量，格式为 KEY=VALUE",
   "Extra runtime secret to sync through the provider CLI, as KEY=VALUE": "要通过提供程序 CLI 同步的额外运行时机密，格式为 KEY=VALUE",
   "Extra skill-discovery roots (repeatable)": "额外的技能发现根目录（可重复）",

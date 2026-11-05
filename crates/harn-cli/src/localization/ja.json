@@ -899,7 +899,7 @@
   "Extra host capability schema for bundle contract validation": "バンドル契約検証用の追加ホスト機能スキーマ",
   "Extra host capability schema for preflight validation": "事前確認検証用の追加ホスト機能スキーマ",
   "Extra host capability schema to merge into the default manifest": "デフォルトマニフェストにマージする追加ホスト機能スキーマ",
-  "Extra read-only filesystem roots. Repeatable; each path is readable but never writable": "追加の読み取り専用ファイルシステムルート。繰り返し指定可能。各パスは読み取り可能ですが、書き込みはできません",
+  "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root": "追加の読み取り専用ファイルシステムルート。繰り返し指定可能。Linux では、書き込み可能なルート内にあるルートにサブプロセスが書き込める場合があります",
   "Extra runtime environment variable to include and sync, as KEY=VALUE": "含めて同期する追加のランタイム環境変数。KEY=VALUE として指定",
   "Extra runtime secret to sync through the provider CLI, as KEY=VALUE": "プロバイダ CLI 経由で同期する追加のランタイムシークレット。KEY=VALUE として指定",
   "Extra skill-discovery roots (repeatable)": "追加のスキル探索ルート（繰り返し指定可能）",
