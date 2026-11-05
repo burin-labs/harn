@@ -152,7 +152,7 @@ pub struct RunTranscriptArtifactDescriptor {
     pub tool_schema_hash: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct CompactionEventRecord {
     /// Schema version of the receipt this record was projected from. `0` marks a

@@ -36,7 +36,7 @@ fn default_schema_version() -> u32 {
 
 /// One serializable, versioned record of a single transcript compaction. See the
 /// module docs for how it flows through every projection.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompactionReceipt {
     /// Schema version. Lets readers migrate: a receipt read from an older
