@@ -1164,6 +1164,7 @@ The callback receives:
   tool_results: list,
   tool_count: int,
   tool_names: list,
+  resolved_tool_calls: list<{id: string?, name: string?}> | nil,
   available_tool_names: list<string>,
   claimable_tool_names: list<string>,
   successful_tool_names: list,
@@ -1179,6 +1180,14 @@ The callback receives:
   completion_signal: AgentCompletionSignal,
 }
 ```
+
+`resolved_tool_calls` lists the calls selected by the loop for this turn, in
+order, without their arguments. An empty list means no call was resolved; it
+does not rule out malformed or rejected tool markup. `nil` means the inventory
+was not supplied. An entry's missing ID or name is `nil`. The inventory is not
+proof of a result: reconcile unique IDs and names with the transcript lifecycle
+before attributing any effect, and treat missing, duplicate, or unmatched
+identities as unknown.
 
 `completion_signal` is the loop's typed marker decision. Its `declared` field
 answers whether the configured sentinel was emitted. Its `source` is

@@ -14,6 +14,9 @@ const TRANSCRIPT_REPORT_SCHEMA = "harn.agent.transcript.report.v1"
 
 pub type AgentTranscriptToolCall = {id?: string, name: string, args: dict, raw?: unknown}
 
+/** The normalized identity of one tool call, without its arguments. */
+pub type AgentTranscriptToolCallIdentity = {id: string, name: string}
+
 /** Provider message content forms accepted by transcript normalization. */
 pub type AgentTranscriptTextValue = string | list | dict | nil
 
@@ -361,6 +364,20 @@ pub fn agent_transcript_tool_call_name(call: dict) -> string {
 }
 
 /**
+ * Normalize call identity without reading or returning its arguments.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call_identity(call: dict) -> AgentTranscriptToolCallIdentity {
+  return {
+    id: __first_text([call?.id, call?.call_id, call?.tool_call_id]),
+    name: agent_transcript_tool_call_name(call),
+  }
+}
+
+/**
  * Return canonical tool-call arguments as a dict when possible.
  *
  * `arguments` may be an object or a JSON string. Unparseable strings are kept
@@ -396,13 +413,13 @@ pub fn agent_transcript_tool_call_args(call: dict) {
  * @api_stability: experimental
  */
 pub fn agent_transcript_tool_call(call: dict) -> AgentTranscriptToolCall? {
-  const name = agent_transcript_tool_call_name(call)
-  if name == "" {
+  const identity = agent_transcript_tool_call_identity(call)
+  if identity.name == "" {
     return nil
   }
   return {
-    id: __first_text([call?.id, call?.call_id, call?.tool_call_id]),
-    name: name,
+    id: identity.id,
+    name: identity.name,
     args: agent_transcript_tool_call_args(call),
     raw: call,
   }

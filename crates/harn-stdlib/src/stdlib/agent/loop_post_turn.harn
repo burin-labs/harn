@@ -350,6 +350,7 @@ pub fn agent_loop_post_turn_transition(
         context.dispatch,
         post_turn_opts,
         context.iteration_index,
+        context.tool_calls,
       )
     },
   )

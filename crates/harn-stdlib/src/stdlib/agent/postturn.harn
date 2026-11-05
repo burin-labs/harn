@@ -21,6 +21,7 @@ import {
   __tool_surface_narrowing_post_turn,
   __tool_surface_tool_allowed,
 } from "std/agent/tool_surface"
+import { agent_transcript_tool_call_identity } from "std/agent/transcript"
 import {
   __turn_end_condition_config,
   __turn_end_judge_due,
@@ -36,6 +37,27 @@ import {
 
 /** One exact registry tool claimed for the immediately following model turn. */
 pub type AgentNextToolClaim = {tool_name: string}
+
+/** Identity of one resolved call; missing values remain unknown. */
+pub type AgentPostTurnResolvedToolCall = {id: string?, name: string?}
+
+fn __post_turn_resolved_tool_calls(calls: list?) -> list<AgentPostTurnResolvedToolCall>? {
+  if calls == nil {
+    return nil
+  }
+  let out: list<AgentPostTurnResolvedToolCall> = []
+  for call in calls {
+    const identity = if type_of(call) == "dict" {
+      agent_transcript_tool_call_identity(call)
+    } else {
+      {id: "", name: ""}
+    }
+    const id = identity.id
+    const name = identity.name
+    out = out + [{id: id ? id : nil, name: name ? name : nil}]
+  }
+  return out
+}
 
 fn __default_done_sentinel(opts: any) {
   return opts?.done_sentinel
@@ -1038,6 +1060,7 @@ pub fn agent_compute_post_turn(
   dispatch: AgentToolDispatch,
   opts: any,
   iteration: int,
+  resolved_tool_calls: list? = nil,
 ) {
   const sentinel = __default_done_sentinel(opts)
   const text = llm_result?.text ?? ""
@@ -1059,6 +1082,7 @@ pub fn agent_compute_post_turn(
     tool_results: dispatch_results,
     tool_count: len(dispatch_results),
     tool_names: tool_names,
+    resolved_tool_calls: __post_turn_resolved_tool_calls(resolved_tool_calls),
     tools: opts?.tools,
     available_tool_names: __tool_surface_current_names(opts),
     claimable_tool_names: __tool_surface_claimable_names(opts),
