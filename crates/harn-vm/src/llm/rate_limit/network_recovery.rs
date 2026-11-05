@@ -3,6 +3,8 @@
 use super::*;
 use crate::llm::api::LlmCallOptions;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::PoisonError;
 
 /// Preserve direct fail-fast checks of the breaker state machine.
 #[cfg(test)]
@@ -66,8 +68,9 @@ pub(crate) fn swap_prompt_probe_owner(replacement: Option<String>) -> Option<Str
 }
 
 /// One person's prompt, from sending it until its turn ends.
+#[must_use = "dropping the guard ends the prompt's claim on its probe"]
 pub struct InteractivePromptGuard {
-    session_id: String,
+    owner: String,
 }
 
 /// Offer this prompt's next request on each failing route the chance to probe
@@ -76,15 +79,20 @@ pub struct InteractivePromptGuard {
 ///
 /// Call this inside the turn's ambient scope and hold the guard for the turn.
 pub fn begin_interactive_prompt(session_id: &str) -> InteractivePromptGuard {
+    static PROMPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
     ensure_initialized_from_config();
-    swap_prompt_probe_owner(Some(session_id.to_string()));
+    // Unique per prompt, so a worker outliving its turn cannot act for the
+    // session's next prompt.
+    let owner = format!(
+        "{session_id}#{}",
+        PROMPT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    );
+    swap_prompt_probe_owner(Some(owner.clone()));
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     for limiter in registry.limiters.values_mut() {
-        limiter.breaker.offer_interactive_probe(session_id);
+        limiter.breaker.offer_interactive_probe(&owner);
     }
-    InteractivePromptGuard {
-        session_id: session_id.to_string(),
-    }
+    InteractivePromptGuard { owner }
 }
 
 impl Drop for InteractivePromptGuard {
@@ -93,14 +101,14 @@ impl Drop for InteractivePromptGuard {
         // to whoever is polling now.
         PROMPT_PROBE_OWNER.with(|slot| {
             let mut slot = slot.borrow_mut();
-            if slot.as_deref() == Some(self.session_id.as_str()) {
+            if slot.as_deref() == Some(self.owner.as_str()) {
                 *slot = None;
             }
         });
-        if let Ok(mut registry) = registry().lock() {
-            for limiter in registry.limiters.values_mut() {
-                limiter.breaker.probe_offers.remove(&self.session_id);
-            }
+        let now_ms = crate::clock_mock::instant_now().as_millis();
+        let mut registry = registry().lock().unwrap_or_else(PoisonError::into_inner);
+        for limiter in registry.limiters.values_mut() {
+            limiter.breaker.withdraw_prompt(&self.owner, now_ms);
         }
     }
 }

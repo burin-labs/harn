@@ -1,4 +1,3 @@
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import {
@@ -11,6 +10,9 @@ import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run } from "std/command"
 import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
 import { repair_test_tools } from "../../conformance/fixtures/agents/repair_tools"
+import {
+  fixture_verify_completion,
+} from "../../conformance/fixtures/agents/verify_completion_fixture"
 
 fn run_with_discovery(harness: Harness, unavailable: bool) -> dict {
   const probe_key = "discovery-facts-${harness.random.uuid()}"
@@ -34,10 +36,9 @@ fn run_with_discovery(harness: Harness, unavailable: bool) -> dict {
             done_sentinel: "##DONE##",
             session_id: session,
           }
-            + agent_completion_gate(
-              harness.runtime,
-              {
-                facts: { _ ->
+            + {
+              verify_completion: fixture_verify_completion(
+                { _ ->
                   harness.runtime.store_set(probe_key, true)
                   return {
                     source_write_count: 1,
@@ -47,8 +48,8 @@ fn run_with_discovery(harness: Harness, unavailable: bool) -> dict {
                     } : nil,
                   }
                 },
-              },
-            ),
+              ),
+            },
         ) },
       )
       assert(harness.runtime.store_get(probe_key) == true, "the completion gate must be reached")
@@ -295,10 +296,9 @@ pipeline test_a_declared_verifier_runs_despite_unavailable_discovery(harness: Ha
           final_wrapup: false,
           done_sentinel: "##DONE##",
         }
-          + agent_completion_gate(
-            harness.runtime,
-            {
-              facts: { _ ->
+          + {
+            verify_completion: fixture_verify_completion(
+              { _ ->
                 {
                   source_write_count: 1,
                   verification_command: command,
@@ -309,8 +309,8 @@ pipeline test_a_declared_verifier_runs_despite_unavailable_discovery(harness: Ha
                   },
                 }
               },
-            },
-          ),
+            ),
+          },
       )
     },
   )
@@ -349,10 +349,9 @@ pipeline test_unavailable_discovery_never_stops_active_work(harness: Harness) {
             session_id: session,
             stall_diagnostics: {enabled: true, post_edit_reverify: true},
           }
-            + agent_completion_gate(
-              harness.runtime,
-              {
-                facts: { ctx ->
+            + {
+              verify_completion: fixture_verify_completion(
+                { ctx ->
                   if ctx.stop_reason == "post_edit_reverify" {
                     harness.runtime.store_set(key, true)
                   }
@@ -364,8 +363,8 @@ pipeline test_unavailable_discovery_never_stops_active_work(harness: Harness) {
                     },
                   }
                 },
-              },
-            ),
+              ),
+            },
         ) },
       )
     },

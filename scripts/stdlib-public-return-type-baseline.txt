@@ -210,11 +210,6 @@ crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_composition_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_edit_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_host_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_read_tools
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_apply_budget
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_classify_writes
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_combine_verify
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_feedback_keys
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_ladder
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_classify_verdict
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_leading_word
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_verdict_token
