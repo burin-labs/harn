@@ -290,9 +290,8 @@ jobs:
       - name: Smoke test harn run
         shell: bash
         run: |
-          export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
-          make build-harn
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          harn_bin="${CARGO_TARGET_DIR:-./target}/debug/harn"
+          HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh "$harn_bin"
           ./scripts/sign_local_macos.sh --verify "$harn_bin"
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           test "$("$harn_bin" run smoke.harn)" = ok
