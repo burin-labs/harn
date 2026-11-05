@@ -135,6 +135,41 @@ fn binding_controls_apply_only_to_supported_adaptive_signed_history() {
     assert_eq!(unsigned, before);
 }
 
+/// Anthropic answers 400 to `block_binding` on `between_tools`, and 400 again to
+/// a signed block kept across a changed tool list (measured on Sonnet 5.5).
+#[test]
+fn between_tools_history_drops_signed_reasoning_without_binding_controls() {
+    use super::anthropic::prepare_thinking_binding;
+    let mut body = serde_json::json!({
+        "model": "claude-sonnet-5-5",
+        "thinking": {"type": "between_tools"},
+        "messages": [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "reason", "signature": "signed"},
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "tool_use", "id": "t1", "name": "look", "input": {}}
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "alone", "signature": "signed"}
+            ]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": []}]}
+        ]
+    });
+    assert!(!prepare_thinking_binding(&mut body, "anthropic", "ignored"));
+    assert!(body["thinking"].get("block_binding").is_none());
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "look", "input": {}}
+            ]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": []}]}
+        ])
+    );
+}
+
 #[test]
 fn unsigned_route_strips_anthropic_reasoning_blocks() {
     let mut opts = base_payload();
