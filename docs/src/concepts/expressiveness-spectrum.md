@@ -109,7 +109,6 @@ stays the loop.
 
 ```harn,ignore
 import { agent_preset } from "std/agent/presets"
-import { agent_completion_gate } from "std/agent/completion_gate"
 
 // Start from the preset, then layer control onto it.
 let opts = agent_preset("repair", {
@@ -119,20 +118,20 @@ let opts = agent_preset("repair", {
 // Bound the run: either ceiling ends it `budget_exhausted`.
 opts = {...opts, max_iterations: 40, token_budget: 400000}
 
-// An independent "are we actually done?"
-// gate, not the model's own say-so.
-opts = {...opts, ...agent_completion_gate(harness.runtime, {
-  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-  verify_command: fn() { return host_run_verify() },
-})}
+// An independent "are we done?" check, not the model's own say-so.
+opts = {
+  ...opts,
+  verify_completion: fn(ctx) { return host_completion_verdict(ctx) },
+}
 
 const run = agent_loop(harness, task, opts?.system, opts)
 ```
 
 Every one of those lines is opt-in. The `max_iterations` and `token_budget`
 ceilings bound spend. Detectors catch loops and stalls
-([`std/agent/stall`](../stdlib/detectors.md)). The completion gate ([`std/agent/completion_gate`](../stdlib/agent-judge.md))
-is a deterministic veto plus an optional bounded judge, so "done" is a fact you
+([`std/agent/stall`](../stdlib/detectors.md)). The `verify_completion` callback
+plus an optional bounded judge ([completion judge](../stdlib/agent-judge.md))
+is a deterministic veto, so "done" is a fact you
 control, not a mood the model is in.
 Leave any of them out and the loop still runs. You add guardrails one at a
 time, each from its own module, none of them a new hook on the loop. The

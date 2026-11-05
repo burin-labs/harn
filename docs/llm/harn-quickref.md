@@ -2668,7 +2668,7 @@ that need to validate progress data at a boundary: use
 validates config dictionaries and applies the default tool name and description.
 
 `agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
-builds the input-side bookend to `agent_completion_gate`. Spread the returned
+builds a cheap input-side check. Spread the returned
 bundle into `agent_loop` options to run a cheap classifier before the first main
 model turn. A tripwire emits `input_guardrail_verdict`, records a zero-token
 assistant explanation, and returns `status: "input_guardrail"` with

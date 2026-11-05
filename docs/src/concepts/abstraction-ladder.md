@@ -93,7 +93,7 @@ one of these is a plain stdlib module that composes onto `agent_loop` options
 
 | Concern | Lives in | Reach for |
 |---|---|---|
-| **"Are we actually done?"** completion gate | [`std/agent/completion_gate`](../llm/completion-control.md#completion-gate-agent_completion_gate) | `agent_completion_gate(runtime, options)` checks host write and verification facts and can add a bounded LLM judge. |
+| **"Are we actually done?"** completion check | [`verify_completion`](../llm/completion-control.md) | A host callback checks write and verification facts; `verify_completion_judge` can add a bounded LLM judge. |
 | **Progress / stall detectors** (unified) | [`std/agent/stall`](../stdlib/detectors.md#unified-detectors) | `agent_stall_initial_state()` + `agent_stall_observe_tool_calls(...)` / `agent_stall_no_net_progress(...)` — ping-pong, no-net-progress, and repeated-verified-pass detection in one place. |
 | **Auto-compaction** (*when* to compact) | [`std/agent/autocompact`](../llm/agent_loop.md#agent-loop-compaction) | `compaction_policy(...)`, `agent_autocompact_if_needed(session, opts)` — keep the transcript under the context ceiling. |
 | **Compaction pins** (*what* to preserve) | [`std/agent/pins`](../stdlib/agent-pins-goal.md) | `pin(kind, content)`, `with_pin_roots(opts, pins)`, `pin_compaction_policy(pins)` — a typed pin taxonomy that survives compaction by construction and doubles as reachability-GC roots. Pins *feed* auto-compaction's preservation; they don't decide when it runs. |
