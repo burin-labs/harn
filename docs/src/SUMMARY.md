@@ -156,7 +156,6 @@
 - [Tool surface validation](./tool-surface-validation.md)
 - [Durable step stdlib](./stdlib/step.md)
 - [Cache stdlib](./stdlib/cache.md)
-- [Response compaction](./stdlib/response-compaction.md)
 - [Calendar stdlib](./stdlib/calendar.md)
 - [Markdown stdlib](./stdlib/markdown.md)
 - [Coordination directory locks](./stdlib/coordination-locks.md)
