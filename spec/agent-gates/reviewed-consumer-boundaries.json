@@ -114,13 +114,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n              budget: budget,\n              budget_decisions: budget_decisions,\n              current_max: current_max,\n              iteration: iteration,\n              iteration_index: iteration_index,\n              llm_result: llm_result,\n              loop_start_ms: loop_start_ms,\n              structural_validator_attempts: structural_validator_attempts,\n              structural_verdict: structural_verdict,\n              turn_llm_opts: turn_llm_opts,\n              visible_text: visible_text,\n            }",
-    "owner": "__agent_loop_run",
-    "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "{\n              primary_provider: primary_provider,\n              primary_model: primary_model,\n              primary_tool_format: primary_tool_format,\n              opts: opts,\n              budget: budget,\n              iteration: iteration,\n              iteration_index: iteration_index,\n              consecutive_failure_count: consecutive_failure_count,\n              loop_start_ms: loop_start_ms,\n              current_max: current_max,\n              escalation_retry_pending: escalation_retry_pending,\n              budget_exhausted_emitted: budget_exhausted_emitted,\n              budget_decisions: budget_decisions,\n            }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."

@@ -362,10 +362,6 @@
         "name": "opts"
       },
       {
-        "function": "__agent_projection_with_scratchpad_barrier",
-        "name": "opts"
-      },
-      {
         "function": "__agent_required_tools_from_options",
         "name": "opts"
       },
@@ -563,18 +559,6 @@
       },
       {
         "function": "agent_required_tools_missing_from_session",
-        "name": "opts"
-      },
-      {
-        "function": "agent_scratchpad_init",
-        "name": "opts"
-      },
-      {
-        "function": "agent_scratchpad_options",
-        "name": "opts"
-      },
-      {
-        "function": "agent_scratchpad_recitation_fragment",
         "name": "opts"
       },
       {
@@ -890,10 +874,6 @@
         "name": "turn_opts"
       },
       {
-        "function": "__run_structural_validator",
-        "name": "turn_opts"
-      },
-      {
         "function": "__stack_pack_options",
         "name": "base"
       },
@@ -1044,10 +1024,6 @@
       {
         "function": "agent_stall_turn_end_judge_due",
         "name": "opts"
-      },
-      {
-        "function": "__run_structural_validator",
-        "name": "llm_opts"
       },
       {
         "function": "__sync_tool_search_state",

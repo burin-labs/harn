@@ -5,25 +5,6 @@
       "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
       "type": "object"
     },
-    "AgentScratchpadReorganization": {
-      "properties": {
-        "details": true,
-        "iteration": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "status": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "iteration",
-        "status",
-        "details"
-      ],
-      "type": "object"
-    },
     "AnchorChanged": {
       "properties": {
         "carryTranscript": {
@@ -1818,62 +1799,6 @@
       ],
       "type": "object"
     },
-    "StructuralValidatorDecision": {
-      "properties": {
-        "attempts": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "diagnostic": {
-          "type": "string"
-        },
-        "iteration": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "maxAttempts": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "onFailure": {
-          "type": "string"
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "recommendedAction": {
-          "type": "string"
-        },
-        "rule": {
-          "type": "string"
-        },
-        "skipped": {
-          "type": "boolean"
-        },
-        "vetoed": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "iteration",
-        "rule",
-        "diagnostic",
-        "recommendedAction",
-        "vetoed",
-        "skipped",
-        "reason",
-        "onFailure",
-        "attempts",
-        "maxAttempts"
-      ],
-      "type": "object"
-    },
     "SubagentJoin": {
       "properties": {
         "childRunId": {
@@ -2149,21 +2074,6 @@
       },
       "then": {
         "$ref": "#/$defs/AgentLoopStallWarning"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "agent_scratchpad_reorganization"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/AgentScratchpadReorganization"
       }
     },
     {
@@ -2935,21 +2845,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "structural_validator_decision"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/StructuralValidatorDecision"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "subagent_join"
           }
         },
@@ -3071,7 +2966,6 @@
   "type": "object",
   "x-harn-kinds": {
     "agent_loop_stall_warning": "AgentLoopStallWarning",
-    "agent_scratchpad_reorganization": "AgentScratchpadReorganization",
     "anchor_changed": "AnchorChanged",
     "boundary_failure": "BoundaryFailure",
     "budget_circuit_breaker": "BudgetCircuitBreaker",
@@ -3123,7 +3017,6 @@
     "session_closed": "SessionClosed",
     "session_health": "SessionHealth",
     "step_judge_decision": "StepJudgeDecision",
-    "structural_validator_decision": "StructuralValidatorDecision",
     "subagent_join": "SubagentJoin",
     "subagent_stop": "SubagentStop",
     "tool_batch_disposition": "ToolBatchDisposition",

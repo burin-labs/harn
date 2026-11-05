@@ -776,25 +776,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__run_structural_validator(\n          opts?._structural_validator,\n          session.session_id,\n          normalized + {raw_text: raw_text},\n          tool_calls,\n          parsed,\n          llm_opts,\n          turn_opts,\n          successful_tools_seen,\n          rejected_tools_seen,\n          structural_validator_attempts,\n        )",
-    "owner": "__run_structural_validator",
-    "evidence": "Consumer __run_structural_validator.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__run_structural_validator",
-        "parameter": "llm_opts"
-      },
-      {
-        "scope": "AgentSpec",
-        "function": "__run_structural_validator",
-        "parameter": "turn_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "__stall_judge_opts(\n            turn_opts,\n            verify_completion_judge_invocations,\n            turn_end_judge_invocations,\n          )",
     "owner": "__stall_judge_opts",
     "evidence": "Consumer __stall_judge_opts.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",

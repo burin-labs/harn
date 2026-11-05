@@ -89,7 +89,6 @@ pub const DEFAULT_TRANSCRIPT_MESSAGE_CAP: usize = 4096;
 /// Default cap on retained transcript audit events per session. Events
 /// include message-derived entries plus orchestration lifecycle records.
 pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
-pub const MAX_SCRATCHPAD_BYTES: usize = 16 * 1024;
 #[cfg(debug_assertions)]
 const CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC: &str = "HARN-CACHE-001";
 
@@ -257,10 +256,6 @@ pub struct SessionState {
     /// (epic #2208). `None` until a host opens the session with one or
     /// the ACP `reanchor` / `add_root` primitives populate it.
     pub workspace_anchor: Option<WorkspaceAnchor>,
-    /// Small session-local working memory rendered into agent prompts by the
-    /// Harn stdlib agent loop. This is live state, not a replayed message.
-    pub scratchpad: Option<VmValue>,
-    pub scratchpad_version: u64,
     pub goal: SessionGoalState,
     /// A VM fork's inherited goal awaits its first canonical journal.
     pub(crate) goal_pending_fork: bool,
@@ -350,7 +345,6 @@ mod live_clients;
 mod metadata;
 mod retention;
 mod runtime_store;
-mod scratchpad;
 pub(crate) mod session_event;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
@@ -388,7 +382,6 @@ use runtime_store::{
     clear_unknown_host_event_warnings, retire_all_session_states, retire_session_state,
     DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,
 };
-pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub(crate) use transcript_lifecycle::{
@@ -1181,8 +1174,6 @@ fn fork_with_retention(
         state.actor_chain = src.actor_chain.clone();
         state.workspace_anchor = src.workspace_anchor.clone();
         state.workspace_policy = src.workspace_policy.clone();
-        state.scratchpad = src.scratchpad.clone();
-        state.scratchpad_version = src.scratchpad_version;
         state.goal = src.goal.clone();
         state.goal.turn = SessionGoalTurn::Idle;
         state.goal_pending_fork = true;

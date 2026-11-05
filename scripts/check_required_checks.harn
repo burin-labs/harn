@@ -1,0 +1,198 @@
+import { read_yaml } from "std/fs"
+import { path_visibility, visibility_failure } from "./path_visibility.harn"
+
+const CHECK_NAME = "Required check contract"
+
+const REGISTRY_PATH = "scripts/required_checks.toml"
+
+// Rows that cannot leave the registry by an edit to it alone. Each guards
+// something no other required check covers: the aggregate of every build and
+// test job, and the scan of public text a squash merge copies to main.
+const PINNED_CONTEXTS = ["CI status", "Public metadata privacy"]
+
+// GitHub runs a `pull_request` workflow on these activity types when the
+// trigger names none.
+const DEFAULT_PULL_REQUEST_TYPES = ["opened", "synchronize", "reopened"]
+
+fn strings(values: any) -> list<string> {
+  return (values ?? []).map({ value -> return trim(to_string(value)) }).to_list()
+}
+
+fn triggers(document: dict) -> dict {
+  const on = document["on"]
+  if type_of(on) == "dict" {
+    return on
+  }
+  let result: dict = {}
+  const names = if type_of(on) == "list" {
+    strings(on)
+  } else {
+    strings([on])
+  }
+  for name in names {
+    result[name] = nil
+  }
+  return result
+}
+
+fn pull_request_types(trigger: any) -> list<string> {
+  const declared = strings(trigger?.types)
+  if len(declared) == 0 {
+    return DEFAULT_PULL_REQUEST_TYPES
+  }
+  return declared
+}
+
+fn trigger_errors(prefix: string, record: dict, document: dict) -> list<string> {
+  let errors: list<string> = []
+  const on = triggers(document)
+  const events = strings(record?.events)
+  if len(events) == 0 {
+    errors = errors + [prefix + "registry row lists no events"]
+  }
+  for event in events {
+    if !on.keys().contains(event) {
+      errors = errors + [prefix + "workflow is not triggered by " + event]
+      continue
+    }
+    // A path filter leaves the check unreported for any change outside it,
+    // and an unreported required check holds the merge forever.
+    for filter in ["paths", "paths-ignore"] {
+      if type_of(on[event]) == "dict" && on[event][filter] != nil {
+        errors = errors + [prefix + event + " trigger filters by " + filter]
+      }
+    }
+  }
+  const wanted = strings(record?.pull_request_types)
+  if len(wanted) > 0 {
+    if !events.contains("pull_request") {
+      errors = errors + [prefix + "pull_request_types is set but pull_request is not an event"]
+    } else if on.keys().contains("pull_request") {
+      const actual = pull_request_types(on.pull_request)
+      for kind in wanted {
+        if !actual.contains(kind) {
+          errors = errors + [prefix + "pull_request trigger does not run on " + kind]
+        }
+      }
+    }
+  }
+  return errors
+}
+
+fn job_errors(prefix: string, record: dict, document: dict) -> list<string> {
+  const id = trim(to_string(record?.job ?? ""))
+  const context = trim(to_string(record?.context ?? ""))
+  const job = (document?.jobs ?? {})[id]
+  if job == nil {
+    return [prefix + "workflow has no job " + id]
+  }
+  let errors: list<string> = []
+  const reported = trim(to_string(job?.name ?? id))
+  if reported != context {
+    errors = errors + [prefix + "job " + id + " reports `" + reported + "`, not the required name"]
+  }
+  // GitHub counts a skipped required job as passing, so a condition that can
+  // be false turns the gate into a pass. `always()` is the one safe condition.
+  const condition = job["if"]
+  if condition != nil && trim(to_string(condition)) != "always()" {
+    errors = errors + [prefix + "job " + id + " has a condition that can skip it"]
+  }
+  return errors
+}
+
+/**
+ * Every problem with the registry against the parsed workflows, keyed by
+ * repository-relative path. Empty means each required check is reported by a
+ * job that runs, unconditionally, on every event the row lists.
+ */
+pub fn required_check_errors(records: list, documents: dict) -> list<string> {
+  let errors: list<string> = []
+  let seen: dict = {}
+  for record in records {
+    const context = trim(to_string(record?.context ?? ""))
+    if context == "" {
+      errors = errors + ["registry row has no context"]
+      continue
+    }
+    const prefix = context + ": "
+    if seen[context] ?? false {
+      errors = errors + [prefix + "duplicate registry row"]
+    }
+    seen[context] = true
+    for field in ["ruleset", "workflow", "job", "reason"] {
+      if trim(to_string(record[field] ?? "")) == "" {
+        errors = errors + [prefix + field + " is empty"]
+      }
+    }
+    const path = trim(to_string(record?.workflow ?? ""))
+    const document = documents[path]
+    if path == "" {
+      continue
+    }
+    if document == nil {
+      errors = errors + [prefix + path + " was not readable"]
+      continue
+    }
+    errors = errors + job_errors(prefix, record, document)
+    errors = errors + trigger_errors(prefix, record, document)
+  }
+  for context in PINNED_CONTEXTS {
+    if !(seen[context] ?? false) {
+      errors = errors + [context + ": pinned required check is missing from the registry"]
+    }
+  }
+  return errors
+}
+
+fn main(harness: Harness) {
+  const parsed = toml_parse(harness.fs.read_text(REGISTRY_PATH))
+  if is_err(parsed) {
+    harness.stdio.eprintln(CHECK_NAME + ": invalid registry: " + to_string(unwrap_err(parsed)))
+    harness.runtime.exit(1)
+  }
+  const records = unwrap(parsed)?.check ?? []
+  if len(records) == 0 {
+    harness.stdio.eprintln(CHECK_NAME + ": registry declares no required checks")
+    harness.runtime.exit(1)
+  }
+  let denials: list<string> = []
+  let documents: dict = {}
+  for record in records {
+    const path = trim(to_string(record?.workflow ?? ""))
+    if path == "" || documents[path] != nil {
+      continue
+    }
+    const seen = path_visibility(harness.fs, CHECK_NAME, path)
+    if seen.denial != "" {
+      denials = denials + [seen.denial]
+      continue
+    }
+    if !seen.exists {
+      continue
+    }
+    const document = read_yaml(harness.fs, path, nil)
+    if document == nil {
+      harness.stdio.eprintln(CHECK_NAME + ": YAML parser returned no document for " + path)
+      harness.runtime.exit(1)
+    }
+    documents[path] = document
+  }
+  const denied = visibility_failure(CHECK_NAME, denials)
+  if denied != "" {
+    harness.stdio.eprintln(denied)
+    harness.runtime.exit(1)
+  }
+  const errors = required_check_errors(records, documents)
+  if len(errors) > 0 {
+    harness.stdio.eprintln(CHECK_NAME + " failed:")
+    for error in errors {
+      harness.stdio.eprintln("  " + error)
+    }
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println(
+    CHECK_NAME + ": OK (" + to_string(len(records)) + " required checks, "
+      + to_string(len(documents))
+      + " workflows)",
+  )
+}

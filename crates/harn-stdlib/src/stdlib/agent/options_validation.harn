@@ -10,7 +10,6 @@ import "std/agent/options_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
-import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { omit } from "std/json"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
@@ -332,15 +331,6 @@ pub fn __validate_tool_caller(value: any) {
   }
   if type_of(value) != "closure" {
     throw "agent_loop: `tool_caller` must be a closure or nil; got " + type_of(value)
-  }
-}
-
-pub fn __validate_structural_validator(value: any) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `structural_validator` must be a closure or nil; got " + type_of(value)
   }
 }
 
@@ -744,9 +734,6 @@ pub fn __validate_agent_loop_callback_options(opts: any) {
   if __has_key(opts, "tool_caller") {
     __validate_tool_caller(opts.tool_caller)
   }
-  if __has_key(opts, "structural_validator") {
-    __validate_structural_validator(opts.structural_validator)
-  }
   if __has_key(opts, "input_guardrail") {
     __validate_input_guardrail(opts.input_guardrail)
   }
@@ -767,9 +754,6 @@ pub fn __validate_agent_loop_callback_options(opts: any) {
   }
   if __has_key(opts, "transcript_projection") {
     __validate_transcript_projection(opts.transcript_projection)
-  }
-  if __has_key(opts, "scratchpad") {
-    agent_scratchpad_options(opts)
   }
 }
 

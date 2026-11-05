@@ -11,7 +11,7 @@
 // A registry is free to hold one — a zero-argument tool is ordinary, and so is
 // a tool whose only declared parameters are internal — so the branch for it
 // must carry the bare object type and no `properties` key at all.
-import { tool_call_output_schema } from "std/llm/structural_validator"
+import { tool_call_output_schema } from "std/llm/tool_call_schema"
 
 fn _define(registry: any, name: string, params: dict) {
   return tool_define(

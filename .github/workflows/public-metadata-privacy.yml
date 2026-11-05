@@ -1,0 +1,56 @@
+name: Public metadata privacy
+
+# This repository is public, and a squash merge copies the pull request's title
+# and body into the commit on main. This workflow scans the title, the body,
+# every commit message in the event range and the lines the range adds, and
+# fails when any of them names a downstream host product or private
+# infrastructure. The vocabulary has one owner,
+# `scripts/check_public_product_names.sh`, reached through
+# `scripts/check_pr_metadata_privacy.sh`; nothing here repeats it.
+#
+# The check is required on main through `scripts/required_checks.toml`
+# (`make check-required-checks`). Keeping it in its own workflow means turning
+# off an unrelated gate cannot turn this one off, and because the check is
+# required, a disabled or deleted workflow leaves the check unreported and
+# blocks the merge instead of passing it.
+#
+# `edited` re-runs the scan when a title or body changes after a green run, so
+# the result on the head commit always describes the text a squash would copy.
+# Keep the job name stable: the ruleset matches it verbatim.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  # The newest event carries the current title and body, so it supersedes any
+  # run still scanning older text for the same pull request.
+  group: public-metadata-privacy-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  public-metadata-privacy:
+    name: Public metadata privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Commit messages are public PR metadata. The scanner fails closed if
+          # either range endpoint is absent; keep the exact range available for
+          # pull-request and merge-group events.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare exact event commit range
+        run: bash .github/scripts/prepare-pr-gate-range.sh
+
+      - name: Scan public metadata
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: ./scripts/check_pr_metadata_privacy.sh

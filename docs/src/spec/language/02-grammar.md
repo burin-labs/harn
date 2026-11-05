@@ -131,10 +131,6 @@ Imports starting with `std/` load embedded stdlib modules:
   agent_state_handoff)
 - `import "std/agent/progress"` — agent progress narration and task-list
   helpers (agent_progress, agent_progress_tool)
-- `import "std/agent/scratchpad"` — live session-local agent working memory
-  helpers (agent_scratchpad_options, agent_scratchpad_init,
-  agent_scratchpad_recitation_fragment, agent_scratchpad_reorganize,
-  agent_scratchpad_reorganize_if_due)
 - `import "std/agent/fact"` — typed fact envelopes over durable memory
   (store_fact, recall_facts, invalidate_facts)
 - `import "std/agent/probe"` — probe-first verification primitive: run a

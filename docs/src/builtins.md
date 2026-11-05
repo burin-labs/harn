@@ -3552,16 +3552,13 @@ See the [Sessions](./sessions.md) chapter for the full model.
 | `harness.agent.exists(id)` | id | bool | Safe on unknown ids |
 | `harness.agent.current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
 | `harness.agent.length(id)` | id | int | Message count; errors on unknown id |
-| `harness.agent.snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `scratchpad`, `scratchpad_version`, `parent_id`, `child_ids`, and `branched_at_event_index` |
+| `harness.agent.snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `actor_chain`, `parent_id`, `child_ids`, and `branched_at_event_index` |
 | `harness.agent.ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |
 | `harness.agent.actor_chain(id?)` | id: string or nil | dict or nil | Returns the RFC 8693 `{sub, act}` actor chain for `id`, or for the current active session when `id` is omitted |
 | `actor_chain_validate_scope_attenuation(chain, opts?)` | chain: dict, opts: dict | dict | Validates monotonic actor-chain scopes. `opts` accepts `policy`, `raise`, `alert`, and `trace_id`; violations raise an auth error unless `raise` is `false` |
 | `harness.agent.reset(id)` | id | nil | Wipes history; preserves id and subscribers |
 | `harness.agent.fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |
 | `harness.agent.fork_at(src, keep_first, dst?)` | src, keep_first: int, dst | string | Forks then keeps the first `keep_first` messages on the child; records `branched_at_event_index` |
-| `harness.agent.scratchpad(id)` | id | dict or nil | Returns the small session-local agent scratchpad |
-| `harness.agent.set_scratchpad(id, scratchpad, opts?)` | id, scratchpad: dict, opts: dict | dict | Stores a dict scratchpad and returns `{ok, version, scratchpad}`. `opts` may include `source`, `reason`, and `metadata` |
-| `harness.agent.clear_scratchpad(id, opts?)` | id, opts: dict | dict | Clears the scratchpad and returns `{ok, version, scratchpad: nil}` |
 | `harness.agent.trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
 | `harness.agent.compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask/custom compactor; custom strategies use `custom_compactor`, `mask_callback`, or `compress_callback` closures |
 | `harness.agent.inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |

@@ -10,7 +10,6 @@ import "std/agent/options_validation"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
-import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
@@ -245,7 +244,6 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
   const llm_retry = opts?._llm_retry
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
-  const structural_validator = opts?.structural_validator
   const input_guardrail = opts?.input_guardrail
   const pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
   opts = __with_project_context_profile(harness.project, opts)
@@ -306,7 +304,6 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
       _llm_retry: llm_retry,
       _on_delta: on_delta,
       _tool_caller: tool_caller,
-      _structural_validator: structural_validator,
       _input_guardrail: input_guardrail,
       _pre_turn_scope_classifier: pre_turn_scope_classifier,
     }

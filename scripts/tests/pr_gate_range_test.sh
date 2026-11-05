@@ -141,6 +141,7 @@ rm ".git/objects/${blob:0:2}/${blob:2}"
 refuse_gate HEAD HEAD
 echo 'PASS: existing tree with unreadable blob refuses comparison'
 
-# Workflow uses the same helper in both consumers of the event range.
-[[ $(grep -c 'run: bash .github/scripts/prepare-pr-gate-range.sh' "$repo_root/.github/workflows/pr-gates.yml") == 2 ]]
+# Both consumers of the event range use the same helper.
+[[ $(grep -c 'run: bash .github/scripts/prepare-pr-gate-range.sh' "$repo_root/.github/workflows/pr-gates.yml") == 1 ]]
+[[ $(grep -c 'run: bash .github/scripts/prepare-pr-gate-range.sh' "$repo_root/.github/workflows/public-metadata-privacy.yml") == 1 ]]
 echo 'pr_gate_range_test: ok'

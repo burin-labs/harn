@@ -60,7 +60,6 @@ pub import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-pub import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 pub import { agent_skills_match } from "std/agent/skills"
 pub import {
   agent_stall_apply_result,
@@ -141,7 +140,7 @@ pub import {
   llm_clear_one_shot_prefill,
   llm_enable_equivalent_failover,
 } from "std/llm/options"
-import { exact_tool_call_output_schema } from "std/llm/structural_validator"
+import { exact_tool_call_output_schema } from "std/llm/tool_call_schema"
 pub import { env_bool } from "std/os"
 
 pub fn __agent_loop_llm_overrides(opts: dict) {

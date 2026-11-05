@@ -43,6 +43,10 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
+  // Split out of the entry above: a real shell has to reach its foreground
+  // child before the interrupt, and a next statement that never runs is only
+  // observable over time. A slow host can weaken the check but never fail it.
+  "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e/interrupt_next_statement.rs",
   // Physical lease-ownership e2e: waits for an orphaned Cargo PID to become
   // observable/dead across exact SIGKILL boundaries.
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
@@ -110,6 +114,8 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
+  // Bounds the wait for a real shell to report that it started.
+  "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e/interrupt_next_statement.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
   // Stop controls: the deadline bounds the wait for a cancelled session's
   // background child to be reaped. A single immediate reading reports a

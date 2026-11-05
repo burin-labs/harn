@@ -26,6 +26,7 @@ on:
       - Merge override dispatch
       - Portable kernel browser Wasm
       - PR gates
+      - Public metadata privacy
       - Release PR drift check
       - SDK codegen
       - Secret exposure report

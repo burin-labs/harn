@@ -10,7 +10,6 @@ type Options = {
   env_file: string,
   tool_format: string,
   step_judge: string,
-  structural_validator: string,
   output_dir: string,
   baseline_results_dir: string,
   harn_bin: string,
@@ -150,9 +149,6 @@ fn run_cell(
   if !options.mock && options.env_file != "" {
     args = args + ["--env-file", options.env_file]
   }
-  if options.structural_validator != "" {
-    args = args + ["--structural-validator", options.structural_validator]
-  }
   if options.baseline_results_dir != "" {
     const baseline = path_join(options.baseline_results_dir, cell.baseline, "summary.json")
     require harness.fs.exists(baseline), "Missing requested baseline: ${baseline}"
@@ -172,7 +168,7 @@ fn run_cell(
 
 fn main(harness: Harness) -> nil {
   const usage =
-    "Usage: experiments/step-judge/run.sh [--mock] [--replicates N] [--cell NAME] [--no-probes] [--env-file FILE] [--tool-format FORMAT] [--step-judge PRESET] [--structural-validator MODE] [--output-dir DIR] [--baseline-results-dir DIR] [--harn-bin PATH]"
+    "Usage: experiments/step-judge/run.sh [--mock] [--replicates N] [--cell NAME] [--no-probes] [--env-file FILE] [--tool-format FORMAT] [--step-judge PRESET] [--output-dir DIR] [--baseline-results-dir DIR] [--harn-bin PATH]"
   if help_requested(argv) {
     harness.stdio.println(usage)
     return
@@ -189,7 +185,6 @@ fn main(harness: Harness) -> nil {
           flag("env_file", harness.env.get("HARN_EXT_EXPERIMENT_ENV_FILE") ?? ""),
           flag("tool_format", "text"),
           flag("step_judge", ""),
-          flag("structural_validator", ""),
           flag("output_dir", ""),
           flag("baseline_results_dir", ""),
           flag("harn_bin", harness.env.get("HARN_BIN") ?? ""),

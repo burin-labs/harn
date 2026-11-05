@@ -608,8 +608,7 @@ fingerprint event; it is not injected into the replayable message list. A later
 continuation that omits all system prompt fields reuses the stored session
 prompt for the provider request without writing another transcript event.
 Internal `_system_fragments` entries may set `bucket: "before"` (default) or
-`bucket: "after"`; the latter is used for live prompt-tail recitations such as
-the agent scratchpad.
+`bucket: "after"`; the latter is used for live prompt-tail fragments.
 
 ```harn
 import { system_before, with_system_fragments } from "std/llm/prompts"

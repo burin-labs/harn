@@ -166,7 +166,6 @@ type HarnAgentEventKind string
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
 var HarnAgentEventKinds = []HarnAgentEventKind{
 	"agent_loop_stall_warning",
-	"agent_scratchpad_reorganization",
 	"anchor_changed",
 	"boundary_failure",
 	"budget_circuit_breaker",
@@ -218,7 +217,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"session_closed",
 	"session_health",
 	"step_judge_decision",
-	"structural_validator_decision",
 	"subagent_join",
 	"subagent_stop",
 	"tool_batch_disposition",
@@ -2320,12 +2318,6 @@ type HarnAgentsEventProjection struct {
 	TaskID    *string    `json:"task_id,omitempty"`
 }
 
-type HarnAgentEventAgentScratchpadReorganization struct {
-	Iteration uint64          `json:"iteration"`
-	Status    string          `json:"status"`
-	Details   json.RawMessage `json:"details"`
-}
-
 type HarnAgentEventAnchorChanged struct {
 	Previous        json.RawMessage `json:"previous"`
 	Current         json.RawMessage `json:"current"`
@@ -2738,19 +2730,6 @@ type HarnAgentEventStepJudgeDecision struct {
 	CostUsd           float64 `json:"costUsd"`
 	Provider          string  `json:"provider"`
 	Model             string  `json:"model"`
-}
-
-type HarnAgentEventStructuralValidatorDecision struct {
-	Iteration         uint64  `json:"iteration"`
-	Rule              string  `json:"rule"`
-	Diagnostic        string  `json:"diagnostic"`
-	RecommendedAction string  `json:"recommendedAction"`
-	Vetoed            bool    `json:"vetoed"`
-	Skipped           bool    `json:"skipped"`
-	Reason            *string `json:"reason"`
-	OnFailure         string  `json:"onFailure"`
-	Attempts          uint64  `json:"attempts"`
-	MaxAttempts       uint64  `json:"maxAttempts"`
 }
 
 type HarnAgentEventSubagentJoin struct {

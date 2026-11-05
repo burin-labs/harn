@@ -4,10 +4,6 @@ import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_tool_format } from "std/agent/options"
 import { __validate_done_sentinel } from "std/agent/options_validation"
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
-import {
-  agent_scratchpad_options,
-  agent_scratchpad_recitation_fragment,
-} from "std/agent/scratchpad"
 import { __skill_rendered_prompt } from "std/agent/skills"
 import {
   agent_session_messages,
@@ -805,10 +801,6 @@ pub fn agent_build_turn_system_fragments(
       __agent_text_tool_contract_prompt(harness.fs, harness.llm, opts),
     )
   }
-  const scratchpad_fragment = agent_scratchpad_recitation_fragment(harness.agent, session, opts)
-  if scratchpad_fragment != nil {
-    fragments.push(scratchpad_fragment)
-  }
   return fragments
 }
 
@@ -841,43 +833,8 @@ fn __agent_projection_options(opts: dict) {
   throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(raw)
 }
 
-fn __agent_reachability_projection(policy: string) {
-  return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
-}
-
-fn __agent_projection_with_scratchpad_barrier(
-  agent: HarnessAgent,
-  session_id: any,
-  projection_opts: dict,
-  opts: dict?,
-) {
-  const policy_label = projection_opts?.policy ?? "raw"
-  if !__agent_reachability_projection(policy_label) {
-    return projection_opts
-  }
-  const scratchpad_cfg = agent_scratchpad_options(opts)
-  if !scratchpad_cfg.enabled {
-    return projection_opts
-  }
-  const snapshot = agent.snapshot(session_id) ?? {}
-  const scratchpad = snapshot?.scratchpad
-  if scratchpad == nil {
-    return projection_opts
-  }
-  const version = snapshot?.scratchpad_version ?? 0
-  return projection_opts
-    + {
-      scratchpad: [projection_opts?.scratchpad, scratchpad],
-      write_barrier_refs: [
-        projection_opts?.write_barrier_refs,
-        projection_opts?.barrier_refs,
-        "agent_scratchpad:v" + to_string(version),
-      ],
-    }
-}
-
 fn __agent_apply_projection(agent: HarnessAgent, session_id: any, messages: any, opts: any) {
-  let projection_opts = __agent_projection_options(opts)
+  const projection_opts = __agent_projection_options(opts)
   if projection_opts == nil {
     return messages
   }
@@ -885,12 +842,6 @@ fn __agent_apply_projection(agent: HarnessAgent, session_id: any, messages: any,
   if policy_label == "raw" {
     return messages
   }
-  projection_opts = __agent_projection_with_scratchpad_barrier(
-    agent,
-    session_id,
-    projection_opts,
-    opts,
-  )
   const projection = agent_session_project_turn(agent, session_id, projection_opts)
   return projection?.messages ?? messages
 }

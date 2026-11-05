@@ -1,0 +1,394 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/tool_call_schema - tool registry parameter readers and the call-envelope output schema.
+fn __tcs_dict(value: unknown) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __tcs_list(value: unknown) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __tcs_string(value: any) -> string {
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __tcs_string_list(value: unknown) -> list {
+  let out = []
+  for item in __tcs_list(value) {
+    const text = trim(__tcs_string(item))
+    if text != "" {
+      out.push(text)
+    }
+  }
+  return out
+}
+
+fn __tcs_registry_tool_entry(registry: dict, name: any) {
+  const tools = __tcs_dict(registry)
+  let entries = __tcs_list(tools?.tools)
+  for entry in entries {
+    const direct_name = __tcs_string(entry?.name)
+    const function = entry?.function
+    const function_name = if type_of(function) == "dict" {
+      __tcs_string(function?.name)
+    } else {
+      ""
+    }
+    if direct_name == name || function_name == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __tcs_tool_entry_parameters(entry: dict) {
+  const function = entry?.function
+  if type_of(function) == "dict" && type_of(function?.parameters) == "dict" {
+    return function.parameters
+  }
+  if type_of(entry?.parameters) == "dict" {
+    return entry.parameters
+  }
+  if type_of(entry?.inputSchema) == "dict" {
+    return entry.inputSchema
+  }
+  return {}
+}
+
+fn __tcs_parameter_entries(parameters: dict) {
+  if type_of(parameters?.properties) == "dict" {
+    return parameters.properties
+  }
+  let entries = {}
+  for name in __tcs_dict(parameters).keys() {
+    if !contains(
+      ["type", "properties", "required", "additionalProperties", "description", "title", "$schema"],
+      name,
+    ) {
+      entries = entries + {[name]: parameters[name]}
+    }
+  }
+  return entries
+}
+
+fn __tcs_param_is_required(parameters: dict, name: any, schema: dict) -> bool {
+  if type_of(parameters?.properties) == "dict" {
+    return contains(__tcs_string_list(parameters?.required), name)
+  }
+  if type_of(schema) == "dict" {
+    if schema?.default != nil {
+      return false
+    }
+    if type_of(schema?.required) == "bool" {
+      return schema.required
+    }
+    if type_of(schema?.optional) == "bool" {
+      return !schema.optional
+    }
+  }
+  return true
+}
+
+/**
+ * The names of a tool's REQUIRED parameters, for the corrective that asks a
+ * model to emit a call it described but never sent.
+ *
+ * Names only, never values. An earlier form of this returned `[{key, value}]`
+ * with a type placeholder for each value (`"<string>"`), on the theory that a
+ * model copying the exemplar verbatim would produce an obviously unfilled call.
+ * It does not: live smoke showed a model copy `"<string>"` into the repair call
+ * and then into every subsequent call for the rest of the session, filling
+ * optional parameters it had never used before with the same token. A
+ * placeholder inside a JSON string is indistinguishable from a value, so the
+ * only safe exemplar is one that carries no values at all — the corrective
+ * renders the bare call envelope and names the required keys in prose.
+ *
+ * Empty for an unknown tool, a tool that declares no parameters, and a tool
+ * whose parameters are all optional. Underscore-prefixed parameters are the
+ * harness's to fill rather than the model's, but a REQUIRED one still has to
+ * be sent, so it is still named.
+ *
+ * This lives beside the parameter readers because this module already owns the
+ * shape tolerance for a tool entry's parameters: JSON-schema
+ * `properties`/`required`, and the flat `{name: schema}` form with per-field
+ * `required`/`optional`/`default`. A corrective that re-derived those rules
+ * would be a second owner of the same policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_required_argument_names(registry: dict, tool_name: any) -> list<string> {
+  const entry = __tcs_registry_tool_entry(registry, __tcs_string(tool_name))
+  if entry == nil {
+    return []
+  }
+  const parameters = __tcs_tool_entry_parameters(entry)
+  const entries = __tcs_parameter_entries(parameters)
+  let out: list<string> = []
+  for name in __tcs_dict(entries).keys() {
+    if __tcs_param_is_required(parameters, name, entries[name]) {
+      out.push(name)
+    }
+  }
+  return out
+}
+
+/**
+ * The output schema that makes a turn's completion a single parseable tool
+ * call and nothing else.
+ *
+ * Projects the registry into a JSON Schema for the flat call envelope the
+ * text parser already accepts, keyed with the CANONICAL argument alias
+ * (`{"name": .., "args": {..}}`) so the forced completion matches the shape
+ * every standing prompt and corrective teaches, one `anyOf` branch per tool:
+ * `name` is pinned to that tool and `args` must carry the tool's REQUIRED
+ * parameter keys (live smoke evidence: with an open arguments object the
+ * model lazily emits `{}` and burns a turn re-issuing the call). Argument
+ * values stay shallow — presence is enforced by the grammar, value shape by
+ * the dispatch-time validator that owns it. Internal underscore-prefixed
+ * parameters are the harness's to fill, not the model's to write, so they
+ * are left out of the grammar unless the registry marks one required (live
+ * smoke evidence: an offered `_nl_intent` key is what the model reaches for
+ * under constraint).
+ *
+ * When the corrective claimed the turn for one named tool, `claimed_tool`
+ * narrows the schema to that tool's branch: the claim already told the model
+ * which call to make, and the full `anyOf` lets it wander to a different
+ * tool instead (observed live: a `look` claim answered with a junk `search`).
+ * An empty or unrecognized `claimed_tool` keeps every branch.
+ *
+ * A tool with no model-facing parameters gets a bare `{"type": "object"}` args
+ * branch rather than an empty `properties` object, which llama.cpp's grammar
+ * conversion mishandles in a way that fails the whole request.
+ *
+ * Returns nil for an empty or unreadable registry, in which case no
+ * contract should be applied.
+ *
+ * This lives beside the parameter readers for the same reason as
+ * `tool_required_argument_names`: this module owns the shape tolerance
+ * for tool registry entries, and a second reader would be a second owner of
+ * the same policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_output_schema(registry: dict, claimed_tool: string = "") -> any? {
+  const tools = __tcs_list(__tcs_dict(registry)?.tools)
+  const claimed = trim(__tcs_string(claimed_tool))
+  let branches = []
+  let claimed_branch = nil
+  let seen = []
+  for entry in tools {
+    const direct_name = __tcs_string(entry?.name)
+    const function = entry?.function
+    const function_name = if type_of(function) == "dict" {
+      __tcs_string(function?.name)
+    } else {
+      ""
+    }
+    const name = if direct_name != "" {
+      direct_name
+    } else {
+      function_name
+    }
+    if name == "" || contains(seen, name) {
+      continue
+    }
+    seen.push(name)
+    const parameters = __tcs_tool_entry_parameters(entry)
+    const entries = __tcs_parameter_entries(parameters)
+    let props = {}
+    let req = []
+    for pname in __tcs_dict(entries).keys() {
+      const schema = entries[pname]
+      const required = __tcs_param_is_required(parameters, pname, schema)
+      if starts_with(pname, "_") && !required {
+        continue
+      }
+      props = props + {[pname]: __tcs_argument_property_schema(schema)}
+      if required {
+        req.push(pname)
+      }
+    }
+    // A tool with nothing for the model to write gets the bare object type, and
+    // in particular no empty `properties`. llama.cpp's grammar conversion
+    // mishandles `{"type": "object", "properties": {}}` (ggml-org/llama.cpp
+    // #25923) and the malformed production fails the WHOLE combined request,
+    // so one zero-parameter tool in the registry would take every other branch
+    // down with it. Nothing is lost by leaving the keys open here: there are no
+    // enumerated keys to close against, and dispatch still rejects an argument
+    // the tool does not declare.
+    //
+    // Otherwise additionalProperties stays false: llama.cpp's grammar
+    // conversion treats an open object as an arbitrary key-value production,
+    // which is both slow and an invitation to hallucinate argument names; every
+    // accepted key is already enumerated from the registry, which dispatch
+    // validates against.
+    let args_schema = if len(__tcs_dict(props).keys()) == 0 {
+      {type: "object"}
+    } else {
+      {type: "object", properties: props, additionalProperties: false}
+    }
+    if len(req) > 0 {
+      args_schema = args_schema + {required: req}
+    }
+    const branch = {
+      type: "object",
+      properties: {name: {type: "string", enum: [name]}, args: args_schema},
+      required: ["name", "args"],
+      additionalProperties: false,
+    }
+    if claimed != "" && name == claimed {
+      claimed_branch = branch
+    }
+    branches.push(branch)
+  }
+  if claimed_branch != nil {
+    return claimed_branch
+  }
+  if len(branches) == 0 {
+    return nil
+  }
+  if len(branches) == 1 {
+    return branches[0]
+  }
+  return {anyOf: branches}
+}
+
+/**
+ * Project one named registry tool into the canonical call-envelope schema.
+ *
+ * Unlike `tool_call_output_schema`, this fails closed for an absent name. A
+ * one-turn execution claim must never degrade into the full tool union: doing
+ * so would turn "call verify next" into "call anything next" while still
+ * looking structurally constrained to its caller.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn exact_tool_call_output_schema(registry: dict, claimed_tool: string) -> any? {
+  const claimed = trim(claimed_tool)
+  if claimed == "" {
+    return nil
+  }
+  const schema = tool_call_output_schema(registry, claimed)
+  if schema == nil || schema?.properties?.name?.enum != [claimed] {
+    return nil
+  }
+  return schema
+}
+
+/**
+ * A deliberately shallow JSON-Schema fragment for one tool argument.
+ *
+ * Only a single unambiguous scalar/container type is projected; anything
+ * richer (unions, nested objects, enums) becomes a permissive `{}` so the
+ * decode grammar never forbids a value the dispatch-time validator would
+ * accept. Constrained emission against a deep union schema is a known
+ * field-dropping hazard on llama.cpp; presence is enforced here, shape is
+ * enforced where it is owned — at dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+fn __tcs_argument_property_schema(schema: dict) -> dict {
+  const types = __tcs_schema_type_names(schema)
+  if len(types) != 1 {
+    return {}
+  }
+  const mapped = __tcs_json_schema_type_name(types[0])
+  if mapped == "" {
+    return {}
+  }
+  return {type: mapped}
+}
+
+fn __tcs_json_schema_type_name(name: string) -> string {
+  if name == "string" {
+    return "string"
+  }
+  if name == "integer" || name == "int" {
+    return "integer"
+  }
+  if name == "number" || name == "float" {
+    return "number"
+  }
+  if name == "boolean" || name == "bool" {
+    return "boolean"
+  }
+  if name == "array" || name == "list" {
+    return "array"
+  }
+  if name == "object" || name == "dict" {
+    return "object"
+  }
+  return ""
+}
+
+fn __tcs_schema_type_names(schema: dict) {
+  let raw = nil
+  if type_of(schema) == "string" {
+    raw = schema
+  } else if type_of(schema) == "dict" {
+    raw = schema?.type
+  }
+  let names = []
+  if type_of(raw) == "list" {
+    for item in raw {
+      const name = lowercase(trim(__tcs_string(item)))
+      if name != "" {
+        names.push(name)
+      }
+    }
+  } else {
+    const name = lowercase(trim(__tcs_string(raw)))
+    if name != "" {
+      names.push(name)
+    }
+  }
+  return names
+}
+
+/**
+ * Compatibility projection for embedders that consumed the former exemplar
+ * helper. New model-facing code must use `tool_required_argument_names` and
+ * keep placeholder values out of the call envelope; this function preserves
+ * the published experimental API without making it a second owner of which
+ * parameters are required.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_required_argument_exemplar(registry: dict, tool_name: any) -> list {
+  const entry = __tcs_registry_tool_entry(registry, __tcs_string(tool_name))
+  if entry == nil {
+    return []
+  }
+  const entries = __tcs_parameter_entries(__tcs_tool_entry_parameters(entry))
+  let out = []
+  for name in tool_required_argument_names(registry, tool_name) {
+    const types = __tcs_schema_type_names(entries[name])
+    const placeholder = if len(types) > 0 {
+      "<" + types[0] + ">"
+    } else {
+      "<value>"
+    }
+    out.push({key: name, value: placeholder})
+  }
+  return out
+}

@@ -1509,7 +1509,6 @@ pub struct ACPSessionRequestPermissionResult {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HarnAgentEventKind {
     AgentLoopStallWarning,
-    AgentScratchpadReorganization,
     AnchorChanged,
     BoundaryFailure,
     BudgetCircuitBreaker,
@@ -1561,7 +1560,6 @@ pub enum HarnAgentEventKind {
     SessionClosed,
     SessionHealth,
     StepJudgeDecision,
-    StructuralValidatorDecision,
     SubagentJoin,
     SubagentStop,
     ToolBatchDisposition,
@@ -1576,7 +1574,6 @@ impl HarnAgentEventKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AgentLoopStallWarning => "agent_loop_stall_warning",
-            Self::AgentScratchpadReorganization => "agent_scratchpad_reorganization",
             Self::AnchorChanged => "anchor_changed",
             Self::BoundaryFailure => "boundary_failure",
             Self::BudgetCircuitBreaker => "budget_circuit_breaker",
@@ -1628,7 +1625,6 @@ impl HarnAgentEventKind {
             Self::SessionClosed => "session_closed",
             Self::SessionHealth => "session_health",
             Self::StepJudgeDecision => "step_judge_decision",
-            Self::StructuralValidatorDecision => "structural_validator_decision",
             Self::SubagentJoin => "subagent_join",
             Self::SubagentStop => "subagent_stop",
             Self::ToolBatchDisposition => "tool_batch_disposition",
@@ -1658,7 +1654,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "agent_loop_stall_warning" => Self::AgentLoopStallWarning,
-            "agent_scratchpad_reorganization" => Self::AgentScratchpadReorganization,
             "anchor_changed" => Self::AnchorChanged,
             "boundary_failure" => Self::BoundaryFailure,
             "budget_circuit_breaker" => Self::BudgetCircuitBreaker,
@@ -1710,7 +1705,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "session_closed" => Self::SessionClosed,
             "session_health" => Self::SessionHealth,
             "step_judge_decision" => Self::StepJudgeDecision,
-            "structural_validator_decision" => Self::StructuralValidatorDecision,
             "subagent_join" => Self::SubagentJoin,
             "subagent_stop" => Self::SubagentStop,
             "tool_batch_disposition" => Self::ToolBatchDisposition,
@@ -2359,8 +2353,6 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 ];
 
 pub const HARN_AGENT_EVENT_KIND_AGENT_LOOP_STALL_WARNING: &str = "agent_loop_stall_warning";
-pub const HARN_AGENT_EVENT_KIND_AGENT_SCRATCHPAD_REORGANIZATION: &str =
-    "agent_scratchpad_reorganization";
 pub const HARN_AGENT_EVENT_KIND_ANCHOR_CHANGED: &str = "anchor_changed";
 pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
@@ -2415,8 +2407,6 @@ pub const HARN_AGENT_EVENT_KIND_SEMANTIC_CACHE_MISS: &str = "semantic_cache_miss
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
 pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
 pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
-pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str =
-    "structural_validator_decision";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_JOIN: &str = "subagent_join";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_STOP: &str = "subagent_stop";
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
@@ -2428,7 +2418,6 @@ pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "agent_loop_stall_warning",
-    "agent_scratchpad_reorganization",
     "anchor_changed",
     "boundary_failure",
     "budget_circuit_breaker",
@@ -2480,7 +2469,6 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "session_closed",
     "session_health",
     "step_judge_decision",
-    "structural_validator_decision",
     "subagent_join",
     "subagent_stop",
     "tool_batch_disposition",
@@ -5512,13 +5500,6 @@ pub struct HarnAgentsEventProjection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventAgentScratchpadReorganization {
-    pub iteration: u64,
-    pub status: String,
-    pub details: Value,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventAnchorChanged {
     pub previous: Value,
     pub current: Value,
@@ -6138,23 +6119,6 @@ pub struct HarnAgentEventStepJudgeDecision {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventStructuralValidatorDecision {
-    pub iteration: u64,
-    pub rule: String,
-    pub diagnostic: String,
-    #[serde(rename = "recommendedAction")]
-    pub recommended_action: String,
-    pub vetoed: bool,
-    pub skipped: bool,
-    pub reason: Option<String>,
-    #[serde(rename = "onFailure")]
-    pub on_failure: String,
-    pub attempts: u64,
-    #[serde(rename = "maxAttempts")]
-    pub max_attempts: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventSubagentJoin {
     #[serde(rename = "parentSessionId")]
     pub parent_session_id: String,
@@ -6268,8 +6232,6 @@ pub struct HarnAgentEventTypedCheckpoint {
 pub enum HarnAgentEventPayload {
     #[serde(rename = "agent_loop_stall_warning")]
     AgentLoopStallWarning(std::collections::BTreeMap<String, Value>),
-    #[serde(rename = "agent_scratchpad_reorganization")]
-    AgentScratchpadReorganization(HarnAgentEventAgentScratchpadReorganization),
     #[serde(rename = "anchor_changed")]
     AnchorChanged(HarnAgentEventAnchorChanged),
     #[serde(rename = "boundary_failure")]
@@ -6372,8 +6334,6 @@ pub enum HarnAgentEventPayload {
     SessionHealth(std::collections::BTreeMap<String, Value>),
     #[serde(rename = "step_judge_decision")]
     StepJudgeDecision(HarnAgentEventStepJudgeDecision),
-    #[serde(rename = "structural_validator_decision")]
-    StructuralValidatorDecision(HarnAgentEventStructuralValidatorDecision),
     #[serde(rename = "subagent_join")]
     SubagentJoin(HarnAgentEventSubagentJoin),
     #[serde(rename = "subagent_stop")]
