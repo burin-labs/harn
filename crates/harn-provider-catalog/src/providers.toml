@@ -989,6 +989,17 @@ label = "mock"
 model = "mock-approval-reviewer"
 provider = "mock"
 
+[model_ladders.crystallization_curator]
+label = "workflow curator route with transport fallback"
+
+[[model_ladders.crystallization_curator.steps]]
+label = "mid"
+model = "sonnet"
+
+[[model_ladders.crystallization_curator.steps]]
+label = "frontier"
+model = "opus"
+
 [model_ladders.frugal]
 label = "frugal: cheap-first with frontier escalation"
 
