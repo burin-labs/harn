@@ -8,9 +8,7 @@ use harn_builtin_macros::harn_builtin;
 
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
 use super::agent_tool_governance::validate_registered_input;
-use super::{
-    agent_runtime, agent_session_host, agent_tools, compass_router, helpers, permissions, tools,
-};
+use super::{agent_runtime, agent_session_host, agent_tools, helpers, permissions, tools};
 
 mod cancelled_tool;
 mod denial_results;
@@ -1055,78 +1053,6 @@ async fn dispatch_tool_call_live(
         .await;
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
-    }
-
-    // Compass tool-rewrite router (B.9, #2612). Observe freeform /
-    // whole-file edit calls and either suggest the AST-precise primitive
-    // (advisory; default) or rewrite the call into a provably-equivalent
-    // structural form. Runs after permission / pre-tool hooks but before
-    // schema validation so a rewritten call is validated against its new
-    // tool. Inert when disabled or when the call is not a freeform edit.
-    {
-        let compass_options = compass_router::options_to_json(options);
-        let compass_config = compass_router::CompassConfig::from_options(&compass_options);
-        if !matches!(compass_config.mode, compass_router::CompassMode::Off) {
-            let original_tool = tool_name.clone();
-            let original_args = tool_args.clone();
-            let decision = compass_router::route(&tool_name, &tool_args, &compass_config);
-            // `rewrite` mode that could not prove equivalence degrades to a
-            // suggestion; count that as `fell_back` rather than `suggested`.
-            let fell_back = compass_config.mode == compass_router::CompassMode::Rewrite
-                && matches!(decision, compass_router::CompassDecision::Suggest { .. });
-            if let Some(event) = compass_router::routing_event(
-                &decision,
-                &original_tool,
-                &original_args,
-                &compass_config,
-                fell_back,
-            ) {
-                agent_runtime::emit_agent_event_with_ctx(
-                    Some(&ctx),
-                    &crate::agent_events::AgentEvent::CompassRoutingDecision {
-                        session_id: session_id.clone(),
-                        tool_call_id: tool_id.clone(),
-                        mode: event.mode.to_string(),
-                        action: event.action.to_string(),
-                        persona: event.persona,
-                        original_tool: event.original_tool,
-                        routed_tool: event.routed_tool,
-                        target_tool: event.target_tool,
-                        path: event.path,
-                    },
-                )
-                .await;
-            }
-            if let compass_router::CompassDecision::Rewrite {
-                tool_name: new_name,
-                tool_args: new_args,
-                ..
-            } = &decision
-            {
-                tool_name = new_name.clone();
-                tool_args = new_args.clone();
-            }
-            if let Some(reminder_body) = compass_router::apply_decision(
-                &decision,
-                &original_tool,
-                &compass_config,
-                fell_back,
-            ) {
-                if crate::agent_sessions::exists(&session_id) {
-                    let mut reminder = crate::llm::helpers::SystemReminder::new(
-                        reminder_body,
-                        crate::llm::helpers::ReminderSource::StdlibProvider,
-                        agent_primitive_option_int(options, "_iteration").unwrap_or(0),
-                    );
-                    reminder.tags = vec!["compass".to_string()];
-                    reminder.dedupe_key = Some(format!("compass:{original_tool}"));
-                    reminder.ttl_turns = Some(1);
-                    reminder.propagate = crate::llm::helpers::ReminderPropagate::None;
-                    reminder.role_hint = crate::llm::helpers::ReminderRoleHint::Developer;
-                    let _ = crate::agent_sessions::inject_reminder(&session_id, reminder);
-                }
-            }
-        }
     }
 
     if let Err(message) = validate_registered_input(tools, &tool_name, &tool_args, audience) {

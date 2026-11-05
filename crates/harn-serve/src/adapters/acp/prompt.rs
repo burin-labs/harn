@@ -626,6 +626,7 @@ impl AcpServer {
             "pipeline":source_path.as_ref().map(|path|path.display().to_string()).unwrap_or_else(||"<inline>".into()),
         })));
         let profile_turn = self.begin_profile_turn(&session_id);
+        let builtin_profile = (profile_turn != 0).then(harn_vm::builtin_profile::enable);
         let host_bridge_for_response = host_bridge.clone();
         let runtime_configurator = self.runtime_configurator.clone();
         let execution = runtime_configurator.run_prompt(
@@ -639,6 +640,8 @@ impl AcpServer {
                 cancelled: &cancellation.cancelled,
             },
             Box::pin(store_scope.run(mode_policy.run(Box::pin(async {
+                // A person asking again is the signal to try a route that was failing.
+                let _prompt_guard = harn_vm::llm::begin_interactive_prompt(&session_id);
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
                 let _spend_recorder = SessionSpendRecorder::new(
                     llm_spend.clone(),
@@ -671,6 +674,7 @@ impl AcpServer {
         );
         let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
+        drop(builtin_profile);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
         let turn_spent_usd = llm_spent_usd.and_then(|_| {
             llm_spend
