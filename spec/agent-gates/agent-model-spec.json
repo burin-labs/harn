@@ -1377,10 +1377,6 @@
         "reader": "model-registry-key-domain"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-        "reader": "agent_completion_claim_apply_options"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
         "reader": "__judge_tool_entries"
       },

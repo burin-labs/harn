@@ -331,6 +331,12 @@ pub fn capture_with_writer_policy(
         None => (None, HashMap::new()),
     };
 
+    if !crate::git_repository::may_be_git_worktree(&root) {
+        return Ok(unavailable(
+            "not_a_git_worktree",
+            "No Git repository marker in this folder or its ancestors",
+        ));
+    }
     let prefix = match git(&root, &["rev-parse", "--show-prefix"]) {
         Ok(out) => String::from_utf8_lossy(&out).trim().to_string(),
         Err(error) => {

@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::git_repository::may_be_git_worktree;
+
 /// Git data needed by the scanner.
 pub trait GitCapabilities {
     /// Return tracked and untracked file paths relative to `root`.
@@ -22,7 +24,7 @@ pub struct CliGitCapabilities;
 
 impl GitCapabilities for CliGitCapabilities {
     fn list_files(&self, root: &Path) -> Option<Vec<String>> {
-        if !has_git_repository_marker(root) {
+        if !may_be_git_worktree(root) {
             return None;
         }
 
@@ -62,7 +64,7 @@ impl GitCapabilities for CliGitCapabilities {
     }
 
     fn churn_scores(&self, root: &Path) -> BTreeMap<String, f64> {
-        if !has_git_repository_marker(root) {
+        if !may_be_git_worktree(root) {
             return BTreeMap::new();
         }
 
@@ -114,14 +116,6 @@ impl GitCapabilities for CliGitCapabilities {
     }
 }
 
-/// Returns true when `root` is inside a Git worktree based on local marker files.
-///
-/// This deliberately avoids shelling out to `git rev-parse`: the default
-/// capability uses this predicate to decide whether spawning Git is appropriate.
-fn has_git_repository_marker(root: &Path) -> bool {
-    root.ancestors().any(|dir| dir.join(".git").exists())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,18 +143,6 @@ mod tests {
             .prefix("harn-hostlib-git-")
             .tempdir_in(parent)
             .unwrap()
-    }
-
-    #[test]
-    fn marker_detection_handles_plain_and_worktree_git_markers() {
-        let tmp = tempdir_outside_ambient_repo();
-        let root = tmp.path();
-
-        assert!(!has_git_repository_marker(root));
-
-        fs::write(root.join(".git"), "gitdir: /tmp/example\n").unwrap();
-        assert!(has_git_repository_marker(root));
-        assert!(has_git_repository_marker(&root.join("nested")));
     }
 
     /// Run a git command with a hermetic identity so tests do not depend on or
