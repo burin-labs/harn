@@ -93,7 +93,6 @@ public enum HarnProtocolConstants {
         "cache_miss",
         "capability_gap",
         "code_librarian_query_nl_fallback",
-        "compass_routing_decision",
         "composition_child_call",
         "composition_child_result",
         "composition_error",
@@ -5777,17 +5776,6 @@ public struct HarnAgentEventCodeLibrarianQueryNlFallback: Codable, Sendable, Equ
     }
 }
 
-public struct HarnAgentEventCompassRoutingDecision: Codable, Sendable, Equatable {
-    public var toolCallId: String
-    public var mode: String
-    public var action: String
-    public var persona: String
-    public var originalTool: String
-    public var routedTool: String
-    public var targetTool: String
-    public var path: String?
-}
-
 public struct HarnAgentEventCompositionChildCall: Codable, Sendable, Equatable {
     public var runId: String
     public var toolCallId: String
@@ -7101,7 +7089,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case cacheMiss([String: HarnACPValue])
     case capabilityGap(HarnAgentEventCapabilityGap)
     case codeLibrarianQueryNlFallback(HarnAgentEventCodeLibrarianQueryNlFallback)
-    case compassRoutingDecision(HarnAgentEventCompassRoutingDecision)
     case compositionChildCall(HarnAgentEventCompositionChildCall)
     case compositionChildResult(HarnAgentEventCompositionChildResult)
     case compositionError(HarnAgentEventCompositionError)
@@ -7169,7 +7156,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case cacheMiss = "cache_miss"
         case capabilityGap = "capability_gap"
         case codeLibrarianQueryNlFallback = "code_librarian_query_nl_fallback"
-        case compassRoutingDecision = "compass_routing_decision"
         case compositionChildCall = "composition_child_call"
         case compositionChildResult = "composition_child_result"
         case compositionError = "composition_error"
@@ -7232,7 +7218,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "cache_miss",
             "capability_gap",
             "code_librarian_query_nl_fallback",
-            "compass_routing_decision",
             "composition_child_call",
             "composition_child_result",
             "composition_error",
@@ -7314,7 +7299,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .cacheMiss: self.payload = .cacheMiss(fields)
         case .capabilityGap: self.payload = .capabilityGap(try container.decode(HarnAgentEventCapabilityGap.self))
         case .codeLibrarianQueryNlFallback: self.payload = .codeLibrarianQueryNlFallback(try container.decode(HarnAgentEventCodeLibrarianQueryNlFallback.self))
-        case .compassRoutingDecision: self.payload = .compassRoutingDecision(try container.decode(HarnAgentEventCompassRoutingDecision.self))
         case .compositionChildCall: self.payload = .compositionChildCall(try container.decode(HarnAgentEventCompositionChildCall.self))
         case .compositionChildResult: self.payload = .compositionChildResult(try container.decode(HarnAgentEventCompositionChildResult.self))
         case .compositionError: self.payload = .compositionError(try container.decode(HarnAgentEventCompositionError.self))

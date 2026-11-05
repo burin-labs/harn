@@ -83,8 +83,8 @@ Tree-sitter grammars are pinned in [`Cargo.toml`](Cargo.toml). Language
 names, aliases, extensions, exact file names (`Dockerfile`, `Makefile`), and
 structural capability columns live in one table, `LANGUAGES` in the
 [`harn-languages`](../harn-languages/src/lib.rs) crate. The code index,
-scanner, `get_file_outline`, `ast.*`, the project fingerprint, and the edit
-compass all detect languages through it, and a sweep test asserts they agree.
+scanner, `get_file_outline`, `ast.*`, and the project fingerprint
+all detect languages through it, and a sweep test asserts they agree.
 `src/ast/language.rs` binds a grammar to every registry row marked
 structural. `get_file_outline` returns `status: "unsupported"` with a typed
 `reason` for files the registry does not know, languages without a grammar,

@@ -1,207 +1,18 @@
-# Completion gate (`std/agent/completion_gate`)
+# Completion judge
 
-`agent_completion_gate(runtime, options)` returns an options fragment for
-`agent_loop`. It checks host-supplied write and verification facts and can add a
-bounded LLM judge. Harn owns the decision rules. The host supplies facts such as
-which writes changed source and whether verification passed.
+The loop decides whether a turn may end through three seams:
+`verify_completion` (a host callback that reads deterministic facts such as
+which writes changed source and whether verification passed),
+`verify_completion_judge` (a bounded LLM judge that runs after it), and
+`turn_end_condition`. Harn owns the judge and its arbitration. The host owns the
+facts and supplies them from its own callback.
 
-## `agent_completion_gate`
+## The bounded judge
 
-```text
-agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) -> dict
-```
-
-Spread the returned fragment into the loop's base options:
-
-```harn,ignore
-import { agent_completion_gate } from "std/agent/completion_gate"
-
-agent_loop(harness, task, system, base_opts + agent_completion_gate(
-  harness.runtime, {
-    facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-    verify_command: fn() { return host_run_verify() },
-    // optional bounded LLM judge, capped at 5 by default
-    judge: true,
-  }))
-```
-
-### Options
-
-`CompletionGateOptions` splits into host-fact callbacks and plain-data policy
-knobs. Every field is optional.
-
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `facts` | `fn(ctx) -> CompletionFacts` | — | The primary fact supplier. `ctx` is `{session_id, task, stop_reason, text, messages}`. |
-| `behavior_evidence` | `fn(ctx) -> CompletionBehaviorRequest?` | — | Supplies the goal, intent, check pair and live input reader for a behavior-preserving task. |
-| `classify_write` | `fn(path, diff?) -> WriteKind` | — | Labels one write when `facts` returns a `writes` list without counts. |
-| `verify_command` | `fn() -> CompletionVerifyVerdict` | — | Runs the verifier oracle when `facts` carries no `verify` verdict. |
-| `feedback_decorator` | `fn(reason, feedback, verdict) -> string` | — | Decorates a delivered veto using its stable ladder reason and structured verdict. |
-| `require_source_write` | bool | `true` | Enforce the source-write evidence requirement. |
-| `requires_write` | bool | per-task fact | Override the "this task needs a source change" fact. |
-| `max_vetoes` | int | `3` | Per-session soft-veto budget; `0` disables. |
-| `exhaustion` | `"allow"` / `"stop_unverified"` | `"allow"` | End an exhausted retry window as unverified, including strict failures, instead of allowing soft failures or retrying strict failures indefinitely. |
-| `requirement_contract` | `CompletionRequirementContract` | absent | Declares requirements assessed from the facts callback's typed evidence. Requires `facts`. |
-| `judge` | bool / dict | off | Attach a bounded LLM judge (`true` or a judge-config dict). |
-| `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"turn_end_condition"`). |
-| `feedback_templates` | dict | defaults | Override feedback by ladder key; repeated failures support `{attempts}` and `{findings}`. |
-| `escalation_threshold` | int | `3` | Failed-after-write streak required to recommend escalation. |
-| `escalation_target` | string | — | Host routing channel copied onto an escalated verdict and event. |
-
-All verifier results are required: one failed result blocks completion, and an
-empty result list remains unmeasured. The former `veto_combine` callback has been
-removed so a host cannot replace this rule with custom verdict arbitration.
-
-`requirement_contract` uses the same typed contract and evidence roles as the
-completion judge. The facts callback returns `requirement_assessments` and
-`requirement_evidence`; Harn joins them to the declared roster. Missing, duplicate,
-unsupported and unmet assessments remain pending, even when a separate verifier
-passed or the soft-veto budget was spent. The decision receipt includes the
-required count, pending count and pending names. An `assistant_output` requirement
-can cite a typed response observation without inventing a tool call or artifact.
-
-The fact types:
-
-- `CompletionFacts` — `{consecutive_failed_after_write?,
-  source_write_count?, cosmetic_write_count?, writes?, verify?,
-  verification_failures_converging?, requires_write?, requirement_assessments?,
-  requirement_evidence?}`. Supply counts directly,
-  or a `writes` list of `CompletionWriteFact` for the gate to classify.
-  `verify` is one `CompletionVerifyVerdict` or a list of them. When the streak
-  is present, a red verifier uses the streak-aware reasons below; a converging
-  diagnostic set consumes churn credit and suppresses escalation for that
-  decision.
-- `CompletionWriteFact` — `{path?, diff?, kind?}`. `kind` is a `WriteKind`
-  string; `"source"` and `"cosmetic"` are load-bearing, anything else is treated
-  as non-source.
-- `CompletionVerifyVerdict` — `{ok?, findings?, command?}`. `findings` is
-  optional red-detail text. `command` optionally names what the oracle ran, so
-  the reading passed to the bounded judge can say which verification passed.
-
-Optional evidence facts tighten a green reading: `verification_current: false`
-rejects a check older than the latest write, `verification_discriminates: false`
-rejects a check already green without the change, and
-`observed_failure_required: true` requires `observed_failure: true`. An explicit
-`oracle_expected` also keeps an unrun verifier pending when no verdict exists.
-`verification_command` names that expected check when no verdict has named it;
-the pending and terminal readings still report `not_run`.
-`verifier_available: false` records that the configured verifier could not start;
-after a source write the live gate ends unverified rather than asking for repairs
-to a check that measured nothing.
-
-When the host cannot read the workspace to discover a verifier, supply
-`verification_discovery: {state: "unavailable", detail: "..."}` with a nonempty
-explanation of what could not be read. If no verifier is declared or observed,
-the completed run is labeled `completion_unverified` and the explanation is
-preserved on its terminal outcome. This fact does not stop active work or ask
-for another check. A declared or observed verifier remains authoritative; a
-successfully read empty workspace is not discovery failure.
-
-### Behavior-preserving work
-
-For an explicitly declared `behavior_preserving` task, a check that passed before
-the edit can count after the edit when both executions and the current workspace
-are bound to the same active goal. Use `completion_behavior_run_check` from
-`std/agent/completion_behavior_evidence` before and after the edit. Supply its
-two `behavior_check` records, agent capability, active goal ID, intent,
-task-target reader and `VerificationReuse` reader in the gate's
-`behavior_evidence` callback. Declare the requested target identity in the
-session goal's `metadata.target`; the target reader supplies that identity and
-its current digest, not a digest of arbitrary workspace changes. Use the same
-reader for each bound check. If the host cannot resolve or declare the target,
-the strict veto remains in place. At each
-decision, the gate reads the current goal and verifier inputs itself. The current
-supported check is a shell command matching the goal's declared verification
-command. Its working directory must resolve inside the session's workspace
-anchor, including an additional mounted root. A missing or changed anchor cannot
-bind the check. Both checks must name the run session's own goal. A different
-goal session cannot grant this exception without a canonical association owned
-by the run; it retains the ordinary strict veto.
-
-The `VerificationReuse` input reader must read complete current workspace,
-source, dependency, environment and revision identities, including changes made
-outside the agent. The target identity must stay the same, its digest must change
-between the checks, and the current digest must match the second check. Missing
-or unreadable inputs, an absent baseline, stale source, a replaced goal, or
-another session leave the ordinary strict veto in place.
-Effect admission controls reuse only; an executed check can bind its observation
-even when skipping its effects has not been authorized.
-Run a fresh check after further changes. Neither a write nor a passing pair proves
-that behavior is preserved; the declaration and verifier express the caller's
-intent and evidence. `behavior_change` and `unknown` retain the strict rule.
-
-A facts provider may supply `requirement_contract` for the current boundary,
-using the same typed roster,
-assessments and evidence. This current roster survives a retarget; a contract
-declared in the options still follows the opening objective's retirement rules.
-
-`completion_gate_verdict(facts, options)` evaluates the same evidence ladder
-without callbacks or state changes. `agent_completion_gate_preview(runtime,
-payload, options)` runs the configured callbacks and complete decision without
-charging a retry. Hosts that own delivery can use
-`agent_completion_gate_record_veto(runtime, session_id, reason)` and
-`agent_completion_gate_veto_counts(runtime, session_id)`; `completion_gate_budget`
-reads those counts for the current phase. No-source refusals remain visible but
-do not spend the retry window after a source write. An exhausted
-`stop_unverified` decision preserves verification and requirement evidence and
-uses the runtime's terminal refusal contract.
-
-## The deterministic ladder
-
-The gate never keys on a done-sentinel string. It decides purely from write and
-verifier facts, first match wins:
-
-| Reason | Result | Condition |
-| --- | --- | --- |
-| `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
-| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact |
-| `failed_verification` | veto (**strict**) | streak-aware red verifier below the threshold, or diagnostic churn is still converging |
-| `repeated_verification_failures` | veto (**strict**) + escalation | non-converging red verifier at or above `escalation_threshold` |
-| `verified_after_write` / `verified` | allow | verifier is green |
-| `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — the budget never releases it |
-| `no_workspace_write` | allow | task does not require a source change |
-| `veto_budget_exhausted` | allow | a soft veto after `max_vetoes`, converted to an attributable end |
-
-Only **source** writes count as progress toward done. A cosmetic final write (a
-comment, a `.md` typo) is not evidence: it can't flip an already-green run back
-to unverified, and a run that wrote only cosmetics can't claim done. A **strict**
-veto (a source write with a red or missing verifier) is never released by the
-veto budget, so a failing build cannot end as verified.
-
-Each deterministic decision emits a `judge_decision` event with
-`trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
-the budget converts a soft veto into an allow, the event carries
-`reason: "veto_budget_exhausted"` plus `converted_from` with the original class.
-Streak escalation decisions also carry `escalation_recommended` and, when
-configured, `escalation_target`. Consumers read the same fields from the
-session's `judge_decision` events.
-
-`requirement_report` preserves the validated requirement ledger when the
-decision has one: row IDs, evidence references, statuses, pending count and
-pending names. Native events and JSONL retain the same report; ACP exposes it
-as `requirementReport`. An absent report remains `nil`; it does not mean every
-requirement passed. The completion checkpoint carries the boundary report in
-`requirements`, including the combined reports from its adjudicators.
-
-`feedback_decorator` runs only after the ladder and veto budget resolve a veto
-that will actually be delivered. It receives `(reason, feedback, verdict)`;
-the verdict includes any escalation fields, so a host can attach
-language-specific repair cues without parsing the default prose.
-
-### Degraded mode
-
-With neither `facts` nor `verify_command`, the deterministic gate has nothing
-to assert, so it abstains: it
-allows, and marks `_completion_gate.facts_available = false` with a verdict
-reason of `facts_unavailable`. It never fabricates a pass. Any configured LLM
-judge still runs, so this is judge-only mode, not no-op mode.
-
-## The optional bounded judge
-
-Set `judge` to add an LLM check after the deterministic ladder. `judge: true`
-uses defaults. A dict may set the provider, model, system prompt, timeouts, and
-invocation cap. The judge uses `verify_completion_judge` by default; set
-`judge_seam: "turn_end_condition"` to use that completion trigger instead. The default
+Set `verify_completion_judge` to a judge config to add an LLM check after the
+`verify_completion` callback. An empty dict uses defaults. A dict may set the
+provider, model, system prompt, timeouts, and invocation cap. Set
+`turn_end_condition` to use that completion trigger instead. The default
 cap is 5 calls per session. Past the cap, the loop ends with status
 `completion_unverified`. Set `max_invocations: 0` to disable the cap. Two
 helpers expose the catalog review and the resolved cap:
@@ -228,12 +39,12 @@ disabled.
 
 ### What the judge is shown, and what it may refuse on
 
-The ladder's verifier reading is passed to the judge rather than discarded. The
+The `verify_completion` verifier reading is passed to the judge rather than discarded. The
 evidence snapshot carries a typed
 `verification: {oracle_expected, command, observed, observed_at_evidence_index}`,
 where `observed` is `passed`, `failed`, or `not_run`, and the judge's prompt
 renders it as an explicit deterministic-verification block. `not_run` covers
-both "no oracle was configured" and "the gate could not read facts", so a
+both "no oracle was configured" and "the callback could not read facts", so a
 `facts_unavailable` allow can never read as a passing verification.
 
 The judge's verdict carries a `gap_class` alongside `verdict` and `detail`:
@@ -289,8 +100,8 @@ of these must hold:
 
 | Clause | Required reading |
 | --- | --- |
-| the gate ran | the directive receipt's `invoked.deterministic` |
-| the gate allowed on a proven write | reason is exactly `verified_after_write` |
+| the callback ran | the directive receipt's `invoked.deterministic` |
+| the callback allowed on a proven write | reason is exactly `verified_after_write` |
 | the reading agrees with the reason | threaded `observed` is `passed` |
 | the turn is the sealed final answer | `stop_reason` is `sentinel` |
 | there is an answer to hand back | the final response is non-empty |
@@ -305,7 +116,7 @@ false, so a reader can tell a judge that never ran from one that ran and agreed.
 `verified` is deliberately not `verified_after_write`. A green verifier with no
 source write behind it is an ordinary prose completion and still calls the
 judge, as do an unverified path, a red or unrun verifier, a non-sentinel
-boundary, and a run with no deterministic gate.
+boundary, and a run with no deterministic callback.
 
 The acceptance-ledger clause is there because the skip does not only skip the
 judge. The pending-requirements check that turns a `done` into a `continue` lives
@@ -380,12 +191,12 @@ the named gap to the next actor turn. Standalone callers can use
 
 - [Agent guardrails](./agent-guardrails.md) — the input-side bookend that can
   stop before the first main model turn.
-- [Completion control](../llm/completion-control.md#completion-gate-agent_completion_gate)
-  — the same gate in the context of the loop's other completion seams
+- [Completion control](../llm/completion-control.md)
+  — the judge in the context of the loop's other completion seams
   (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).
 - [Host-supplied facts](./fact-intake-seams.md) — the broader
-  Harn-owns-mechanism / host-owns-facts pattern this gate follows.
-- [Agent governors and detectors](./governors.md) — the budget and stall side of
+  Harn-owns-mechanism / host-owns-facts pattern the judge follows.
+- [Agent detectors](./detectors.md) — the stall side of
   the same placement contract.
 - [The expressiveness spectrum](../concepts/expressiveness-spectrum.md#level-4-tune-the-loop-by-composing-building-blocks)
-  — where the completion gate sits when you compose loop control by hand.
+  — where completion control sits when you compose loop control by hand.

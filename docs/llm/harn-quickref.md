@@ -2666,7 +2666,7 @@ that need to validate progress data at a boundary: use
 validates config dictionaries and applies the default tool name and description.
 
 `agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
-builds the input-side bookend to `agent_completion_gate`. Spread the returned
+builds a cheap input-side check. Spread the returned
 bundle into `agent_loop` options to run a cheap classifier before the first main
 model turn. A tripwire emits `input_guardrail_verdict`, records a zero-token
 assistant explanation, and returns `status: "input_guardrail"` with
@@ -4831,23 +4831,6 @@ fn main(harness: Harness) {
     },
     // optional dispatch label
     observe: {emit_event: "billing.routing_decision"},
-    // optional verifier chain
-    escalate_on: [
-      // parse the candidate as Harn
-      {kind: "typecheck"},
-      {
-        kind: "lint",
-        forbidden_patterns: ["TODO", "unwrap\\("],
-        on_fail: "refine",
-      },
-      {
-        kind: "test_run",
-        command: ["cargo", "test", "--quiet"],
-        timeout_secs: 60,
-      },
-    ],
-    // optional, default 1
-    max_refines_per_link: 1,
   })
 
   const result = harness.llm.call(
@@ -4855,7 +4838,7 @@ fn main(harness: Harness) {
   )
   // result.routing = {policy, selected, session_cost_usd,
   //   attempts: [{provider, model, status, duration_ms, cost_usd,
-  //               error?, verifier_outcome?, verifier_signals?}]}
+  //               error?}]}
 }
 ```
 
@@ -4878,33 +4861,10 @@ Semantics:
   pricing in `std/llm/economics`. `on_exceed: "abort"` throws the
   standard budget-exceeded error, `"skip"` advances to the next chain
   link, `"warn"` emits an event and proceeds.
-- **Verifier escalation** (`escalate_on`): each verifier inspects the
-  successful candidate's text. The first non-`accept` signal drives
-  the next decision — `refine` re-runs the **same** link with a
-  tightened prompt (up to `max_refines_per_link` retries; nudge text
-  includes the verifier's reason), `escalate` advances to the next
-  link. If the verifier rejects the last link and no frontier remains,
-  the rejected candidate is returned anyway with
-  `verifier_outcome: "escalate"` on the trace — verifiers gate routing
-  decisions, not correctness. Each `escalate_on` entry is a dict with
-  `kind: "typecheck" | "lint" | "test_run"` plus kind-specific
-  options:
-  - `typecheck`: parses the candidate as Harn (extracting ```harn /
-    ``` fenced blocks by default via `extract_fenced: true`); parse
-    or type errors trigger `on_fail` (default `escalate`).
-  - `lint`: regex-based pattern check with
-    `forbidden_patterns: [...]`, `required_patterns: [...]`, and
-    `max_line_length: N`; any rule violation triggers `on_fail`
-    (default `refine`).
-  - `test_run`: spawns `command: [...]` with the candidate text on
-    stdin (toggle with `pass_via_stdin: false`); non-zero exit
-    triggers `on_fail` (default `escalate`). `timeout_secs` defaults
-    to 30. **Authority lives in the script that builds the policy** —
-    `test_run` shells out under the calling process's permissions.
 - **Tape events**: `<dispatch>.decision`, `<dispatch>.attempt`,
   `<dispatch>.race_started`, `<dispatch>.race_won`,
   `<dispatch>.race_lost`, `<dispatch>.budget_exceeded`,
-  `<dispatch>.verifier_signal`, `<dispatch>.exhausted` (default
+  `<dispatch>.exhausted` (default
   `dispatch = llm.routing`; override via `observe.emit_event`).
 - **Replay**: the routing decision rides on the result envelope's
   `routing_decision` block, so transcripts and replay re-attribute each

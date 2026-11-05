@@ -64,31 +64,6 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                 );
             }
         }
-        AgentEvent::CompassRoutingDecision {
-            session_id,
-            tool_call_id,
-            mode,
-            action,
-            persona,
-            original_tool,
-            routed_tool,
-            target_tool,
-            path,
-        } => {
-            sink.emit_agent_event(
-                session_id,
-                &payloads::CompassRoutingDecision {
-                    tool_call_id: tool_call_id.clone(),
-                    mode: mode.clone(),
-                    action: action.clone(),
-                    persona: persona.clone(),
-                    original_tool: original_tool.clone(),
-                    routed_tool: routed_tool.clone(),
-                    target_tool: target_tool.clone(),
-                    path: path.clone(),
-                },
-            );
-        }
         AgentEvent::FeedbackInjected {
             session_id,
             kind,

@@ -499,11 +499,31 @@ impl AcpServer {
         if checkpoint_reserved {
             if let Some(boundary_id) = prompt.correlation.message_id.as_deref() {
                 // A failed capture must not prevent the person's prompt running.
-                self.sessions
+                // The scan runs off this thread so other requests keep moving;
+                // only this turn waits for it.
+                let tracking = self
+                    .sessions
                     .get(&session_id)
                     .expect("admitted session")
                     .checkpoint_tracking
-                    .capture_boundary(&session_id, boundary_id, &cwd, &store_scope, true);
+                    .clone();
+                let (owner_id, boundary, root, scope) = (
+                    session_id.clone(),
+                    boundary_id.to_string(),
+                    cwd.clone(),
+                    store_scope.clone(),
+                );
+                let capture = harn_vm::orchestration::run_blocking_with_ambient({
+                    let tracking = tracking.clone();
+                    move || tracking.capture_boundary(&owner_id, &boundary, &root, &scope, true)
+                })
+                .await;
+                if let Err(error) = capture {
+                    tracking.fail(
+                        boundary_id,
+                        format!("checkpoint capture did not finish: {error}"),
+                    );
+                }
             }
         }
         #[cfg(not(feature = "hostlib"))]
@@ -626,6 +646,7 @@ impl AcpServer {
             "pipeline":source_path.as_ref().map(|path|path.display().to_string()).unwrap_or_else(||"<inline>".into()),
         })));
         let profile_turn = self.begin_profile_turn(&session_id);
+        let builtin_profile = (profile_turn != 0).then(harn_vm::builtin_profile::enable);
         let host_bridge_for_response = host_bridge.clone();
         let runtime_configurator = self.runtime_configurator.clone();
         let execution = runtime_configurator.run_prompt(
@@ -673,6 +694,7 @@ impl AcpServer {
         );
         let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
+        drop(builtin_profile);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
         let turn_spent_usd = llm_spent_usd.and_then(|_| {
             llm_spend

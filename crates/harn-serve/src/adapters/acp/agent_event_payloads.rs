@@ -157,20 +157,6 @@ pub struct CodeLibrarianQueryNlFallback {
     pub text: String,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CompassRoutingDecision {
-    pub tool_call_id: String,
-    pub mode: String,
-    pub action: String,
-    pub persona: String,
-    pub original_tool: String,
-    pub routed_tool: String,
-    pub target_tool: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-}
-
 /// The run envelope shared by `composition_start`, `composition_finish`, and
 /// `composition_error`.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -787,7 +773,6 @@ agent_event_registry! {
     "cache_miss" => CacheMiss,
     "capability_gap" => CapabilityGap,
     "code_librarian_query_nl_fallback" => CodeLibrarianQueryNlFallback,
-    "compass_routing_decision" => CompassRoutingDecision,
     "composition_child_call" => CompositionChildCall,
     "composition_child_result" => CompositionChildResult,
     "composition_error" => CompositionError,

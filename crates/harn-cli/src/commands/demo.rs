@@ -71,10 +71,9 @@ const SCENARIOS: &[Scenario] = &[
     Scenario {
         id: "routing-policy",
         title: "routing_policy escalates a cheap chain to a frontier link",
-        description: "Drive the v0.8.40 routing_policy primitive through three mocked tasks: a \
-                      clean cheap-link success, a 429 that fails over to the frontier, and a \
-                      TODO-poisoned cheap reply that the lint verifier escalates. Demonstrates \
-                      per-attempt routing receipts, failover, and verifier-signal escalation \
+        description: "Drive the v0.8.40 routing_policy primitive through two mocked tasks: a \
+                      clean cheap-link success and a 429 that fails over to the frontier. \
+                      Demonstrates per-attempt routing receipts and failover \
                       (canary scenario for the demo gate, #2437).",
         script: include_str!("../../assets/demo/routing-policy/scenario.harn"),
         tape: include_str!("../../assets/demo/routing-policy/tape.jsonl"),
