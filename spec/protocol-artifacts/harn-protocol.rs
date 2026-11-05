@@ -1528,7 +1528,6 @@ pub enum HarnAgentEventKind {
     FinalWrapup,
     HostAttachment,
     HostToolResult,
-    InputGuardrailVerdict,
     IterationEnd,
     IterationStart,
     JudgeDecision,
@@ -1553,7 +1552,6 @@ pub enum HarnAgentEventKind {
     RepairOutputContractApplied,
     RequireSuccessfulToolsViolation,
     ReservedTerminalVerify,
-    ScopeClassifierVerdict,
     SelfConsistencyTie,
     SemanticCacheHit,
     SemanticCacheMiss,
@@ -1593,7 +1591,6 @@ impl HarnAgentEventKind {
             Self::FinalWrapup => "final_wrapup",
             Self::HostAttachment => "host_attachment",
             Self::HostToolResult => "host_tool_result",
-            Self::InputGuardrailVerdict => "input_guardrail_verdict",
             Self::IterationEnd => "iteration_end",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
@@ -1618,7 +1615,6 @@ impl HarnAgentEventKind {
             Self::RepairOutputContractApplied => "repair_output_contract_applied",
             Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
             Self::ReservedTerminalVerify => "reserved_terminal_verify",
-            Self::ScopeClassifierVerdict => "scope_classifier_verdict",
             Self::SelfConsistencyTie => "self_consistency_tie",
             Self::SemanticCacheHit => "semantic_cache_hit",
             Self::SemanticCacheMiss => "semantic_cache_miss",
@@ -1673,7 +1669,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "final_wrapup" => Self::FinalWrapup,
             "host_attachment" => Self::HostAttachment,
             "host_tool_result" => Self::HostToolResult,
-            "input_guardrail_verdict" => Self::InputGuardrailVerdict,
             "iteration_end" => Self::IterationEnd,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
@@ -1698,7 +1693,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "repair_output_contract_applied" => Self::RepairOutputContractApplied,
             "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
             "reserved_terminal_verify" => Self::ReservedTerminalVerify,
-            "scope_classifier_verdict" => Self::ScopeClassifierVerdict,
             "self_consistency_tie" => Self::SelfConsistencyTie,
             "semantic_cache_hit" => Self::SemanticCacheHit,
             "semantic_cache_miss" => Self::SemanticCacheMiss,
@@ -2373,7 +2367,6 @@ pub const HARN_AGENT_EVENT_KIND_FEEDBACK_INJECTED: &str = "feedback_injected";
 pub const HARN_AGENT_EVENT_KIND_FINAL_WRAPUP: &str = "final_wrapup";
 pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
-pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
@@ -2400,7 +2393,6 @@ pub const HARN_AGENT_EVENT_KIND_REPAIR_OUTPUT_CONTRACT_APPLIED: &str =
 pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str =
     "require_successful_tools_violation";
 pub const HARN_AGENT_EVENT_KIND_RESERVED_TERMINAL_VERIFY: &str = "reserved_terminal_verify";
-pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
 pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_tie";
 pub const HARN_AGENT_EVENT_KIND_SEMANTIC_CACHE_HIT: &str = "semantic_cache_hit";
 pub const HARN_AGENT_EVENT_KIND_SEMANTIC_CACHE_MISS: &str = "semantic_cache_miss";
@@ -2437,7 +2429,6 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "final_wrapup",
     "host_attachment",
     "host_tool_result",
-    "input_guardrail_verdict",
     "iteration_end",
     "iteration_start",
     "judge_decision",
@@ -2462,7 +2453,6 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",
-    "scope_classifier_verdict",
     "self_consistency_tie",
     "semantic_cache_hit",
     "semantic_cache_miss",
@@ -5839,21 +5829,6 @@ pub struct HarnAgentEventHostToolResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventInputGuardrailVerdict {
-    pub iteration: u64,
-    pub tripwire: bool,
-    pub reason: String,
-    pub label: String,
-    pub confidence: serde_json::Number,
-    #[serde(rename = "confidenceThreshold")]
-    pub confidence_threshold: serde_json::Number,
-    #[serde(rename = "classifierKind")]
-    pub classifier_kind: Option<String>,
-    pub model: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventIterationEnd {
     pub iteration: u64,
     #[serde(rename = "iterationInfo")]
@@ -6057,24 +6032,6 @@ pub struct HarnAgentEventRequireSuccessfulToolsViolation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventScopeClassifierVerdict {
-    pub iteration: u64,
-    pub label: String,
-    #[serde(rename = "originalLabel")]
-    pub original_label: String,
-    pub confidence: serde_json::Number,
-    #[serde(rename = "confidenceThreshold")]
-    pub confidence_threshold: serde_json::Number,
-    pub evidence: String,
-    #[serde(rename = "skipMainTurn")]
-    pub skip_main_turn: bool,
-    #[serde(rename = "classifierKind")]
-    pub classifier_kind: Option<String>,
-    pub model: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventSelfConsistencyTie {
     pub answer: String,
     pub total: u64,
@@ -6270,8 +6227,6 @@ pub enum HarnAgentEventPayload {
     HostAttachment(HarnAgentEventHostAttachment),
     #[serde(rename = "host_tool_result")]
     HostToolResult(HarnAgentEventHostToolResult),
-    #[serde(rename = "input_guardrail_verdict")]
-    InputGuardrailVerdict(HarnAgentEventInputGuardrailVerdict),
     #[serde(rename = "iteration_end")]
     IterationEnd(HarnAgentEventIterationEnd),
     #[serde(rename = "iteration_start")]
@@ -6320,8 +6275,6 @@ pub enum HarnAgentEventPayload {
     RequireSuccessfulToolsViolation(HarnAgentEventRequireSuccessfulToolsViolation),
     #[serde(rename = "reserved_terminal_verify")]
     ReservedTerminalVerify(std::collections::BTreeMap<String, Value>),
-    #[serde(rename = "scope_classifier_verdict")]
-    ScopeClassifierVerdict(HarnAgentEventScopeClassifierVerdict),
     #[serde(rename = "self_consistency_tie")]
     SelfConsistencyTie(HarnAgentEventSelfConsistencyTie),
     #[serde(rename = "semantic_cache_hit")]

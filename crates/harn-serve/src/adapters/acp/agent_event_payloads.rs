@@ -343,20 +343,6 @@ pub struct HostToolResult {
     pub sanitization: Value,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InputGuardrailVerdict {
-    pub iteration: usize,
-    pub tripwire: bool,
-    pub reason: String,
-    pub label: String,
-    pub confidence: f64,
-    pub confidence_threshold: f64,
-    pub classifier_kind: Option<String>,
-    pub model: Option<String>,
-    pub error: Option<String>,
-}
-
 /// `iterationInfo` is the agent loop's script-authored iteration record.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -560,21 +546,6 @@ pub struct RequireSuccessfulToolsViolation {
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ScopeClassifierVerdict {
-    pub iteration: usize,
-    pub label: String,
-    pub original_label: String,
-    pub confidence: f64,
-    pub confidence_threshold: f64,
-    pub evidence: String,
-    pub skip_main_turn: bool,
-    pub classifier_kind: Option<String>,
-    pub model: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct SelfConsistencyTie {
     pub answer: String,
     pub total: usize,
@@ -769,7 +740,6 @@ agent_event_registry! {
     "final_wrapup" => FinalWrapup,
     "host_attachment" => HostAttachment,
     "host_tool_result" => HostToolResult,
-    "input_guardrail_verdict" => InputGuardrailVerdict,
     "iteration_end" => IterationEnd,
     "iteration_start" => IterationStart,
     "judge_decision" => JudgeDecision,
@@ -794,7 +764,6 @@ agent_event_registry! {
     "repair_output_contract_applied" => RepairOutputContractApplied,
     "require_successful_tools_violation" => RequireSuccessfulToolsViolation,
     "reserved_terminal_verify" => ReservedTerminalVerify,
-    "scope_classifier_verdict" => ScopeClassifierVerdict,
     "self_consistency_tie" => SelfConsistencyTie,
     "semantic_cache_hit" => SemanticCacheHit,
     "semantic_cache_miss" => SemanticCacheMiss,

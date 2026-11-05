@@ -455,10 +455,9 @@ pub fn classify_agent_terminal_with_class(
         "completion_unverified" => AgentTerminalKind::CompletionUnverified,
         "stuck" if stop_reason == "thrash_hard_stop" => AgentTerminalKind::PolicyThrash,
         "stuck" => AgentTerminalKind::PolicyNoProgress,
-        // `input_guardrail`/`scope_alert` come from the loop's guardrail arms;
-        // `blocked` is the UserPromptSubmit-hook block result. All three are a
-        // guardrail policy denying the turn.
-        "input_guardrail" | "scope_alert" | "blocked" => AgentTerminalKind::PolicyGuardrail,
+        // `blocked` is the UserPromptSubmit-hook block result: a guardrail
+        // policy denying the turn.
+        "blocked" => AgentTerminalKind::PolicyGuardrail,
         "done" => {
             if has_error {
                 classify_error(terminal_class)
@@ -697,11 +696,7 @@ mod tests {
             AgentTerminalKind::PolicyNoProgress,
         );
         assert_eq!(
-            classify_agent_terminal("input_guardrail", "input_guardrail_tripwire", false, None),
-            AgentTerminalKind::PolicyGuardrail,
-        );
-        assert_eq!(
-            classify_agent_terminal("scope_alert", "out_of_scope", false, None),
+            classify_agent_terminal("blocked", "blocked", false, None),
             AgentTerminalKind::PolicyGuardrail,
         );
     }
@@ -866,8 +861,6 @@ mod tests {
             "provider_error",
             "cancelled",
             "blocked",
-            "input_guardrail",
-            "scope_alert",
             "suspended",
             "done",
             "",

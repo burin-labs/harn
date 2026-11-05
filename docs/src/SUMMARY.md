@@ -176,7 +176,6 @@
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent detectors](./stdlib/detectors.md)
 - [Pace cut rules](./stdlib/cut-rules.md)
-- [Agent guardrails](./stdlib/agent-guardrails.md)
 - [Completion judge](./stdlib/agent-judge.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)

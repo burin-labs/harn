@@ -16,7 +16,6 @@
 # count   12  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/goal.harn
-# count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
@@ -28,11 +27,11 @@
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   26  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
-# count   30  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
+# count   16  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   22  crates/harn-stdlib/src/stdlib/agent/options_public.harn
-# count   45  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
+# count   43  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/pins.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/postturn.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/preflight.harn
@@ -90,7 +89,6 @@
 # count    3  crates/harn-stdlib/src/stdlib/llm/refine.harn
 # count    2  crates/harn-stdlib/src/stdlib/llm/resilience.harn
 # count   18  crates/harn-stdlib/src/stdlib/llm/safe.harn
-# count    1  crates/harn-stdlib/src/stdlib/llm/scope_classifier.harn
 # count    3  crates/harn-stdlib/src/stdlib/llm/tool_binder.harn
 # count   17  crates/harn-stdlib/src/stdlib/llm/tool_middleware.harn
 # count    6  crates/harn-stdlib/src/stdlib/llm/tool_telemetry.harn
@@ -198,10 +196,6 @@ crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_pin
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_prompt_part
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_reloop
 crates/harn-stdlib/src/stdlib/agent/goal.harn::with_goal
-crates/harn-stdlib/src/stdlib/agent/guardrails.harn::__agent_input_guardrail_fail_open
-crates/harn-stdlib/src/stdlib/agent/guardrails.harn::__agent_input_guardrail_normalize
-crates/harn-stdlib/src/stdlib/agent/guardrails.harn::agent_input_guardrail
-crates/harn-stdlib/src/stdlib/agent/guardrails.harn::agent_input_guardrail_check
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_command_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_composition_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_edit_tools
@@ -334,20 +328,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_tool_call
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_wrapup_directive
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_wrapup_eligible_status
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_wrapup_response_protocol_tail
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__input_guardrail_assistant_text
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__input_guardrail_record_skip_turn
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__run_input_guardrail
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__run_pre_turn_scope_classifier
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_alert_body
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_assistant_text
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_confidence
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_fail_open
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_label
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_mounted_roots
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_normalize
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_recent_context
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_record_skip_turn
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_skip_main
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_admit_bootstrap
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_bootstrap_if_needed
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_mount_additional
@@ -402,7 +382,6 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_safe
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_callback_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_completion_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_done_sentinel
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_input_guardrail
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_judge_cadence
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_judge_dict_or_bool
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_loop_control
@@ -412,7 +391,6 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_non_nega
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_on_delta
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_optional_nonnegative_int
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_optional_positive_int
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_pre_turn_scope_classifier
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_prefetch_next_turn
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_removed_agent_loop_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_string_list
@@ -737,7 +715,6 @@ crates/harn-stdlib/src/stdlib/llm/safe.harn::structured_envelope_or_default
 crates/harn-stdlib/src/stdlib/llm/safe.harn::structured_min_max_tokens
 crates/harn-stdlib/src/stdlib/llm/safe.harn::verdict_normalize
 crates/harn-stdlib/src/stdlib/llm/safe.harn::with_case_insensitive_keys
-crates/harn-stdlib/src/stdlib/llm/scope_classifier.harn::pre_turn_scope_classifier
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::natural_language_executor_middleware
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::natural_language_executor_schema_transform
 crates/harn-stdlib/src/stdlib/llm/tool_binder.harn::with_natural_language_executor

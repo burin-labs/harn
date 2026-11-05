@@ -148,8 +148,6 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("judge_started", None),
     host_event("judge_decision", None),
     host_event("step_judge_decision", None),
-    host_event("scope_classifier_verdict", None),
-    host_event("input_guardrail_verdict", None),
     host_event("missing_tool_call_verdict", None),
     host_event("require_successful_tools_violation", ASSISTANT),
     host_event("final_wrapup", ASSISTANT),

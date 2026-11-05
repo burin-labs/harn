@@ -165,14 +165,7 @@ fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
   }
   const status = to_string(result?.status ?? "")
   const final_status = to_string(result?.final_status ?? "")
-  const terminal_statuses = [
-    "provider_error",
-    "error",
-    "blocked",
-    "suspended",
-    "cancelled",
-    "scope_alert",
-  ]
+  const terminal_statuses = ["provider_error", "error", "blocked", "suspended", "cancelled"]
   return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
 }
 

@@ -456,8 +456,6 @@ pub type AgentExecutionSpec = {
   llm_caller?: any,
   llm_caller_transport?: LlmCallerTransport,
   tool_caller?: any,
-  input_guardrail?: any,
-  pre_turn_scope_classifier?: any,
   context_callback?: any,
   context_filter?: any,
   message_decorator?: any,

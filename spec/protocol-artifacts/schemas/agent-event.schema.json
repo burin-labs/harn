@@ -925,62 +925,6 @@
       ],
       "type": "object"
     },
-    "InputGuardrailVerdict": {
-      "properties": {
-        "classifierKind": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "confidence": {
-          "format": "double",
-          "type": "number"
-        },
-        "confidenceThreshold": {
-          "format": "double",
-          "type": "number"
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "iteration": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "label": {
-          "type": "string"
-        },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
-          "type": "string"
-        },
-        "tripwire": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "iteration",
-        "tripwire",
-        "reason",
-        "label",
-        "confidence",
-        "confidenceThreshold",
-        "classifierKind",
-        "model",
-        "error"
-      ],
-      "type": "object"
-    },
     "IterationEnd": {
       "description": "`iterationInfo` is the agent loop's script-authored iteration record.",
       "properties": {
@@ -1589,66 +1533,6 @@
     "ReservedTerminalVerify": {
       "additionalProperties": true,
       "description": "An event whose body is a whole record Harn does not type: a script-authored\nsignal or a handler diagnostic forwarded verbatim.",
-      "type": "object"
-    },
-    "ScopeClassifierVerdict": {
-      "properties": {
-        "classifierKind": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "confidence": {
-          "format": "double",
-          "type": "number"
-        },
-        "confidenceThreshold": {
-          "format": "double",
-          "type": "number"
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "evidence": {
-          "type": "string"
-        },
-        "iteration": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "label": {
-          "type": "string"
-        },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "originalLabel": {
-          "type": "string"
-        },
-        "skipMainTurn": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "iteration",
-        "label",
-        "originalLabel",
-        "confidence",
-        "confidenceThreshold",
-        "evidence",
-        "skipMainTurn",
-        "classifierKind",
-        "model",
-        "error"
-      ],
       "type": "object"
     },
     "SelfConsistencyTie": {
@@ -2365,21 +2249,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "input_guardrail_verdict"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/InputGuardrailVerdict"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "iteration_end"
           }
         },
@@ -2740,21 +2609,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "scope_classifier_verdict"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "$ref": "#/$defs/ScopeClassifierVerdict"
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "self_consistency_tie"
           }
         },
@@ -2985,7 +2839,6 @@
     "final_wrapup": "FinalWrapup",
     "host_attachment": "HostAttachment",
     "host_tool_result": "HostToolResult",
-    "input_guardrail_verdict": "InputGuardrailVerdict",
     "iteration_end": "IterationEnd",
     "iteration_start": "IterationStart",
     "judge_decision": "JudgeDecision",
@@ -3010,7 +2863,6 @@
     "repair_output_contract_applied": "RepairOutputContractApplied",
     "require_successful_tools_violation": "RequireSuccessfulToolsViolation",
     "reserved_terminal_verify": "ReservedTerminalVerify",
-    "scope_classifier_verdict": "ScopeClassifierVerdict",
     "self_consistency_tie": "SelfConsistencyTie",
     "semantic_cache_hit": "SemanticCacheHit",
     "semantic_cache_miss": "SemanticCacheMiss",

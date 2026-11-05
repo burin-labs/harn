@@ -384,7 +384,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "final_wrapup",
     "host_attachment",
     "host_tool_result",
-    "input_guardrail_verdict",
     "iteration_end",
     "iteration_start",
     "judge_decision",
@@ -409,7 +408,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",
-    "scope_classifier_verdict",
     "self_consistency_tie",
     "semantic_cache_hit",
     "semantic_cache_miss",
@@ -2739,18 +2737,6 @@ class HarnAgentEventHostToolResult(_HarnDataclass):
     sanitization: JsonValue
 
 @dataclass
-class HarnAgentEventInputGuardrailVerdict(_HarnDataclass):
-    iteration: int
-    tripwire: bool
-    reason: str
-    label: str
-    confidence: float
-    confidenceThreshold: float
-    classifierKind: Optional[str]
-    model: Optional[str]
-    error: Optional[str]
-
-@dataclass
 class HarnAgentEventIterationEnd(_HarnDataclass):
     iteration: int
     iterationInfo: JsonValue
@@ -2893,19 +2879,6 @@ class HarnAgentEventRequireSuccessfulToolsViolation(_HarnDataclass):
     redactedSummary: str
     recurrenceHints: List[str]
     metadata: JsonValue
-
-@dataclass
-class HarnAgentEventScopeClassifierVerdict(_HarnDataclass):
-    iteration: int
-    label: str
-    originalLabel: str
-    confidence: float
-    confidenceThreshold: float
-    evidence: str
-    skipMainTurn: bool
-    classifierKind: Optional[str]
-    model: Optional[str]
-    error: Optional[str]
 
 @dataclass
 class HarnAgentEventSelfConsistencyTie(_HarnDataclass):

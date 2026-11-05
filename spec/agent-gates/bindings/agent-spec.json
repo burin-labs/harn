@@ -866,14 +866,6 @@
         "name": "turn_opts"
       },
       {
-        "function": "__run_input_guardrail",
-        "name": "turn_opts"
-      },
-      {
-        "function": "__run_pre_turn_scope_classifier",
-        "name": "turn_opts"
-      },
-      {
         "function": "__stack_pack_options",
         "name": "base"
       },

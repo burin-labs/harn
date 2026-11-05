@@ -104,7 +104,6 @@ public enum HarnProtocolConstants {
         "final_wrapup",
         "host_attachment",
         "host_tool_result",
-        "input_guardrail_verdict",
         "iteration_end",
         "iteration_start",
         "judge_decision",
@@ -129,7 +128,6 @@ public enum HarnProtocolConstants {
         "repair_output_contract_applied",
         "require_successful_tools_violation",
         "reserved_terminal_verify",
-        "scope_classifier_verdict",
         "self_consistency_tie",
         "semantic_cache_hit",
         "semantic_cache_miss",
@@ -6253,56 +6251,6 @@ public struct HarnAgentEventHostToolResult: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnAgentEventInputGuardrailVerdict: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var tripwire: Bool
-    public var reason: String
-    public var label: String
-    public var confidence: Double
-    public var confidenceThreshold: Double
-    public var classifierKind: String?
-    public var model: String?
-    public var error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case iteration
-        case tripwire
-        case reason
-        case label
-        case confidence
-        case confidenceThreshold
-        case classifierKind
-        case model
-        case error
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        iteration = try values.decode(Int.self, forKey: .iteration)
-        tripwire = try values.decode(Bool.self, forKey: .tripwire)
-        reason = try values.decode(String.self, forKey: .reason)
-        label = try values.decode(String.self, forKey: .label)
-        confidence = try values.decode(Double.self, forKey: .confidence)
-        confidenceThreshold = try values.decode(Double.self, forKey: .confidenceThreshold)
-        classifierKind = try values.decode(String?.self, forKey: .classifierKind)
-        model = try values.decode(String?.self, forKey: .model)
-        error = try values.decode(String?.self, forKey: .error)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(iteration, forKey: .iteration)
-        try values.encode(tripwire, forKey: .tripwire)
-        try values.encode(reason, forKey: .reason)
-        try values.encode(label, forKey: .label)
-        try values.encode(confidence, forKey: .confidence)
-        try values.encode(confidenceThreshold, forKey: .confidenceThreshold)
-        try values.encode(classifierKind, forKey: .classifierKind)
-        try values.encode(model, forKey: .model)
-        try values.encode(error, forKey: .error)
-    }
-}
-
 public struct HarnAgentEventIterationEnd: Codable, Sendable, Equatable {
     public var iteration: Int
     public var iterationInfo: HarnACPValue
@@ -6698,60 +6646,6 @@ public struct HarnAgentEventRequireSuccessfulToolsViolation: Codable, Sendable, 
     }
 }
 
-public struct HarnAgentEventScopeClassifierVerdict: Codable, Sendable, Equatable {
-    public var iteration: Int
-    public var label: String
-    public var originalLabel: String
-    public var confidence: Double
-    public var confidenceThreshold: Double
-    public var evidence: String
-    public var skipMainTurn: Bool
-    public var classifierKind: String?
-    public var model: String?
-    public var error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case iteration
-        case label
-        case originalLabel
-        case confidence
-        case confidenceThreshold
-        case evidence
-        case skipMainTurn
-        case classifierKind
-        case model
-        case error
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        iteration = try values.decode(Int.self, forKey: .iteration)
-        label = try values.decode(String.self, forKey: .label)
-        originalLabel = try values.decode(String.self, forKey: .originalLabel)
-        confidence = try values.decode(Double.self, forKey: .confidence)
-        confidenceThreshold = try values.decode(Double.self, forKey: .confidenceThreshold)
-        evidence = try values.decode(String.self, forKey: .evidence)
-        skipMainTurn = try values.decode(Bool.self, forKey: .skipMainTurn)
-        classifierKind = try values.decode(String?.self, forKey: .classifierKind)
-        model = try values.decode(String?.self, forKey: .model)
-        error = try values.decode(String?.self, forKey: .error)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(iteration, forKey: .iteration)
-        try values.encode(label, forKey: .label)
-        try values.encode(originalLabel, forKey: .originalLabel)
-        try values.encode(confidence, forKey: .confidence)
-        try values.encode(confidenceThreshold, forKey: .confidenceThreshold)
-        try values.encode(evidence, forKey: .evidence)
-        try values.encode(skipMainTurn, forKey: .skipMainTurn)
-        try values.encode(classifierKind, forKey: .classifierKind)
-        try values.encode(model, forKey: .model)
-        try values.encode(error, forKey: .error)
-    }
-}
-
 public struct HarnAgentEventSelfConsistencyTie: Codable, Sendable, Equatable {
     public var answer: String
     public var total: Int
@@ -7040,7 +6934,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case finalWrapup(HarnAgentEventFinalWrapup)
     case hostAttachment(HarnAgentEventHostAttachment)
     case hostToolResult(HarnAgentEventHostToolResult)
-    case inputGuardrailVerdict(HarnAgentEventInputGuardrailVerdict)
     case iterationEnd(HarnAgentEventIterationEnd)
     case iterationStart(HarnAgentEventIterationStart)
     case judgeDecision(HarnAgentEventJudgeDecision)
@@ -7065,7 +6958,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case repairOutputContractApplied(HarnAgentEventRepairOutputContractApplied)
     case requireSuccessfulToolsViolation(HarnAgentEventRequireSuccessfulToolsViolation)
     case reservedTerminalVerify([String: HarnACPValue])
-    case scopeClassifierVerdict(HarnAgentEventScopeClassifierVerdict)
     case selfConsistencyTie(HarnAgentEventSelfConsistencyTie)
     case semanticCacheHit([String: HarnACPValue])
     case semanticCacheMiss([String: HarnACPValue])
@@ -7106,7 +6998,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case finalWrapup = "final_wrapup"
         case hostAttachment = "host_attachment"
         case hostToolResult = "host_tool_result"
-        case inputGuardrailVerdict = "input_guardrail_verdict"
         case iterationEnd = "iteration_end"
         case iterationStart = "iteration_start"
         case judgeDecision = "judge_decision"
@@ -7131,7 +7022,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case repairOutputContractApplied = "repair_output_contract_applied"
         case requireSuccessfulToolsViolation = "require_successful_tools_violation"
         case reservedTerminalVerify = "reserved_terminal_verify"
-        case scopeClassifierVerdict = "scope_classifier_verdict"
         case selfConsistencyTie = "self_consistency_tie"
         case semanticCacheHit = "semantic_cache_hit"
         case semanticCacheMiss = "semantic_cache_miss"
@@ -7167,7 +7057,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "final_wrapup",
             "host_attachment",
             "host_tool_result",
-            "input_guardrail_verdict",
             "iteration_end",
             "iteration_start",
             "judge_decision",
@@ -7192,7 +7081,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "repair_output_contract_applied",
             "require_successful_tools_violation",
             "reserved_terminal_verify",
-            "scope_classifier_verdict",
             "self_consistency_tie",
             "semantic_cache_hit",
             "semantic_cache_miss",
@@ -7247,7 +7135,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .finalWrapup: self.payload = .finalWrapup(try container.decode(HarnAgentEventFinalWrapup.self))
         case .hostAttachment: self.payload = .hostAttachment(try container.decode(HarnAgentEventHostAttachment.self))
         case .hostToolResult: self.payload = .hostToolResult(try container.decode(HarnAgentEventHostToolResult.self))
-        case .inputGuardrailVerdict: self.payload = .inputGuardrailVerdict(try container.decode(HarnAgentEventInputGuardrailVerdict.self))
         case .iterationEnd: self.payload = .iterationEnd(try container.decode(HarnAgentEventIterationEnd.self))
         case .iterationStart: self.payload = .iterationStart(try container.decode(HarnAgentEventIterationStart.self))
         case .judgeDecision: self.payload = .judgeDecision(try container.decode(HarnAgentEventJudgeDecision.self))
@@ -7272,7 +7159,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .repairOutputContractApplied: self.payload = .repairOutputContractApplied(try container.decode(HarnAgentEventRepairOutputContractApplied.self))
         case .requireSuccessfulToolsViolation: self.payload = .requireSuccessfulToolsViolation(try container.decode(HarnAgentEventRequireSuccessfulToolsViolation.self))
         case .reservedTerminalVerify: self.payload = .reservedTerminalVerify(fields)
-        case .scopeClassifierVerdict: self.payload = .scopeClassifierVerdict(try container.decode(HarnAgentEventScopeClassifierVerdict.self))
         case .selfConsistencyTie: self.payload = .selfConsistencyTie(try container.decode(HarnAgentEventSelfConsistencyTie.self))
         case .semanticCacheHit: self.payload = .semanticCacheHit(fields)
         case .semanticCacheMiss: self.payload = .semanticCacheMiss(fields)

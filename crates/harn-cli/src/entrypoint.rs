@@ -785,9 +785,6 @@ async fn dispatch(subcommand: Command, explain: bool) {
             Some(EvalCommand::Calibrate(calibrate_args)) => {
                 process::exit(commands::eval_calibrate::run(calibrate_args).await)
             }
-            Some(EvalCommand::ScopeTriage(scope_args)) => {
-                process::exit(commands::eval_scope_triage::run(scope_args).await)
-            }
             Some(EvalCommand::ToolCalls(tool_calls_args)) => {
                 let code = commands::eval_tool_calls::run(tool_calls_args).await;
                 if code != 0 {

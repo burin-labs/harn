@@ -153,14 +153,6 @@
         "reader": "__agent_loop_emit_provider_error"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
-        "reader": "__run_input_guardrail"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
-        "reader": "__run_pre_turn_scope_classifier"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
         "reader": "__agent_loop_turn_setup"
       },
@@ -319,14 +311,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
         "reader": "__agent_loop_emit_provider_error"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
-        "reader": "__run_input_guardrail"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
-        "reader": "__run_pre_turn_scope_classifier"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
