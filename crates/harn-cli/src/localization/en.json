@@ -900,7 +900,7 @@
   "Extra host capability schema for bundle contract validation": "Extra host capability schema for bundle contract validation",
   "Extra host capability schema for preflight validation": "Extra host capability schema for preflight validation",
   "Extra host capability schema to merge into the default manifest": "Extra host capability schema to merge into the default manifest",
-  "Extra read-only filesystem roots. Repeatable; each path is readable but never writable": "Extra read-only filesystem roots. Repeatable; each path is readable but never writable",
+  "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root": "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root",
   "Extra runtime environment variable to include and sync, as KEY=VALUE": "Extra runtime environment variable to include and sync, as KEY=VALUE",
   "Extra runtime secret to sync through the provider CLI, as KEY=VALUE": "Extra runtime secret to sync through the provider CLI, as KEY=VALUE",
   "Extra skill-discovery roots (repeatable)": "Extra skill-discovery roots (repeatable)",

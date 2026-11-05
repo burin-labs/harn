@@ -899,7 +899,7 @@
   "Extra host capability schema for bundle contract validation": "Schema extra delle capacità dell'host per la convalida del contratto del bundle",
   "Extra host capability schema for preflight validation": "Schema extra delle capacità dell'host per la convalida del preflight",
   "Extra host capability schema to merge into the default manifest": "Schema extra delle capacità dell'host da unire nel manifest predefinito",
-  "Extra read-only filesystem roots. Repeatable; each path is readable but never writable": "Radici aggiuntive del filesystem in sola lettura. Ripetibile; ogni percorso è leggibile ma mai scrivibile",
+  "Extra read-only filesystem roots. Repeatable; on Linux, subprocesses may write a root nested inside a writable root": "Radici aggiuntive del filesystem in sola lettura. Ripetibile; su Linux, i sottoprocessi possono scrivere in una radice all'interno di una radice scrivibile",
   "Extra runtime environment variable to include and sync, as KEY=VALUE": "Variabile di ambiente runtime extra da includere e sincronizzare, come KEY=VALUE",
   "Extra runtime secret to sync through the provider CLI, as KEY=VALUE": "Segreto runtime extra da sincronizzare tramite il provider CLI, come KEY=VALUE",
   "Extra skill-discovery roots (repeatable)": "Radici aggiuntive per la scoperta delle skill (ripetibile)",

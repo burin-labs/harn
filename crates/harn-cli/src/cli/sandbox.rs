@@ -48,8 +48,8 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub allow_process_loopback: bool,
-    /// Extra read-only filesystem roots. Repeatable; each path is
-    /// readable but never writable.
+    /// Extra read-only filesystem roots. Repeatable; on Linux, subprocesses
+    /// may write a root nested inside a writable root.
     #[arg(
         long = "read-only-root",
         value_name = "PATH",
