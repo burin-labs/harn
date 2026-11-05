@@ -471,22 +471,6 @@ mod tests {
                 "std/agent/cut_rules should export {name}"
             );
         }
-
-        let governor_exports = public_functions_for_module("agent/governors")
-            .into_iter()
-            .map(|function| function.name)
-            .collect::<BTreeSet<_>>();
-        for removed in [
-            "governor_pace_check_max_injections",
-            "governor_pace_decision",
-            "governor_pace_extend_max",
-            "pace_action_of",
-        ] {
-            assert!(
-                !governor_exports.contains(removed),
-                "std/agent/governors must not retain removed export {removed}"
-            );
-        }
     }
 
     #[test]

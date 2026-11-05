@@ -376,7 +376,6 @@ catalog_entries! {
     "agent/stall_verification" => "stdlib/agent/stall_verification.harn",
     "agent/stall_detectors" => "stdlib/agent/stall_detectors.harn",
     "agent/cut_rules" => "stdlib/agent/cut_rules.harn",
-    "agent/governors" => "stdlib/agent/governors.harn",
     "agent/control" => "stdlib/agent/control.harn",
     "agent/action_graph" => "stdlib/agent/action_graph.harn",
     "agent/result_text" => "stdlib/agent/result_text.harn",

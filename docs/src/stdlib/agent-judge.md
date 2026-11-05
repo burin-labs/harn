@@ -385,7 +385,7 @@ the named gap to the next actor turn. Standalone callers can use
   (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).
 - [Host-supplied facts](./fact-intake-seams.md) — the broader
   Harn-owns-mechanism / host-owns-facts pattern this gate follows.
-- [Agent governors and detectors](./governors.md) — the budget and stall side of
+- [Agent detectors](./detectors.md) — the stall side of
   the same placement contract.
 - [The expressiveness spectrum](../concepts/expressiveness-spectrum.md#level-4-tune-the-loop-by-composing-building-blocks)
   — where the completion gate sits when you compose loop control by hand.
