@@ -372,6 +372,8 @@ pub(crate) mod provider_dispatch;
 pub(crate) mod providers;
 pub mod rate_governor;
 pub(crate) mod rate_limit;
+pub(crate) use rate_limit::swap_prompt_probe_owner;
+pub use rate_limit::{begin_interactive_prompt, InteractivePromptGuard};
 pub mod receipts;
 pub(crate) mod route;
 mod stream;

@@ -125,8 +125,11 @@ opts = with_governance(opts, {
   detectors: {no_progress: {messages: 3}, stuck: {same_diagnostic: 3}},
 })
 
-// An independent "are we actually done?" check, not the model's own say-so.
-opts = {...opts, verify_completion: fn(ctx) { return host_completion_verdict(ctx) }}
+// An independent "are we done?" check, not the model's own say-so.
+opts = {
+  ...opts,
+  verify_completion: fn(ctx) { return host_completion_verdict(ctx) },
+}
 
 // Hide tools this task can't need, and fill in a prompt nudge — both are
 // fill-nil, so they never override anything you set explicitly.

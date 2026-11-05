@@ -38,6 +38,8 @@ pub(crate) use test_support::{
     install_test_policy, test_env_guard, EgressTestConfigGuard, EgressTestEnvGuard,
 };
 
+#[cfg(target_os = "linux")]
+mod namespace_bridge;
 pub use process_proxy::{ProcessEgressAudit, ProcessEgressProxy, ProcessEgressProxyError};
 pub use provider_allow::{
     configured_provider_private_allow_host, install_ssrf_guard_with_private_host_allowlist,
@@ -335,6 +337,51 @@ pub fn register_egress_builtins(vm: &mut Vm) {
             let (policy, declared) = policy_from_config(config)?;
             install_policy(policy, declared, "stdlib")?;
             Ok(policy_summary())
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "child_network_refusals",
+        |_args, _out| {
+            let refusals = crate::orchestration::current_execution_policy()
+                .and_then(|policy| policy.process_network_proxy)
+                .map(process_proxy::take_child_network_refusals)
+                .unwrap_or_default();
+            Ok(VmValue::List(Arc::new(
+                refusals
+                    .into_iter()
+                    .map(|refusal| {
+                        let mut entry = BTreeMap::new();
+                        entry.put_str("host", refusal.host.as_str());
+                        entry.insert("port".to_string(), VmValue::Int(i64::from(refusal.port)));
+                        entry.put_str("protocol", refusal.protocol);
+                        entry.insert(
+                            "can_approve".to_string(),
+                            VmValue::Bool(process_proxy::can_approve_child_network_host(
+                                &refusal.host,
+                            )),
+                        );
+                        VmValue::dict(entry)
+                    })
+                    .collect(),
+            )))
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "child_network_allow",
+        |args, _out| {
+            let Some(VmValue::String(host)) = args.first() else {
+                return Err(vm_error("child_network_allow: requires a host string"));
+            };
+            let granted = match crate::orchestration::current_execution_policy()
+                .and_then(|policy| policy.process_network_proxy)
+            {
+                Some(proxy) => process_proxy::allow_child_network_host(proxy, host)
+                    .map_err(|error| vm_error(format!("child_network_allow: {error}")))?,
+                None => false,
+            };
+            Ok(VmValue::Bool(granted))
         },
     );
 }

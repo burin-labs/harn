@@ -20,6 +20,7 @@ use super::super::refactor_core::{
     collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source, EditSpan,
     FilePlan, Scope, ShadowSite,
 };
+use super::super::rename_python_stub::{self, Counterpart};
 use super::super::rename_reach::{Exclusions, Reach};
 use super::super::rename_rust_residue::{doc_link_mentions, span_at, Residue};
 use super::super::state::IndexState;
@@ -167,6 +168,44 @@ pub(super) fn rename(
         BackendOutcome::Unavailable(reason) => return Ok(Answer::Fallback(reason)),
         BackendOutcome::Interrupted(interrupt) => return Ok(Answer::Interrupted(interrupt)),
     };
+    let counterpart = if language == Language::Python {
+        Counterpart::find(
+            request.state,
+            seed_path,
+            &source,
+            offset,
+            env.symbol_name,
+            &mentions,
+            request.session_id,
+        )?
+    } else {
+        None
+    };
+    if let Some(counterpart) = &counterpart {
+        let started = std::time::Instant::now();
+        let (outcome, _) = lsp::rename(
+            &RenameRequest {
+                path: &counterpart.path,
+                source: &counterpart.source,
+                offset: counterpart.offsets[0],
+                ..lsp_request
+            },
+            &warmed,
+        );
+        if let Some(run) = env.backend.language_server.as_mut() {
+            run.elapsed_ms += started.elapsed().as_millis() as u64;
+        }
+        match outcome {
+            BackendOutcome::Changeset(more) => rename_python_stub::merge(&mut changeset, more),
+            BackendOutcome::Declined(reason) | BackendOutcome::Unavailable(reason) => {
+                return Ok(Answer::Fallback(format!(
+                    "the language server could not rename `{}` in {}: {reason}",
+                    env.symbol_name, counterpart.path
+                )))
+            }
+            BackendOutcome::Interrupted(interrupt) => return Ok(Answer::Interrupted(interrupt)),
+        }
+    }
     // The server's edit proves where references are; check the scope before
     // any fallback, which would rename only inside the scope.
     let changed: Vec<&str> = changeset.iter().map(|file| file.path.as_str()).collect();
@@ -293,6 +332,16 @@ pub(super) fn rename(
         Ok(resolutions) => resolutions,
         Err(unanswered) => return Ok(unanswered.into()),
     };
+    let resolutions = sites.iter().zip(resolutions).map(|(site, resolution)| {
+        let declaration = counterpart
+            .as_ref()
+            .is_some_and(|stub| stub.names((&site.path, site.offset), &resolution));
+        if declaration {
+            Resolution::Seed
+        } else {
+            resolution
+        }
+    });
     let mut preserved_sites: Vec<(&Site, &str)> = unreachable
         .iter()
         .map(|(site, reason)| (site, *reason))

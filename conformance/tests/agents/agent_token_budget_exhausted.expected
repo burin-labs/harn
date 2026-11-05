@@ -1,0 +1,6 @@
+status=budget_exhausted
+stop_reason=token_budget
+event_count=1
+event_kind=token_budget
+roomy_stop_reason=max_iterations
+roomy_token_events=0

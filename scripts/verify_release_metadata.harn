@@ -10,7 +10,11 @@
 // exits non-zero with an `error: ...` message on any failed check.
 import { compare_release, next, parse, parse_release } from "std/semver"
 import { git_error_detail, resolve_commit } from "./git_base.harn"
-import { development_version_from_stable } from "./release_metadata.harn"
+import {
+  changelog_entries,
+  changelog_entry_heading,
+  published_changelog_versions,
+} from "./release_changelog_entries.harn"
 import {
   ReleaseWithdrawal,
   load_release_withdrawals,
@@ -18,12 +22,9 @@ import {
   release_withdrawal_for_tag,
 } from "./release_withdrawals.harn"
 import {
-  changelog_entries,
-  changelog_entry_heading,
   extract_section,
   normalize_version,
   previous_version,
-  published_changelog_versions,
   render_notes,
 } from "./render_release_notes.harn"
 
@@ -192,12 +193,15 @@ pub fn is_bump_ahead(cargo_version: string, changelog_version: string) -> bool {
   return false
 }
 
-/** True for the one valid mid-cycle relationship to the latest release. */
+/**
+ * True when the workspace declares a version after the latest recorded release.
+ * Main does so until publication, and CHANGELOG.md gains the section afterwards.
+ */
 pub fn is_development_after_release(workspace_version: string, released_version: string) -> bool {
-  if parse(released_version) == nil {
+  if parse(released_version) == nil || parse_release(workspace_version) == nil {
     return false
   }
-  return development_version_from_stable(released_version) == workspace_version
+  return compare_release(workspace_version, released_version) > 0
 }
 
 /** True when `versions` is already in strictly/weakly descending semver order. */

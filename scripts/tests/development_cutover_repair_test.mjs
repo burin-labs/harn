@@ -81,7 +81,7 @@ function fixture(t, overrides = {}) {
         GH_REPO: policy.repository,
         GITHUB_RUN_ID: "70001",
         MEASURED_REPAIR_OWED: "true",
-        MEASURED_DEVELOPMENT_VERSION: "1.2.4-dev",
+        MEASURED_DEVELOPMENT_VERSION: "1.2.4",
         MEASURED_PUBLISHED_TAG: "v1.2.3",
         HARN_RELEASE_ROOT: workspace,
         REPAIR_TEST_STATE: stateFile,
@@ -160,7 +160,7 @@ test("existing red development PR suppresses automatic repair", (t) => {
       {
         number: 42,
         state: "open",
-        head: { ref: "automation/development-1.2.4-dev" },
+        head: { ref: "automation/development-1.2.4" },
         checks: "failure",
       },
     ],
@@ -181,7 +181,7 @@ test("reservation on a later status page suppresses dispatch", (t) => {
     })),
     {
       id: policy.seed.id + 2,
-      context: `${policy.context_prefix}1.2.4-dev`,
+      context: `${policy.context_prefix}1.2.4`,
       state: "failure",
     },
   ];

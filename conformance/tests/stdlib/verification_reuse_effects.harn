@@ -1,0 +1,82 @@
+import { shell_quote } from "std/runtime"
+import { with_temp_dir } from "std/testing"
+import { verification_run_check } from "std/verification"
+
+fn launch_count(fs: HarnessFs, path: string) -> int {
+  const text = trim(fs.read_text(path) ?? "")
+  assert(text != "", "the child must leave a measured receipt")
+  return len(split(text, "\n"))
+}
+
+pipeline test(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the real-child control uses a POSIX shell")
+  }
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const receipt = path_join(root, "required-effects")
+      const spec = {mode: "shell", command: "echo effect >> ${shell_quote(receipt)}", cwd: root}
+      const unknown = {
+        scope: "effects-unknown/${root}",
+        inputs: { ->
+          {revision: 0, workspace: root, source: "source", dependencies: "deps", environment: "env"}
+        },
+        accept: { result -> result.success },
+      }
+      const unknown_options = {record: false, reuse: unknown}
+      const unknown_first = verification_run_check(harness, "fixture", spec, unknown_options)
+      const unknown_again = verification_run_check(harness, "fixture", spec, unknown_options)
+      assert_eq(unknown_first.execution, "executed")
+      assert(unknown_first.binding != nil, "effect uncertainty must not erase a valid observation")
+      assert_eq(unknown_again.execution, "executed", "unknown effects must not suppress a child")
+      assert_eq(launch_count(harness.fs, receipt), 2)
+      const required = unknown + {scope: "effects-required/${root}", skip_effects_safe: false}
+      const required_options = {record: false, reuse: required}
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, required_options).execution,
+        "executed",
+      )
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, required_options).execution,
+        "executed",
+      )
+      assert_eq(launch_count(harness.fs, receipt), 4, "required effects must occur twice")
+      const malformed = unknown + {scope: "effects-malformed/${root}", skip_effects_safe: "true"}
+      const malformed_options = {record: false, reuse: malformed}
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, malformed_options).execution,
+        "executed",
+      )
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, malformed_options).execution,
+        "executed",
+      )
+      assert_eq(launch_count(harness.fs, receipt), 6, "a truthy string is not an attestation")
+      // The receipt only counts launches here; it is not a required effect.
+      const safe = unknown + {scope: "effects-safe/${root}", skip_effects_safe: true}
+      const safe_options = {record: false, reuse: safe}
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, safe_options).execution,
+        "executed",
+      )
+      assert_eq(verification_run_check(harness, "fixture", spec, safe_options).execution, "reused")
+      assert_eq(launch_count(harness.fs, receipt), 7, "attested safe reuse avoids the second child")
+      const revoked_options = {record: false, reuse: safe + {skip_effects_safe: false}}
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, revoked_options).execution,
+        "executed",
+      )
+      assert_eq(
+        verification_run_check(harness, "fixture", spec, safe_options).execution,
+        "executed",
+      )
+      assert_eq(
+        launch_count(harness.fs, receipt),
+        9,
+        "revoking admission must retire the cached result",
+      )
+    },
+  )
+  harness.stdio.println("verification reuse effects ok")
+}

@@ -29,6 +29,7 @@ for source in \
   verify_published_harn_runtime.sh \
   release_metadata.harn \
   release_changelog_fold.harn \
+  release_changelog_entries.harn \
   render_release_notes.harn \
   release_withdrawals.harn \
   path_visibility.harn \

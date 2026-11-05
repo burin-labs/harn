@@ -185,6 +185,12 @@ fn __backoff_delay(
  * Honors `error.retry_after_ms` and case-insensitive `Retry-After` header
  * when honor_retry_after is true.
  *
+ * `opts.max_elapsed_ms` bounds the wall clock: no new attempt starts unless the
+ * time spent, the backoff, and another attempt as long as the last one all fit.
+ * A short stall still retries; a silent provider that used a whole request
+ * timeout does not get another. An attempt in flight is never cut short. When
+ * this stops a retry the envelope also carries `retry_budget_exhausted: true`.
+ *
  * Returns the LAST envelope unchanged plus `retries_attempted: N`.
  * Never throws — raw throws from `next` become {ok: false, status: "exception"}.
  *
@@ -196,12 +202,13 @@ pub fn with_retry(harness: Harness, next: any, opts: any = nil) {
     return __partial_with_harness(with_retry, harness, next)
   }
   const cfg = __opts_dict(opts)
-  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} =
+  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true, max_elapsed_ms = 0} =
     cfg
     ?? {}
   const predicate = cfg?.predicate
   return { call ->
     const base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
+    const started_ms = harness.clock.monotonic_ms()
     let attempt = 1
     let last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
     while attempt <= max_attempts {
@@ -209,7 +216,9 @@ pub fn with_retry(harness: Harness, next: any, opts: any = nil) {
       if attempt > 1 {
         attempt_call = attempt_call + {opts: llm_clear_one_shot_prefill(call?.opts)}
       }
+      const attempt_started_ms = harness.clock.monotonic_ms()
       const envelope = __safe_invoke(next, attempt_call)
+      const attempt_ended_ms = harness.clock.monotonic_ms()
       last_envelope = envelope
       const should_retry = if predicate != nil {
         const r = try {
@@ -243,6 +252,11 @@ pub fn with_retry(harness: Harness, next: any, opts: any = nil) {
         header_delay
       } else {
         backoff_delay
+      }
+      if max_elapsed_ms > 0
+        && attempt_ended_ms - started_ms + delay + attempt_ended_ms - attempt_started_ms
+          > max_elapsed_ms {
+        return envelope + {retries_attempted: attempt - 1, retry_budget_exhausted: true}
       }
       if delay > 0 {
         harness.clock.sleep_ms(delay)

@@ -122,18 +122,6 @@ async fn dispatch(subcommand: Command, explain: bool) {
                 fatal_error(error);
             }
         }
-        Command::NetnsLaunch(_) => {
-            // Unreachable: the pre-runtime dispatcher claims this invocation
-            // before the runtime that owns this match is built. Refusing
-            // rather than running it keeps the failure legible, because the
-            // namespace this helper exists to create cannot be created from
-            // here: a user namespace is refused to a multi-threaded caller,
-            // and the runtime's worker threads are already up.
-            fatal_error(
-                "the namespace helper must run before the runtime starts; reaching it \
-                 here means the pre-runtime dispatcher did not recognise the invocation",
-            );
-        }
         Command::Skill(args) => match args.command {
             SkillCommand::List(list) => commands::skills::run_list(&list),
             SkillCommand::Get(get) => commands::skills::run_get(&get),

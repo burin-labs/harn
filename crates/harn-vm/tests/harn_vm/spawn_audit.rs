@@ -56,6 +56,12 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
         "run_captured_spawn; applies session_closed_env_for_command before spawning",
     ),
     (
+        "harn-vm/src/process_sandbox/namespace_helper.rs",
+        3,
+        "namespace helper: execs the payload the funnel already closed, with the argv and \
+         environment it was handed, and probes itself with no payload",
+    ),
+    (
         "harn-hostlib/src/process/owner_death.rs",
         2,
         "process-owner guardian: re-executes this binary with the sensitive environment \

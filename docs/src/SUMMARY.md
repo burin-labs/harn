@@ -178,7 +178,6 @@
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent governors and detectors](./stdlib/governors.md)
 - [Pace cut rules](./stdlib/cut-rules.md)
-- [Soft-landing cut rules](./stdlib/soft-landing.md)
 - [Agent guardrails](./stdlib/agent-guardrails.md)
 - [Completion judge](./stdlib/agent-judge.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)

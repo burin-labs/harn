@@ -635,9 +635,10 @@ pub fn verification_record_check_result(
  * - `record`: set `false` to run and build the observation without updating
  *   the profile store.
  * - `reuse`: a `VerificationReuse` with a run-scoped key, a complete input-state
- *   reader, and the check's positive-verdict callback. Unknown or changed
- *   inputs force execution; hits return `execution: "reused"` without adding
- *   a profile timing sample.
+ *   reader, the check's positive-verdict callback, and an explicit attestation
+ *   that skipping the command omits no required effects. Unknown or changed
+ *   inputs or effects force execution; hits return `execution: "reused"`
+ *   without adding a profile timing sample.
  * - any `verification_observation_from_command_result` option.
  *
  * @effects: [process, host, fs, state]

@@ -1,31 +1,25 @@
 name: Promote release
-run-name: Promote release ${{ github.event.workflow_run.head_sha || inputs.candidate_sha }}
+run-name: Promote release ${{ inputs.candidate_sha }}
 
 # Publishes a release from the files a main candidate run built and checked.
-# Nothing here builds a release file.
+# Nothing here builds a release file, and nothing starts this workflow except an
+# explicit request naming a commit.
 #
-# Invariant: while main declares a stable version with no published release,
-# every successful main candidate of that version is promotable, whatever
-# event built it, and promotion keeps one candidate in flight until one
-# qualifies. A failed candidate never strands the version; a red source still
-# never publishes, because each candidate is gated on its own source's CI.
+# Invariant: main always declares the next unpublished stable version, so every
+# checkpoint candidate is promotable as what it was compiled and signed as. A
+# commit declaring such a version publishes nothing by itself.
 #
-#   1. build-release-binaries.yml builds, signs, attests, and checks a
-#      candidate: at the version commit's push, at the daily schedule, or on
-#      request. It concludes success only when every release check passed on
-#      those files.
-#   2. This workflow starts when any main run of it completes, or a maintainer
-#      recovers a certified run already contained in main. `plan` proves the
-#      run's source declares the stable version through that version's
-#      transition in its first-parent history, then finds the successful run
-#      that built the candidate at that source. Before publishing it waits up
-#      to 90 minutes for the protected `green` branch to contain the source,
-#      so only a commit whose full CI suite passed is published. A release
-#      already published from another candidate is a no-op.
-#      When the run left nothing to promote, scripts/ci/release_candidate_reconcile.sh
-#      requests a source candidate of main if main still owes a release and
-#      none is in flight, and opens one tracking issue once main's newest
-#      commit has failed its candidate past the allowance.
+#   1. build-release-binaries.yml builds, signs, attests, and checks a candidate
+#      when green-checkpoint.yml or a maintainer requests one. It concludes
+#      success only when every release check passed on those files.
+#   2. A caller dispatches this workflow with the commit to publish, and
+#      optionally its run; without one the newest successful candidate run of
+#      that commit is used. `plan` requires that the commit is on main, its
+#      candidate run succeeded with every target, its version is unpublished,
+#      declared by that commit and above the latest published release, and its
+#      full CI suite passed: it waits up to 90 minutes for the protected `green`
+#      branch to contain the commit. An older commit may publish; a used or lower
+#      version never does.
 #   3. `promote` calls the organization's promote-release.yml, which proves
 #      the run passed at that commit, checks every file's sha256 and
 #      attestation against the candidate manifest, then creates the tag and the
@@ -33,17 +27,19 @@ run-name: Promote release ${{ github.event.workflow_run.head_sha || inputs.candi
 #      publish-release.yml, which publishes the crates from the tag.
 #   4. `repin` asks every registered consumer to repin onto the release,
 #      `container` packages the published Linux archives into the image, and
-#      `open-development-bump` moves main to the next development version.
+#      `open-development-bump` opens the pull request moving main to the next
+#      unpublished version.
 on:
   workflow_dispatch:
     inputs:
-      candidate_run_id:
-        description: Successful candidate run whose source is already on main
+      candidate_sha:
+        description: Full SHA of the main commit to publish
         required: true
         type: string
-      candidate_sha:
-        description: Full source SHA certified by the candidate run
-        required: true
+      candidate_run_id:
+        description: Candidate run of that commit; the newest successful one when empty
+        required: false
+        default: ''
         type: string
       rehearsal_promotion_run_id:
         description: Prior promotion with a measured successful rehearsal of this candidate
@@ -68,31 +64,17 @@ on:
         required: false
         default: false
         type: boolean
-  # Privileged `workflow_run` is intentional: the resolver executes trusted
-  # main code and validates the producer before candidate source is read.
-  workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main runs of this repository
-    workflows: [Build release binaries]
-    types: [completed]
-    branches: [main]
-
 permissions:
   contents: read
 
 concurrency:
-  # Recovery and automatic publication of one source share the existing key.
-  # Warm pushes must not replace a pending release for another source.
-  group: promote-release-${{ github.event.workflow_run.head_sha || inputs.candidate_sha }}
+  group: promote-release-${{ inputs.candidate_sha }}
   cancel-in-progress: false
 
 jobs:
   resolve:
     name: Resolve certified source
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (
-      github.event.workflow_run.conclusion == 'success' &&
-      contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event.workflow_run.event) &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -120,12 +102,11 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || github.event.workflow_run.id }}
-          EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.workflow_run.head_sha }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.candidate_sha }}
           COMPLETED_CONSUMER_RUN_ID: ${{ inputs.completed_consumer_run_id }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
           STANDALONE_HARN: ${{ inputs.standalone_harn && 'true' || 'false' }}
-          RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
         run: bash scripts/resolve-release-promotion-source.sh
 
   plan:
@@ -139,7 +120,6 @@ jobs:
     outputs:
       source_sha: ${{ needs.resolve.outputs.source_sha }}
       promote: ${{ steps.plan.outputs.promote }}
-      reconcile: ${{ steps.plan.outputs.reconcile }}
       run_id: ${{ steps.plan.outputs.run_id }}
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
@@ -176,7 +156,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
 
-      - name: Decide from the version
+      - name: Prove the version is publishable
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -187,7 +167,6 @@ jobs:
           REQUIRES_CONSUMER_REPAIR: ${{ needs.resolve.outputs.requires_consumer_repair }}
           BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
           SOURCE_DIRECTORY: release-source
-          RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
           STANDALONE_HARN: ${{ needs.resolve.outputs.standalone_harn }}
         run: |
@@ -202,96 +181,52 @@ jobs:
           source scripts/lib/green_checkpoint.sh
           source_directory="${SOURCE_DIRECTORY:-.}"
           version="$(release_workspace_version < "$source_directory/Cargo.toml")"
-          previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
-          # Nothing to promote: after an automatic run, the reconcile step keeps
-          # a candidate in flight while main still owes a release.
-          nothing_to_promote() {
-            echo "::notice::$1"
-            echo "promote=false" >> "$GITHUB_OUTPUT"
-            [[ "${RECOVERY:-false}" == true ]] || echo "reconcile=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-          # Any main source declaring a stable version is that version's
-          # candidate once its first-parent history proves the transition. The
-          # version commit proves it by itself.
-          if release_push_is_stable_version_change "$previous" "$version"; then
-            transition="$HEAD_SHA"
-          elif release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
-            if ! transition="$(cd "$source_directory" && release_recovery_transition "$HEAD_SHA" "$version")"; then
-              echo "::error::Source $HEAD_SHA has no proved stable release version transition in its first-parent history."
-              exit 1
-            fi
-          elif [[ "${RECOVERY:-false}" == true ]]; then
-            echo "::error::Requested recovery source has no proved stable release version transition in its first-parent history."
-            exit 1
-          else
-            nothing_to_promote "$HEAD_SHA declares development version $version; there is nothing to promote."
-          fi
           tag="v$version"
-          # A release already published from any source makes this a no-op; an
-          # unpublished tag at another commit is a conflict a person must resolve.
-          if tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha 2>/dev/null)"; then
-            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "::notice::$tag is already released from $tag_sha; nothing to promote."
-              echo "promote=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+          # The source declares this version; publication refuses a used, lower
+          # or prerelease one, whichever commit asks.
+          if ! release_require_promotable_version "$GITHUB_REPOSITORY" "$version"; then
+            echo "::error::$HEAD_SHA cannot publish $tag."
+            exit 1
+          fi
+          # An unpublished tag at this commit is a promotion that stopped before
+          # publishing; at another commit it is a conflict a person must resolve.
+          tag_refs="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")"
+          if jq -e --arg ref "refs/tags/$tag" 'any(.[]; .ref == $ref)' <<< "$tag_refs" >/dev/null; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
             if [[ "$tag_sha" != "$HEAD_SHA" ]]; then
               echo "::error::$tag already points at $tag_sha, not the candidate commit $HEAD_SHA."
               exit 1
             fi
           fi
-          # Main can explicitly retire a failed, never-published stable
-          # candidate by advancing development. Do not resurrect it later.
-          # Published tags were handled above and retain their follow-through.
-          main_version="$(release_workspace_version < Cargo.toml)"
-          release_version_is_canonical "$main_version" || {
-            echo "::error::Cannot read main's release identity; refusing unproved promotion."
-            exit 1
-          }
-          if release_workspace_supersedes_source "$version" "$main_version"; then
-            echo "::error::Unpublished $tag is superseded by main's $main_version identity."
+          # A retired version stays retired; main records it in its changelog.
+          main_changelog="$(cat CHANGELOG.md)"
+          if grep -Fxq "## $tag (never published)" <<< "$main_changelog"; then
+            echo "::error::$tag is retired as never published on main."
             exit 1
           fi
-          # The candidate is found by commit, whichever main event built it.
-          if [[ "${RECOVERY:-false}" == true ]]; then
-            candidate_run="$BUILD_RUN_ID"
-          elif ! candidate_run="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$HEAD_SHA")"; then
-            echo "::error::Could not read which run built the $tag candidate at $HEAD_SHA."
-            exit 1
-          fi
-          if [[ -z "$candidate_run" ]]; then
-            if [[ "$HEAD_SHA" == "$transition" ]]; then
-              echo "::error::No successful build run holds a $tag candidate at $HEAD_SHA (this push's run $BUILD_RUN_ID built none)."
-              exit 1
-            fi
-            nothing_to_promote "Run $BUILD_RUN_ID built no $tag candidate at $HEAD_SHA (version commit $transition)."
-          fi
+          candidate_run="$BUILD_RUN_ID"
           # Publish only a commit whose full CI suite passed: green must contain it.
           green_wait_for "$GITHUB_REPOSITORY" "$HEAD_SHA" || exit 1
-          [[ "$HEAD_SHA" == "$transition" ]] ||
-            echo "::notice::Promoting descendant $HEAD_SHA of $tag version commit $transition."
           if [[ -n "${CONSUMER_PULL_REQUEST:-}" && "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
             echo "::error::An explicit consumer repair cannot replace an originally dispatched completed child."
             exit 1
           fi
           requires_rehearsal=false
           if [[ "${STANDALONE_HARN:-false}" == true ]]; then
-            [[ "${RECOVERY:-false}" == true ]] || exit 1
             echo '::notice::Standalone Harn publication requires source and archive qualification; downstream acceptance remains separate.'
           elif [[ "${REQUIRES_CONSUMER_REPAIR:-false}" == true ]]; then
-            [[ "${RECOVERY:-false}" == true && "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || exit 1
+            [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] || exit 1
             requires_rehearsal=true
             echo "::notice::Verified candidate archives require a fresh observer-owned consumer repair measurement."
           elif [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
-            [[ "${RECOVERY:-false}" == true ]] || exit 1
             echo "::notice::Original observer remains unmeasured; exact completed-child authorization is required."
-          elif [[ "${RECOVERY:-false}" == true ]]; then
+          else
+            # Checkpoint candidates carry no rehearsal, so promotion measures it.
             consumer="$(release_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA")"
             echo "Consumer release rehearsal run=$candidate_run source=$HEAD_SHA verdict=$consumer"
             if jq -e '.count == 0' <<< "$consumer" >/dev/null; then
               requires_rehearsal=true
-              echo "::notice::This candidate has no consumer rehearsal; recovery must measure it before publication."
+              echo "::notice::This candidate has no consumer rehearsal; promotion must measure it before publication."
             else
               if [[ -n "${CONSUMER_PULL_REQUEST:-}" ]]; then
                 echo "::error::Explicit consumer repairs apply only to a missing rehearsal; an existing rehearsal remains authoritative."
@@ -300,12 +235,8 @@ jobs:
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
               release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
             fi
-          else
-            release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
-            # The pass must still describe this source, these archives and the consumer revision.
-            release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
           fi
-          # Capture the exact settled producer before launching a fresh recovery
+          # Capture the exact settled producer before launching a fresh
           # rehearsal. Promotion must later verify this same manifest/attempt.
           if [[ "$requires_rehearsal" == true && "${REQUIRES_CONSUMER_REPAIR:-false}" != true ]]; then
             identity="$(node scripts/lib/release-candidate-state.mjs producer-identity "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA")"
@@ -331,66 +262,8 @@ jobs:
           WAIT_FOR_FULL_SUITE: 'true'
         run: bash scripts/ci/require_full_suite.sh
 
-  reconcile:
-    name: Keep release candidates moving
-    needs: [resolve, plan]
-    if: always() && (github.event_name == 'workflow_run' || needs.plan.outputs.reconcile == 'true')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    concurrency:
-      group: harn-release-candidate-reconcile
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Qualify reconciliation wake-up
-        id: wake
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          PLAN_RECONCILE: ${{ needs.plan.outputs.reconcile }}
-        run: node scripts/ci/release-reconcile-wake.mjs
-      - name: Mint candidate request token
-        id: reconcile-token
-        if: steps.wake.outputs.required == 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-actions: write
-          permission-issues: write
-      - name: Mint recovery read authority
-        id: recovery-read
-        if: steps.wake.outputs.required == 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: |
-            ${{ github.event.repository.name }}
-            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-          permission-actions: read
-          permission-contents: read
-          permission-pull-requests: read
-      - name: Keep a candidate in flight while main owes a release
-        if: steps.wake.outputs.required == 'true'
-        env:
-          GH_TOKEN: ${{ steps.reconcile-token.outputs.token }}
-          SELF_RUN_ID: ${{ github.run_id }}
-          SOURCE_DIRECTORY: .
-          RELEASE_RECOVERY_READ_TOKEN: ${{ steps.recovery-read.outputs.token }}
-          CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
-        run: MAIN_SHA="$(git rev-parse HEAD)" bash scripts/ci/release_candidate_reconcile.sh
-
   consumer-rehearsal:
-    name: Recover missing consumer rehearsal
+    name: Measure consumer rehearsal
     needs: plan
     if: needs.plan.outputs.promote == 'true' && needs.plan.outputs.requires_rehearsal == 'true'
     permissions:
@@ -735,7 +608,7 @@ jobs:
           done
 
   open-development-bump:
-    name: Open post-publication development bump
+    name: Open post-publication version bump
     needs: [plan, promote]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && !inputs.inspect_publication_only }}
     permissions:
