@@ -2,13 +2,6 @@
   {
     "scope": "native-runner-option-helpers",
     "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-    "expression": "\"_iteration\"",
-    "owner": "agent_primitive_option_int",
-    "evidence": "The current iteration number is supplied by the runner for event and tool-dispatch evidence."
-  },
-  {
-    "scope": "native-runner-option-helpers",
-    "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
     "expression": "\"_stop_reason\"",
     "owner": "agent_primitive_option_str",
     "evidence": "The runner supplies the terminal reason as dispatch metadata."

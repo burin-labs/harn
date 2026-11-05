@@ -23,7 +23,7 @@
 //      the row only fills the slot when the caller left it nil.
 //
 // Fold-family naming: prompt-fragment folds take `agent_options` FIRST and are
-// named `with_<x>` (`with_goal`, `with_governance`, `with_overlay`) — they only
+// named `with_<x>` (`with_goal`, `with_overlay`) — they only
 // ADD a fragment and never narrow a surface. The `_policy` suffix is reserved
 // for genuine surface-narrowing lowerings (e.g. `lane_policy`, which prunes
 // `agent_options.tools`). `overlay_policy` is retained as a deprecated alias
@@ -182,8 +182,7 @@ pub fn overlay_context_fragment(
  * `overlay_context_fragment`. Never touches `agent_options.system` or any other
  * explicit system-prompt option; it only adds a fragment alongside them.
  *
- * Options-first arg order matches the rest of the fold family (`with_goal`,
- * `with_governance`).
+ * Options-first arg order matches the rest of the fold family (`with_goal`).
  *
  * @effects: []
  * @errors: [runtime]

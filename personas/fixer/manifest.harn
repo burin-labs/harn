@@ -27,7 +27,6 @@ fn fixer_manifest() {
       preview: "edit_dry_run",
       fallback: "edit_safe_text_patch",
     },
-    compass: {mode: "suggest"},
   }
 }
 

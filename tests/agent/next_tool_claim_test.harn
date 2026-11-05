@@ -11,13 +11,13 @@
 // dispatch sequence proves the contract reached the model call, produced no
 // intervening read, fired exactly once, and left the later turn unpinned.
 import { agent_capture_events, agent_next_tool_claim_receipt_schema } from "std/agent/events"
-import { compose_post_turn } from "std/agent/governors"
 import { agent_loop } from "std/agent/loop"
 import {
   __agent_loop_effective_llm_options,
   __agent_loop_provider_request_options,
 } from "std/agent/loop_support"
 import { AgentSpec, agent_options } from "std/agent/options"
+import { compose_post_turn } from "std/agent/postturn"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_apply_tool_surface_narrowing } from "std/agent/tool_surface"
 

@@ -59,7 +59,6 @@ mod call_error_projection_tests;
 pub mod capabilities;
 pub mod capability_audit;
 mod code_mode;
-pub(crate) mod compass_router;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
 pub(crate) use harn_llm::content;
