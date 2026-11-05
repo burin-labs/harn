@@ -450,7 +450,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-    "expression": "agent_loop_options(\n      harness,\n      agent_progress_apply_options(harness.agent, options),\n    )",
+    "expression": "agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))",
     "owner": "agent_loop_options",
     "evidence": "Consumer agent_loop_options.options in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
