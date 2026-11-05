@@ -945,7 +945,7 @@ fn a_worst_case_projection_denies_the_next_call_at_56_percent_of_actual_spend() 
     // A run whose cumulative ACTUAL spend is 56% of its cap is denied its next
     // call, because the admission bound for that call is priced worst-case.
     // The denial is conservative by design; what it cannot do on its own is
-    // land the run, which is what `std/agent/cut_landing` adds above it.
+    // land the run, which a caller above the seam has to do.
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();
     reset_cost_state();
