@@ -10,12 +10,13 @@
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use url::Url;
 
+use super::ssrf::is_disallowed_ip;
 use super::{
     current_policy_context, ensure_env_seeded, evaluate_resolved_addrs, global_state,
     normalize_host, parse_rule_list, ConfiguredPolicy, DefaultAction, EgressPolicy,
@@ -27,6 +28,7 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const IDLE_TIMEOUT: Duration = Duration::from_mins(5);
 const MAX_AUDIT_EVENTS: usize = 256;
+const UNREACHABLE_REASON: &str = "allowed destination was unreachable";
 const MAX_ACTIVE_CONNECTIONS: usize = 128;
 
 /// Why a child egress proxy could not be started.
@@ -124,6 +126,112 @@ pub struct ProcessEgressAudit {
     pub reason: String,
 }
 
+#[derive(Debug, Default)]
+struct AuditLog {
+    entries: Vec<ProcessEgressAudit>,
+    /// Destinations refused since the host last asked. The policy refused
+    /// these; a listed host that failed to connect is not among them.
+    unread_refusals: Vec<ProcessEgressAudit>,
+}
+
+/// What a host can do to a running allowlist proxy, found from the endpoint on
+/// the current execution policy.
+#[derive(Debug)]
+struct AllowlistControl {
+    http_port: u16,
+    policy: Arc<ProcessPolicySource>,
+    audit: Arc<Mutex<AuditLog>>,
+}
+
+static ALLOWLIST_PROXIES: Mutex<Vec<Weak<AllowlistControl>>> = Mutex::new(Vec::new());
+
+fn allowlist_control(proxy: ProcessNetworkProxy) -> Option<Arc<AllowlistControl>> {
+    ALLOWLIST_PROXIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter_map(Weak::upgrade)
+        .find(|control| control.http_port == proxy.http_port)
+}
+
+/// Destinations the allowlist proxy behind `proxy` refused since the last call.
+/// Empty when `proxy` is not an allowlist proxy.
+pub(super) fn take_child_network_refusals(proxy: ProcessNetworkProxy) -> Vec<ProcessEgressAudit> {
+    let Some(control) = allowlist_control(proxy) else {
+        return Vec::new();
+    };
+    let mut log = control
+        .audit
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    std::mem::take(&mut log.unread_refusals)
+}
+
+/// Add a host to the allowlist proxy behind `proxy`, for the life of that proxy.
+/// Returns false when `proxy` is not an allowlist proxy, so nothing was granted.
+pub(super) fn allow_child_network_host(
+    proxy: ProcessNetworkProxy,
+    host: &str,
+) -> Result<bool, String> {
+    let Some(control) = allowlist_control(proxy) else {
+        return Ok(false);
+    };
+    let ProcessPolicySource::Fixed(fixed) = control.policy.as_ref() else {
+        return Ok(false);
+    };
+    if !can_approve_child_network_host(host) {
+        return Err(format!("`{host}` is not one public host name"));
+    }
+    let name = normalize_host(host);
+    let rules = parse_rule_list(&name).map_err(|error| error.to_string())?;
+    let mut configured = fixed
+        .configured
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let target = EgressTarget {
+        host: name.clone(),
+        ip: None,
+        port: None,
+    };
+    // A listed host keeps what the list gave it, private answers included.
+    if !configured
+        .policy
+        .allow
+        .iter()
+        .any(|rule| rule.matches(&target))
+    {
+        configured.policy.allow.extend(rules);
+        fixed
+            .approved
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(name);
+    }
+    Ok(true)
+}
+
+/// Whether a person's approval can open `host`: one DNS name, never an address.
+///
+/// An address rule would make the proxy resolve every name a child tries, and
+/// an address names the host's own services as readily as anyone else's. The
+/// rule grammar also takes lists and wildcards, and a refusal names one host.
+/// A numeric label is refused because resolvers read `2130706433` and `0x7f.1`
+/// as addresses, and what an approved name resolves to is held at connect time.
+pub(super) fn can_approve_child_network_host(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && !label.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        && labels.last().is_some_and(|top| {
+            top.starts_with("xn--") || top.bytes().all(|byte| byte.is_ascii_alphabetic())
+        })
+}
+
 /// A running host-side proxy. Keep this handle alive for at least as long as
 /// every child process whose policy references [`Self::endpoints`].
 #[derive(Debug)]
@@ -131,7 +239,13 @@ pub struct ProcessEgressProxy {
     endpoints: ProcessNetworkProxy,
     shutdown: Arc<AtomicBool>,
     joins: Vec<JoinHandle<()>>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
+    policy: Arc<ProcessPolicySource>,
+    /// Holds the registration that hosts look this proxy up by.
+    _control: Option<Arc<AllowlistControl>>,
+    /// How a child in a private network namespace reaches these listeners.
+    #[cfg(target_os = "linux")]
+    bridge: Option<super::namespace_bridge::NamespaceBridge>,
 }
 
 impl ProcessEgressProxy {
@@ -171,10 +285,23 @@ impl ProcessEgressProxy {
             block_private: Some(SsrfMode::Off),
             allow_loopback: true,
         };
-        Self::start(ProcessPolicySource::Fixed(ConfiguredPolicy::single(
-            "process_network",
-            policy,
-        )))
+        let mut proxy = Self::start(ProcessPolicySource::Fixed(Box::new(FixedPolicy {
+            configured: RwLock::new(ConfiguredPolicy::single("process_network", policy)),
+            approved: RwLock::default(),
+        })))?;
+        let control = Arc::new(AllowlistControl {
+            http_port: proxy.endpoints.http_port,
+            policy: Arc::clone(&proxy.policy),
+            audit: Arc::clone(&proxy.audit),
+        });
+        let mut registered = ALLOWLIST_PROXIES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        registered.retain(|entry| entry.strong_count() > 0);
+        registered.push(Arc::downgrade(&control));
+        drop(registered);
+        proxy._control = Some(control);
+        Ok(proxy)
     }
 
     fn start(policy: ProcessPolicySource) -> Result<Self, ProcessEgressProxyError> {
@@ -198,7 +325,7 @@ impl ProcessEgressProxy {
             .port();
         let shutdown = Arc::new(AtomicBool::new(false));
         let active_connections = Arc::new(AtomicUsize::new(0));
-        let audit = Arc::new(Mutex::new(Vec::new()));
+        let audit = Arc::new(Mutex::new(AuditLog::default()));
         let policy = Arc::new(policy);
 
         let http_join = spawn_listener(
@@ -214,7 +341,7 @@ impl ProcessEgressProxy {
         let socks_join = match spawn_listener(
             "harn-process-socks-proxy",
             socks,
-            policy,
+            Arc::clone(&policy),
             Arc::clone(&shutdown),
             active_connections,
             Arc::clone(&audit),
@@ -229,7 +356,8 @@ impl ProcessEgressProxy {
             }
         };
 
-        Ok(Self {
+        #[allow(unused_mut)]
+        let mut proxy = Self {
             endpoints: ProcessNetworkProxy {
                 http_port,
                 socks_port,
@@ -237,7 +365,20 @@ impl ProcessEgressProxy {
             shutdown,
             joins: vec![http_join, socks_join],
             audit,
-        })
+            policy,
+            _control: None,
+            #[cfg(target_os = "linux")]
+            bridge: None,
+        };
+        // A failure here drops `proxy`, which stops the listeners.
+        #[cfg(target_os = "linux")]
+        {
+            proxy.bridge = Some(
+                super::namespace_bridge::NamespaceBridge::start(proxy.endpoints)
+                    .map_err(ProcessEgressProxyError::Other)?,
+            );
+        }
+        Ok(proxy)
     }
 
     pub fn endpoints(&self) -> ProcessNetworkProxy {
@@ -248,6 +389,7 @@ impl ProcessEgressProxy {
         self.audit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
             .clone()
     }
 }
@@ -265,15 +407,24 @@ impl Drop for ProcessEgressProxy {
 }
 
 type ClientHandler =
-    fn(TcpStream, Arc<ProcessPolicySource>, Arc<Mutex<Vec<ProcessEgressAudit>>>) -> io::Result<()>;
+    fn(TcpStream, Arc<ProcessPolicySource>, Arc<Mutex<AuditLog>>) -> io::Result<()>;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum ProcessPolicySource {
-    Fixed(ConfiguredPolicy),
+    Fixed(Box<FixedPolicy>),
     Live {
         context: Option<EgressPolicyContext>,
         default_block_private: bool,
     },
+}
+
+/// An allowlist and the hosts added to it after it started. A started list can
+/// name an internal registry, so its hosts may answer with a private address. A
+/// host approved later came from a refusal and may not.
+#[derive(Debug)]
+struct FixedPolicy {
+    configured: RwLock<ConfiguredPolicy>,
+    approved: RwLock<Vec<String>>,
 }
 
 /// Destination policy for a granted child network with no configured egress
@@ -296,9 +447,44 @@ fn process_network_grant_policy(default_block_private: bool) -> ConfiguredPolicy
 }
 
 impl ProcessPolicySource {
+    /// Refuse an approved host whose answers include a private address, so
+    /// approving a name cannot open the host's own services or a cloud metadata
+    /// endpoint. The answers checked here are the ones connected to.
+    fn hold_approved_host_public(
+        &self,
+        host: &str,
+        addresses: Vec<SocketAddr>,
+    ) -> Result<Vec<SocketAddr>, String> {
+        let Self::Fixed(fixed) = self else {
+            return Ok(addresses);
+        };
+        let name = normalize_host(host);
+        let approved = fixed
+            .approved
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&name);
+        if approved
+            && addresses
+                .iter()
+                .any(|address| is_disallowed_ip(address.ip(), false))
+        {
+            return Err(format!(
+                "approved host `{name}` resolves to a private address"
+            ));
+        }
+        Ok(addresses)
+    }
+
     fn configured(&self) -> Result<ConfiguredPolicy, String> {
         let mut configured = match self {
-            Self::Fixed(configured) => Some(configured.clone()),
+            Self::Fixed(fixed) => Some(
+                fixed
+                    .configured
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+            ),
             Self::Live { context, .. } => match context {
                 Some(context) => context
                     .0
@@ -336,7 +522,7 @@ fn spawn_listener(
     policy: Arc<ProcessPolicySource>,
     shutdown: Arc<AtomicBool>,
     active_connections: Arc<AtomicUsize>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
     handler: ClientHandler,
 ) -> Result<JoinHandle<()>, String> {
     crate::runtime_stack::builder()
@@ -385,7 +571,7 @@ impl Drop for ActiveConnection {
 fn handle_http_client(
     mut client: TcpStream,
     policy: Arc<ProcessPolicySource>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
 ) -> io::Result<()> {
     let request = match read_http_head(&mut client) {
         Ok(request) => request,
@@ -547,7 +733,7 @@ fn write_http_error(stream: &mut TcpStream, status: u16, reason: &str) -> io::Re
 fn handle_socks_client(
     mut client: TcpStream,
     policy: Arc<ProcessPolicySource>,
-    audit: Arc<Mutex<Vec<ProcessEgressAudit>>>,
+    audit: Arc<Mutex<AuditLog>>,
 ) -> io::Result<()> {
     let mut greeting = [0_u8; 2];
     client.read_exact(&mut greeting)?;
@@ -615,7 +801,7 @@ fn connect_allowed(
     host: &str,
     port: u16,
     policy: &ProcessPolicySource,
-    audit: &Mutex<Vec<ProcessEgressAudit>>,
+    audit: &Mutex<AuditLog>,
 ) -> Result<TcpStream, String> {
     let configured = match policy.configured() {
         Ok(configured) => configured,
@@ -624,7 +810,9 @@ fn connect_allowed(
             return Err(reason);
         }
     };
-    match resolve_allowed(host, port, &configured) {
+    match resolve_allowed(host, port, &configured)
+        .and_then(|addresses| policy.hold_approved_host_public(host, addresses))
+    {
         Ok(addresses) => {
             for address in addresses {
                 if let Ok(stream) = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
@@ -641,7 +829,7 @@ fn connect_allowed(
                     return Ok(stream);
                 }
             }
-            let reason = "allowed destination was unreachable".to_string();
+            let reason = UNREACHABLE_REASON.to_string();
             record_audit(audit, protocol, host, port, false, &reason);
             Err(reason)
         }
@@ -732,7 +920,7 @@ fn parse_authority(authority: &str, default_port: u16) -> Result<(String, u16), 
 }
 
 fn record_audit(
-    audit: &Mutex<Vec<ProcessEgressAudit>>,
+    audit: &Mutex<AuditLog>,
     protocol: &'static str,
     host: &str,
     port: u16,
@@ -742,16 +930,27 @@ fn record_audit(
     let mut audit = audit
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if audit.len() == MAX_AUDIT_EVENTS {
-        audit.remove(0);
-    }
-    audit.push(ProcessEgressAudit {
+    let entry = ProcessEgressAudit {
         protocol,
         host: normalize_host(host),
         port,
         allowed,
         reason: reason.to_string(),
-    });
+    };
+    if !allowed
+        && reason != UNREACHABLE_REASON
+        && audit.unread_refusals.len() < MAX_AUDIT_EVENTS
+        && !audit
+            .unread_refusals
+            .iter()
+            .any(|seen| seen.host == entry.host && seen.port == entry.port)
+    {
+        audit.unread_refusals.push(entry.clone());
+    }
+    if audit.entries.len() == MAX_AUDIT_EVENTS {
+        audit.entries.remove(0);
+    }
+    audit.entries.push(entry);
 }
 
 fn relay(left: TcpStream, right: TcpStream) -> io::Result<()> {
@@ -1083,5 +1282,147 @@ mod tests {
             super::super::effective_ssrf_settings(Some(&policy)),
             (SsrfMode::Off, false)
         );
+    }
+
+    /// The grant must change what a running proxy decides, and the refusal
+    /// must read back once, or an approval could not rerun the command.
+    #[test]
+    fn an_approved_host_is_admitted_after_its_refusal_is_read() {
+        let proxy = ProcessEgressProxy::start_allowlist(&[]).expect("start");
+        let endpoints = proxy.endpoints();
+        let connect = |target: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", endpoints.http_port)).expect("reach");
+            write!(
+                stream,
+                "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n"
+            )
+            .expect("send");
+            let mut head = Vec::new();
+            let mut chunk = [0u8; 256];
+            while !head.windows(2).any(|pair| pair == b"\r\n") {
+                let read = stream.read(&mut chunk).expect("read");
+                if read == 0 {
+                    break;
+                }
+                head.extend_from_slice(&chunk[..read]);
+            }
+            String::from_utf8_lossy(&head).into_owned()
+        };
+        let last_reason = || {
+            let log = proxy.audit.lock().unwrap();
+            log.entries.last().expect("audited").reason.clone()
+        };
+        let target = "registry.example:443";
+
+        assert!(connect(target).contains("403"));
+        assert_eq!(last_reason(), "no allow rule matched");
+        let refusals = take_child_network_refusals(endpoints);
+        assert_eq!(refusals.len(), 1, "{refusals:?}");
+        assert_eq!(refusals[0].host, "registry.example");
+        assert!(take_child_network_refusals(endpoints).is_empty());
+
+        assert!(allow_child_network_host(endpoints, "registry.example").expect("grant"));
+        connect(target);
+        assert_ne!(
+            last_reason(),
+            "no allow rule matched",
+            "the list now has it"
+        );
+
+        // An approval opens one name: another still gets no lookup on the host.
+        assert!(connect("unlisted.invalid:443").contains("403"));
+        assert_eq!(last_reason(), "no allow rule matched");
+        take_child_network_refusals(endpoints);
+
+        // Nor can an approved name reach the host's own services. It resolves to
+        // loopback on a host with DNS and to nothing without; neither connects.
+        let server = TcpListener::bind("127.0.0.1:0").expect("bind");
+        server.set_nonblocking(true).expect("nonblocking");
+        let port = server.local_addr().expect("addr").port();
+        assert!(allow_child_network_host(endpoints, "localtest.me").expect("grant"));
+        assert!(connect(&format!("localtest.me:{port}")).contains("403"));
+        assert!(server.accept().is_err(), "loopback must see no connection");
+
+        drop(proxy);
+        assert!(!allow_child_network_host(endpoints, "registry.example").expect("gone"));
+    }
+
+    #[test]
+    fn an_approved_host_may_not_answer_with_a_private_address() {
+        let listed = ConfiguredPolicy::single(
+            "process_network",
+            EgressPolicy {
+                allow: parse_rule_list("listed.example").unwrap(),
+                deny: Vec::new(),
+                default: DefaultAction::Deny,
+                block_private: Some(SsrfMode::Off),
+                allow_loopback: true,
+            },
+        );
+        let source = ProcessPolicySource::Fixed(Box::new(FixedPolicy {
+            configured: RwLock::new(listed),
+            approved: RwLock::new(vec!["approved.example".to_string()]),
+        }));
+        let answer = |ip: &str| vec![SocketAddr::new(ip.parse().unwrap(), 443)];
+        for private in [
+            "127.0.0.1",
+            "169.254.169.254",
+            "10.0.0.1",
+            "192.168.1.1",
+            "0.0.0.0",
+            "::1",
+            "::ffff:127.0.0.1",
+        ] {
+            assert!(
+                source
+                    .hold_approved_host_public("Approved.Example", answer(private))
+                    .is_err(),
+                "{private} must be refused"
+            );
+        }
+        let mixed = [answer("140.82.112.3"), answer("127.0.0.1")].concat();
+        assert!(source
+            .hold_approved_host_public("approved.example", mixed)
+            .is_err());
+        assert!(source
+            .hold_approved_host_public("approved.example", answer("140.82.112.3"))
+            .is_ok());
+        assert!(
+            source
+                .hold_approved_host_public("listed.example", answer("10.0.0.1"))
+                .is_ok(),
+            "a list that named an internal registry keeps it"
+        );
+    }
+
+    /// One approval names one host. The rule parser takes lists and wildcards, so
+    /// a card showing one name must not be able to grant more than that.
+    #[test]
+    fn an_approval_grants_exactly_one_host() {
+        let proxy = ProcessEgressProxy::start_allowlist(&[]).expect("start");
+        let endpoints = proxy.endpoints();
+        for wider in [
+            "a.example,b.example",
+            "*",
+            "*.example",
+            "a.example b.example",
+            "",
+            "169.254.169.254",
+            "127.0.0.1",
+            "0.0.0.0",
+            "::1",
+            "2130706433",
+            "0x7f.1",
+            "1.2.example",
+            "localhost",
+            "registry.example.",
+        ] {
+            assert!(!can_approve_child_network_host(wider), "{wider:?}");
+            assert!(
+                allow_child_network_host(endpoints, wider).is_err(),
+                "{wider:?} must be refused"
+            );
+        }
+        assert!(allow_child_network_host(endpoints, "registry.example").expect("grant"));
     }
 }

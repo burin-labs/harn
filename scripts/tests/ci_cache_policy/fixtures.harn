@@ -165,7 +165,7 @@ pub fn release_binary_workflow() {
     concurrency: {
       group: "build-release-binaries-"
         + gha_expression(
-          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
+          "(github.event_name == 'workflow_dispatch' && inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.benchmark_source_sha || github.sha, github.sha)) || (github.event_name == 'workflow_dispatch' && inputs.source_candidate && 'source-main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && 'warm-main') || (github.event_name == 'push' && format('branch-{0}', github.run_id)) || github.ref_name",
         ),
       "cancel-in-progress": gha_expression(
         "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && !inputs.source_candidate && !inputs.benchmark_only",
@@ -362,7 +362,7 @@ pub fn workflows() {
           permissions: {actions: "write", contents: "write"},
           env: {
             HARN_RELEASE_CACHE_SAVE_ENABLED: gha_expression(
-              "((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false'",
+              "((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false'",
             ),
           },
           steps: [
@@ -423,7 +423,7 @@ pub fn workflows() {
               include: [{kind: "workspace"}, {kind: "lean-lsp"}, {kind: "freshness-checker"}],
             },
           },
-          env: {RUSTFLAGS: "-D warnings"},
+          env: {RUSTFLAGS: "-D warnings", HARN_RUSTC_FRONTEND_THREADS: "1"},
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
@@ -537,7 +537,8 @@ pub fn workflows() {
       },
     },
     "macos-nightly.yml": {
-      env: {RUSTFLAGS: "-D warnings"},
+      on: {push: {branches: ["main"], paths: ["rust-toolchain.toml"]}},
+      env: {RUSTFLAGS: "-D warnings", HARN_RUSTC_FRONTEND_THREADS: "1"},
       permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {

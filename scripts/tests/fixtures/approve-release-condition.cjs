@@ -8,7 +8,7 @@ const admits = (ref, login = 'harn-release-bot[bot]', repository = 'burin-labs/h
     github: {repository, event_name: event, event: {pull_request: {user: {login}, head: {ref}}}},
   });
 
-for (const ref of ['release/v1.2.4', 'release-attempt/v1.2.4/' + 'a'.repeat(40), 'automation/development-1.2.5-dev']) {
+for (const ref of ['release/v1.2.4', 'release-attempt/v1.2.4/' + 'a'.repeat(40), 'automation/development-1.2.5']) {
   assert.equal(admits(ref), true, `version-only checker was not reached for ${ref}`);
   assert.equal(admits(ref, 'unrelated[bot]'), false);
   assert.equal(admits(ref, 'harn-release-bot[bot]', 'unrelated/fork'), false);

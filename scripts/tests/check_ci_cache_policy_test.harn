@@ -280,15 +280,12 @@ pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Ha
 }
 
 @test
-pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+pipeline test_changes_admission_is_checked_before_expensive_ci(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   const steps = ci.jobs.changes.steps
   assert_eq(steps[0].with["fetch-depth"], 0)
-  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
-  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
-  assert(steps[1].run.contains("release_range_release_commits"))
-  assert_eq(steps[2].id, "merged_base")
-  assert_eq(steps[3].id, "filter")
+  assert_eq(steps[1].id, "merged_base")
+  assert_eq(steps[2].id, "filter")
   // Every compile, artifact consumer, and product proof depends directly on
   // admission. Capacity measurement and inexpensive hygiene can stay parallel.
   for name in [
@@ -322,15 +319,6 @@ pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Ha
   const aggregate = ci.jobs["ci-status"].steps[aggregate_index(ci)].run
   assert(aggregate.contains("CI tier was not measured."))
   assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
-  assert_eq(
-    len(
-      ci.jobs["release-contract"].steps.filter(
-        { step -> step?.name == "Keep a release commit last in its merge group" },
-      )
-        .to_list(),
-    ),
-    0,
-  )
 }
 
 @test
@@ -1778,6 +1766,41 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   const ci = declared["ci.yml"]
   const declared_policy = policy()
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  // The artifact name binds the compiler wrapper, which depends on the host's
+  // core and memory count unless the front-end thread count is pinned. A run on
+  // another hosted machine shape then names an artifact no consumer can find.
+  const unpinned_producer = {...producer, env: {RUSTFLAGS: "-D warnings"}}
+  assert(
+    macos_warm_errors(declared_policy, unpinned_producer, ci).contains(
+      "macos-nightly.yml must pin HARN_RUSTC_FRONTEND_THREADS=1 so the warm artifact name does not depend on the host shape",
+    ),
+  )
+  const unpinned_consumer = {
+    ...ci,
+    jobs: {...ci.jobs, "macos-lint": {...ci.jobs["macos-lint"], env: {RUSTFLAGS: "-D warnings"}}},
+  }
+  assert(
+    macos_warm_errors(declared_policy, producer, unpinned_consumer).contains(
+      "ci.yml:macos-lint must pin HARN_RUSTC_FRONTEND_THREADS=1 to match the warm artifact producer",
+    ),
+  )
+  // A toolchain move must republish the artifact the manifest binds to it.
+  const push_without_toolchain = {
+    ...producer,
+    on: {
+      ...producer["on"],
+      push: {
+        ...producer["on"].push,
+        paths: producer["on"].push.paths.filter({ path -> return path != "rust-toolchain.toml" })
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, push_without_toolchain, ci).contains(
+      "macos-nightly.yml must republish the warm artifact on a push to main that changes rust-toolchain.toml, which its manifest binds",
+    ),
+  )
   const without_invalidation = {
     ...producer,
     jobs: {

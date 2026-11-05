@@ -16,6 +16,24 @@ fn at(value: &str) -> OffsetDateTime {
     OffsetDateTime::parse(value, &Rfc3339).expect("rfc3339 instant")
 }
 
+#[test]
+fn openai_sol_promotion_ends_before_november_30() {
+    let _guard = super::env_guard();
+    for (instant, expected, cache_read) in [
+        ("2026-08-20T12:00:00Z", 0.035, 0.0005),
+        ("2026-11-29T23:59:59Z", 0.024, 0.0004),
+        ("2026-11-30T00:00:00Z", 0.035, 0.0005),
+        ("2026-12-01T12:00:00Z", 0.035, 0.0005),
+    ] {
+        let cost = pricing_aware_call_cost("openai", "gpt-5.6-sol", 1_000, 1_000, at(instant))
+            .expect("OpenAI Sol route is priced");
+        assert!((cost - expected).abs() < 1e-9, "{instant}: {cost}");
+        let detail = pricing_detail_for_tier("openai", "gpt-5.6-sol", false, 1_000, at(instant))
+            .expect("OpenAI Sol route is priced");
+        assert!((detail.cache_read_per_1k.unwrap() - cache_read).abs() < 1e-9);
+    }
+}
+
 const DEEPSEEK_PROVIDER: &str = "openrouter";
 const DEEPSEEK_MODEL: &str = "deepseek/deepseek-v4-pro-0813";
 

@@ -133,26 +133,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Refuse a group that would bury a release before admitting expensive
-      # proofs. The group's base is the previous queue entry, so compare with
-      # fetched main rather than that base. All product proofs need changes;
-      # its failure also remains a required failure in the CI aggregate.
-      - name: Keep a release commit last in its merge group
-        if: github.event_name == 'merge_group'
-        env:
-          MAIN_REF: refs/remotes/origin/main
-          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/lib/release_version.sh
-          source scripts/lib/release_version.sh
-          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
-          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
-          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
-            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
-            exit 1
-          fi
-
       - name: Resolve the merge commit's base
         id: merged_base
         if: github.event_name == 'pull_request'
@@ -635,19 +615,13 @@ jobs:
   # well as `pull_request`, because a candidate superseded by a fragment that
   # landed after the release branch was cut is a merge-queue-time fact.
   release-contract:
-    name: Harn and release orchestrator agree
+    name: Release paperwork rehearsal
     needs: [changes]
     # Every main push rehearses the tail, including changes outside the PR filter.
     # The required aggregate accepts a skip only on an unrelated PR.
     if: github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      # The release orchestrator, pinned by commit. Moving this pin is a
-      # deliberate change to which release semantics this repository is
-      # checked against.
-      ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 747e02488cda516e507892cfc01e3df283d2ba23
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -655,50 +629,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check out the pinned release orchestrator
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ env.ORCHESTRATOR_REPOSITORY }}
-          ref: ${{ env.ORCHESTRATOR_REF }}
-          path: .release-orchestrator
-          persist-credentials: false
-
       - name: Verify release license notices and archive assembly
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           make test-release-notices
 
-      # The orchestrator's modules are written against the Harn runtime it
-      # pins, not the one this repository is currently building.
-      - name: Install the orchestrator's pinned Harn
+      - name: Install the bootstrap Harn
         uses: ./.github/actions/setup-harn
         with:
-          version-file: .release-orchestrator/.harn-version
+          version-file: .harn-bootstrap-version
           token: ${{ github.token }}
-
-      # Preserve the event's base identity if a stacked parent lands and its
-      # branch disappears while this job is running.
-      - name: Fetch the captured base and immutable release attempts
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
-        run: |
-          bash scripts/ci/fetch_release_base.sh "$BASE_REF" "$BASE_SHA"
-          git fetch --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
-
-      - name: Evaluate the release contract
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          harn run --no-sandbox \
-            .release-orchestrator/check_release_contract.harn \
-            -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}" --contract-ref HEAD
-
-      - name: Verify the opener against the pinned release contract
-        env:
-          OPENER_ORCHESTRATOR_ROOT: .release-orchestrator
-        run: HARN_RELEASE_METADATA_BIN="$(command -v harn)" bash scripts/tests/open_release_pr_test.sh
 
       - name: Rehearse release staging and development cutover offline
         run: bash scripts/release_rehearsal.sh
@@ -1058,44 +998,6 @@ jobs:
         with:
           name: harn-cli.tar.zst
           path: ${{ runner.temp }}/harn-cli.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-      - name: Select an exact release head CLI
-        id: head-cli
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          version="$(release_workspace_version < Cargo.toml)"
-          if ! release_version_is_canonical "$version" || release_version_is_prerelease "$version"; then
-            echo 'selected=false' >> "$GITHUB_OUTPUT"
-          else
-            git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$SOURCE_HEAD"
-            source_tree="$(git rev-parse --verify "$SOURCE_HEAD^{tree}")"
-            checkout_tree="$(git rev-parse --verify 'HEAD^{tree}')"
-            if [[ -n "$source_tree" && "$source_tree" == "$checkout_tree" ]]; then
-              echo 'selected=true' >> "$GITHUB_OUTPUT"
-            else
-              echo '::notice::Release head differs from the tested merge tree; no exact-head CLI is available.'
-              echo 'selected=false' >> "$GITHUB_OUTPUT"
-            fi
-          fi
-      - name: Relink the exact release head CLI
-        if: steps.head-cli.outputs.selected == 'true'
-        timeout-minutes: 10
-        env:
-          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
-          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-        run: ./scripts/ci/rust_artifact.sh build-head-cli "$RUNNER_TEMP/harn-head-cli.tar.zst" "$SOURCE_HEAD"
-      - name: Upload the exact release head CLI
-        if: steps.head-cli.outputs.selected == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: harn-head-cli.tar.zst
-          path: ${{ runner.temp }}/harn-head-cli.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
@@ -2555,6 +2457,9 @@ jobs:
     if: needs.changes.outputs.main_full_suite == 'true'
     env:
       RUSTFLAGS: "-D warnings"
+      # Matches the producer: the warm artifact's name binds the compiler wrapper,
+      # which otherwise depends on the host's core and memory count.
+      HARN_RUSTC_FRONTEND_THREADS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain

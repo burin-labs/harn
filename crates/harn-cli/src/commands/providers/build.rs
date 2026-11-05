@@ -675,6 +675,19 @@ reasoning_none_supported = false
         fs::write(&catalog_path, "{}").unwrap();
         assert!(run_generate(&args).unwrap_err().contains("drifted"));
         fs::write(&catalog_path, &catalog_json).unwrap();
+        fs::write(&args.providers_output, "# stale\n").unwrap();
+        assert!(run_generate(&args).unwrap_err().contains("drifted"));
+        fs::write(&args.providers_output, &providers).unwrap();
+        let source_path = args.source_dir.join("00-base/private.toml");
+        let source = fs::read_to_string(&source_path).unwrap();
+        fs::write(
+            &source_path,
+            source.replace("display_name = \"Private\"", "display_name = \"Changed\""),
+        )
+        .unwrap();
+        assert!(run_generate(&args).unwrap_err().contains("drifted"));
+        fs::write(&source_path, source).unwrap();
+        run_generate(&args).expect("restored source and projections are current");
         args.check = false;
         let stdlib_names =
             fs::read_to_string(&args.stdlib_provider_names_output).expect("stdlib provider names");

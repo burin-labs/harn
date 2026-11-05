@@ -852,6 +852,7 @@ test-pr-gate-scripts:
 	./scripts/tests/prune_stale_targets_test.sh
 	bash ./scripts/tests/prune_stale_targets_lock_test.sh
 	python3 ./scripts/tests/prune_stale_targets_reader_test.py
+	python3 ./scripts/tests/prune_stale_targets_linux_census_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
@@ -909,9 +910,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_candidate_trigger_test.sh
-	./scripts/tests/release_candidate_reconcile_test.sh
 	node --test scripts/tests/release_candidate_state_test.mjs
-	node --test scripts/tests/release_reconcile_wake_test.mjs
 	node --test scripts/tests/dependency_security_test.mjs
 	./scripts/tests/dispatch_native_qualification_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh

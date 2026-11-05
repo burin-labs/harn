@@ -104,6 +104,9 @@ pub struct AmbientExecutionScope {
     /// (never inherited from the parent), then the child's own
     /// `begin_agent_session` push is saved/restored across awaits.
     session_stack: Vec<crate::agent_sessions::CurrentSessionFrame>,
+    /// The session whose prompt this work belongs to. Unlike `session_stack`,
+    /// workers inherit it, because they are part of that prompt's turn.
+    prompt_probe_owner: Option<String>,
     /// The thread execution context (cwd/env/source-dir + capability path-scope
     /// root). Not a LIFO stack — a single `Option` the worker sets at startup and
     /// holds across the whole agent loop's awaits, so it cross-wires fan-out
@@ -226,6 +229,7 @@ impl AmbientExecutionScope {
             inference_boundary: clone_via_swap(
                 crate::llm::api::inference_boundary::swap_ambient_boundary,
             ),
+            prompt_probe_owner: clone_via_swap(crate::llm::swap_prompt_probe_owner),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             persistent_state: clone_via_swap(
@@ -302,6 +306,7 @@ impl AmbientExecutionScope {
                 crate::llm::api::inference_boundary::swap_ambient_boundary,
             ),
             session_stack: clone_via_swap(swap_current_session_stack),
+            prompt_probe_owner: clone_via_swap(crate::llm::swap_prompt_probe_owner),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             persistent_state: clone_via_swap(
@@ -385,6 +390,10 @@ impl AmbientExecutionScope {
             crate::llm::api::inference_boundary::swap_ambient_boundary,
         );
         swap_slot(&mut self.session_stack, swap_current_session_stack);
+        swap_slot(
+            &mut self.prompt_probe_owner,
+            crate::llm::swap_prompt_probe_owner,
+        );
         swap_slot(&mut self.execution_context, swap_thread_execution_context);
         swap_slot(&mut self.source_dir, swap_source_dir);
         swap_slot(

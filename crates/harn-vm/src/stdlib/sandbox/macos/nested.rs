@@ -79,7 +79,11 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
     if !process_is_sandboxed() {
         return Nesting::NotNested;
     }
-    if !super::policy_allows_network(policy) && !outer_denies("network-outbound", None) {
+    // A proxied child may reach only the proxy, which an outer profile that
+    // allows outbound sockets would not hold it to.
+    let network_is_narrowed =
+        !super::policy_allows_network(policy) || policy.process_network_proxy.is_some();
+    if network_is_narrowed && !outer_denies("network-outbound", None) {
         return Nesting::Unenforceable(Narrowing::Network);
     }
     let writable = writable_roots(policy);

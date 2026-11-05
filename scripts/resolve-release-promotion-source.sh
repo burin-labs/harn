@@ -14,7 +14,7 @@ source "$script_dir/lib/candidate_archive_contract.sh"
 source "$script_dir/lib/release_consumer_verdict.sh"
 
 repository="${GITHUB_REPOSITORY:?repository required}"
-run_id="${CANDIDATE_RUN_ID:?candidate run required}"
+run_id="${CANDIDATE_RUN_ID:-}"
 expected_sha="${EXPECTED_SOURCE_SHA:?source required}"
 completed_child="${COMPLETED_CONSUMER_RUN_ID:-}"
 repair_pull="${CONSUMER_PULL_REQUEST:-}"
@@ -26,9 +26,24 @@ if [[ "$standalone" == true ]]; then
     exit 1
   }
 fi
-[[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ &&
-   "$run_id" =~ ^[1-9][0-9]*$ && "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
-  echo '::error::Invalid repository or candidate run identity.' >&2
+[[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
+  echo '::error::Invalid repository or candidate source identity.' >&2
+  exit 1
+}
+# The commit is the request; its newest successful candidate run is the default.
+if [[ -z "$run_id" ]]; then
+  run_id="$(release_candidate_run_id "$repository" "$expected_sha")" || {
+    echo "::error::Could not read which run built a candidate at $expected_sha." >&2
+    exit 1
+  }
+  [[ -n "$run_id" ]] || {
+    echo "::error::No successful build run holds a candidate at $expected_sha." >&2
+    exit 1
+  }
+fi
+export CANDIDATE_RUN_ID="$run_id"
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]] || {
+  echo '::error::Invalid candidate run identity.' >&2
   exit 1
 }
 run="$(gh api "repos/$repository/actions/runs/$run_id")"
@@ -68,7 +83,7 @@ sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attach
     and ($repair == "true" or $standalone == "true" or (.status == "completed" and
       (.conclusion == "success" or ($attached == "true" and .conclusion == "failure"))))
     and (.event == "merge_group" or
-      ((.event == "push" or .event == "schedule" or .event == "workflow_dispatch") and .head_branch == "main")))
+      ((.event == "push" or .event == "workflow_dispatch") and .head_branch == "main")))
   | .head_sha | select(type == "string" and test("^[0-9a-f]{40}$"))
 ' <<< "$run")" || {
   echo "::error::Run $run_id is not a successful owning release producer." >&2
@@ -99,32 +114,29 @@ jq -e --arg sha "$sha" '
   echo "::error::Candidate $sha is not contained in main." >&2
   exit 1
 }
-# A maintainer-named non-push producer must hold a complete candidate. An
-# automatic run of any producer leaves the candidate lookup to the planner.
-if [[ "${RECOVERY:-false}" == true && "$(jq -r '.event' <<< "$run")" != push ]]; then
-  cargo="$(gh api "repos/$repository/contents/Cargo.toml?ref=$sha" \
-    -H 'Accept: application/vnd.github.raw+json')"
-  version="$(release_workspace_version <<< "$cargo")"
-  if ! release_version_is_canonical "$version" || release_version_is_prerelease "$version"; then
-    echo '::error::Manual recovery requires a canonical stable candidate version.' >&2
-    exit 1
-  fi
-  expected="$(candidate_archive_expected_targets_json | jq -c --arg sha "$sha" \
-    --arg files "$RELEASE_FILES_ARTIFACT" '[.[] | "harn-" + .] + ["candidate-manifest-" + $sha, $files]')"
-  artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100")"
-  if ! release_candidate_artifacts_complete "$artifacts" "$expected" ||
-    ! jq -e --argjson run_id "$run_id" --arg sha "$policy_sha" --argjson run "$run" '
-      all(.artifacts[];
-        .workflow_run.id == $run_id and .workflow_run.head_sha == $sha and
-        .workflow_run.head_branch == "main" and
-        .workflow_run.repository_id == $run.repository.id and
-        .workflow_run.head_repository_id == $run.head_repository.id and
-        (.workflow_run.repository_id | type == "number" and . > 0) and
-        (.workflow_run.head_repository_id | type == "number" and . > 0))
-    ' <<< "$artifacts" >/dev/null; then
-    echo '::error::Manual producer lacks a complete, exact-source candidate artifact inventory.' >&2
-    exit 1
-  fi
+# The producer must hold a complete candidate of a stable version at this source.
+cargo="$(gh api "repos/$repository/contents/Cargo.toml?ref=$sha" \
+  -H 'Accept: application/vnd.github.raw+json')"
+version="$(release_workspace_version <<< "$cargo")"
+if ! release_version_is_canonical "$version" || release_version_is_prerelease "$version"; then
+  echo '::error::Promotion requires a canonical stable candidate version.' >&2
+  exit 1
+fi
+expected="$(candidate_archive_expected_targets_json | jq -c --arg sha "$sha" \
+  --arg files "$RELEASE_FILES_ARTIFACT" '[.[] | "harn-" + .] + ["candidate-manifest-" + $sha, $files]')"
+artifacts="$(gh api "repos/$repository/actions/runs/$run_id/artifacts?per_page=100")"
+if ! release_candidate_artifacts_complete "$artifacts" "$expected" ||
+  ! jq -e --argjson run_id "$run_id" --arg sha "$policy_sha" --argjson run "$run" '
+    all(.artifacts[];
+      .workflow_run.id == $run_id and .workflow_run.head_sha == $sha and
+      .workflow_run.head_branch == "main" and
+      .workflow_run.repository_id == $run.repository.id and
+      .workflow_run.head_repository_id == $run.head_repository.id and
+      (.workflow_run.repository_id | type == "number" and . > 0) and
+      (.workflow_run.head_repository_id | type == "number" and . > 0))
+  ' <<< "$artifacts" >/dev/null; then
+  echo '::error::Producer lacks a complete, exact-source candidate artifact inventory.' >&2
+  exit 1
 fi
 {
   echo "source_sha=$sha"

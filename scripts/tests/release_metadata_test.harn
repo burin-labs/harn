@@ -6,7 +6,7 @@ import {
   apply_unpublished_retirement,
   cargo_dependency_from_line,
   current_version,
-  development_version_from_stable,
+  next_version_from_stable,
   package_names_for_manifests,
   release_metadata_plan,
   rewrite_local_dependency_versions,
@@ -100,11 +100,11 @@ fn dependency_schema() -> Schema<DependencyProjection> {
 
 @test
 pipeline test_development_version_contract_is_exact(harness: Harness, task: unknown) {
-  assert_eq(development_version_from_stable("1.2.3"), "1.2.4-dev")
+  assert_eq(next_version_from_stable("1.2.3"), "1.2.4")
   assert_eq(stable_version_from_development("1.2.4-dev"), "1.2.4")
   assert_throws_eq(
-    { -> development_version_from_stable("1.2.3-rc.1") },
-    "development version requires stable release SemVer: 1.2.3-rc.1",
+    { -> next_version_from_stable("1.2.3-rc.1") },
+    "next version requires stable release SemVer: 1.2.3-rc.1",
   )
   assert_throws_eq(
     { -> stable_version_from_development("1.2.4") },
@@ -289,17 +289,12 @@ pipeline test_retirement_rewrites_the_development_graph_and_actual_install_base(
     harness.fs,
     { root ->
       workspace(harness.fs, root)
-      write_fixture(
-        harness.fs,
-        root,
-        "CHANGELOG.md",
-        "## v1.2.3\n\n### Fixed\n\n- candidate\n\n## v1.2.2\n\n- published\n",
-      )
+      write_fixture(harness.fs, root, "CHANGELOG.md", "## v1.2.2\n\n- published\n")
       const plan = apply_unpublished_retirement(harness.fs, root, "1.2.3", "v1.2.2")
-      assert_eq(plan.next_version, "1.2.4-dev")
-      assert_eq(current_version(harness.fs, root), "1.2.4-dev")
+      assert_eq(plan.next_version, "1.2.4")
+      assert_eq(current_version(harness.fs, root), "1.2.4")
       const root_doc = root_manifest_projection(harness.fs.read_text(path_join(root, "Cargo.toml")))
-      assert_eq(root_doc.workspace.dependencies["member-a"]?.version, "=1.2.4-dev")
+      assert_eq(root_doc.workspace.dependencies["member-a"]?.version, "=1.2.4")
       const agent = agent_projection(
         harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
       )
@@ -314,7 +309,7 @@ pipeline test_retirement_rewrites_the_development_graph_and_actual_install_base(
       )
       const changelog = harness.fs.read_text(path_join(root, "CHANGELOG.md"))
       assert_eq(changelog.contains("## v1.2.3 (never published)"), true)
-      assert_eq(changelog.contains("## Unreleased\n\n### Fixed\n\n- candidate"), true)
+      assert_eq(changelog.contains("## v1.2.2\n\n- published"), true)
     },
   )
 }
@@ -422,24 +417,23 @@ pipeline test_development_then_release_preserves_distribution_boundary(
     harness.fs,
     { root ->
       workspace(harness.fs, root)
-      const development = apply_development_metadata(harness.fs, root)
-      assert_eq(development.next_version, "1.2.4-dev")
-      assert_eq(current_version(harness.fs, root), "1.2.4-dev")
+      const development = apply_development_metadata(harness.fs, root, "1.2.3")
+      assert_eq(development.next_version, "1.2.4")
+      assert_eq(current_version(harness.fs, root), "1.2.4")
       const root_manifest = root_manifest_projection(
         harness.fs.read_text(path_join(root, "Cargo.toml")),
       )
       assert_eq(
         root_manifest.workspace.dependencies.get("member-a"),
-        {path: "crates/member-a", version: "=1.2.4-dev"},
+        {path: "crates/member-a", version: "=1.2.4"},
       )
       const development_agent = agent_projection(
         harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
       )
       assert_eq(development_agent.version, "1.2.3")
-      const release = release_metadata_plan(harness.fs, root, "patch")
-      assert_eq(release.next_version, "1.2.4")
-      apply_release_metadata(harness.fs, root, release.next_version, "patch")
-      assert_eq(current_version(harness.fs, root), "1.2.4")
+      // Publishing 1.2.4 moves main on and the install manifest up to 1.2.4.
+      apply_development_metadata(harness.fs, root, "1.2.4")
+      assert_eq(current_version(harness.fs, root), "1.2.5")
       const released_agent = agent_projection(
         harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
       )
@@ -667,16 +661,10 @@ pipeline test_actual_version_cut_rewrites_and_reads_back_renamed_package(
         harness.fs.read_text(path)
           + "\naliased = { package = \"tree-sitter-harn\", path = \"../../tree-sitter-harn\", version = \"=1.2.3\" }\n",
       )
-      apply_development_metadata(harness.fs, root)
+      apply_development_metadata(harness.fs, root, "1.2.3")
       const development = member_manifest_projection(harness.fs.read_text(path))
       assert_eq(
         development.dependencies.get("aliased"),
-        {package: "tree-sitter-harn", path: "../../tree-sitter-harn", version: "=1.2.4-dev"},
-      )
-      apply_release_metadata(harness.fs, root, "1.2.4", "patch")
-      const release = member_manifest_projection(harness.fs.read_text(path))
-      assert_eq(
-        release.dependencies.get("aliased"),
         {package: "tree-sitter-harn", path: "../../tree-sitter-harn", version: "=1.2.4"},
       )
     },
@@ -728,7 +716,7 @@ pipeline test_actual_later_line_version_refuses_before_every_manifest_write(harn
         .to_list()
       assert_eq(before.count, 5)
       assert_throws_eq(
-        { -> apply_development_metadata(harness.fs, root) },
+        { -> apply_development_metadata(harness.fs, root, "1.2.3") },
         "local path dependency tree-sitter-harn version must be on its declaration line",
       )
       for original in before {
@@ -749,8 +737,8 @@ pipeline test_actual_bump_preserves_alias_shaped_and_wrong_type_metadata(harness
       const metadata =
         "\n[package.metadata.example]\nsdk = { package = \"tree-sitter-harn\", path = \"../../tree-sitter-harn\", version = \"=1.2.3\" }\nwrong_types = { package = 7, path = false, version = true }\n"
       harness.fs.write_text(path, harness.fs.read_text(path) + metadata)
-      apply_development_metadata(harness.fs, root)
-      assert_eq(current_version(harness.fs, root), "1.2.4-dev")
+      apply_development_metadata(harness.fs, root, "1.2.3")
+      assert_eq(current_version(harness.fs, root), "1.2.4")
       const actual = toml_parse(harness.fs.read_text(path)).get("package")?.get("metadata")
       const expected = toml_parse(metadata).get("package")?.get("metadata")
       assert_eq(actual, expected)
@@ -790,12 +778,12 @@ pipeline test_the_published_release_decides_the_next_development_identity(
   // A tag and a bare version are the same answer.
   assert_eq(stable_release_version("v0.10.133"), "0.10.133")
   assert_eq(stable_release_version("0.10.133"), "0.10.133")
-  assert_eq(development_version_from_stable(stable_release_version("v0.10.133")), "0.10.134-dev")
+  assert_eq(next_version_from_stable(stable_release_version("v0.10.133")), "0.10.134")
   // The exact stranding: the workspace still says 0.10.133-dev and refuses,
   // while the published tag answers without ambiguity.
   assert_throws_eq(
-    { -> development_version_from_stable("0.10.133-dev") },
-    "development version requires stable release SemVer: 0.10.133-dev",
+    { -> next_version_from_stable("0.10.133-dev") },
+    "next version requires stable release SemVer: 0.10.133-dev",
   )
   // Nothing but an exact stable release is accepted in the trusted position,
   // or the value this exists to reject comes back through it.

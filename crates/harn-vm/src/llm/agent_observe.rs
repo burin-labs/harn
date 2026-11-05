@@ -502,6 +502,7 @@ impl ObservedAttemptToken {
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }
+        self.inference_speed.start();
     }
 }
 

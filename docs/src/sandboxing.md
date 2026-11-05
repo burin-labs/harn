@@ -177,16 +177,37 @@ raw socket cannot bypass the host decision. DNS is resolved by the proxy and
 each connection is pinned to the addresses checked by the existing CIDR, deny,
 and private-address rules.
 
-The native managed boundary is currently available on macOS. On another local
-platform, a CLI `--allow-process-network` grant still raises the capability
-ceiling to network, but Harn does not *start* a proxy it cannot enforce. Child
-processes then have unrestricted sockets; `harn run` discloses that on stderr,
-and run attestation reports `unrestricted` rather than
-`unsupported_fail_closed`. An execution policy that already carries
-`process_network_proxy` (inherited from a host or outer sandbox) is unchanged:
-Linux and Windows still fail-close `process.exec` behind that proxy. Remote
-sandbox backends continue to advertise their own `network_policy` capability.
-An empty allowlist is deny-all everywhere.
+An ACP server takes its children's hosts from `AcpSandboxConfig::child_network_allow`
+instead of the live policy: the proxy admits only the listed hosts, and Harn's own
+calls keep their separate policy. A pipeline reads what the proxy refused with
+`harness.net.child_network_refusals()`, which returns each destination once, and
+adds a host for the life of the server with `harness.net.child_network_allow(host)`.
+Refusals are per server, so commands running in parallel cannot be told apart, and
+an approval applies to every session on that server. Share a server this way only
+when it serves one user and one trust domain.
+
+An added host must be one DNS name, marked `can_approve` on its refusal. Addresses,
+single-label names, and all-digit labels are refused, and an added name that resolves
+to a loopback, private, or link-local address does not connect. A host listed at
+start keeps its private reach, so a list can name an internal registry.
+
+The managed boundary is available on macOS, and on Linux when the policy names
+the namespace launcher (`--netns-launcher`). A Linux child then runs in a private
+network namespace with only loopback. A relay in that namespace listens on the
+proxy's port numbers and forwards to the host proxy over a Unix socket, so raw
+sockets, datagrams, and direct DNS have no route. A daemon that outlives its
+command loses the relay and keeps its loopback. Bubblewrap-only hosts refuse the
+grant.
+
+On another local platform, or on Linux with no launcher, a CLI
+`--allow-process-network` grant still raises the capability ceiling to network,
+but Harn does not *start* a proxy it cannot enforce. Child processes then have
+unrestricted sockets; `harn run` discloses that on stderr, and run attestation
+reports `unrestricted` rather than `unsupported_fail_closed`. An execution policy
+that already carries `process_network_proxy` (inherited from a host or outer
+sandbox) is unchanged: a platform that cannot enforce it fail-closes
+`process.exec` behind that proxy. Remote sandbox backends continue to advertise
+their own `network_policy` capability. An empty allowlist is deny-all everywhere.
 
 The managed proxy records only protocol, normalized host, port, decision, and
 reason. It never records request paths, query strings, headers, bodies, proxy
@@ -858,9 +879,9 @@ Secret-shaped names such as `GRADLE_TOKEN` still require an explicit grant.
 
 Every sandboxed child spawned under a restricted profile gets `TMPDIR`,
 `TMP`, and `TEMP` pointed at the `tmp` directory of the workspace's runtime
-dir: `~/Library/Caches/harn-sandbox/<digest>` on macOS,
-`$XDG_CACHE_HOME/harn-sandbox/<digest>` or `~/.cache/harn-sandbox/<digest>`
-on Linux, and `%LOCALAPPDATA%\harn-sandbox\<digest>` on Windows, where the
+dir: `~/Library/Caches/.harn-sandbox/<digest>` on macOS,
+`$XDG_CACHE_HOME/.harn-sandbox/<digest>` or `~/.cache/.harn-sandbox/<digest>`
+on Linux, and `%LOCALAPPDATA%\.harn-sandbox\<digest>` on Windows, where the
 digest names the canonical first writable `workspace_root`. The runtime dir is
 outside the workspace, so the child's temporary files never reach a diff, a
 PR, eval grading, or a linter or test collector walking the tree. It is created
@@ -868,8 +889,10 @@ lazily and owner-only, a symlinked or foreign-owned component is refused, and
 every backend grants it as a write root, including runs restricted to declared
 roots. The toolchain cache is its sibling `toolchain` directory. Each runtime
 dir records its workspace root, and the first runtime dir a process creates
-removes the runtime dirs of workspaces that no longer exist. A runtime dir
-counts as part of its workspace for the in-process file builtins and policy
+removes the runtime dirs of workspaces that no longer exist. When the runtime
+dir cannot be created, such as in a container with `HOME` unset or unwritable,
+Harn warns and uses the self-ignored `.harn-tmp` and `.harn-toolchain-cache` in
+the first workspace root instead. A runtime dir counts as part of its workspace for the in-process file builtins and policy
 narrowing: a root that covers the workspace covers its runtime dir, so a
 `workspace_roots` entry made inside a child's temp dir narrows the enclosing
 policy rather than falling outside it. `harness.fs.workspace_temp_dir()` is a

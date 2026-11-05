@@ -8402,7 +8402,7 @@
           {
             "id": "deepinfra-v41-flash-intro",
             "starts_on": "2026-09-26",
-            "review_after": "2026-10-04",
+            "review_after": "2026-12-04",
             "source_url": "https://deepinfra.com/deepseek-ai/DeepSeek-V4.1-Flash",
             "input_per_mtok": 0.14,
             "output_per_mtok": 0.42,
@@ -14864,7 +14864,7 @@
           {
             "id": "mercury-3-launch",
             "starts_on": "2026-10-21",
-            "review_after": "2026-10-28",
+            "review_after": "2026-12-04",
             "source_url": "https://docs.inceptionlabs.ai/get-started/models",
             "input_per_mtok": 0.1,
             "output_per_mtok": 0.35,
@@ -21406,7 +21406,8 @@
           {
             "id": "openai-2026-08-sol",
             "starts_on": "2026-08-21",
-            "review_after": "2026-11-21",
+            "ends_on": "2026-11-29",
+            "review_after": "2026-11-30",
             "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
             "input_per_mtok": 4.0,
             "output_per_mtok": 20.0,
@@ -37242,7 +37243,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Together removes this model from serverless inference on 2026-11-04 and recommends Qwen/Qwen3.7-Max: https://docs.together.ai/docs/deprecations",
+        "sunset_date": "2026-11-04",
+        "superseded_by": "Qwen/Qwen3.7-Max"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -50168,28 +50172,6 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "together",
-      "model": "Qwen/Qwen3.8-2.4T-A95B",
-      "base_url": "https://api.together.xyz/v1",
-      "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "Qwen3.8 2.4T A95B (Together)",
-      "family": "qwen",
-      "capabilities": [
-        "batch",
-        "extended_thinking",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools"
