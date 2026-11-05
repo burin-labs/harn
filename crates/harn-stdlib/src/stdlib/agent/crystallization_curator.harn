@@ -1008,7 +1008,7 @@ fn cc_steps_that_only_failed(evidence: list) -> list {
 }
 
 /** The steps of a command that the window only ever saw fail. */
-fn cc_broken_steps(command: string, broken: list, cwd: any = nil) -> list {
+fn cc_broken_steps(command: string, broken: list, cwd: string = "") -> list {
   const plan = command_sequence_plan(command, cwd)
   if plan.status != "measured" {
     return []
