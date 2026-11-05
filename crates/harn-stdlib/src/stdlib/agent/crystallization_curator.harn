@@ -123,6 +123,48 @@ fn cc_repeated_recoveries(cards: list) -> list {
   return len(sessions) >= 2 ? out : []
 }
 
+/**
+ * Commands that failed and never passed in at least two sessions, each of which
+ * then did something else and ended on a pass. A check that cannot work here
+ * shows this shape: sessions route around it, so no rerun ever passes. Whether
+ * the cause is the environment or each task's own code is the curator's call.
+ */
+fn cc_repeated_workarounds(cards: list) -> list {
+  let by_failure = {}
+  for card in cards {
+    const session = cc_text(card?.session_id)
+    const commands = card?.commands ?? []
+    if session == "" || len(commands) == 0 || commands[len(commands) - 1]?.ok != true {
+      continue
+    }
+    let seen = []
+    for index in range(0, len(commands)) {
+      const entry = commands[index]
+      const failed = to_string(entry?.command ?? "")
+      if entry?.ok != false || failed == "" || seen.contains(failed) {
+        continue
+      }
+      seen = seen + [failed]
+      const later = commands[index + 1:len(commands)]
+      if later.any({ item -> item?.ok == true && to_string(item?.command ?? "").contains(failed) }) {
+        continue
+      }
+      const worked_around_with = later.filter({ item -> item?.ok == true })
+        .map({ item -> to_string(item?.command ?? "") })
+        .to_list()
+      by_failure[failed] = (by_failure[failed] ?? [])
+        + [{session_id: session, worked_around_with: worked_around_with}]
+    }
+  }
+  let out = []
+  for failed in keys(by_failure).sorted() {
+    if len(by_failure[failed]) >= 2 {
+      out = out + [{failed: failed, sessions: by_failure[failed]}]
+    }
+  }
+  return out
+}
+
 fn cc_session_ids(evidence: list) -> list {
   let out = []
   for item in evidence ?? [] {
@@ -222,6 +264,8 @@ The repository's declared checks set each check's scope: its arguments, filters,
 
 Count recovery across sessions. `repeated_recoveries` lists sessions that failed a command, later passed that same command, and ended on a pass, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
+`repeated_workarounds` lists commands that failed and never passed in at least two sessions, each of which then did something else and ended on a pass. An `exit_code` of null only means the run recorded no code, so use inspect_session_evidence to see what happened. When the cause is this environment rather than each task's code, the project's check does not work here as declared, and every later session will pay to find another way, often a weaker one: a run that skips part of the project tests nothing there. Work out from the sessions what really runs the project's tests here, including any build or install a compiled or generated part needs before its tests can see an edit, and propose that sequence. That sessions wrote their workarounds differently is not a reason to decline when they route around the same failure: choose the one that exercises the most, as commands that do not depend on the machine. A step running a declared check through the repository's virtualenv, such as `.venv/bin/python -m pytest` for `python3 -m pytest`, counts as that declared check word for word.
+
 Every proposal's `evidence_ids` must list the `id` of cards, not their `session_id`, from at least two sessions, each with a non-empty `session_id` and at least one command. A submission that cites fewer is rejected, so submit zero proposals when the window does not hold two such sessions.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
@@ -236,6 +280,10 @@ ${json_stringify(cards)}
 <repeated_recoveries>
 ${json_stringify(cc_repeated_recoveries(cards))}
 </repeated_recoveries>
+
+<repeated_workarounds>
+${json_stringify(cc_repeated_workarounds(cards))}
+</repeated_workarounds>
 
 <existing_pending>
 ${json_stringify(pending ?? [])}
@@ -851,6 +899,31 @@ fn cc_declared_checks(options: any = nil) -> list {
   return out
 }
 
+const PROJECT_ENV_BIN_DIRS: list<string> = ["venv/bin/", ".venv/bin/", "env/bin/"]
+
+/** A program run from the repository's virtualenv is that program with the env active. */
+fn cc_program_in_env(program: string) -> string {
+  for dir in PROJECT_ENV_BIN_DIRS {
+    if program.starts_with(dir) {
+      const name = program[len(dir):len(program)]
+      return name == "python3" ? "python" : name
+    }
+  }
+  return ""
+}
+
+fn cc_same_step(have: dict, want: dict) -> bool {
+  if have == want {
+    return true
+  }
+  if have.cwd != want.cwd || len(have.argv) != len(want.argv) || len(have.argv) == 0 {
+    return false
+  }
+  const expected = want.argv[0] == "python3" ? "python" : want.argv[0]
+  return cc_program_in_env(have.argv[0]) == expected
+    && have.argv[1:len(have.argv)] == want.argv[1:len(want.argv)]
+}
+
 /** Match literal argv and directory scopes from the owning shell planner. */
 fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   const observed = command_sequence_plan(verify_command)
@@ -863,7 +936,7 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   const have = observed.steps
   const want = declared.steps
   for start in range(0, len(have) - len(want) + 1) {
-    if have[start:start + len(want)] == want {
+    if range(0, len(want)).all({ offset -> cc_same_step(have[start + offset], want[offset]) }) {
       return true
     }
   }
@@ -880,7 +953,7 @@ fn cc_only_repeats_declared_checks(verify_command: string, declared: list) -> bo
   for check in declared {
     declared_steps = declared_steps + command_sequence_plan(check.command, check.cwd).steps
   }
-  return observed.steps.all({ step -> declared_steps.any({ known -> known == step }) })
+  return observed.steps.all({ step -> declared_steps.any({ known -> cc_same_step(step, known) }) })
 }
 
 fn cc_session_passed_command(evidence: list, command: string) -> bool {
