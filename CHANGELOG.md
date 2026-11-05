@@ -9,6 +9,188 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.188
+
+### Breaking
+
+- **`std/agent/governors` is removed.** The opt-in post-turn budget governor, the convergence guard, `with_governance`,
+  `agent_governed_preset`, `governors_selftest` and `agent_convergence_guard_receipt_schema` had no caller outside tests.
+  The loop's own ceilings (`max_iterations`, `token_budget`, `iteration_budget`) are unchanged and end a run with status
+  `budget_exhausted`.
+
+  Migration: replace a governor `budget` with `max_iterations` or `token_budget`. `compose_post_turn` now lives in
+  `std/agent/postturn`. Importing `std/agent/governors` is a module-not-found error.
+- **A grant declares its own credential.** Output redaction no longer reads a variable's name. A `secret://` grant,
+  a grant bound to one command, and the new `secret-env:VAR` source (`GrantSourceSpec::SecretEnv`) are filtered from
+  the current session's output, or from the whole process's output when no agent session is current, as in a plain
+  `harn run`. Filtering matches exact values and is best-effort cleanup, not a security boundary; encoded forms are no
+  longer filtered.
+
+  Migration: declare a session-wide `env:` grant that holds a credential as `secret-env:`.
+- **Edit-tool rewrite router removed.** The agent loop no longer observes
+  freeform edit calls to suggest or rewrite them into structural edit tools.
+  Gone are the `compass` agent option, the `compass_ast_edits` reminder
+  provider, the `compass_routing_decision` agent event, and the
+  `harn.compass.*` metric namespace. The `edit_*` stdlib tools are unchanged
+  and the model still chooses among them from their descriptions.
+
+  Migration: stop passing `compass` to `agent_loop` or persona manifests; the
+  loop no longer reads it. Drop `compass_ast_edits` from
+  `reminders: {providers: [...]}`. Hosts that match on the
+  `compass_routing_decision` event kind or the generated
+  `CompassRoutingDecision` type must drop that case after regenerating their
+  protocol bindings.
+- **Removed `std/agent/completion_gate` and `std/agent/completion_behavior_evidence`.**
+  `agent_completion_gate`, `agent_completion_gate_preview`, `agent_completion_gate_veto_counts`,
+  `agent_completion_gate_record_veto`, `completion_gate_verdict`, `completion_gate_budget`,
+  `completion_behavior_evidence`, `completion_behavior_run_check` and their option and fact types are gone, along
+  with the `completion_gate` row accepted by `agent_preset_register` packs. No in-tree caller used the configured
+  gate outside its own tests. Supply a `verify_completion` callback that returns
+  `{confirm, message?, reason?, verification?, requirement_report?}`, and set `verify_completion_judge` or
+  `turn_end_condition` for a bounded model judge. The judge arbitration, `completion_requirements` and
+  `verify_completion` seams are unchanged.
+- **Input guardrail and pre-turn scope classifier removed.** `agent_loop` no
+  longer accepts `input_guardrail` or `pre_turn_scope_classifier`, and the
+  `status: "input_guardrail"` / `status: "scope_alert"` terminals,
+  `std/agent/guardrails` (`agent_input_guardrail`,
+  `agent_input_guardrail_check`), `std/llm/scope_classifier`
+  (`pre_turn_scope_classifier`), `lane_scope_classifier`, `harn eval
+  scope_triage`, the `HARN_EVAL_SCOPE_TRIAGE_*` variables, and the
+  `input_guardrail_verdict` / `scope_classifier_verdict` agent events are gone.
+  Both hooks were opt-in and off by default. Neither was a security boundary:
+  each was a model judgment that failed open on classifier error, and the
+  sandbox and tool policy do the enforcing. To stop a request before the first
+  model turn, check it in the caller before starting `agent_loop`, or deny it
+  through tool policy.
+
+  Migration: delete `input_guardrail` and `pre_turn_scope_classifier` from
+  `agent_loop` options (either key is now an unknown option, and `agent_loop`
+  refuses the run with `no option reads`), and drop handling of the two event kinds
+  and the two terminal statuses. Regenerate protocol bindings.
+- **Removed `std/agent/lanes` and `std/agent/overlays`.** The modules classified
+  the first user message into a fixed tool lane and appended mode-specific
+  prompt lines. No in-repo caller used them, and a lane pinned the tool
+  surface to the first message, so later user direction could not widen it. The
+  `lane_policy` and `overlay_policy` preset-pack keys and agent option fields
+  are gone with them, along with `lane_scope_classifier` and the
+  `stage_gate_*` text-marker helpers.
+
+  Migration: delete the imports. Narrow tools through the tool list passed to
+  `agent_loop`, and put mode-specific guidance in the system prompt or a
+  skill. A preset registered with `lane_policy` or `overlay_policy` now fails
+  as an unknown pack key.
+- **Removed `std/agent/response_compaction`, `std/agent/compaction_classify`, and the `classify` compaction strategy.**
+  Nothing in the runtime or the shipped pipelines used them. The `classify` strategy and its `classify` option
+  (`compaction.classify`, `transcript_compact`, `transcript_auto_compact`, `agent_session_compact`, compaction
+  policies) are gone, as are the `classification` field on compaction receipts, events and ACP `_meta.harn`, and the
+  "via classified compaction" recap header. `compact_strategy: "classify"` is now an unknown-strategy error, and an
+  `auto_compact` strategy label of `classify` falls back to observation masking like any other unrecognized label.
+
+  Migration: use `observation_mask` or `llm` compaction. Callers that stored large values through
+  `response_compaction` should keep the exact value in `std/cache` themselves and summarize it with an ordinary
+  `harness.llm` call. Rust consumers constructing `CompactionReceipt`, `CompactionEventRecord`, `AutoCompactConfig` or
+  `CompactionPolicyDeclaration` must drop the `classification` field; exhaustive matches on `CompactStrategy` or
+  `PolicyStrategy` lose the `Classify` variant. Vendored protocol bindings generated from `spec/protocol-artifacts` must
+  be regenerated: `transcript_compacted` session updates no longer carry `_meta.harn.classification`, and bindings that
+  required it reject the new payload.
+- **Structural validator removed.** `std/llm/structural_validator` and
+  `with_structural_validator` are gone, along with the agent loop's
+  `structural_validator` option, the `structural_validator_decision` agent
+  event, and `harn eval coding-agent --structural-validator`. The tool-registry
+  readers `tool_required_argument_names`, `tool_required_argument_exemplar`,
+  `tool_call_output_schema`, and `exact_tool_call_output_schema` move unchanged
+  to `std/llm/tool_call_schema`.
+
+  Migration: stop passing `structural_validator` to `agent_loop`; it is now an
+  unknown option, and `agent_loop` refuses the run with `no option reads`.
+  Import the four registry readers from `std/llm/tool_call_schema`. Hosts that
+  match on the removed `structural_validator_decision` host event kind, or on
+  its generated payload type (`HarnAgentEventStructuralValidatorDecision` in
+  Swift and Go, the `StructuralValidatorDecision` variant in Rust), must drop
+  that case after regenerating their protocol bindings.
+- **`routing_policy` no longer runs a verifier chain.** The `escalate_on` and `max_refines_per_link` options, the
+  `verifier_outcome` and `verifier_signals` fields on routing attempts, and the `<dispatch>.verifier_signal` event are
+  removed. A policy now advances only on provider failure, budget, or race. `routing_policy` does not reject unknown
+  keys, so a leftover `escalate_on` is silently ignored and never runs.
+
+  Migration: check the candidate in the calling script and call again with a stronger model when the check fails.
+- **Scratchpad recitation is removed.** The opt-in `scratchpad` agent option, the `std/agent/scratchpad` module, the
+  session scratchpad (`harness.agent.scratchpad`, `set_scratchpad`, `clear_scratchpad`, the `scratchpad` and
+  `scratchpad_version` snapshot fields, the `agent_scratchpad` transcript events and `metadata.agent_scratchpad`) and
+  the `agent_scratchpad_reorganization` agent event are gone. The `agent_loop` no longer adds a scratchpad as a
+  reachability-GC root or write barrier.
+
+  Migration: drop `scratchpad` from agent options and stop calling the three session scratchpad methods. To keep
+  notes across turns, put them in the system prompt or a durable store such as `agent_state_*` or the memory
+  helpers. A reachability-GC projection that needs a write barrier now takes `write_barrier_refs` explicitly. The
+  `scratchpad` key of `transcript_project` stays as caller-supplied root material.
+
+### Added
+
+- Post-turn callbacks can inspect ordered IDs and names of resolved tool calls
+  without receiving their arguments, making missing or duplicate result evidence visible.
+
+### Removed
+
+- **The `completion_tool` agent option and its `task_complete` completion-claim exit are removed.** The option was off
+  by default and no downstream consumer enabled it; a completion is now accepted only through the ordinary finish path
+  and the configured completion judge. The `explicit_completion_claim` stop reason and the
+  `harn.completion_claim_observation.v1` checkpoint no longer exist, and `std/agent/completion_claim` is gone.
+
+  Migration: drop `completion_tool` from agent options (it is now an unknown-option error) and stop importing
+  `std/agent/completion_claim`.
+- **`std/agent/run_meter` and `std/agent/cut_landing` are removed.** The typed
+  run meter, the cut-predicate grammar, and the latched
+  `running -> landing -> stopped` machine had no caller in the agent loop, the
+  CLI, or any stdlib module. Iteration, cost, token, and deadline ceilings, and
+  the message shown when one ends a run, are unchanged and never used them.
+  `std/agent/cut_rules` stays.
+
+  Migration: delete imports of either module.
+
+### Fixed
+
+- ACP profiles include builtin call costs and counts for each profiled turn.
+- Agent loops on Claude Sonnet 5.5 with thinking off no longer fail with a provider 400 when tool narrowing
+  changes the tool list mid-conversation.
+- Checkpoint capture reports plain folders as unavailable without launching Git,
+  avoiding developer-tools installer triggers on macOS without Git installed.
+- Dispatch sessions that stop polling and capturing are now forgotten after the retention period,
+  and their unaccepted captures are cancelled, so dead sessions can no longer fill the inbox's
+  monitor records and refuse new starts. A full inbox also frees the records of quiet sessions when
+  a monitor is cancelled, and a refusal forgets nothing. A host that was only silent resumes with its
+  next `start`; until then capture, claim and accept fail with a typed `DispatchForgotten` error.
+- Verify the exact Harn executable after local builds and setup, so an invalid macOS signature fails before the build
+  reports success.
+- A route's network breaker window now means the same time for every prompt in a
+  long-lived process, because all real clocks share one monotonic origin. Before
+  this, a window opened in one prompt was read through the next prompt's clock and
+  looked longer by the time between the two prompts.
+- An ACP prompt now lets its own first request probe a network-open route
+  immediately. One probe runs at a time per route. If it gets no answer, the rest
+  of that prompt's turn fails fast with `circuit_open` instead of waiting, and other
+  sessions on the route wait out the window as usual. Embedders opt in by holding
+  the guard from `harn_vm::llm::begin_interactive_prompt(session_id)` for the turn,
+  inside its ambient scope. Dropping the guard frees a probe the prompt still owns,
+  so a cancelled prompt does not hold the route half-open.
+- A breaker wait that sends nothing now reports `transient_network` and says no
+  request was sent, not `timeout`.
+- `with_retry` takes an optional `max_elapsed_ms` wall-clock budget.
+- `hostlib_code_index_rename_symbol` renames a Python declaration together with its same-stem type stub when a
+  language server answers. The implementation, the stub, overloads in the stub and every reference change as one
+  edit, from either file as the seed. A same-named declaration in another file or at another scope is left alone.
+- Verification reuse now requires explicit admission that skipping a check omits no required effects;
+  otherwise the check executes again.
+
+### Security
+
+- The `Public metadata privacy` check now runs in its own workflow and is
+  declared as a required status check in `scripts/required_checks.toml`, which
+  `make check-required-checks` holds to the workflows that report each check.
+  Disabling an unrelated gate no longer disables it, a title or body edit
+  re-runs it on the head commit, and an event without a title or body key now
+  fails as unmeasured instead of passing.
+
 ## v0.10.187
 
 ### Breaking
