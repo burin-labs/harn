@@ -15,8 +15,8 @@
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration as StdDuration, Instant};
+use std::sync::Arc;
+use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use harn_clock::Clock;
@@ -32,11 +32,6 @@ tokio::task_local! {
     /// async-task-safe and cannot bleed between concurrently evaluated
     /// Harness values.
     static CAPABILITY_CLOCK: Arc<dyn Clock>;
-}
-
-fn process_start() -> &'static Instant {
-    static PROCESS_START: OnceLock<Instant> = OnceLock::new();
-    PROCESS_START.get_or_init(Instant::now)
 }
 
 /// Monotonic instant snapshot with millisecond resolution. Compares cheaply,
@@ -261,7 +256,7 @@ pub fn now_ms() -> i64 {
 pub fn instant_now() -> ClockInstant {
     active_clock()
         .map(|clock| ClockInstant(StdDuration::from_millis(clock.monotonic_ms().max(0) as u64)))
-        .unwrap_or_else(|| ClockInstant(process_start().elapsed()))
+        .unwrap_or_else(|| ClockInstant(harn_clock::process_monotonic_origin().elapsed()))
 }
 
 /// Advance the topmost mock clock by `duration`. No-op if no clock is

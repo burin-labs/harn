@@ -35,7 +35,7 @@ Agent modules below are under `crates/harn-stdlib/src/stdlib/agent/`.
 | --- | --- |
 | `loop_run.harn`, `loop_turn_options.harn`, `postturn.harn`, `loop_tool_calls.harn` | runner |
 | `transcript.harn`, `control.harn` | runner context and accepted controls |
-| `completion_gate.harn`, `judge.harn`, `completion_evidence.harn`, `completion_requirements.harn` | stop decision |
+| `judge.harn`, `completion_evidence.harn`, `completion_requirements.harn` | stop decision |
 | `stall_*.harn` | stall handler and explicit checkpoint lifetime |
 | `std/workflow` | runner lifetime across workflow stages |
 | `std/eval` and replay primitives | grader support and meter stick statistics |

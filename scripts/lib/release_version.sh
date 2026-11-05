@@ -46,52 +46,21 @@ release_version_is_published() {
   printf '%s\n' "$published"
 }
 
-# Main owes a release while it declares a stable version that is not published.
-# Every main candidate of that version is a release candidate, whatever event
-# built it; promotion takes whichever qualifies first.
-release_version_is_owed() {
-  local repository="${1:?repository required}" version="${2:-}" published
-  release_version_is_canonical "$version" && ! release_version_is_prerelease "$version" || return 1
-  published="$(release_version_is_published "$repository" "$version")" || return 2
-  [[ "$published" == false ]]
-}
-
-release_next_patch_development() {
+# The version main declares after publishing stable <version>. Main always names
+# the next unpublished stable version, so every checkpoint candidate compiles
+# and signs the identity it could be published as.
+release_next_patch_stable() {
   local stable="${1:-}"
   if [[ ! "$stable" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
     return 1
   fi
-  printf '%s.%s.%s-%s\n' \
+  printf '%s.%s.%s\n' \
     "${BASH_REMATCH[1]}" \
     "${BASH_REMATCH[2]}" \
-    "$(( 10#${BASH_REMATCH[3]} + 1 ))" \
-    "$HARN_RELEASE_DEVELOPMENT_PRERELEASE"
+    "$(( 10#${BASH_REMATCH[3]} + 1 ))"
 }
 
-release_development_target_matches_stable() {
-  local development="${1:-}"
-  local stable="${2:-}"
-  local expected
-  expected="$(release_next_patch_development "$stable")" || return 1
-  [[ "$development" == "$expected" ]]
-}
-
-# True when a development identity names the same patch that has since been
-# selected by a stable tag. This is the recovery shape where certification
-# tagged an immutable release candidate without merging that candidate back to
-# main: main remains on X.Y.Z-dev until publication completes, then advances to
-# X.Y.(Z+1)-dev.
-release_development_target_precedes_stable() {
-  local development="${1:-}"
-  local stable="${2:-}"
-  release_version_is_canonical "$stable" || return 1
-  release_version_is_prerelease "$stable" && return 1
-  [[ "$development" == "${stable}-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}" ]]
-}
-
-# Compare numeric release generations without shell integer overflow. A newer
-# workspace retires an unpublished older source, while a published source is
-# handled before this guard so its remaining distribution steps can finish.
+# Compare numeric release generations without shell integer overflow.
 release_workspace_supersedes_source() {
   local source="${1:-}" workspace="${2:-}" index left right
   release_version_is_canonical "$source" || return 2
@@ -127,17 +96,6 @@ release_published_version_for_workspace() {
   return 1
 }
 
-release_head_is_release_commit_for_version() {
-  local version="${1:-}"
-  release_version_is_canonical "$version" || return 1
-  release_version_is_prerelease "$version" && return 1
-  local subject
-  subject="$(git log -1 --format='%s' HEAD)" || return 1
-  [[ "$subject" =~ ^Release\ v"$version"([[:space:]].*)?$ ]] || return 1
-  git show HEAD -- Cargo.toml \
-    | grep -Eq "^\+version = \"$version\"$"
-}
-
 # A required squash merge replaces a certified release commit with a new commit
 # carrying the same patch. Accept that fold without weakening the ancestry check
 # to a matching version or subject: every commit unique to the tag's history
@@ -158,10 +116,13 @@ release_tag_is_represented_in_head() {
   [[ "$saw_commit" == true ]]
 }
 
-# Decide whether a published stable workspace needs the next development
-# identity. This is release state, not branch-tip authorship: after the tag is
-# public, unrelated commits may sit above the release commit without changing
-# which stable version the workspace still declares.
+# Decide whether main must move to the next unpublished stable version. This is
+# release state, not branch-tip authorship: after publication, unrelated commits
+# may sit above the published source while main still declares its version.
+#
+# The published source may also be any older main commit, so the workspace may
+# already be the next version. A -dev workspace is the one-time cutover from the
+# earlier development identity scheme.
 #
 # Results are returned in RELEASE_DEVELOPMENT_BUMP_* globals so workflow source
 # and fixture tests consume one decision owner.
@@ -189,12 +150,17 @@ release_development_bump_plan() {
     return 0
   fi
 
-  local latest_version="${latest_tag#v}"
-  if release_development_target_precedes_stable "$workspace_version" "$latest_version"; then
-    RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$latest_version")" \
-      || return 1
+  local latest_version="${latest_tag#v}" next
+  next="$(release_next_patch_stable "$latest_version")" || return 1
+  if [[ "$workspace_version" == "$next" ]]; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="next_version_already_declared"
+    return 0
+  fi
+  if [[ "$workspace_version" == "${next}-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}" \
+    || "$workspace_version" == "${latest_version}-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}" ]]; then
+    RELEASE_DEVELOPMENT_BUMP_VERSION="$next"
     RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
-    RELEASE_DEVELOPMENT_BUMP_REASON="published_candidate_supersedes_development_identity"
+    RELEASE_DEVELOPMENT_BUMP_REASON="development_identity_becomes_next_version"
     return 0
   fi
   if [[ "$workspace_version" != "$latest_version" ]]; then
@@ -206,10 +172,37 @@ release_development_bump_plan() {
     return 0
   fi
 
-  RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$workspace_version")" \
-    || return 1
+  RELEASE_DEVELOPMENT_BUMP_VERSION="$next"
   RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
-  RELEASE_DEVELOPMENT_BUMP_REASON="published_stable_needs_development_identity"
+  RELEASE_DEVELOPMENT_BUMP_REASON="published_stable_needs_next_version"
+}
+
+# A version may be published only when it is stable, has no release, and is above
+# the newest published release. Older commits stay releasable; an already-used or
+# lower version never does. Unreadable publication state refuses.
+release_require_promotable_version() {
+  local repository="${1:?repository required}" version="${2:-}" published latest
+  if ! release_version_is_canonical "$version" || release_version_is_prerelease "$version"; then
+    echo "error: v$version is not a stable release version" >&2
+    return 1
+  fi
+  if ! published="$(release_version_is_published "$repository" "$version")"; then
+    echo "error: could not read whether v$version is published" >&2
+    return 1
+  fi
+  if [[ "$published" != false ]]; then
+    echo "error: v$version is already published" >&2
+    return 1
+  fi
+  if ! latest="$(gh api "repos/$repository/releases/latest" --jq .tag_name)" \
+    || ! release_tag_is_canonical "$latest" || release_version_is_prerelease "${latest#v}"; then
+    echo "error: could not read the latest published release" >&2
+    return 1
+  fi
+  if ! release_workspace_supersedes_source "${latest#v}" "$version"; then
+    echo "error: v$version is not above the latest published release $latest" >&2
+    return 1
+  fi
 }
 
 # Explicit repair of a stable identity that never became a release. Historical
@@ -273,7 +266,8 @@ release_unpromotable_source_observation() (
     .head_sha == $source and .status == "completed" and
     (.conclusion as $c | ["success","failure","cancelled","timed_out"] | index($c) != null) and
     (.run_attempt | type == "number" and . > 0 and . == floor) and
-    (.event == "merge_group" or (.event == "push" and .head_branch == "main"))
+    .event == "workflow_dispatch" and .head_branch == "main" and
+    .display_title == "Build release binaries [source-candidate]"
   ' <<< "$producer_run" >/dev/null
   run="$(gh api "repos/$repository/actions/runs/$ci")"
   jq -e --arg repository "$repository" --arg source "$source" --arg id "$ci" '
@@ -476,60 +470,6 @@ release_require_unpublished_retirement() (
 # repository. Prints nothing when there is none.
 release_workspace_version() {
   sed -n 's/^version = "\([^"]*\)"$/\1/p' | head -n 1
-}
-
-# A push to main is a release candidate exactly when it changes the workspace
-# version to a canonical stable X.Y.Z. The version decides, never the commit
-# subject: a development bump, a prerelease, or an unchanged version is not a
-# release, and a missing previous version (a root commit) is still a change.
-release_push_is_stable_version_change() {
-  local previous="${1:-}"
-  local current="${2:-}"
-  release_version_is_canonical "$current" \
-    && ! release_version_is_prerelease "$current" \
-    && [[ "$current" != "$previous" ]]
-}
-
-# Recovery may certify a corrected descendant of an unpublished stable cut.
-# Find the version transition on its first-parent history; missing history is
-# not evidence of a release. The caller still checks tags and certification.
-release_recovery_transition() {
-  local source="${1:?source commit required}" version="${2:?version required}"
-  local commits commit toml current owner="$source"
-  release_version_is_canonical "$version" && ! release_version_is_prerelease "$version" || return 1
-  toml="$(git show "$source:Cargo.toml")" || return 1
-  [[ "$(release_workspace_version <<< "$toml")" == "$version" ]] || return 1
-  commits="$(git rev-list --first-parent "$source" -- Cargo.toml)" || return 1
-  while IFS= read -r commit; do
-    [[ -n "$commit" ]] || return 1
-    toml="$(git show "$commit:Cargo.toml")" || return 1
-    current="$(release_workspace_version <<< "$toml")"
-    release_version_is_canonical "$current" || return 1
-    if [[ "$current" != "$version" ]]; then
-      printf '%s\n' "$owner"
-      return 0
-    fi
-    owner="$commit"
-  done <<< "$commits"
-  return 1
-}
-
-# The commits in base..head (first parent, oldest first) that change the
-# workspace version to a stable X.Y.Z. A merge queue lands several entries in
-# one push, so the pushed head's parent need not be the previous main: a push is
-# judged over its whole range, never by HEAD^ alone.
-release_range_release_commits() {
-  local base="${1:?base commit required}"
-  local head="${2:?head commit required}"
-  local previous current commit
-  previous="$(git show "$base:Cargo.toml" | release_workspace_version)"
-  while read -r commit; do
-    current="$(git show "$commit:Cargo.toml" | release_workspace_version)"
-    if release_push_is_stable_version_change "$previous" "$current"; then
-      printf '%s\n' "$commit"
-    fi
-    previous="$current"
-  done < <(git rev-list --reverse --first-parent "$base..$head")
 }
 
 release_tag_is_canonical() {

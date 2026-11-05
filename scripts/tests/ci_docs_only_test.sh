@@ -27,7 +27,7 @@ check true \
   website/package-lock.json \
   changelog.d/4115.fixed.md
 
-check true ./docs/src/stdlib/governors.md
+check true ./docs/src/stdlib/detectors.md
 check false
 check false crates/harn-vm/src/lib.rs
 check false scripts/release_ship.sh

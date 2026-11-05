@@ -103,7 +103,7 @@ Implementation details and trace schemas live in
 ## Input guardrail (`agent_input_guardrail`)
 
 `agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
-builds the input-side bookend for `agent_completion_gate`. It runs before the
+builds a cheap input-side check. It runs before the
 first main `agent_loop` model turn and spreads into loop options as
 `input_guardrail`. A tripwire records an `input_guardrail_verdict` event, writes
 a zero-token assistant explanation, and stops the loop with
@@ -122,24 +122,3 @@ agent_loop(harness, task, system, base_opts + guardrail_opts)
 For an explicit preflight verdict instead of loop composition, use
 `agent_input_guardrail_check(task, classifier?, options?)`. It returns the same
 `{tripwire, reason, label, confidence}` shape.
-
-## Completion gate (`agent_completion_gate`)
-
-`agent_completion_gate(runtime, options)` returns an options fragment for
-`agent_loop`. It checks host-supplied write and verification facts through
-`verify_completion` and can add a bounded LLM judge.
-
-```harn,ignore
-import { agent_completion_gate } from "std/agent/completion_gate"
-
-agent_loop(harness, task, system, base_opts + agent_completion_gate(
-  harness.runtime, {
-    facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-    verify_command: fn() { return host_run_verify() },
-    // optional bounded LLM judge, capped at 5 by default
-    judge: true,
-  }))
-```
-
-See [Completion gate (`std/agent/completion_gate`)](../stdlib/agent-judge.md)
-for the option table, fact types, veto ladder, and bounded judge.

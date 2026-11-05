@@ -9,6 +9,7 @@ pub type AgentLoopRetryOptions = {
   max_attempts?: int,
   base_ms?: int,
   max_ms?: int,
+  max_elapsed_ms?: int,
   backoff?: LlmRetryBackoff,
   jitter?: LlmRetryJitter,
   honor_retry_after?: bool,

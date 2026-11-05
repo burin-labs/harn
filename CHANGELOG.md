@@ -13,6 +13,13 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Breaking
 
+- **Sandboxed sessions can hold children to a host list.** `AcpSandboxConfig::child_network_allow` holds each
+  confined child with network authority to one deny-by-default proxy that admits only the listed hosts.
+  `ProcessSandboxPolicy::deny_network` gives a child no IP networking at any side-effect level.
+
+  Migration: Rust consumers constructing `AcpSandboxConfig` or `ProcessSandboxPolicy` literals must provide the new
+  fields or use `..Default::default()`. `None` and `false` keep today's behavior.
+
 - **Cache usage preserves omitted read and write counts separately (#7320).**
   vLLM cache accounting now recognizes `created_cache_tokens`. Missing counters
   stay unknown through retries, live notifications, and saved run reports;
@@ -57,6 +64,10 @@ keeps condensed series summaries instead of full per-patch history.
   text is from an assistant. Regenerate strict protocol bindings before consuming the new field.
 
 ### Added
+
+- Child-process egress through the managed proxy now works on Linux when the policy names the namespace launcher.
+  The child runs in a private network namespace whose only way out is the proxy, so raw sockets, datagrams, and
+  direct DNS have no route.
 
 - Add an offline Claude thread wire-state primitive with exclusive cursor ownership,
   full-history recovery and deterministic protocol tests. Existing sessions and

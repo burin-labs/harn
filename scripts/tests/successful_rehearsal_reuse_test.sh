@@ -10,6 +10,12 @@ source_sha=1111111111111111111111111111111111111111
 consumer_sha=2222222222222222222222222222222222222222
 export GH_TOKEN=consumer-read REHEARSAL_PROMOTION_READ_TOKEN=promotion-read
 
+# The census below reads these job names; a rename must not leave it refusing.
+for job in 'Resolve certified source' 'Measure consumer rehearsal' 'Require publication qualification'; do
+  grep -Fq "name: $job" "$root/.github/workflows/promote-release.yml" \
+    || { echo "FAIL: promote-release.yml has no job named $job" >&2; exit 1; }
+done
+
 fixture_step() {
   local file=$1 command=$2
   shift 2
@@ -51,8 +57,8 @@ gh() {
     *'/actions/runs/100/jobs?'*)
       jq -nc --arg mode "${mode:-}" '[{total_count:(if $mode == "partial" then 4 else 3 end),jobs:[
         {id:1,run_id:100,run_attempt:1,name:"Resolve certified source",status:"completed",conclusion:"success"},
-        {id:2,run_id:100,run_attempt:1,name:"Recover missing consumer rehearsal / Consumer canary",status:"completed",conclusion:(if $mode == "failed-parent-job" then "failure" else "success" end)},
-        {id:3,run_id:100,run_attempt:1,name:"Require measured consumer completion",status:"completed",conclusion:"success"}]}]' ;;
+        {id:2,run_id:100,run_attempt:1,name:"Measure consumer rehearsal / Consumer canary",status:"completed",conclusion:(if $mode == "failed-parent-job" then "failure" else "success" end)},
+        {id:3,run_id:100,run_attempt:1,name:"Require publication qualification",status:"completed",conclusion:"success"}]}]' ;;
     *'/actions/runs/300/jobs?'*)
       jq -nc --arg mode "${mode:-}" '[{total_count:3,jobs:[
         {id:11,run_id:300,run_attempt:1,name:"Prove the candidate against the harn-linked TUI suite",status:"completed",conclusion:"success"},
