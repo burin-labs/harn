@@ -551,7 +551,6 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
 /// the "recap of a recap = the same recap, updated" contract that stops recaps
 /// from compounding across compactions.
 pub const RECAP_HEADER_SENTINEL: &str = "via observation masking]";
-pub const CLASSIFIED_RECAP_HEADER_SENTINEL: &str = "via classified compaction]";
 
 /// Byte cap on a single carried-forward prior recap. Bounds the compound-growth
 /// term independently of the per-message budget so a chain of compactions
@@ -566,7 +565,7 @@ const ASSISTANT_PREVIEW_CHARS: usize = 240;
 
 /// Whether a message body is a previous observation-mask recap.
 pub fn is_prior_recap(content: &str) -> bool {
-    content.contains(RECAP_HEADER_SENTINEL) || content.contains(CLASSIFIED_RECAP_HEADER_SENTINEL)
+    content.contains(RECAP_HEADER_SENTINEL)
 }
 
 /// Render one archived assistant turn as a bounded preview. Short turns pass

@@ -37,8 +37,8 @@ if ! grep -Fq "inputs.benchmark_only && format('benchmark-{0}-{1}', inputs.bench
   echo "build_revision_workflow_test: explicit and default benchmark sources need a source-and-policy-qualified concurrency lane" >&2
   exit 1
 fi
-if ! grep -Fq "((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source_candidate)) && 'source-main')" "$release_workflow"; then
-  echo "build_revision_workflow_test: manual and scheduled source candidates must share their separate concurrency lane" >&2
+if ! grep -Fq "(github.event_name == 'workflow_dispatch' && inputs.source_candidate && 'source-main')" "$release_workflow"; then
+  echo "build_revision_workflow_test: source candidates need their own concurrency lane" >&2
   exit 1
 fi
 

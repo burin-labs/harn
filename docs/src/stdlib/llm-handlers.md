@@ -133,7 +133,7 @@ non-empty.
 |---|---|---|
 | `llm_caller(harness, opts?)` | `(Harness, dict?) -> caller` | From `std/llm/caller`. Combines the default caller with typed retries; `opts.retry` configures `with_retry`. |
 | `default_llm_caller(agent, llm)` | `(HarnessAgent, HarnessLlm) -> caller` | From `std/llm/caller`. Makes one logical LLM call and returns `{ok: true, value}` or a classified failure envelope. Never throws. |
-| `with_retry(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/provider_error/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
+| `with_retry(harness, next, opts?)` | `(Harness, caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Optional `max_elapsed_ms` starts no attempt unless the time spent, the backoff, and another attempt as long as the last one all fit, and adds `retry_budget_exhausted: true` when it stops a retry. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/provider_error/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
 | `with_fallback(agent, callers)` | `(HarnessAgent, list<caller>) -> caller` | Try callers in order; advance on `{ok: false}`. On success: result + `{fallback_index, fallback_total}`. Emits `llm_fallback_attempt` per attempt. |
 | `with_shadow(agent, primary, shadow, opts?)` | `(HarnessAgent, caller, caller, dict?) -> caller` | Run both via `parallel each`; return primary. `sampler(call) -> bool`, `on_diff(p, s) -> nil`, `diff_when ∈ {"any","ok_only"}`. Emits `llm_shadow_diff` when text differs. |
 | `with_prompt_rewrite(next, rewriter)` | `(caller, fn(prompt, system, opts) -> {prompt?, system?, opts?}) -> caller` | Rewrite the call before delegating; missing keys fall back to original. Used by `refine_caller`. |
@@ -302,11 +302,6 @@ const policy = harness.llm.routing_policy({
   latency: {race_after_ms: 5000},
   budget:  {per_call_usd: 0.5, on_exceed: "abort"},
   observe: {emit_event: "billing.routing_decision"},
-  // optional verifier chain
-  escalate_on: [
-    {kind: "typecheck"},
-    {kind: "lint", forbidden_patterns: ["TODO"], on_fail: "refine"},
-  ],
 })
 
 const result = harness.llm.call(
@@ -314,22 +309,10 @@ const result = harness.llm.call(
 )
 ```
 
-`escalate_on` makes frontier escalation **conditional on a
-code-quality signal** rather than static routing. Verifiers see the
-candidate's text after a successful link: `accept` keeps it,
-`refine` retries the same link with the verifier's reason appended to
-the prompt (capped by `max_refines_per_link`, default `1`),
-`escalate` advances to the next link. Three built-in kinds —
-`typecheck` (harn-parser), `lint` (regex `forbidden_patterns` /
-`required_patterns` / `max_line_length`), and `test_run` (spawns a
-configurable command with the candidate on stdin) — let scripts gate
-"only call Opus when Devstral's answer doesn't typecheck." See the
-quickref for the full per-kind option list.
-
 Compared to `compose([with_routing, with_retry, with_fallback])`, the
 primitive is replay-deterministic (every attempt rides on the result
 envelope's `routing` block), records its own tape events
-(`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,verifier_signal,exhausted}`),
+(`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}`),
 and pays for `latency.race_after_ms` racing out-of-the-box. Migrate
 existing chains by replacing the wrapper composition with one
 `harness.llm.routing_policy({...})` call; layer `compose([with_logging,

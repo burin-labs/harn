@@ -39,6 +39,8 @@ const SECRET_KEY: &str = "token";
 /// holds it only if the unprofiled grant registered it.
 const OTHER_KEY: &str = "other";
 const OTHER_PROBE: &str = "harn-probe-unprofiled-grant";
+const SESSION_KEY: &str = "session";
+const SESSION_PROBE: &str = "harn-probe-session-secret";
 const PROBE_BASIC: &str = "eC1hY2Nlc3MtdG9rZW46aGFybi1wcm9iZS1naC1ncmFudA";
 
 const FAKE_GH: &str = r#"#!/bin/sh
@@ -308,7 +310,8 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
     let provider: std::sync::Arc<dyn SecretProvider> = std::sync::Arc::new(
         MemorySecretProvider::new(SECRET_ACCOUNT)
             .with_secret(SecretId::new(SECRET_ACCOUNT, SECRET_KEY), PROBE)
-            .with_secret(SecretId::new(SECRET_ACCOUNT, OTHER_KEY), OTHER_PROBE),
+            .with_secret(SecretId::new(SECRET_ACCOUNT, OTHER_KEY), OTHER_PROBE)
+            .with_secret(SecretId::new(SECRET_ACCOUNT, SESSION_KEY), SESSION_PROBE),
     );
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -739,6 +742,98 @@ fn a_grant_to_an_unprofiled_program_is_redacted_from_its_output() {
         !out.contains(OTHER_PROBE),
         "an unprofiled grant was printed: {out}"
     );
+}
+
+/// A host also grants paths and modes for the whole session. Hiding those would
+/// rewrite every command's output that names the project, so only a secret-store
+/// grant and a session grant named as a credential are redacted.
+#[test]
+fn a_session_grant_is_redacted_only_when_it_is_a_credential() {
+    const PROJECT_ROOT: &str = "/harn-probe/session-project-root";
+    const MODE: &str = "harn-probe-literal-mode";
+    const TOKEN: &str = "harn-probe-session-credential";
+    const RENAMED: &str = "harn-probe-renamed-credential";
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let env_grant = |var: &str| GrantSpec {
+        name: var.to_ascii_lowercase(),
+        source: GrantSourceSpec::Env {
+            var: var.to_string(),
+        },
+        expose_as_env: Some(var.to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    let literal = GrantSpec {
+        name: "probe_mode".to_string(),
+        source: GrantSourceSpec::Literal {
+            value: MODE.to_string(),
+        },
+        expose_as_env: Some("PROBE_MODE".to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    // Exposed under a plain name, the source variable still names a credential.
+    let renamed = GrantSpec {
+        name: "probe_renamed".to_string(),
+        source: GrantSourceSpec::Env {
+            var: "PROBE_UPSTREAM_TOKEN".to_string(),
+        },
+        expose_as_env: Some("PROBE_UPSTREAM".to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    // The name says nothing about a credential: the source alone decides.
+    let stored = GrantSpec {
+        name: "probe_stored".to_string(),
+        source: GrantSourceSpec::SecretStore {
+            account: SECRET_ACCOUNT.to_string(),
+            key: SESSION_KEY.to_string(),
+        },
+        expose_as_env: Some("PROBE_STORED".to_string()),
+        for_command: None,
+        expose_to: Default::default(),
+    };
+    let environment = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
+        vec![
+            env_grant("PROBE_PROJECT_ROOT"),
+            env_grant("PROBE_SESSION_TOKEN"),
+            literal,
+            renamed,
+            stored,
+        ],
+        &|name| match name {
+            "PROBE_PROJECT_ROOT" => Some(PROJECT_ROOT.to_string()),
+            "PROBE_SESSION_TOKEN" => Some(TOKEN.to_string()),
+            "PROBE_UPSTREAM_TOKEN" => Some(RENAMED.to_string()),
+            _ => std::env::var(name).ok(),
+        },
+    )
+    .expect("the granted policy must launch");
+    harn_vm::stdlib::process::set_session_environment(Some(environment));
+    let out = fixture.argv(&["printenv", "PROBE_PROJECT_ROOT"], &[]);
+    assert!(out.contains(PROJECT_ROOT), "a path was hidden: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_MODE"], &[]);
+    assert!(out.contains(MODE), "a literal was hidden: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_SESSION_TOKEN"], &[]);
+    assert!(out.contains("[redacted]"), "the grant never arrived: {out}");
+    assert!(!out.contains(TOKEN), "a credential was printed: {out}");
+    let out = fixture.argv(&["printenv", "PROBE_UPSTREAM"], &[]);
+    assert!(
+        out.contains("[redacted]"),
+        "the rename never arrived: {out}"
+    );
+    assert!(
+        !out.contains(RENAMED),
+        "a renamed credential was printed: {out}"
+    );
+    let out = fixture.argv(&["printenv", "PROBE_STORED"], &[]);
+    assert!(
+        out.contains("[redacted]"),
+        "the secret never arrived: {out}"
+    );
+    assert!(!out.contains(SESSION_PROBE), "a secret was printed: {out}");
 }
 
 /// A script `gh` on a trusted `PATH` entry, such as a version-manager shim

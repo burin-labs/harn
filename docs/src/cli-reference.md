@@ -430,10 +430,14 @@ A granted `gh` receives no caller or inherited variable except `LANG`,
 table above. Proxy, TLS (`SSL_CERT_FILE`, `SSL_CERT_DIR`), debug and token
 variables a caller sets are dropped.
 
-Every value any grant hands to a child, for any program, is redacted from that command's stdout
+Every credential a grant hands to a child, for any program, is redacted from that command's stdout
 and stderr, from events, and from transcripts, including a value printed
 across several writes, its base64 form, the base64 of `x-access-token:VALUE`,
 and its percent-encoded form. Values shorter than 8 bytes are not redacted.
+A credential is a `secret_store` grant, any grant bound to one command, or a session-wide `env:`
+grant whose source or exposed variable name contains `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`,
+`OAUTH_KEY`, `HEADERS` or `PRIVATE_KEY`, in any case. Other session-wide `env:` grants and literals
+stay readable.
 
 Git configuration that names other programs per repository, such as filter
 drivers or `diff.external`, is not overridden, and no granted read reaches it:

@@ -216,7 +216,6 @@
         "_meta": {
           "harn": {
             "archivedMessages": 3,
-            "classification": null,
             "compactionPolicy": {
               "instruction_mode": "extend",
               "instruction_source": "host",

@@ -344,3 +344,107 @@ async fn an_unreadable_spend_refuses_only_a_capped_turn() {
             .await;
     }
 }
+
+const CALL_TOKENS: i64 = 12;
+
+/// Every model call uses exactly `CALL_TOKENS`, so the ceiling arithmetic is
+/// the test's, not a tokenizer's.
+fn install_token_mocks(count: usize) -> MockModeGuard {
+    let mocks = (0..count)
+        .map(|_| {
+            harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
+                "text": "still working",
+                "model": "gpt-4o-mini",
+                "provider": "mock",
+                "input_tokens": CALL_TOKENS / 2,
+                "output_tokens": CALL_TOKENS / 2,
+            }))
+            .expect("mock fixture")
+        })
+        .collect();
+    harn_vm::llm::install_cli_llm_mocks(mocks);
+    MockModeGuard
+}
+
+fn agent_loop_pipeline() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(project.join(".harn")).expect("project state dir");
+    let pipeline = project.join("ceiling.harn");
+    std::fs::write(
+        &pipeline,
+        r###"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+pipeline main(harness: Harness) {
+  const session = "llm-tokens-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "Keep replying.",
+      nil,
+      {
+        provider: "mock",
+        model: "gpt-4o-mini",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        max_nudges: 5,
+        final_wrapup: false,
+      },
+    ) },
+  )
+  const events = captured.events.filter({ event -> event.type == "budget_exhausted" })
+  harness.stdio.println(
+    captured.result.status + " " + to_string(captured.result.stop_reason) + " "
+      + to_string(len(events)) + " " + to_string(events[0]?.kind),
+  )
+}
+"###,
+    )
+    .expect("write pipeline");
+    (dir, pipeline)
+}
+
+/// The ACP host's `llm_tokens` ceiling is the execution-wide token cap. A run
+/// that crosses it ends `budget_exhausted` and emits the one `budget_exhausted`
+/// event; the same run under a ceiling it never reaches goes on to its
+/// iteration cap, so the first case cannot pass without the ceiling.
+async fn run_under_token_ceiling(ceiling: u64) -> String {
+    harn_vm::reset_thread_local_state();
+    let _mocks = install_token_mocks(6);
+    let (_dir, pipeline) = agent_loop_pipeline();
+    let project = pipeline.parent().unwrap().to_path_buf();
+    let config = AcpServerConfig::new(Some(pipeline.to_string_lossy().into_owned())).with_budget(
+        BudgetSpec {
+            llm_tokens: Some(ceiling),
+            ..BudgetSpec::default()
+        },
+    );
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session_with_config(config, serde_json::json!(project)).await;
+            let line = run_prompt(&request_tx, &mut response_rx, &session_id, 2).await;
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+            line
+        })
+        .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_llm_tokens_ceiling_ends_a_run_with_the_budget_exhausted_message() {
+    let _reset = ResetActiveEventLog;
+    let capped = run_under_token_ceiling(CALL_TOKENS as u64 + 1).await;
+    assert_eq!(
+        capped,
+        "budget_exhausted budget_exhausted 1 budget_exhausted"
+    );
+    let roomy = run_under_token_ceiling(100_000).await;
+    assert_eq!(roomy, "budget_exhausted max_iterations 1 max_iterations");
+}

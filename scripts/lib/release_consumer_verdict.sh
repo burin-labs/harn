@@ -521,7 +521,7 @@ release_authenticated_successful_rehearsal() (
   ' <<< "$pages")" || return 1
   scratch="$(mktemp -d)" || return 1
   trap 'rm -rf "$scratch"' EXIT
-  for name in 'Resolve certified source' 'Recover missing consumer rehearsal / Consumer canary' 'Require measured consumer completion'; do
+  for name in 'Resolve certified source' 'Measure consumer rehearsal / Consumer canary' 'Require publication qualification'; do
     id="$(jq -er --arg name "$name" '
       [.[]|select(.name == $name)] |
       if length == 1 and .[0].status == "completed" and .[0].conclusion == "success"
@@ -529,7 +529,7 @@ release_authenticated_successful_rehearsal() (
     ' <<< "$jobs")" || return 1
     case "$name" in
       'Resolve certified source') log=resolver ;;
-      'Require measured consumer completion') log=authorization ;;
+      'Require publication qualification') log=authorization ;;
       *) log=consumer ;;
     esac
     gh api --allow-escape-sequences "repos/$repository/actions/jobs/$id/logs" > "$scratch/$log" || return 1
@@ -738,8 +738,8 @@ release_authenticated_failed_rehearsal() (
   trap 'rm -rf "$scratch"' EXIT
   for item in \
     "$resolver|Resolve certified source|success|resolver" \
-    "$consumer|Recover missing consumer rehearsal / Consumer canary|failure|consumer" \
-    "$authorization|Require measured consumer completion|failure|authorization"; do
+    "$consumer|Measure consumer rehearsal / Consumer canary|failure|consumer" \
+    "$authorization|Require publication qualification|failure|authorization"; do
     IFS='|' read -r id name verdict log <<< "$item"
     job="$(gh api "repos/$repository/actions/jobs/$id")"
     jq -e --arg id "$id" --arg parent "$parent" --arg name "$name" \

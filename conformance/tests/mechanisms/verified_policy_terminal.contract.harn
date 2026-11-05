@@ -1,4 +1,3 @@
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { CompletionDirectiveReceipt } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
@@ -8,6 +7,7 @@ import {
 } from "std/agent/loop_terminal"
 import { llm_text, with_llm_script } from "std/testing"
 import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+import { fixture_verify_completion } from "../../fixtures/agents/verify_completion_fixture"
 
 fn accepted_verification() -> CompletionDirectiveReceipt {
   return {
@@ -102,17 +102,16 @@ fn run_live_case(
             },
             stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true},
           }
-            + agent_completion_gate(
-              harness.runtime,
-              {
-                facts: { _ctx ->
+            + {
+              verify_completion: fixture_verify_completion(
+                { _ctx ->
                   return {
                     source_write_count: 1,
                     verify: {ok: verify_passes, command: "fixture-verify"},
                   }
                 },
-              },
-            ),
+              ),
+            },
         ) },
       )
       return captured.result
@@ -163,14 +162,8 @@ pipeline default(harness: Harness) {
     )
     assert_eq(unchanged.final_status, status)
   }
-  const natural = __agent_loop_resolve_verified_policy_stop(
-    "done",
-    "explicit_completion_claim",
-    evidence,
-    nil,
-    nil,
-  )
-  assert_eq(natural.stop_reason, "explicit_completion_claim")
+  const natural = __agent_loop_resolve_verified_policy_stop("done", "natural", evidence, nil, nil)
+  assert_eq(natural.stop_reason, "natural")
   const red = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
       + {verification: {oracle_expected: true, observed: "failed", command: "fixture-verify"}},

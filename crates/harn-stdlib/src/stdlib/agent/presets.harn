@@ -35,15 +35,6 @@ import {
 
 // Fill-nil pack keys a spec may carry. Each is a lower-priority default that
 // fills ONLY a nil/absent option key; an explicit caller value always wins.
-// `completion_gate` carries a `CompletionGateOptions` spec so a preset can ship a
-// default done-time gate; a consumer lowers it with `agent_completion_gate(...)`
-// (std/agent/judge) and spreads the result into `agent_loop` options.
-// `lane_policy` carries `{rows, task_key?, hard_keep?}` — a consumer reads the
-// task text out of its own opts (e.g. `opts.task_key`) and lowers it with
-// `lane_policy(pack.lane_policy.rows, task, opts, pack.lane_policy)`
-// (std/agent/lanes). `overlay_policy` carries `{rows, mode, lane?, overrides?}` —
-// lowered with `overlay_policy(pack.overlay_policy.rows, pack.overlay_policy.mode,
-// opts, pack.overlay_policy)` (std/agent/overlays).
 // `pin_policy` carries a preset's default compaction-pin policy (see
 // std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
 // into `opts.pin_policy` for pin-aware harnesses.
@@ -55,13 +46,10 @@ import {
 // actually reaches the effective spec.
 const __PRESET_PACK_KEYS = [
   "budget",
-  "completion_gate",
   "fallback_chain",
   "iteration_budget",
   "ladder",
-  "lane_policy",
   "models",
-  "overlay_policy",
   "pin_policy",
   "provider",
   "stall_diagnostics",
@@ -190,56 +178,13 @@ fn __builtin_preset_specs() {
     },
     repair: {
       family: "generic",
-      pack: {
-        budget: {total_budget_usd: 10.0},
-        // Mirrors `std/agent/lanes::default_lane_rows()` inline (presets.harn
-        // intentionally does not import std/agent/lanes — see the pack-key
-        // comment above `__PRESET_PACK_KEYS`); a consumer may just as well
-        // pass `default_lane_rows()` directly instead of this row.
-        lane_policy: {
-          hard_keep: [],
-          rows: [
-            {
-              match: {explicit_target_paths: {max: 4, min: 1}},
-              name: "explicit_patch",
-              tool_names: [
-                "look",
-                "search",
-                "edit",
-                "run",
-                "poll_command",
-                "wait_command",
-                "kill_command",
-                "read_command_output",
-              ],
-            },
-            {default: true, name: "general"},
-          ],
-        },
-        ladder: "agent_frontier",
-        timeout_ms: 180000,
-      },
+      pack: {budget: {total_budget_usd: 10.0}, ladder: "agent_frontier", timeout_ms: 180000},
     },
     review_captain: {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 15.0},
         ladder: "agent_frontier",
-        // Mirrors `std/agent/overlays::default_overlay_rows()`'s `agent` row
-        // inline (see the lane_policy comment above on why presets.harn
-        // avoids importing the sibling module).
-        overlay_policy: {
-          mode: "agent",
-          rows: [
-            {
-              lines: [
-                "Batch related read-only tool calls together before acting; avoid narrating between them.",
-                "Prefer acting on information the task and current tools already provide over asking a clarifying question.",
-              ],
-              mode: "agent",
-            },
-          ],
-        },
         pin_policy: captain_pins,
         timeout_ms: 240000,
       },
@@ -280,7 +225,7 @@ fn __preset_registry() {
  * behavior template (captains additionally compose the opt-in tool/LLM
  * middleware layers), and `pack` supplies fill-nil option defaults
  * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `models`,
- * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`,
+ * `pin_policy`,
  * `iteration_budget`, `stall_diagnostics`) that fill ONLY nil/absent keys.
  * The spec shape is validated; an invalid family or unknown pack key throws.
  * Returns the normalized kind string.
@@ -849,8 +794,8 @@ fn __apply_preset_pack(opts: any, kind: any) {
  * The returned dict is a plain `agent_loop` options dict. Callers can
  * spread it into `agent_loop(harness, ...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
- * timeout, cost budget, model ladder, completion_gate, lane_policy,
- * overlay_policy, pin policy, iteration_budget, stall_diagnostics) into
+ * timeout, cost budget, model ladder,
+ * pin policy, iteration_budget, stall_diagnostics) into
  * nil/absent keys, and runs the shared
  * agent-loop default transport retry normalizer (opt out with `retry: false`
  * or `llm_retry: nil`). Captain presets additionally compose:

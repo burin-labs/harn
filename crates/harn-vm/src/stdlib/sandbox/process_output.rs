@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     fn every_process_launch_surface_rejects_managed_proxy_without_kernel_boundary() {
         let policy = CapabilityPolicy {
             process_network_proxy: Some(ProcessNetworkProxy {

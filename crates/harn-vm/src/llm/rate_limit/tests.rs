@@ -1,6 +1,8 @@
 use super::*;
 use crate::llm::api::LlmCallOptions;
 
+mod prompt_probe;
+
 #[test]
 fn llm_call_admission_captures_consumer_session_and_reroute_policy() {
     let mut opts = LlmCallOptions {
@@ -1006,6 +1008,255 @@ fn breaker_reopens_when_half_open_probe_fails() {
         b.admit(after + 1).is_some(),
         "a failed half-open probe must re-open the breaker"
     );
+}
+
+/// A prompt in session `id` offers the probe and its first request takes it.
+fn prompt_probes(b: &mut NetworkBreaker, now_ms: u128, id: &str) {
+    b.offer_interactive_probe(id);
+    b.take_interactive_probe(now_ms, Some(id));
+}
+
+#[test]
+fn interactive_probe_skips_the_open_window_and_success_closes_the_breaker() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    assert!(b.admit(1).is_some(), "unattended callers still wait");
+    prompt_probes(&mut b, 1, "a");
+    assert!(
+        b.admit(1).is_none(),
+        "the prompt's first request is the probe"
+    );
+    assert!(
+        b.admit(1).is_some(),
+        "the grant admits one probe, not a storm"
+    );
+    b.record_success();
+    assert_eq!(b.state, BreakerState::Closed);
+    assert_eq!(b.interactive_probe, None);
+}
+
+#[test]
+fn a_prompts_offer_changes_nothing_for_other_callers() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    b.offer_interactive_probe("a");
+    b.take_interactive_probe(1, Some("background"));
+    assert!(b.admit(1).is_some(), "the window still holds");
+    assert_eq!(b.interactive_probe, None);
+}
+
+#[test]
+fn a_failed_probe_fails_only_its_own_prompts_turn() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    prompt_probes(&mut b, 1, "a");
+    assert!(b.admit(1).is_none());
+    b.record_network_failure(9_000);
+    let (_, reason) = b.blocked(9_001).expect("reopened");
+    assert_eq!(
+        b.reason_for_caller(reason, Some("a")),
+        BreakerOpenReason::InteractiveProbeFailed
+    );
+    assert_eq!(
+        b.reason_for_caller(reason, Some("background")),
+        BreakerOpenReason::Network
+    );
+    assert_eq!(
+        b.reason_for_caller(reason, None),
+        BreakerOpenReason::Network
+    );
+}
+
+#[test]
+fn prompts_at_once_send_one_probe_and_the_next_goes_when_it_answers() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    b.offer_interactive_probe("a");
+    b.offer_interactive_probe("b");
+    b.offer_interactive_probe("c");
+    b.take_interactive_probe(1, Some("a"));
+    assert!(b.admit(1).is_none(), "a is the probe");
+    for id in ["b", "c"] {
+        b.take_interactive_probe(2, Some(id));
+        assert_eq!(b.admit(2).expect("in flight").0, Duration::ZERO);
+    }
+    assert_eq!(b.network_opens, 1);
+
+    b.record_network_failure(3);
+    b.take_interactive_probe(4, Some("b"));
+    assert!(b.admit(4).is_none(), "b's offer survived the wait");
+    assert_eq!(
+        b.admit(4).expect("in flight").0,
+        Duration::ZERO,
+        "not c too"
+    );
+}
+
+#[test]
+fn failed_interactive_probe_reopens_and_fails_that_turn_fast_then_later_callers_wait() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    prompt_probes(&mut b, 1, "a");
+    assert!(b.admit(1).is_none());
+    b.record_network_failure(9_000);
+    let (remaining, reason) = b.admit(9_001).expect("a failed probe reopens the breaker");
+    assert_eq!(reason, BreakerOpenReason::InteractiveProbeFailed);
+    assert_eq!(
+        remaining.as_millis(),
+        u128::from(NETWORK_BREAKER_OPEN_MS_SECOND) - 1
+    );
+
+    // Once the window passes, an unattended probe that also fails waits as usual.
+    let after = 9_000 + u128::from(NETWORK_BREAKER_OPEN_MS_SECOND);
+    assert!(b.admit(after).is_none());
+    b.record_network_failure(after);
+    assert_eq!(
+        b.admit(after).expect("reopened").1,
+        BreakerOpenReason::Network
+    );
+}
+
+#[test]
+fn interactive_probe_takes_over_a_probe_that_never_reported_and_grows_no_window() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        b.record_network_failure(0);
+    }
+    let after = u128::from(NETWORK_BREAKER_OPEN_MS);
+    assert!(
+        b.admit(after).is_none(),
+        "a probe whose owner is then cancelled"
+    );
+    assert_eq!(b.admit(after).expect("held").0, Duration::ZERO);
+    prompt_probes(&mut b, after + 1, "a");
+    assert_eq!(
+        b.admit(after + 1).expect("still its probe").0,
+        Duration::ZERO
+    );
+    let stale = after + u128::from(NETWORK_BREAKER_OPEN_MS);
+    b.take_interactive_probe(stale, Some("a"));
+    assert_eq!(b.network_opens, 1, "a grant is not a failure");
+    assert!(b.admit(stale).is_none());
+}
+
+#[test]
+fn prompt_after_a_failed_turn_below_the_threshold_still_fails_fast_when_the_provider_stays_down() {
+    let mut b = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
+        b.record_network_failure(0);
+    }
+    prompt_probes(&mut b, 1, "a");
+    assert!(b.admit(1).is_none(), "the route is still closed");
+    b.record_network_failure(8_000);
+    assert_eq!(
+        b.admit(8_001).expect("the failure trips the breaker").1,
+        BreakerOpenReason::InteractiveProbeFailed
+    );
+
+    let mut healed = NetworkBreaker::default();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD - 1 {
+        healed.record_network_failure(0);
+    }
+    prompt_probes(&mut healed, 1, "a");
+    healed.record_success();
+    assert_eq!(healed.interactive_probe, None);
+}
+
+#[test]
+fn interactive_probe_leaves_closed_and_unproductive_routes_alone() {
+    let mut closed = NetworkBreaker::default();
+    prompt_probes(&mut closed, 1, "a");
+    assert_eq!(closed.state, BreakerState::Closed);
+    assert_eq!(closed.interactive_probe, None);
+    assert!(closed.probe_offers.is_empty());
+
+    let mut empty = NetworkBreaker::default();
+    for _ in 0..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+        empty.record_unproductive_completion(0);
+    }
+    prompt_probes(&mut empty, 1, "a");
+    assert_eq!(
+        empty.admit(1).expect("still open").1,
+        BreakerOpenReason::UnproductiveCompletion
+    );
+}
+
+#[test]
+fn a_window_opened_through_one_real_clock_holds_when_read_through_a_later_one() {
+    let _env = crate::llm::env_guard();
+    // A paused runtime built first would read before the origin, and the
+    // breaker's unsigned reading would clamp the window's opening time.
+    harn_clock::process_monotonic_origin();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let mut opts = crate::llm::api::options::base_opts("clock-origin-window");
+        opts.model = "clock-origin-model".into();
+        crate::clock_mock::scope_capability_clock(harn_clock::RealClock::arc(), async {
+            for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+                observe_network_outcome_for_llm_call(&opts, true);
+            }
+        })
+        .await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        let (remaining, _) =
+            crate::clock_mock::scope_capability_clock(harn_clock::RealClock::arc(), async {
+                network_breaker_admission(&opts)
+            })
+            .await
+            .expect("still open");
+        assert!(
+            remaining <= Duration::from_millis(NETWORK_BREAKER_OPEN_MS - 50),
+            "a {NETWORK_BREAKER_OPEN_MS}ms window read 50ms later had {remaining:?} left"
+        );
+    });
+}
+
+#[test]
+fn network_recovery_that_runs_out_its_budget_says_nothing_was_sent() {
+    let _env = crate::llm::env_guard();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("runtime");
+    let mut opts = crate::llm::api::options::base_opts("recovery-budget-route");
+    opts.model = "recovery-budget-model".into();
+    opts.timeout = Some(1);
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        observe_network_outcome_for_llm_call(&opts, true);
+    }
+    // Grow the window past the one-second budget.
+    {
+        let mut registry_guard = registry().lock().expect("registry");
+        for key in limiter_keys(&opts.provider, &opts.model) {
+            limiter_for_key(&mut registry_guard.limiters, &key)
+                .breaker
+                .state = BreakerState::Open {
+                until_ms: crate::clock_mock::instant_now().as_millis() + 60_000,
+            };
+        }
+    }
+    let error = runtime
+        .block_on(await_network_breaker_for_llm_call(&opts))
+        .expect_err("the budget runs out");
+    assert_eq!(
+        crate::value::error_to_category(&error),
+        crate::value::ErrorCategory::TransientNetwork
+    );
+    assert!(error.to_string().contains("no request was sent"), "{error}");
 }
 
 #[test]

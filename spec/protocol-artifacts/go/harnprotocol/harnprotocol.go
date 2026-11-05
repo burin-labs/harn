@@ -175,7 +175,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"cache_miss",
 	"capability_gap",
 	"code_librarian_query_nl_fallback",
-	"compass_routing_decision",
 	"composition_child_call",
 	"composition_child_result",
 	"composition_error",
@@ -1586,7 +1585,6 @@ type ACPTranscriptCompactedUpdateMetaHarn struct {
 	CompactionPolicy        json.RawMessage `json:"compactionPolicy"`
 	Recap                   json.RawMessage `json:"recap"`
 	SourceMeasurement       json.RawMessage `json:"sourceMeasurement"`
-	Classification          json.RawMessage `json:"classification"`
 	Replayed                *bool           `json:"replayed,omitempty"`
 }
 
@@ -2387,17 +2385,6 @@ type HarnAgentEventCodeLibrarianQueryNlFallback struct {
 	MctsExpansions  uint64  `json:"mctsExpansions"`
 	ResultCount     uint64  `json:"resultCount"`
 	Text            string  `json:"text"`
-}
-
-type HarnAgentEventCompassRoutingDecision struct {
-	ToolCallID   string  `json:"toolCallId"`
-	Mode         string  `json:"mode"`
-	Action       string  `json:"action"`
-	Persona      string  `json:"persona"`
-	OriginalTool string  `json:"originalTool"`
-	RoutedTool   string  `json:"routedTool"`
-	TargetTool   string  `json:"targetTool"`
-	Path         *string `json:"path,omitempty"`
 }
 
 type HarnAgentEventCompositionChildCall struct {

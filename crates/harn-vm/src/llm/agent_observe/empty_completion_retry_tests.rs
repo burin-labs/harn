@@ -157,7 +157,8 @@ fn network_recovery_deadline_refuses_dispatch_without_spending_a_provider_call()
                 .expect_err("the open window exceeds the call's available time");
             assert_eq!(
                 crate::value::error_to_category(&error),
-                crate::value::ErrorCategory::Timeout
+                crate::value::ErrorCategory::TransientNetwork,
+                "a wait that sent nothing must not read as a provider timeout"
             );
             assert!(fake_llm_captured_calls().is_empty());
             assert_eq!(

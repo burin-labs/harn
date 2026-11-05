@@ -251,7 +251,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "cache_miss",
   "capability_gap",
   "code_librarian_query_nl_fallback",
-  "compass_routing_decision",
   "composition_child_call",
   "composition_child_result",
   "composition_error",
@@ -1640,7 +1639,6 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   compactionPolicy: ACPValue
   recap: ACPValue
   sourceMeasurement: ACPValue
-  classification: ACPValue
   replayed?: boolean
 }
 
@@ -2726,17 +2724,6 @@ export interface HarnAgentEventCodeLibrarianQueryNlFallback {
   text: string
 }
 
-export interface HarnAgentEventCompassRoutingDecision {
-  toolCallId: string
-  mode: string
-  action: string
-  persona: string
-  originalTool: string
-  routedTool: string
-  targetTool: string
-  path?: string | null
-}
-
 export interface HarnAgentEventCompositionChildCall {
   runId: string
   toolCallId: string
@@ -3179,7 +3166,6 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "cache_miss" } & Record<string, ACPValue>)
   | ({ sessionId: string; kind: "capability_gap" } & HarnAgentEventCapabilityGap)
   | ({ sessionId: string; kind: "code_librarian_query_nl_fallback" } & HarnAgentEventCodeLibrarianQueryNlFallback)
-  | ({ sessionId: string; kind: "compass_routing_decision" } & HarnAgentEventCompassRoutingDecision)
   | ({ sessionId: string; kind: "composition_child_call" } & HarnAgentEventCompositionChildCall)
   | ({ sessionId: string; kind: "composition_child_result" } & HarnAgentEventCompositionChildResult)
   | ({ sessionId: string; kind: "composition_error" } & HarnAgentEventCompositionError)

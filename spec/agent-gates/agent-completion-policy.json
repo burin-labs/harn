@@ -1,22 +1,5 @@
 [
   {
-    "default": "false",
-    "evidence": "completion_claim.agent_completion_claim_apply_options defaults the typed completion claim tool off. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
-    "kind": "boolean option",
-    "layer": "runner",
-    "name": "AgentSpec.completion_tool",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-        "reader": "agent_completion_claim_apply_options"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "dynamic: observed local fallback \"the configured done sentinel\"; normalization may override",
     "evidence": "Static declaration/read only; downstream headless binding not observed.",
     "expiry": "2026-09-13",
@@ -288,10 +271,6 @@
     "reachability": "unknown",
     "readers": [
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-        "reader": "__completion_claim_requirement_ids"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "reader": "__completion_policy_plan"
       },
@@ -361,10 +340,6 @@
     "name": "AgentSpec.verify_completion_judge",
     "reachability": "unknown",
     "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
-        "reader": "__completion_claim_requirement_ids"
-      },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
         "reader": "__completion_policy_plan"

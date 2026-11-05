@@ -1561,6 +1561,8 @@ complementary_with = [
     "kimi",
 ]
 context_window = 1010000
+deprecated = true
+deprecation_note = "Together removes this model from serverless inference on 2026-11-04 and recommends Qwen/Qwen3.7-Max: https://docs.together.ai/docs/deprecations"
 equivalence_group = "qwen3.8-2.4t-a95b"
 logical_model = "qwen3.8-2.4t-a95b"
 name = "Qwen3.8 2.4T A95B (Together)"
@@ -1574,6 +1576,8 @@ strengths = [
     "tool_use",
     "reasoning",
 ]
+sunset_date = "2026-11-04"
+superseded_by = "Qwen/Qwen3.7-Max"
 tier = "frontier"
 wire_model = "Qwen/Qwen3.8-2.4T-A95B"
 
@@ -4766,7 +4770,7 @@ cache_read_per_mtok = 0.004
 id = "deepinfra-v41-flash-intro"
 input_per_mtok = 0.14
 output_per_mtok = 0.42
-review_after = "2026-10-04"
+review_after = "2026-12-04"
 source_url = "https://deepinfra.com/deepseek-ai/DeepSeek-V4.1-Flash"
 starts_on = "2026-09-26"
 
@@ -8237,10 +8241,11 @@ output_multiplier = 1.5
 [[models."gpt-5.6-sol".pricing.promotions]]
 cache_read_per_mtok = 0.4
 cache_write_per_mtok = 5.0
+ends_on = "2026-11-29"
 id = "openai-2026-08-sol"
 input_per_mtok = 4.0
 output_per_mtok = 20.0
-review_after = "2026-11-21"
+review_after = "2026-11-30"
 source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
 starts_on = "2026-08-21"
 
@@ -9828,7 +9833,7 @@ cache_read_per_mtok = 0.01
 id = "mercury-3-launch"
 input_per_mtok = 0.1
 output_per_mtok = 0.35
-review_after = "2026-10-28"
+review_after = "2026-12-04"
 source_url = "https://docs.inceptionlabs.ai/get-started/models"
 starts_on = "2026-10-21"
 

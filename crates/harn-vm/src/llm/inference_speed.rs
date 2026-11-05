@@ -13,6 +13,15 @@
 //! GenAI client metrics: `time_to_first_token_ms` corresponds to
 //! `gen_ai.client.inference.time_to_first_chunk`, and the rate is the inverse
 //! of `gen_ai.client.inference.time_per_output_chunk` measured in tokens.
+//!
+//! Mock and scripted fake attempts publish start and settlement; failures
+//! settle without a rate. Successful non-cache tape-served results also publish
+//! a local start and settlement. Predicate-cache hits, recorded tape errors and
+//! legacy hash-fixture replay return before dispatch, so they publish neither.
+//! Each real-provider retry starts its own measurement. Local execution
+//! publishes its timing without changing the recorded response, whose hashes
+//! must not depend on elapsed time or replace the original provider's
+//! measurements with replay speed.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -238,6 +247,15 @@ impl InferenceMeter {
     /// Settle the call: exact counts replace the estimate, the final snapshot
     /// is published, and it is recorded on the result's telemetry.
     pub(crate) fn finish(&self, result: &mut LlmResult) {
+        self.finish_with_telemetry(result, true);
+    }
+
+    /// Publish local execution speed while preserving the deterministic response.
+    pub(crate) fn finish_local(&self, result: &mut LlmResult) {
+        self.finish_with_telemetry(result, false);
+    }
+
+    fn finish_with_telemetry(&self, result: &mut LlmResult, record: bool) {
         let now = Instant::now();
         let snapshot = {
             let mut state = self.lock();
@@ -291,7 +309,9 @@ impl InferenceMeter {
                 token_source,
             }
         };
-        result.telemetry.inference_speed = Some(Box::new(snapshot.clone()));
+        if record {
+            result.telemetry.inference_speed = Some(Box::new(snapshot.clone()));
+        }
         self.publish(snapshot);
     }
 

@@ -79,6 +79,50 @@ fn cc_evidence_cards(evidence: list) -> list {
     .to_list()
 }
 
+/**
+ * Sessions that failed a command, later passed that same command, and ended on a
+ * pass, counted from each card's command ledger. Empty unless at least two
+ * distinct sessions did, since one recovery is not repetition. A card with no
+ * session id cannot be told apart from another, so it never counts. Command text
+ * is carried verbatim; whether two recoveries are the same fix stays the
+ * curator's judgment.
+ */
+fn cc_repeated_recoveries(cards: list) -> list {
+  let out = []
+  let sessions = []
+  for card in cards {
+    let failed = []
+    let recovered_with = []
+    let last_ok = false
+    let failure_rerun_passed = false
+    for entry in card?.commands ?? [] {
+      const command = to_string(entry?.command ?? "")
+      if entry?.ok == false {
+        if command != "" {
+          failed = failed + [command]
+        }
+        last_ok = false
+      } else if entry?.ok == true {
+        last_ok = true
+        if len(failed) > 0 {
+          recovered_with = recovered_with + [command]
+          failure_rerun_passed = failure_rerun_passed
+            || failed.any({ failure -> command.contains(failure) })
+        }
+      }
+    }
+    const session = cc_text(card?.session_id)
+    if session != "" && last_ok && failure_rerun_passed {
+      if !sessions.contains(session) {
+        sessions = sessions + [session]
+      }
+      out = out
+        + [{session_id: card?.session_id, failed: failed, recovered_with: recovered_with}]
+    }
+  }
+  return len(sessions) >= 2 ? out : []
+}
+
 fn cc_session_ids(evidence: list) -> list {
   let out = []
   for item in evidence ?? [] {
@@ -91,6 +135,8 @@ fn cc_session_ids(evidence: list) -> list {
 }
 
 const REVIEWED_EVIDENCE_CAP: int = 200
+
+const MIN_CITED_SESSIONS: int = 2
 
 fn cc_review_file(fs: HarnessFs, options: any = nil) -> string {
   return path_join(pl_state_root(fs, options), "crystallization", "curator-review.json")
@@ -170,9 +216,13 @@ These examples define breadth, not templates:
 2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
 3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
 
-Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence even from one or two sessions, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
+Each card's `commands` lists the commands that run executed, in order, with exit codes. A run that failed several commands before one succeeded shows a project workflow the agent had to discover the hard way: how this repository is tested, built, generated, or deployed. Such hard-won knowledge is strong evidence once two sessions show it, because every future session would pay the same discovery cost. Encode the working sequence, its required environment and ordering, as a capability that later sessions can call first try. For a deterministic command sequence, call scaffold_harn_tool with `steps` (the working commands in order, argv words relative to the repository): it returns a complete tested tool and its `verify_command`. Validate it, then submit it as a harn_tool with that artifact and `verify_command` unchanged. When the full sequence is slow, also pass `fast_steps`: the quick check an agent should run after each edit, such as the formatter and linter plus the fastest declared tests. Submit `fast_verify_command` unchanged beside `verify_command`; the full sequence stays the check that must pass before finishing.
 
-The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. A submission whose `verify_command` runs none of the declared test checks is rejected.
+The repository's declared checks set each check's scope: its arguments, filters, markers, and directory. A learned sequence starts from them. Add the steps the evidence shows they need first (generate, build, install) and keep each declared check you use as one step, word for word, with its `cwd`. Never replace a declared check with a broader command an agent happened to run: a slow or out-of-scope suite the repository excludes makes every future session pay for it, and fail on code the task did not touch. When declared checks disagree on scope, as when a Makefile target runs every test but the CI workflow excludes a slow suite, use the ones the CI workflow runs: they are what a change must pass to merge. When a declared `verify` check that sessions already passed aggregates the others, keep it whole so the sequence still runs everything it runs. A submission whose `verify_command` runs neither a declared test check nor such a verify check is rejected.
+
+Count recovery across sessions. `repeated_recoveries` lists sessions that failed a command, later passed that same command, and ended on a pass, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
+
+Every proposal's `evidence_ids` must list the `id` of cards, not their `session_id`, from at least two sessions, each with a non-empty `session_id` and at least one command. A submission that cites fewer is rejected, so submit zero proposals when the window does not hold two such sessions.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -182,6 +232,10 @@ Review this bounded evidence window and the existing pending capability cards.
 <evidence_cards>
 ${json_stringify(cards)}
 </evidence_cards>
+
+<repeated_recoveries>
+${json_stringify(cc_repeated_recoveries(cards))}
+</repeated_recoveries>
 
 <existing_pending>
 ${json_stringify(pending ?? [])}
@@ -205,7 +259,7 @@ Call submit_crystallization_batch when your analysis is complete.
 fn cc_allowed_session(args: dict, allowed: list) -> string {
   const id = cc_text(args?.session_id)
   if id == "" || !allowed.contains(id) {
-    throw "inspect_session_evidence: session_id is outside this evidence window"
+    throw "inspect_session_evidence: session_id is outside this evidence window. Pass a card's session_id field, not its id."
   }
   return id
 }
@@ -816,22 +870,74 @@ fn cc_runs_declared_check(verify_command: string, check: dict) -> bool {
   return false
 }
 
-/**
- * The declared checks a learned verifier must run at least one of: the test
- * checks, or the verify checks when none is a test.
- */
-fn cc_required_declared_checks(declared: list) -> list {
-  const tests = declared.filter({ check -> check.intent == "test" }).to_list()
-  return len(tests) > 0 ? tests : declared.filter({ check -> check.intent == "verify" }).to_list()
+/** True when every step of a verifier already belongs to a declared check. */
+fn cc_only_repeats_declared_checks(verify_command: string, declared: list) -> bool {
+  const observed = command_sequence_plan(verify_command)
+  if observed.status != "measured" || len(observed.steps) == 0 {
+    return false
+  }
+  let declared_steps = []
+  for check in declared {
+    declared_steps = declared_steps + command_sequence_plan(check.command, check.cwd).steps
+  }
+  return observed.steps.all({ step -> declared_steps.any({ known -> known == step }) })
 }
 
-fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
+fn cc_session_passed_command(evidence: list, command: string) -> bool {
+  return evidence.any(
+    { item ->
+      (item?.command_ledger ?? []).any(
+        { entry -> entry?.ok == true && to_string(entry?.command ?? "").contains(command) },
+      )
+    },
+  )
+}
+
+/**
+ * The declared checks a learned verifier must run at least one of: any test
+ * check, or a verify check a session in the window already passed. A verify
+ * check can be wider than the test checks, so naming one is not enough; a
+ * session that ran it shows future sessions pay nothing new for it.
+ */
+fn cc_required_declared_checks(declared: list, evidence: list) -> list {
+  return declared.filter(
+    { check ->
+      check.intent == "test"
+        || (check.intent == "verify" && cc_session_passed_command(evidence, check.command))
+    },
+  )
+    .to_list()
+}
+
+/**
+ * The distinct sessions a proposal's citations can be counted for: a cited
+ * evidence item from this window with a session id and a non-empty command ledger.
+ */
+fn cc_cited_sessions(proposal: dict, evidence: list) -> list {
+  const cited = proposal?.evidence_ids ?? []
+  return cc_session_ids(
+    evidence.filter({ item -> cited.contains(item?.id) && len(item?.command_ledger ?? []) > 0 })
+      .to_list(),
+  )
+}
+
+fn cc_prepare_valid_proposals(
+  harness: Harness,
+  proposals: list,
+  evidence: list,
+  options: any = nil,
+) -> list {
   let prepared = []
   const installed = cc_installed(harness.fs, options)
-  const required = cc_required_declared_checks(cc_declared_checks(options))
+  const declared = cc_declared_checks(options)
+  const required = cc_required_declared_checks(declared, evidence)
   for proposal in proposals ?? [] {
     if cc_duplicates_installed(proposal, installed) {
       continue
+    }
+    if len(cc_cited_sessions(proposal, evidence)) < MIN_CITED_SESSIONS {
+      throw "submit_crystallization_batch: `evidence_ids` must list the `id` of cards, not their session_id, from at least two sessions that each have a non-empty session_id and at least one command. Repair and resubmit, or submit no proposal when the window lacks two. Card ids: "
+        + json_stringify(evidence.map({ item -> item?.id }).to_list())
     }
     if proposal?.kind == "skill" {
       prepared = prepared + [proposal]
@@ -840,8 +946,11 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = 
     const verify = to_string(proposal?.artifact?.verify_command ?? "")
     if verify != "" && len(required) > 0
       && !required.any({ check -> cc_runs_declared_check(verify, check) }) {
-      throw "submit_crystallization_batch: `verify_command` must run a declared test check word for word from its cwd, not a broader command. Declared: "
+      throw "submit_crystallization_batch: `verify_command` must run a declared test check, or a verify check a session already passed, word for word from its cwd, not a broader command. A step with a glob or other shell syntax cannot be measured. Declared: "
         + json_stringify(required)
+    }
+    if verify != "" && cc_only_repeats_declared_checks(verify, declared) {
+      throw "submit_crystallization_batch: `verify_command` only repeats declared checks, which later sessions already run. Add the steps it needs first, or submit no proposal."
     }
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
@@ -1067,7 +1176,12 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], options)
+          const proposals = cc_prepare_valid_proposals(
+            harness,
+            args?.proposals ?? [],
+            evidence,
+            options,
+          )
           const result = pattern_learning_record_curated_batch(
             harness,
             args + {proposals: proposals},
@@ -1095,6 +1209,8 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * session only ran installed checks and passed (`no_new_workflow_evidence`). `declared_checks`
  * (`[{intent, command, cwd}]`, the checks the repository states) bound a
  * learned verifier's scope: one that runs none of the declared test checks is rejected.
+ * Every proposal must cite evidence from at least two sessions with a session id and
+ * a command ledger; a submission that does not is rejected whatever the model says.
  *
  * @effects: [agent, llm, store.read, store.write]
  * @errors: []
@@ -1154,7 +1270,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
       require_successful_tools: ["submit_crystallization_batch"],
       stop_after_successful_tools: ["submit_crystallization_batch"],
       loop_until_done: true,
-      max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
+      max_iterations: min(max(2, route?.max_iterations ?? 12), 24),
       max_nudges: 2,
       session_id: route?.session_id ?? "crystallization-curator-" + harness.random.uuid_v7(),
       budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},

@@ -673,7 +673,7 @@ fn upsert_session(
 }
 
 /// Expire lapsed signals, prune settled ones past retention, and drop stale
-/// sessions.
+/// sessions and idle dispatch gates.
 fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     for signal in state.signals.values_mut() {
         if signal.capture.is_none()
@@ -691,6 +691,7 @@ fn maintain(state: &mut InboxSnapshot, config: &Config, now: OffsetDateTime) {
     state
         .sessions
         .retain(|_, session| now - session.last_seen <= config.stale_after);
+    crate::dispatch::prune_idle_gates(state, config.retain_for, now);
 }
 
 /// Give every pending generation a live recipient the policy allows.
