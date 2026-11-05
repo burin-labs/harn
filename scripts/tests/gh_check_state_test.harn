@@ -231,7 +231,7 @@ pipeline test_cross_repo_workflow_cannot_supply_harn_expectations(harness: Harne
   assert_eq(census.exit_code, 3)
   const owned = check_expectations("burin-labs/harn", "burin-labs/harn", [], filters, diff)
   assert_eq(owned.source, "workflow_filters")
-  assert_eq(owned.expected_names.contains("Harn and release orchestrator agree"), true)
+  assert_eq(owned.expected_names.contains("Release paperwork rehearsal"), true)
 }
 
 pipeline test_harn_registry_does_not_describe_other_owned_workflows(harness: Harness) {
