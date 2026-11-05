@@ -4434,7 +4434,6 @@ dependencies = [
  "harn-grammars",
  "harn-ir",
  "harn-kernel",
- "harn-languages",
  "harn-lexer",
  "harn-llm",
  "harn-modules",
