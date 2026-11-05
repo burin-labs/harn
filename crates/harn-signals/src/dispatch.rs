@@ -1,10 +1,12 @@
 //! Durable monitor pacing. Hosts claim only at a safe dispatch boundary and
 //! accept the stable batch id idempotently before committing its acceptance.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
-use crate::{CaptureIdentity, Inbox, InboxSnapshot, Signal, SignalsError};
+use crate::{CaptureIdentity, Config, Inbox, InboxSnapshot, Signal, SignalsError};
 
 pub const DEFAULT_DISPATCH_INTERVAL_SECONDS: u32 = 60;
 
@@ -70,6 +72,7 @@ pub(crate) fn validate_capture(
         &identity.execution_id,
     ) {
         (None, None) => Ok(()),
+        (None, Some(_)) => Err(SignalsError::DispatchForgotten),
         (Some(gate), Some(epoch))
             if !gate.closed
                 && gate.execution_id == *epoch
@@ -102,7 +105,7 @@ impl Inbox {
                 "dispatch interval must be between 1 and 86400 seconds",
             ));
         }
-        let max_scopes = self.config().max_signals;
+        let config = self.config();
         self.transact(now, |state| {
             if let Some(gate) = state.dispatch.get(session_id) {
                 if gate.retired_executions.contains(execution_id) {
@@ -123,20 +126,8 @@ impl Inbox {
                     ));
                 }
             }
-            if metadata_size(state) >= max_scopes {
-                return Err(invalid("dispatch metadata capacity reached"));
-            }
-            for signal in state.signals.values_mut() {
-                if signal.is_pending()
-                    && signal
-                        .capture
-                        .as_ref()
-                        .is_some_and(|c| c.session_id == session_id)
-                {
-                    signal.cancelled_at = Some(now);
-                    signal.delivery = None;
-                }
-            }
+            make_gate_room(state, session_id, config, now)?;
+            cancel_session_captures(state, session_id, now);
             let previous = state.dispatch.remove(session_id);
             let mut retired_executions = previous
                 .as_ref()
@@ -194,7 +185,7 @@ impl Inbox {
             let gate = state
                 .dispatch
                 .get_mut(session_id)
-                .ok_or_else(|| invalid("dispatch session has not started"))?;
+                .ok_or(SignalsError::DispatchForgotten)?;
             if gate.closed || gate.execution_id != execution_id {
                 return Err(invalid("dispatch epoch is closed or stale"));
             }
@@ -264,7 +255,7 @@ impl Inbox {
             let gate = state
                 .dispatch
                 .get_mut(session_id)
-                .ok_or_else(|| invalid("dispatch session has not started"))?;
+                .ok_or(SignalsError::DispatchForgotten)?;
             if gate.closed || gate.execution_id != execution_id {
                 return Err(invalid("dispatch epoch is closed or stale"));
             }
@@ -316,22 +307,25 @@ impl Inbox {
         monitor_key: Option<&str>,
         now: OffsetDateTime,
     ) -> Result<usize, SignalsError> {
-        let max_monitors = self.config().max_signals;
+        let config = self.config();
         self.transact(now, |state| {
-            let metadata_count = metadata_size(state);
-            let gate = state
-                .dispatch
-                .get_mut(session_id)
-                .ok_or_else(|| invalid("dispatch session has not started"))?;
-            if let Some(key) = monitor_key {
-                validate_identity(key)?;
-                if !gate.cancelled_monitors.contains(key) && metadata_count >= max_monitors {
-                    return Err(invalid("cancelled monitor capacity reached"));
-                }
-            }
+            // A forgotten session already has nothing to cancel.
+            let Some(gate) = state.dispatch.get(session_id) else {
+                return Ok(0);
+            };
             if gate.execution_id != execution_id {
                 return Err(invalid("dispatch epoch is stale"));
             }
+            if let Some(key) = monitor_key {
+                validate_identity(key)?;
+                if !gate.cancelled_monitors.contains(key) {
+                    make_gate_room(state, session_id, config, now)?;
+                }
+            }
+            let gate = state
+                .dispatch
+                .get_mut(session_id)
+                .ok_or(SignalsError::DispatchForgotten)?;
             if let Some(key) = monitor_key {
                 gate.cancelled_monitors.insert(key.into());
             }
@@ -365,12 +359,139 @@ impl DispatchState {
         self.closed = true;
         self.claim = None;
     }
+
+    /// Forgetting this gate changes nothing a host can observe: no claim is out
+    /// and the pacing window is over, so a later start paces the same way.
+    fn is_settled(&self, now: OffsetDateTime) -> bool {
+        self.claim.is_none() && self.pacing_is_over(now)
+    }
+
+    /// A clock behind the high-water mark keeps a gate, since that mark is the
+    /// guard.
+    fn pacing_is_over(&self, now: OffsetDateTime) -> bool {
+        let interval = Duration::seconds(i64::from(self.interval_seconds));
+        self.observed_at <= now && self.accepted_at.is_none_or(|last| last + interval <= now)
+    }
+
+    fn record_count(&self) -> usize {
+        1 + self.cancelled_monitors.len() + self.retired_executions.len()
+    }
+}
+
+/// The newest pending capture of each session that has one.
+fn latest_pending_captures(state: &InboxSnapshot) -> BTreeMap<String, OffsetDateTime> {
+    let mut latest = BTreeMap::new();
+    for signal in state.signals.values().filter(|signal| signal.is_pending()) {
+        if let Some(capture) = &signal.capture {
+            latest
+                .entry(capture.session_id.clone())
+                .and_modify(|at: &mut OffsetDateTime| *at = (*at).max(signal.fired_at))
+                .or_insert(signal.fired_at);
+        }
+    }
+    latest
+}
+
+fn cancel_session_captures(state: &mut InboxSnapshot, session_id: &str, now: OffsetDateTime) {
+    for signal in state.signals.values_mut() {
+        if signal.is_pending()
+            && signal
+                .capture
+                .as_ref()
+                .is_some_and(|c| c.session_id == session_id)
+        {
+            signal.cancelled_at = Some(now);
+            signal.delivery = None;
+        }
+    }
+}
+
+/// Sessions rarely say they ended. One that has neither polled nor captured for
+/// the retention period is treated as dead: its unaccepted captures are
+/// cancelled and its gate goes the way a settled signal does. A host that was
+/// only silent gets `DispatchForgotten` and resumes with an idempotent start.
+pub(crate) fn prune_idle_gates(
+    state: &mut InboxSnapshot,
+    retain_for: Duration,
+    now: OffsetDateTime,
+) {
+    if !state
+        .dispatch
+        .values()
+        .any(|gate| now - gate.observed_at >= retain_for)
+    {
+        return;
+    }
+    let captures = latest_pending_captures(state);
+    let dead: Vec<String> = state
+        .dispatch
+        .iter()
+        .filter(|(session_id, gate)| {
+            let last_active = captures
+                .get(session_id.as_str())
+                .map_or(gate.observed_at, |at| gate.observed_at.max(*at));
+            now - last_active >= retain_for
+                && gate.pacing_is_over(now)
+                && gate
+                    .claim
+                    .as_ref()
+                    .is_none_or(|claim| claim.expires_at <= now)
+        })
+        .map(|(session_id, _)| session_id.clone())
+        .collect();
+    for session_id in dead {
+        cancel_session_captures(state, &session_id, now);
+        state.dispatch.remove(&session_id);
+    }
+}
+
+/// Make room for one more record by forgetting the longest-idle gates of
+/// sessions gone quiet for `stale_after`. Nothing is forgotten unless that frees
+/// enough, so a refusal leaves every record in place.
+fn make_gate_room(
+    state: &mut InboxSnapshot,
+    starting: &str,
+    config: &Config,
+    now: OffsetDateTime,
+) -> Result<(), SignalsError> {
+    let before = metadata_size(state);
+    if before < config.max_signals {
+        return Ok(());
+    }
+    let captures = latest_pending_captures(state);
+    let mut quiet: Vec<_> = state
+        .dispatch
+        .iter()
+        .filter(|(session_id, gate)| {
+            session_id.as_str() != starting
+                && now - gate.observed_at >= config.stale_after
+                && gate.is_settled(now)
+                && !captures.contains_key(session_id.as_str())
+        })
+        .collect();
+    quiet.sort_by_key(|(_, gate)| gate.observed_at);
+    let mut remaining = before;
+    let mut forgotten = Vec::new();
+    for (session_id, gate) in quiet {
+        if remaining < config.max_signals {
+            break;
+        }
+        remaining -= gate.record_count();
+        forgotten.push(session_id.clone());
+    }
+    if remaining >= config.max_signals {
+        return Err(SignalsError::DispatchFull(before));
+    }
+    for session_id in forgotten {
+        state.dispatch.remove(&session_id);
+    }
+    Ok(())
 }
 
 fn metadata_size(state: &InboxSnapshot) -> usize {
     state
         .dispatch
         .values()
-        .map(|gate| 1 + gate.cancelled_monitors.len() + gate.retired_executions.len())
+        .map(DispatchState::record_count)
         .sum()
 }

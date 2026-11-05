@@ -148,11 +148,7 @@ pub const PATH_GATED_CHECKS = [
     check_prefix: "Swift protocol binding probe",
     always_main: true,
   },
-  {
-    filter: "release_contract",
-    check_prefix: "Harn and release orchestrator agree",
-    always_main: true,
-  },
+  {filter: "release_contract", check_prefix: "Release paperwork rehearsal", always_main: true},
 ]
 
 /** Checks that must report on every head, whatever the diff touched. */

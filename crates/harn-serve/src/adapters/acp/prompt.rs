@@ -639,6 +639,8 @@ impl AcpServer {
                 cancelled: &cancellation.cancelled,
             },
             Box::pin(store_scope.run(mode_policy.run(Box::pin(async {
+                // A person asking again is the signal to try a route that was failing.
+                let _prompt_guard = harn_vm::llm::begin_interactive_prompt(&session_id);
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
                 let _spend_recorder = SessionSpendRecorder::new(
                     llm_spend.clone(),

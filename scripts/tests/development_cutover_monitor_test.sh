@@ -35,65 +35,77 @@ if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
 fi
 grep -Fq 'main_version=1.2.3' "$bare_log"
 grep -Fq 'latest_tag=v1.2.3' "$bare_log"
-grep -Fq 'expected_branch=automation/development-1.2.4-dev' "$bare_log"
+grep -Fq 'expected_branch=automation/development-1.2.4' "$bare_log"
 grep -Fq 'matching_pr_count=0' "$bare_log"
 grep -Fq 'remediation_pr_count=0' "$bare_log"
 grep -Fq 'open_pr_count=0' "$bare_log"
 grep -Fq 'merged_pr_count=0' "$bare_log"
-grep -Fq 'development cutover is owed' "$bare_log"
+grep -Fq 'main owes the next version' "$bare_log"
 grep -Fxq 'repair_owed=true' "$bare_output"
-grep -Fxq 'repair_version=1.2.4-dev' "$bare_output"
+grep -Fxq 'repair_version=1.2.4' "$bare_output"
 grep -Fxq 'repair_published_tag=v1.2.3' "$bare_output"
 
-# A correctly cut-over main is a known non-null negative control: the same
-# probe must report its measured version and remain silent.
+# A main still on the development identity owes the same next stable version: this
+# is how main reaches its first unpublished version.
 printf '[workspace.package]\nversion = "1.2.4-dev"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
 git -C "$fixture" commit --quiet -m 'Start 1.2.4-dev development'
 git -C "$fixture" update-ref refs/remotes/origin/main HEAD
-current_log="$tmp_root/current.log"
-HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
-HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
-  "$repo_root/scripts/check_development_cutover.sh" >"$current_log"
-grep -Fq 'main_version=1.2.4-dev' "$current_log"
-grep -Fq 'matching_pr_count=0' "$current_log"
-grep -Fq 'development cutover monitor: current:' "$current_log"
-
-# A merged next release is awaiting publication, not an overdue development
-# bump for the preceding tag. The commit status must remain pending, not green.
-printf '[workspace.package]\nversion = "1.2.4"\n' > "$fixture/Cargo.toml"
-git -C "$fixture" add Cargo.toml
-git -C "$fixture" commit --quiet -m 'Release v1.2.4'
-git -C "$fixture" update-ref refs/remotes/origin/main HEAD
-pending_log="$tmp_root/pending.log"
-pending_output="$tmp_root/pending-output"
-HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
-HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
-GITHUB_OUTPUT="$pending_output" \
-  "$repo_root/scripts/check_development_cutover.sh" >"$pending_log"
-grep -Fxq 'state=pending' "$pending_output"
-if grep -Fq 'repair_owed=true' "$pending_output"; then
-  echo "unpublished main admitted automatic repair" >&2
+identity_output="$tmp_root/identity-output"
+if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+  HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+  GITHUB_OUTPUT="$identity_output" \
+    "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/identity.log" 2>&1; then
+  echo "a development identity on main passed as current" >&2
   exit 1
 fi
-grep -Fq 'publication pending: main 1.2.4, latest tag v1.2.3' "$pending_log"
+grep -Fxq 'repair_owed=true' "$identity_output"
+grep -Fxq 'repair_version=1.2.4' "$identity_output"
+printf 'automation/development-1.2.4\tOPEN\t-\thttps://example.invalid/pull/40\n' > "$rows"
+identity_open_output="$tmp_root/identity-open-output"
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+GITHUB_OUTPUT="$identity_open_output" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/identity-open.log"
+grep -Fxq 'state=pending' "$identity_open_output"
+: > "$rows"
+
+# A main declaring the next version is settled, not awaiting anything: a known
+# non-null negative control, so the same probe reports its version and stays green.
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$fixture/Cargo.toml"
+git -C "$fixture" add Cargo.toml
+git -C "$fixture" commit --quiet -m 'Start 1.2.4 development'
+git -C "$fixture" update-ref refs/remotes/origin/main HEAD
+current_log="$tmp_root/current.log"
+current_output="$tmp_root/current-output"
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+GITHUB_OUTPUT="$current_output" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$current_log"
+grep -Fq 'main_version=1.2.4' "$current_log"
+grep -Fq 'current: main 1.2.4 declares the next unpublished version after v1.2.3' "$current_log"
+grep -Fxq 'state=success' "$current_output"
+if grep -Fq 'repair_owed=true' "$current_output"; then
+  echo "settled main admitted automatic repair" >&2
+  exit 1
+fi
 
 # Publishing that exact version changes the same observation into a real debt.
 git -C "$fixture" tag v1.2.4
 if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
   HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
     "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/published.log" 2>&1; then
-  echo "published stable main without a development PR did not alarm" >&2
+  echo "published stable main without a version PR did not alarm" >&2
   exit 1
 fi
-grep -Fq 'expected_development_version=1.2.5-dev' "$tmp_root/published.log"
+grep -Fq 'expected_next_version=1.2.5' "$tmp_root/published.log"
 git -C "$fixture" tag -d v1.2.4 >/dev/null
 
 # A retired, never-published version leaves main's stable version more than one
-# patch ahead of the latest tag. That is still publication pending, not owed.
+# patch ahead of the latest tag. That is still settled, not owed.
 printf '[workspace.package]\nversion = "1.2.6"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
-git -C "$fixture" commit --quiet -m 'Release v1.2.6 after retired v1.2.5'
+git -C "$fixture" commit --quiet -m 'Start 1.2.6 after retired 1.2.5'
 git -C "$fixture" update-ref refs/remotes/origin/main HEAD
 git -C "$fixture" tag v1.2.4
 skipped_log="$tmp_root/skipped.log"
@@ -105,12 +117,12 @@ GITHUB_OUTPUT="$skipped_output" \
   cat "$skipped_log" >&2
   exit 1
 }
-grep -Fxq 'state=pending' "$skipped_output"
-grep -Fq 'publication pending: main 1.2.6, latest tag v1.2.4' "$skipped_log"
+grep -Fxq 'state=success' "$skipped_output"
+grep -Fq 'current: main 1.2.6 declares the next unpublished version after v1.2.4' "$skipped_log"
 git -C "$fixture" tag -d v1.2.4 >/dev/null
 
 # Any other version is unhealthy. Merely differing from the latest tag must
-# not collapse an older stable or a skipped development target into green.
+# not collapse an older stable or a skipped development identity into green.
 for wrong_version in 1.2.2 1.2.5-dev; do
   printf '[workspace.package]\nversion = "%s"\n' "$wrong_version" > "$fixture/Cargo.toml"
   git -C "$fixture" add Cargo.toml
@@ -124,7 +136,7 @@ for wrong_version in 1.2.2 1.2.5-dev; do
     exit 1
   fi
   grep -Fq "main_version=$wrong_version" "$wrong_log"
-  grep -Fq 'expected_development_version=1.2.4-dev' "$wrong_log"
+  grep -Fq 'expected_next_version=1.2.4' "$wrong_log"
 done
 
 # An open exact-target PR is unfinished work, never proof that main converged.
@@ -132,7 +144,7 @@ printf '[workspace.package]\nversion = "1.2.3"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
 git -C "$fixture" commit --quiet -m 'fixture bare main'
 git -C "$fixture" update-ref refs/remotes/origin/main HEAD
-printf 'automation/development-1.2.4-dev\tOPEN\t-\thttps://example.invalid/pull/42\n' > "$rows"
+printf 'automation/development-1.2.4\tOPEN\t-\thttps://example.invalid/pull/42\n' > "$rows"
 open_log="$tmp_root/open.log"
 open_output="$tmp_root/open-output"
 HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
@@ -160,7 +172,7 @@ if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
   exit 1
 fi
 grep -Fq 'wrong version: main 1.2.2' "$tmp_root/wrong-open.log"
-printf 'automation/development-1.2.4-dev\tOPEN\t-\thttps://example.invalid/pull/43\n' >> "$rows"
+printf 'automation/development-1.2.4\tOPEN\t-\thttps://example.invalid/pull/43\n' >> "$rows"
 set +e
 HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
 HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
@@ -173,7 +185,7 @@ grep -Fq 'matching=2, open=2' "$tmp_root/ambiguous.log"
 # A full query page cannot distinguish exactly 100 from truncated history.
 : > "$rows"
 for pr_number in $(seq 1 100); do
-  printf 'automation/development-1.2.4-dev\tCLOSED\t-\thttps://example.invalid/pull/%s\n' "$pr_number" >> "$rows"
+  printf 'automation/development-1.2.4\tCLOSED\t-\thttps://example.invalid/pull/%s\n' "$pr_number" >> "$rows"
 done
 set +e
 HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
@@ -184,7 +196,7 @@ set -e
 [[ "$truncated_rc" -eq 2 ]]
 grep -Fq 'matching=100, open=0' "$tmp_root/truncated.log"
 
-printf 'automation/development-1.2.4-dev\tMERGED\t2026-08-29T23:00:00Z\thttps://example.invalid/pull/41\n' > "$rows"
+printf 'automation/development-1.2.4\tMERGED\t2026-08-29T23:00:00Z\thttps://example.invalid/pull/41\n' > "$rows"
 merged_log="$tmp_root/merged.log"
 if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
   HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
@@ -199,7 +211,7 @@ grep -Fq 'MERGED:https://example.invalid/pull/41' "$merged_log"
 
 # A certified release tag may name its immutable candidate rather than a main
 # ancestor. The repository's stable tag list still owns publication identity,
-# so a main already at the following development version is current.
+# so a main already at the following version is current.
 off_ancestry_fixture="$tmp_root/off-ancestry"
 off_ancestry_rows="$tmp_root/off-ancestry-rows.tsv"
 mkdir -p "$off_ancestry_fixture"
@@ -221,9 +233,9 @@ git -C "$off_ancestry_fixture" add Cargo.toml
 git -C "$off_ancestry_fixture" commit --quiet -m 'Release v1.2.4 candidate'
 git -C "$off_ancestry_fixture" tag v1.2.4
 git -C "$off_ancestry_fixture" switch --quiet "$default_branch"
-printf '[workspace.package]\nversion = "1.2.5-dev"\n' > "$off_ancestry_fixture/Cargo.toml"
+printf '[workspace.package]\nversion = "1.2.5"\n' > "$off_ancestry_fixture/Cargo.toml"
 git -C "$off_ancestry_fixture" add Cargo.toml
-git -C "$off_ancestry_fixture" commit --quiet -m 'Start 1.2.5-dev development'
+git -C "$off_ancestry_fixture" commit --quiet -m 'Start 1.2.5 development'
 git -C "$off_ancestry_fixture" update-ref refs/remotes/origin/main HEAD
 : > "$off_ancestry_rows"
 
@@ -232,11 +244,10 @@ HARN_DEVELOPMENT_CUTOVER_ROOT="$off_ancestry_fixture" \
 HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$off_ancestry_rows" \
   "$repo_root/scripts/check_development_cutover.sh" > "$off_ancestry_log"
 grep -Fq 'latest_tag=v1.2.4' "$off_ancestry_log"
-grep -Fq 'main_version=1.2.5-dev' "$off_ancestry_log"
-grep -Fq 'expected_development_version=1.2.5-dev' "$off_ancestry_log"
+grep -Fq 'main_version=1.2.5' "$off_ancestry_log"
 
-# The same non-ancestor release tag must reject a genuinely stale development
-# fold rather than treating any development version as current.
+# The same non-ancestor release tag must reject a genuinely stale version rather
+# than treating any development identity as current.
 printf '[workspace.package]\nversion = "1.2.4-dev"\n' > "$off_ancestry_fixture/Cargo.toml"
 git -C "$off_ancestry_fixture" add Cargo.toml
 git -C "$off_ancestry_fixture" commit --quiet -m 'Fixture stale development fold'
@@ -250,7 +261,7 @@ if HARN_DEVELOPMENT_CUTOVER_ROOT="$off_ancestry_fixture" \
 fi
 grep -Fq 'latest_tag=v1.2.4' "$stale_fold_log"
 grep -Fq 'main_version=1.2.4-dev' "$stale_fold_log"
-grep -Fq 'expected_development_version=1.2.5-dev' "$stale_fold_log"
+grep -Fq 'expected_next_version=1.2.5' "$stale_fold_log"
 
 # An unreadable PR census is unknown, not a measured zero or green state.
 cat > "$bin_dir/gh" <<'EOF'

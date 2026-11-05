@@ -50,7 +50,7 @@
 #   CANARY_REPOSITORY  owner/name of the consumer.
 #   CANARY_WORKFLOW    the consumer's rehearsal workflow file.
 #   SOURCE_REVISION    the commit under test.
-#   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
+#   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z.
 #   PAIRING_TEXT       a pull request description to read trailers from; when
 #                      empty, CANARY_PAIRING_SOURCE supplies commit messages.
 #   CANARY_PAIRING_SOURCE  optional checkout of SOURCE_REVISION with its history

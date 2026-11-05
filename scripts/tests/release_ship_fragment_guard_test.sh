@@ -115,10 +115,10 @@ if ! run_guard_allowing "$clean" >/dev/null 2>&1; then
   exit 1
 fi
 
-# --- Case 8: finalize rejects the tag tree before resolving Harn -------------
-# Exercise the production entry point, not only the extracted function. The
-# fake metadata binary is deliberately slow: reaching it means finalize paid
-# build-shaped work before making the millisecond fragment decision.
+# --- Case 8: finalize publishes a tag tree that holds its fragments ----------
+# A tag's tree holds its notes as fragments, rendered at build time, so they do
+# not stop finalize. Exercise the production entry point: it gets past the point
+# the old guard refused, into the build-shaped work after it.
 run_finalize_tag_fixture() {
   local name="$1"
   local fold_on_main="$2"
@@ -161,113 +161,16 @@ printf '0.10.999\n'
 EOF
   chmod +x "$fake_metadata"
 
-  local output status started elapsed
-  started=$SECONDS
-  if output=$(cd "$fixture" && \
+  local output
+  output=$(cd "$fixture" && \
       HARN_RELEASE_ROOT="$fixture" \
       HARN_RELEASE_METADATA_BIN="$fake_metadata" \
-      bash "$ship_script" --finalize --skip-dry-run --skip-github-release 2>&1); then
-    status=0
-  else
-    status=$?
-  fi
-  elapsed=$((SECONDS - started))
-
-  [[ "$status" -ne 0 ]] \
-    || { echo "FAIL: finalize accepted a tagged tree with a fragment" >&2; exit 1; }
-  grep -q "7605.fixed.md" <<<"$output" \
-    || { echo "FAIL: finalize did not name the tag's fragment: $output" >&2; exit 1; }
-  ! grep -q "Build portal frontend" <<<"$output" \
-    || { echo "FAIL: finalize built the portal before rejecting the fragment" >&2; exit 1; }
-  [[ ! -e "$metadata_marker" ]] \
-    || { echo "FAIL: finalize resolved Harn metadata before rejecting the fragment" >&2; exit 1; }
-  (( elapsed < 2 )) \
-    || { echo "FAIL: fragment rejection took ${elapsed}s, expected under 2s" >&2; exit 1; }
+      bash "$ship_script" --finalize --skip-dry-run --skip-github-release 2>&1) || true
+  grep -q "Build portal frontend" <<<"$output" \
+    || { echo "FAIL: finalize stopped before its build work: $output" >&2; exit 1; }
 }
 
 run_finalize_tag_fixture "tag-and-branch-carry-fragment" false
 run_finalize_tag_fixture "branch-folded-tag-still-carries-fragment" true
-
-# --- Case 9: post-candidate fragments defer through the production entry ----
-scoped="$tmp_root/scoped"
-mkdir -p "$scoped/changelog.d"
-git -C "$scoped" init -q -b main
-git -C "$scoped" config user.name "Release guard fixture"
-git -C "$scoped" config user.email "release-guard@example.invalid"
-git -C "$scoped" config commit.gpgSign false
-git -C "$scoped" config tag.gpgSign false
-printf '[workspace.package]\nversion = "0.10.999"\n' > "$scoped/Cargo.toml"
-printf '# Changelog\n\n## v0.10.999\n\n- Candidate note.\n' > "$scoped/CHANGELOG.md"
-git -C "$scoped" add Cargo.toml CHANGELOG.md
-git -C "$scoped" commit -q -m "immutable release candidate"
-candidate=$(git -C "$scoped" rev-parse HEAD)
-git -C "$scoped" branch "release-attempt/v0.10.999/$candidate" "$candidate"
-printf -- '- Arrived after candidate.\n' > "$scoped/changelog.d/later.fixed.md"
-git -C "$scoped" add changelog.d/later.fixed.md
-git -C "$scoped" commit -q -m "post-candidate fragment"
-scoped_tagged_commit=$(git -C "$scoped" rev-parse HEAD)
-git -C "$scoped" tag v0.10.999
-[[ "$(git -C "$scoped" rev-parse 'v0.10.999^{commit}')" == "$scoped_tagged_commit" ]] \
-  || { echo "FAIL: scoped fixture tag does not resolve to its tagged commit" >&2; exit 1; }
-git -C "$scoped" switch -q --detach v0.10.999
-
-scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
-  --repo "$scoped" --version 0.10.999)
-[[ "$(jq -r '.resolved' <<< "$scope")" == "true" ]] \
-  || { echo "FAIL: candidate scope did not resolve: $scope" >&2; exit 1; }
-[[ "$(jq -r '.owned | length' <<< "$scope")" == "0" ]] \
-  || { echo "FAIL: later fragment read as candidate-owned: $scope" >&2; exit 1; }
-[[ "$(jq -r '.deferred[0]' <<< "$scope")" == "changelog.d/later.fixed.md" ]] \
-  || { echo "FAIL: later fragment was not deferred: $scope" >&2; exit 1; }
-
-# The signed tag metadata is the durable owner after recovery cleans the
-# transient attempt ref. An annotated fixture is sufficient here because the
-# production publisher independently verifies the tag signature.
-git -C "$scoped" tag -d v0.10.999 >/dev/null
-git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$candidate" "$scoped_tagged_commit"
-git -C "$scoped" branch -D "release-attempt/v0.10.999/$candidate" >/dev/null
-scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
-  --repo "$scoped" --version 0.10.999)
-[[ "$(jq -r '.resolved' <<< "$scope")" == "true" ]] \
-  || { echo "FAIL: signed tag candidate did not survive ref cleanup: $scope" >&2; exit 1; }
-[[ "$(jq -r '.candidate_commit' <<< "$scope")" == "$candidate" ]] \
-  || { echo "FAIL: signed tag resolved the wrong candidate: $scope" >&2; exit 1; }
-
-git -C "$scoped" tag -d v0.10.999 >/dev/null
-git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: not-a-commit' "$scoped_tagged_commit"
-scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
-  --repo "$scoped" --version 0.10.999)
-[[ "$(jq -r '.resolved' <<< "$scope")" == "false" ]] \
-  || { echo "FAIL: malformed signed candidate metadata did not fail closed: $scope" >&2; exit 1; }
-
-git -C "$scoped" tag -d v0.10.999 >/dev/null
-git -C "$scoped" switch -q -c mismatched-candidate "$candidate"
-printf '\nCandidate metadata points at a different changelog.\n' >> "$scoped/CHANGELOG.md"
-git -C "$scoped" add CHANGELOG.md
-git -C "$scoped" commit -q -m "mismatched candidate fixture"
-mismatched_candidate=$(git -C "$scoped" rev-parse HEAD)
-git -C "$scoped" switch -q --detach "$scoped_tagged_commit"
-git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$mismatched_candidate" "$scoped_tagged_commit"
-scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
-  --repo "$scoped" --version 0.10.999)
-[[ "$(jq -r '.resolved' <<< "$scope")" == "false" ]] \
-  || { echo "FAIL: mismatched signed candidate metadata did not fail closed: $scope" >&2; exit 1; }
-
-git -C "$scoped" tag -d v0.10.999 >/dev/null
-git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$candidate" "$scoped_tagged_commit"
-
-scoped_metadata="$tmp_root/scoped-fake-release-metadata"
-cat > "$scoped_metadata" <<'EOF'
-#!/usr/bin/env bash
-printf '0.10.998\n'
-EOF
-chmod +x "$scoped_metadata"
-if ! output=$(cd "$scoped" && \
-    HARN_RELEASE_ROOT="$scoped" \
-    HARN_RELEASE_METADATA_BIN="$scoped_metadata" \
-    bash "$ship_script" --finalize --skip-dry-run --skip-github-release 2>&1); then
-  grep -q "deferring 1 post-candidate" <<< "$output" \
-    || { echo "FAIL: finalize rejected proven deferred fragment: $output" >&2; exit 1; }
-fi
 
 echo "release_ship_fragment_guard_test: ok"

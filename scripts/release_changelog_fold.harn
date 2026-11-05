@@ -2,9 +2,12 @@
  * Fold `changelog.d/<id>.<category>.md` fragments into CHANGELOG.md's release
  * section and delete the folded fragments.
  *
- * This is the one owner of the release fold. `release_ship.sh --prepare` runs
- * it before the version bump, so the `Release vX.Y.Z` pull request carries the
- * folded notes and the fragment deletions in the same commit.
+ * This is the one owner of the release fold. A candidate's notes come from
+ * `fold_candidate_changelog` at build time, because main declares the next
+ * version before CHANGELOG.md has a section for it. After publication,
+ * `fold-published` writes that same section from the published tag's fragments
+ * into the version commit and deletes them, so fragments landed since the tag
+ * stay for the next release.
  * List updates use concatenation because these tools also run on the release
  * orchestrator's pinned runtime, whose `push` returns a copy.
  *
@@ -17,6 +20,8 @@
  *
  * Usage:
  *   harn run scripts/release_changelog_fold.harn -- fold --version X.Y.Z [--root PATH]
+ *   harn run --no-sandbox scripts/release_changelog_fold.harn -- fold-published \\
+ *     --version X.Y.Z --fragments-root PATH [--root PATH]
  */
 import {
   ChangelogCategory,
@@ -29,7 +34,7 @@ import {
 } from "std/changelog"
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { path_visibility, require_scanned } from "./path_visibility.harn"
-import { changelog_entries, changelog_entry_heading } from "./render_release_notes.harn"
+import { changelog_entries, changelog_entry_heading } from "./release_changelog_entries.harn"
 
 const CHECK_NAME = "Release changelog fold"
 
@@ -281,42 +286,30 @@ pub fn promote_unreleased_section(
   }
 }
 
-/** Preserve the failed identity while carrying its changes into the next cut. */
+/**
+ * Record a retired identity. Its fragments stay in changelog.d, so its changes
+ * ship in the next release; only the version number is given up. Promotion refuses
+ * a version main records this way.
+ */
 pub fn retire_unpublished_section(text: string, version: string, published_base: string) -> string {
   const entries = changelog_entries(text)
-  // Earlier retired identities may sit between the candidate and its base.
-  let base_index = 1
+  // Earlier retired identities may sit above the published base.
+  let base_index = 0
   while entries[base_index]?.never_published == true {
     base_index = base_index + 1
   }
-  if entries[0]?.version != version || entries[0]?.never_published != false
-    || entries[base_index]?.version != published_base
-    || entries[base_index]?.never_published != false {
-    throw "retirement requires the current unreleased identity and its actual published predecessor"
+  if entries[base_index]?.version != published_base
+    || entries.any({ entry -> entry.version == version }) {
+    throw "retirement requires an unrecorded identity above its actual published predecessor"
   }
-  const headings = changelog_heading_offsets(text)
-  const first = first_version_heading(headings)
+  const first = first_version_heading(changelog_heading_offsets(text))
   if first == nil {
     throw "retirement has no changelog section"
   }
-  const end = next_heading_start(headings, first.start) ?? len(text)
-  const body = changelog_body_for(text, first, end)
-  if body.trim() == "" {
-    throw "retirement cannot carry empty release notes"
-  }
-  const unreleased = first_unreleased_heading(headings)
-  const start = unreleased != nil && unreleased.start < first.start ? unreleased.start : first.start
-  const pending = unreleased != nil && unreleased.start < first.start ? changelog_body_for(
-    text,
-    unreleased,
-    first.start,
-  ) : ""
-  const carried = changelog_merge_release_bodies(pending, body)
-  return text[0:start] + "## Unreleased\n\n" + carried + "\n\n"
+  return text[0:first.start]
     + "## v${version} (never published)\n\n"
-    + body
-    + "\n\n"
-    + text[end:len(text)]
+    + "- Retired before publication; its changes ship in the next release.\n\n"
+    + text[first.start:len(text)]
 }
 
 fn section_bullet_lines(body: string) -> int {
@@ -455,6 +448,33 @@ pub fn fold_release_changelog(
 }
 
 /**
+ * Fold for a candidate of the next version, which has no section yet. Every
+ * checkpoint must stay promotable, so a source with nothing to report gets an
+ * explicit empty section instead of a refusal. A malformed fragment still refuses.
+ */
+pub fn fold_candidate_changelog(
+  original: string,
+  files: list<ReleaseFragmentFile>,
+  version: string,
+) -> ReleaseChangelogFold {
+  const has_fragments = files.any({ file -> is_release_changelog_fragment_name(file.name) })
+  if has_fragments || promote_unreleased_section(original, version).success {
+    return fold_release_changelog(original, files, version)
+  }
+  const first = first_version_heading(changelog_heading_offsets(original))
+  const at = first?.start ?? len(original)
+  return {
+    success: true,
+    message: "no fragments; recorded v${version} with no user-facing changes",
+    text: original[0:at] + "## v${version}\n\n- No user-facing changes.\n\n"
+      + original[at:len(original)],
+    changed: true,
+    fragments: [],
+    findings: [],
+  }
+}
+
+/**
  * Read every fragment file in `changelog.d/`, sorted by name. A missing
  * directory has no fragments. A denied one refuses: it must not read as a
  * release with nothing to fold.
@@ -519,6 +539,39 @@ pub fn apply_release_changelog_fold(
   return fold
 }
 
+/**
+ * Write a just-published version's section into CHANGELOG.md under `root` from
+ * the fragments its tag held, under `fragments_root`, and delete those from
+ * `root`. A section already present is left alone.
+ */
+pub fn apply_published_changelog_fold(
+  fs: HarnessFs,
+  root: string,
+  fragments_root: string,
+  version: string,
+) -> list<ReleaseFragmentFile> {
+  const changelog_path = path_join(root, "CHANGELOG.md")
+  const original = fs.read_text(changelog_path)
+  // An existing section already holds this release's notes, and it did not come
+  // from these fragments: they stay for the next release, or their entries vanish.
+  if changelog_entries(original).any({ entry -> entry.version == version }) {
+    return []
+  }
+  const files = read_fragment_files(fs, fragments_root)
+  const fold = fold_candidate_changelog(original, files, version)
+  if !fold.success {
+    throw fold.findings.join("\n")
+  }
+  fs.write_text(changelog_path, fold.text)
+  for file in files {
+    const fragment = path_join(root, "changelog.d", file.name)
+    if fs.exists(fragment) {
+      fs.delete(fragment)
+    }
+  }
+  return files
+}
+
 fn arg_spec() {
   return parser(
     {
@@ -527,6 +580,13 @@ fn arg_spec() {
         {kind: "positional", name: "action", required: true},
         {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
         {kind: "flag", name: "version", long: "--version", parse: "string", default: ""},
+        {
+          kind: "flag",
+          name: "fragments_root",
+          long: "--fragments-root",
+          parse: "string",
+          default: "",
+        },
       ],
     },
   )
@@ -535,7 +595,7 @@ fn arg_spec() {
 fn main(harness: Harness) -> int {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/release_changelog_fold.harn -- fold --version X.Y.Z [--root PATH]",
+      "usage: harn run scripts/release_changelog_fold.harn -- fold|fold-published --version X.Y.Z [--fragments-root PATH] [--root PATH]",
     )
     return 0
   }
@@ -552,11 +612,20 @@ fn main(harness: Harness) -> int {
   )
   const version = trim(to_string(parsed.options?.version ?? ""))
   try {
-    if action != "fold" {
+    if action != "fold" && action != "fold-published" {
       throw "unknown action: " + action
     }
     if regex_match("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", version) == nil {
       throw "--version must be a stable X.Y.Z release version, got '" + version + "'"
+    }
+    if action == "fold-published" {
+      const fragments_root = trim(to_string(parsed.options?.fragments_root ?? ""))
+      if fragments_root == "" {
+        throw "fold-published requires --fragments-root"
+      }
+      const files = apply_published_changelog_fold(harness.fs, root, fragments_root, version)
+      harness.stdio.println("Recorded v${version} from ${len(files)} published file(s)")
+      return 0
     }
     const fold = apply_release_changelog_fold(harness.fs, root, version)
     harness.stdio.println(

@@ -27,25 +27,25 @@ if [[ -z "$latest_tag" ]]; then
   exit 2
 fi
 
-expected_version="$(release_next_patch_development "${latest_tag#v}")" || {
+expected_version="$(release_next_patch_stable "${latest_tag#v}")" || {
   echo "error: latest tag is not a canonical stable version: $latest_tag" >&2
   exit 2
 }
 expected_branch="automation/development-$expected_version"
 
-# A stable workspace ahead of the latest tag awaits publication. Ordering is
-# semantic, not next-patch equality: a retired unpublished version is skipped.
-# This is an unproven publication state, never a successful cutover verdict.
+# Main is settled once it declares a stable version above the latest tag. That is
+# its normal state, not a pending one, and ordering is semantic, not next-patch
+# equality: a retired unpublished version is skipped.
 if release_version_is_canonical "$workspace_version" \
   && ! release_version_is_prerelease "$workspace_version" \
   && release_workspace_supersedes_source "${latest_tag#v}" "$workspace_version"; then
-  description="publication pending: main $workspace_version, latest tag $latest_tag"
+  description="current: main $workspace_version declares the next unpublished version after $latest_tag"
   echo "main_ref=$main_ref"
   echo "main_version=$workspace_version"
   echo "latest_tag=$latest_tag"
   echo "$description"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    printf 'state=pending\ndescription=%s\n' "$description" >> "$GITHUB_OUTPUT"
+    printf 'state=success\ndescription=%s\n' "$description" >> "$GITHUB_OUTPUT"
   fi
   exit 0
 fi
@@ -116,7 +116,7 @@ fi
 echo "main_ref=$main_ref"
 echo "main_version=$workspace_version"
 echo "latest_tag=$latest_tag"
-echo "expected_development_version=$expected_version"
+echo "expected_next_version=$expected_version"
 echo "expected_branch=$expected_branch"
 echo "matching_pr_count=$matching_count"
 echo "remediation_pr_count=$remediation_count"
@@ -130,7 +130,8 @@ fi
 
 state=success
 description="current: main $workspace_version, expected $expected_version, open PRs $open_count"
-if [[ "$workspace_version" == "${latest_tag#v}" && "$open_count" -eq 1 ]]; then
+if [[ "$open_count" -eq 1 &&
+  ("$workspace_version" == "${latest_tag#v}" || "$workspace_version" == "$expected_version-dev") ]]; then
   state=pending
   description="pending: main $workspace_version, expected $expected_version, one open update PR"
 elif [[ "$workspace_version" != "$expected_version" ]]; then
@@ -147,11 +148,11 @@ elif [[ "$workspace_version" != "$expected_version" ]]; then
         "$expected_version" "$latest_tag" >> "$GITHUB_OUTPUT"
     fi
   fi
-  echo "error: development cutover is owed; $description" >&2
+  echo "error: main owes the next version; $description" >&2
   exit 1
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'state=%s\ndescription=%s\n' "$state" "$description" >> "$GITHUB_OUTPUT"
 fi
-echo "development cutover monitor: $description"
+echo "next version monitor: $description"

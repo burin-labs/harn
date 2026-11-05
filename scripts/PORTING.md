@@ -20,7 +20,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_docs_links.harn` | `make check-docs-links` | Markdown local-link resolver; `..` resolved at `fs.exists` time. |
 | `verify_language_spec.harn` | `scripts/release_gate.sh` (`verify_language_spec` phase) | Extracts ```harn fences from the spec and type-checks each; resolves the checker binary via `cargo metadata`. |
 | `verify_release_metadata.harn` | `ci.yml` + `release_gate.sh` | Cargo.toml↔CHANGELOG checks; reuses `std/semver`; imports `render_release_notes.harn` in-process for its render smoke check. |
-| `render_release_notes.harn` | `release_gate.sh` + `build-release-binaries.yml` | CHANGELOG section → GitHub notes; the release-asset job invokes the built linux-x64 release binary (no toolchain there). |
+| `render_release_notes.harn` | `release_gate.sh` + `build-release-binaries.yml` | CHANGELOG section, or `changelog.d/` when the section is absent → GitHub notes; the release-asset job invokes the built linux-x64 release binary (no toolchain there). |
 | `sync_protocol_fixture_runtime_versions.harn` | `scripts/release_gate.sh` | Fixture runtime-version bump; `--write` produces byte-identical fixtures. |
 | `build_release_assets_manifest.harn` | `release_gate.sh` + `build-release-binaries.yml` | Release-asset manifest; byte-identical JSON vs Python `json.dumps(sort_keys)`. |
 | `backfill_stdlib_metadata.harn` | manual tool | Stdlib-metadata backfill (mutating); verified `diff -r`-identical mutation + idempotent (re-run = no-op). |

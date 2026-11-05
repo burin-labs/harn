@@ -13,10 +13,11 @@ name: Open release PR
 # a certified tree. Fragments that landed on main after green wait for the
 # next release. The pull request still targets main.
 #
-# A completed green-checkpoint pass, the schedule and a manual dispatch run the
-# same decision, so a release opens as soon as green holds unreleased fragments
-# instead of at the next scheduled run. Each run is a no-op with a notice when
-# main has no unreleased fragments or is not on a development version. When a
+# Retired: main declares the next stable version and promote-release.yml
+# publishes a named commit, so nothing starts this automatically. It stays
+# dispatchable until the new path has proven itself. Each run is a no-op with a
+# notice when main has no unreleased fragments or is not on a development
+# version. When a
 # `Release vX.Y.Z` pull request is already open, the run verifies its immutable
 # attempt and leaves mergeable attempts unchanged. A modified folded fragment
 # can replace a conflicted attempt after green contains the correction. A push
@@ -28,15 +29,6 @@ name: Open release PR
 # minutes). It builds only when no unexpired artifact exists.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "29 15 * * *"
-  workflow_run: # zizmor: ignore[dangerous-triggers] runs trusted main code and reads only run metadata; no run artifact or code is consumed
-    workflows: [Green checkpoint]
-    types: [completed]
-    branches: [main]
-  push:
-    branches: [main]
-    paths: ["changelog.d/**"]
 
 permissions:
   actions: read
