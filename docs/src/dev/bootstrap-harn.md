@@ -14,6 +14,9 @@ The shell adapter needs curl or wget, a SHA256 utility, and tar. On Windows,
 run it in Git Bash; ZIP seed extraction uses PowerShell. Node is unnecessary.
 `.harn-bootstrap-version` pins the published installer-capable seed independently
 of the requested runtime, so the same seed can install older Harn releases.
+If the direct seed download fails and `jq` is available, the adapter selects
+the exact release assets through the GitHub API. Both download paths use the
+same checksum and cache verification.
 
 The adapter runs the checked-in `std/runtime/bootstrap` source, which delegates
 release verification and cache policy to `std/runtime/install`. Native archive
