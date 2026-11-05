@@ -1185,9 +1185,15 @@ The callback receives:
 order, without their arguments. An empty list means no call was resolved; it
 does not rule out malformed or rejected tool markup. `nil` means the inventory
 was not supplied. An entry's missing ID or name is `nil`. The inventory is not
-proof of a result: reconcile unique IDs and names with the transcript lifecycle
-before attributing any effect, and treat missing, duplicate, or unmatched
-identities as unknown.
+proof of a result. `agent_transcript_turn_lifecycle_report` from
+`std/agent/transcript` reconciles the inventory with the lifecycle report and
+the callback's iteration. Supply the lifecycle from that callback's session;
+the function does not authenticate the origin of its arguments. It reports
+`complete` only when one assistant row is observed and every resolved ID and
+name matches one completed call in order.
+It reports unavailable or inconsistent evidence separately, with counts and
+issues. Completion does not prove that a call had no effects or that malformed
+or rejected tool markup was absent.
 
 `completion_signal` is the loop's typed marker decision. Its `declared` field
 answers whether the configured sentinel was emitted. Its `source` is

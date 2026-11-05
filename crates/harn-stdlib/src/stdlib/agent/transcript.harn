@@ -130,6 +130,21 @@ pub type AgentTranscriptToolLifecycleReport = {
   invalid_count: int,
 }
 
+/** Identity of one resolved call; missing values remain unknown. */
+pub type AgentPostTurnResolvedToolCall = {id: string?, name: string?}
+
+pub type AgentTranscriptTurnLifecycleStatus = "complete" | "unavailable" | "inconsistent"
+
+pub type AgentTranscriptTurnLifecycleReport = {
+  schema: "harn.agent.transcript.turn_lifecycle_report.v1",
+  status: AgentTranscriptTurnLifecycleStatus,
+  expected_count: int?,
+  observed_count: int,
+  assistant_row_count: int,
+  calls: list<AgentTranscriptToolLifecycle>,
+  issues: list<string>,
+}
+
 fn __first_text(values: list) -> string {
   for value in values {
     if type_of(value) == "string" && value != "" {
@@ -1142,6 +1157,79 @@ pub fn agent_transcript_tool_lifecycle_report(
     unmatched_results: orphans.unmatched_results,
     issues: orphans.issues,
     invalid_count: len(orphans.issues),
+  }
+}
+
+/**
+ * Reconcile a turn's resolved calls with completed transcript lifecycles.
+ * The caller supplies the lifecycle from the turn's session. A complete report
+ * does not authenticate that source or prove anything about effects or replay safety.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_turn_lifecycle_report(
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  resolved: list<AgentPostTurnResolvedToolCall>?,
+  iteration: int,
+) -> AgentTranscriptTurnLifecycleReport {
+  const calls = lifecycle.calls.filter({ call -> call.iteration == iteration }).to_list()
+  const assistant_rows = lifecycle.rows.filter(
+    { row -> row.kind == "assistant" && row.iteration == iteration },
+  )
+    .to_list()
+  if resolved == nil {
+    return {
+      schema: "harn.agent.transcript.turn_lifecycle_report.v1",
+      status: "unavailable",
+      expected_count: nil,
+      observed_count: len(calls),
+      assistant_row_count: len(assistant_rows),
+      calls: calls,
+      issues: ["resolved inventory unavailable"],
+    }
+  }
+  let issues: list<string> = []
+  if iteration < 0 {
+    issues = issues + ["invalid iteration"]
+  }
+  if !lifecycle.ok {
+    issues = issues + ["transcript lifecycle incomplete"]
+  }
+  if len(assistant_rows) != 1 {
+    issues = issues + ["assistant turn not uniquely observed"]
+  }
+  if len(resolved) != len(calls) {
+    issues = issues + ["call count mismatch"]
+  }
+  let seen: dict<string, bool> = {}
+  let index = 0
+  for identity in resolved {
+    const id = identity.id ?? ""
+    const name = identity.name ?? ""
+    if trim(id) == "" || trim(name) == "" {
+      issues = issues + ["missing call identity: ${name} (${id})"]
+    } else if seen[id] ?? false {
+      issues = issues + ["duplicate call identity: ${name} (${id})"]
+    } else {
+      seen = seen + {[id]: true}
+    }
+    const call = calls[index]
+    if call == nil || call?.tool_call_id != id || call?.name != name
+      || call?.status != "completed" {
+      issues = issues + ["unmatched call: ${name} (${id})"]
+    }
+    index = index + 1
+  }
+  return {
+    schema: "harn.agent.transcript.turn_lifecycle_report.v1",
+    status: len(issues) == 0 ? "complete" : "inconsistent",
+    expected_count: len(resolved),
+    observed_count: len(calls),
+    assistant_row_count: len(assistant_rows),
+    calls: calls,
+    issues: issues,
   }
 }
 
