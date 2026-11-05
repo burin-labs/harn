@@ -1637,7 +1637,6 @@ export interface ACPTranscriptCompactedUpdateMetaHarn {
   compactionPolicy: ACPValue
   recap: ACPValue
   sourceMeasurement: ACPValue
-  classification: ACPValue
   replayed?: boolean
 }
 

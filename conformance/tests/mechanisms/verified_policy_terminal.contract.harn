@@ -153,14 +153,8 @@ pipeline default(harness: Harness) {
     )
     assert_eq(unchanged.final_status, status)
   }
-  const natural = __agent_loop_resolve_verified_policy_stop(
-    "done",
-    "explicit_completion_claim",
-    evidence,
-    nil,
-    nil,
-  )
-  assert_eq(natural.stop_reason, "explicit_completion_claim")
+  const natural = __agent_loop_resolve_verified_policy_stop("done", "natural", evidence, nil, nil)
+  assert_eq(natural.stop_reason, "natural")
   const red = __agent_loop_terminal_verification_from_assessment(
     accepted_verification()
       + {verification: {oracle_expected: true, observed: "failed", command: "fixture-verify"}},

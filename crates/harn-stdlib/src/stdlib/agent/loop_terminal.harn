@@ -291,7 +291,7 @@ pub fn __agent_loop_resolve_verified_policy_stop(
  *
  * The stop-reason set includes deterministic completion candidates, whose
  * requirement receipts do not replace the host's declared-artifact contract.
- * `explicit_completion_claim`, `post_edit_reverify`,
+ * `post_edit_reverify`,
  * `stalled_turn_end_judge`
  * are reached only when a completion judge or a reserve verification already
  * ruled on this run, and `done` is the judge-accepted spelling. Something with

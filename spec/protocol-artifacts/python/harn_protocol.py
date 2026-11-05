@@ -1827,7 +1827,6 @@ class ACPTranscriptCompactedUpdateMetaHarn(_HarnDataclass):
     compactionPolicy: JsonValue
     recap: JsonValue
     sourceMeasurement: JsonValue
-    classification: JsonValue
     replayed: Optional[bool] = None
 
 @dataclass

@@ -1,4 +1,3 @@
-import { CompletionClaim } from "std/agent/completion_claim"
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { AgentCompletionSignal } from "std/agent/completion_signal"
@@ -109,7 +108,6 @@ pub type CompletionEvidencePacket = {
   research_summary: CompletionResearchSummary,
   fallback_observations: list<CompletionEvidenceAction>,
   requirement_evidence: list<CompletionRequirementEvidenceRecord>,
-  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionEvidenceSelection = {
@@ -195,7 +193,6 @@ pub type CompletionEvidenceSnapshot = {
   pending_tool_batch_effect_count: int,
   // Absent until a deterministic gate actually ran and reported.
   verification?: CompletionVerificationState?,
-  completion_claim?: CompletionClaim,
   // The completion target as amended by accepted mid-run user steering,
   // derived once at the judge payload seam. Every exit authority shown this
   // snapshot — the LLM judge, a `verify_completion` closure, the completion
@@ -439,11 +436,6 @@ pub fn completion_evidence_id(
     lifecycle_issues: packet.lifecycle_issues,
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: verification,
-  }
-  // Keep the default, opt-out path byte-identical. A nil optional field would
-  // still serialize as a new key and churn every existing evidence identity.
-  if packet.completion_claim != nil {
-    base = base + {completion_claim: packet.completion_claim}
   }
   // Two decisions that differ only in accepted steering were decided under
   // different obligations and must not share an evidence identity. An unsteered

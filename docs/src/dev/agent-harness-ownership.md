@@ -36,7 +36,6 @@ Agent modules below are under `crates/harn-stdlib/src/stdlib/agent/`.
 | `loop_run.harn`, `loop_turn_options.harn`, `postturn.harn`, `loop_tool_calls.harn` | runner |
 | `transcript.harn`, `control.harn` | runner context and accepted controls |
 | `judge.harn`, `completion_evidence.harn`, `completion_requirements.harn` | stop decision |
-| `completion_claim.harn` | Actor proposal and citation validation at the stop-decision boundary |
 | `stall_*.harn` | stall handler and explicit checkpoint lifetime |
 | `std/workflow` | runner lifetime across workflow stages |
 | `std/eval` and replay primitives | grader support and meter stick statistics |
@@ -150,14 +149,6 @@ It cannot mark those needs as met.
 Host facts can mark a chat task, a required output, a review file, or a source
 change. Those inputs must not hide a second set of stop rules. Any evidence the
 actor cites must exist in the run and match the current task generation.
-
-Extend the existing `CompletionClaim` and `task_complete` tool for actor intent.
-The current implementation validates citations before judging, but is opt-in,
-allows an implicit prose fallback, requires cited tool work, and rejects
-`blocked_on` as an invalid completion. The cutover must support a truthful
-read-only answer and a blocked terminal result without inventing tool evidence
-or forcing more work. Remove the fallback and its switch when the typed path
-covers those cases; do not add a second completion tool.
 
 ## stall handler
 
