@@ -94,7 +94,6 @@ public enum HarnProtocolConstants {
         "cache_miss",
         "capability_gap",
         "code_librarian_query_nl_fallback",
-        "compass_routing_decision",
         "composition_child_call",
         "composition_child_result",
         "composition_error",
@@ -3869,7 +3868,6 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
     public var compactionPolicy: HarnACPValue
     public var recap: HarnACPValue
     public var sourceMeasurement: HarnACPValue
-    public var classification: HarnACPValue
     public var replayed: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -3892,7 +3890,6 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         case compactionPolicy
         case recap
         case sourceMeasurement
-        case classification
         case replayed
     }
 
@@ -3917,7 +3914,6 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         compactionPolicy = try values.decode(HarnACPValue.self, forKey: .compactionPolicy)
         recap = try values.decode(HarnACPValue.self, forKey: .recap)
         sourceMeasurement = try values.decode(HarnACPValue.self, forKey: .sourceMeasurement)
-        classification = try values.decode(HarnACPValue.self, forKey: .classification)
         replayed = try values.decodeIfPresent(Bool.self, forKey: .replayed)
     }
 
@@ -3942,7 +3938,6 @@ public struct HarnACPTranscriptCompactedUpdateMetaHarn: Codable, Sendable, Equat
         try values.encode(compactionPolicy, forKey: .compactionPolicy)
         try values.encode(recap, forKey: .recap)
         try values.encode(sourceMeasurement, forKey: .sourceMeasurement)
-        try values.encode(classification, forKey: .classification)
         try values.encodeIfPresent(replayed, forKey: .replayed)
     }
 }
@@ -4333,7 +4328,6 @@ public enum HarnACPTypedSessionUpdate: Codable, Sendable, Equatable {
             if value["_meta"]?["harn"] != nil {
             if value["_meta"]?["harn"]?["archivedMessages"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is required") }
             if (value["_meta"]?["harn"]?["archivedMessages"]?.doubleValue ?? 0) < 0 { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.archivedMessages is below its minimum") }
-            if value["_meta"]?["harn"]?["classification"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.classification is required") }
             if value["_meta"]?["harn"]?["compactionPolicy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.compactionPolicy is required") }
             if value["_meta"]?["harn"]?["engineStrategy"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.engineStrategy is required") }
             if value["_meta"]?["harn"]?["estimatedTokensAfter"] == nil { throw DecodingError.dataCorruptedError(in: container, debugDescription: "session update _meta.harn.estimatedTokensAfter is required") }
@@ -5784,17 +5778,6 @@ public struct HarnAgentEventCodeLibrarianQueryNlFallback: Codable, Sendable, Equ
     }
 }
 
-public struct HarnAgentEventCompassRoutingDecision: Codable, Sendable, Equatable {
-    public var toolCallId: String
-    public var mode: String
-    public var action: String
-    public var persona: String
-    public var originalTool: String
-    public var routedTool: String
-    public var targetTool: String
-    public var path: String?
-}
-
 public struct HarnAgentEventCompositionChildCall: Codable, Sendable, Equatable {
     public var runId: String
     public var toolCallId: String
@@ -7109,7 +7092,6 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case cacheMiss([String: HarnACPValue])
     case capabilityGap(HarnAgentEventCapabilityGap)
     case codeLibrarianQueryNlFallback(HarnAgentEventCodeLibrarianQueryNlFallback)
-    case compassRoutingDecision(HarnAgentEventCompassRoutingDecision)
     case compositionChildCall(HarnAgentEventCompositionChildCall)
     case compositionChildResult(HarnAgentEventCompositionChildResult)
     case compositionError(HarnAgentEventCompositionError)
@@ -7178,7 +7160,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case cacheMiss = "cache_miss"
         case capabilityGap = "capability_gap"
         case codeLibrarianQueryNlFallback = "code_librarian_query_nl_fallback"
-        case compassRoutingDecision = "compass_routing_decision"
         case compositionChildCall = "composition_child_call"
         case compositionChildResult = "composition_child_result"
         case compositionError = "composition_error"
@@ -7242,7 +7223,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "cache_miss",
             "capability_gap",
             "code_librarian_query_nl_fallback",
-            "compass_routing_decision",
             "composition_child_call",
             "composition_child_result",
             "composition_error",
@@ -7325,7 +7305,6 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .cacheMiss: self.payload = .cacheMiss(fields)
         case .capabilityGap: self.payload = .capabilityGap(try container.decode(HarnAgentEventCapabilityGap.self))
         case .codeLibrarianQueryNlFallback: self.payload = .codeLibrarianQueryNlFallback(try container.decode(HarnAgentEventCodeLibrarianQueryNlFallback.self))
-        case .compassRoutingDecision: self.payload = .compassRoutingDecision(try container.decode(HarnAgentEventCompassRoutingDecision.self))
         case .compositionChildCall: self.payload = .compositionChildCall(try container.decode(HarnAgentEventCompositionChildCall.self))
         case .compositionChildResult: self.payload = .compositionChildResult(try container.decode(HarnAgentEventCompositionChildResult.self))
         case .compositionError: self.payload = .compositionError(try container.decode(HarnAgentEventCompositionError.self))

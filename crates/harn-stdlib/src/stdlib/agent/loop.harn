@@ -1,5 +1,4 @@
 // @harn-entrypoint-category agent.stdlib
-import { agent_completion_claim_apply_options } from "std/agent/completion_claim"
 import { AgentLoopTerminalError, AgentResult } from "std/agent/contracts"
 import { __agent_loop_run } from "std/agent/loop_run"
 import "std/agent/loop_support"
@@ -56,10 +55,7 @@ pub fn agent_loop(
     // which is more use than "no option reads this".
     __validate_removed_agent_loop_options(options ?? {})
     __validate_agent_loop_option_keys(options)
-    let opts = agent_loop_options(
-      harness,
-      agent_progress_apply_options(harness.agent, agent_completion_claim_apply_options(options)),
-    )
+    let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
     // Lifecycle composition owns the agent projection so direct callers and
     // this default path share one validated, closure-preserving boundary.
     opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}

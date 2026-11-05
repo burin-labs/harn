@@ -46,7 +46,7 @@ release_development_bump_plan "$version" "$published_tag" true
 if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
   release_require_unpublished_retirement "$version" "$published_tag"
   RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
-  RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$version")"
+  RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_stable "$version")"
   RELEASE_DEVELOPMENT_BUMP_REASON=failed_unpublished_identity_retired
 fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -57,4 +57,4 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "published_tag=$published_tag"
   } >> "$GITHUB_OUTPUT"
 fi
-echo "::notice::Post-publication development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>} published_tag=$published_tag"
+echo "::notice::Post-publication version bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>} published_tag=$published_tag"

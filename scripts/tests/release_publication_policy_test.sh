@@ -49,13 +49,7 @@ grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vsc
 publish_workflow="$root/.github/workflows/publish-release.yml"
 grep -Fq "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" "$publish_workflow" \
   || fail "stable drift comparison can select a prerelease tag"
-grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
-  "$publish_workflow" \
-  || fail "declared -dev workspace state does not bypass publication"
-grep -Fq 'release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
-  "$publish_workflow" \
-  || fail "certified at-SHA tag turns its pending main state red"
-grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"' \
+grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF_NAME"' \
   "$publish_workflow" \
   || fail "matching version strings bypass trusted candidate tag verification"
 if grep -Fq 'permission-contents: write' "$publish_workflow"; then

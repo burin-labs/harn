@@ -183,8 +183,7 @@ start_source_candidate() {
       or (map(.total_count) | unique | length) != 1
       or (map(.workflow_runs | length) | add) != .[0].total_count
     then error("incomplete census") else . end
-    # A scheduled run builds the same candidate under the plain run name.
-    | [.[].workflow_runs[] | select(.display_title == "Build release binaries [source-candidate]" or .event == "schedule")] as $candidates
+    | [.[].workflow_runs[] | select(.display_title == "Build release binaries [source-candidate]")] as $candidates
     | ($candidates | map(select(.status != "completed")) | length) as $active
     | if $active > 0 then "skip: \($active) still running"
       elif any($candidates[]; .head_sha == $tip) then "skip: main'"'"'s tip already has one"

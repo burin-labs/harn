@@ -19,7 +19,6 @@ const IDLE_NUDGE_ID: &str = "idle_nudge";
 const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
 const RESUME_CONTINUITY_ID: &str = "resume_continuity";
-const COMPASS_AST_EDITS_ID: &str = "compass_ast_edits";
 const PROJECT_FACTS_ID: &str = "project_facts";
 const WORKSPACE_ANCHOR_ID: &str = "workspace_anchor";
 const GROUNDED_REVIEW_ID: &str = "grounded_review";
@@ -32,7 +31,6 @@ const RESUME_CONTINUITY_EVENTS: &[HookEvent] = &[HookEvent::WorkerResumed];
 const PROJECT_FACTS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
 const WORKSPACE_ANCHOR_EVENTS: &[HookEvent] =
     &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
-const COMPASS_AST_EDITS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::WorkerResumed];
 const GROUNDED_REVIEW_EVENTS: &[HookEvent] = &[
     HookEvent::PostToolUse,
     HookEvent::PostStep,
@@ -65,15 +63,6 @@ pub trait ReminderProvider {
     fn id(&self) -> &'static str;
     fn subscribes_to(&self) -> &'static [HookEvent];
     fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec>;
-    /// Whether this provider fires by default (no explicit opt-in). The default
-    /// set is *derived* from this flag (see [`canonical_default_enabled_ids`]),
-    /// so a newly-added default-on provider is enabled automatically and can
-    /// never silently fail to fire by being forgotten in a second hand-kept
-    /// list. Opt-in-only providers override this to `false` and activate per
-    /// session via `reminders: {providers: ["<id>"]}`.
-    fn default_enabled(&self) -> bool {
-        true
-    }
 }
 
 #[derive(Clone)]
@@ -1351,67 +1340,7 @@ pub async fn evaluate_and_inject(
     Ok(iteration_state.into_json())
 }
 
-/// Compass (B.9, #2521): help a coding agent choose an edit mechanism.
-///
-/// The `edit_*` stdlib surface (`edit_apply_node`, `edit_rename_symbol`,
-/// the structured refactors, `edit_dry_run`) pays off when structural
-/// addressing, parse validation, or semantic-neighbor updates prevent a
-/// concrete failure mode. Hash-guarded text patches remain a first-class
-/// choice for exact localized changes. This provider injects that balanced
-/// guidance at session start (and on resume). When enabled it always fires
-/// and preserves across compaction so the guidance persists through a long
-/// session.
-///
-/// It is registered in `canonical_providers` but ships **opt-in**: it is
-/// deliberately absent from the default-enabled set
-/// (`canonical_provider_ids`), so a session activates it explicitly with
-/// `reminders: {providers: ["compass_ast_edits"]}`. The other canonical
-/// providers are conditional (they stay silent without relevant data); an
-/// unconditional default-on steer would instead fire on every agent loop,
-/// including sub-agent and one-shot loops that never edit code.
-struct CompassAstEditsProvider;
-
-const COMPASS_AST_EDITS_BODY: &str = "Choose the simplest safe edit mechanism for each change. \
-Use `edit_apply_node` or `edit_insert_at_anchor` when structural addressing and parse \
-validation materially reduce risk, and `edit_rename_symbol` or a structured refactor when \
-semantic neighbours must change together. Use `edit_safe_text_patch` for exact localized \
-text changes, whether or not the language has grammar support. Preview risky or \
-multi-operation plans with `edit_dry_run`.";
-
-impl ReminderProvider for CompassAstEditsProvider {
-    fn id(&self) -> &'static str {
-        COMPASS_AST_EDITS_ID
-    }
-
-    fn subscribes_to(&self) -> &'static [HookEvent] {
-        COMPASS_AST_EDITS_EVENTS
-    }
-
-    // The burin compass ships opt-in: registered as a canonical provider but
-    // NOT enabled by default; sessions activate it via `reminders.providers`.
-    fn default_enabled(&self) -> bool {
-        false
-    }
-
-    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
-        let mut reminder = provider_reminder(
-            COMPASS_AST_EDITS_BODY.to_string(),
-            COMPASS_AST_EDITS_ID,
-            ctx,
-        );
-        reminder.tags = vec![COMPASS_AST_EDITS_ID.to_string()];
-        // One steer per session; the dedupe key suppresses a second
-        // emission if both SessionStart and a later resume fire.
-        reminder.dedupe_key = Some(COMPASS_AST_EDITS_ID.to_string());
-        reminder.ttl_turns = None;
-        reminder.preserve_on_compact = true;
-        reminder.propagate = ReminderPropagate::Session;
-        reminder.role_hint = ReminderRoleHint::System;
-        Some(reminder)
-    }
-}
-
-fn canonical_providers() -> [&'static dyn ReminderProvider; 9] {
+fn canonical_providers() -> [&'static dyn ReminderProvider; 8] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
@@ -1421,7 +1350,6 @@ fn canonical_providers() -> [&'static dyn ReminderProvider; 9] {
         &ProjectFactsProvider,
         &WorkspaceAnchorProvider,
         &GroundedReviewProvider,
-        &CompassAstEditsProvider,
     ]
 }
 
@@ -1462,12 +1390,11 @@ fn enabled_provider_ids(
         return BTreeSet::new();
     }
 
-    // Default-enabled canonical providers. Opt-in-only providers (e.g. the
-    // burin compass) are excluded by `default_enabled() == false` and activate
-    // through an explicit `reminders.providers: ["<id>"]` entry handled below.
-    let mut enabled: BTreeSet<String> = canonical_default_enabled_ids()
+    // Every canonical provider is on by default; `reminders.providers`
+    // entries below add to or subtract from that set.
+    let mut enabled: BTreeSet<String> = canonical_providers()
         .into_iter()
-        .map(str::to_string)
+        .map(|provider| provider.id().to_string())
         .collect();
     for provider in user_providers {
         enabled.insert(provider.id.clone());
@@ -1489,24 +1416,6 @@ fn enabled_provider_ids(
         }
     }
     enabled
-}
-
-/// Ids of the canonical providers enabled by default, *derived* from the
-/// single [`canonical_providers`] array via [`ReminderProvider::default_enabled`].
-///
-/// There is deliberately no second hand-maintained id list to drift against
-/// the provider array: a new default-on provider is enabled the moment it joins
-/// `canonical_providers`, and an opt-in provider (the burin compass) is excluded
-/// by returning `default_enabled() == false`. Previously these were two separate
-/// arrays (`[_; 9]` of providers, `[_; 8]` of ids) kept in sync only by
-/// convention — a forgotten id made a provider silently never fire, and that
-/// miss was indistinguishable from the intentional opt-in case.
-fn canonical_default_enabled_ids() -> Vec<&'static str> {
-    canonical_providers()
-        .into_iter()
-        .filter(|provider| provider.default_enabled())
-        .map(|provider| provider.id())
-        .collect()
 }
 
 async fn evaluate_vm_provider(
@@ -1943,53 +1852,6 @@ mod tests {
 
     mod grounded_review_truncation_tests;
 
-    #[test]
-    fn default_enabled_ids_are_derived_and_exclude_only_opt_in_providers() {
-        let defaults: BTreeSet<&str> = canonical_default_enabled_ids().into_iter().collect();
-        let all: BTreeSet<&str> = canonical_providers().iter().map(|p| p.id()).collect();
-
-        // The derived default set is exactly the canonical providers that are
-        // not opt-in — no separate hand-maintained list to drift.
-        for provider in canonical_providers() {
-            assert_eq!(
-                defaults.contains(provider.id()),
-                provider.default_enabled(),
-                "provider `{}` default-enabled membership must match its default_enabled() flag",
-                provider.id()
-            );
-        }
-
-        // The burin compass is the one registered-but-opt-in provider: present
-        // in the full set, absent from the default set.
-        assert!(all.contains(COMPASS_AST_EDITS_ID));
-        assert!(
-            !defaults.contains(COMPASS_AST_EDITS_ID),
-            "compass ships opt-in and must not be default-enabled"
-        );
-        // Every other canonical provider is on by default.
-        assert_eq!(defaults.len(), all.len() - 1);
-    }
-
-    #[test]
-    fn compass_guides_edit_choice_and_survives_compaction() {
-        let spec = CompassAstEditsProvider
-            .evaluate(&ctx(HookEvent::SessionStart, json!({}), JsonValue::Null))
-            .expect("compass fires on session start");
-        // The reminder's `id` is an auto-generated per-instance UUID; the
-        // provider identity is carried by `dedupe_key` / `tags` (matching
-        // the other canonical providers, e.g. the workspace anchor test).
-        assert_eq!(spec.dedupe_key.as_deref(), Some(COMPASS_AST_EDITS_ID));
-        assert_eq!(spec.tags, vec![COMPASS_AST_EDITS_ID.to_string()]);
-        assert!(spec.body.contains("simplest safe edit mechanism"));
-        assert!(spec.body.contains("edit_apply_node"));
-        assert!(spec.body.contains("edit_rename_symbol"));
-        assert!(spec.body.contains("edit_safe_text_patch"));
-        assert!(spec.body.contains("edit_dry_run"));
-        // The steer must outlive a context compaction, otherwise a long
-        // session silently reverts to freeform edits after the first squash.
-        assert!(spec.preserve_on_compact);
-    }
-
     /// harn#4731 defect #1: the post-compaction recap must be durable. If it
     /// expires (the old `ttl_turns = 2`) the model loses the only surviving
     /// memory of everything archived two turns later. `ttl_turns = None` plus
@@ -2012,15 +1874,6 @@ mod tests {
             spec.preserve_on_compact,
             "recap must survive the next compaction"
         );
-    }
-
-    #[test]
-    fn compass_subscribes_to_session_lifecycle_only() {
-        let events = CompassAstEditsProvider.subscribes_to();
-        assert!(events.contains(&HookEvent::SessionStart));
-        assert!(events.contains(&HookEvent::WorkerResumed));
-        // Not per-tool-call — that would spam the transcript on every edit.
-        assert!(!events.contains(&HookEvent::PostToolUse));
     }
 
     #[test]

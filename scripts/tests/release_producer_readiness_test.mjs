@@ -281,7 +281,11 @@ test('the actual promotion resolver admits only an explicit repair with complete
       const data=JSON.parse(fs.readFileSync(process.env.REPAIR_FIXTURE,'utf8'));
       const route=process.argv[3];
       if(route.includes('/compare/')) console.log(JSON.stringify({status:'ahead',merge_base_commit:{sha:data.run.head_sha}}));
-      else if(route.endsWith('/42')) console.log(JSON.stringify(data.run));
+      else if(route.endsWith('/42')) console.log(JSON.stringify({...data.run,
+        repository:{id:1,...data.run.repository},head_repository:{id:1,...data.run.head_repository}}));
+      else if(route.includes('/contents/Cargo.toml')) console.log('[workspace.package]\\nversion = "1.2.3"');
+      else if(route.includes('/artifacts')) console.log(JSON.stringify({total_count:data.artifacts.length,
+        artifacts:data.artifacts.map(item=>({...item,workflow_run:{...item.workflow_run,head_branch:'main',repository_id:1,head_repository_id:1}}))}));
       else process.exit(2);`,{mode:0o755});
     const execute=(changes={},environment={})=>{
       fs.writeFileSync(fixture,JSON.stringify({run,jobs,artifacts,...changes}));

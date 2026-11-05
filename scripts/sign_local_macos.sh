@@ -16,10 +16,24 @@
 # Idempotent: safe to re-run after every `cargo build`. No-op on non-macOS.
 # Fails if any binary does not pass `codesign --verify --strict` afterwards.
 # Signs Harn's product binaries and the private worktree freshness checker in
-# target/{debug,release}.
+# target/{debug,release}. A positional path also requires and signs the exact
+# resolved executable; `--verify PATH` checks it without changing it.
 
 set -euo pipefail
 
+if [ "${1:-}" = "--verify" ]; then
+  [ "$#" -eq 2 ] && [ -f "$2" ] && [ -x "$2" ] || { echo "expected an executable to verify" >&2; exit 1; }
+  if [ "$(uname)" = "Darwin" ]; then
+    codesign --verify --strict "$2"
+  fi
+  exit 0
+fi
+[ "$#" -le 1 ] || { echo "expected at most one required executable" >&2; exit 1; }
+required="${1:-}"
+if [ -n "$required" ] && { [ ! -f "$required" ] || [ ! -x "$required" ]; }; then
+  echo "required Harn executable is missing: $required" >&2
+  exit 1
+fi
 [ "$(uname)" = "Darwin" ] || exit 0
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,6 +57,13 @@ fi
 
 target_dir="$(hook_target_dir)"
 target_dir="${target_dir:-target}"
+if [ -n "$required" ]; then
+  profile_dir="${required%/*}"
+  case "$profile_dir" in
+    */debug | */release) target_dir="${profile_dir%/*}" ;;
+    *) echo "required Harn executable is outside a Cargo profile: $required" >&2; exit 1 ;;
+  esac
+fi
 
 # A signature is only as good as the verifier that accepts it: `codesign -s`
 # can exit 0 or be swallowed while leaving a seal the kernel rejects (an
@@ -78,10 +99,15 @@ sign_one() {
 }
 
 signed_any=0
+if [ -n "$required" ]; then
+  sign_one "$required"
+  signed_any=1
+fi
 for profile in debug release; do
   for bin in harn harn-dap harn-lsp harn-freshness-check; do
     path="$target_dir/$profile/$bin"
     [ -x "$path" ] || continue
+    [ "$path" != "$required" ] || continue
     sign_one "$path"
     signed_any=1
   done

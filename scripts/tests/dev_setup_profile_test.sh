@@ -67,7 +67,14 @@ make_fixture_repo() {
   cp "$repo_root/scripts/rustc_frontend_wrapper.sh" "$repo/scripts/rustc_frontend_wrapper.sh"
   chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
+  cat > "$repo/scripts/sign_local_macos.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${DEV_SETUP_TEST_SIGNER_RECORD:-/dev/null}"
+if [[ "${1:-}" == "--verify" && "${DEV_SETUP_TEST_VERIFY_FAIL:-0}" == 1 ]]; then
+  exit 42
+fi
+SH
   printf '#!/usr/bin/env bash\nset -euo pipefail\nexec cargo "$@"\n' \
     > "$repo/scripts/cargo_with_worktree_build_dir.sh"
   cat > "$repo/scripts/harn_bin.sh" <<'SH'
@@ -188,6 +195,7 @@ run_setup() {
     DEV_SETUP_TEST_RESOLVER_RECORD="$tmp_root/resolver-$profile.txt" \
     DEV_SETUP_TEST_TIMEOUT_RECORD="$tmp_root/timeout-$profile.txt" \
     DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-$profile.txt" \
+    DEV_SETUP_TEST_SIGNER_RECORD="$tmp_root/signer-$profile.txt" \
     "$repo/scripts/dev_setup.sh" > "$output" 2>&1
 }
 
@@ -262,6 +270,11 @@ rust_target_dir="$tmp_root/cache-rust/harn/dev-setup/harn-target/$(basename "$tm
 rust_harn_bin="$rust_target_dir/debug/harn"
 if [[ ! -x "$rust_harn_bin" ]]; then
   echo "rust setup did not leave an executable production Harn binary" >&2
+  exit 1
+fi
+if ! grep -Fxq "$rust_harn_bin" "$tmp_root/signer-rust.txt" \
+  || ! grep -Fxq -- "--verify $rust_harn_bin" "$tmp_root/signer-rust.txt"; then
+  echo "rust setup did not sign and finally verify the resolved executable" >&2
   exit 1
 fi
 publication_resolver_record="$tmp_root/resolver-rust-publication.txt"
@@ -937,6 +950,11 @@ fi
 if [[ ! -d "$prune_guard_entry" ]]; then
   echo "the sweep removed the caller's own entry" >&2
   printf '%s\n' "$guard_output" >&2
+  exit 1
+fi
+
+if DEV_SETUP_TEST_VERIFY_FAIL=1 run_setup "$rust_repo" rust "$tmp_root/invalid-signature-output.txt" "$rust_cargo"; then
+  echo "rust setup accepted a failed final signature verification" >&2
   exit 1
 fi
 

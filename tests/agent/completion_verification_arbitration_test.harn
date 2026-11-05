@@ -9,7 +9,6 @@
 // gate that could not read facts, on an unrun verifier, or on a manner-clause
 // refusal is the blanket weakening this mechanism exists to avoid, and it would
 // look identical to a working one from the positive case alone.
-import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import {
   __judge_completion_verdict_read,
@@ -210,55 +209,20 @@ pipeline test_absent_gap_class_reads_as_other(harness: Harness, task: unknown) {
   )
 }
 
-// -------------------------------------------------------------------------------------------------
-// B1: the gate reports what it observed.
-// -------------------------------------------------------------------------------------------------
-
-fn __green_verify() {
-  return {command: "run the project checks", ok: true}
-}
-
-fn __red_verify() {
-  return {findings: "2 failed", ok: false}
-}
-
-fn __wrote_source(_ctx: unknown) {
-  return {source_write_count: 1}
-}
-
-pipeline test_gate_reports_the_verification_it_observed(harness: Harness, task: unknown) {
-  const green = agent_completion_gate(
-    harness.runtime,
-    {facts: __wrote_source, verify_command: __green_verify},
-  )
-    .verify_completion({session_id: "gate-green", transcript: "[]"})
-  assert_eq(green.confirm, true)
-  assert_eq(green.verification.observed, "passed")
-  assert_eq(green.verification.oracle_expected, true)
-  assert_eq(green.verification.command, "run the project checks")
-  const red = agent_completion_gate(
-    harness.runtime,
-    {facts: __wrote_source, max_vetoes: 0, verify_command: __red_verify},
-  )
-    .verify_completion({session_id: "gate-red", transcript: "[]"})
-  assert_eq(red.confirm, false)
-  assert_eq(red.verification.observed, "failed")
-  // A verifier is configured but produced no verdict this turn.
-  const unrun = agent_completion_gate(harness.runtime, {facts: __wrote_source, max_vetoes: 0})
-    .verify_completion({session_id: "gate-unrun", transcript: "[]"})
-  assert_eq(unrun.verification.observed, "not_run")
-  assert_eq(unrun.verification.oracle_expected, false)
-}
-
-pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task: unknown) {
-  // The trap this mechanism is built around: this `confirm` means "I could not
-  // look". Nothing it ships may read as a positive observation.
-  const verdict = agent_completion_gate(harness.runtime, {}).verify_completion(
-    {session_id: "gate-blind", transcript: "[]"},
-  )
-  assert_eq(verdict.confirm, true)
-  assert_eq(verdict.reason, "facts_unavailable")
-  assert_eq(verdict.verification.observed, "not_run")
+/** A callback that could not read facts: `confirm: true` here means "I could not look". */
+fn __facts_unavailable_gate() {
+  return { _payload ->
+    {
+      confirm: true,
+      reason: "facts_unavailable",
+      verification: {
+        oracle_expected: false,
+        command: "",
+        observed: "not_run",
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
 }
 
 pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, task: unknown) {
@@ -442,7 +406,7 @@ pipeline test_unrun_verification_does_not_convert(harness: Harness, task: unknow
 }
 
 pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, task: unknown) {
-  // The real facts-free gate, through its real seam: `confirm: true` with
+  // A facts-free callback, through the real seam: `confirm: true` with
   // `reason: facts_unavailable`. Keying the conversion on `confirm` would
   // convert here, and this case is why it does not.
   const captured = with_llm_script(
@@ -469,7 +433,7 @@ pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, 
             max_iterations: 2,
             verify_completion_judge: {provider: "mock", max_invocations: 1},
           }
-            + agent_completion_gate(harness.runtime, {}),
+            + {verify_completion: __facts_unavailable_gate()},
         ) },
       )
     },

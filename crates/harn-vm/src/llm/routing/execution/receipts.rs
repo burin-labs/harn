@@ -50,46 +50,6 @@ pub(crate) struct RoutingAttempt {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub error: Option<RoutingErrorSnapshot>,
-    /// Per-verifier signals emitted after this attempt's response.
-    /// Empty when the policy has no `escalate_on` chain or the
-    /// attempt failed before verifiers ran.
-    pub verifier_signals: Vec<VerifierSignalRecord>,
-    /// What the verifier chain told the router to do with this
-    /// candidate. `Accept` means the answer was returned;
-    /// `Refine`/`Escalate` mean the router moved on (within the same
-    /// link or to the next link respectively).
-    pub verifier_outcome: Option<VerifierOutcome>,
-}
-
-/// One signal entry in `RoutingAttempt.verifier_signals`. Kept simple
-/// so it survives serialization through `VmValue` dicts without losing
-/// the verifier's name and the human-readable reason.
-#[derive(Clone, Debug)]
-pub(crate) struct VerifierSignalRecord {
-    pub name: String,
-    pub kind: String,
-    pub signal: String,
-    pub reason: Option<String>,
-}
-
-/// Aggregated verdict across the verifier chain for one attempt. Drives
-/// receipt rendering ("escalated because verifier=refine on attempt 1,
-/// escalate on attempt 2").
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum VerifierOutcome {
-    Accept,
-    Refine,
-    Escalate,
-}
-
-impl VerifierOutcome {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::Accept => "accept",
-            Self::Refine => "refine",
-            Self::Escalate => "escalate",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,23 +107,7 @@ pub(crate) fn trace_to_decision(
     for (idx, attempt) in trace.attempts.iter().enumerate() {
         let selected = trace.selected == Some(idx);
         let reason = match attempt.status {
-            AttemptStatus::Succeeded => match attempt.verifier_outcome {
-                Some(VerifierOutcome::Refine) => {
-                    if selected {
-                        "selected:verifier_refine_fallback".to_string()
-                    } else {
-                        "verifier:refine".to_string()
-                    }
-                }
-                Some(VerifierOutcome::Escalate) => {
-                    if selected {
-                        "selected:verifier_escalate_fallback".to_string()
-                    } else {
-                        "verifier:escalate".to_string()
-                    }
-                }
-                Some(VerifierOutcome::Accept) | None => "selected".to_string(),
-            },
+            AttemptStatus::Succeeded => "selected".to_string(),
             AttemptStatus::Failed => attempt
                 .error
                 .as_ref()
@@ -248,26 +192,6 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                     err_dict.put_int("status", status as i64);
                 }
                 dict.put("error", VmValue::dict(err_dict));
-            }
-            if let Some(outcome) = attempt.verifier_outcome {
-                dict.put_str("verifier_outcome", outcome.as_str());
-            }
-            if !attempt.verifier_signals.is_empty() {
-                let signals: Vec<VmValue> = attempt
-                    .verifier_signals
-                    .iter()
-                    .map(|signal| {
-                        let mut sig_dict = BTreeMap::new();
-                        sig_dict.put_str("name", signal.name.clone());
-                        sig_dict.put_str("kind", signal.kind.clone());
-                        sig_dict.put_str("signal", signal.signal.clone());
-                        if let Some(reason) = &signal.reason {
-                            sig_dict.put_str("reason", reason.clone());
-                        }
-                        VmValue::dict(sig_dict)
-                    })
-                    .collect();
-                dict.put("verifier_signals", VmValue::list(signals));
             }
             VmValue::dict(dict)
         })

@@ -1518,7 +1518,6 @@ pub enum HarnAgentEventKind {
     CacheMiss,
     CapabilityGap,
     CodeLibrarianQueryNlFallback,
-    CompassRoutingDecision,
     CompositionChildCall,
     CompositionChildResult,
     CompositionError,
@@ -1586,7 +1585,6 @@ impl HarnAgentEventKind {
             Self::CacheMiss => "cache_miss",
             Self::CapabilityGap => "capability_gap",
             Self::CodeLibrarianQueryNlFallback => "code_librarian_query_nl_fallback",
-            Self::CompassRoutingDecision => "compass_routing_decision",
             Self::CompositionChildCall => "composition_child_call",
             Self::CompositionChildResult => "composition_child_result",
             Self::CompositionError => "composition_error",
@@ -1669,7 +1667,6 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "cache_miss" => Self::CacheMiss,
             "capability_gap" => Self::CapabilityGap,
             "code_librarian_query_nl_fallback" => Self::CodeLibrarianQueryNlFallback,
-            "compass_routing_decision" => Self::CompassRoutingDecision,
             "composition_child_call" => Self::CompositionChildCall,
             "composition_child_result" => Self::CompositionChildResult,
             "composition_error" => Self::CompositionError,
@@ -2373,7 +2370,6 @@ pub const HARN_AGENT_EVENT_KIND_CACHE_MISS: &str = "cache_miss";
 pub const HARN_AGENT_EVENT_KIND_CAPABILITY_GAP: &str = "capability_gap";
 pub const HARN_AGENT_EVENT_KIND_CODE_LIBRARIAN_QUERY_NL_FALLBACK: &str =
     "code_librarian_query_nl_fallback";
-pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routing_decision";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_CALL: &str = "composition_child_call";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_RESULT: &str = "composition_child_result";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_ERROR: &str = "composition_error";
@@ -2441,7 +2437,6 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "cache_miss",
     "capability_gap",
     "code_librarian_query_nl_fallback",
-    "compass_routing_decision",
     "composition_child_call",
     "composition_child_result",
     "composition_error",
@@ -3790,7 +3785,6 @@ pub struct ACPTranscriptCompactedUpdateMetaHarn {
     pub recap: Value,
     #[serde(rename = "sourceMeasurement")]
     pub source_measurement: Value,
-    pub classification: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed: Option<bool>,
 }
@@ -4306,7 +4300,6 @@ const TRANSCRIPT_COMPACTED_RULES: &[(&str, SessionUpdateRule)] = &[
         ("/_meta/harn", SessionUpdateRule::Present(&[
             ("/_meta/harn/archivedMessages", SessionUpdateRule::Required),
             ("/_meta/harn/archivedMessages", SessionUpdateRule::Minimum(0)),
-            ("/_meta/harn/classification", SessionUpdateRule::Required),
             ("/_meta/harn/compactionPolicy", SessionUpdateRule::Required),
             ("/_meta/harn/engineStrategy", SessionUpdateRule::Required),
             ("/_meta/harn/estimatedTokensAfter", SessionUpdateRule::Required),
@@ -5633,23 +5626,6 @@ pub struct HarnAgentEventCodeLibrarianQueryNlFallback {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnAgentEventCompassRoutingDecision {
-    #[serde(rename = "toolCallId")]
-    pub tool_call_id: String,
-    pub mode: String,
-    pub action: String,
-    pub persona: String,
-    #[serde(rename = "originalTool")]
-    pub original_tool: String,
-    #[serde(rename = "routedTool")]
-    pub routed_tool: String,
-    #[serde(rename = "targetTool")]
-    pub target_tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventCompositionChildCall {
     #[serde(rename = "runId")]
     pub run_id: String,
@@ -6310,8 +6286,6 @@ pub enum HarnAgentEventPayload {
     CapabilityGap(HarnAgentEventCapabilityGap),
     #[serde(rename = "code_librarian_query_nl_fallback")]
     CodeLibrarianQueryNlFallback(HarnAgentEventCodeLibrarianQueryNlFallback),
-    #[serde(rename = "compass_routing_decision")]
-    CompassRoutingDecision(HarnAgentEventCompassRoutingDecision),
     #[serde(rename = "composition_child_call")]
     CompositionChildCall(HarnAgentEventCompositionChildCall),
     #[serde(rename = "composition_child_result")]

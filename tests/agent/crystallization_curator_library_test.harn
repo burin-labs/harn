@@ -474,6 +474,12 @@ pipeline test_curator_requires_counted_evidence_from_two_sessions(harness: Harne
       expected: 0,
     },
     {
+      why: "session ids cited instead of card ids",
+      evidence: two_sessions,
+      cited: ["session-one", "session-two"],
+      expected: 0,
+    },
+    {
       why: "the second session is not cited",
       evidence: two_sessions,
       cited: ["run-one"],

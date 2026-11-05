@@ -222,7 +222,7 @@ The repository's declared checks set each check's scope: its arguments, filters,
 
 Count recovery across sessions. `repeated_recoveries` lists sessions that failed a command, later passed that same command, and ended on a pass, counted from their command ledgers, so treat those facts as confirmed. When its entries share the same kind of step, each of those sessions paid to rediscover one fix and the next session will pay again. Propose that recovery as a sequence: the steps, then the declared check, unchanged. Use the repository's own named recipe for a step when the evidence shows one, such as a make or just target, instead of rebuilding its arguments; a step runs without a shell, so a glob in it never expands. A sequence that only repeats a declared check adds nothing and is rejected. Being able to state the fix in one line, already knowing the declared check, or a step rewriting tracked generated or formatted files are not reasons to decline: the sessions ran those steps themselves to finish, and the agent still reviews the resulting diff. Decline only when the failures came from each task's own code or the recoveries have nothing in common.
 
-Every proposal's `evidence_ids` must cite cards from at least two sessions, each with a non-empty `session_id` and at least one command. A submission that cites fewer is rejected, so submit zero proposals when the window does not hold two such sessions.
+Every proposal's `evidence_ids` must list the `id` of cards, not their `session_id`, from at least two sessions, each with a non-empty `session_id` and at least one command. A submission that cites fewer is rejected, so submit zero proposals when the window does not hold two such sessions.
 
 Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
 """
@@ -936,7 +936,8 @@ fn cc_prepare_valid_proposals(
       continue
     }
     if len(cc_cited_sessions(proposal, evidence)) < MIN_CITED_SESSIONS {
-      throw "submit_crystallization_batch: `evidence_ids` must cite at least two sessions, each with a non-empty session_id and at least one command. One session is not repetition; submit no proposal when the window lacks two."
+      throw "submit_crystallization_batch: `evidence_ids` must list the `id` of cards, not their session_id, from at least two sessions that each have a non-empty session_id and at least one command. Repair and resubmit, or submit no proposal when the window lacks two. Card ids: "
+        + json_stringify(evidence.map({ item -> item?.id }).to_list())
     }
     if proposal?.kind == "skill" {
       prepared = prepared + [proposal]
@@ -1269,7 +1270,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
       require_successful_tools: ["submit_crystallization_batch"],
       stop_after_successful_tools: ["submit_crystallization_batch"],
       loop_until_done: true,
-      max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
+      max_iterations: min(max(2, route?.max_iterations ?? 12), 24),
       max_nudges: 2,
       session_id: route?.session_id ?? "crystallization-curator-" + harness.random.uuid_v7(),
       budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},

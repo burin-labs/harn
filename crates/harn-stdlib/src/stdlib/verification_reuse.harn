@@ -53,6 +53,10 @@ pub fn __verification_reuse_lookup(
   if reuse == nil || trim(reuse.scope) == "" {
     return nil
   }
+  if reuse.skip_effects_safe != true {
+    runtime.store_set(verification_reuse_key(reuse.scope), nil)
+    return nil
+  }
   const stored = runtime.store_get(verification_reuse_key(reuse.scope))
   match schema_parse(stored, schema_of(VerificationRecordedCheck)) {
     Ok(cached) -> {
@@ -105,6 +109,13 @@ pub fn __verification_reuse_store(
   } else {
     nil
   }
-  runtime.store_set(verification_reuse_key(reuse.scope), bound)
+  // A stable successful observation is still useful evidence when its effects
+  // must recur. Only an explicit attestation permits keeping it for reuse.
+  const reusable = if reuse.skip_effects_safe == true {
+    bound
+  } else {
+    nil
+  }
+  runtime.store_set(verification_reuse_key(reuse.scope), reusable)
   return bound ?? check
 }

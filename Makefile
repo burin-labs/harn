@@ -251,21 +251,30 @@ build: build-harn
 # Canonical CLI build for product-path iteration. Retains the worktree target
 # isolation, freshness-receipt, and signing contract.
 build-harn:
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
-	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
+	@set -e; \
+	harn_bin="$$(HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print)"; \
+	HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh "$$harn_bin"; \
+	HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt; \
+	./scripts/sign_local_macos.sh --verify "$$harn_bin"
 
 build-release:
 	$(HARN_CARGO_CMD) build --release
-	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
+	@set -e; \
+	target_dir="$$(. ./scripts/lib/cargo_env.sh; harn_cargo_metadata_target_dir)"; \
+	case "$${OS:-$$(uname -s)}" in Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=.exe ;; *) suffix= ;; esac; \
+	harn_bin="$$target_dir/release/harn$$suffix"; \
+	HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh "$$harn_bin"; \
+	./scripts/sign_local_macos.sh --verify "$$harn_bin"
 
 # Re-sign already-built harn binaries without rebuilding. Useful after
 # pulling, switching worktrees, or any path that touched target/ without
 # going through `make build` (e.g. `cargo run` with sccache).
 sign-local:
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
-	./scripts/sign_local_macos.sh
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
+	@set -e; \
+	harn_bin="$$(HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print)"; \
+	./scripts/sign_local_macos.sh "$$harn_bin"; \
+	HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt; \
+	./scripts/sign_local_macos.sh --verify "$$harn_bin"
 
 # Format all code
 fmt: fmt-app-host
@@ -910,9 +919,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/open_release_pr_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_withdrawal_lineage_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_candidate_trigger_test.sh
-	./scripts/tests/release_candidate_reconcile_test.sh
 	node --test scripts/tests/release_candidate_state_test.mjs
-	node --test scripts/tests/release_reconcile_wake_test.mjs
 	node --test scripts/tests/dependency_security_test.mjs
 	./scripts/tests/dispatch_native_qualification_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
