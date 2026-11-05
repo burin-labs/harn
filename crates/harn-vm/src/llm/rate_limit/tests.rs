@@ -1,6 +1,8 @@
 use super::*;
 use crate::llm::api::LlmCallOptions;
 
+mod prompt_probe;
+
 #[test]
 fn llm_call_admission_captures_consumer_session_and_reroute_policy() {
     let mut opts = LlmCallOptions {
@@ -1221,104 +1223,6 @@ fn a_window_opened_through_one_real_clock_holds_when_read_through_a_later_one() 
             "a {NETWORK_BREAKER_OPEN_MS}ms window read 50ms later had {remaining:?} left"
         );
     });
-}
-
-#[test]
-fn prompt_grant_reaches_every_route_key_and_a_failed_probe_fails_the_next_call_fast() {
-    let _env = crate::llm::env_guard();
-    let _clock =
-        crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
-    let mut opts = crate::llm::api::options::base_opts("prompt-probe-route");
-    opts.model = "prompt-probe-model".into();
-    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
-        observe_network_outcome_for_llm_call(&opts, true);
-    }
-    assert!(network_breaker_admission(&opts).is_some());
-
-    let prompt = begin_interactive_prompt("prompt-session");
-    assert!(network_breaker_admission(&opts).is_none(), "probe admitted");
-    observe_network_outcome_for_llm_call(&opts, true);
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("runtime");
-    let error = runtime
-        .block_on(await_network_breaker_for_llm_call(&opts))
-        .expect_err("the turn fails instead of waiting");
-    assert_eq!(
-        crate::value::error_to_category(&error),
-        crate::value::ErrorCategory::CircuitOpen
-    );
-    assert!(error.to_string().contains("not answering"), "{error}");
-    drop(prompt);
-
-    let (_, reason) = network_breaker_admission(&opts).expect("still open");
-    assert_eq!(
-        reason,
-        BreakerOpenReason::Network,
-        "another caller on the route waits as usual"
-    );
-}
-
-#[test]
-fn prompts_interleaving_on_one_thread_keep_their_own_probe_and_verdict() {
-    use tokio::sync::oneshot::channel;
-
-    let _env = crate::llm::env_guard();
-    let mut opts = crate::llm::api::options::base_opts("interleaved-route");
-    opts.model = "interleaved-model".into();
-    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
-        observe_network_outcome_for_llm_call(&opts, true);
-    }
-    let (a_begun, a_begun_seen) = channel();
-    let (b_begun, b_begun_seen) = channel();
-    let (a_probing, a_probing_seen) = channel();
-    let (b_waited, b_waited_seen) = channel();
-    let (a_failed, a_failed_seen) = channel();
-
-    let prompt_a = crate::orchestration::scope_ambient_context(async {
-        let _prompt = begin_interactive_prompt("prompt-a");
-        a_begun.send(()).unwrap();
-        b_begun_seen.await.unwrap();
-        assert!(
-            network_breaker_admission(&opts).is_none(),
-            "a's own request takes a's offer, with b's prompt begun on top of it"
-        );
-        a_probing.send(()).unwrap();
-        b_waited_seen.await.unwrap();
-        observe_network_outcome_for_llm_call(&opts, true);
-        a_failed.send(()).unwrap();
-        await_network_breaker_for_llm_call(&opts)
-            .await
-            .expect_err("a's turn fails instead of waiting")
-    });
-    let prompt_b = crate::orchestration::scope_ambient_context(async {
-        a_begun_seen.await.unwrap();
-        let _prompt = begin_interactive_prompt("prompt-b");
-        b_begun.send(()).unwrap();
-        a_probing_seen.await.unwrap();
-        let (remaining, reason) = network_breaker_admission(&opts).expect("a's probe is in flight");
-        assert_eq!(remaining, Duration::ZERO);
-        assert_eq!(reason, BreakerOpenReason::Network);
-        b_waited.send(()).unwrap();
-        a_failed_seen.await.unwrap();
-        assert!(
-            network_breaker_admission(&opts).is_none(),
-            "b is not handed a's verdict and probes with its own offer"
-        );
-    });
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("runtime");
-    let (error, ()) = runtime.block_on(async { tokio::join!(prompt_a, prompt_b) });
-    assert_eq!(
-        crate::value::error_to_category(&error),
-        crate::value::ErrorCategory::CircuitOpen
-    );
-    assert!(error.to_string().contains("not answering"), "{error}");
 }
 
 #[test]

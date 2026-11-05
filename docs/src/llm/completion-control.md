@@ -101,24 +101,3 @@ groups must share one scrutiny. No shipping row is `light` yet.
 
 Implementation details and trace schemas live in
 [Agent plane ownership](../dev/agent-loops.md#completion-checkpoints).
-
-## Completion gate (`agent_completion_gate`)
-
-`agent_completion_gate(runtime, options)` returns an options fragment for
-`agent_loop`. It checks host-supplied write and verification facts through
-`verify_completion` and can add a bounded LLM judge.
-
-```harn,ignore
-import { agent_completion_gate } from "std/agent/completion_gate"
-
-agent_loop(harness, task, system, base_opts + agent_completion_gate(
-  harness.runtime, {
-    facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-    verify_command: fn() { return host_run_verify() },
-    // optional bounded LLM judge, capped at 5 by default
-    judge: true,
-  }))
-```
-
-See [Completion gate (`std/agent/completion_gate`)](../stdlib/agent-judge.md)
-for the option table, fact types, veto ladder, and bounded judge.
