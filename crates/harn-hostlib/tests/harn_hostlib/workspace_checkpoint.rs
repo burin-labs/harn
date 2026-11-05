@@ -555,6 +555,52 @@ fn non_git_directory_is_explicitly_unavailable() {
     assert_eq!(restore["available"], false);
 }
 
+#[cfg(unix)]
+#[test]
+fn non_git_capture_does_not_launch_git() {
+    use harn_vm::security::{EnvironmentPolicyKind, SessionEnvironment};
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    assert!(!root.ancestors().any(|parent| parent.join(".git").exists()));
+    let bin = root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let git = bin.join("git");
+    fs::write(
+        &git,
+        "#!/bin/sh\nprintf 'called\\n' >> \"$0.calls\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+    let environment = SessionEnvironment::launch_from_snapshot(
+        EnvironmentPolicyKind::Isolated,
+        vec![],
+        [
+            ("PATH".to_string(), path_str(&bin)),
+            ("HOME".to_string(), path_str(&root)),
+        ]
+        .into_iter()
+        .collect(),
+        &|_| None,
+    )
+    .unwrap();
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(environment);
+    let mut control = harn_vm::process_sandbox::session_std_command("git").unwrap();
+    assert_eq!(control.status().unwrap().code(), Some(1));
+    let calls = bin.join("git.calls");
+    assert_eq!(fs::read_to_string(&calls).unwrap(), "called\n");
+    fs::remove_file(&calls).unwrap();
+
+    let captured = Session::new(&root).capture("turn-1");
+    assert_eq!(captured["available"], false, "{captured}");
+    assert_eq!(captured["reason"], "not_a_git_worktree", "{captured}");
+    assert!(
+        !calls.exists(),
+        "plain-folder checkpoint capture launched Git"
+    );
+}
+
 #[test]
 fn unknown_boundary_is_unavailable() {
     let dir = repo();
