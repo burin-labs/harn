@@ -595,9 +595,10 @@ pub fn signal_pid_and_group(pid: u32, signal: i32) {
 }
 
 /// Signal a pid, its process group, and every descendant process visible in
-/// the system process table. Descendants are signalled deepest-first so a
-/// child that escaped into its own process group (for example via `setsid`)
-/// cannot survive a timeout merely because it left the original group.
+/// the system process table, so a child that escaped into its own process group
+/// (for example via `setsid`) cannot survive a timeout merely because it left
+/// the original group. Parents are signalled before their children: a shell
+/// whose foreground child dies first moves on to its next statement.
 pub fn signal_pid_tree_and_group(pid: u32, signal: i32) {
     let _ = signal_pid_tree_and_group_with_report(pid, signal);
 }
@@ -621,7 +622,10 @@ pub fn signal_pid_tree_group_and_token_with_report(
     #[cfg(unix)]
     {
         let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
-        for child in descendant_processes(pid) {
+        // Read the parent edges first: they are gone once the root has died.
+        let descendants = descendant_processes(pid);
+        signal_pid_and_group(pid, signal);
+        for child in descendants.into_iter().rev() {
             signal_pid_and_group(child.pid, signal);
             report.merge_child(child.with_signal(signal));
         }
@@ -634,7 +638,6 @@ pub fn signal_pid_tree_group_and_token_with_report(
                 report.merge_child(child.with_signal(signal));
             }
         }
-        signal_pid_and_group(pid, signal);
         if signal == 9 {
             wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
         }
@@ -709,7 +712,9 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
 ) -> ProcessCleanupReport {
     let preserved_pgid = preserved_pgid as i32;
     let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
-    for child in descendant_processes(pid) {
+    let descendants = descendant_processes(pid);
+    signal_pid_preserving_group(pid, preserved_pgid, signal);
+    for child in descendants.into_iter().rev() {
         signal_pid_preserving_group(child.pid, preserved_pgid, signal);
         report.merge_child(child.with_signal(signal));
     }
@@ -729,7 +734,6 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
             }
         }
     }
-    signal_pid_preserving_group(pid, preserved_pgid, signal);
     report
 }
 

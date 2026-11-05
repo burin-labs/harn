@@ -496,6 +496,7 @@ fn real_background_child_receives_explicit_credential_over_private_pipe() {
 
 #[path = "process_tools_e2e/completed_cleanup.rs"]
 mod completed_cleanup;
+mod interrupt_next_statement;
 
 #[test]
 fn real_background_hard_timeout_reaps_detached_descendant() {
