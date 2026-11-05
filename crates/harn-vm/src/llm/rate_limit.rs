@@ -354,6 +354,22 @@ impl NetworkBreaker {
         }
     }
 
+    /// A prompt's turn ended: nothing it started may act for it any more. A
+    /// probe it still owns will never report, so the route opens for the next
+    /// caller instead of staying half-open.
+    fn withdraw_prompt(&mut self, owner: &str, now_ms: u128) {
+        self.probe_offers.remove(owner);
+        if self.failed_probe_owner.as_deref() == Some(owner) {
+            self.failed_probe_owner = None;
+        }
+        if self.interactive_probe.as_deref() == Some(owner) {
+            self.interactive_probe = None;
+            if self.state == BreakerState::HalfOpen {
+                self.state = BreakerState::Open { until_ms: now_ms };
+            }
+        }
+    }
+
     fn blocked(&self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
         match self.state {
             BreakerState::Closed => None,

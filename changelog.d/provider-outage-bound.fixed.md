@@ -7,7 +7,8 @@
   of that prompt's turn fails fast with `circuit_open` instead of waiting, and other
   sessions on the route wait out the window as usual. Embedders opt in by holding
   the guard from `harn_vm::llm::begin_interactive_prompt(session_id)` for the turn,
-  inside its ambient scope.
+  inside its ambient scope. Dropping the guard frees a probe the prompt still owns,
+  so a cancelled prompt does not hold the route half-open.
 - A breaker wait that sends nothing now reports `transient_network` and says no
   request was sent, not `timeout`.
 - `with_retry` takes an optional `max_elapsed_ms` wall-clock budget.
