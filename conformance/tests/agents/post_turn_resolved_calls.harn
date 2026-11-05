@@ -1,7 +1,10 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_session_messages } from "std/agent/state"
-import { agent_transcript_tool_lifecycle_report } from "std/agent/transcript"
+import {
+  agent_transcript_tool_lifecycle_report,
+  agent_transcript_turn_lifecycle_report,
+} from "std/agent/transcript"
 import { with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
@@ -54,6 +57,15 @@ pipeline default(harness: Harness) {
             assert_eq(len(current), 2)
             assert_eq(current[0]?.tool_call_id, "lookup-1")
             assert_eq(current[1]?.tool_call_id, "lookup-2")
+            const reconciled = agent_transcript_turn_lifecycle_report(
+              lifecycle,
+              turn?.resolved_tool_calls,
+              turn.iteration,
+            )
+            assert_eq(reconciled.status, "complete", "the real turn must reconcile")
+            assert_eq(reconciled.expected_count, 2)
+            assert_eq(reconciled.observed_count, 2)
+            assert_eq(reconciled.assistant_row_count, 1)
             return {stop: true, stop_reason: "captured"}
           },
         },
@@ -80,11 +92,65 @@ pipeline default(harness: Harness) {
               [],
               "a turn with no resolved calls has an empty inventory",
             )
+            const lifecycle = agent_transcript_tool_lifecycle_report(
+              agent_session_messages(harness.agent, turn.session_id),
+            )
+            const reconciled = agent_transcript_turn_lifecycle_report(
+              lifecycle,
+              turn?.resolved_tool_calls,
+              turn.iteration,
+            )
+            assert_eq(reconciled.status, "complete", "the empty turn must be observed")
+            assert_eq(reconciled.expected_count, 0)
+            assert_eq(reconciled.observed_count, 0)
+            assert_eq(reconciled.assistant_row_count, 1)
             return {stop: true, stop_reason: "empty"}
           },
         },
       )
       assert_eq(result.stop_reason, "empty")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "first-turn", name: "lookup", arguments: {query: "one"}}]},
+      {text: "done"},
+    ],
+    { ->
+      const marker = "reconciled-turn-count"
+      harness.runtime.store_set(marker, 0)
+      const result = agent_loop(
+        harness,
+        "Look up one fact and answer.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          tools: tools,
+          max_iterations: 2,
+          loop_until_done: true,
+          post_turn_callback: { turn ->
+            const lifecycle = agent_transcript_tool_lifecycle_report(
+              agent_session_messages(harness.agent, turn.session_id),
+            )
+            const reconciled = agent_transcript_turn_lifecycle_report(
+              lifecycle,
+              turn?.resolved_tool_calls,
+              turn.iteration,
+            )
+            assert_eq(reconciled.status, "complete", "each real turn must reconcile")
+            harness.runtime.store_set(marker, harness.runtime.store_get(marker) + 1)
+            if len(turn?.resolved_tool_calls ?? []) == 0 {
+              return {stop: true, stop_reason: "two-turns"}
+            }
+            return {stop: false}
+          },
+        },
+      )
+      assert_eq(result.stop_reason, "two-turns")
+      assert_eq(harness.runtime.store_get(marker), 2)
+      harness.runtime.store_set(marker, nil)
     },
   )
   const sid = harness.agent.open(nil)

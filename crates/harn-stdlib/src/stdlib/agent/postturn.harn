@@ -21,6 +21,7 @@ import {
   __tool_surface_narrowing_post_turn,
   __tool_surface_tool_allowed,
 } from "std/agent/tool_surface"
+pub import { AgentPostTurnResolvedToolCall } from "std/agent/transcript"
 import { agent_transcript_tool_call_identity } from "std/agent/transcript"
 import {
   __turn_end_condition_config,
@@ -37,9 +38,6 @@ import {
 
 /** One exact registry tool claimed for the immediately following model turn. */
 pub type AgentNextToolClaim = {tool_name: string}
-
-/** Identity of one resolved call; missing values remain unknown. */
-pub type AgentPostTurnResolvedToolCall = {id: string?, name: string?}
 
 fn __post_turn_resolved_tool_calls(calls: list?) -> list<AgentPostTurnResolvedToolCall>? {
   if calls == nil {

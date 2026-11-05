@@ -16,6 +16,7 @@ import {
   agent_transcript_tool_lifecycle_report,
   agent_transcript_tool_result_blocks,
   agent_transcript_tool_results,
+  agent_transcript_turn_lifecycle_report,
 } from "std/agent/transcript"
 import { write_jsonl } from "std/jsonl"
 import { is_type } from "std/schema"
@@ -142,6 +143,78 @@ pipeline test_agent_transcript_lifecycle_report_fails_closed_on_pairing_anomalie
   assert(contains(codes, "tool_call_missing_id"))
   assert(contains(codes, "tool_call_result_missing"))
   assert(contains(codes, "orphan_tool_result"))
+}
+
+pipeline test_turn_lifecycle_requires_measured_matching_calls(harness: Harness) {
+  const records = [
+    {
+      role: "assistant",
+      tool_calls: [
+        {id: "one", name: "look", arguments: {}},
+        {id: "two", name: "look", arguments: {}},
+      ],
+    },
+    {role: "tool", name: "look", tool_call_id: "one", content: "first"},
+    {role: "tool", name: "look", tool_call_id: "two", content: "second"},
+  ]
+  const lifecycle = agent_transcript_tool_lifecycle_report(records)
+  const calls = [{id: "one", name: "look"}, {id: "two", name: "look"}]
+  const measured = agent_transcript_turn_lifecycle_report(lifecycle, calls, 0)
+  assert_eq(measured.status, "complete")
+  assert_eq(measured.expected_count, 2)
+  assert_eq(measured.observed_count, 2)
+  assert_eq(measured.assistant_row_count, 1)
+  assert_eq(measured.calls[1]?.tool_call_id, "two")
+  assert_eq(agent_transcript_turn_lifecycle_report(lifecycle, nil, 0).status, "unavailable")
+  assert_eq(agent_transcript_turn_lifecycle_report(lifecycle, [], 0).status, "inconsistent")
+  assert_eq(
+    agent_transcript_turn_lifecycle_report(
+      lifecycle,
+      [{id: "one", name: "look"}, {id: "one", name: "look"}],
+      0,
+    ).status,
+    "inconsistent",
+  )
+  assert_eq(
+    agent_transcript_turn_lifecycle_report(
+      lifecycle,
+      [{id: "one", name: "look"}, {id: nil, name: "look"}],
+      0,
+    ).status,
+    "inconsistent",
+  )
+  assert_eq(
+    agent_transcript_turn_lifecycle_report(
+      lifecycle,
+      [{id: "one", name: "look"}, {id: "two", name: "edit"}],
+      0,
+    ).status,
+    "inconsistent",
+  )
+  assert_eq(
+    agent_transcript_turn_lifecycle_report(
+      lifecycle,
+      [{id: "one", name: "look"}, {id: "two", name: nil}],
+      0,
+    ).status,
+    "inconsistent",
+  )
+  assert_eq(
+    agent_transcript_turn_lifecycle_report(
+      lifecycle,
+      [{id: "two", name: "look"}, {id: "one", name: "look"}],
+      0,
+    ).status,
+    "inconsistent",
+  )
+  assert_eq(agent_transcript_turn_lifecycle_report(lifecycle, calls, 1).status, "inconsistent")
+  const missing_result = agent_transcript_tool_lifecycle_report(records[0:2])
+  assert_eq(agent_transcript_turn_lifecycle_report(missing_result, calls, 0).status, "inconsistent")
+  const missing_transcript = agent_transcript_tool_lifecycle_report(nil)
+  assert(missing_transcript.ok, "the existing report alone accepts an empty transcript")
+  const absent = agent_transcript_turn_lifecycle_report(missing_transcript, [], 0)
+  assert_eq(absent.status, "inconsistent", "no transcript cannot prove an empty turn")
+  assert_eq(absent.assistant_row_count, 0)
 }
 
 pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(harness: Harness) {
