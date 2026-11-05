@@ -55,29 +55,44 @@ fn current_store() -> Result<Store, InputError> {
     store(&id, false)
 }
 
+/// The filter for output produced while no agent session is current, such as a
+/// plain `harn run --grant`. It holds only values added by
+/// [`filter_granted_value`] and lasts for the process.
+fn process_store() -> Store {
+    static PROCESS: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
+    PROCESS.get_or_init(Store::default).clone()
+}
+
+/// The filter that applies to output produced here: the current session's
+/// store when one is current (created on demand with `create`), otherwise the
+/// process store.
+fn filter_store(create: bool) -> Option<Store> {
+    match crate::current_agent_session_id() {
+        Some(id) => store(&id, create).ok(),
+        None => Some(process_store()),
+    }
+}
+
 pub(crate) fn has_private_filter() -> bool {
-    current_store().is_ok_and(|store| store.lock().has_secret_filters())
+    filter_store(false).is_some_and(|store| store.lock().has_secret_filters())
 }
 
 /// Below this a value is too likely to occur in unrelated output.
 const MIN_FILTERED_VALUE_LEN: usize = 8;
 
-/// Filter a credential a grant is about to hand a child from this session's output.
+/// Filter a credential a grant is about to hand a child from this session's
+/// output, or from the process's output when no session is current.
 ///
 /// Value matching is best-effort cleanup of accidents, not a security boundary:
 /// a child holding a value can encode or split it past any filter, and what holds
-/// a secret back is not handing it over. With no current session there is no
-/// output to clean. Returns `false` only when the session's filter is full, so the
-/// caller must not expose the value.
+/// a secret back is not handing it over. Returns `false` only when the filter is
+/// full, so the caller must not expose the value.
 #[must_use]
 pub fn filter_granted_value(value: &str) -> bool {
     if value.len() < MIN_FILTERED_VALUE_LEN {
         return true;
     }
-    let Some(id) = crate::current_agent_session_id() else {
-        return true;
-    };
-    store(&id, true).map_or(true, |store| store.lock().add_filter(value))
+    filter_store(true).map_or(true, |store| store.lock().add_filter(value))
 }
 
 /// Retain the filter for one operation, including output received after close.
@@ -86,13 +101,13 @@ pub struct OutputFilter(Option<Store>);
 
 impl OutputFilter {
     pub fn capture() -> Self {
-        Self(current_store().ok())
+        Self(filter_store(false))
     }
 
     /// Capture for a child about to spawn, whose grants may be the first thing
     /// this session has to filter. Never call this under the session lock.
     pub fn capture_for_spawn() -> Self {
-        Self(crate::current_agent_session_id().and_then(|session_id| store(&session_id, true).ok()))
+        Self(filter_store(true))
     }
 
     pub fn redact(&self, text: &str) -> String {
@@ -151,8 +166,9 @@ pub(crate) fn http_header(
         .with_value(name, usage, now_ms(), |value| format!("{prefix}{value}"))
 }
 
-/// Exact-value filtering complements the shared pattern policy. No store or
-/// active session is a real empty set, not an ambient credential fallback.
+/// Exact-value filtering complements the shared pattern policy. A session with
+/// no store is a real empty set, not an ambient credential fallback; with no
+/// session, the process store holds only credentials a grant handed a child.
 pub fn redact(text: &str) -> String {
     OutputFilter::capture().redact(text)
 }

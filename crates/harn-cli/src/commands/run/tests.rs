@@ -861,12 +861,96 @@ pipeline main(harness: Harness) {
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.stdout.lines().collect::<Vec<_>>(),
-        ["delivered granted-secret-value", "absent"]
+        ["delivered [redacted]", "absent"]
     );
     assert!(
         outcome.stderr.contains("environment policy: granted"),
         "the grant must be disclosed; stderr:\n{}",
         outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+/// A session-wide `secret-env:` grant declares its value a credential, so a
+/// plain `harn run`, which has no agent session, still redacts it from what a
+/// child prints.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_secret_env_grant_is_redacted_without_a_session() {
+    harn_vm::reset_thread_local_state();
+    let src = "HARN_TEST_SECRET_ENV_GRANT_SRC";
+    // SAFETY: this test process mutates its own env; the vars are unique to it
+    // and removed before returning.
+    std::env::set_var(src, "declared-secret-env-value");
+    std::env::remove_var("HARN_TEST_SECRET_ENV_CHILD");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        [
+            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
+            r#"
+import { command_run } from "std/command"
+
+pipeline main(harness: Harness) {
+  const result = command_run(
+    harness.tools,
+    {argv: ["sh", "-c", "[ \"$HARN_TEST_SECRET_ENV_CHILD\" = declared-secret-env-value ] && printf delivered; printf ' %s' \"$HARN_TEST_SECRET_ENV_CHILD\""]},
+    {capture: {max_inline_bytes: 64}},
+  )
+  if !result.success {
+    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
+  }
+  harness.stdio.println(result.stdout)
+}
+"#,
+        ]
+        .concat(),
+    )
+    .expect("write script");
+
+    let config = EnvironmentPolicyConfig::from_flags(
+        None,
+        &[format!(
+            "secret_grant=secret-env:{src},expose=HARN_TEST_SECRET_ENV_CHILD"
+        )],
+    )
+    .expect("valid grant");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_environment_policy(config),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(src);
+
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(
+        outcome.stdout.lines().collect::<Vec<_>>(),
+        ["delivered [redacted]"]
+    );
+    assert!(
+        !outcome.stdout.contains("declared-secret-env-value"),
+        "a declared credential was printed: {}",
+        outcome.stdout
     );
     harn_vm::reset_thread_local_state();
 }

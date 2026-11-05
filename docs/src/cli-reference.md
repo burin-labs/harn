@@ -304,11 +304,12 @@ Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND][,to=in_process]`:
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
 # Snapshot a provider key for this run's own model calls. No spawned
-# command, including one the agent runs, can read it.
-harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
+# command, including one the agent runs, can read it. `secret-env:` declares
+# the value a credential, so it is redacted from output; `env:` is not.
+harn run --grant fireworks=secret-env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY,to=in_process agent.harn
 
 # The same key for model calls and every spawned command.
-harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
+harn run --grant fireworks=secret-env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
 
 Each exposed grant reaches one audience:
@@ -431,7 +432,8 @@ table above. Proxy, TLS (`SSL_CERT_FILE`, `SSL_CERT_DIR`), debug and token
 variables a caller sets are dropped.
 
 Every credential a grant hands to a child, for any program, is redacted from the current session's
-command output, events, and transcripts, including a value printed across several writes. This
+command output, events, and transcripts, including a value printed across several writes. With no
+agent session, as in a plain `harn run`, it is redacted from all of the process's output. This
 matches exact values and cleans up accidents. It is not a security boundary: a child holding a
 value can encode it past the filter. Values shorter than 8 bytes are not redacted.
 A credential is a `secret_store` grant, a `secret-env:` grant, or any grant bound to one command.
@@ -1311,7 +1313,7 @@ harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
 harn time run main.harn --eager-project-handlers
 harn time run main.harn --write-root /path/to/output
-harn time run main.harn --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY
+harn time run main.harn --grant fireworks=secret-env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY
 harn time run -e 'harness.stdio.log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```

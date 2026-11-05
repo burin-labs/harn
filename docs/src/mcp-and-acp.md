@@ -742,7 +742,7 @@ applied as `environmentPolicy: {kind, source}`, where `source` is `client` or
     "grants": [
       {
         "name": "provider_key",
-        "source": {"env": {"var": "OPENAI_API_KEY"}},
+        "source": {"secret_env": {"var": "OPENAI_API_KEY"}},
         "expose_as_env": "OPENAI_API_KEY",
         "expose_to": "in_process"
       },
@@ -756,6 +756,10 @@ applied as `environmentPolicy: {kind, source}`, where `source` is `client` or
   }
 }
 ```
+
+The `secret_env` source snapshots a launcher variable like `env` and declares
+the value a credential, so it is redacted from output; a plain `env` value is
+not.
 
 `expose_to: "in_process"` lets the session's own model calls authenticate with
 the key while no command, MCP stdio server, or ACP provider the session starts
