@@ -30,7 +30,7 @@ use super::scan::{command_text, risk_labels_from_scan, security_command_analysis
 
 #[path = "gh_read.rs"]
 mod gh_read;
-pub(crate) use gh_read::gh_invocation_is_read_only;
+pub(crate) use gh_read::{gh_invocation_is_read_only, gh_read, GhRead};
 
 /// Risk labels that positively establish a workspace write.
 ///

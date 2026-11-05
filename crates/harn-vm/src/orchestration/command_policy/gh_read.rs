@@ -210,6 +210,16 @@ fn read_subcommand_flags(group: &str, verb: &str) -> Option<&'static [GhFlag]> {
     })
 }
 
+/// What a read-only gh invocation names, as gh itself parses it: every value of
+/// `-R`/`--repo` and `--hostname`, wherever it appears (`-pRo/r` is a preview
+/// value, not a repository), and the positional arguments.
+#[derive(Debug, Default)]
+pub(crate) struct GhRead<'a> {
+    pub(crate) repos: Vec<&'a str>,
+    pub(crate) hostnames: Vec<&'a str>,
+    pub(crate) positionals: Vec<&'a str>,
+}
+
 /// `gh pr list` and `gh api repos/o/r` read; `gh pr merge`, `gh issue comment`,
 /// `gh pr view -cw`, and `gh api -X POST ...` do not. Global `-R`/`--repo`/
 /// `--hostname` flags may also come before the subcommand.
@@ -218,67 +228,97 @@ fn read_subcommand_flags(group: &str, verb: &str) -> Option<&'static [GhFlag]> {
 /// `rev-parse` and `symbolic-ref`, none of which runs a filter driver, hook or
 /// external diff.
 pub(crate) fn gh_invocation_is_read_only(args: &[String]) -> bool {
-    let mut words = args;
+    gh_read(args).is_some()
+}
+
+/// The parsed read, or `None` when the invocation is not a read.
+pub(crate) fn gh_read(args: &[String]) -> Option<GhRead<'_>> {
+    let mut read = GhRead::default();
+    let mut words = args.iter();
     loop {
-        match words {
-            [flag, _, rest @ ..] if matches!(flag.as_str(), "-R" | "--repo" | "--hostname") => {
-                words = rest;
-            }
-            [flag, rest @ ..]
-                if flag.starts_with("--repo=")
-                    || flag.starts_with("--hostname=")
-                    || (flag.starts_with("-R") && flag.len() > 2) =>
-            {
-                words = rest;
-            }
-            _ => break,
+        let before = words.clone();
+        let global = match words.next() {
+            Some(arg) => match arg.strip_prefix("--") {
+                Some(long) => long_flag_reads(long, &mut words, &[], |_, _| true, &mut read),
+                None => arg.strip_prefix('-').is_some_and(|cluster| {
+                    short_flags_read(cluster, &mut words, &[], |_, _| true, &mut read)
+                }),
+            },
+            None => false,
+        };
+        if !global {
+            words = before;
+            break;
         }
     }
-    match words {
+    let words = words.as_slice();
+    let reads = match words {
         [api, rest @ ..] if api == "api" => {
-            positionals_when_read(rest, API, api_value_reads) == Some(1)
+            parse_read(rest, API, api_value_reads, &mut read) && read.positionals.len() == 1
         }
         [status] if status == "status" => true,
         [group, verb, rest @ ..] => read_subcommand_flags(group, verb)
-            .is_some_and(|flags| positionals_when_read(rest, flags, |_, _| true).is_some()),
+            .is_some_and(|flags| parse_read(rest, flags, |_, _| true, &mut read)),
         _ => false,
-    }
+    };
+    reads.then_some(read)
 }
 
-/// How many positional arguments `args` holds, or `None` when any flag is not
-/// known to read. A bare `--` ends the flags, and the grant refuses it by name.
-fn positionals_when_read(
-    args: &[String],
+/// Whether every flag in `args` is known to read, recording the positionals
+/// and host-bearing values into `read`. A bare `--` ends the flags, and the
+/// grant refuses it by name.
+fn parse_read<'a>(
+    args: &'a [String],
     flags: &[GhFlag],
     value_reads: fn(&str, &str) -> bool,
-) -> Option<usize> {
-    let mut positionals = 0;
+    read: &mut GhRead<'a>,
+) -> bool {
     let mut words = args.iter();
     while let Some(arg) = words.next() {
         if arg == "--" {
-            return Some(positionals + words.len());
+            read.positionals.extend(words.map(String::as_str));
+            return true;
         }
         let reads = if let Some(long) = arg.strip_prefix("--") {
-            long_flag_reads(long, &mut words, flags, value_reads)
+            long_flag_reads(long, &mut words, flags, value_reads, read)
         } else if let Some(cluster) = arg.strip_prefix('-') {
-            short_flags_read(cluster, &mut words, flags, value_reads)
+            short_flags_read(cluster, &mut words, flags, value_reads, read)
         } else {
-            positionals += 1;
+            read.positionals.push(arg);
             true
         };
         if !reads {
-            return None;
+            return false;
         }
     }
-    Some(positionals)
+    true
+}
+
+/// Whether `value` keeps `flag` a read; a repository or host value is recorded.
+fn value_reads_into<'a>(
+    flag: &GhFlag,
+    value: &'a str,
+    value_reads: fn(&str, &str) -> bool,
+    read: &mut GhRead<'a>,
+) -> bool {
+    if !value_reads(flag.long, value) {
+        return false;
+    }
+    match flag.long {
+        "repo" => read.repos.push(value),
+        "hostname" => read.hostnames.push(value),
+        _ => {}
+    }
+    true
 }
 
 /// Whether `--name` or `--name=value` is a known flag that keeps this a read.
-fn long_flag_reads(
-    long: &str,
-    words: &mut std::slice::Iter<'_, String>,
+fn long_flag_reads<'a>(
+    long: &'a str,
+    words: &mut std::slice::Iter<'a, String>,
     flags: &[GhFlag],
     value_reads: fn(&str, &str) -> bool,
+    read: &mut GhRead<'a>,
 ) -> bool {
     let (name, inline) = match long.split_once('=') {
         Some((name, value)) => (name, Some(value)),
@@ -292,17 +332,18 @@ fn long_flag_reads(
     }
     inline
         .or_else(|| words.next().map(String::as_str))
-        .is_some_and(|value| value_reads(flag.long, value))
+        .is_some_and(|value| value_reads_into(flag, value, value_reads, read))
 }
 
 /// Whether one argument of short flags keeps this a read. The first
 /// value-taking letter ends the flags: the rest of the argument, or else the
 /// next one, is its value. An empty cluster is a lone `-`, which is not a flag.
-fn short_flags_read(
-    cluster: &str,
-    words: &mut std::slice::Iter<'_, String>,
+fn short_flags_read<'a>(
+    cluster: &'a str,
+    words: &mut std::slice::Iter<'a, String>,
     flags: &[GhFlag],
     value_reads: fn(&str, &str) -> bool,
+    read: &mut GhRead<'a>,
 ) -> bool {
     let mut letters = cluster.chars();
     while let Some(letter) = letters.next() {
@@ -320,12 +361,12 @@ fn short_flags_read(
         // `-p=` is an empty value, as gh parses it. It does not take the next
         // argument, which gh reads as a flag of its own.
         if let Some(inline) = rest.strip_prefix('=') {
-            return value_reads(flag.long, inline);
+            return value_reads_into(flag, inline, value_reads, read);
         }
         return Some(rest)
             .filter(|rest| !rest.is_empty())
             .or_else(|| words.next().map(String::as_str))
-            .is_some_and(|value| value_reads(flag.long, value));
+            .is_some_and(|value| value_reads_into(flag, value, value_reads, read));
     }
     !cluster.is_empty()
 }

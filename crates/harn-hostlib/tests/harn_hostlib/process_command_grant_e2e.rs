@@ -891,6 +891,8 @@ fn a_granted_read_naming_another_host_is_refused() {
         "gh pr view -cRgithub.localhost/o/r 1",
         "gh pr view -cR github.localhost/o/r 1",
         "gh pr view -cR=github.localhost/o/r 1",
+        "gh api -pR --hostname github.localhost user",
+        "gh pr list -LR -R github.localhost/o/r",
         "gh issue list --repo=github.localhost/o/r",
         "gh issue list --repo github.localhost/o/r",
         "gh repo view github.localhost/o/r",

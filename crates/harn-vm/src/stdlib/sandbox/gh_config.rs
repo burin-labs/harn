@@ -78,9 +78,7 @@ fn gh_refusal(args: &[String]) -> Option<&'static str> {
     if let Some(reason) = auth_refusal(args) {
         return Some(reason);
     }
-    if !crate::orchestration::gh_invocation_is_read_only(args) {
-        return None;
-    }
+    let read = crate::orchestration::gh_read(args)?;
     for arg in args {
         if arg == "--" {
             return Some("`--` would pass the rest of the command to another program");
@@ -100,7 +98,7 @@ fn gh_refusal(args: &[String]) -> Option<&'static str> {
             return Some("an output filter can read the credential from the environment");
         }
     }
-    if names_another_host(args) {
+    if names_another_host(&read) {
         return Some("the grant is for github.com, and this names another host");
     }
     if args.iter().any(|arg| names_plaintext_url(arg)) {
@@ -134,39 +132,26 @@ const GRANTED_HOSTS: &[&str] = &["github.com", "api.github.com"];
 
 /// Whether a `--hostname`, a `-R`/`--repo` value, or a positional argument
 /// names a host other than github.com, in any spelling: `HOST/OWNER/REPO`, a
-/// URL, or an SSH remote. `OWNER/REPO` names no host.
-fn names_another_host(args: &[String]) -> bool {
+/// URL, or an SSH remote. `OWNER/REPO` names no host. The values are the ones
+/// gh's own flag parsing gives each flag, so a letter inside another flag's
+/// value (`-pR`, `-pRo/r`) is never read as `-R`.
+fn names_another_host(read: &crate::orchestration::GhRead<'_>) -> bool {
     let foreign = |host: &str| {
         !GRANTED_HOSTS
             .iter()
             .any(|granted| host.eq_ignore_ascii_case(granted))
     };
-    let mut words = args.iter().map(String::as_str);
-    while let Some(arg) = words.next() {
-        // `R` also parses inside a cluster: `-cR HOST/OWNER/REPO`, `-cRHOST/...`.
-        let short_repo = arg
-            .strip_prefix('-')
-            .filter(|flags| !flags.starts_with('-'))
-            .and_then(|flags| flags.split_once('R'))
-            .map(|(_, value)| value);
-        let (hostname, repo) = match (arg, short_repo) {
-            ("--hostname", _) => (words.next(), None),
-            ("--repo", _) | (_, Some("")) => (None, words.next()),
-            (_, Some(value)) => (None, Some(value.strip_prefix('=').unwrap_or(value))),
-            _ => (arg.strip_prefix("--hostname="), arg.strip_prefix("--repo=")),
-        };
-        if hostname.is_some_and(foreign) {
-            return true;
-        }
-        let candidate = repo.or((!arg.starts_with('-')).then_some(arg));
-        if candidate
-            .and_then(|value| repository_host(value, repo.is_some()))
-            .is_some_and(foreign)
-        {
-            return true;
-        }
-    }
-    false
+    read.hostnames.iter().copied().any(foreign)
+        || read
+            .repos
+            .iter()
+            .filter_map(|repo| repository_host(repo, true))
+            .any(foreign)
+        || read
+            .positionals
+            .iter()
+            .filter_map(|arg| repository_host(arg, false))
+            .any(foreign)
 }
 
 /// The host a repository or URL argument names, if any. A positional argument
@@ -457,6 +442,41 @@ prompt: enabled
             &["api", "ftp://github.com/x"],
         ] {
             assert!(refused(args), "{args:?}");
+        }
+    }
+
+    /// The repository and host a read names are the values gh's own flag
+    /// parsing gives `-R`, `--repo` and `--hostname`. An `R` inside another
+    /// flag's value is not `-R`, so it neither hides the next flag (`-pR
+    /// --hostname ...`) nor names a repository (`-pRevil.example/o/r`).
+    #[test]
+    fn repository_and_host_values_follow_gh_flag_parsing() {
+        let refusal =
+            |args: &[&str]| gh_refusal(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
+        let host = Some("the grant is for github.com, and this names another host");
+        for (args, expected) in [
+            (
+                &["api", "-pR", "--hostname", "evil.example", "user"][..],
+                host,
+            ),
+            (&["api", "-pR", "--hostname=evil.example", "user"], host),
+            (&["api", "--hostname=evil.example", "user"], host),
+            (&["pr", "list", "-LR", "-R", "ghe/o/r"], host),
+            (&["pr", "list", "-LR", "--repo", "ghe/o/r"], host),
+            (&["pr", "view", "-cRevil.example/o/r", "1"], host),
+            (&["issue", "list", "--repo=host.example/o/r"], host),
+            (&["-R", "ghe/o/r", "issue", "list"], host),
+            (&["issue", "list", "-R", "other/repo"], None),
+            (&["-R", "other/repo", "issue", "list"], None),
+            (&["issue", "list", "-Rowner/repo"], None),
+            (&["api", "-pRowner/repo", "user"], None),
+            (&["api", "-pRevil.example/o/r", "user"], None),
+            (&["pr", "list", "-LR", "5"], None),
+            (&["-R", "github.com/o/r", "pr", "list"], None),
+            (&["pr", "list", "--repo", "github.com/o/r"], None),
+            (&["api", "--hostname=github.com", "user"], None),
+        ] {
+            assert_eq!(refusal(args), expected, "{args:?}");
         }
     }
 
