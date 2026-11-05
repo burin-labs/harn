@@ -1222,3 +1222,87 @@ fn visible_text_excerpt(text: string?) {
   }
   return trimmed[0:160] + "…"
 }
+
+fn __normalize_verdict(verdict: unknown) -> dict {
+  if verdict == nil || verdict == "" {
+    return {message: "", stop: false}
+  }
+  if type_of(verdict) == "bool" {
+    return {message: "", stop: verdict}
+  }
+  if type_of(verdict) == "string" {
+    return {message: verdict, stop: false}
+  }
+  if type_of(verdict) == "dict" {
+    return {
+      llm_options: verdict?.llm_options,
+      message: to_string(verdict?.message ?? ""),
+      next_tool_claim: verdict?.next_tool_claim,
+      next_options: verdict?.next_options,
+      prefill: verdict?.prefill,
+      stop: verdict?.stop ?? false,
+      stop_reason: verdict?.stop_reason,
+    }
+  }
+  return {message: "", stop: false}
+}
+
+/**
+ * compose_post_turn(callbacks) chains several `post_turn_callback` closures into
+ * ONE, so a caller can run their own callback alongside a detector
+ * overlay without a new option. The FIRST callback that requests a stop wins
+ * (its `stop_reason` / `next_options` / `llm_options` are preserved) and any
+ * warn messages accumulated before it are prepended; otherwise all non-empty
+ * warn messages are merged. Returns nil when nothing fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn compose_post_turn(callbacks: list) {
+  return { payload ->
+    let messages = []
+    let result = nil
+    let next_tool_claim = nil
+    for callback in callbacks {
+      if callback == nil {
+        continue
+      }
+      const norm = __normalize_verdict(callback(payload))
+      if norm.stop {
+        const prior = if len(messages) > 0 {
+          join(messages, "\n") + "\n"
+        } else {
+          ""
+        }
+        result = norm + {message: prior + norm.message}
+        break
+      }
+      if to_string(norm?.message ?? "") != "" {
+        messages.push(norm.message)
+      }
+      if norm?.next_tool_claim != nil {
+        if next_tool_claim != nil
+          && next_tool_claim?.tool_name != norm?.next_tool_claim?.tool_name {
+          throw "compose_post_turn: callbacks returned conflicting `next_tool_claim` values"
+        }
+        next_tool_claim = norm.next_tool_claim
+      }
+    }
+    if result != nil {
+      result
+    } else if len(messages) > 0 || next_tool_claim != nil {
+      let combined = if len(messages) > 0 {
+        {message: join(messages, "\n")}
+      } else {
+        {}
+      }
+      if next_tool_claim != nil {
+        combined = combined + {next_tool_claim: next_tool_claim}
+      }
+      combined
+    } else {
+      nil
+    }
+  }
+}

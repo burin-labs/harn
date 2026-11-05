@@ -105,9 +105,11 @@ fn pl_command_from_result(raw_output: any) -> string {
  * a command that went to the background (exit still unknown, `command_id`
  * set) takes its exit from the later update that reports the same
  * `command_id`, such as a wait. A known exit code decides `ok`, because a
- * tool call completes normally even when its command fails. This is what lets
- * a curator see a workflow the agent had to discover the hard way, which a
- * tool-name sequence (`run, verify, run`) hides.
+ * tool call completes normally even when its command fails. A check the host ran
+ * itself, with no tool call, is a typed checkpoint naming `command` and a `status`
+ * of `passed` or `failed`. This is what lets a curator see a workflow the agent
+ * had to discover the hard way, which a tool-name sequence (`run, verify, run`)
+ * hides.
  *
  * @effects: []
  * @errors: []
@@ -122,6 +124,17 @@ pub fn pl_session_command_ledger(events: list) -> list {
     const transcript_event = pl_session_transcript_event(event)
     const kind = pl_text(transcript_event?.kind)
     const metadata = transcript_event?.metadata ?? {}
+    if kind == "typed_checkpoint" {
+      const verdict = pl_text(metadata?.status)
+      const checked = pl_text(metadata?.command)
+      if checked != "" && (verdict == "passed" || verdict == "failed") {
+        const host_check = "host-check-" + to_string(len(order))
+        commands = commands + {[host_check]: {tool: pl_text(metadata?.kind), command: checked}}
+        outcomes = outcomes + {[host_check]: {exit_code: nil, ok: verdict == "passed"}}
+        order = order + [host_check]
+      }
+      continue
+    }
     const call_id = pl_text(metadata?.tool_call_id)
     if call_id == "" || (kind != "tool_call" && kind != "tool_call_update") {
       continue

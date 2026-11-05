@@ -374,7 +374,6 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "cache_miss",
     "capability_gap",
     "code_librarian_query_nl_fallback",
-    "compass_routing_decision",
     "composition_child_call",
     "composition_child_result",
     "composition_error",
@@ -2595,17 +2594,6 @@ class HarnAgentEventCodeLibrarianQueryNlFallback(_HarnDataclass):
     mctsExpansions: int
     resultCount: int
     text: str
-
-@dataclass
-class HarnAgentEventCompassRoutingDecision(_HarnDataclass):
-    toolCallId: str
-    mode: str
-    action: str
-    persona: str
-    originalTool: str
-    routedTool: str
-    targetTool: str
-    path: Optional[str] = None
 
 @dataclass
 class HarnAgentEventCompositionChildCall(_HarnDataclass):

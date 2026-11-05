@@ -124,6 +124,8 @@ outside the agent. The target identity must stay the same, its digest must chang
 between the checks, and the current digest must match the second check. Missing
 or unreadable inputs, an absent baseline, stale source, a replaced goal, or
 another session leave the ordinary strict veto in place.
+Effect admission controls reuse only; an executed check can bind its observation
+even when skipping its effects has not been authorized.
 Run a fresh check after further changes. Neither a write nor a passing pair proves
 that behavior is preserved; the declaration and verifier express the caller's
 intent and evidence. `behavior_change` and `unknown` retain the strict rule.
@@ -383,7 +385,7 @@ the named gap to the next actor turn. Standalone callers can use
   (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).
 - [Host-supplied facts](./fact-intake-seams.md) — the broader
   Harn-owns-mechanism / host-owns-facts pattern this gate follows.
-- [Agent governors and detectors](./governors.md) — the budget and stall side of
+- [Agent detectors](./detectors.md) — the stall side of
   the same placement contract.
 - [The expressiveness spectrum](../concepts/expressiveness-spectrum.md#level-4-tune-the-loop-by-composing-building-blocks)
   — where the completion gate sits when you compose loop control by hand.

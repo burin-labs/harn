@@ -85,6 +85,23 @@
     "verdict": "KEEP-with-expiry"
   },
   {
+    "default": "0",
+    "evidence": "llm.resilience.with_retry treats zero as no bound on the time spent across attempts. Conformance covers the bound; canonical host reachability is not inferred.",
+    "expiry": "2027-05-04",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentLoopRetryOptions.max_elapsed_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+        "reader": "with_retry"
+      }
+    ],
+    "reason": "Lets a caller bound how long retries hold a person waiting on a provider that does not answer, without replacing the retry predicate.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "8000",
     "evidence": "llm.resilience.with_retry destructures its retry configuration with this fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",

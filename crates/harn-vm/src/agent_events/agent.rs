@@ -251,21 +251,6 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
-    /// Emitted when the compass observes a freeform edit and either
-    /// suggests a structural primitive, rewrites the tool call, or falls
-    /// back because rewrite mode could not prove equivalence.
-    CompassRoutingDecision {
-        session_id: String,
-        tool_call_id: String,
-        mode: String,
-        action: String,
-        persona: String,
-        original_tool: String,
-        routed_tool: String,
-        target_tool: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<String>,
-    },
     /// Emitted after an agent scratchpad reorganization attempt. The
     /// scratchpad body itself stays in session state; this event carries
     /// status and count/error metadata so live UIs and eval harnesses can
