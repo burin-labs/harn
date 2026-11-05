@@ -1,4 +1,3 @@
-import { CompletionClaim } from "std/agent/completion_claim"
 import {
   COMPLETION_VERIFICATION_EVIDENCE_INDEX,
   CompletionEvidenceProjection,
@@ -138,7 +137,6 @@ pub type CompletionDirectiveReceipt = {
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
   goal_assessment?: CompletionGoalAssessment?,
-  completion_claim?: CompletionClaim,
   precheck?: CompletionPrecheckResult?,
 }
 
@@ -303,9 +301,6 @@ fn __judge_payload(
       ),
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: nil,
-  }
-  if opts?._completion_claim != nil {
-    payload = payload + {completion_claim: opts._completion_claim}
   }
   return payload
 }
@@ -920,7 +915,6 @@ fn __judge_directive(
     } else {
       nil
     },
-    completion_claim: payload?.completion_claim,
     goal_assessment: if ledger.required_count == 0 && ledger.pending_count == 0 {
       verdict.goal_assessment
     } else {
@@ -945,7 +939,7 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
   if !due {
     return false
   }
-  return contains(["sentinel", "natural", "stalled", "explicit_completion_claim"], stop_reason)
+  return contains(["sentinel", "natural", "stalled"], stop_reason)
 }
 
 /** Build the one ordered plan for a completion boundary. */
