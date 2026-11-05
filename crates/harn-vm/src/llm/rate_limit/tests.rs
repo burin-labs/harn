@@ -1322,6 +1322,66 @@ fn prompts_interleaving_on_one_thread_keep_their_own_probe_and_verdict() {
 }
 
 #[test]
+fn a_worker_outliving_its_turn_cannot_act_for_the_sessions_next_prompt() {
+    let _env = crate::llm::env_guard();
+    let _clock =
+        crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+    let mut opts = crate::llm::api::options::base_opts("late-worker-route");
+    opts.model = "late-worker-model".into();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        observe_network_outcome_for_llm_call(&opts, true);
+    }
+
+    let first = begin_interactive_prompt("session");
+    let worker_owner = swap_prompt_probe_owner(None);
+    assert!(worker_owner.is_some());
+    swap_prompt_probe_owner(worker_owner.clone());
+    assert!(network_breaker_admission(&opts).is_none(), "first probe");
+    observe_network_outcome_for_llm_call(&opts, true);
+    drop(first);
+
+    let next = begin_interactive_prompt("session");
+    let next_owner = swap_prompt_probe_owner(worker_owner);
+    let (_, reason) = network_breaker_admission(&opts).expect("the worker waits");
+    assert_eq!(
+        reason,
+        BreakerOpenReason::Network,
+        "the old turn's verdict went with it, and the next prompt's offer stays"
+    );
+    swap_prompt_probe_owner(next_owner);
+    assert!(
+        network_breaker_admission(&opts).is_none(),
+        "the next prompt still has its own probe"
+    );
+    drop(next);
+}
+
+#[test]
+fn a_prompt_cancelled_mid_probe_frees_the_route_at_once() {
+    let _env = crate::llm::env_guard();
+    let _clock =
+        crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+    let mut opts = crate::llm::api::options::base_opts("cancelled-probe-route");
+    opts.model = "cancelled-probe-model".into();
+    for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+        observe_network_outcome_for_llm_call(&opts, true);
+    }
+
+    let cancelled = begin_interactive_prompt("cancelled");
+    assert!(network_breaker_admission(&opts).is_none(), "probe admitted");
+    let waiting = begin_interactive_prompt("waiting");
+    let (remaining, _) = network_breaker_admission(&opts).expect("one probe at a time");
+    assert_eq!(remaining, Duration::ZERO);
+
+    drop(cancelled);
+    assert!(
+        network_breaker_admission(&opts).is_none(),
+        "the waiting prompt probes without waiting out a takeover"
+    );
+    drop(waiting);
+}
+
+#[test]
 fn network_recovery_that_runs_out_its_budget_says_nothing_was_sent() {
     let _env = crate::llm::env_guard();
     let runtime = tokio::runtime::Builder::new_current_thread()
