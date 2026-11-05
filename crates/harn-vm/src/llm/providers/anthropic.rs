@@ -326,11 +326,23 @@ pub(crate) fn reconcile_request_body(
 /// Keep valid signed reasoning while letting Anthropic discard blocks whose
 /// conversation prefix has changed. Only advertise this on catalogued routes
 /// and adaptive thinking: other thinking modes reject `block_binding`.
+///
+/// `between_tools` is one of those modes, yet still returns signed blocks that
+/// Anthropic rejects once the tool list changes. It is the thinking-off setting,
+/// so history drops them instead of risking a 400 on tool-surface narrowing.
 pub(crate) fn prepare_thinking_binding(
     body: &mut serde_json::Value,
     provider: &str,
     fallback_model: &str,
 ) -> bool {
+    if body
+        .pointer("/thinking/type")
+        .and_then(serde_json::Value::as_str)
+        == Some("between_tools")
+    {
+        remove_signed_reasoning(body);
+        return false;
+    }
     let model = body
         .get("model")
         .map_or(fallback_model, |value| value.as_str().unwrap_or_default());
@@ -373,6 +385,27 @@ pub(crate) fn prepare_thinking_binding(
             serde_json::json!({"prefix_mismatch_behavior":"drop_block"});
     }
     true
+}
+
+fn remove_signed_reasoning(body: &mut serde_json::Value) {
+    let Some(messages) = body
+        .get_mut("messages")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    messages.retain_mut(|message| {
+        let Some(blocks) = message
+            .get_mut("content")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return true;
+        };
+        let before = blocks.len();
+        blocks.retain(|block| !harn_llm::reasoning_history::is_signed_anthropic_block(block));
+        // A turn holding only reasoning has nothing left to send.
+        before == blocks.len() || !blocks.is_empty()
+    });
 }
 
 fn remove_unsupported_assistant_prefill(body: &mut serde_json::Value, provider: &str, model: &str) {

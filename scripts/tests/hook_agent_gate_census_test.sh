@@ -125,8 +125,9 @@ exec /bin/mkdir "$@"
 SH
 cat > "$work/scripts/sign_local_macos.sh" <<'SH'
 #!/bin/sh
-printf 'codesign\n' >> "$NO_BUILD_EFFECT_RECORD"
+printf 'codesign %s\n' "$*" >> "$NO_BUILD_EFFECT_RECORD"
 [ "${HOOK_SIGN_FAIL:-0}" != 1 ] || exit 91
+[ "${1:-}" != --verify ] || [ "${HOOK_VERIFY_FAIL:-0}" != 1 ] || exit 93
 SH
 chmod +x "$fake_bin/uname" "$fake_bin/mkdir" "$work/scripts/sign_local_macos.sh"
 
@@ -275,17 +276,29 @@ if [[ -s "$build_record" || -s "$effects_record" ]]; then
   fail 'a fresh no-build runtime triggered build or signing' "$build_record" "$effects_record"
 fi
 
-for failure in sign receipt; do
+signed_out="$tmp_root/signed-build.out"
+HARN_BIN_NO_BUILD=0 WORKTREE_STALE=1 HOOK_TEST_UNAME=Darwin \
+  run_prepush "$changed_reader" pass "$signed_out" ||
+  fail 'a verified signed build did not reach the census' "$signed_out"
+grep -Fxq "codesign $worktree_harn" "$effects_record" ||
+  fail 'the hook did not sign the resolved executable' "$effects_record"
+grep -Fxq -- "codesign --verify $worktree_harn" "$effects_record" ||
+  fail 'the hook did not finally verify the resolved executable' "$effects_record"
+
+for failure in sign receipt verify; do
   failure_out="$tmp_root/$failure-refused.out"
   sign_fail=0
   receipt_fail=0
+  verify_fail=0
   if [[ "$failure" == sign ]]; then
     sign_fail=1
-  else
+  elif [[ "$failure" == receipt ]]; then
     receipt_fail=1
+  else
+    verify_fail=1
   fi
   if HARN_BIN_NO_BUILD=0 WORKTREE_STALE=1 HOOK_TEST_UNAME=Darwin \
-      HOOK_SIGN_FAIL="$sign_fail" HOOK_RECEIPT_FAIL="$receipt_fail" \
+      HOOK_SIGN_FAIL="$sign_fail" HOOK_RECEIPT_FAIL="$receipt_fail" HOOK_VERIFY_FAIL="$verify_fail" \
       run_prepush "$changed_reader" pass "$failure_out"; then
     fail "a failed $failure checkpoint allowed the census" "$failure_out"
   fi

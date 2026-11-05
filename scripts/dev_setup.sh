@@ -691,18 +691,19 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
   log "Building and proving the canonical Harn CLI"
   # Fresh setup can compile the entire graph. Keep the resolver's shorter
   # interactive default for ordinary commands, but let this cold build finish.
-  HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+  harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=0 \
     HARN_BIN_CARGO_TIMEOUT_SECONDS="${HARN_BIN_CARGO_TIMEOUT_SECONDS:-3600}" \
-    ./scripts/harn_bin.sh --print >/dev/null
+    ./scripts/harn_bin.sh --print)"
   # Signing mutates the canonical artifact identity, so refresh the receipt
   # only after the final bytes are in place and before publishing a target seed.
-  ./scripts/sign_local_macos.sh
+  ./scripts/sign_local_macos.sh "$harn_bin"
   HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
   if [[ -x ./scripts/cargo_target_seed.sh ]] \
     && grep -Fxq "target-dir = \"${cargo_target_root}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \
       .cargo/config.toml; then
     ./scripts/cargo_target_seed.sh publish "${cargo_target_root}" "${HARN_DEV_SETUP_STORAGE_ROOT}"
   fi
+  ./scripts/sign_local_macos.sh --verify "$harn_bin"
 else
   echo "Bootstrap profile configured the worktree; deferring compilation to the final task lane."
 fi

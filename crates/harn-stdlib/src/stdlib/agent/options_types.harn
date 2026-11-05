@@ -650,8 +650,6 @@ pub type AgentPresetOptions = AgentSpec \
   stages?: list,
   verification_steps?: list,
   verification?: list,
-  lane_policy?: any,
-  overlay_policy?: any,
   workflow_learning_eligibility?: string,
 }
 
@@ -679,14 +677,6 @@ pub type AgentPresetOptions = AgentSpec \
  * even though the loop never reads them. Same shape of debt as
  * `allowed_tools`: the cleaner end state is for the worker request to carry
  * them on its own channel.
- */
-/**
- * Preset-pack lane rows, lowered by `std/agent/lanes`. `agent_preset`
- * copies it into the options it returns.
- */
-/**
- * Preset-pack overlay rows, lowered by `std/agent/overlays`. `agent_preset`
- * copies it into the options it returns.
  */
 /**
  * Whether this run's transcript may feed workflow learning. Read by the host
