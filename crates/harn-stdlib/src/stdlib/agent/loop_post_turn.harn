@@ -565,10 +565,7 @@ pub fn agent_loop_post_turn_transition(
       should_continue = true
     }
     if !should_continue {
-      return {
-        action: "break",
-        state: next + {stop_reason: outcome.stop_reason},
-      }
+      return {action: "break", state: next + {stop_reason: outcome.stop_reason}}
     }
   }
   if should_continue && post_edit_reverify_confirmed && context.iteration >= next.current_max {

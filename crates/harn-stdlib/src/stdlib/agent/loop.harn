@@ -55,10 +55,7 @@ pub fn agent_loop(
     // which is more use than "no option reads this".
     __validate_removed_agent_loop_options(options ?? {})
     __validate_agent_loop_option_keys(options)
-    let opts = agent_loop_options(
-      harness,
-      agent_progress_apply_options(harness.agent, options),
-    )
+    let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
     // Lifecycle composition owns the agent projection so direct callers and
     // this default path share one validated, closure-preserving boundary.
     opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
