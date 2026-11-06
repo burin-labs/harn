@@ -1050,7 +1050,10 @@ fn observe_wrapper(
             "the daemon fixture did not reach its blocking read".to_string(),
         ));
     }
-    let daemon_helpers = daemon.map(DaemonProbe::helper_states);
+    let daemon_helpers = daemon
+        .map(DaemonProbe::helper_states)
+        .transpose()
+        .map_err(|error| Unmeasured::Broken(format!("process census unavailable: {error}")))?;
     let daemon_alive = daemon_helpers.as_ref().map(|helpers| !helpers.is_empty());
     let (behaved, receipt) = match case {
         ConformanceCase::RustcWrapperThatRunsIsKept => (

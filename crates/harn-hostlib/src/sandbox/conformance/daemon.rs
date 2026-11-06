@@ -52,16 +52,21 @@ impl DaemonProbe {
 
     #[cfg(all(test, unix))]
     fn alive(&self) -> bool {
-        !self.helper_states().is_empty()
+        !self
+            .helper_states()
+            .expect("read process census")
+            .is_empty()
     }
 
-    pub(super) fn helper_states(&self) -> Vec<(sysinfo::Pid, sysinfo::ProcessStatus)> {
-        snapshot()
+    pub(super) fn helper_states(
+        &self,
+    ) -> Result<Vec<(sysinfo::Pid, sysinfo::ProcessStatus)>, String> {
+        Ok(snapshot()?
             .processes()
             .values()
             .filter(|process| self.owns(process))
             .map(|process| (process.pid(), process.status()))
-            .collect()
+            .collect())
     }
 
     pub(super) fn started(&self) -> bool {
@@ -79,14 +84,20 @@ impl DaemonProbe {
     }
 }
 
-fn snapshot() -> System {
-    let mut system = System::new();
+fn snapshot() -> Result<System, String> {
+    let mut system = System::new().map_err(|error| error.to_string())?;
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
     );
-    system
+    if system
+        .process(sysinfo::Pid::from_u32(std::process::id()))
+        .is_none()
+    {
+        return Err("process census did not observe itself".into());
+    }
+    Ok(system)
 }
 
 pub(super) fn shell_path(path: &Path) -> String {

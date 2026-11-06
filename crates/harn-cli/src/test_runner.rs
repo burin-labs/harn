@@ -730,12 +730,13 @@ fn per_worker_memory_mb() -> u64 {
 /// runner-loss cancellations). Returns `None` when nothing can be measured,
 /// leaving the core-based cap in force.
 fn available_memory_mb() -> Option<u64> {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    let host_mb = match sys.available_memory() {
-        0 => None, // unsupported / detection failed — don't over-throttle
-        bytes => Some(bytes / (1024 * 1024)),
-    };
+    let host_mb = sysinfo::System::new().ok().and_then(|mut sys| {
+        sys.refresh_memory();
+        match sys.available_memory() {
+            0 => None, // unsupported / detection failed — don't over-throttle
+            bytes => Some(bytes / (1024 * 1024)),
+        }
+    });
     match (host_mb, cgroup_v2_headroom_mb()) {
         (Some(h), Some(c)) => Some(h.min(c)),
         (Some(h), None) => Some(h),
