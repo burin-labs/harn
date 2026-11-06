@@ -83,10 +83,13 @@ pub(crate) fn bytes_to_gib_f64(bytes: u64) -> f64 {
 pub(crate) fn detect_ram() -> RamSnapshot {
     let system = System::new_with_specifics(
         RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
-    );
+    )
+    .ok();
     RamSnapshot {
-        total_bytes: nonzero(system.total_memory()),
-        available_bytes: available_ram_bytes(&system),
+        total_bytes: system
+            .as_ref()
+            .and_then(|system| nonzero(system.total_memory())),
+        available_bytes: available_ram_bytes(system.as_ref()),
     }
 }
 
@@ -94,8 +97,8 @@ pub(crate) fn detect_ram() -> RamSnapshot {
 /// could still allocate" figure — `MemAvailable` on Linux — which is exactly
 /// what callers want, so defer to it.
 #[cfg(not(target_os = "macos"))]
-fn available_ram_bytes(system: &System) -> Option<u64> {
-    nonzero(system.available_memory())
+fn available_ram_bytes(system: Option<&System>) -> Option<u64> {
+    system.and_then(|system| nonzero(system.available_memory()))
 }
 
 /// macOS is the deliberate exception: do NOT route this through
@@ -118,7 +121,7 @@ fn available_ram_bytes(system: &System) -> Option<u64> {
 ///
 /// So keep the conservative `vm_stat` reclaimable-pages estimate on macOS.
 #[cfg(target_os = "macos")]
-fn available_ram_bytes(_system: &System) -> Option<u64> {
+fn available_ram_bytes(_system: Option<&System>) -> Option<u64> {
     command_stdout("vm_stat", &[]).and_then(|text| parse_macos_vm_stat(&text))
 }
 
@@ -182,6 +185,7 @@ fn available_space_for(path: &Path) -> Option<u64> {
             .into_owned(),
     );
     Disks::new_with_refreshed_list()
+        .ok()?
         .iter()
         // Nested mounts all prefix-match `probe`; the deepest one owns it.
         .filter(|disk| probe.starts_with(disk.mount_point()))

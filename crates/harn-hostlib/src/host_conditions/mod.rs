@@ -432,14 +432,19 @@ fn local_questions() -> (HostEnvironment, Vec<HostConditionObservation>) {
         let environment = local_non_linux_environment();
         #[cfg(target_os = "macos")]
         let promised_cpu = {
-            let load = sysinfo::System::load_average().one;
-            let cores = std::thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1);
-            HostConditionObservation::observed(
-                HostContentionQuestion::PromisedCpu,
-                load / cores as f64,
-            )
+            match (
+                sysinfo::System::load_average(),
+                std::thread::available_parallelism(),
+            ) {
+                (Ok(load), Ok(cores)) => HostConditionObservation::observed(
+                    HostContentionQuestion::PromisedCpu,
+                    load.one / usize::from(cores) as f64,
+                ),
+                _ => HostConditionObservation::unavailable(
+                    HostContentionQuestion::PromisedCpu,
+                    "native CPU contention counters could not be read",
+                ),
+            }
         };
         #[cfg(not(target_os = "macos"))]
         let promised_cpu = HostConditionObservation::unavailable(

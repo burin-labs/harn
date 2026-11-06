@@ -28,23 +28,24 @@ impl ActiveProcessCleanupGuard {
             .chain(cleanup_token_processes(&entry.cleanup_token))
             .map(|child| (child.pid, child))
             .collect::<BTreeMap<_, _>>();
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            false,
-            ProcessRefreshKind::nothing(),
-        );
-        for (peer, process) in system.processes() {
-            let peer = peer.as_u32();
-            if peer != pid && unsafe { libc::getpgid(peer as i32) } == pid as i32 {
-                children.entry(peer).or_insert_with(|| {
-                    ProcessCleanupChild::new(
-                        peer,
-                        process.parent().map(|parent| parent.as_u32()),
-                        1,
-                        command_name(process.cmd()),
-                    )
-                });
+        if let Ok(mut system) = System::new() {
+            system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                false,
+                ProcessRefreshKind::nothing(),
+            );
+            for (peer, process) in system.processes() {
+                let peer = peer.as_u32();
+                if peer != pid && unsafe { libc::getpgid(peer as i32) } == pid as i32 {
+                    children.entry(peer).or_insert_with(|| {
+                        ProcessCleanupChild::new(
+                            peer,
+                            process.parent().map(|parent| parent.as_u32()),
+                            1,
+                            command_name(process.cmd()),
+                        )
+                    });
+                }
             }
         }
         children.remove(&pid);

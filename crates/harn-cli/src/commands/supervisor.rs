@@ -151,7 +151,7 @@ async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {
 
     let mut state = read_supervisor_state(&state_dir)?;
     if let Some(process) = state.process.as_ref() {
-        if process_is_alive(process.pid) {
+        if process_is_alive(process.pid)? {
             return Err(format!(
                 "workflow supervisor is already running as pid {}",
                 process.pid
@@ -218,7 +218,7 @@ async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {
     state.updated_at = Some(now_rfc3339());
     write_supervisor_state(&state_dir, &state)?;
 
-    let process = state.process.as_ref().map(process_snapshot);
+    let process = state.process.as_ref().map(process_snapshot).transpose()?;
     if status == "failed" {
         return Err(format!(
             "workflow supervisor exited before readiness; see {}",
@@ -266,16 +266,16 @@ async fn run_stop(args: SupervisorStopArgs) -> OrchestratorResult<()> {
             .into());
     };
     let pid = process.pid;
-    let was_alive = process_is_alive(pid);
+    let was_alive = process_is_alive(pid)?;
     if was_alive {
         terminate_process(pid)?;
     }
-    let stopped = wait_for_process_exit(pid, Duration::from_secs(10)).await;
+    let stopped = wait_for_process_exit(pid, Duration::from_secs(10)).await?;
     process.status = if stopped { "stopped" } else { "stopping" }.to_string();
     process.stopped_at = Some(now_rfc3339());
     state.updated_at = process.stopped_at.clone();
     write_supervisor_state(&state_dir, &state)?;
-    let process = state.process.as_ref().map(process_snapshot);
+    let process = state.process.as_ref().map(process_snapshot).transpose()?;
     if args.json {
         return print_json(&SupervisorAction {
             status: if stopped { "stopped" } else { "stopping" }.to_string(),
@@ -450,7 +450,7 @@ async fn set_status_and_apply(
         return print_json(&SupervisorAction {
             status: status.to_string(),
             workflow_id: Some(workflow_id.to_string()),
-            process: state.process.as_ref().map(process_snapshot),
+            process: state.process.as_ref().map(process_snapshot).transpose()?,
             result: json!({
                 "workflow": workflow,
                 "inspect": inspect,
@@ -621,7 +621,7 @@ async fn supervisor_snapshot(
 
     Ok(SupervisorSnapshot {
         schema_version: 1,
-        process: state.process.as_ref().map(process_snapshot),
+        process: state.process.as_ref().map(process_snapshot).transpose()?,
         workflows,
         events,
         dlq: SupervisorDlqSummary {
@@ -688,18 +688,20 @@ fn stable_event_name(kind: &str, status: &str) -> &'static str {
     }
 }
 
-fn process_snapshot(process: &WorkflowSupervisorProcess) -> SupervisorProcessSnapshot {
-    SupervisorProcessSnapshot {
+fn process_snapshot(
+    process: &WorkflowSupervisorProcess,
+) -> OrchestratorResult<SupervisorProcessSnapshot> {
+    Ok(SupervisorProcessSnapshot {
         pid: process.pid,
         status: process.status.clone(),
-        alive: process_is_alive(process.pid),
+        alive: process_is_alive(process.pid)?,
         config_path: process.config_path.clone(),
         state_dir: process.state_dir.clone(),
         bind: process.bind.clone(),
         log_path: process.log_path.clone(),
         started_at: process.started_at.clone(),
         stopped_at: process.stopped_at.clone(),
-    }
+    })
 }
 
 async fn wait_for_running_snapshot(
@@ -733,15 +735,24 @@ async fn wait_for_running_snapshot(
 /// dependency) rather than shelling out to `kill -0`, so it works on every
 /// platform and avoids spawning a subprocess on the liveness-polling hot path
 /// in `wait_for_process_exit`.
-fn process_is_alive(pid: u32) -> bool {
+fn process_is_alive(pid: u32) -> OrchestratorResult<bool> {
     let pid = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    let own_pid = sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = sysinfo::System::new()
+        .map_err(|error| format!("failed to inspect supervisor process: {error}"))?;
     sys.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::Some(&[pid]),
+        sysinfo::ProcessesToUpdate::Some(&[pid, own_pid]),
         true,
         sysinfo::ProcessRefreshKind::nothing(),
     );
-    sys.process(pid).is_some()
+    if sys.process(own_pid).is_none() {
+        return Err(
+            "failed to inspect supervisor process: process census did not observe itself"
+                .to_string()
+                .into(),
+        );
+    }
+    Ok(sys.process(pid).is_some())
 }
 
 #[cfg(unix)]
@@ -770,7 +781,7 @@ fn signal_process_reload(
     let Some(process) = process else {
         return Ok(None);
     };
-    if !process_is_alive(process.pid) {
+    if !process_is_alive(process.pid)? {
         return Ok(None);
     }
     let status = Command::new("kill")
@@ -796,15 +807,15 @@ fn signal_process_reload(
     Ok(None)
 }
 
-async fn wait_for_process_exit(pid: u32, timeout: Duration) -> bool {
+async fn wait_for_process_exit(pid: u32, timeout: Duration) -> OrchestratorResult<bool> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if !process_is_alive(pid) {
-            return true;
+        if !process_is_alive(pid)? {
+            return Ok(true);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    !process_is_alive(pid)
+    Ok(!process_is_alive(pid)?)
 }
 
 fn merge_json_object(target: &mut JsonValue, patch: JsonValue) {

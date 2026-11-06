@@ -150,14 +150,14 @@ fn call_harness_system_method(
 ) -> Result<VmValue, VmError> {
     use crate::harness_system as sys;
     let json = match method {
-        "cpu" => sys::cpu_snapshot(),
-        "memory" => sys::memory_snapshot(),
+        "cpu" => sys::cpu_snapshot().map_err(VmError::Runtime)?,
+        "memory" => sys::memory_snapshot().map_err(VmError::Runtime)?,
         "gpus" | "gpu" => sys::gpus_snapshot(),
-        "temperature" => sys::temperature_snapshot(),
+        "temperature" => sys::temperature_snapshot().map_err(VmError::Runtime)?,
         "platform" => sys::platform_snapshot(),
         "identity" => sys::identity_snapshot(),
         "parent_process" => sys::parent_process_snapshot(),
-        "processes" => sys::processes_snapshot(),
+        "processes" => sys::processes_snapshot().map_err(VmError::Runtime)?,
         _ => return Err(method_unsupported(handle, method)),
     };
     Ok(crate::value::json::json_to_vm_value(&json))
