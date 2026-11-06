@@ -1,0 +1,88 @@
+name: Shared pin bump implementation
+
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+      release_path:
+        required: true
+        type: boolean
+      changes:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      RELEASE_APP_CLIENT_ID:
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: shared-pin-bump-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Require the immutable implementation identity
+        if: ${{ fromJSON(toJSON(job)).workflow_repository != 'burin-labs/harn' || fromJSON(toJSON(job)).workflow_sha == '' }}
+        run: exit 1
+      - name: Check out the implementation at its own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
+          ref: ${{ fromJSON(toJSON(job)).workflow_sha }}
+          path: harn-policy
+          persist-credentials: false
+      - name: Set up Harn
+        id: harn
+        uses: ./harn-policy/.github/actions/setup-harn
+        with:
+          version: "0.10.188"
+      - name: Mint the consumer-scoped bump token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      - name: Open or recover the snapshot-bound pull request
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BUMP_READ_TOKEN: ${{ github.token }}
+          BUMP_WORKFLOW: ${{ inputs.workflow }}
+          BUMP_SHA: ${{ inputs.sha }}
+          BUMP_RELEASE_PATH: ${{ inputs.release_path }}
+          BUMP_CHANGES: ${{ inputs.changes }}
+          BUMP_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HARN: ${{ steps.harn.outputs.path }}
+        run: |
+          set -euo pipefail
+          "$HARN" run \
+            --allow-process-network \
+            --grant gh_token=env:GH_TOKEN,expose=GH_TOKEN \
+            --grant read_token=env:BUMP_READ_TOKEN,expose=BUMP_READ_TOKEN \
+            --grant workflow=env:BUMP_WORKFLOW,expose=BUMP_WORKFLOW \
+            --grant sha=env:BUMP_SHA,expose=BUMP_SHA \
+            --grant release_path=env:BUMP_RELEASE_PATH,expose=BUMP_RELEASE_PATH \
+            --grant changes=env:BUMP_CHANGES,expose=BUMP_CHANGES \
+            --grant run_url=env:BUMP_RUN_URL,expose=BUMP_RUN_URL \
+            --grant repository=env:GITHUB_REPOSITORY,expose=GITHUB_REPOSITORY \
+            harn-policy/scripts/ci/shared_pin_bump_cli.harn
