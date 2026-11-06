@@ -118,7 +118,7 @@ blake3 = "1.8.7"
 # Read the linker-owned ELF build-id, Mach-O LC_UUID, or Windows CodeView
 # GUID/age from the running artifact. This identifies stale/copy-substituted
 # builds in O(1) without hashing a 400+ MiB debug executable on every check.
-buildid = "=1.0.5"
+buildid = "=1.1.0"
 sha2 = "0.11"
 # POSIX-correct argv quoting for every emitted shell command line. Hand-rolled
 # quoters disagreed on the safe-character set and dropped empty arguments.
@@ -128,7 +128,7 @@ hmac = "0.13"
 ipnet = "2"
 tar = { version = "0.4", default-features = false }
 flate2 = "1"
-lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "xz", "optimization"] }
+lzma-rust2 = { version = "0.24", default-features = false, features = ["std", "xz", "optimization"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 subtle = "2.6"
 base64 = "0.23"
@@ -153,7 +153,7 @@ thiserror = "2"
 which = "8"
 # Cross-platform host memory for memory-aware test-worker sizing. Already in
 # the tree via harn-vm; matched features keep the build unified.
-sysinfo = { version = "0.39", default-features = false, features = ["disk", "system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["disk", "system"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -233,7 +233,7 @@ rcgen.workspace = true
 rstest.workspace = true
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 wat = "1"
-lzma-rust2 = { version = "0.15", default-features = false, features = ["encoder"] }
+lzma-rust2 = { version = "0.24", default-features = false, features = ["encoder"] }
 
 [lints]
 workspace = true
