@@ -13,7 +13,7 @@ use harn_vm::run_tape::{
     start_branch, start_recording, BranchPlan, BranchReport, BranchScope, EffectScan,
     RecordingLevel, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
 };
-use harn_vm::testbench::tape::EventTape;
+use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
 use harn_vm::value::VmError;
 
 /// Recording and branch replay are process-global.
@@ -354,6 +354,25 @@ fn a_served_tool_call_injects_the_reminders_its_recording_injected() {
     assert!(
         tape.contains("Grounded adversarial review"),
         "the recording injected the reminder"
+    );
+    let recording = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let advisory_delivered = recording.records.iter().any(|record| match &record.kind {
+        TapeRecordKind::LlmCall {
+            call_index: Some(2),
+            messages,
+            ..
+        } => messages.iter().any(|message| {
+            let bytes = recording.resolve_payload(message).unwrap();
+            let text = String::from_utf8(bytes).unwrap();
+            text.contains("Grounded adversarial review")
+                && text.contains("authority=\\\"advisory\\\"")
+                && text.contains("task scope")
+        }),
+        _ => false,
+    });
+    assert!(
+        advisory_delivered,
+        "the next model request must carry a task-scoped advisory"
     );
 
     let Branched { output, report, .. } = branch(&source, &dirs.tapes, &dirs.workspace, 2);

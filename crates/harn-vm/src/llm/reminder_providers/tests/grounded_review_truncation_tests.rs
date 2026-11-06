@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::helpers::DirectiveAuthority;
 use serde_json::json;
 
 #[test]
@@ -19,6 +20,7 @@ fn grounded_review_provider_fires_on_verified_tool_failure() {
     assert_eq!(reminder.ttl_turns, Some(2));
     assert_eq!(reminder.propagate, ReminderPropagate::None);
     assert_eq!(reminder.role_hint, ReminderRoleHint::Developer);
+    assert_eq!(reminder.authority, DirectiveAuthority::Advisory);
     assert!(reminder
         .dedupe_key
         .as_deref()
@@ -26,6 +28,11 @@ fn grounded_review_provider_fires_on_verified_tool_failure() {
     assert!(reminder.body.contains("verified:typecheck"));
     assert!(reminder.body.contains("cannot find value `missing`"));
     assert!(reminder.body.contains("command=cargo check -p demo"));
+    assert!(reminder.body.contains("task scope"));
+    assert!(reminder.body.contains("fix in-scope causes"));
+    assert!(reminder
+        .body
+        .contains("Report unrelated or unresolved failures"));
 }
 
 #[test]
