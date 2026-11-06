@@ -568,7 +568,7 @@ pub fn agent_reset_tool_surface_narrowing(opts: dict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_reopen_tool_surface(agent: HarnessAgent, session: dict, opts: dict) {
+pub fn __agent_reopen_tool_surface(agent: HarnessAgent, session: dict, opts: dict) -> dict {
   const reset = agent_reset_tool_surface_narrowing(opts)
   return if opts?._tool_surface_user_boundary == nil {
     reset

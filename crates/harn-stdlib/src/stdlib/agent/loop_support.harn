@@ -116,7 +116,7 @@ import { __tool_surface_tool_allowed } from "std/agent/tool_surface"
 pub import {
   agent_apply_tool_surface_narrowing,
   agent_narrow_tool_surface_at_user_boundary,
-  agent_reopen_tool_surface,
+  __agent_reopen_tool_surface,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/tool_surface"
 pub import {
