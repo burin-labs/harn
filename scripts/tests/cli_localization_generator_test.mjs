@@ -113,7 +113,15 @@ test("generator rejects every unexpected output and retires only registered gene
     assert.ok(measured.sources > 10 && measured.expectedCalls > 100 && measured.generated > measured.sources);
     const renderers = fs.readdirSync(path.join(root, output), {recursive: true})
       .filter((name) => name.endsWith(".harn"))
-      .flatMap((name) => [...fs.readFileSync(path.join(root, output, name), "utf8").matchAll(/^pub fn (message_\d+)\(/gm)].map((match) => match[1]));
+      .flatMap((name) => {
+        const parsed = spawnSync(binary, ["parse", path.join(root, output, name), "--json"],
+          {cwd: root, env, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024});
+        assert.equal(parsed.status, 0, parsed.stderr || parsed.error);
+        const result = JSON.parse(parsed.stdout);
+        assert.equal(result.ok, true);
+        return result.data.body.filter((node) => node.kind === "FnDecl" && node.fields.name !== "cli_message")
+          .map((node) => { assert.equal(node.fields.is_pub, true); return node.fields.name; });
+      });
     assert.equal(renderers.length, Object.keys(registry.messages).length, "each canonical message has one renderer");
     assert.equal(new Set(renderers).size, renderers.length, "renderer ownership cannot repeat across modules");
     assert.equal(measured.measuredCalls, measured.expectedCalls);
