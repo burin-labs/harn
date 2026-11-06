@@ -37,10 +37,16 @@ pipeline main(harness: Harness) {
     script
 }
 
-async fn run_host_dispatch_fixture(declared: bool) -> crate::commands::run::RunOutcome {
+async fn run_host_dispatch_fixture(
+    declared: bool,
+    entry: Option<&str>,
+) -> crate::commands::run::RunOutcome {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_imported_host_dispatch_project(project.path(), declared);
+    if let Some(entry) = entry {
+        std::fs::write(&script, entry).expect("write tool declaration entry");
+    }
     assert_eq!(
         crate::compiler_context::trusted_host_dispatch_for_source(&script),
         declared,
@@ -78,7 +84,7 @@ impl harn_vm::HostCallBridge for DispatchBoundaryBridge {
 
 #[tokio::test]
 async fn execute_run_honors_manifest_trusted_host_dispatch() {
-    let outcome = run_host_dispatch_fixture(true).await;
+    let outcome = run_host_dispatch_fixture(true, None).await;
     assert_eq!(
         outcome.exit_code, 0,
         "stderr:\n{}\nstdout:\n{}",
@@ -89,7 +95,7 @@ async fn execute_run_honors_manifest_trusted_host_dispatch() {
 
 #[tokio::test]
 async fn execute_run_rejects_imported_host_dispatch_without_manifest_authority() {
-    let outcome = run_host_dispatch_fixture(false).await;
+    let outcome = run_host_dispatch_fixture(false, None).await;
     assert_ne!(
         outcome.exit_code, 0,
         "ordinary module graph unexpectedly ran:\nstdout:\n{}\nstderr:\n{}",
@@ -106,4 +112,27 @@ async fn execute_run_rejects_imported_host_dispatch_without_manifest_authority()
         "denied graph reached its entry pipeline: {}",
         outcome.stdout
     );
+}
+
+#[tokio::test]
+async fn execute_run_routes_declared_tools_through_the_native_capability_adapter() {
+    let outcome = run_host_dispatch_fixture(
+        true,
+        Some(
+            r#"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+fn main(harness: Harness) {
+  const tools = tool_define(tool_registry(), "read_input", "Read input", {
+    executor: "host_bridge", host_capability: "runtime.pipeline_input",
+  })
+  const result = agent_dispatch_tool_call(harness.tools, {name: "read_input", arguments: {}}, tools)
+  assert(result.ok && result.result == "bridge-reached", "the declared capability reached its host")
+  harness.stdio.println("target-ran")
+}
+"#,
+        ),
+    )
+    .await;
+    assert_eq!(outcome.exit_code, 0, "{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "target-ran");
 }

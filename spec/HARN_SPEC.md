@@ -3345,6 +3345,8 @@ Host tools dispatch the declared capability with the tool's argument object.
 Command capabilities retain command policy and approval checks. Capability fixtures
 and recorded tool results retain their existing interception points. An absent or
 unhandled host adapter returns a tool rejection; it can't run a standalone fallback.
+Native embedders install a `HostCallBridge`; a generic `HostBridge` connection alone
+doesn't provide capability dispatch.
 
 ```harn
 const registry = tool_registry()
