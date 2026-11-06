@@ -558,6 +558,7 @@ catalog_entries! {
     "agent/prompts/tool_contract_deferred_tools.harn.prompt" => "stdlib/agent/prompts/tool_contract_deferred_tools.harn.prompt",
     "agent/prompts/deferred_tool_listing.harn.prompt" => "stdlib/agent/prompts/deferred_tool_listing.harn.prompt",
     "agent/prompts/default_nudge.harn.prompt" => "stdlib/agent/prompts/default_nudge.harn.prompt",
+    "agent/prompts/stall_feedback.harn.prompt" => "stdlib/agent/prompts/stall_feedback.harn.prompt",
     "agent/prompts/agentic_user_system.harn.prompt" => "stdlib/agent/prompts/agentic_user_system.harn.prompt",
     "agent/prompts/agentic_user_user.harn.prompt" => "stdlib/agent/prompts/agentic_user_user.harn.prompt",
     "agent/prompts/loop_until_done_system.harn.prompt" => "stdlib/agent/prompts/loop_until_done_system.harn.prompt",

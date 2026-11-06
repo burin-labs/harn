@@ -411,7 +411,8 @@ pub(crate) fn render_stdlib_prompt_asset(
     } else {
         format!("std/{path}")
     };
-    let asset = TemplateAsset::render_target(&target).map_err(VmError::Runtime)?;
+    let asset = TemplateAsset::stdlib(&target)
+        .ok_or_else(|| VmError::Runtime(format!("unknown stdlib prompt asset '{path}'")))?;
     render_asset_result(&asset, bindings).map_err(VmError::from)
 }
 

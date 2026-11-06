@@ -22,6 +22,11 @@ Stdlib-owned model-facing prompt prose lives in embedded `std/...harn.prompt`
 assets. These render without touching the filesystem and report stable
 `std://...` provenance URIs:
 
+`render_stdlib_prompt(path, bindings?) -> string` renders these embedded assets
+without a filesystem capability. It accepts catalog paths with or without
+`std/`, refuses unknown assets and filesystem paths, and resolves includes
+inside the embedded catalog. It uses the same template engine and provenance.
+
 ```harn,ignore
 const tool_contract = harness.fs.render_prompt(
   "std/agent/prompts/tool_contract_text.harn.prompt", {},
