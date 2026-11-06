@@ -843,6 +843,14 @@ Use `connector_http_header(...)` for case-insensitive response header lookup and
 `connector_http_rate_limit(...)` to expose `Retry-After`, `RateLimit-*`, and
 `X-RateLimit-*` metadata without repeating provider-local header scans.
 
+Use `connector_http_validate_url_host(value, label?)` before accepting an
+operator-configured HTTPS endpoint. It returns `Result<string, string>` with
+the parsed host or a validation error naming the setting. It rejects
+private literal addresses and `.localhost`, `.local`, and `.internal` names;
+`connector_http_is_disallowed_host(host)` exposes the same host check directly.
+These pure checks perform no DNS lookup. Actual requests still apply the
+connect-time address guard, which also rejects private addresses returned by DNS.
+
 AWS-backed connector packages that need exactly one signed REST/JSON call can
 use the global `aws_sigv4_headers(...)` primitive and still route the request
 through `harness.net.request(...)`. Keep this as a narrow auth helper, not the

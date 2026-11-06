@@ -1,0 +1,108 @@
+import {
+  connector_http_header,
+  connector_http_is_disallowed_host,
+  connector_http_validate_url_host,
+} from "std/connectors/http"
+import * as buildkite from "../../fixtures/connectors/contract-v1/buildkite/src/lib"
+import * as circleci from "../../fixtures/connectors/contract-v1/circleci/src/lib"
+
+pipeline test(harness: Harness) {
+  for host in [
+    "localhost",
+    "LOCALHOST.",
+    "build.localhost",
+    "build.local",
+    "build.internal",
+    "127.0.0.1",
+    "10.0.0.1",
+    "172.16.0.1",
+    "192.168.0.1",
+    "169.254.169.254",
+    "100.64.0.1",
+    "100.127.255.255",
+    "0.0.0.0",
+    "::",
+    "::1",
+    "fc00::1",
+    "fdff::1",
+    "fe80::1",
+    "::ffff:10.0.0.1",
+    "[::ffff:127.0.0.1]",
+    "0x7f000001",
+    "",
+    "[::1",
+  ] {
+    assert(connector_http_is_disallowed_host(host), "private or invalid host must refuse: ${host}")
+  }
+  for host in [
+    "8.8.8.8",
+    "1.1.1.1",
+    "172.15.255.255",
+    "172.32.0.1",
+    "100.63.255.255",
+    "100.128.0.0",
+    "2606:4700:4700::1111",
+    "[2001:4860:4860::8888]",
+    "::ffff:8.8.8.8",
+    "example.org",
+    "10.example.org",
+    "localhost.example.org",
+  ] {
+    assert(!connector_http_is_disallowed_host(host), "public host must remain available: ${host}")
+  }
+  assert_eq(
+    unwrap(connector_http_validate_url_host("https://example.org:8443/path?q=value#fragment")),
+    "example.org",
+  )
+  assert(is_err(connector_http_validate_url_host("https://[::1]:8443/path")))
+  assert_eq(
+    unwrap(connector_http_validate_url_host("https://[2606:4700:4700::1111]:8443/path")),
+    "[2606:4700:4700::1111]",
+  )
+  assert(is_err(connector_http_validate_url_host("https://[broken")))
+  assert_eq(unwrap_err(connector_http_validate_url_host(nil, "endpoint")), "endpoint is required")
+  assert_eq(
+    unwrap_err(connector_http_validate_url_host("http://example.org", "endpoint")),
+    "endpoint must use https:// scheme",
+  )
+  assert_eq(connector_http_header({" X-Test ": " value "}, "x-test"), "value")
+  assert_eq(connector_http_header({headers: {" X-Test ": " value "}}, "x-test"), "value")
+  assert_eq(connector_http_header({headers: "ordinary header"}, "headers"), "ordinary header")
+  for provider in ["buildkite", "circleci"] {
+    for url in [
+      "https://0.0.0.0",
+      "https://[::ffff:127.0.0.1]:443",
+      "https://example.org@127.0.0.1",
+    ] {
+      harness.testing.http_mock_clear()
+      const args = {api_base_url: url, api_token: "fixture", method: "GET", path: "/probe"}
+      const refused = if provider == "buildkite" {
+        buildkite.call(harness, "api.request", args)
+      } else {
+        circleci.call(harness, "api.request", args)
+      }
+      assert(is_err(refused), "${provider} must refuse ${url}")
+      assert_eq(len(harness.testing.http_mock_calls()), 0)
+    }
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock(
+      "GET",
+      "https://api.example.org/probe",
+      {status: 200, body: "{\"reached\":true}"},
+    )
+    const args = {
+      api_base_url: "https://api.example.org",
+      api_token: "fixture",
+      method: "GET",
+      path: "/probe",
+    }
+    const accepted = if provider == "buildkite" {
+      buildkite.call(harness, "api.request", args)
+    } else {
+      circleci.call(harness, "api.request", args)
+    }
+    assert_eq(accepted.reached, true)
+    assert_eq(len(harness.testing.http_mock_calls()), 1)
+  }
+  harness.testing.http_mock_clear()
+}

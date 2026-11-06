@@ -1,3 +1,5 @@
+import { connector_http_header, connector_http_validate_url_host } from "std/connectors/http"
+
 const BUILDKITE_PROVIDER_ID = "buildkite"
 
 const BUILDKITE_STATE_KEY = "harn-buildkite-connector.state"
@@ -111,7 +113,7 @@ pub fn activate(harness: Harness, bindings: list? = []) {
   let seen_paths = {}
   for binding in bindings ?? [] {
     const binding_id = binding?.binding_id ?? binding?.id
-      ?? ("binding-" + to_string(len(by_id.keys())))
+      ?? "binding-" + to_string(len(by_id.keys()))
     const path = binding?.path ?? binding?.match?.path
     if path != nil && path != "" {
       if seen_paths.get(path) {
@@ -166,7 +168,7 @@ pub fn normalize_inbound(harness: Harness, raw: dict) {
     return __reject(400, "invalid_json", "buildkite payload body is not valid JSON")
   }
   const payload = unwrap(parsed)
-  const event = payload?.event ?? __header(headers, "x-buildkite-event")
+  const event = payload?.event ?? connector_http_header(headers, "x-buildkite-event")
   if event == nil || event == "" {
     return __reject(
       400,
@@ -341,16 +343,6 @@ fn __reject_err(err: dict) {
   return __reject(status, code, message)
 }
 
-fn __header(headers: dict?, name: any) {
-  const wanted = lowercase(name)
-  for entry in (headers ?? {}).entries() {
-    if lowercase(trim(to_string(entry.key))) == wanted {
-      return trim(to_string(entry.value))
-    }
-  }
-  return nil
-}
-
 @complexity(allow)
 fn __webhook_token(runtime: HarnessRuntime, secrets: HarnessSecrets, raw: dict) {
   const state = __state(runtime)
@@ -420,11 +412,11 @@ fn __verify_webhook(harness: Harness, raw: dict, headers: dict?, body_text: any)
       "buildkite webhook token is required; configure buildkite/webhook-token to verify inbound webhooks",
     )
   }
-  const signature_header = __header(headers, "x-buildkite-signature")
+  const signature_header = connector_http_header(headers, "x-buildkite-signature")
   if signature_header != nil && signature_header != "" {
     return __verify_signature(harness.clock, raw, signature_header, body_text, to_string(token))
   }
-  const provided_token = __header(headers, "x-buildkite-token")
+  const provided_token = connector_http_header(headers, "x-buildkite-token")
   if provided_token == nil || provided_token == "" {
     return __err(
       "missing_signature",
@@ -496,7 +488,7 @@ fn __parse_signature_header(header: any) {
   let fields = {}
   for part in split(to_string(header), ",") {
     const trimmed = trim(part)
-    const eq = __index_of(trimmed, "=")
+    const eq = trimmed.index_of("=")
     if eq > 0 {
       const key = lowercase(trim(trimmed[0:eq]))
       const value = trim(trimmed[eq + 1:len(trimmed)])
@@ -540,7 +532,7 @@ fn __build_event(
   }
   return {
     dedupe_key: __dedupe_key(event, pipeline_slug, build),
-    headers: {"x-buildkite-event": __header(headers, "x-buildkite-event")},
+    headers: {"x-buildkite-event": connector_http_header(headers, "x-buildkite-event")},
     kind: __event_kind(event, build, job),
     occurred_at: __occurred_at(build, job, raw),
     payload: normalized_payload,
@@ -680,100 +672,11 @@ fn __api_url(api_base_url: any, path: any) {
 
 @complexity(allow)
 fn __validate_url_host(url_value: any, label: string) {
-  if url_value == nil || trim(to_string(url_value)) == "" {
-    return __err("invalid_url", label + " is required")
-  }
-  const url = trim(to_string(url_value))
-  if !starts_with(lowercase(url), "https://") {
-    return __err("invalid_url", label + " must use https:// scheme")
-  }
-  const after_scheme = url[8:len(url)]
-  const slash_idx = __index_of(after_scheme, "/")
-  const host_port = if slash_idx >= 0 {
-    after_scheme[0:slash_idx]
-  } else {
-    after_scheme
-  }
-  const host = __strip_port(host_port)
-  if host == "" {
-    return __err("invalid_url", label + " is missing a host")
-  }
-  const host_lc = lowercase(host)
-  if __is_disallowed_host(host_lc) {
-    return __err(
-      "invalid_url",
-      label + " host `" + host
-        + "` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
-    )
+  const checked = connector_http_validate_url_host(url_value, label)
+  if is_err(checked) {
+    return __err("invalid_url", unwrap_err(checked))
   }
   return Ok(true)
-}
-
-fn __strip_port(host_port: string?) {
-  if starts_with(host_port, "[") {
-    const close = __index_of(host_port, "]")
-    if close >= 0 {
-      return host_port[1:close]
-    }
-    return host_port
-  }
-  const colon = __index_of(host_port, ":")
-  if colon >= 0 {
-    return host_port[0:colon]
-  }
-  return host_port
-}
-
-fn __index_of(text: any, needle: any) {
-  const n = len(text)
-  const m = len(needle)
-  if m == 0 {
-    return 0
-  }
-  let i = 0
-  while i + m <= n {
-    if text[i:i + m] == needle {
-      return i
-    }
-    i = i + 1
-  }
-  return -1
-}
-
-@complexity(allow)
-fn __is_disallowed_host(host_lc: any) {
-  if host_lc == "localhost" {
-    return true
-  }
-  if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
-    || ends_with(host_lc, ".internal") {
-    return true
-  }
-  if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
-    return true
-  }
-  if starts_with(host_lc, "127.") || starts_with(host_lc, "10.")
-    || starts_with(host_lc, "169.254.")
-    || starts_with(host_lc, "192.168.") {
-    return true
-  }
-  if starts_with(host_lc, "172.") {
-    const rest = host_lc[4:len(host_lc)]
-    const dot = __index_of(rest, ".")
-    if dot > 0 {
-      const octet_str = rest[0:dot]
-      const parsed = try {
-        to_int(octet_str)
-      }
-      if !is_err(parsed) {
-        const octet = unwrap(parsed)
-        if octet >= 16 && octet <= 31 {
-          return true
-        }
-      }
-    }
-  }
-  return false
 }
 
 @complexity(allow)
@@ -833,7 +736,9 @@ fn __decode_response(response: dict) {
   if trim(response.body ?? "") == "" {
     return {body: "", headers: response.headers, status: response.status}
   }
-  const content_type = lowercase(to_string(__header(response.headers ?? {}, "content-type") ?? ""))
+  const content_type = lowercase(
+    to_string(connector_http_header(response.headers ?? {}, "content-type") ?? ""),
+  )
   // job.log and other text endpoints return text/plain; surface the body verbatim.
   if contains(content_type, "text/") {
     return {body: response.body, headers: response.headers, status: response.status}
@@ -851,11 +756,11 @@ fn __decode_response(response: dict) {
 
 @complexity(allow)
 fn __maybe_wait_for_rate_limit(clock: HarnessClock, response: dict) {
-  const remaining = __header(response.headers ?? {}, "ratelimit-remaining")
+  const remaining = connector_http_header(response.headers ?? {}, "ratelimit-remaining")
   if remaining == nil || trim(to_string(remaining)) != "0" {
     return Ok(false)
   }
-  const reset = __header(response.headers ?? {}, "ratelimit-reset")
+  const reset = connector_http_header(response.headers ?? {}, "ratelimit-reset")
   if reset == nil || trim(to_string(reset)) == "" {
     return Ok(true)
   }

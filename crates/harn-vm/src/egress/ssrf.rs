@@ -39,6 +39,27 @@ pub fn is_disallowed_ip(ip: IpAddr, allow_loopback: bool) -> bool {
     }
 }
 
+/// Classify a literal IP or hostname without resolving DNS. Connections still
+/// require the connect-time resolver guard to reject private DNS answers.
+pub fn is_disallowed_host(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_disallowed_ip(ip, false);
+    }
+    match url::Host::parse(host) {
+        Ok(url::Host::Ipv4(ip)) => is_disallowed_ip(IpAddr::V4(ip), false),
+        Ok(url::Host::Ipv6(ip)) => is_disallowed_ip(IpAddr::V6(ip), false),
+        Ok(url::Host::Domain(host)) => {
+            let host = host.trim_end_matches('.');
+            host.is_empty()
+                || host == "localhost"
+                || [".localhost", ".local", ".internal"]
+                    .iter()
+                    .any(|suffix| host.ends_with(suffix))
+        }
+        Err(_) => true,
+    }
+}
+
 /// True when a configured provider endpoint may intentionally target `ip`.
 ///
 /// This is narrower than the generic SSRF hatch: configured LLM endpoints may

@@ -1121,6 +1121,18 @@ fn http_header_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     ))
 }
 
+#[harn_builtin(
+    exposure = "pure", effects = [],
+    sig = "http_is_disallowed_host(host: string) -> bool", category = "http",
+    doc = "Classify a literal host against the canonical private-address rules without DNS or network I/O."
+)]
+fn http_is_disallowed_host_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::String(host)) = args.first() else {
+        return Err(vm_error("http_is_disallowed_host: requires a host string"));
+    };
+    Ok(VmValue::Bool(crate::egress::ssrf::is_disallowed_host(host)))
+}
+
 fn register_http_mock_builtins(vm: &mut Vm) {
     vm.register_capability_method(
         harn_builtin_meta::CapabilityId::Testing,
