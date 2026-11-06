@@ -1,6 +1,7 @@
 use super::*;
 mod data;
 mod listing;
+mod references;
 
 fn upstream_schema(name: &str) -> jsonschema::Validator {
     let mut schema: JsonValue = serde_json::from_str(include_str!(concat!(
@@ -329,6 +330,46 @@ async fn v1_stream_uses_response_unions_and_refuses_terminal_subscriptions() {
 async fn v1_refuses_mismatched_messages_before_task_creation() {
     let (_dir, server) = echo_server();
     let router = http_router(server.clone(), LOCAL_URL);
+    for (request, expected) in [
+        (
+            json!({"jsonrpc":"2.0","id":"shape","params":send_params()}),
+            -32600,
+        ),
+        (
+            json!({"jsonrpc":"2.0","id":"shape","method":42,"params":send_params()}),
+            -32600,
+        ),
+        (
+            json!({"jsonrpc":"2.0","id":"shape","method":"UnknownMethod","params":send_params()}),
+            -32601,
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header(A2A_VERSION_HEADER, "1.0")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let rejected: JsonValue =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(rejected["error"]["code"], expected, "{rejected}");
+        assert_eq!(
+            rejected["id"],
+            if expected == -32600 {
+                JsonValue::Null
+            } else {
+                json!("shape")
+            }
+        );
+        assert!(server.tasks.lock().unwrap().is_empty());
+    }
     for message in [
         json!({}),
         json!({"messageId":"", "role":"ROLE_USER", "parts":[{"text":"hello"}]}),

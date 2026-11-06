@@ -137,7 +137,10 @@ pub(super) struct V1Request {
 impl V1Request {
     pub(super) fn decode(request: &mut JsonValue) -> Result<Self, JsonValue> {
         let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
-        if request["jsonrpc"] != "2.0" || !(id.is_null() || id.is_number() || id.is_string()) {
+        if request["jsonrpc"] != "2.0"
+            || !(id.is_null() || id.is_number() || id.is_string())
+            || !request.get("method").is_some_and(JsonValue::is_string)
+        {
             return Err(schema::error_response(
                 JsonValue::Null,
                 -32600,
@@ -145,7 +148,9 @@ impl V1Request {
             ));
         }
         let invalid = |message: &str| schema::error_response(id.clone(), -32602, message);
-        let method = request["method"].as_str().unwrap_or_default();
+        let method = request["method"]
+            .as_str()
+            .expect("validated JSON-RPC method");
         let operation = Operation::from_v1(method).ok_or_else(|| {
             let code = match method {
                 "CreateTaskPushNotificationConfig"
@@ -194,13 +199,6 @@ impl V1Request {
                 let message = &mut send.message;
                 if message.role != "ROLE_USER" || message.message_id.is_empty() {
                     return Err(invalid("Expected ROLE_USER and a nonempty messageId"));
-                }
-                if message.task_id.is_some() {
-                    return Err(schema::error_response(
-                        id.clone(),
-                        UNSUPPORTED_OPERATION,
-                        "Task continuation is not supported",
-                    ));
                 }
                 if message.parts.is_empty() {
                     return Err(invalid("message.parts must not be empty"));

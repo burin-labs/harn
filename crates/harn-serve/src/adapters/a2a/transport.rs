@@ -113,6 +113,27 @@ impl A2aServer {
             Ok(principal) => principal,
             Err(processed) => return processed,
         };
+        if !version.is_legacy() && matches!(method, "message/send" | "message/stream") {
+            if let Some(id) = params
+                .pointer("/message/taskId")
+                .and_then(JsonValue::as_str)
+            {
+                let (code, message) = if self.task_visibility(id, principal.as_ref()) == Some(true)
+                {
+                    (
+                        super::wire::UNSUPPORTED_OPERATION,
+                        "Task continuation is not supported",
+                    )
+                } else {
+                    (A2A_TASK_NOT_FOUND, "Task not found")
+                };
+                return prepare_error_to_processed(
+                    A2aPrepareError::new(code, message),
+                    rpc_id,
+                    None,
+                );
+            }
+        }
         let authorized_task_id =
             || self.visible_task_id(task_id_param(&params), principal.as_ref());
         let (outcome, deprecation) = match method {

@@ -533,14 +533,26 @@ impl A2aServer {
             .unwrap_or(JsonValue::Null)
     }
 
+    pub(super) fn task_visibility(
+        &self,
+        id: &str,
+        principal: Option<&crate::AuthenticatedPrincipal>,
+    ) -> Option<bool> {
+        self.tasks
+            .lock()
+            .expect("tasks poisoned")
+            .get(id)
+            .map(|task| task.visible_to(principal))
+    }
+
     pub(super) fn visible_task_id<'a>(
         &self,
         id: Option<&'a str>,
         principal: Option<&crate::AuthenticatedPrincipal>,
     ) -> Option<&'a str> {
         id.filter(|id| {
-            if let Some(task) = self.tasks.lock().expect("tasks poisoned").get(*id) {
-                return task.visible_to(principal);
+            if let Some(visible) = self.task_visibility(id, principal) {
+                return visible;
             }
             // An explicitly open legacy server may recover anonymous push configs.
             principal.is_none()
