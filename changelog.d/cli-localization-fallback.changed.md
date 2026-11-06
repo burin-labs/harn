@@ -1,2 +1,2 @@
-Reuse the existing English fallback for identical CLI translations, reducing generated code
-while preserving localized output, literal arguments and validation errors.
+Share generated CLI message renderers and reuse the English fallback for identical
+translations while preserving each command's messages, localized output and validation errors.

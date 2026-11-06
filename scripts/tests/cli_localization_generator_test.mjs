@@ -25,6 +25,9 @@ test("every registered CLI renderer preserves localized text, literal arguments 
   try {
     for (const [relative, surface] of Object.entries(registry.sources)) {
       const namespace = relative.slice("crates/harn-stdlib/src/stdlib/cli/".length, -5);
+      const foreign = Object.keys(registry.messages).find((key) => !(key in surface.calls));
+      assert.ok(foreign, "namespace refusal needs a real message owned by another surface");
+      const foreignValues = Array.from({length: registry.messages[foreign]}, (_, index) => `foreign${index}`);
       const cases = [];
       const refusals = [];
       for (const key of Object.keys(surface.calls).sort()) {
@@ -50,7 +53,9 @@ fn main(harness: Harness) {
   }
   const unknown = try { renderer.cli_message("en", "unregistered-message-control", []); false } catch { true }
   assert(unknown, "unregistered localization message must refuse")
-  harness.stdio.println(json_stringify({arity: len(refusals), unknown: true}))
+  const foreign = try { renderer.cli_message("en", ${JSON.stringify(foreign)}, ${JSON.stringify(foreignValues)}); false } catch { true }
+  assert(foreign, "a message from another namespace must refuse")
+  harness.stdio.println(json_stringify({arity: len(refusals), unknown: true, foreign: true}))
 }
 `);
       const result = spawnSync(process.env.HARN_BIN, ["run", program], {
@@ -59,7 +64,7 @@ fn main(harness: Harness) {
       });
       assert.equal(result.status, 0, `${namespace}: ${result.stderr || result.error}`);
       const actual = result.stdout.trimEnd().split("\n").map((line) => JSON.parse(line));
-      assert.deepEqual(actual.pop(), {arity: refusals.length, unknown: true});
+      assert.deepEqual(actual.pop(), {arity: refusals.length, unknown: true, foreign: true});
       assert.deepEqual(actual, cases.map(({locale, key, values}) => render((catalogs[locale] ?? catalogs.en)[key], values)), namespace);
       localized += cases.filter(({key, values}, index) => actual[index] !== render(catalogs.en[key], values)).length;
       measured += actual.length;
@@ -68,7 +73,7 @@ fn main(harness: Harness) {
     assert.ok(functions > 100, "the public renderer census must be nonempty");
     assert.ok(localized > 100, "the probe must reach translations distinct from English");
     assert.equal(measured, functions * (Object.keys(catalogs).length + 1));
-    t.diagnostic(`Verified ${functions} renderers, ${measured} locale outputs, ${functions} arity refusals and ${Object.keys(registry.sources).length} unknown-message refusals; ${localized} outputs differ from English`);
+    t.diagnostic(`Verified ${functions} renderer paths, ${measured} locale outputs, ${functions} arity refusals, ${Object.keys(registry.sources).length} unknown-message and cross-namespace refusals; ${localized} outputs differ from English`);
   } finally {
     fs.rmSync(temporary, {recursive: true, force: true});
   }
@@ -105,7 +110,12 @@ test("generator rejects every unexpected output and retires only registered gene
     const positive = run();
     assert.equal(positive.status, 0, positive.stderr);
     const measured = JSON.parse(positive.stdout);
-    assert.ok(measured.sources > 10 && measured.expectedCalls > 100 && measured.generated > 100);
+    assert.ok(measured.sources > 10 && measured.expectedCalls > 100 && measured.generated > measured.sources);
+    const renderers = fs.readdirSync(path.join(root, output), {recursive: true})
+      .filter((name) => name.endsWith(".harn"))
+      .flatMap((name) => [...fs.readFileSync(path.join(root, output, name), "utf8").matchAll(/^pub fn (message_\d+)\(/gm)].map((match) => match[1]));
+    assert.equal(renderers.length, Object.keys(registry.messages).length, "each canonical message has one renderer");
+    assert.equal(new Set(renderers).size, renderers.length, "renderer ownership cannot repeat across modules");
     assert.equal(measured.measuredCalls, measured.expectedCalls);
     assert.equal(measured.pending, 0);
     assert.deepEqual(measured.failed, []);
