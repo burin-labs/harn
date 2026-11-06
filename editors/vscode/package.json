@@ -260,7 +260,7 @@
       "minimatch@^10": "11.0.5"
     },
     "vscode-languageclient": {
-      "minimatch@^10": "11.0.5"
+      "minimatch": "11.0.5"
     }
   },
   "l10n": "./l10n"

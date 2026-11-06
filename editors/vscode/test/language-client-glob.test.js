@@ -1,8 +1,12 @@
 const assert = require("node:assert/strict");
 const Module = require("node:module");
+const path = require("node:path");
 const test = require("node:test");
 
 test("the language client matches file-operation globs with the installed matcher", async () => {
+  const clientRequire = Module.createRequire(require.resolve("vscode-languageclient/node"));
+  assert(clientRequire.resolve("minimatch").startsWith(path.resolve(__dirname, "../node_modules") + path.sep));
+  assert.equal(clientRequire("minimatch/package.json").version, "11.0.5");
   const originalLoad = Module._load;
   Module._load = function (request, ...args) {
     if (request === "vscode") {
