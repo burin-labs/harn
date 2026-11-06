@@ -1,10 +1,18 @@
 import { read_json_result, read_yaml } from "std/fs"
 import {
+  CiCachePolicy,
   ci_cache_policy_parse,
   harn_check_cache_action_errors,
   harn_check_cache_writer_errors,
 } from "../check_ci_cache_policy"
 import "./ci_cache_policy/fixtures.harn"
+
+fn writer_policy(fs: HarnessFs) -> CiCachePolicy {
+  return {
+    ...policy(fs),
+    harn_check_cache_writers: [{workflow: "ci.yml", job: "harn-audit", family: "audit"}],
+  }
+}
 
 fn shipped_restore(fs: HarnessFs) -> dict {
   return read_yaml(fs, "../../.github/actions/harn-check-cache/action.yml")
@@ -255,7 +263,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
 ) {
   assert_eq(
     harn_check_cache_writer_errors(
-      policy(),
+      writer_policy(harness.fs),
       {"ci.yml": writer_doc({"harn-audit": audit_job(save_step())})},
     ),
     [],
@@ -272,12 +280,15 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
     },
   }
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": rogue})})
+    harn_check_cache_writer_errors(
+      writer_policy(harness.fs),
+      {"ci.yml": writer_doc({"harn-audit": rogue})},
+    )
       .contains("ci.yml:harn-audit:audit-docs is not an authorized Harn check cache writer"),
   )
   // A registered writer that no workflow runs.
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": {jobs: {}}}).contains(
+    harn_check_cache_writer_errors(writer_policy(harness.fs), {"ci.yml": {jobs: {}}}).contains(
       "authorized Harn check cache writer is not active: ci.yml:harn-audit:audit",
     ),
   )
@@ -288,7 +299,10 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
     steps: [no_restore.steps[0], no_restore.steps[2], no_restore.steps[3]],
   }
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": unrestored})})
+    harn_check_cache_writer_errors(
+      writer_policy(harness.fs),
+      {"ci.yml": writer_doc({"harn-audit": unrestored})},
+    )
       .contains(
         "ci.yml:harn-audit:audit must restore the same family earlier in the job, which is what points HARN_CACHE_DIR at the saved paths",
       ),
@@ -296,7 +310,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
   // A failing save must not fail the gate, and the prune needs actions: write.
   const fatal = audit_job({...save_step(), "continue-on-error": nil}, "read")
   const fatal_errors = harn_check_cache_writer_errors(
-    policy(),
+    writer_policy(harness.fs),
     {"ci.yml": writer_doc({"harn-audit": fatal})},
   )
   assert(
@@ -315,7 +329,7 @@ pipeline test_harn_check_cache_writers_must_be_registered_active_and_restored(
   }
   assert(
     harn_check_cache_writer_errors(
-      policy(),
+      writer_policy(harness.fs),
       {"ci.yml": writer_doc({"harn-audit": audit_job(save_step()), reader: reader})},
     )
       .contains(
@@ -335,23 +349,32 @@ pipeline test_harn_check_cache_writer_cannot_depend_on_push_routing(
   // The first writer: an audit lane gated on the push router's verdict.
   const gated = {...job, needs: ["changes"], if: "needs.changes.outputs.rust == 'true'"}
   assert(
-    harn_check_cache_writer_errors(policy(), {"ci.yml": writer_doc({"harn-audit": gated})})
+    harn_check_cache_writer_errors(
+      writer_policy(harness.fs),
+      {"ci.yml": writer_doc({"harn-audit": gated})},
+    )
       .contains(routed),
   )
   // No scheduled backstop: a quiet main leaves the family unwritten.
   const unscheduled = {on: {push: {branches: ["main"]}}, jobs: {"harn-audit": job}}
-  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": unscheduled}).contains(routed))
+  assert(
+    harn_check_cache_writer_errors(writer_policy(harness.fs), {"ci.yml": unscheduled}).contains(
+      routed,
+    ),
+  )
   // Riding the merge queue: the queue is optional.
   const queued = {
     on: {...writer_doc({})["on"], merge_group: {types: ["checks_requested"]}},
     jobs: {"harn-audit": job},
   }
-  assert(harn_check_cache_writer_errors(policy(), {"ci.yml": queued}).contains(routed))
+  assert(
+    harn_check_cache_writer_errors(writer_policy(harness.fs), {"ci.yml": queued}).contains(routed),
+  )
 }
 
 @test
 pipeline test_harn_check_cache_policy_refuses_shared_families(harness: Harness, task: unknown) {
-  const base = policy()
+  const base = writer_policy(harness.fs)
   assert(ci_cache_policy_parse(base) != nil)
   const shared = {
     ...base,

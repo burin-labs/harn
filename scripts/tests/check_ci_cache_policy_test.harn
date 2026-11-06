@@ -1185,7 +1185,7 @@ pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_
 ) {
   const policy = release_warm_cache_path_policy()
   assert_eq(release_warm_cache_path_policy_parse(policy), policy)
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   assert_eq(release_warm_cache_path_policy_errors(policy, workflow), [])
   assert_eq(release_warm_cache_concurrency_errors(workflow), [])
   assert_eq(release_aot_runner_errors(workflow), [])
@@ -1197,6 +1197,7 @@ pipeline test_release_warm_cache_policy_accepts_a_rotated_full_commit_pin(
   task: unknown,
 ) {
   const rotated = release_binary_workflow_with_filter_uses(
+    harness.fs,
     RELEASE_PATH_FILTER_ACTION + "@fedcba9876543210fedcba9876543210fedcba98",
   )
   assert_eq(release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), rotated), [])
@@ -1213,7 +1214,7 @@ pipeline test_release_warm_cache_policy_rejects_mutable_or_malformed_action_refs
     "other/paths-filter@0123456789abcdef0123456789abcdef01234567",
   ]
   for uses in invalid_uses {
-    const invalid = release_binary_workflow_with_filter_uses(uses)
+    const invalid = release_binary_workflow_with_filter_uses(harness.fs, uses)
     assert_eq(
       release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), invalid),
       ["build-release-binaries.yml:setup must use dorny/paths-filter pinned to a full commit SHA"],
@@ -1286,7 +1287,7 @@ pipeline test_release_warm_cache_policy_rejects_post_build_gates_and_missing_com
       + ["scripts/check_binary_size.harn"],
   }
   assert_eq(
-    release_warm_cache_path_policy_errors(invalid, release_binary_workflow()),
+    release_warm_cache_path_policy_errors(invalid, release_binary_workflow(harness.fs)),
     [
       "release warm-cache policy is missing required input: Cargo.lock",
       "release warm-cache policy contains unclassified input: scripts/check_binary_size.harn",
@@ -1298,7 +1299,7 @@ pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_polic
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const filter_step = setup_step_by_id(workflow, "release-build-inputs")
   const invalid = {
     concurrency: workflow.concurrency,
@@ -1322,7 +1323,7 @@ pipeline test_release_warm_cache_policy_requires_an_unshallowed_setup_checkout(
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const policy = release_warm_cache_path_policy()
   const steps = workflow.jobs.setup.steps
   // A shallow clone is the shape that failed: the filter's second `--depth=1`
@@ -1354,7 +1355,7 @@ pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_out
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const filter_step = setup_step_by_id(workflow, "release-build-inputs")
   const resolve_step = setup_step_by_id(workflow, "resolve")
   const invalid = {
@@ -1381,7 +1382,7 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const invalid = {
     ...workflow,
     concurrency: {
@@ -1411,8 +1412,8 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   )
 }
 
-pipeline test_release_concurrency_rejects_pre_fix_dispatch_groups() {
-  const workflow = release_binary_workflow()
+pipeline test_release_concurrency_rejects_pre_fix_dispatch_groups(harness: Harness) {
+  const workflow = release_binary_workflow(harness.fs)
   const invalid = {
     ...workflow,
     concurrency: {
@@ -1438,7 +1439,7 @@ pipeline test_release_aot_runner_requires_only_the_free_standard_runner(
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const invalid = {
     ...workflow,
     jobs: {
@@ -1461,7 +1462,7 @@ pipeline test_release_warm_cache_prune_skips_only_superseded_warms(
   harness: Harness,
   task: unknown,
 ) {
-  const workflow = release_binary_workflow()
+  const workflow = release_binary_workflow(harness.fs)
   const invalid = {
     ...workflow,
     jobs: {
@@ -1488,12 +1489,17 @@ pipeline test_ci_cache_policy_refuses_a_restore_no_writer_can_satisfy(
   // does not fail: it misses, the job compiles from nothing, and the only trace
   // is wall time. Both shapes below looked correct in review and restored
   // nothing, so both are asserted rather than assumed.
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   let unwritten = declared
   unwritten["ci.yml"].jobs.package_audit_reader = {
     steps: [{uses: "./.github/actions/rust-cache", with: {"shared-key": "a-family-nobody-saves"}}],
   }
-  const unwritten_errors = ci_cache_policy_errors(policy(), action(), node_action(), unwritten)
+  const unwritten_errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    unwritten,
+  )
   assert(
     unwritten_errors.any({ error -> contains(error, "a-family-nobody-saves") }),
     "a restore of an unwritten family must be refused",
@@ -1511,9 +1517,13 @@ pipeline test_ci_cache_policy_refuses_a_restore_no_writer_can_satisfy(
     ],
   }
   assert(
-    ci_cache_policy_errors(policy(), action(), node_action(), unsuffixed).any(
-      { error -> contains(error, "suffixless_reader") },
-    ),
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      action(harness.fs),
+      node_action(harness.fs),
+      unsuffixed,
+    )
+      .any({ error -> contains(error, "suffixless_reader") }),
     "a restore missing the writer's workspace-crates suffix must be refused",
   )
 }
@@ -1522,19 +1532,24 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
   harness: Harness,
   task: unknown,
 ) {
-  assert(ci_cache_policy_parse(policy()) != nil)
-  const declared = workflows()
+  assert(ci_cache_policy_parse(policy(harness.fs)) != nil)
+  const declared = workflows(harness.fs)
   assert_eq(
-    ci_cache_policy_errors(policy(), action(), node_action(), declared)
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      action(harness.fs),
+      node_action(harness.fs),
+      declared,
+    )
       + windows_shared_cache_errors(declared["windows-nightly.yml"])
       + windows_native_admission_errors(
-        policy(),
+        policy(harness.fs),
         declared["ci.yml"],
         declared["windows-nightly.yml"],
       )
-      + windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"])
-      + nextest_version_errors(policy(), declared)
-      + actions_cache_capacity_errors(policy()),
+      + windows_release_certify_warm_errors(policy(harness.fs), declared["windows-nightly.yml"])
+      + nextest_version_errors(policy(harness.fs), declared)
+      + actions_cache_capacity_errors(policy(harness.fs)),
     [],
   )
 }
@@ -1543,15 +1558,22 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   assert_eq(windows_shared_cache_errors(declared["windows-nightly.yml"]), [])
   assert_eq(
-    windows_native_admission_errors(policy(), declared["ci.yml"], declared["windows-nightly.yml"]),
+    windows_native_admission_errors(
+      policy(harness.fs),
+      declared["ci.yml"],
+      declared["windows-nightly.yml"],
+    ),
     [],
   )
-  assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
-  assert_eq(nextest_version_errors(policy(), declared), [])
-  assert_eq(actions_cache_capacity_errors(policy()), [])
+  assert_eq(
+    windows_release_certify_warm_errors(policy(harness.fs), declared["windows-nightly.yml"]),
+    [],
+  )
+  assert_eq(nextest_version_errors(policy(harness.fs), declared), [])
+  assert_eq(actions_cache_capacity_errors(policy(harness.fs)), [])
 }
 
 /**
@@ -1562,7 +1584,7 @@ pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const nightly = declared["windows-nightly.yml"]
   const restored = {
     ...declared["ci.yml"],
@@ -1572,7 +1594,7 @@ pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
     },
   }
   assert_eq(
-    windows_native_admission_errors(policy(), restored, nightly),
+    windows_native_admission_errors(policy(harness.fs), restored, nightly),
     [
       "ci.yml:windows runs on a native Windows runner; native Windows belongs to windows-nightly.yml (nightly, dispatch, and release pull requests), not pull-request or merge-group admission",
     ],
@@ -1580,7 +1602,7 @@ pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
   // An unreadable ci.yml has no jobs, which would otherwise read as "no
   // Windows job" and pass.
   assert_eq(
-    windows_native_admission_errors(policy(), {}, nightly),
+    windows_native_admission_errors(policy(harness.fs), {}, nightly),
     ["ci.yml must declare jobs for the native Windows admission check to read"],
   )
 }
@@ -1589,24 +1611,24 @@ pipeline test_windows_native_admission_pins_release_pull_request_routing(
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const ci = declared["ci.yml"]
   const nightly = declared["windows-nightly.yml"]
   const path_gated = {...nightly, on: {...nightly.on, pull_request: {paths: ["crates/**"]}}}
   assert_eq(
-    windows_native_admission_errors(policy(), ci, path_gated),
+    windows_native_admission_errors(policy(harness.fs), ci, path_gated),
     [
       "windows-nightly.yml pull_request trigger must carry no path filter; the release route alone decides which pull requests run",
     ],
   )
   const queued = {...nightly, on: {...nightly.on, merge_group: nil}}
   assert_eq(
-    windows_native_admission_errors(policy(), ci, queued),
+    windows_native_admission_errors(policy(harness.fs), ci, queued),
     ["windows-nightly.yml must not run on merge_group"],
   )
   const no_release_prs = {...nightly, on: {schedule: nightly.on.schedule, workflow_dispatch: nil}}
   assert_eq(
-    windows_native_admission_errors(policy(), ci, no_release_prs),
+    windows_native_admission_errors(policy(harness.fs), ci, no_release_prs),
     ["windows-nightly.yml must run on release pull requests"],
   )
   const route = nightly.jobs.route
@@ -1629,7 +1651,7 @@ pipeline test_windows_native_admission_pins_release_pull_request_routing(
     },
   }
   assert_eq(
-    windows_native_admission_errors(policy(), ci, inline_matcher),
+    windows_native_admission_errors(policy(harness.fs), ci, inline_matcher),
     [
       "windows-nightly.yml:route must decide pull-request runs through .github/scripts/release-ref.sh release_pr_only_lane_run and publish it as outputs.run",
     ],
@@ -1642,7 +1664,7 @@ pipeline test_windows_native_admission_pins_release_pull_request_routing(
     },
   }
   assert_eq(
-    windows_native_admission_errors(policy(), ci, unrouted),
+    windows_native_admission_errors(policy(harness.fs), ci, unrouted),
     [
       "windows-nightly.yml:nextest must need route and run only when it says `needs.route.outputs.run == 'true'`",
     ],
@@ -1653,14 +1675,14 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const ci = declared["ci.yml"]
   const nightly = declared["windows-nightly.yml"]
   const producer = nightly.jobs.nextest
   const with_producer = { job -> return {...nightly, jobs: {...nightly.jobs, nextest: job}} }
   assert_eq(
     windows_native_admission_errors(
-      policy(),
+      policy(harness.fs),
       ci,
       with_producer({...producer, "runs-on": windows_runner_expression()}),
     ),
@@ -1679,18 +1701,18 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
       .to_list(),
   }
   assert_eq(
-    windows_native_admission_errors(policy(), ci, with_producer(variable_only_drive)),
+    windows_native_admission_errors(policy(harness.fs), ci, with_producer(variable_only_drive)),
     ["windows-nightly.yml:nextest must gate Hyper-V Dev Drive setup on HARN_WINDOWS_DEVDRIVE"],
   )
 }
 
 pipeline test_windows_test_stack_is_runtime_only_and_exact(harness: Harness, task: unknown) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const ci = declared["ci.yml"]
   const nightly = declared["windows-nightly.yml"]
   const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
   assert(
-    windows_native_admission_errors(policy(), ci, cache_polluted).contains(
+    windows_native_admission_errors(policy(harness.fs), ci, cache_polluted).contains(
       "Windows RUST_MIN_STACK is test-runtime-only and must not enter the producer's cache-action environment",
     ),
   )
@@ -1714,7 +1736,7 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact(harness: Harness, tas
     },
   }
   assert_eq(
-    windows_native_admission_errors(policy(), ci, wrong_stack),
+    windows_native_admission_errors(policy(harness.fs), ci, wrong_stack),
     ["windows-nightly.yml:nextest must set RUST_MIN_STACK=16777216 on its test step"],
   )
 }
@@ -1731,14 +1753,23 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const producer = declared["windows-nightly.yml"].jobs.nextest
-  const cache = producer.steps[3]
+  const cache = cache_step(producer)
   const invalid = {
     jobs: {
       nextest: {
         ...producer,
-        steps: producer.steps.slice(0, 3) + [{...cache, if: nil}] + producer.steps.slice(4),
+        steps: producer.steps.map(
+          { step ->
+            return if step == cache {
+              {...step, if: nil}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
       },
     },
   }
@@ -1761,10 +1792,10 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const producer = declared["macos-nightly.yml"]
   const ci = declared["ci.yml"]
-  const declared_policy = policy()
+  const declared_policy = policy(harness.fs)
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
   // The artifact name binds the compiler wrapper, which depends on the host's
   // core and memory count unless the front-end thread count is pinned. A run on
@@ -1885,9 +1916,7 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
       nextest: {
         ...producer.jobs.nextest,
         steps: producer.jobs.nextest.steps.filter(
-          { step ->
-            return trim(to_string(step?.uses ?? "")) != "actions/upload-artifact@exact-pin"
-          },
+          { step -> return step?.name != "Upload macOS workspace warm artifact" },
         )
           .to_list(),
       },
@@ -1933,9 +1962,9 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const producer = declared["windows-nightly.yml"]
-  const declared_policy = policy()
+  const declared_policy = policy(harness.fs)
   assert_eq(windows_release_certify_warm_errors(declared_policy, producer), [])
   // The job's own block replaces the workflow's, so a workflow-level grant
   // does not reach a job that declares `contents: read` alone.
@@ -2037,8 +2066,8 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
 }
 
 pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task: unknown) {
-  const declared = workflows()
-  const declared_policy = policy()
+  const declared = workflows(harness.fs)
+  const declared_policy = policy(harness.fs)
   assert_eq(nextest_version_errors(declared_policy, declared), [])
   const drifted = {
     ...declared,
@@ -2071,8 +2100,8 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
   harness: Harness,
   task: unknown,
 ) {
-  assert_eq(actions_cache_capacity_errors(policy()), [])
-  const base = policy()
+  assert_eq(actions_cache_capacity_errors(policy(harness.fs)), [])
+  const base = policy(harness.fs)
   // Every field is re-listed on purpose. A named type annotation does not
   // accept a top-level `...base` spread, so these literals have to enumerate,
   // and adding a policy block is expected to touch each of them.
@@ -2141,25 +2170,31 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
   harness: Harness,
   task: unknown,
 ) {
-  const declared = workflows()
+  const declared = workflows(harness.fs)
   const producer = declared["windows-nightly.yml"].jobs.nextest
-  const producer_cache = producer.steps[3]
+  const producer_cache = cache_step(producer)
   const invalid = {
     jobs: {
       nextest: {
         ...producer,
-        steps: producer.steps.slice(0, 3)
-          + [
-            {
-              ...producer_cache,
-              with: {
-                ...producer_cache.with,
-                "source-key": native_source_key(),
-                "target-dir": "",
-                "broad-restore-prefix": "v0-rust-workspace-windows-",
-              },
-            },
-          ],
+        steps: producer.steps.map(
+          { step ->
+            return if step == producer_cache {
+              {
+                ...producer_cache,
+                with: {
+                  ...producer_cache.with,
+                  "source-key": native_source_key(),
+                  "target-dir": "",
+                  "broad-restore-prefix": "v0-rust-workspace-windows-",
+                },
+              }
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
       },
     },
   }
@@ -2177,10 +2212,10 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   task: unknown,
 ) {
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
-        build: workflows()["build-release-binaries.yml"].jobs.build,
+        build: workflows(harness.fs)["build-release-binaries.yml"].jobs.build,
         cache_budget: {
           permissions: {contents: "read"},
           steps: [
@@ -2212,7 +2247,12 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains("ci.yml.env.SCCACHE_GHA_ENABLED enables the per-object GHA sccache backend"),
   )
