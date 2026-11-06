@@ -25,6 +25,63 @@ fn test_task_params(text: &str) -> JsonValue {
 }
 
 #[tokio::test]
+async fn cancellation_before_dispatch_prevents_execution_and_late_publication() {
+    let (dir, server) = test_server(include_str!("fixtures/write_task.harn"));
+    let blocked = dir.path().join("blocked.txt");
+    let task = server
+        .prepare_task(
+            &test_task_params(blocked.to_str().unwrap()),
+            AuthRequest::default(),
+            None,
+        )
+        .await
+        .unwrap_or_else(|_| panic!("prepare"));
+    let canceled = server.cancel_task(&task.id).unwrap();
+    assert_eq!(canceled["status"]["state"], "canceled");
+    let before = server.task_json(&task.id);
+    server.run_task_to_completion(&task).await;
+    assert!(
+        !blocked.exists(),
+        "a canceled task must never execute its write"
+    );
+    server.complete_task(
+        &task.id,
+        CallResponse {
+            function: "triage".into(),
+            value: json!("late result"),
+            printed_output: String::new(),
+            feedback: None,
+            trace_id: harn_vm::TraceId("late".into()),
+            cached: false,
+            duration_ms: 0,
+            dispatch: crate::DispatchCallReceipt::default(),
+        },
+    );
+    server.fail_task(&task.id, "late failure");
+    server.auth_required_task(&task.id, "late authentication error");
+    assert_eq!(
+        server.task_json(&task.id),
+        before,
+        "acknowledged cancellation is terminal"
+    );
+    let executed = dir.path().join("executed.txt");
+    let normal = server
+        .prepare_task(
+            &test_task_params(executed.to_str().unwrap()),
+            AuthRequest::default(),
+            None,
+        )
+        .await
+        .unwrap_or_else(|_| panic!("prepare normal"));
+    server.run_task_to_completion(&normal).await;
+    assert_eq!(
+        std::fs::read_to_string(executed).unwrap(),
+        "actual execution"
+    );
+    assert_eq!(server.task_json(&normal.id)["status"]["state"], "completed");
+}
+
+#[tokio::test]
 async fn waits_for_sink_failure_before_completing_and_clears_registration() {
     let (_dir, server) = test_server(
         r#"
@@ -37,7 +94,7 @@ pub fn triage(harness: Harness, task: string) -> string {
 "#,
     );
     let task = server
-        .prepare_task(&test_task_params("hello"), AuthRequest::default())
+        .prepare_task(&test_task_params("hello"), AuthRequest::default(), None)
         .await
         .unwrap_or_else(|_| panic!("prepare task"));
     let session_id = super::a2a_worker_session_id(&task.id);
@@ -75,7 +132,7 @@ pub fn triage(harness: Harness, task: string) -> string {
 "#,
     );
     let task = server
-        .prepare_task(&test_task_params("cancel me"), AuthRequest::default())
+        .prepare_task(&test_task_params("cancel me"), AuthRequest::default(), None)
         .await
         .unwrap_or_else(|_| panic!("prepare task"));
     let session_id = super::a2a_worker_session_id(&task.id);
@@ -89,17 +146,24 @@ pub fn triage(harness: Harness, task: string) -> string {
         })
     };
 
+    let mut reached_progress = false;
     while let Some(event) = events.next().await {
-        if event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update") {
+        if event
+            .pointer("/result/status/message/parts/0/text")
+            .and_then(JsonValue::as_str)
+            == Some("Ready for cancellation.")
+        {
+            reached_progress = true;
             break;
         }
     }
+    assert!(reached_progress, "task did not reach cancellable progress");
     let cancelled = server.cancel_task(&task_id).expect("cancel running task");
-    assert_eq!(cancelled["status"]["state"], "cancelled");
+    assert_eq!(cancelled["status"]["state"], "canceled");
     runner.await.expect("task runner");
 
     let task_json = server.task_json(&task_id);
-    assert_eq!(task_json["status"]["state"], "cancelled");
+    assert_eq!(task_json["status"]["state"], "canceled");
     assert!(task_json["metadata"]["harn"]["persistenceError"]
         .as_str()
         .expect("cancelled task persistence error")

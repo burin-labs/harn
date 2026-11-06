@@ -530,6 +530,18 @@ Behavior today:
   callers; rejects unauthenticated calls with HTTP 401 plus a
   `WWW-Authenticate` challenge, or `ExtendedAgentCardNotConfiguredError`
   / `-32007` when no `AuthPolicy` methods are configured)
+- A2A 1.0 JSON-RPC discovery and requests selected with `A2A-Version: 1.0`:
+  `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`,
+  `SubscribeToTask`, and `GetExtendedAgentCard`. This interface advertises
+  streaming and refuses subscriptions to terminal tasks. It does not support
+  task continuation or push configuration. Listing and task access are scoped
+  to the authenticated principal, issuer, and tenant. Missing or empty version
+  headers and the REST routes select 0.3.
+- Persisted legacy push configurations remain accessible after restart only on
+  an explicitly unauthenticated server. An authenticated server refuses access
+  when the in-memory task owner is unavailable.
+  Task access and push configuration use the same owner across protocol
+  versions, deprecated aliases, and REST routes.
 - one-cycle compatibility aliases for `a2a.*`, `tasks/send`,
   `tasks/send_and_wait`, `tasks/sendSubscribe`, and `tasks/list`, with
   `Deprecation: true` on legacy HTTP responses

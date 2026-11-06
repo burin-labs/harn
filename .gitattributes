@@ -118,3 +118,4 @@ tree-sitter-harn/src/scanner.c merge
 crates/harn-stdlib/src/stdlib/cli/localization.harn -merge
 crates/harn-stdlib/src/stdlib/cli/localization/** -merge
 crates/harn-stdlib/src/catalog_entries.rs -merge
+spec/protocol-artifacts/schemas/a2a-1.0.1.schema.json -merge

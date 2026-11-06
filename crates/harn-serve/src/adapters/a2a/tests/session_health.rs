@@ -12,6 +12,8 @@ fn session_health_uses_the_checked_task_event_without_changing_task_state() {
     let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(
         task_id.clone(),
         TaskState {
+            principal: None,
+            status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
             id: task_id.clone(),
             context_id: Some("context-health".to_owned()),
             status: TaskStatus::InputRequired,

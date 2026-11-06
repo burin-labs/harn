@@ -26,6 +26,8 @@
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn
+import { resolve_harn_bin } from "./check_docs_snippets.harn"
+
 const SITE_SNIPPET_GLOB = "website/src/examples/*.harn.txt"
 
 const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/*.harn"
@@ -59,46 +61,6 @@ fn glob_rel(fs: HarnessFs, pattern: string) -> list<string> {
     matches = matches + [rel_path(g)]
   }
   return matches.sorted()
-}
-
-/**
- * Resolve the harn binary used to check snippets: $HARN_BIN wins,
- * else the workspace target dir's debug build (building it quietly when
- * missing) — the same ladder as the bash original.
- */
-fn resolve_harn_bin(harness: Harness) -> string {
-  const env_bin = harness.env.get("HARN_BIN")
-  if env_bin != nil && env_bin != "" {
-    return env_bin
-  }
-  let target_dir = ""
-  const meta = harness.process.run(
-    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
-  )
-  if meta.success {
-    const parsed = try {
-      json_parse(meta.stdout)
-    } catch (err) {
-      nil
-    }
-    target_dir = parsed?.target_directory ?? ""
-  }
-  if target_dir == "" {
-    target_dir = harness.env.get("CARGO_TARGET_DIR") ?? ""
-  }
-  if target_dir == "" {
-    target_dir = "target"
-  }
-  const bin = "${target_dir}/debug/harn"
-  if !harness.fs.exists(bin) {
-    harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
-    if !build.success {
-      harness.stdio.eprint(build.stderr)
-      throw "cargo build -p harn-cli failed"
-    }
-  }
-  return bin
 }
 
 pipeline main(harness: Harness) {

@@ -1,0 +1,4 @@
+pub fn triage(fs: HarnessFs, task: string) -> string {
+  fs.write_text(task, "actual execution")
+  return task
+}

@@ -22,9 +22,6 @@
   "overrides": {
     "js-yaml": "5.5.0",
     "katex": "0.19.0",
-    "markdownlint": {
-      "re2js@2.8.6": "2.8.7"
-    },
     "minimatch@^10": "11.0.5",
     "react": "19.2.6",
     "react-dom": "19.2.6",

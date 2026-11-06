@@ -136,6 +136,19 @@ fn single_part_result(parts: &[Value]) -> Option<Value> {
     part.get("data").cloned()
 }
 
+/// Decode the padded or unpadded standard and URL-safe bytes forms ProtoJSON accepts.
+pub fn decode_raw_bytes(value: &str) -> Result<Vec<u8>, A2aClientError> {
+    [
+        &base64::engine::general_purpose::STANDARD,
+        &base64::engine::general_purpose::STANDARD_NO_PAD,
+        &base64::engine::general_purpose::URL_SAFE,
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+    ]
+    .iter()
+    .find_map(|engine| engine.decode(value).ok())
+    .ok_or_else(|| A2aClientError::Protocol("A2A raw content must be valid base64".to_string()))
+}
+
 fn validate_parts(value: Option<&Value>) -> Result<&[Value], A2aClientError> {
     let parts = value
         .and_then(Value::as_array)
@@ -161,18 +174,7 @@ fn validate_parts(value: Option<&Value>) -> Result<&[Value], A2aClientError> {
             ));
         }
         if content[0] == "raw" {
-            let bytes = value.as_str().unwrap();
-            let engines = [
-                &base64::engine::general_purpose::STANDARD,
-                &base64::engine::general_purpose::STANDARD_NO_PAD,
-                &base64::engine::general_purpose::URL_SAFE,
-                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            ];
-            if !engines.iter().any(|engine| engine.decode(bytes).is_ok()) {
-                return Err(A2aClientError::Protocol(
-                    "A2A raw content must be valid base64".to_string(),
-                ));
-            }
+            decode_raw_bytes(value.as_str().unwrap())?;
         }
     }
     Ok(parts.as_slice())

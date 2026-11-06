@@ -15,8 +15,8 @@ pub(crate) use negotiation::peer_wire_settings;
 #[cfg(test)]
 use transport::send_http;
 use transport::send_jsonrpc;
-pub use wire::A2aWireVersion;
 use wire::SendResponse;
+pub use wire::{decode_raw_bytes, A2aWireVersion};
 
 const A2A_AGENT_CARD_PATHS: &[&str] = &[
     ".well-known/agent-card.json",

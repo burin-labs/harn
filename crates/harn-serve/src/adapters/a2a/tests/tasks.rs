@@ -517,6 +517,8 @@ fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
     // protocol's wire shape from a single source.
     let task_id = "task-1".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,
@@ -572,6 +574,8 @@ fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
 fn a2a_worker_sink_publishes_progress_as_status_update() {
     let task_id = "task-progress".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: Some("ctx-progress".to_string()),
         status: TaskStatus::Working,
@@ -626,6 +630,8 @@ fn a2a_worker_sink_publishes_progress_as_status_update() {
 fn a2a_worker_sink_publishes_message_only_progress_status() {
     let task_id = "task-progress-message".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,
@@ -669,6 +675,8 @@ fn a2a_worker_sink_publishes_message_only_progress_status() {
 fn a2a_worker_sink_does_not_override_terminal_task_with_progress() {
     let task_id = "task-progress-terminal".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Completed,
@@ -730,6 +738,8 @@ pub fn run(task: string) -> string {
         tasks.insert(
             task_id.clone(),
             TaskState {
+                principal: None,
+                status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
                 id: task_id.clone(),
                 context_id: None,
                 status: TaskStatus::Working,
@@ -838,7 +848,10 @@ fn hitl_requested_event_transitions_task_into_input_required() {
     // subscribers can observe the resume before the task ultimately
     // completes / fails.
     let task_id = "task-hitl".to_string();
+    let (legacy_tx, mut legacy_rx) = unbounded();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,
@@ -846,7 +859,7 @@ fn hitl_requested_event_transitions_task_into_input_required() {
         artifacts: Vec::new(),
         metadata: BTreeMap::new(),
         events: Vec::new(),
-        subscribers: Vec::new(),
+        subscribers: vec![(harn_vm::a2a::A2aWireVersion::V0_3, legacy_tx)],
         cancel_token: None,
     };
     let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
@@ -861,6 +874,13 @@ fn hitl_requested_event_transitions_task_into_input_required() {
         kind: "question".into(),
         payload: serde_json::json!({"prompt": "Approve?"}),
     });
+
+    let published = futures::FutureExt::now_or_never(legacy_rx.next())
+        .flatten()
+        .expect("published legacy extension");
+    assert_eq!(published["result"]["kind"], "question");
+    assert_eq!(published["result"]["payload"]["prompt"], "Approve?");
+    assert!(published["result"].get("contextId").is_none());
 
     {
         let tasks = tasks.lock().expect("tasks");
@@ -916,6 +936,8 @@ fn hitl_requested_event_does_not_override_terminal_task() {
     // reanimate it into `input-required`.
     let task_id = "task-terminal".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Cancelled,
@@ -1163,6 +1185,8 @@ fn tool_call_completed_emits_artifact_update_event() {
     // identity.
     let task_id = "task-tool-output".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: Some("ctx-1".into()),
         status: TaskStatus::Working,
@@ -1227,6 +1251,8 @@ fn tool_call_completed_emits_artifact_update_event() {
 fn agent_artifact_event_emits_artifact_update() {
     let task_id = "task-agent-artifact".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: Some("ctx-artifacts".into()),
         status: TaskStatus::Working,
@@ -1295,6 +1321,8 @@ fn agent_artifact_event_emits_artifact_update() {
 fn agent_artifact_manifest_event_emits_bundle_artifact_update() {
     let task_id = "task-artifact-manifest".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
         id: task_id.clone(),
         context_id: Some("ctx-artifacts".into()),
         status: TaskStatus::Working,

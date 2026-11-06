@@ -46,7 +46,7 @@ schemars = "=1.2.3"
 sha2 = "0.11"
 subtle = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
-time = { version = "0.3", features = ["formatting"] }
+time = { version = "0.3", features = ["formatting", "parsing"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 toml = "1.1"
 tower = { version = "0.5", features = ["util"] }
@@ -94,7 +94,7 @@ harn-flock = { path = "../harn-flock", version = "=0.10.189" }
 rstest.workspace = true
 zeroize = "1"
 harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.189" }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite.workspace = true
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.189", features = ["test-support"] }

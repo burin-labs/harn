@@ -4,6 +4,12 @@ use super::events::*;
 use super::schema::*;
 use super::*;
 
+#[derive(Debug)]
+pub(super) enum TaskAccessError {
+    NotFound,
+    Terminal,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct AgentTerminalProjection {
     pub(super) status: TaskStatus,
@@ -55,6 +61,7 @@ impl A2aServer {
         &self,
         params: &JsonValue,
         auth: AuthRequest,
+        principal: Option<&crate::AuthenticatedPrincipal>,
     ) -> Result<PreparedTask, A2aPrepareError> {
         let parts = message_parts(params)?;
         let text = message_text(params, &parts);
@@ -102,10 +109,16 @@ impl A2aServer {
 
         let mut task = TaskState {
             id: task_id.clone(),
+            principal: principal.cloned(),
+            status_updated_at: current_timestamp_utc(),
             context_id,
             status: TaskStatus::Submitted,
             history: vec![TaskMessage {
-                id: Uuid::now_v7().to_string(),
+                id: params
+                    .pointer("/message/messageId")
+                    .and_then(JsonValue::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| Uuid::now_v7().to_string()),
                 role: "user".to_string(),
                 parts: parts.clone(),
             }],
@@ -115,8 +128,7 @@ impl A2aServer {
             subscribers: Vec::new(),
             cancel_token: Some(cancel_token.clone()),
         };
-        task.events
-            .push(status_event(&task_id, TaskStatus::Submitted));
+        publish_locked(&mut task, status_event(&task_id, TaskStatus::Submitted));
         self.tasks
             .lock()
             .expect("tasks poisoned")
@@ -142,7 +154,9 @@ impl A2aServer {
     }
 
     pub(super) async fn run_task_to_completion(self: &Arc<Self>, task: &PreparedTask) {
-        self.transition(&task.id, TaskStatus::Working);
+        if !self.transition(&task.id, TaskStatus::Working) {
+            return;
+        }
         // Subscribe a per-task `AgentEventSink` that translates worker
         // lifecycle events into A2A task events. The session id used by
         // the inner dispatch (set via `agent_session_id` on the
@@ -249,18 +263,22 @@ impl A2aServer {
         harn["persistenceError"] = JsonValue::String(error.to_string());
     }
 
-    pub(super) fn transition(&self, task_id: &str, status: TaskStatus) {
+    pub(super) fn transition(&self, task_id: &str, status: TaskStatus) -> bool {
         let event = status_event(task_id, status.clone());
         let task_for_push = {
             let mut tasks = self.tasks.lock().expect("tasks poisoned");
             let Some(task) = tasks.get_mut(task_id) else {
-                return;
+                return false;
             };
+            if task.status.is_terminal() {
+                return false;
+            }
             task.status = status;
             publish_locked(task, event);
             task_to_json(task)
         };
         self.deliver_push(task_for_push);
+        true
     }
 
     pub(super) fn complete_task(&self, task_id: &str, response: CallResponse) {
@@ -268,11 +286,12 @@ impl A2aServer {
         let parts = response_parts(&response.value);
         let artifacts = response_artifacts(&response.value, &parts);
         let handoff_metadata = handoff_task_metadata(&response);
+        let message_id = Uuid::now_v7().to_string();
         let message = json!({
             "type": "message",
             "taskId": task_id,
             "message": {
-                "id": Uuid::now_v7().to_string(),
+                "id": message_id,
                 "role": "agent",
                 "parts": parts
             }
@@ -282,8 +301,11 @@ impl A2aServer {
             let Some(task) = tasks.get_mut(task_id) else {
                 return;
             };
+            if task.status.is_terminal() {
+                return;
+            }
             task.history.push(TaskMessage {
-                id: Uuid::now_v7().to_string(),
+                id: message_id,
                 role: "agent".to_string(),
                 parts,
             });
@@ -334,6 +356,9 @@ impl A2aServer {
             let Some(task) = tasks.get_mut(task_id) else {
                 return;
             };
+            if task.status.is_terminal() {
+                return;
+            }
             task.status = TaskStatus::Failed;
             task.history.push(TaskMessage {
                 id: Uuid::now_v7().to_string(),
@@ -373,6 +398,9 @@ impl A2aServer {
             let Some(task) = tasks.get_mut(task_id) else {
                 return;
             };
+            if task.status.is_terminal() {
+                return;
+            }
             task.status = status;
             task.history.push(TaskMessage {
                 id: Uuid::now_v7().to_string(),
@@ -403,6 +431,9 @@ impl A2aServer {
             let Some(task) = tasks.get_mut(task_id) else {
                 return;
             };
+            if task.status.is_terminal() {
+                return;
+            }
             task.status = TaskStatus::AuthRequired;
             task.history.push(TaskMessage {
                 id: Uuid::now_v7().to_string(),
@@ -416,18 +447,21 @@ impl A2aServer {
         self.deliver_push(task_for_push);
     }
 
-    pub(super) fn cancel_task(&self, task_id: &str) -> Result<JsonValue, String> {
-        let task_for_push = {
+    #[cfg(test)]
+    pub(super) fn cancel_task(&self, task_id: &str) -> Result<JsonValue, TaskAccessError> {
+        self.cancel_task_versioned(task_id, harn_vm::a2a::A2aWireVersion::V0_3)
+    }
+
+    pub(super) fn cancel_task_versioned(
+        &self,
+        task_id: &str,
+        version: harn_vm::a2a::A2aWireVersion,
+    ) -> Result<JsonValue, TaskAccessError> {
+        let (task_for_push, response) = {
             let mut tasks = self.tasks.lock().expect("tasks poisoned");
-            let task = tasks
-                .get_mut(task_id)
-                .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+            let task = tasks.get_mut(task_id).ok_or(TaskAccessError::NotFound)?;
             if task.status.is_terminal() {
-                return Err(format!(
-                    "TaskNotCancelableError: task {} is in terminal state '{}'",
-                    task_id,
-                    task.status.as_str()
-                ));
+                return Err(TaskAccessError::Terminal);
             }
             if let Some(cancel_token) = task.cancel_token.as_ref() {
                 cancel_token.store(true, Ordering::SeqCst);
@@ -435,10 +469,10 @@ impl A2aServer {
             task.status = TaskStatus::Cancelled;
             publish_locked(task, status_event(task_id, TaskStatus::Cancelled));
             task.cancel_token = None;
-            task_to_json(task)
+            (task_to_json(task), task_to_json_versioned(task, version))
         };
-        self.deliver_push(task_for_push.clone());
-        Ok(task_for_push)
+        self.deliver_push(task_for_push);
+        Ok(response)
     }
 
     pub(super) fn is_cancelled(&self, task_id: &str) -> bool {
@@ -449,34 +483,98 @@ impl A2aServer {
             .is_some_and(|task| task.status == TaskStatus::Cancelled)
     }
 
+    #[cfg(test)]
     pub(super) fn subscribe(&self, task_id: &str) -> Option<UnboundedReceiver<JsonValue>> {
+        self.subscribe_task(task_id, harn_vm::a2a::A2aWireVersion::V0_3)
+            .ok()
+    }
+
+    pub(super) fn subscribe_task(
+        &self,
+        task_id: &str,
+        version: harn_vm::a2a::A2aWireVersion,
+    ) -> Result<UnboundedReceiver<JsonValue>, TaskAccessError> {
         let (tx, rx) = unbounded();
         let mut tasks = self.tasks.lock().expect("tasks poisoned");
-        let task = tasks.get_mut(task_id)?;
-        for event in &task.events {
-            let _ = tx.unbounded_send(wrap_event(JsonValue::Null, event.clone()));
+        let task = tasks.get_mut(task_id).ok_or(TaskAccessError::NotFound)?;
+        if !version.is_legacy() && task.status.is_terminal() {
+            return Err(TaskAccessError::Terminal);
+        }
+        if version.is_legacy() {
+            for event in &task.events {
+                let _ = tx.unbounded_send(wrap_event(JsonValue::Null, event.clone()));
+            }
+        } else {
+            let _ = tx.unbounded_send(wrap_event(
+                JsonValue::Null,
+                json!({"task": task_to_json_versioned(task, version)}),
+            ));
         }
         if !task.status.is_terminal() {
-            task.subscribers.push(tx);
+            task.subscribers.push((version, tx));
         }
-        Some(rx)
+        Ok(rx)
     }
 
     pub(super) fn task_json(&self, task_id: &str) -> JsonValue {
+        self.task_json_versioned(task_id, harn_vm::a2a::A2aWireVersion::V0_3)
+    }
+
+    pub(super) fn task_json_versioned(
+        &self,
+        task_id: &str,
+        version: harn_vm::a2a::A2aWireVersion,
+    ) -> JsonValue {
         self.tasks
             .lock()
             .expect("tasks poisoned")
             .get(task_id)
-            .map(task_to_json)
+            .map(|task| task_to_json_versioned(task, version))
             .unwrap_or(JsonValue::Null)
     }
 
-    pub(super) fn list_tasks(&self) -> JsonValue {
+    pub(super) fn task_visibility(
+        &self,
+        id: &str,
+        principal: Option<&crate::AuthenticatedPrincipal>,
+    ) -> Option<bool> {
+        self.tasks
+            .lock()
+            .expect("tasks poisoned")
+            .get(id)
+            .map(|task| task.visible_to(principal))
+    }
+
+    pub(super) fn visible_task_id<'a>(
+        &self,
+        id: Option<&'a str>,
+        principal: Option<&crate::AuthenticatedPrincipal>,
+    ) -> Option<&'a str> {
+        id.filter(|id| {
+            if let Some(visible) = self.task_visibility(id, principal) {
+                return visible;
+            }
+            // An explicitly open legacy server may recover anonymous push configs.
+            principal.is_none()
+                && self.core.auth_policy().methods.is_empty()
+                && self
+                    .push_configs
+                    .lock()
+                    .expect("push configs poisoned")
+                    .contains_key(*id)
+        })
+    }
+
+    pub(super) fn list_tasks(
+        &self,
+        principal: Option<&crate::AuthenticatedPrincipal>,
+    ) -> JsonValue {
         let tasks = self
             .tasks
             .lock()
             .expect("tasks poisoned")
             .values()
+            .filter(|task| task.visible_to(principal))
             .map(|task| {
                 json!({
                     "id": task.id,
@@ -546,6 +644,24 @@ impl A2aServer {
                 .collect::<Vec<_>>()
         };
         Ok(JsonValue::Array(configs))
+    }
+
+    pub(super) fn visible_push_configs(
+        &self,
+        task_id: Option<&str>,
+        principal: Option<&crate::AuthenticatedPrincipal>,
+    ) -> Result<JsonValue, String> {
+        if task_id.is_some() && self.visible_task_id(task_id, principal).is_none() {
+            return Err("TaskNotFoundError".to_string());
+        }
+        let mut configs = self.push_configs(task_id)?;
+        if let Some(configs) = configs.as_array_mut() {
+            configs.retain(|config| {
+                self.visible_task_id(config["taskId"].as_str(), principal)
+                    .is_some()
+            });
+        }
+        Ok(configs)
     }
 
     pub(super) async fn delete_push_config(

@@ -456,10 +456,13 @@ outputs = [
   "spec/protocol-artifacts/schemas/inference-admission-snapshot.schema.json",
   "spec/protocol-artifacts/schemas/provider-account-attestation.schema.json",
   "spec/protocol-artifacts/schemas/canonical-history-boundaries.schema.json",
+  "spec/protocol-artifacts/schemas/a2a-1.0.1.schema.json",
 ]
 sources = [
   "crates/harn-serve/openapi.yaml",
   "conformance/protocols/schemas/acp-session-update.schema.json",
+  "conformance/protocols/schemas/a2a-1.0.1.schema.json",
+  "crates/harn-serve/src/adapters/a2a/wire.rs",
   "crates/harn-cli/src/commands/",
   "crates/harn-session-store/src/boundary.rs",
   "crates/harn-vm/src/agent_sessions/canonical_boundary.rs",
