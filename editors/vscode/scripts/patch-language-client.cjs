@@ -7,10 +7,10 @@ const { join } = require("node:path");
 
 const root = join(__dirname, "..", "node_modules", "vscode-languageclient");
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
-if (version !== "10.1.2") throw new Error(`Review the matcher patch for vscode-languageclient ${version}`);
+if (version !== "11.0.0") throw new Error(`Review the matcher patch for vscode-languageclient ${version}`);
 const files = [
   ["lib/common/utils/globPattern.js", "ec8f8ed49366dc71c63a6908f0de06568086058cef3e59d6665df4c721826129", "6bab870a3edd1d991af511e2e808afbaac10e236cb36422716b551403db75b7b"],
-  ["lib/common/fileOperations.js", "27021d92f7e2bb0094f0044d9516bfb3d76427e350b9a0945dac00e294f88f01", "46f1ec30d94ec7f7658ff219d4f00f973c9629f648ebbf81e311022f8e7ff02d"],
+  ["lib/common/fileOperations.js", "5d38e3f825f80f4e72fd931c50d014cc86f636218b724740377fc7bc9023f907", "9187d6e9b8090916eaa82ad4cb0b61de6fa78dd2908f14852fe4f103e69e7030"],
 ];
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 const replacements = files.map(([relative, original, patched]) => {

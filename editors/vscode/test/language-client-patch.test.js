@@ -13,7 +13,7 @@ test("the dependency patch refuses unknown source before changing either file", 
   fs.mkdirSync(path.dirname(script), { recursive: true });
   fs.mkdirSync(path.join(client, "lib/common/utils"), { recursive: true });
   fs.copyFileSync(path.join(__dirname, "../scripts/patch-language-client.cjs"), script);
-  fs.writeFileSync(path.join(client, "package.json"), JSON.stringify({ version: "10.1.2" }));
+  fs.copyFileSync(path.join(__dirname, "../node_modules/vscode-languageclient/package.json"), path.join(client, "package.json"));
   const names = ["lib/common/utils/globPattern.js", "lib/common/fileOperations.js"];
   const originals = names.map((name) => fs.readFileSync(path.join(__dirname, "../node_modules/vscode-languageclient", name), "utf8")
     .replace("matcher.set.length === 0", "!matcher.makeRe()"));
