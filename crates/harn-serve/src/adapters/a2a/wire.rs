@@ -186,7 +186,7 @@ impl V1Request {
                 value
                     .as_u64()
                     .and_then(|n| usize::try_from(n).ok())
-                    .filter(|n| *n <= i32::MAX as usize)
+                    .filter(|n| i32::try_from(*n).is_ok())
                     .ok_or_else(|| invalid("historyLength must be a nonnegative int32"))
             })
             .transpose()?;
@@ -204,7 +204,7 @@ impl V1Request {
                     return Err(invalid("message.parts must not be empty"));
                 }
                 for part in &mut message.parts {
-                    decode_part(part).map_err(&invalid)?;
+                    decode_part(part).map_err(invalid)?;
                 }
                 message.role = "user".to_owned();
                 let context = message
