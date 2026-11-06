@@ -112,13 +112,13 @@ pub import {
   agent_tool_search_inject_if_needed,
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
-import { __tool_surface_tool_allowed } from "std/agent/tool_surface"
 pub import {
+  __agent_reopen_tool_surface,
   agent_apply_tool_surface_narrowing,
   agent_narrow_tool_surface_at_user_boundary,
-  __agent_reopen_tool_surface,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/tool_surface"
+import { __tool_surface_tool_allowed } from "std/agent/tool_surface"
 pub import {
   agent_has_turn_end_condition,
   agent_stall_turn_end_judge_due,
