@@ -1,26 +1,20 @@
 use super::{dict_get, vm_to_json};
 use crate::value::VmValue;
 
-/// Recover the plan artifact from a dispatched emit_plan/update_plan result.
-///
-/// The local short-circuit handler (`handle_tool_locally`) returns the
-/// pretty-printed plan JSON as a string, so the dispatch result's
-/// `result` field is typically a string. We try parsing it; if that
-/// fails, fall back to renormalizing from the tool arguments. Either
-/// way we get the executable plan embedded in the transcript's collaborative
-/// `metadata.plan_document_event`.
+/// Recover a canonical plan result or normalize the original tool arguments.
+/// Host acknowledgements remain tool output; only a plan artifact result
+/// supplies the executable plan for the collaborative document.
 pub(super) fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
-    if let Some(VmValue::String(rendered)) = dict_get(result, "result") {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(rendered) {
-            if parsed.is_object() {
-                return Some(parsed);
-            }
-        }
-    }
     if let Some(value) = dict_get(result, "result") {
-        let json = vm_to_json(value);
-        if json.is_object() {
-            return Some(json);
+        let plan = match value {
+            VmValue::String(rendered) => serde_json::from_str::<serde_json::Value>(rendered).ok(),
+            _ => Some(vm_to_json(value)),
+        };
+        if let Some(plan) = plan.filter(|plan| {
+            plan.get("_type").and_then(serde_json::Value::as_str)
+                == Some(crate::llm::plan::PLAN_ARTIFACT_KIND)
+        }) {
+            return Some(plan);
         }
     }
     let tool_name = dict_get(result, "tool_name")
@@ -167,6 +161,75 @@ pub(super) fn next_plan_document_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acknowledgements_and_canonical_results_preserve_plan_document_validation() {
+        use crate::llm::plan::{
+            normalize_plan_tool_call, persisted_plan_document_events, EMIT_PLAN_TOOL,
+        };
+        use serde_json::json;
+
+        crate::reset_thread_local_state();
+        let arguments =
+            json!({"plan": {"steps": [{"content": "Argument plan", "status": "pending"}]}});
+        let from_arguments = normalize_plan_tool_call(EMIT_PLAN_TOOL, &arguments);
+        let canonical = normalize_plan_tool_call(
+            EMIT_PLAN_TOOL,
+            &json!({"steps": [{"content": "Canonical host plan", "status": "completed"}]}),
+        );
+        let mut malformed = canonical.clone();
+        malformed.as_object_mut().unwrap().remove("steps");
+        let acknowledgement = json!({"accepted": true, "message": "Plan recorded"});
+        for (index, (returned, expected)) in [
+            (acknowledgement.clone(), Some(from_arguments.clone())),
+            (json!(acknowledgement.to_string()), Some(from_arguments)),
+            (canonical.clone(), Some(canonical.clone())),
+            (json!(canonical.to_string()), Some(canonical)),
+            (malformed.clone(), None),
+            (json!(malformed.to_string()), None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let session = crate::agent_sessions::open_or_create_for_test(Some(format!(
+                "plan-result-{index}"
+            )));
+            let dispatch = crate::schema::json_to_vm_value(&json!([{
+                "ok": true, "tool_name": EMIT_PLAN_TOOL, "tool_call_id": "plan-result",
+                "arguments": arguments, "result": returned,
+            }]));
+            let outcome = super::super::host_agent_session_record_tool_results_builtin(
+                &[VmValue::string(&session), dispatch],
+                &mut String::new(),
+            );
+            let events = persisted_plan_document_events(&session).unwrap();
+            if let Some(expected) = expected {
+                outcome.expect("valid plan result records a canonical document");
+                assert_eq!(events.len(), 1);
+                assert!(matches!(
+                    &events[0],
+                    crate::llm::plan::PlanDocumentEvent::Created { .. }
+                ));
+                assert_eq!(
+                    serde_json::to_value(&events[0].document().current_revision.plan).unwrap(),
+                    expected
+                );
+                let resumed = crate::llm::plan::resume_plan_document_store(&session).unwrap();
+                assert_eq!(resumed.current(), events[0].document());
+            } else {
+                let error = outcome
+                    .expect_err("claimed canonical artifacts must remain strictly validated");
+                assert!(
+                    error.to_string().contains("missing field `steps`"),
+                    "{error}"
+                );
+                assert!(
+                    events.is_empty(),
+                    "invalid canonical artifacts must not become argument-derived plans"
+                );
+            }
+        }
+    }
 
     #[test]
     fn resume_selects_the_latest_created_plan_document() {

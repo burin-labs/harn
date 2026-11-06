@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::PLAN_SCHEMA_VERSION;
+use super::{PLAN_ARTIFACT_KIND, PLAN_SCHEMA_VERSION};
 
 pub const PLAN_DOCUMENT_SCHEMA_VERSION: &str = "harn.plan_document.v1";
 pub const PLAN_DOCUMENT_ARTIFACT_KIND: &str = "plan_document";
@@ -901,7 +901,7 @@ fn revision_operation_event_id(operation: &PlanRevisionOperation) -> &str {
 
 fn validate_plan(plan: &PlanArtifact) -> Result<(), PlanDocumentError> {
     require(
-        plan.type_name == "plan_artifact",
+        plan.type_name == PLAN_ARTIFACT_KIND,
         "plan _type must be plan_artifact",
     )?;
     require(

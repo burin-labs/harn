@@ -7,6 +7,8 @@ mod document;
 pub use document::*;
 
 pub const PLAN_SCHEMA_VERSION: &str = "harn.plan.v1";
+/// Discriminator for the canonical executable plan artifact.
+pub const PLAN_ARTIFACT_KIND: &str = "plan_artifact";
 pub const EMIT_PLAN_TOOL: &str = "emit_plan";
 pub const UPDATE_PLAN_TOOL: &str = "update_plan";
 
@@ -32,7 +34,7 @@ pub fn is_plan_tool(name: &str) -> bool {
 pub fn normalize_plan_tool_call(tool_name: &str, args: &serde_json::Value) -> serde_json::Value {
     let source = args.get("plan").unwrap_or(args);
     let mut plan = serde_json::json!({
-        "_type": "plan_artifact",
+        "_type": PLAN_ARTIFACT_KIND,
         "schema_version": PLAN_SCHEMA_VERSION,
         "tool": tool_name,
         "title": string_field(source, &["title", "name"]).unwrap_or_else(|| "Plan".to_string()),
