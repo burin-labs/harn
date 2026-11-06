@@ -195,8 +195,7 @@ impl SqliteSessionStore {
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA)
-            .map_err(map_initialization)?;
+        require_read_initialized(&conn)?;
         Ok(Self {
             inner: Arc::new(StoreInner {
                 conn: Mutex::new(conn),
@@ -224,8 +223,7 @@ impl SqliteSessionStore {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(backend)?;
         conn.execute_batch("BEGIN DEFERRED").map_err(backend)?;
-        require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA)
-            .map_err(map_initialization)?;
+        require_read_initialized(&conn)?;
         Ok(Self {
             inner: Arc::new(StoreInner {
                 conn: Mutex::new(conn),
@@ -800,6 +798,23 @@ fn map_sql(error: rusqlite::Error) -> StoreError {
             message,
         },
         None => StoreError::Backend(message),
+    }
+}
+
+fn require_read_initialized(conn: &Connection) -> StoreResult<()> {
+    match require_snapshot_initialized::<StoreError>(conn, SQLITE_SCHEMA) {
+        Err(harn_sqlite::InitializationError::SchemaNotInitialized { .. })
+            if conn
+                .query_row(
+                    "SELECT NOT EXISTS(SELECT 1 FROM main.sqlite_schema)",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(map_sql)? =>
+        {
+            Err(StoreError::Uninitialized)
+        }
+        result => result.map_err(map_initialization),
     }
 }
 
