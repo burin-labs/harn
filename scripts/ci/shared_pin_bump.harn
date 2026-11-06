@@ -42,6 +42,12 @@ pub type Request = {references: list<string>, sha: string, release_path: bool, c
 
 pub type WorkflowFile = {path: string, text: string}
 
+pub const SECURITY_POLICY_PATH = "scripts/lib/dependency-security-policy.json"
+
+pub const SECURITY_PROOF_REF = ".github/workflows/dependency-security-proof.yml"
+
+type SecuritySigner = {schemaVersion: string, signerWorkflow: string, signerRevision: string}
+
 const REFERENCE = "^\\.github/(workflows/[A-Za-z0-9_.-]+\\.ya?ml|actions/[A-Za-z0-9_.-]+)$"
 
 fn normalize_reference(raw: string) -> string {
@@ -139,7 +145,27 @@ pub fn rewrite_files(files: list<WorkflowFile>, request: Request) -> list<Workfl
   }
   let changed = []
   for file in files {
-    const text = rewrite_pins(file.text, request.references, request.sha)
+    let text = rewrite_pins(file.text, request.references, request.sha)
+    if file.path == SECURITY_POLICY_PATH {
+      const policy = schema_expect(json_parse(file.text), schema_of(SecuritySigner))
+      if policy.schemaVersion != "harn.dependency_security_policy.v1"
+        || policy.signerWorkflow != OWNER + "/" + SECURITY_PROOF_REF
+        || regex_match("^[0-9a-f]{40}$", policy.signerRevision) == nil {
+        throw "dependency security signer policy is invalid"
+      }
+      for ref in request.references {
+        if policy.signerWorkflow == OWNER + "/" + ref {
+          if !pin_shas(files, ref).contains(policy.signerRevision) {
+            throw "dependency security signer policy does not match a measured workflow pin"
+          }
+          const pattern = "(\\\"signerRevision\\\"\\s*:\\s*\\\")[0-9a-f]{40}(\\\")"
+          if len(regex_captures(pattern, file.text)) != 1 {
+            throw "dependency security signer revision is not uniquely represented"
+          }
+          text = regex_replace(pattern, "$" + "{1}" + request.sha + "$" + "{2}", file.text)
+        }
+      }
+    }
     if text != file.text {
       changed = changed + [{path: file.path, text: text}]
     }
