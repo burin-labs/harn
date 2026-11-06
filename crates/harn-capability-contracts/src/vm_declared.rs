@@ -98,6 +98,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "evaluate"),
     ("llm", "evaluate_predicate"),
     ("llm", "evaluate_request"),
+    ("llm", "evaluation_receipt"),
     ("llm", "execution_contract"),
     ("llm", "healthcheck"),
     ("llm", "infer_provider"),

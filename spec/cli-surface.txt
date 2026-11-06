@@ -1700,6 +1700,10 @@ harn serve acp --api-key
 harn serve acp --bind
 harn serve acp --cert
 harn serve acp --confine-workspace
+harn serve acp --flight-recorder
+harn serve acp --flight-recorder-max-events
+harn serve acp --flight-recorder-out
+harn serve acp --flight-recorder-retain
 harn serve acp --hmac-secret
 harn serve acp --key
 harn serve acp --obs
