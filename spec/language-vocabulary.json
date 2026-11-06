@@ -412,6 +412,7 @@
     "http_error",
     "http_etag",
     "http_header",
+    "http_is_disallowed_host",
     "http_no_content",
     "http_not_modified",
     "http_ok",
