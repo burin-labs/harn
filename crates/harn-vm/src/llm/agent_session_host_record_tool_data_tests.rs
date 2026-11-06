@@ -1,6 +1,34 @@
 use super::*;
 use crate::value::{VmDictExt, VmValue};
 
+#[test]
+fn host_plan_acknowledgment_records_the_original_plan() {
+    reset_agent_session_host_state();
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "host-plan-acknowledgment".to_string(),
+    ));
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
+        "tool_name": "emit_plan",
+        "tool_call_id": "tc_plan",
+        "ok": true,
+        "result": {"accepted": true},
+        "arguments": {"plan": {
+            "direction": "Add coverage",
+            "tasks": ["Exercise the real dispatch path"],
+            "verification": ["run the focused test"]
+        }}
+    }]));
+    super::super::record_tool_results_for_test(&session_id, dispatch);
+
+    let events = crate::llm::plan::persisted_plan_document_events(&session_id)
+        .expect("plan events are readable");
+    assert_eq!(events.len(), 1);
+    let plan = &events[0].document().current_revision.plan;
+    assert_eq!(plan.summary, "Add coverage");
+    assert_eq!(plan.steps[0].content, "Exercise the real dispatch path");
+    assert_eq!(plan.verification_commands, ["run the focused test"]);
+}
+
 /// A native escalated call must retain producer facts when its result is
 /// recorded, even though the session's primary tool channel is text.
 #[test]

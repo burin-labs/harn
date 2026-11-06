@@ -5,21 +5,21 @@ use crate::value::VmValue;
 ///
 /// The local short-circuit handler (`handle_tool_locally`) returns the
 /// pretty-printed plan JSON as a string, so the dispatch result's
-/// `result` field is typically a string. We try parsing it; if that
-/// fails, fall back to renormalizing from the tool arguments. Either
-/// way we get the executable plan embedded in the transcript's collaborative
+/// `result` field is typically a string. A host may instead return an
+/// acknowledgment. Only a typed plan result supplies the artifact; otherwise
+/// normalize the original tool arguments for the transcript's collaborative
 /// `metadata.plan_document_event`.
 pub(super) fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
     if let Some(VmValue::String(rendered)) = dict_get(result, "result") {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(rendered) {
-            if parsed.is_object() {
+            if parsed.get("_type").and_then(serde_json::Value::as_str) == Some("plan_artifact") {
                 return Some(parsed);
             }
         }
     }
     if let Some(value) = dict_get(result, "result") {
         let json = vm_to_json(value);
-        if json.is_object() {
+        if json.get("_type").and_then(serde_json::Value::as_str) == Some("plan_artifact") {
             return Some(json);
         }
     }
@@ -167,6 +167,42 @@ pub(super) fn next_plan_document_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_result_distinguishes_artifacts_from_acknowledgments() {
+        let arguments = serde_json::json!({"plan": {"direction": "Original plan"}});
+        for acknowledgment in [
+            serde_json::json!({"accepted": true}),
+            serde_json::json!("{\"accepted\":true}"),
+        ] {
+            let result = crate::schema::json_to_vm_value(&serde_json::json!({
+                "tool_name": "emit_plan", "arguments": arguments, "result": acknowledgment,
+            }));
+            let plan = plan_artifact_from_result(&result).expect("normalized arguments");
+            assert_eq!(plan["_type"], "plan_artifact");
+            assert_eq!(plan["summary"], "Original plan");
+        }
+
+        let typed = crate::llm::plan::normalize_plan_tool_call(
+            "emit_plan",
+            &serde_json::json!({"summary": "Host plan"}),
+        );
+        for host_result in [typed.clone(), serde_json::json!(typed.to_string())] {
+            let result = crate::schema::json_to_vm_value(&serde_json::json!({
+                "tool_name": "emit_plan", "arguments": arguments, "result": host_result,
+            }));
+            assert_eq!(plan_artifact_from_result(&result), Some(typed.clone()));
+        }
+        let malformed = serde_json::json!({"_type": "plan_artifact"});
+        let result = crate::schema::json_to_vm_value(&serde_json::json!({
+            "tool_name": "emit_plan", "arguments": arguments, "result": malformed,
+        }));
+        let plan = plan_artifact_from_result(&result).expect("typed result");
+        assert!(
+            crate::llm::plan::create_plan_document_event(plan, "agent", "emit_plan", "1", "1")
+                .is_err()
+        );
+    }
 
     #[test]
     fn resume_selects_the_latest_created_plan_document() {
