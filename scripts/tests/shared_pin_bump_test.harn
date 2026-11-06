@@ -3,6 +3,7 @@ import { assert_error_contains } from "std/testing"
 import {
   RELEASE_PATH_LINE,
   Request,
+  SECURITY_POLICY_PATH,
   branch_name,
   parse_request,
   pr_body,
@@ -25,8 +26,12 @@ type FakeGitHub = {gh: Gh, writes: fn() -> list<string>, written_paths: fn() -> 
 fn fake_call(scenario: string, args: list<string>) -> dict {
   const path = args[len(args) - 1]
   if path.contains("/contents/.github/workflows/ci.yml?") {
-    const text = scenario == "missing" ? "jobs: {}\n" : ship_workflow(OLD)
+    const text = scenario == "missing" ? "jobs: {}\n" : ["security_policy", "security_missing"]
+      .contains(scenario) ? security_workflow(OLD) : ship_workflow(OLD)
     return {success: true, stdout: text, stderr: ""}
+  }
+  if path.contains("/contents/scripts/lib/dependency-security-policy.json?") {
+    return {success: true, stdout: security_policy(OLD), stderr: ""}
   }
   if path.contains("/contents/.github/workflows/promote-release.yml?") {
     return {success: true, stdout: ship_workflow(OLD), stderr: ""}
@@ -103,7 +108,8 @@ fn fake_json(scenario: string, repo: string, args: list<string>) -> unknown {
       ]
         + (scenario == "action" ? [
           {path: ".github/actions/nested/action.yml", type: "blob", mode: "100644"},
-        ] : []),
+        ] : [])
+        + security_policy_tree_entry(scenario),
     }
   }
   if path == "repos/" + repo + "/git/commits/" + OLD {
@@ -120,6 +126,62 @@ fn fake_json(scenario: string, repo: string, args: list<string>) -> unknown {
       && args.contains("waiting") ? [{databaseId: 7}] : []
   }
   throw "unexpected GitHub JSON call " + join(args, " ")
+}
+
+fn security_workflow(sha: string) -> string {
+  return "uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@" + sha + "\n"
+}
+
+fn security_policy_tree_entry(scenario: string) -> list<dict> {
+  return scenario == "security_policy" ? [
+    {path: SECURITY_POLICY_PATH, type: "blob", mode: "100644"},
+  ] : []
+}
+
+fn security_policy(sha: string) -> string {
+  return json_stringify(
+    {
+      schemaVersion: "harn.dependency_security_policy.v1",
+      signerWorkflow: "burin-labs/.github/.github/workflows/dependency-security-proof.yml",
+      signerRevision: sha,
+      maximumAgeMs: 3600000,
+    },
+  )
+}
+
+pipeline test_security_signer_policy_moves_with_the_measured_workflow() {
+  const ref = "dependency-security-proof.yml"
+  const files = [
+    {path: ".github/workflows/ci.yml", text: security_workflow(OLD)},
+    {path: SECURITY_POLICY_PATH, text: security_policy(OLD)},
+  ]
+  assert_eq(
+    rewrite_files(files, request(ref)),
+    [
+      {path: ".github/workflows/ci.yml", text: security_workflow(NEW)},
+      {path: SECURITY_POLICY_PATH, text: security_policy(NEW)},
+    ],
+  )
+  assert_error_contains(
+    fn() { rewrite_files(
+      [
+        {path: ".github/workflows/ci.yml", text: security_workflow(OLD)},
+        {path: SECURITY_POLICY_PATH, text: security_policy(OTHER)},
+      ],
+      request(ref),
+    ) },
+    "does not match a measured workflow pin",
+  )
+  const fake = fake_github("security_policy")
+  const result = process_request(fake.gh, fake.gh, request(ref), "burin-labs/harn", "run")
+  assert(result.contains("opened pull request #42"), result)
+  assert_eq(fake.written_paths(), [".github/workflows/ci.yml", SECURITY_POLICY_PATH])
+  const missing = fake_github("security_missing")
+  assert_error_contains(
+    fn() { process_request(missing.gh, missing.gh, request(ref), "burin-labs/harn", "run") },
+    "signer policy is missing",
+  )
+  assert_eq(missing.writes(), [])
 }
 
 fn fake_github(scenario: string, repo: string = "burin-labs/harn") -> FakeGitHub {
