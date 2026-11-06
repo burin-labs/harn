@@ -55,8 +55,10 @@ an occurrence returned by any evaluator method. It makes no provider request.
 `kind: "retained"` carries a typed `receipt` with schema
 `harn.evaluation.accounting.v1`: occurrence and route identity, outcome,
 physical attempts, accounting status, tokens, settled cost, and budget charge.
+Its optional `usage_certainty` preserves the usage owner's known cost and
+unpriced-call coverage when a total bill remains unknown.
 Its optional `native_transport` preserves reported downstream attempts and
-provider, plus the requested data-control posture and outcome. Missing reports
+provider, plus the full data-control receipt, including caveats. Missing reports
 remain `nil`; a budget charge doesn't establish a settled provider bill.
 
 `kind: "unavailable"` carries `reason: "malformed_reference"`,

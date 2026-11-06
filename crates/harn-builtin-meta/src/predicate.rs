@@ -340,6 +340,47 @@ pub const EVALUATE_REQUEST: BuiltinSignature = BuiltinSignature::simple(
     EVALUATION_OUTCOME,
 );
 
+const DATA_CONTROLS_RECEIPT: Ty = Ty::Shape(&[
+    Field::new("requested_posture", STRING),
+    Field::new(
+        "outcome",
+        Ty::Union(&[
+            Ty::LitString("not_requested"),
+            Ty::LitString("applied"),
+            Ty::LitString("no_control_available"),
+            Ty::LitString("provider_unresearched"),
+        ]),
+    ),
+    Field::new("provider", STRING),
+    Field::new("model", STRING),
+    Field::optional("training_default", STRING),
+    Field::optional("account_confirmation_applied", BOOL),
+    Field::optional("control_scope", STRING),
+    Field::optional(
+        "applied",
+        Ty::Apply(
+            "list",
+            &[Ty::Shape(&[
+                Field::new("location", STRING),
+                Field::new("name", STRING),
+                // Preserve the provider's opaque JSON control value without coercion.
+                Field::new("value", Ty::Any),
+                Field::new("effect", STRING),
+                Field::optional("caveat", STRING),
+            ])],
+        ),
+    ),
+    Field::optional("note", STRING),
+    Field::optional("inference_boundary_rule", STRING),
+    Field::optional(
+        "inference_catalog_evidence",
+        Ty::Shape(&[
+            Field::new("local_runtime", BOOL),
+            Field::new("open_weight", Ty::Union(&[BOOL, NIL])),
+        ]),
+    ),
+]);
+
 /// Accounting facts projected from the execution's retained evaluation receipt.
 pub const EVALUATION_ACCOUNTING: Ty = Ty::Shape(&[
     Field::new("schema", Ty::LitString("harn.evaluation.accounting.v1")),
@@ -373,29 +414,28 @@ pub const EVALUATION_ACCOUNTING: Ty = Ty::Shape(&[
     Field::new("cost_usd", Ty::Union(&[FLOAT, NIL])),
     Field::new("budget_charge_usd", Ty::Union(&[FLOAT, NIL])),
     Field::new(
+        "usage_certainty",
+        Ty::Union(&[
+            NIL,
+            Ty::Shape(&[
+                Field::new("known_cost_usd", FLOAT),
+                Field::new("provider_call_count", INT),
+                Field::new("unpriced_calls", INT),
+                Field::new("usage_unknown_calls", INT),
+                Field::new("unpriced_tokens", INT),
+                Field::new("unpriced_reason", Ty::Union(&[STRING, NIL])),
+                Field::new("projected_cost_usd", Ty::Union(&[FLOAT, NIL])),
+            ]),
+        ]),
+    ),
+    Field::new(
         "native_transport",
         Ty::Union(&[
             NIL,
             Ty::Shape(&[
                 Field::new("provider_attempts_reported", Ty::Union(&[INT, NIL])),
                 Field::new("final_provider_reported", Ty::Union(&[STRING, NIL])),
-                Field::new(
-                    "data_controls",
-                    Ty::Shape(&[
-                        Field::new("requested_posture", STRING),
-                        Field::new(
-                            "outcome",
-                            Ty::Union(&[
-                                Ty::LitString("not_requested"),
-                                Ty::LitString("applied"),
-                                Ty::LitString("no_control_available"),
-                                Ty::LitString("provider_unresearched"),
-                            ]),
-                        ),
-                        Field::new("provider", STRING),
-                        Field::new("model", STRING),
-                    ]),
-                ),
+                Field::new("data_controls", DATA_CONTROLS_RECEIPT),
             ]),
         ]),
     ),

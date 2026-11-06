@@ -208,16 +208,23 @@ pub struct EvaluationReceipt {
 
 impl EvaluationReceipt {
     pub(crate) fn accounting_value(&self) -> crate::VmValue {
+        let usage_certainty = self.usage.as_ref().map(|usage| {
+            let certainty = crate::llm::usage::summarize_usage_cost_certainty([usage.as_ref()]);
+            serde_json::json!({
+                "known_cost_usd": certainty.known_cost_usd,
+                "provider_call_count": certainty.provider_call_count,
+                "unpriced_calls": certainty.unpriced_calls,
+                "usage_unknown_calls": certainty.usage_unknown_calls,
+                "unpriced_tokens": certainty.unpriced_tokens,
+                "unpriced_reason": certainty.unpriced_reason.map(|reason| reason.as_str()),
+                "projected_cost_usd": certainty.projected_cost_usd(),
+            })
+        });
         let transport = self.native_transport.as_ref().map(|transport| {
             serde_json::json!({
                 "provider_attempts_reported": transport.provider_attempts_reported,
                 "final_provider_reported": transport.final_provider_reported,
-                "data_controls": {
-                    "requested_posture": transport.data_controls.requested_posture,
-                    "outcome": transport.data_controls.outcome,
-                    "provider": transport.data_controls.provider,
-                    "model": transport.data_controls.model,
-                },
+                "data_controls": transport.data_controls,
             })
         });
         crate::schema::json_to_vm_value(&serde_json::json!({
@@ -228,7 +235,7 @@ impl EvaluationReceipt {
             "physical_attempts": self.physical_attempts, "accounting_status": self.accounting_status,
             "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
             "cost_usd": self.cost_usd, "budget_charge_usd": self.budget_charge_usd,
-            "native_transport": transport,
+            "native_transport": transport, "usage_certainty": usage_certainty,
         }))
     }
 
