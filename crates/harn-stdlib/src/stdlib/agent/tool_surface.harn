@@ -282,6 +282,15 @@ fn __tool_surface_removed(candidates: list, used: string | list, config: dict) {
   return removed
 }
 
+fn __tool_surface_hard_keep(opts: dict) -> list {
+  const configured = opts?.tool_surface_narrowing?.hard_keep ?? []
+  return if len(opts?._read_only_stance_tools ?? []) > 0 {
+    configured + [opts?.read_only_stance?.escape_tool ?? "request_write_access"]
+  } else {
+    configured
+  }
+}
+
 fn __tool_surface_removed_names(details: list) {
   let names = []
   for detail in details {
@@ -401,12 +410,7 @@ pub fn agent_narrow_tool_surface_at_user_boundary(
     return __tool_surface_record_boundary(agent, session, boundary_opts)
   }
   const used = __tool_surface_window_used(history)
-  const escape_tool = if len(opts?._read_only_stance_tools ?? []) > 0 {
-    opts?.read_only_stance?.escape_tool ?? "request_write_access"
-  } else {
-    ""
-  }
-  const hard_keep = (config?.hard_keep ?? []) + [escape_tool]
+  const hard_keep = __tool_surface_hard_keep(opts)
   const removed_details = __tool_surface_removed(
     candidate_entries,
     used,
@@ -539,10 +543,17 @@ pub fn agent_apply_tool_surface_narrowing(opts: dict) {
     return base
   }
   const claimed_tool = trim(to_string(opts?._next_tool_claim?.tool_name ?? ""))
-  const effective_names = if claimed_tool != "" && !contains(names, claimed_tool) {
+  let effective_names = if claimed_tool != "" && !contains(names, claimed_tool) {
     names + [claimed_tool]
   } else {
     names
+  }
+  // Skills and tool search can mount a hard-kept tool after the boundary's
+  // candidate census. Keep those registered tools without widening policy.
+  for name in __tool_surface_hard_keep(opts) {
+    if !contains(effective_names, name) {
+      effective_names = effective_names + [name]
+    }
   }
   return base
     + {

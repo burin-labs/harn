@@ -30,7 +30,14 @@
         "name": "config"
       },
       {
-        "function": "__tool_surface_narrowing_post_turn",
+        "function": "agent_narrow_tool_surface_at_user_boundary",
+        "name": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      },
+      {
+        "function": "__tool_surface_hard_keep",
         "name": "opts",
         "path": [
           "tool_surface_narrowing"

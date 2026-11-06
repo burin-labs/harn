@@ -926,7 +926,19 @@
         "name": "opts"
       },
       {
-        "function": "__tool_surface_narrowing_post_turn",
+        "function": "agent_narrow_tool_surface_at_user_boundary",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_hard_keep",
+        "name": "opts"
+      },
+      {
+        "function": "__tool_surface_record_boundary",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_reopen_tool_surface",
         "name": "opts"
       },
       {

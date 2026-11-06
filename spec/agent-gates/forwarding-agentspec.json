@@ -816,7 +816,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "agent_reset_tool_surface_narrowing(opts)",
     "owner": "agent_reset_tool_surface_narrowing",
     "evidence": "Consumer agent_reset_tool_surface_narrowing.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -831,13 +831,13 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "agent_reset_tool_surface_narrowing(turn_opts)",
-    "owner": "agent_reset_tool_surface_narrowing",
-    "evidence": "Consumer agent_reset_tool_surface_narrowing.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "expression": "__agent_reopen_tool_surface(harness.agent, session, opts)",
+    "owner": "__agent_reopen_tool_surface",
+    "evidence": "The session-aware skill reopening owner forwards AgentSpec to the existing pure reset and records its runtime boundary decision; literal configuration reads remain independently bound.",
     "consumers": [
       {
         "scope": "AgentSpec",
-        "function": "agent_reset_tool_surface_narrowing",
+        "function": "__agent_reopen_tool_surface",
         "parameter": "opts"
       }
     ]
@@ -1663,14 +1663,14 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-    "expression": "__tool_surface_narrowing_post_turn(harness.agent, session, llm_result, dispatch_results, opts)",
-    "owner": "__tool_surface_narrowing_post_turn",
-    "evidence": "Consumer __tool_surface_narrowing_post_turn.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_narrow_tool_surface_at_user_boundary(harness.agent, session, opts)",
+    "owner": "agent_narrow_tool_surface_at_user_boundary",
+    "evidence": "The user-boundary narrowing owner receives AgentSpec and audits its literal configuration reads through its independently bound opts parameter.",
     "consumers": [
       {
         "scope": "AgentSpec",
-        "function": "__tool_surface_narrowing_post_turn",
+        "function": "agent_narrow_tool_surface_at_user_boundary",
         "parameter": "opts"
       }
     ]

@@ -549,15 +549,36 @@
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "opts?._tool_surface_narrowed_tools",
-    "owner": "__tool_surface_narrowing_post_turn",
+    "owner": "__tool_surface_record_boundary",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-    "expression": "opts?._tool_surface_narrowing_history",
-    "owner": "__tool_surface_narrowing_post_turn",
+    "expression": "opts?._tool_surface_user_boundary",
+    "owner": "agent_narrow_tool_surface_at_user_boundary",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts._tool_surface_user_boundary",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "Canonical source identity of the user message whose derived surface decision is recorded; runtime state, not caller configuration."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._tool_surface_user_boundary",
+    "owner": "__agent_reopen_tool_surface",
+    "evidence": "An explicit skill activation updates the already-recorded user-boundary surface decision; this source identity is runtime state."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "opts?._read_only_stance_tools",
+    "owner": "__tool_surface_hard_keep",
+    "evidence": "The stance owner supplies the currently armed tool window; it is derived runtime authority rather than an independent caller setting."
   },
   {
     "scope": "AgentSpec",
