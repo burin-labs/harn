@@ -314,6 +314,20 @@ impl AcpClient {
     fn start(config: AcpServerConfig) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (response_tx, response_rx) = mpsc::unbounded_channel();
+        // The API projects Harn updates into its own events and permission
+        // lifecycle. Negotiate them before any caller can enqueue work.
+        request_tx
+            .send(json!({
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": 1, "clientCapabilities": {
+                    "_meta": {"harn": {"sessionUpdateExtensions":
+                        crate::adapters::acp::ACP_SESSION_UPDATE_VARIANTS.iter()
+                            .chain(crate::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS.iter())
+                            .collect::<Vec<_>>()
+                    }}
+                }}
+            }))
+            .expect("initialize internal ACP connection");
         harn_parser::runtime_stack::builder()
             .name("harn-acp-client".to_owned())
             .spawn(move || {
