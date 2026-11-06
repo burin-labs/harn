@@ -571,7 +571,7 @@ fn __pr_number(build: dict) {
   return pr?.id ?? pr?.number
 }
 
-fn __job(job: dict) {
+fn __job(job: dict?) {
   if job == nil {
     return nil
   }
@@ -603,7 +603,7 @@ fn __dedupe_key(event: string, pipeline_slug: string?, build: dict) {
     + to_string(build?.state ?? "")
 }
 
-fn __occurred_at(build: dict, job: dict, raw: dict) {
+fn __occurred_at(build: dict, job: dict?, raw: dict) {
   if raw?.occurred_at != nil {
     return raw.occurred_at
   }
