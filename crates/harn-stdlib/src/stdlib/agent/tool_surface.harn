@@ -346,7 +346,7 @@ fn __tool_surface_remaining(candidates: list, removed: string | list) {
  * results and harness directives have distinct canonical event kinds or
  * visibility, even when their provider transport role is `user`.
  *
- * @effects: []
+ * @effects: [agent]
  * @errors: []
  * @api_stability: experimental
  */
