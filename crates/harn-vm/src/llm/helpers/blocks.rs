@@ -2,11 +2,13 @@ use crate::value::VmDictExt;
 
 use crate::value::VmValue;
 
+pub(crate) const PUBLIC_VISIBILITY: &str = "public";
+
 pub(super) fn default_visibility_for_role(role: &str) -> &'static str {
     if harn_orchestration::tool_messages::is_tool_result_role(role) {
         "internal"
     } else {
-        "public"
+        PUBLIC_VISIBILITY
     }
 }
 
@@ -55,7 +57,7 @@ pub(super) fn overall_visibility(blocks: &[VmValue], default_visibility: &str) -
             .get("visibility")
             .map(|value| value.display())
             .unwrap_or_else(|| default_visibility.to_string());
-        if visibility == "public" {
+        if visibility == PUBLIC_VISIBILITY {
             return visibility;
         }
         if visibility == "internal" {

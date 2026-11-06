@@ -104,7 +104,7 @@ pub(crate) fn compute_transcript_stats(transcript: &VmValue) -> TranscriptStats 
 
     for event in &events {
         let Some(ev) = event.as_dict() else { continue };
-        if string_field(ev, "visibility").as_deref() == Some("visible") {
+        if string_field(ev, "visibility").as_deref() == Some(super::helpers::PUBLIC_VISIBILITY) {
             stats.visible_event_count += 1;
         }
     }
@@ -197,9 +197,9 @@ mod tests {
     fn stats_counts_visible_events() {
         let transcript = transcript_from_json(serde_json::json!({
             "events": [
-                {"kind": "message", "visibility": "visible"},
-                {"kind": "message", "visibility": "visible"},
-                {"kind": "tool_result", "visibility": "hidden"},
+                {"kind": "message", "visibility": "public"},
+                {"kind": "message", "visibility": "public"},
+                {"kind": "tool_result", "visibility": "internal"},
             ],
         }));
         let stats = compute_transcript_stats(&transcript);
