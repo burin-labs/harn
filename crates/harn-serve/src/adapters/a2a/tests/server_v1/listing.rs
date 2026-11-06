@@ -8,6 +8,8 @@ async fn list_filters_pages_and_projects_real_completed_tasks() {
     for context in ["shared", "other", "shared"] {
         let mut params = send_params();
         params["message"]["contextId"] = json!(context);
+        params["message"]["parts"] =
+            json!([{"text":"hello"}, {"data":{"artifact_witness":context}}]);
         let (_, sent) = rpc(router.clone(), "1.0", "SendMessage", params).await;
         let task = &sent["result"]["task"];
         assert_eq!(task["status"]["state"], "TASK_STATE_COMPLETED", "{sent}");
