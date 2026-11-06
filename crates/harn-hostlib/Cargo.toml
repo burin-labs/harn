@@ -177,7 +177,7 @@ grep-regex = "0.1"
 ignore = "0.4"
 notify = "8"
 rusqlite.workspace = true
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 globset = "0.4"
 walkdir = "2"
 base64 = "0.23"
