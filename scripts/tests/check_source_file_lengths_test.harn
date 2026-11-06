@@ -36,22 +36,10 @@ pipeline test_ci_report_preserves_failure_output_under_errexit(harness: Harness,
   )
 }
 
-fn mkdirs(harness: Harness, path: string) -> nil {
-  if path == "" || path == "." || harness.fs.exists(path) {
-    return nil
-  }
-  const parent = dirname(path) ?? ""
-  if parent != "" && parent != path {
-    mkdirs(harness, parent)
-  }
-  harness.fs.mkdir(path)
-  return nil
-}
-
-fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil {
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(harness, dirname(path) ?? root)
-  harness.fs.write_text(path, text)
+  fs.mkdir(dirname(path) ?? root)
+  fs.write_text(path, text)
   return nil
 }
 
@@ -60,24 +48,24 @@ fn source_text(lines: int, newline: string = "\n") -> string {
 }
 
 fn write_source(
-  harness: Harness,
+  fs: HarnessFs,
   root: string,
   rel: string,
   lines: int,
   newline: string = "\n",
 ) -> nil {
-  write_text(harness, root, rel, source_text(lines, newline))
+  write_text(fs, root, rel, source_text(lines, newline))
   return nil
 }
 
 fn write_inventory(
-  harness: Harness,
+  fs: HarnessFs,
   root: string,
   paths: list<string>,
   identities: dict<string, string> = {},
 ) -> nil {
   write_text(
-    harness,
+    fs,
     root,
     "scripts/source-file-length-legacy.json",
     json_stringify_pretty(
@@ -264,14 +252,19 @@ pipeline test_source_scope_and_windows_path_normalization(harness: Harness, task
   with_temp_dir(
     harness.fs,
     { root ->
-      write_source(harness, root, "crates/app/src/lib.rs", 1)
-      write_source(harness, root, "crates/app/tests/integration.rs", 1)
-      write_source(harness, root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
-      write_source(harness, root, "crates/harn-stdlib/tests/fixture.harn", 1)
-      write_source(harness, root, "spec/protocol-artifacts/generated.rs", 1)
-      write_source(harness, root, "crates/harn-aws-config/src/lib.rs", 1721)
-      write_source(harness, root, "crates/harn-vm/src/llm/providers/bedrock/session_client.rs", 1)
-      write_source(harness, root, "target/debug/generated.rs", 1)
+      write_source(harness.fs, root, "crates/app/src/lib.rs", 1)
+      write_source(harness.fs, root, "crates/app/tests/integration.rs", 1)
+      write_source(harness.fs, root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
+      write_source(harness.fs, root, "crates/harn-stdlib/tests/fixture.harn", 1)
+      write_source(harness.fs, root, "spec/protocol-artifacts/generated.rs", 1)
+      write_source(harness.fs, root, "crates/harn-aws-config/src/lib.rs", 1721)
+      write_source(
+        harness.fs,
+        root,
+        "crates/harn-vm/src/llm/providers/bedrock/session_client.rs",
+        1,
+      )
+      write_source(harness.fs, root, "target/debug/generated.rs", 1)
       assert_eq(
         source_files(harness, root),
         [
@@ -294,9 +287,9 @@ pipeline test_merge_base_and_first_parent_resolve_without_fetching(
     harness.fs,
     { root ->
       init_repo(harness.process, root)
-      write_text(harness, root, "tracked.txt", "base\n")
+      write_text(harness.fs, root, "tracked.txt", "base\n")
       const base = commit_all(harness.process, root, "base")
-      write_text(harness, root, "tracked.txt", "head\n")
+      write_text(harness.fs, root, "tracked.txt", "head\n")
       commit_all(harness.process, root, "head")
       const merge = resolve_base_revision(harness.process, root, "merge-base", base)
       assert_eq(merge.ok, true)
@@ -320,9 +313,9 @@ pipeline test_missing_and_shallow_bases_fail_with_actionable_diagnostics(
       const origin = path_join(root, "origin")
       harness.fs.mkdir(origin)
       init_repo(harness.process, origin)
-      write_text(harness, origin, "tracked.txt", "root\n")
+      write_text(harness.fs, origin, "tracked.txt", "root\n")
       commit_all(harness.process, origin, "root")
-      write_text(harness, origin, "tracked.txt", "tip\n")
+      write_text(harness.fs, origin, "tracked.txt", "tip\n")
       commit_all(harness.process, origin, "tip")
       const shallow = path_join(root, "shallow")
       git_ok(harness.process, root, ["clone", "-q", "--depth", "1", "--no-local", origin, shallow])
@@ -344,17 +337,17 @@ pipeline test_git_path_argv_and_crlf_counts_work_end_to_end(harness: Harness, ta
       const path = "crates/example/src/large file [policy].rs"
       const second_path = "crates/example/src/another large policy.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, path, 1502, "\r\n")
-      write_text(harness, root, second_path, "source line\n".repeat(1501) + "final line")
-      write_inventory(harness, root, [second_path, path])
+      write_source(harness.fs, root, path, 1502, "\r\n")
+      write_text(harness.fs, root, second_path, "source line\n".repeat(1501) + "final line")
+      write_inventory(harness.fs, root, [second_path, path])
       const base = commit_all(harness.process, root, "base with quoted path")
-      write_source(harness, root, path, 1501, "\r\n")
-      write_source(harness, root, second_path, 1501)
+      write_source(harness.fs, root, path, 1501, "\r\n")
+      write_source(harness.fs, root, second_path, 1501)
       commit_all(harness.process, root, "shrink")
       let report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(report.findings, [])
       assert_eq(report.base_revision, base)
-      write_source(harness, root, path, 1503, "\r\n")
+      write_source(harness.fs, root, path, 1503, "\r\n")
       commit_all(harness.process, root, "growth")
       report = check_source_file_lengths(harness, root, "first-parent")
       assert_eq(finding_kinds(report.findings), ["growth"])
@@ -374,9 +367,9 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       const old_path = "crates/example/src/large policy.rs"
       const new_path = "crates/example/src/renamed policy [v2].rs"
       init_repo(harness.process, root)
-      write_source(harness, root, old_path, 1502)
+      write_source(harness.fs, root, old_path, 1502)
       write_text(
-        harness,
+        harness.fs,
         root,
         "scripts/source-file-length-baseline/" + old_path + ".lines",
         "1502\n",
@@ -384,10 +377,10 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       const base = commit_all(harness.process, root, "base")
       git_ok(harness.process, root, ["rm", "-q", "-r", "scripts/source-file-length-baseline"])
       git_ok(harness.process, root, ["mv", old_path, new_path])
-      write_text(harness, root, new_path, "completely rewritten line\n".repeat(1501))
+      write_text(harness.fs, root, new_path, "completely rewritten line\n".repeat(1501))
       let identities: dict<string, string> = {}
       identities[new_path] = old_path
-      write_inventory(harness, root, [new_path], identities)
+      write_inventory(harness.fs, root, [new_path], identities)
       commit_all(harness.process, root, "rename and rewrite")
       const diff = git_ok(
         harness.process,
@@ -397,7 +390,7 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       assert_eq(diff.contains("D\t" + old_path), true)
       assert_eq(diff.contains("A\t" + new_path), true)
       assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
-      write_source(harness, root, new_path, 1503)
+      write_source(harness.fs, root, new_path, 1503)
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["growth"])
       assert_eq(report.findings[0]?.ceiling, 1502)
@@ -416,14 +409,14 @@ pipeline test_rename_cannot_promote_excluded_source_into_legacy_policy(
       const old_path = "spec/protocol-artifacts/generated.rs"
       const new_path = "crates/example/src/generated.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, old_path, 1502)
-      write_inventory(harness, root, [])
+      write_source(harness.fs, root, old_path, 1502)
+      write_inventory(harness.fs, root, [])
       const base = commit_all(harness.process, root, "excluded base")
-      mkdirs(harness, dirname(path_join(root, new_path)) ?? root)
+      harness.fs.mkdir(dirname(path_join(root, new_path)) ?? root)
       git_ok(harness.process, root, ["mv", old_path, new_path])
       let identities: dict<string, string> = {}
       identities[new_path] = old_path
-      write_inventory(harness, root, [new_path], identities)
+      write_inventory(harness.fs, root, [new_path], identities)
       commit_all(harness.process, root, "promote excluded source")
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
@@ -443,15 +436,15 @@ pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
       const smaller = "crates/example/src/smaller.rs"
       const larger = "crates/example/src/larger.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, smaller, 1600)
-      write_source(harness, root, larger, 2000)
-      write_inventory(harness, root, [larger, smaller])
+      write_source(harness.fs, root, smaller, 1600)
+      write_source(harness.fs, root, larger, 2000)
+      write_inventory(harness.fs, root, [larger, smaller])
       const base = commit_all(harness.process, root, "two ceilings")
-      write_source(harness, root, smaller, 1900)
+      write_source(harness.fs, root, smaller, 1900)
       git_ok(harness.process, root, ["rm", larger])
       let identities: dict<string, string> = {}
       identities[smaller] = larger
-      write_inventory(harness, root, [smaller], identities)
+      write_inventory(harness.fs, root, [smaller], identities)
       commit_all(harness.process, root, "attempt identity transfer")
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
@@ -464,15 +457,15 @@ pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
       const identity_path = "crates/example/src/original.rs"
       const legacy_path = "crates/example/src/renamed.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, identity_path, 1400)
-      write_source(harness, root, legacy_path, 2000)
+      write_source(harness.fs, root, identity_path, 1400)
+      write_source(harness.fs, root, legacy_path, 2000)
       let base_ids: dict<string, string> = {}
       base_ids[legacy_path] = identity_path
-      write_inventory(harness, root, [legacy_path], base_ids)
+      write_inventory(harness.fs, root, [legacy_path], base_ids)
       const base = commit_all(harness.process, root, "identity path reintroduced below cap")
-      write_source(harness, root, identity_path, 1900)
+      write_source(harness.fs, root, identity_path, 1900)
       git_ok(harness.process, root, ["rm", legacy_path])
-      write_inventory(harness, root, [identity_path])
+      write_inventory(harness.fs, root, [identity_path])
       commit_all(harness.process, root, "attempt identity return")
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
@@ -485,14 +478,14 @@ pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
       const original = "crates/example/src/original.rs"
       const added = "crates/example/src/added.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, original, 2000)
-      write_inventory(harness, root, [original])
+      write_source(harness.fs, root, original, 2000)
+      write_inventory(harness.fs, root, [original])
       const base = commit_all(harness.process, root, "one ceiling")
-      write_source(harness, root, original, 1400)
-      write_source(harness, root, added, 1900)
+      write_source(harness.fs, root, original, 1400)
+      write_source(harness.fs, root, added, 1900)
       let identities: dict<string, string> = {}
       identities[added] = original
-      write_inventory(harness, root, [added], identities)
+      write_inventory(harness.fs, root, [added], identities)
       commit_all(harness.process, root, "attempt identity copy")
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
@@ -513,23 +506,23 @@ pipeline test_stable_identity_survives_repeated_low_similarity_renames(
       const middle = "crates/example/src/middle.rs"
       const latest = "crates/example/src/latest.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, identity, 1502)
-      write_inventory(harness, root, [identity])
+      write_source(harness.fs, root, identity, 1502)
+      write_inventory(harness.fs, root, [identity])
       commit_all(harness.process, root, "original")
       git_ok(harness.process, root, ["mv", identity, middle])
-      write_text(harness, root, middle, "middle rewrite\n".repeat(1501))
+      write_text(harness.fs, root, middle, "middle rewrite\n".repeat(1501))
       let middle_ids: dict<string, string> = {}
       middle_ids[middle] = identity
-      write_inventory(harness, root, [middle], middle_ids)
+      write_inventory(harness.fs, root, [middle], middle_ids)
       const base = commit_all(harness.process, root, "first rename")
       git_ok(harness.process, root, ["mv", middle, latest])
-      write_text(harness, root, latest, "latest rewrite\n".repeat(1501))
+      write_text(harness.fs, root, latest, "latest rewrite\n".repeat(1501))
       let latest_ids: dict<string, string> = {}
       latest_ids[latest] = identity
-      write_inventory(harness, root, [latest], latest_ids)
+      write_inventory(harness.fs, root, [latest], latest_ids)
       commit_all(harness.process, root, "second rename")
       assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
-      write_text(harness, root, latest, "latest growth\n".repeat(1502))
+      write_text(harness.fs, root, latest, "latest growth\n".repeat(1502))
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["growth"])
       assert_eq(report.findings[0]?.ceiling, 1501)
@@ -570,13 +563,13 @@ pipeline test_oversized_debt_main_carries_is_reported_not_blamed_on_this_change(
       const carried = "crates/example/src/carried.rs"
       const touched = "crates/example/src/touched.rs"
       init_repo(harness.process, root)
-      write_source(harness, root, touched, 10)
-      write_inventory(harness, root, [])
+      write_source(harness.fs, root, touched, 10)
+      write_inventory(harness.fs, root, [])
       const before = commit_all(harness.process, root, "clean base")
-      write_source(harness, root, carried, 1600)
+      write_source(harness.fs, root, carried, 1600)
       const base = commit_all(harness.process, root, "main lands an oversized file")
       // A change set that never touched the oversized file inherits it.
-      write_source(harness, root, touched, 20)
+      write_source(harness.fs, root, touched, 20)
       commit_all(harness.process, root, "unrelated change")
       const inherited = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(inherited.findings), ["new_oversized_source"])
@@ -593,7 +586,7 @@ pipeline test_oversized_debt_main_carries_is_reported_not_blamed_on_this_change(
       assert_eq(introduced.blocking_count, 1)
       assert_eq(introduced.carried_count, 0)
       // Second negative control: touching the oversized file at all blames it.
-      write_source(harness, root, carried, 1601)
+      write_source(harness.fs, root, carried, 1601)
       commit_all(harness.process, root, "touch the oversized file")
       const touched_report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(touched_report.blocking_count, 1)

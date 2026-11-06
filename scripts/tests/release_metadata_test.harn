@@ -182,24 +182,9 @@ fn assert_throws_eq(body: unknown, expected: string) -> nil {
   return nil
 }
 
-fn mkdirs(fs: HarnessFs, path: string) -> nil {
-  const parts = split(path_normalize(path), "/")
-  let current = path.starts_with("/") ? "/" : ""
-  for part in parts {
-    if part == "" {
-      continue
-    }
-    current = current == "" || current == "/" ? current + part : path_join(current, part)
-    if !fs.exists(current) {
-      fs.mkdir(current)
-    }
-  }
-  return nil
-}
-
 fn write_fixture(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(fs, dirname(path) ?? root)
+  fs.mkdir(dirname(path) ?? root)
   fs.write_text(path, text)
   return nil
 }

@@ -6,32 +6,9 @@ const PACKAGES = [
   {dir: "crates/harn-vm", name: "harn-vm"},
 ]
 
-fn mkdirs(fs: HarnessFs, path: string) -> nil {
-  const parts = split(path_normalize(path), "/")
-  let current = if path.starts_with("/") {
-    "/"
-  } else {
-    ""
-  }
-  for part in parts {
-    if part == "" {
-      continue
-    }
-    current = if current == "" || current == "/" {
-      current + part
-    } else {
-      path_join(current, part)
-    }
-    if !fs.exists(current) {
-      fs.mkdir(current)
-    }
-  }
-  return nil
-}
-
 fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(fs, dirname(path) ?? root)
+  fs.mkdir(dirname(path) ?? root)
   fs.write_text(path, text)
   return nil
 }
