@@ -719,8 +719,17 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
   }
   const deferred = new Set(['Consumer release rehearsal / Consumer canary',
     'Consumer release rehearsal / Settled verdict','Release candidate verdict']);
+  // Current source-candidate builds deliberately defer all consumer work to
+  // promotion. Their skipped reusable job and successful candidate verdict
+  // identify that shape; neither is evidence of a consumer rehearsal.
+  const archiveRehearsal=jobs.find(job=>job.name==='Consumer release rehearsal');
+  const archiveOnly=run.event==='workflow_dispatch' && run.status==='completed'
+    && run.conclusion==='success' && archiveRehearsal?.status==='completed'
+    && archiveRehearsal.conclusion==='skipped';
+  if (archiveRehearsal && !archiveOnly) refuse('archive_producer_builds_unproven');
   const required = ['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
-    'Consumer release rehearsal / Decide whether main moved',
+    ...(archiveOnly?['Qualify candidate source','Qualify native release source','Release candidate verdict']:
+      ['Consumer release rehearsal / Decide whether main moved']),
     ...targets.map(target=>`Build ${target}`),
     ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
   const securityRoot='Candidate dependency security';
@@ -741,6 +750,8 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
       || !(job.status==='completed' && job.conclusion==='success'
         || job.name==='Report cache budget' && job.status==='completed' && job.conclusion==='skipped'
         || securitySkips.has(job.name)
+          && job.status==='completed' && job.conclusion==='skipped'
+        || archiveOnly && job.name==='Consumer release rehearsal'
           && job.status==='completed' && job.conclusion==='skipped'
         || job.name==='Release residual audit' && auditPending
         || deferred.has(job.name) && (liveStates.has(job.status) && job.conclusion===null
