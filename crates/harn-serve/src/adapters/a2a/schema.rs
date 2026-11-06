@@ -103,7 +103,9 @@ impl A2aServer {
 
 pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
     let context = task.context_id.as_deref().unwrap_or(&task.id);
-    event["contextId"] = json!(context);
+    if let Some(context) = &task.context_id {
+        event["contextId"] = json!(context);
+    }
     match event
         .get("type")
         .or_else(|| event.get("kind"))
@@ -132,13 +134,7 @@ pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
         _ if event.get("artifact").is_some() => {
             event["kind"] = json!("artifact-update");
         }
-        _ => {
-            let data = event.clone();
-            event["kind"] = json!("message");
-            event["messageId"] = json!(Uuid::now_v7().to_string());
-            event["role"] = json!("agent");
-            event["parts"] = json!([{"kind":"data", "data":data}]);
-        }
+        _ => {}
     }
     task.events.push(event.clone());
     task.subscribers.retain(|(version, tx)| {

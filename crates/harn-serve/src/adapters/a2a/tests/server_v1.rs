@@ -51,7 +51,9 @@ fn legacy_fixture_stream_valid(value: &JsonValue) -> bool {
         && value
             .get("id")
             .is_some_and(|id| legacy_profile_schema("RequestId").is_valid(id))
-        && event["contextId"].as_str().is_some_and(|id| !id.is_empty())
+        && event
+            .get("contextId")
+            .is_none_or(|context| context.is_null() || context.is_string())
         && !["task", "statusUpdate", "artifactUpdate"]
             .iter()
             .any(|key| event.get(key).is_some())
@@ -545,6 +547,9 @@ async fn legacy_discovery_and_stream_match_the_pinned_profile() {
     let mut missing_id = frames[0].clone();
     missing_id.as_object_mut().unwrap().remove("id");
     assert!(!legacy_fixture_stream_valid(&missing_id));
+    let mut invalid_context = frames[0].clone();
+    invalid_context["result"]["contextId"] = json!(true);
+    assert!(!legacy_fixture_stream_valid(&invalid_context));
     let modern_wrapper = json!({"jsonrpc":"2.0", "id":"legacy-stream", "result":{"statusUpdate":frames[0]["result"]}});
     assert!(!legacy_fixture_stream_valid(&modern_wrapper));
     let mut broken_message = frames

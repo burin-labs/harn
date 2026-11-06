@@ -848,6 +848,7 @@ fn hitl_requested_event_transitions_task_into_input_required() {
     // subscribers can observe the resume before the task ultimately
     // completes / fails.
     let task_id = "task-hitl".to_string();
+    let (legacy_tx, mut legacy_rx) = unbounded();
     let task = TaskState {
         principal: None,
         status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
@@ -858,7 +859,7 @@ fn hitl_requested_event_transitions_task_into_input_required() {
         artifacts: Vec::new(),
         metadata: BTreeMap::new(),
         events: Vec::new(),
-        subscribers: Vec::new(),
+        subscribers: vec![(harn_vm::a2a::A2aWireVersion::V0_3, legacy_tx)],
         cancel_token: None,
     };
     let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
@@ -873,6 +874,13 @@ fn hitl_requested_event_transitions_task_into_input_required() {
         kind: "question".into(),
         payload: serde_json::json!({"prompt": "Approve?"}),
     });
+
+    let published = futures::FutureExt::now_or_never(legacy_rx.next())
+        .flatten()
+        .expect("published legacy extension");
+    assert_eq!(published["result"]["kind"], "question");
+    assert_eq!(published["result"]["payload"]["prompt"], "Approve?");
+    assert!(published["result"].get("contextId").is_none());
 
     {
         let tasks = tasks.lock().expect("tasks");

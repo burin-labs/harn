@@ -38,4 +38,19 @@ pub(super) fn events_json(events: &[JsonValue]) -> String {
 
 pub(super) fn is_progress_status_update(event: &JsonValue) -> bool {
     event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update")
+        && event
+            .pointer("/result/status/state")
+            .and_then(JsonValue::as_str)
+            == Some("working")
+        && event.pointer("/result/final").and_then(JsonValue::as_bool) == Some(false)
+        && event
+            .pointer("/result/status/message/parts")
+            .and_then(JsonValue::as_array)
+            .is_some_and(|parts| {
+                parts.iter().any(|part| {
+                    part.get("text")
+                        .and_then(JsonValue::as_str)
+                        .is_some_and(|text| !text.is_empty())
+                })
+            })
 }
