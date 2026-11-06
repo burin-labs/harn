@@ -1,4 +1,4 @@
-use harn_session_store::{SessionMeta, SessionStore, SessionWriteLease, StoreError};
+use harn_session_store::{SessionMeta, SessionWriteLease};
 
 use super::CanonicalStoreDir;
 use crate::value::VmError;
@@ -28,11 +28,10 @@ pub(crate) async fn inspect_closed_session_checkpoint(
         SessionWriteLease::try_acquire(state_dir.as_path(), session_id).map_err(|error| {
             crate::stdlib::session_store::session_lease_error("session continuation", error)
         })?;
-    let store = crate::stdlib::session_store::open_store(&state_dir)?;
-    let meta = match store.describe(session_id).await {
-        Ok(meta) => meta,
-        Err(StoreError::NotFound(_)) => return Ok(None),
-        Err(error) => return Err(VmError::Runtime(format!("session continuation: {error}"))),
+    let Some(meta) =
+        crate::stdlib::session_store::describe_closed_checkpoint(&state_dir, session_id).await?
+    else {
+        return Ok(None);
     };
     Ok(Some(CanonicalSessionCheckpoint {
         state_dir,
