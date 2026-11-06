@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::num::NonZeroU16;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -32,13 +33,13 @@ pub struct SessionOptions {
 }
 
 impl SessionOptions {
-    pub(crate) fn validate(&self) -> Result<(), TerminalError> {
+    pub(crate) fn validate(&self) -> Result<(NonZeroU16, NonZeroU16), TerminalError> {
         if self.argv.first().is_none_or(String::is_empty) {
             return Err(TerminalError::InvalidArgument(
                 "argv must start with a non-empty executable".to_string(),
             ));
         }
-        validate_dimensions(self.rows, self.cols)?;
+        let dimensions = validate_dimensions(self.rows, self.cols)?;
         if self.raw_capacity == 0 {
             return Err(TerminalError::InvalidArgument(
                 "raw_capacity must be greater than zero".to_string(),
@@ -49,7 +50,7 @@ impl SessionOptions {
                 "env_remove entries must not be empty".to_string(),
             ));
         }
-        Ok(())
+        Ok(dimensions)
     }
 }
 
@@ -262,16 +263,19 @@ pub enum TerminalError {
     Poisoned,
 }
 
-pub(crate) fn validate_dimensions(rows: u16, cols: u16) -> Result<(), TerminalError> {
-    if rows == 0 || cols == 0 {
+pub(crate) fn validate_dimensions(
+    rows: u16,
+    cols: u16,
+) -> Result<(NonZeroU16, NonZeroU16), TerminalError> {
+    let (Some(rows), Some(cols)) = (NonZeroU16::new(rows), NonZeroU16::new(cols)) else {
         return Err(TerminalError::InvalidArgument(
             "rows and columns must be greater than zero".to_string(),
         ));
-    }
-    if rows > MAX_DIMENSION || cols > MAX_DIMENSION {
+    };
+    if rows.get() > MAX_DIMENSION || cols.get() > MAX_DIMENSION {
         return Err(TerminalError::InvalidArgument(format!(
             "rows and columns must not exceed {MAX_DIMENSION}"
         )));
     }
-    Ok(())
+    Ok((rows, cols))
 }

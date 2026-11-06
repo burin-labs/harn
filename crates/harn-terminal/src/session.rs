@@ -64,8 +64,8 @@ pub struct TerminalSession {
 impl TerminalSession {
     /// Start a child process in a fresh native PTY.
     pub fn spawn(options: SessionOptions) -> Result<Self, TerminalError> {
-        options.validate()?;
-        let size = pty_size(options.rows, options.cols);
+        let (rows, columns) = options.validate()?;
+        let size = pty_size(rows.get(), columns.get());
         let pair = native_pty_system()
             .openpty(size)
             .map_err(|error| TerminalError::OpenPty(error.to_string()))?;
@@ -110,8 +110,8 @@ impl TerminalSession {
         let shared = Arc::new(SharedState {
             state: Mutex::new(TerminalState {
                 parser: vt100::Parser::new_with_callbacks(
-                    options.rows,
-                    options.cols,
+                    rows,
+                    columns,
                     0,
                     ParserTelemetry::default(),
                 ),
@@ -234,6 +234,7 @@ impl TerminalSession {
         let state = lock(&self.shared.state)?;
         let screen = state.parser.screen();
         let (rows, columns) = screen.size();
+        let (rows, columns) = (rows.get(), columns.get());
         if let Some(region) = region {
             region.validate(rows, columns)?;
         }
@@ -261,12 +262,12 @@ impl TerminalSession {
 
     /// Resize both the native PTY and the VT parser.
     pub fn resize(&self, rows: u16, columns: u16) -> Result<(), TerminalError> {
-        validate_dimensions(rows, columns)?;
+        let (rows, columns) = validate_dimensions(rows, columns)?;
         let master = lock(&self.master)?;
         master
             .as_ref()
             .ok_or(TerminalError::Closed)?
-            .resize(pty_size(rows, columns))
+            .resize(pty_size(rows.get(), columns.get()))
             .map_err(|error| TerminalError::Io(error.to_string()))?;
         drop(master);
         let mut state = lock(&self.shared.state)?;
