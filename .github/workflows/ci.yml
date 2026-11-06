@@ -813,8 +813,8 @@ jobs:
       && github.event.pull_request.head.repo.full_name == github.repository
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@afd182de69c70f74aef97e24b2ac12801983eec4
     secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      RUNNER_PROBE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RUNNER_PROBE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
   # Say where the producer is about to land, and name a hosted fallback when
   # the census cannot be read. The routing expression below reads this job's

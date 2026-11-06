@@ -10,8 +10,24 @@ const repository = "burin-labs/harn";
 const workflow = load(
   fs.readFileSync(`${root}/.github/workflows/smart-ship.yml`, "utf8"),
 );
+const ciWorkflow = load(fs.readFileSync(`${root}/.github/workflows/ci.yml`, "utf8"));
 const availability = workflow.jobs.availability;
 const ship = workflow.jobs.ship;
+
+test("CI and shipping pass the runner probe's declared secret names", () => {
+  for (const caller of [ciWorkflow.jobs["runner-availability"], availability]) {
+    assert.match(
+      caller.uses,
+      /^burin-labs\/\.github\/\.github\/workflows\/runner-availability\.yml@[0-9a-f]{40}$/,
+    );
+    assert.deepEqual(Object.keys(caller.secrets).sort(), [
+      "RUNNER_PROBE_APP_CLIENT_ID",
+      "RUNNER_PROBE_APP_PRIVATE_KEY",
+    ]);
+    assert.ok(caller.secrets.RUNNER_PROBE_APP_CLIENT_ID);
+    assert.ok(caller.secrets.RUNNER_PROBE_APP_PRIVATE_KEY);
+  }
+});
 
 function expressionValue(value) {
   if (value == null) return new data.Null();
@@ -365,7 +381,7 @@ test("the shipped workflow sweeps every 30 minutes and exposes a one-PR dispatch
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.default, undefined);
   assert.match(
     availability.uses,
-    /^burin-labs\/\.github\/\.github\/workflows\/runner-availability\.yml@3d3aba7995a5f4749a1a131204445f6cb438b00a$/,
+    /^burin-labs\/\.github\/\.github\/workflows\/runner-availability\.yml@[0-9a-f]{40}$/,
   );
   assert.equal(availability.with.owned_only, true);
   assert.equal(availability.with.require_measured, true);
@@ -377,7 +393,7 @@ test("the shipped workflow sweeps every 30 minutes and exposes a one-PR dispatch
   assert.equal(ship.with.repair, false);
   assert.match(
     ship.uses,
-    /^burin-labs\/\.github\/\.github\/workflows\/smart-ship\.yml@b01a881d7565d71bab96f911c8f1f813109cc9bc$/,
+    /^burin-labs\/\.github\/\.github\/workflows\/smart-ship\.yml@[0-9a-f]{40}$/,
   );
   assert.deepEqual(
     JSON.parse(evaluate(ship.with["runs-on"], {}).coerceString()),
