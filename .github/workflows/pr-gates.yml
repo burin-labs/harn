@@ -55,7 +55,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: burin-labs/.github/.github/actions/pr-title-check@62309a1164fd47bc1f2ed75632ba84e41d3707a8
+      - uses: burin-labs/.github/.github/actions/pr-title-check@afd182de69c70f74aef97e24b2ac12801983eec4
         with:
           areas: "Parser|VM|LLM|Models|Stdlib|Agent|CLI|Modules|Orchestrator|ACP|Evals|Docs|CI|Release"
           area-suggestions: "Build=CI|Lint=CI"

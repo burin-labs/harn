@@ -394,7 +394,7 @@ jobs:
       issues: write
       id-token: write
       attestations: write
-    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@502c1d9f2f110a9aa0d56ffd548cd06fe198608e
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@afd182de69c70f74aef97e24b2ac12801983eec4
     with:
       source-revision: ${{ needs.setup.outputs.candidate_source_sha }}
       policy: false
@@ -1715,7 +1715,7 @@ jobs:
       # The schema's owner validates the manifest here, so a bad manifest fails
       # the run that wrote it rather than the promotion that reads it.
       - name: Validate the candidate manifest
-        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@2ef969f35ae0384e786be20d9eb2467edc88e8bd
+        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@afd182de69c70f74aef97e24b2ac12801983eec4
         with:
           manifest: ${{ steps.manifest.outputs.manifest }}
           repository: ${{ github.repository }}
