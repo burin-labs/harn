@@ -504,7 +504,10 @@ fn read_workflow(fs: HarnessFs, name: string) -> PolicyWorkflow {
 fn workflow(fs: HarnessFs) -> PolicyWorkflow {
   const ci = read_workflow(fs, "ci.yml")
   const refresh = refresh_workflow(fs)
-  return {...ci, jobs: {...ci.jobs, "rust-cache-refresh": refresh.jobs["rust-cache-refresh"]}}
+  return schema_expect(
+    {...ci, jobs: {...ci.jobs, "rust-cache-refresh": refresh.jobs["rust-cache-refresh"]}},
+    schema_of(PolicyWorkflow),
+  )
 }
 
 fn windows_cache_writer(fs: HarnessFs) -> PolicyWorkflow {

@@ -201,3 +201,11 @@ pub fn workflows(fs: HarnessFs) -> dict<string, PolicyWorkflow> {
   }
   return documents
 }
+
+pub fn workflow_for(documents: dict<string, PolicyWorkflow>, name: string) -> PolicyWorkflow {
+  const document = documents[name]
+  if document == nil {
+    throw "the canonical fixture must include ${name}"
+  }
+  return document
+}

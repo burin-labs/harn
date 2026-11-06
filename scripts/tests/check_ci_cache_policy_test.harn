@@ -1541,13 +1541,16 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
       node_action(harness.fs),
       declared,
     )
-      + windows_shared_cache_errors(declared["windows-nightly.yml"])
+      + windows_shared_cache_errors(workflow_for(declared, "windows-nightly.yml"))
       + windows_native_admission_errors(
         policy(harness.fs),
-        declared["ci.yml"],
-        declared["windows-nightly.yml"],
+        workflow_for(declared, "ci.yml"),
+        workflow_for(declared, "windows-nightly.yml"),
       )
-      + windows_release_certify_warm_errors(policy(harness.fs), declared["windows-nightly.yml"])
+      + windows_release_certify_warm_errors(
+        policy(harness.fs),
+        workflow_for(declared, "windows-nightly.yml"),
+      )
       + nextest_version_errors(policy(harness.fs), declared)
       + actions_cache_capacity_errors(policy(harness.fs)),
     [],
@@ -1559,17 +1562,20 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  assert_eq(windows_shared_cache_errors(declared["windows-nightly.yml"]), [])
+  assert_eq(windows_shared_cache_errors(workflow_for(declared, "windows-nightly.yml")), [])
   assert_eq(
     windows_native_admission_errors(
       policy(harness.fs),
-      declared["ci.yml"],
-      declared["windows-nightly.yml"],
+      workflow_for(declared, "ci.yml"),
+      workflow_for(declared, "windows-nightly.yml"),
     ),
     [],
   )
   assert_eq(
-    windows_release_certify_warm_errors(policy(harness.fs), declared["windows-nightly.yml"]),
+    windows_release_certify_warm_errors(
+      policy(harness.fs),
+      workflow_for(declared, "windows-nightly.yml"),
+    ),
     [],
   )
   assert_eq(nextest_version_errors(policy(harness.fs), declared), [])
@@ -1585,11 +1591,11 @@ pipeline test_windows_native_admission_refuses_a_native_windows_ci_job(
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const nightly = declared["windows-nightly.yml"]
+  const nightly = workflow_for(declared, "windows-nightly.yml")
   const restored = {
-    ...declared["ci.yml"],
+    ...workflow_for(declared, "ci.yml"),
     jobs: {
-      ...declared["ci.yml"].jobs,
+      ...workflow_for(declared, "ci.yml").jobs,
       windows: {"runs-on": windows_runner_expression(), steps: []},
     },
   }
@@ -1612,8 +1618,8 @@ pipeline test_windows_native_admission_pins_release_pull_request_routing(
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const ci = declared["ci.yml"]
-  const nightly = declared["windows-nightly.yml"]
+  const ci = workflow_for(declared, "ci.yml")
+  const nightly = workflow_for(declared, "windows-nightly.yml")
   const path_gated = {...nightly, on: {...nightly.on, pull_request: {paths: ["crates/**"]}}}
   assert_eq(
     windows_native_admission_errors(policy(harness.fs), ci, path_gated),
@@ -1676,8 +1682,8 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const ci = declared["ci.yml"]
-  const nightly = declared["windows-nightly.yml"]
+  const ci = workflow_for(declared, "ci.yml")
+  const nightly = workflow_for(declared, "windows-nightly.yml")
   const producer = nightly.jobs.nextest
   const with_producer = { job -> return {...nightly, jobs: {...nightly.jobs, nextest: job}} }
   assert_eq(
@@ -1708,8 +1714,8 @@ pipeline test_windows_nightly_producer_keeps_its_runner_tier_contract(
 
 pipeline test_windows_test_stack_is_runtime_only_and_exact(harness: Harness, task: unknown) {
   const declared = workflows(harness.fs)
-  const ci = declared["ci.yml"]
-  const nightly = declared["windows-nightly.yml"]
+  const ci = workflow_for(declared, "ci.yml")
+  const nightly = workflow_for(declared, "windows-nightly.yml")
   const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
   assert(
     windows_native_admission_errors(policy(harness.fs), ci, cache_polluted).contains(
@@ -1754,7 +1760,7 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const producer = declared["windows-nightly.yml"].jobs.nextest
+  const producer = workflow_for(declared, "windows-nightly.yml").jobs.nextest
   const cache = cache_step(producer)
   const invalid = {
     jobs: {
@@ -1793,8 +1799,8 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const producer = declared["macos-nightly.yml"]
-  const ci = declared["ci.yml"]
+  const producer = workflow_for(declared, "macos-nightly.yml")
+  const ci = workflow_for(declared, "ci.yml")
   const declared_policy = policy(harness.fs)
   assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
   // The artifact name binds the compiler wrapper, which depends on the host's
@@ -1963,7 +1969,7 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const producer = declared["windows-nightly.yml"]
+  const producer = workflow_for(declared, "windows-nightly.yml")
   const declared_policy = policy(harness.fs)
   assert_eq(windows_release_certify_warm_errors(declared_policy, producer), [])
   // The job's own block replaces the workflow's, so a workflow-level grant
@@ -2072,11 +2078,11 @@ pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task: u
   const drifted = {
     ...declared,
     "windows-nightly.yml": {
-      ...declared["windows-nightly.yml"],
+      ...workflow_for(declared, "windows-nightly.yml"),
       jobs: {
         nextest: {
-          ...declared["windows-nightly.yml"].jobs.nextest,
-          steps: declared["windows-nightly.yml"].jobs.nextest.steps.map(
+          ...workflow_for(declared, "windows-nightly.yml").jobs.nextest,
+          steps: workflow_for(declared, "windows-nightly.yml").jobs.nextest.steps.map(
             { step ->
               if trim(step?.name ?? "") != "Install cargo-nextest" {
                 return step
@@ -2171,7 +2177,7 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
   task: unknown,
 ) {
   const declared = workflows(harness.fs)
-  const producer = declared["windows-nightly.yml"].jobs.nextest
+  const producer = workflow_for(declared, "windows-nightly.yml").jobs.nextest
   const producer_cache = cache_step(producer)
   const invalid = {
     jobs: {
@@ -2215,7 +2221,7 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
     ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
-        build: workflows(harness.fs)["build-release-binaries.yml"].jobs.build,
+        build: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build,
         cache_budget: {
           permissions: {contents: "read"},
           steps: [

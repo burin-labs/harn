@@ -361,11 +361,11 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
   const invalid = {
     ...workflows(harness.fs),
     "ci.yml": {
-      ...workflows(harness.fs)["ci.yml"],
+      ...workflow_for(workflows(harness.fs), "ci.yml"),
       jobs: {
-        ...workflows(harness.fs)["ci.yml"].jobs,
+        ...workflow_for(workflows(harness.fs), "ci.yml").jobs,
         "macos-lint": {
-          ...workflows(harness.fs)["ci.yml"].jobs["macos-lint"],
+          ...workflow_for(workflows(harness.fs), "ci.yml").jobs["macos-lint"],
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "mozilla-actions/sccache-action@exact-pin"},
@@ -377,10 +377,10 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
       },
     },
     "macos-nightly.yml": {
-      ...workflows(harness.fs)["macos-nightly.yml"],
+      ...workflow_for(workflows(harness.fs), "macos-nightly.yml"),
       jobs: {
         nextest: {
-          ...workflows(harness.fs)["macos-nightly.yml"].jobs.nextest,
+          ...workflow_for(workflows(harness.fs), "macos-nightly.yml").jobs.nextest,
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
@@ -428,7 +428,7 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
     ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
-        build: workflows(harness.fs)["build-release-binaries.yml"].jobs.build,
+        build: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build,
         cache_budget: {
           permissions: {actions: "read", contents: "read"},
           steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true}],
@@ -451,7 +451,7 @@ pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows(harness.fs)["build-release-binaries.yml"].jobs.build
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
   const release_cache = cache_step(bounded)
   const invalid = {
     ...workflows(harness.fs),
@@ -467,7 +467,8 @@ pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(
             },
           ],
         },
-        cache_budget: workflows(harness.fs)["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
@@ -489,7 +490,7 @@ pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows(harness.fs)["build-release-binaries.yml"].jobs.build
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
   const release_cache = cache_step(bounded)
   const invalid = {
     ...workflows(harness.fs),
@@ -499,7 +500,8 @@ pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
           ...bounded,
           steps: [{...release_cache, with: {...release_cache.with, "source-key": ""}}],
         },
-        cache_budget: workflows(harness.fs)["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
@@ -520,7 +522,7 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows(harness.fs)["build-release-binaries.yml"].jobs.build
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
   const release_cache = cache_step(bounded)
   const invalid = {
     ...workflows(harness.fs),
@@ -540,7 +542,8 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
             },
           ],
         },
-        cache_budget: workflows(harness.fs)["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
@@ -633,8 +636,8 @@ pub pipeline test_windows_native_admission_accepts_the_free_producer(
   assert_eq(
     windows_native_admission_errors(
       policy(harness.fs),
-      workflows(harness.fs)["ci.yml"],
-      workflows(harness.fs)["windows-nightly.yml"],
+      workflow_for(workflows(harness.fs), "ci.yml"),
+      workflow_for(workflows(harness.fs), "windows-nightly.yml"),
     ),
     [],
   )
@@ -645,14 +648,14 @@ pub pipeline test_windows_native_admission_rejects_a_paid_producer(
   harness: Harness,
   task: unknown,
 ) {
-  const nightly = workflows(harness.fs)["windows-nightly.yml"]
+  const nightly = workflow_for(workflows(harness.fs), "windows-nightly.yml")
   const invalid = {
     ...nightly,
     jobs: {nextest: {...nightly.jobs.nextest, "runs-on": windows_runner_expression()}},
   }
   const errors = windows_native_admission_errors(
     policy(harness.fs),
-    workflows(harness.fs)["ci.yml"],
+    workflow_for(workflows(harness.fs), "ci.yml"),
     invalid,
   )
   assert(errors.contains("windows-nightly.yml:nextest must use free standard windows-latest"))
