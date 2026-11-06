@@ -518,8 +518,8 @@ struct LinuxProbeInput {
     cpu_max: Option<String>,
     memory_pressure: Option<String>,
     io_pressure: Option<String>,
-    load_one: f64,
-    cores: usize,
+    load_one: Option<f64>,
+    cores: Option<usize>,
     current_frequency_khz: Option<u64>,
     max_frequency_khz: Option<u64>,
 }
@@ -537,10 +537,8 @@ impl LinuxProbeInput {
             cpu_max: read_to_string("/sys/fs/cgroup/cpu.max"),
             memory_pressure: read_to_string("/proc/pressure/memory"),
             io_pressure: read_to_string("/proc/pressure/io"),
-            load_one: sysinfo::System::load_average().one,
-            cores: std::thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1),
+            load_one: sysinfo::System::load_average().ok().map(|load| load.one),
+            cores: std::thread::available_parallelism().ok().map(usize::from),
             current_frequency_khz: read_u64(
                 "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
             ),
@@ -574,10 +572,16 @@ fn linux_questions(input: &LinuxProbeInput) -> (HostEnvironment, Vec<HostConditi
                 )
             }),
         HostEnvironment::BareMetal | HostEnvironment::Unknown => {
-            HostConditionObservation::observed(
-                HostContentionQuestion::PromisedCpu,
-                input.load_one / input.cores.max(1) as f64,
-            )
+            match (input.load_one, input.cores) {
+                (Some(load), Some(cores)) if cores > 0 => HostConditionObservation::observed(
+                    HostContentionQuestion::PromisedCpu,
+                    load / cores as f64,
+                ),
+                _ => HostConditionObservation::unavailable(
+                    HostContentionQuestion::PromisedCpu,
+                    "native CPU contention counters could not be read",
+                ),
+            }
         }
     };
     let nominal_speed = match environment {
@@ -737,7 +741,7 @@ mod tests {
             cpu_max: Some("200000 100000\n".to_string()),
             memory_pressure: Some("some avg10=2.50 avg60=0.00 total=1\n".to_string()),
             io_pressure: Some("some avg10=4.00 avg60=0.00 total=1\n".to_string()),
-            cores: 2,
+            cores: Some(2),
             ..LinuxProbeInput::default()
         };
         let (environment, answers) = linux_questions(&input);
@@ -754,7 +758,7 @@ mod tests {
             proc_stat: Some("cpu  10 0 10 70 0 0 0 10 0 0\n".to_string()),
             memory_pressure: Some("some avg10=0.00 avg60=0.00 total=0\n".to_string()),
             io_pressure: Some("some avg10=0.00 avg60=0.00 total=0\n".to_string()),
-            cores: 2,
+            cores: Some(2),
             ..LinuxProbeInput::default()
         };
         let (environment, answers) = linux_questions(&input);
@@ -762,6 +766,22 @@ mod tests {
         assert_eq!(answers[0].contention, Some(0.1));
         assert_eq!(answers[1].status, HostConditionStatus::NotObservable);
         assert_eq!(answers[1].contention, None);
+    }
+
+    #[test]
+    fn missing_load_or_core_count_is_unavailable_not_zero_contention() {
+        let missing = LinuxProbeInput::default();
+        let (_, answers) = linux_questions(&missing);
+        assert_eq!(answers[0].status, HostConditionStatus::Unavailable);
+        assert_eq!(answers[0].contention, None);
+
+        let measured = LinuxProbeInput {
+            load_one: Some(2.0),
+            cores: Some(4),
+            ..LinuxProbeInput::default()
+        };
+        let (_, answers) = linux_questions(&measured);
+        assert_eq!(answers[0].contention, Some(0.5));
     }
 
     #[test]
