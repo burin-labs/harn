@@ -216,7 +216,7 @@ impl EvaluationReceipt {
                 "unpriced_calls": certainty.unpriced_calls,
                 "usage_unknown_calls": certainty.usage_unknown_calls,
                 "unpriced_tokens": certainty.unpriced_tokens,
-                "unpriced_reason": certainty.unpriced_reason.map(|reason| reason.as_str()),
+                "unpriced_reason": certainty.unpriced_reason,
                 "projected_cost_usd": certainty.projected_cost_usd(),
             })
         });

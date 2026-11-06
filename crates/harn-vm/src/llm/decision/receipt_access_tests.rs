@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_vm::NativeVmState;
 use harn_parser::builtin_signatures::TyExt;
 
 const EVALUATE: &str = r#"

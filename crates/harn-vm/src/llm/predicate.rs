@@ -72,7 +72,7 @@ async fn evaluation_receipt_builtin(
     ctx: AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    use crate::NativeVmExt;
+    use crate::native_vm::NativeVmState;
     let reference = args
         .first()
         .map(|value| value.as_str_cow().into_owned())
