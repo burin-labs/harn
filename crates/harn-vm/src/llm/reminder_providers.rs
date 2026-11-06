@@ -467,7 +467,6 @@ impl ReminderProvider for GroundedReviewProvider {
             .in_session(&ctx.session_id)
             .report();
         }
-
         let mut reminder = provider_reminder(
             format_grounded_review_body(ctx, &findings, truncated_count),
             GROUNDED_REVIEW_ID,
@@ -478,6 +477,7 @@ impl ReminderProvider for GroundedReviewProvider {
         reminder.ttl_turns = Some(2);
         reminder.propagate = ReminderPropagate::None;
         reminder.role_hint = ReminderRoleHint::Developer;
+        reminder.authority = crate::llm::helpers::DirectiveAuthority::Advisory;
         Some(reminder)
     }
 }
@@ -1233,9 +1233,9 @@ fn format_grounded_review_body(
         ctx.event.as_str(),
     );
     body.push_str(
-        " Treat these as advisory evidence; inspect the cited source, fix the root cause, and rerun the relevant verifier.",
+        " Respect task scope and requested permissions; fix in-scope causes when appropriate. Report unrelated or unresolved failures without changing unrelated code to make a check pass.",
     );
-    body.push_str(" Do not apply critique-only rewrites without a concrete failing signal.");
+    body.push_str(" Rerun relevant checks for fixes; do not apply critique-only rewrites without a concrete failing signal.");
     for finding in findings {
         body.push_str("\n- [");
         body.push_str(finding.confidence);
