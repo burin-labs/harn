@@ -288,20 +288,6 @@ impl AcpBridge {
         );
     }
 
-    /// Send a canonical ACP `plan` update. Per ACP, each plan update is
-    /// a full replacement for the client's current plan state.
-    #[allow(dead_code)]
-    pub(super) fn send_plan(&self, entries: serde_json::Value) {
-        let update = acp_plan_update(entries);
-        self.send_notification(
-            "session/update",
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "update": update,
-            }),
-        );
-    }
-
     /// Send a structured `session/update` with log level, message, and
     /// fields. `log` is a harn vendor-extension; canonical ACP has no
     /// log channel on the session-update stream, so all vendor fields
