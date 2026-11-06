@@ -83,8 +83,8 @@ async fn real_prompt_updates_obey_negotiated_extensions_and_validate_upstream() 
             request_tx.send(serde_json::json!({"jsonrpc":"2.0", "id":3, "method":"session/prompt", "params":{
                 "sessionId":session, "prompt":[{"type":"text", "text":concat!(
                     "harness.obs.log_warn(\"reached extension producer\", {source: \"probe\"})\n",
-                    "progress(\"probe\", \"full\", 3, 10, {item: \"row-7\"})\n",
-                    "progress(\"probe\", \"minimal\")\n",
+                    "harness.stdio.progress(\"probe\", \"full\", {current: 3, total: 10, data: {item: \"row-7\"}})\n",
+                    "harness.stdio.progress(\"probe\", \"minimal\")\n",
                     "harness.stdio.println(\"reached standard producer\")"
                 )}]
             }})).unwrap();
