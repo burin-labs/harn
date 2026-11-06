@@ -22,96 +22,96 @@ const NEW = "3333333333333333333333333333333333333333"
 
 type FakeGitHub = {gh: Gh, writes: fn() -> list<string>, written_paths: fn() -> list<string>}
 
+fn fake_call(scenario: string, args: list<string>) -> dict {
+  const path = args[len(args) - 1]
+  if path.contains("/contents/.github/workflows/ci.yml?") {
+    const text = scenario == "missing" ? "jobs: {}\n" : ship_workflow(OLD)
+    return {success: true, stdout: text, stderr: ""}
+  }
+  if path.contains("/contents/.github/workflows/promote-release.yml?") {
+    return {success: true, stdout: ship_workflow(OLD), stderr: ""}
+  }
+  if path.contains("/contents/.github/workflows/deploy.yml?") {
+    return {success: true, stdout: ship_workflow(OLD), stderr: ""}
+  }
+  if path.contains("/contents/.github/actions/nested/action.yml?") {
+    return {
+      success: true,
+      stdout: "uses: burin-labs/.github/.github/actions/ci-job-proof@" + OLD,
+      stderr: "",
+    }
+  }
+  if path.contains("/contents/.github/shared-pin-release-policy.json?") {
+    if scenario == "missing_policy" {
+      return {success: false, stdout: "", stderr: "unreadable"}
+    }
+    const name = scenario == "hidden_release" ? "promote-release.yml" : scenario
+      == "host_release" ? "deploy.yml" : scenario == "missing_release_file" ? "absent.yml" : "ci.yml"
+    return {
+      success: true,
+      stdout: json_stringify({schema_version: 1, workflows: [name]}),
+      stderr: "",
+    }
+  }
+  throw "unexpected GitHub call " + join(args, " ")
+}
+
+fn fake_json(scenario: string, repo: string, args: list<string>) -> unknown {
+  const path = args[len(args) - 1]
+  if path == "repos/" + repo {
+    return {default_branch: "main"}
+  }
+  if path == "repos/" + repo + "/git/ref/heads/main" {
+    return {object: {sha: OLD}}
+  }
+  if path.contains("/git/matching-refs/heads/ci/shared-pin-bump/") {
+    return scenario == "existing" ? [
+      {ref: "refs/heads/" + branch_name(NEW, OLD), object: {sha: OTHER}},
+    ] : []
+  }
+  if path.starts_with("repos/burin-labs/.github/compare/") {
+    return {
+      status: scenario == "backwards" && path.ends_with(OLD + "..." + NEW) ? "behind" : "ahead",
+    }
+  }
+  if path.contains("/git/trees/") {
+    return {
+      truncated: scenario == "truncated",
+      tree: [
+        {
+          path: scenario == "hidden_release" ? ".github/workflows/promote-release.yml" : scenario
+            == "host_release" ? ".github/workflows/deploy.yml" : ".github/workflows/ci.yml",
+          type: "blob",
+          mode: "100644",
+        },
+      ]
+        + (scenario == "action" ? [
+          {path: ".github/actions/nested/action.yml", type: "blob", mode: "100644"},
+        ] : []),
+    }
+  }
+  if path == "repos/" + repo + "/git/commits/" + OLD {
+    return {tree: {sha: "base-tree"}}
+  }
+  if path == "repos/" + repo + "/git/commits/" + OTHER {
+    return {tree: {sha: "candidate-tree"}, parents: [{sha: OLD}], verification: {verified: true}}
+  }
+  if path.contains("/pulls?state=open") {
+    return scenario == "existing" ? [{number: 42, body: "body", labels: []}] : []
+  }
+  if args[0] == "run" {
+    return ["waiting", "hidden_release", "host_release"].contains(scenario)
+      && args.contains("waiting") ? [{databaseId: 7}] : []
+  }
+  throw "unexpected GitHub JSON call " + join(args, " ")
+}
+
 fn fake_github(scenario: string, repo: string = "burin-labs/harn") -> FakeGitHub {
   let writes: list<string> = []
   let written_paths: list<string> = []
   const gh: Gh = {
-    call: fn(args) {
-      const path = args[len(args) - 1]
-      if path.contains("/contents/.github/workflows/ci.yml?") {
-        const text = scenario == "missing" ? "jobs: {}\n" : ship_workflow(OLD)
-        return {success: true, stdout: text, stderr: ""}
-      }
-      if path.contains("/contents/.github/workflows/promote-release.yml?") {
-        return {success: true, stdout: ship_workflow(OLD), stderr: ""}
-      }
-      if path.contains("/contents/.github/workflows/deploy.yml?") {
-        return {success: true, stdout: ship_workflow(OLD), stderr: ""}
-      }
-      if path.contains("/contents/.github/actions/nested/action.yml?") {
-        return {
-          success: true,
-          stdout: "uses: burin-labs/.github/.github/actions/ci-job-proof@" + OLD,
-          stderr: "",
-        }
-      }
-      if path.contains("/contents/.github/shared-pin-release-policy.json?") {
-        if scenario == "missing_policy" {
-          return {success: false, stdout: "", stderr: "unreadable"}
-        }
-        const name = scenario == "hidden_release" ? "promote-release.yml" : scenario
-          == "host_release" ? "deploy.yml" : scenario == "missing_release_file" ? "absent.yml" : "ci.yml"
-        return {
-          success: true,
-          stdout: json_stringify({schema_version: 1, workflows: [name]}),
-          stderr: "",
-        }
-      }
-      throw "unexpected GitHub call " + join(args, " ")
-    },
-    json: fn(args) {
-      const path = args[len(args) - 1]
-      if path == "repos/" + repo {
-        return {default_branch: "main"}
-      }
-      if path == "repos/" + repo + "/git/ref/heads/main" {
-        return {object: {sha: OLD}}
-      }
-      if path.contains("/git/matching-refs/heads/ci/shared-pin-bump/") {
-        return scenario == "existing" ? [
-          {ref: "refs/heads/" + branch_name(NEW, OLD), object: {sha: OTHER}},
-        ] : []
-      }
-      if path.starts_with("repos/burin-labs/.github/compare/") {
-        return {
-          status: scenario == "backwards" && path.ends_with(OLD + "..." + NEW) ? "behind" : "ahead",
-        }
-      }
-      if path.contains("/git/trees/") {
-        return {
-          truncated: scenario == "truncated",
-          tree: [
-            {
-              path: scenario == "hidden_release" ? ".github/workflows/promote-release.yml" : scenario
-                == "host_release" ? ".github/workflows/deploy.yml" : ".github/workflows/ci.yml",
-              type: "blob",
-              mode: "100644",
-            },
-          ]
-            + (scenario == "action" ? [
-              {path: ".github/actions/nested/action.yml", type: "blob", mode: "100644"},
-            ] : []),
-        }
-      }
-      if path == "repos/" + repo + "/git/commits/" + OLD {
-        return {tree: {sha: "base-tree"}}
-      }
-      if path == "repos/" + repo + "/git/commits/" + OTHER {
-        return {
-          tree: {sha: "candidate-tree"},
-          parents: [{sha: OLD}],
-          verification: {verified: true},
-        }
-      }
-      if path.contains("/pulls?state=open") {
-        return scenario == "existing" ? [{number: 42, body: "body", labels: []}] : []
-      }
-      if args[0] == "run" {
-        return ["waiting", "hidden_release", "host_release"].contains(scenario)
-          && args.contains("waiting") ? [{databaseId: 7}] : []
-      }
-      throw "unexpected GitHub JSON call " + join(args, " ")
-    },
+    call: fn(args) { return fake_call(scenario, args) },
+    json: fn(args) { return fake_json(scenario, repo, args) },
     write: fn(method, path, body) {
       writes = writes + [method + " " + path]
       if path.ends_with("/git/trees") {
