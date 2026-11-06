@@ -75,6 +75,9 @@ fn sends_control_keys_resizes_and_waits_without_polling() {
         .join("\n")
         .contains("READY"));
 
+    assert!(session.resize(0, 30).is_err(), "zero rows must be refused");
+    let unchanged = session.capture(None).expect("capture after refused resize");
+    assert_eq!((unchanged.rows, unchanged.columns), (6, 20));
     session.resize(8, 30).expect("resize");
     session
         .send(&[
