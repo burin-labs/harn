@@ -3,12 +3,12 @@ use crate::native_vm::NativeVmState;
 use harn_parser::builtin_signatures::TyExt;
 
 const EVALUATE: &str = r#"
-import { EvaluationOutcome } from "std/predicate"
-fn evaluate(llm: HarnessLlm, model: string) -> EvaluationOutcome {
-  return llm.evaluate_request("receipt.public", {text: "observed"},
+fn evaluate(llm: HarnessLlm, model: string) -> {kind: string, receipt: string} {
+  const outcome = llm.evaluate_request("receipt.public", {text: "observed"},
     {safe: {kind: "boolean", instructions: "Safe?"}},
     {backend: "structured_llm", provider: "mock", model: model, threshold: 0.5,
       evaluation_cost_limit: 1.0})
+  return {kind: outcome.kind, receipt: outcome.receipt}
 }
 "#;
 const LOOKUP: &str = r#"
