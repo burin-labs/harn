@@ -1,11 +1,7 @@
-//! Host-side forwarding proxy for sandboxed child processes.
-//!
-//! The proxy is deliberately small: it supports HTTP proxy requests, HTTPS
-//! `CONNECT`, and SOCKS5 TCP `CONNECT`. The OS sandbox separately restricts
-//! the child to these loopback ports, so clearing the injected proxy
-//! environment cannot widen authority. Destination decisions reuse the
-//! canonical [`super::EgressPolicy`] rules and pin each connection to the
-//! addresses resolved during that decision.
+//! HTTP, HTTPS `CONNECT`, and SOCKS5 TCP proxy for sandboxed children.
+//! The child sandbox permits only this proxy's loopback ports, so ignoring
+//! proxy settings cannot widen access. Canonical [`super::EgressPolicy`] rules
+//! decide destinations and pin each connection to its checked addresses.
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -31,20 +27,10 @@ const MAX_AUDIT_EVENTS: usize = 256;
 const UNREACHABLE_REASON: &str = "allowed destination was unreachable";
 const MAX_ACTIVE_CONNECTIONS: usize = 128;
 
-/// Why a child egress proxy could not be started.
-///
-/// The one classified case is the host process being unable to bind its own
-/// loopback listener. That is not a policy decision Harn made: the Harn
-/// process is itself confined, by its own `harn run` jail, by a parent Harn
-/// process's jail, or by the operating system, and that confinement denies
-/// `network-bind` on loopback. A confined parent cannot mediate egress for a
-/// child, so the child cannot start under a managed network policy. The raw
-/// OS text is `Operation not permitted` with no subject, and consumers have
-/// diagnosed it by hand as a cache-path problem and as a sandbox defect; it is
-/// one condition with one remedy, so it carries one diagnostic code.
-///
-/// Only `PermissionDenied` is classified. Every other bind failure keeps its
-/// unclassified shape so this variant cannot absorb an unrelated error.
+/// Why the proxy could not start. A denied loopback bind means existing
+/// confinement prevents mediation, rather than an egress-policy refusal.
+/// Only `PermissionDenied` receives that classification; other failures keep
+/// their OS error so this variant cannot absorb unrelated errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProcessEgressProxyError {
@@ -134,8 +120,7 @@ struct AuditLog {
     unread_refusals: Vec<ProcessEgressAudit>,
 }
 
-/// What a host can do to a running allowlist proxy, found from the endpoint on
-/// the current execution policy.
+/// Control for the allowlist proxy named by the current execution policy.
 #[derive(Debug)]
 struct AllowlistControl {
     http_port: u16,
@@ -217,13 +202,9 @@ pub(super) fn allow_child_network_host(
     Ok(true)
 }
 
-/// Whether a person's approval can open `host`: one DNS name, never an address.
-///
-/// An address rule would make the proxy resolve every name a child tries, and
-/// an address names the host's own services as readily as anyone else's. The
-/// rule grammar also takes lists and wildcards, and a refusal names one host.
-/// A numeric label is refused because resolvers read `2130706433` and `0x7f.1`
-/// as addresses, and what an approved name resolves to is held at connect time.
+/// An approval names one DNS host, never an address, list, or wildcard.
+/// Numeric labels are excluded because resolvers accept alternate IP spellings.
+/// Connect-time checks hold the name to public remote addresses.
 pub(super) fn can_approve_child_network_host(host: &str) -> bool {
     let labels: Vec<&str> = host.split('.').collect();
     labels.len() >= 2
@@ -256,12 +237,8 @@ pub struct ProcessEgressProxy {
 }
 
 impl ProcessEgressProxy {
-    /// Start a proxy from the current Harn egress policy. `Ok(None)` preserves
-    /// the legacy unrestricted child-network grant when no policy was
-    /// configured outside an explicit-policy host scope. Inside that scope the
-    /// process-network grant is itself the child's destination policy: public
-    /// hosts are reachable and private ranges stay behind the SSRF overlay
-    /// until a configured policy narrows it.
+    /// Without configured policy, `Ok(None)` preserves legacy unrestricted grants.
+    /// Inside an explicit-policy scope, public-host policy and SSRF rules apply.
     pub fn start_from_current_policy(
         default_block_private: bool,
     ) -> Result<Option<Self>, ProcessEgressProxyError> {
@@ -278,9 +255,7 @@ impl ProcessEgressProxy {
         .map(Some)
     }
 
-    /// Start the local-cloud projection of a deny-by-default host allowlist.
-    /// Parsing goes through the same rule parser as `HARN_EGRESS_ALLOW` and
-    /// `harness.net.egress_policy`.
+    /// Start a deny-by-default host allowlist using the canonical egress rule parser.
     pub fn start_allowlist(allowed_hosts: &[String]) -> Result<Self, ProcessEgressProxyError> {
         let policy = EgressPolicy {
             allow: parse_rule_list(&allowed_hosts.join(","))
@@ -467,9 +442,7 @@ fn process_network_grant_policy(default_block_private: bool) -> ConfiguredPolicy
 }
 
 impl ProcessPolicySource {
-    /// Refuse an approved host whose answers include a private address, so
-    /// approving a name cannot open the host's own services or a cloud metadata
-    /// endpoint. The answers checked here are the ones connected to.
+    /// Refuse approved names resolving to private or local addresses at connect time.
     fn hold_approved_host_public(
         &self,
         host: &str,
