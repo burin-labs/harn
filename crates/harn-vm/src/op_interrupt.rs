@@ -753,7 +753,9 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
 fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
-    let mut sys = System::new();
+    let Ok(mut sys) = System::new() else {
+        return Vec::new();
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         false,
@@ -782,7 +784,9 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
 fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-    let mut sys = System::new();
+    let Ok(mut sys) = System::new() else {
+        return (Vec::new(), ProcessCleanupCensus::default());
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         false,

@@ -663,6 +663,7 @@ impl HostLeaseStore {
     /// Return the local hostname used when callers omit `--host`.
     pub fn default_host() -> String {
         System::host_name()
+            .ok()
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| "local".to_string())
     }

@@ -394,7 +394,12 @@ fn measure(
     let wrapper = with_wrapper.wrapper.clone();
 
     if let Some(session) = &with_wrapper.session {
-        let survivors = session.members();
+        let survivors = match session.members() {
+            Ok(survivors) => survivors,
+            Err(reason) => {
+                return decision(RustcWrapperDisposition::Unmeasured, wrapper, reason, cwd)
+            }
+        };
         if !survivors.is_empty() {
             let stopped = session.stop(&survivors);
             return decision(
@@ -409,7 +414,12 @@ fn measure(
                 cwd,
             );
         }
-        let escaped = escaped_processes(&nonce, session);
+        let escaped = match escaped_processes(&nonce, session) {
+            Ok(escaped) => escaped,
+            Err(reason) => {
+                return decision(RustcWrapperDisposition::Unmeasured, wrapper, reason, cwd)
+            }
+        };
         if escaped > 0 {
             return decision(
                 RustcWrapperDisposition::Unmeasured,
@@ -807,20 +817,22 @@ impl ProbeSession {
     }
 
     /// Processes still in the session once the build has returned.
-    fn members(&self) -> Vec<u32> {
+    fn members(&self) -> Result<Vec<u32>, String> {
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut system = System::new();
+        let mut system =
+            System::new().map_err(|error| format!("process census unavailable: {error}"))?;
         system.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing(),
         );
-        system
+        require_current_process(&system)?;
+        Ok(system
             .processes()
             .keys()
             .map(|pid| pid.as_u32())
             .filter(|pid| self.holds(*pid))
-            .collect()
+            .collect())
     }
 
     /// Whether `pid` is in this session now, excluding the id's own holder:
@@ -858,6 +870,16 @@ impl ProbeSession {
     }
 }
 
+fn require_current_process(system: &sysinfo::System) -> Result<(), String> {
+    if system
+        .process(sysinfo::Pid::from_u32(std::process::id()))
+        .is_none()
+    {
+        return Err("process census did not observe the current process".into());
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn signal(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) == 0 }
@@ -873,16 +895,29 @@ fn signal(_pid: u32) -> bool {
 /// environment; macOS does not, so there an escape is not seen. These are
 /// only counted, never signalled.
 #[cfg(target_os = "linux")]
-fn escaped_processes(nonce: &str, session: &ProbeSession) -> usize {
+fn escaped_processes(nonce: &str, session: &ProbeSession) -> Result<usize, String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let entry = format!("{PROBE_NONCE_ENV}={nonce}");
-    let mut system = System::new();
+    let mut system =
+        System::new().map_err(|error| format!("process census unavailable: {error}"))?;
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::nothing().with_environ(UpdateKind::Always),
     );
-    system
+    let own = system.process(sysinfo::Pid::from_u32(std::process::id()));
+    let control_read = own.is_some_and(|process| {
+        std::env::vars_os().any(|(key, value)| {
+            let mut entry = key;
+            entry.push("=");
+            entry.push(value);
+            process.environ().contains(&entry)
+        })
+    });
+    if !control_read {
+        return Err("process environment census did not read the current environment".into());
+    }
+    Ok(system
         .processes()
         .iter()
         .filter(|(pid, process)| {
@@ -893,17 +928,29 @@ fn escaped_processes(nonce: &str, session: &ProbeSession) -> usize {
                     .iter()
                     .any(|variable| variable.to_str() == Some(entry.as_str()))
         })
-        .count()
+        .count())
 }
 
 #[cfg(not(target_os = "linux"))]
-fn escaped_processes(_nonce: &str, _session: &ProbeSession) -> usize {
-    0
+fn escaped_processes(_nonce: &str, _session: &ProbeSession) -> Result<usize, String> {
+    Ok(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_process_census_cannot_pass_without_observing_itself() {
+        let mut system = sysinfo::System::new().expect("create census");
+        assert!(require_current_process(&system).is_err());
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::All,
+            true,
+            sysinfo::ProcessRefreshKind::nothing(),
+        );
+        assert!(require_current_process(&system).is_ok());
+    }
 
     /// Starts a session whose leader exits at once and leaves one `sleep`
     /// behind in it, the shape a daemonizing wrapper leaves: returns the
@@ -939,7 +986,7 @@ mod tests {
     fn emptied(session: &ProbeSession) -> bool {
         (0..5_000).any(|_| {
             std::thread::yield_now();
-            session.members().is_empty()
+            session.members().expect("read session members").is_empty()
         })
     }
 
@@ -955,7 +1002,7 @@ mod tests {
         crate::op_interrupt::configure_kill_group(&mut bystander);
         let mut bystander = bystander.spawn().expect("start bystander");
 
-        let members = session.members();
+        let members = session.members().expect("read session members");
         assert_eq!(members.len(), 1, "{members:?}");
         assert!(!members.contains(&bystander.id()));
         assert_eq!(session.stop(&members), 1);
@@ -975,10 +1022,14 @@ mod tests {
     fn a_session_no_probe_started_is_never_signalled() {
         let leader = session_with_one_member();
         let unregistered = ProbeSession(leader);
-        let members = unregistered.members();
+        let members = unregistered.members().expect("read session members");
         assert_eq!(members.len(), 1, "{members:?}");
         assert_eq!(unregistered.stop(&members), 0);
-        assert_eq!(unregistered.members(), members, "a member was signalled");
+        assert_eq!(
+            unregistered.members().expect("read session members"),
+            members,
+            "a member was signalled"
+        );
         let session = ProbeSession::started(leader);
         assert_eq!(session.stop(&members), 1);
         assert!(emptied(&session), "the member outlived its signal");
