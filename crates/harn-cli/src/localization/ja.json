@@ -2434,7 +2434,7 @@
   "Write the export to this file. Defaults to stdout": "エクスポートをこのファイルに書き込みます。既定は stdout です",
   "Write the final state JSON when stdin closes": "stdin が閉じられたときに最終状態 JSON を書き込みます",
   "Write the fixes to disk. Without this, codemod is a dry-run preview": "修正内容をディスクに書き込みます。これがない場合、codemod は dry-run プレビューになります",
-  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`": "既定の `.harn-runs/flight-recordings/` 配下ではなく、このファイルにフライトレコーディングを書き込みます",
+  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`. Serve appends each execution's ID": "既定の `.harn-runs/flight-recordings/` 配下ではなく、このファイルにフライトレコーディングを書き込みます。サーバーは各実行の ID を付加します",
   "Write the generated types to this file. Prints to stdout when omitted": "生成された型をこのファイルに書き込みます。省略時は stdout に出力します",
   "Write the imported run record to this path": "インポートされた実行レコードをこのパスに書き込みます",
   "Write the iteration or diff JSON report to this path": "反復または差分 JSON レポートをこのパスに書き込みます",

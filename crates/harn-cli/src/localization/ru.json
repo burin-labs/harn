@@ -2434,7 +2434,7 @@
   "Write the export to this file. Defaults to stdout": "Записать экспорт в этот файл. По умолчанию — stdout",
   "Write the final state JSON when stdin closes": "Записать JSON конечного состояния, когда stdin закроется",
   "Write the fixes to disk. Without this, codemod is a dry-run preview": "Записать исправления на диск. Без этого codemod работает как предварительный просмотр без изменений",
-  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`": "Записать запись полёта в этот файл вместо файла по умолчанию в `.harn-runs/flight-recordings/`",
+  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`. Serve appends each execution's ID": "Записать запись полёта в этот файл вместо файла по умолчанию в `.harn-runs/flight-recordings/`. Сервер добавляет идентификатор каждого выполнения",
   "Write the generated types to this file. Prints to stdout when omitted": "Записать сгенерированные типы в этот файл. При отсутствии выводит в stdout",
   "Write the imported run record to this path": "Записать импортированную запись запуска по этому пути",
   "Write the iteration or diff JSON report to this path": "Записать JSON-отчёт по итерации или различиям по этому пути",

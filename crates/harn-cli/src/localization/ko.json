@@ -2434,7 +2434,7 @@
   "Write the export to this file. Defaults to stdout": "내보내기를 이 파일에 씁니다. 기본값은 stdout입니다",
   "Write the final state JSON when stdin closes": "stdin이 닫히면 최종 상태 JSON를 씁니다",
   "Write the fixes to disk. Without this, codemod is a dry-run preview": "수정 사항을 디스크에 씁니다. 이것이 없으면 codemod는 드라이런 미리보기입니다",
-  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`": "기본 `.harn-runs/flight-recordings/` 아래 대신 이 파일에 비행 기록을 씁니다",
+  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`. Serve appends each execution's ID": "기본 `.harn-runs/flight-recordings/` 아래 대신 이 파일에 비행 기록을 씁니다. 서버는 각 실행의 ID를 덧붙입니다",
   "Write the generated types to this file. Prints to stdout when omitted": "생성된 타입을 이 파일에 씁니다. 생략하면 stdout으로 출력합니다",
   "Write the imported run record to this path": "가져온 실행 기록을 이 경로에 씁니다",
   "Write the iteration or diff JSON report to this path": "반복 또는 diff JSON 보고서를 이 경로에 씁니다",
