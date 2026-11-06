@@ -42,6 +42,7 @@ type ReleaseWorkflow = {
 }
 
 fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
+  // Optional fields here reject explicit nil, which schema_of permits.
   const step_schema = schema_object(
     {
       name: schema_field(schema_string(), false),
@@ -61,56 +62,10 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
       ),
     },
   )
+  const job = schema_object({steps: schema_list(step_schema)})
   const schema: Schema<ReleaseWorkflow> = schema_refine(
     schema_of(ReleaseWorkflow),
-    schema_object(
-      {
-        jobs: schema_field(
-          schema_object(
-            {
-              setup: schema_field(
-                schema_object(
-                  {
-                    outputs: schema_field(
-                      schema_object({binary_size_fuse_bytes: schema_field(schema_string())}),
-                    ),
-                    steps: schema_field(schema_list(step_schema)),
-                  },
-                ),
-              ),
-              prepare_cli_aot: schema_field(
-                schema_object(
-                  {
-                    needs: schema_field(schema_list(schema_string())),
-                    if: schema_field(schema_string()),
-                    steps: schema_field(schema_list(step_schema)),
-                  },
-                ),
-              ),
-              build: schema_field(
-                schema_object(
-                  {
-                    needs: schema_field(schema_list(schema_string())),
-                    env: schema_field(
-                      schema_object({HARN_REQUIRE_CLI_AOT: schema_field(schema_string())}),
-                    ),
-                    steps: schema_field(schema_list(step_schema)),
-                  },
-                ),
-              ),
-              collect_candidate_manifest: schema_field(
-                schema_object(
-                  {
-                    needs: schema_field(schema_list(schema_string())),
-                    if: schema_field(schema_string()),
-                  },
-                ),
-              ),
-            },
-          ),
-        ),
-      },
-    ),
+    schema_object({jobs: schema_object({setup: job, prepare_cli_aot: job, build: job})}),
   )
   const path = "../../.github/workflows/build-release-binaries.yml"
   return unwrap(get_typed_result(yaml_parse(fs.read_text(path)), schema))
