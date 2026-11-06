@@ -204,7 +204,7 @@ struct TaskMessage {
 struct TaskState {
     id: String,
     principal: Option<crate::AuthenticatedPrincipal>,
-    status_updated_at: Option<String>,
+    status_updated_at: time::OffsetDateTime,
     context_id: Option<String>,
     status: TaskStatus,
     history: Vec<TaskMessage>,

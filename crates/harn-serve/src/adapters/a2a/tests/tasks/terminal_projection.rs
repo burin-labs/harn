@@ -68,7 +68,7 @@ fn complete_task_uses_agent_result_terminal_instead_of_dispatch_success() {
             task_id.to_string(),
             TaskState {
                 principal: None,
-                status_updated_at: None,
+                status_updated_at: time::OffsetDateTime::UNIX_EPOCH,
                 id: task_id.to_string(),
                 context_id: None,
                 status: TaskStatus::Working,

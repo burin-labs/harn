@@ -110,7 +110,7 @@ impl A2aServer {
         let mut task = TaskState {
             id: task_id.clone(),
             principal: principal.cloned(),
-            status_updated_at: None,
+            status_updated_at: current_timestamp_utc(),
             context_id,
             status: TaskStatus::Submitted,
             history: vec![TaskMessage {

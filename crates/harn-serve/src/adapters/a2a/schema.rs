@@ -110,7 +110,7 @@ pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
         .and_then(JsonValue::as_str)
     {
         Some("status" | "status-update") => {
-            task.status_updated_at = Some(current_timestamp_rfc3339());
+            task.status_updated_at = current_timestamp_utc();
             event["kind"] = json!("status-update");
             event["final"] = json!(task.status.is_terminal());
             if event["status"]["state"] == "cancelled" {
@@ -202,9 +202,7 @@ pub(super) fn task_to_json_versioned(
         "artifacts": task.artifacts.clone(),
     });
     if !version.is_legacy() {
-        if let Some(timestamp) = &task.status_updated_at {
-            value["status"]["timestamp"] = json!(timestamp);
-        }
+        value["status"]["timestamp"] = json!(harn_clock::format_rfc3339(task.status_updated_at));
     }
     if let Some(artifacts) = value["artifacts"]
         .as_array_mut()
@@ -1023,9 +1021,11 @@ pub(super) fn a2a_artifact_from_harn_artifact(artifact: &JsonValue) -> JsonValue
 /// stamp each A2A `Artifact.metadata.timestamp` so downstream consumers
 /// can order outputs even when several artifacts share a task.
 pub(super) fn current_timestamp_rfc3339() -> String {
-    // Was `unwrap_or_else(|_| String::new())`; the shared helper falls back to
-    // the epoch instead so an A2A envelope never carries an empty timestamp.
-    harn_clock::system_now_rfc3339()
+    harn_clock::format_rfc3339(current_timestamp_utc())
+}
+
+pub(super) fn current_timestamp_utc() -> time::OffsetDateTime {
+    harn_clock::Clock::now_utc(&harn_clock::RealClock::new())
 }
 
 /// Wrap a tool call's `raw_output` in an A2A `Artifact`. The stable id

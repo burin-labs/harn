@@ -107,26 +107,25 @@ impl ListQuery {
                 {
                     return None;
                 }
-                let raw = task.status_updated_at.as_deref()?;
-                let updated = timestamp(raw).ok()?;
+                let updated = task.status_updated_at;
                 if self.after.is_some_and(|after| updated < after) {
                     return None;
                 }
-                Some((updated, task.id.as_str(), raw, task))
+                Some((updated, task.id.as_str(), task))
             })
             .collect();
         selected.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)));
         let total_size = selected.len();
         let page_size = self.options.page_size.unwrap_or(50) as usize;
-        let mut remaining = selected.iter().filter(|(updated, id, _, _)| {
+        let mut remaining = selected.iter().filter(|(updated, id, _)| {
             self.cursor
                 .as_ref()
                 .is_none_or(|(before, last)| (*updated, *id) < (*before, last.as_str()))
         });
         let page: Vec<_> = remaining.by_ref().take(page_size).collect();
         let next = if remaining.next().is_some() {
-            let (_, id, raw, _) = page.last().expect("nonempty page");
-            let cursor = json!({"options":self.options, "timestamp":raw, "id":id});
+            let (updated, id, _) = page.last().expect("nonempty page");
+            let cursor = json!({"options":self.options, "timestamp":harn_clock::format_rfc3339(*updated), "id":id});
             base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(serde_json::to_vec(&cursor).expect("JSON cursor"))
         } else {
@@ -134,7 +133,7 @@ impl ListQuery {
         };
         let tasks: Vec<_> = page
             .into_iter()
-            .map(|(_, _, _, task)| {
+            .map(|(_, _, task)| {
                 let mut value = task_to_json_versioned(task, harn_vm::a2a::A2aWireVersion::V1_0);
                 limit_history(
                     &mut value,
