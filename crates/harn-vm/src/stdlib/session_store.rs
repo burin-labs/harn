@@ -395,6 +395,28 @@ pub(crate) async fn describe_closed_checkpoint(
     }
 }
 
+/// Load or record spend through a short-lived store with the canonical hooks.
+/// Local commits still notify subscribers; no long-lived watcher is needed.
+pub(crate) async fn load_transient_session_spend(
+    root: &Path,
+    session_id: &str,
+) -> Result<f64, VmError> {
+    let state_dir = SessionStoreDir(crate::persistent_state::canonical_store_root(root));
+    let store = open_sqlite_store(&state_dir)?;
+    crate::agent_session_spend::load_session_llm_spend_usd_from_store(&store, session_id).await
+}
+
+pub(crate) async fn record_transient_session_spend(
+    root: &Path,
+    session_id: &str,
+    spent_usd: f64,
+) -> Result<(), VmError> {
+    let state_dir = SessionStoreDir(crate::persistent_state::canonical_store_root(root));
+    let store = open_sqlite_store(&state_dir)?;
+    crate::agent_session_spend::record_session_llm_spend_usd_in_store(&store, session_id, spent_usd)
+        .await
+}
+
 fn open_maintenance_store(
     state_dir: &SessionStoreDir,
 ) -> harn_session_store::StoreResult<CanonicalStore> {

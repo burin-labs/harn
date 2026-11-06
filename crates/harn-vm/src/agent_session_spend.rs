@@ -32,8 +32,7 @@ pub async fn load_session_llm_spend_usd(
     // The writable open, not the read-only one: it waits on the store's init
     // lock, so a store another process is still creating is read once it is
     // initialized instead of failing the turn's admission.
-    let store = crate::stdlib::session_store::open_canonical_store(project_root)?;
-    load_session_llm_spend_usd_from_store(&store, session_id).await
+    crate::stdlib::session_store::load_transient_session_spend(project_root, session_id).await
 }
 
 /// Store-injected form of [`load_session_llm_spend_usd`].
@@ -65,8 +64,12 @@ pub async fn record_session_llm_spend_usd(
     session_id: &str,
     spent_usd: f64,
 ) -> Result<(), VmError> {
-    let store = crate::stdlib::session_store::open_canonical_store(project_root)?;
-    record_session_llm_spend_usd_in_store(&store, session_id, spent_usd).await
+    crate::stdlib::session_store::record_transient_session_spend(
+        project_root,
+        session_id,
+        spent_usd,
+    )
+    .await
 }
 
 /// Store-injected form of [`record_session_llm_spend_usd`].
