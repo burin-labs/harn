@@ -124,8 +124,8 @@ fn is_disallowed_ipv6(ip: Ipv6Addr, allow_loopback: bool) -> bool {
         return true;
     }
     let segments = ip.segments();
-    // Well-known NAT64 prefix can translate to otherwise refused IPv4 targets.
-    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+    // RFC 6052 and RFC 8215 translation prefixes can target refused IPv4 ranges.
+    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] || segments[..3] == [0x64, 0xff9b, 1] {
         return true;
     }
     // Link-local fe80::/10.
@@ -424,7 +424,13 @@ mod tests {
 
     #[test]
     fn ipv6_blocks_well_known_nat64_range() {
-        for ip in ["64:ff9b::7f00:1", "64:ff9b::808:808"] {
+        for ip in [
+            "64:ff9b::7f00:1",
+            "64:ff9b::808:808",
+            "64:ff9b:1::",
+            "64:ff9b:1::7f00:1",
+            "64:ff9b:1:ffff:ffff:ffff:ffff:ffff",
+        ] {
             for allow_loopback in [false, true] {
                 assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
             }
