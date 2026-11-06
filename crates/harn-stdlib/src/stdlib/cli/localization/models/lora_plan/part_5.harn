@@ -134,9 +134,6 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if locale == "fr" {
     return "  modèle : " + (values[0] ?? "")
   }
-  if locale == "it" {
-    return "  template: " + (values[0] ?? "")
-  }
   if locale == "ja" {
     return "  テンプレート: " + (values[0] ?? "")
   }
@@ -178,9 +175,6 @@ pub fn message_29(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  ツール形式の修正: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  tool format correction: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
     return "  correção de formato da ferramenta: " + (values[0] ?? "")

@@ -104,9 +104,6 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  일치: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  matched: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  совпало: " + (values[0] ?? "")
   }
@@ -142,9 +139,6 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  누락됨: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  missing: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  отсутствует: " + (values[0] ?? "")

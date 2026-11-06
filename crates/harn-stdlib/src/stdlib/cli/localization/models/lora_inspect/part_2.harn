@@ -26,9 +26,6 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  실행:"
   }
-  if locale == "pt-BR" {
-    return "  launch:"
-  }
   if locale == "ru" {
     return "  запуск:"
   }
@@ -64,9 +61,6 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  최대 LoRA rank: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  max LoRA rank: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  максимальный ранг LoRA: " + (values[0] ?? "")
@@ -104,9 +98,6 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  저장할 모듈: 없음"
   }
-  if locale == "pt-BR" {
-    return "  modules to save: none"
-  }
   if locale == "ru" {
     return "  модули для сохранения: нет"
   }
@@ -143,9 +134,6 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  저장할 모듈: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  modules to save: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  модули для сохранения: " + (values[0] ?? "")
   }
@@ -181,9 +169,6 @@ pub fn message_14(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  기본 도구: " + (values[0] ?? "") + ", 선호: " + (values[1] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
   }
   if locale == "ru" {
     return "  встроенные инструменты: " + (values[0] ?? "") + ", предпочтительно: "

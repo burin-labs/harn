@@ -25,9 +25,6 @@ pub fn message_30(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  ツール形式: " + (values[0] ?? "") + " (要求 " + (values[1] ?? "") + ")"
   }
-  if locale == "ko" {
-    return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
-  }
   if locale == "pt-BR" {
     return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
       + ")"
@@ -58,9 +55,6 @@ pub fn message_31(locale: string, values: list<string>) -> string {
   }
   if locale == "fr" {
     return "  formateur : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  trainer: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  トレーナー: " + (values[0] ?? "")
@@ -175,9 +169,6 @@ pub fn message_34(locale: string, values: list<string>) -> string {
   }
   if locale == "fr" {
     return "  entraînement : " + (values[0] ?? "") + " + " + (values[1] ?? "")
-  }
-  if locale == "it" {
-    return "  training: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
   if locale == "ja" {
     return "  学習: " + (values[0] ?? "") + " + " + (values[1] ?? "")

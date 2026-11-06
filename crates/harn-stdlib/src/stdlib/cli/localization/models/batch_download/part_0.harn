@@ -143,9 +143,6 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  작업: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  jobs: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  задания: " + (values[0] ?? "")
   }

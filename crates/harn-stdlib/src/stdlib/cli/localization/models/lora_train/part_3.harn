@@ -20,15 +20,6 @@ pub fn message_15(locale: string, values: list<string>) -> string {
   if locale == "it" {
     return "  produttore: " + (values[0] ?? "")
   }
-  if locale == "ja" {
-    return "  producer: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  producer: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  producer: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  создатель: " + (values[0] ?? "")
   }
@@ -61,12 +52,6 @@ pub fn message_16(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  昇格ID: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  promotion id: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  promotion id: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  идентификатор продвижения: " + (values[0] ?? "")
@@ -172,9 +157,6 @@ pub fn message_19(locale: string, values: list<string>) -> string {
   }
   if locale == "fr" {
     return "  modèle : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  template: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  テンプレート: " + (values[0] ?? "")

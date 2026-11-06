@@ -26,9 +26,6 @@ pub fn message_0(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  메시지 (" + (values[0] ?? "") + "):"
   }
-  if locale == "pt-BR" {
-    return "  messages (" + (values[0] ?? "") + "):"
-  }
   if locale == "ru" {
     return "  сообщения (" + (values[0] ?? "") + "):"
   }
@@ -182,9 +179,6 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "fr" {
     return "  schéma : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  schema: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  スキーマ: " + (values[0] ?? "")

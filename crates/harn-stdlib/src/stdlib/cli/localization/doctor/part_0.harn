@@ -164,32 +164,8 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "FAIL"
-  }
-  if locale == "es" {
-    return "FAIL"
-  }
-  if locale == "fr" {
-    return "FAIL"
-  }
-  if locale == "it" {
-    return "FAIL"
-  }
-  if locale == "ja" {
-    return "FAIL"
-  }
-  if locale == "ko" {
-    return "FAIL"
-  }
-  if locale == "pt-BR" {
-    return "FAIL"
-  }
   if locale == "ru" {
     return "СБОЙ"
-  }
-  if locale == "zh-Hans" {
-    return "FAIL"
   }
   return "FAIL"
 }

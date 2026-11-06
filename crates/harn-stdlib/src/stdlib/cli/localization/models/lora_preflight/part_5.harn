@@ -23,9 +23,6 @@ pub fn message_25(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  ツール形式の修正: " + (values[0] ?? "")
   }
-  if locale == "ko" {
-    return "  tool format correction: " + (values[0] ?? "")
-  }
   if locale == "pt-BR" {
     return "  correção de formato da ferramenta: " + (values[0] ?? "")
   }
@@ -47,32 +44,8 @@ pub fn message_26(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "FAIL"
-  }
-  if locale == "es" {
-    return "FAIL"
-  }
-  if locale == "fr" {
-    return "FAIL"
-  }
-  if locale == "it" {
-    return "FAIL"
-  }
-  if locale == "ja" {
-    return "FAIL"
-  }
-  if locale == "ko" {
-    return "FAIL"
-  }
-  if locale == "pt-BR" {
-    return "FAIL"
-  }
   if locale == "ru" {
     return "СБОЙ"
-  }
-  if locale == "zh-Hans" {
-    return "FAIL"
   }
   return "FAIL"
 }
@@ -126,32 +99,8 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "es" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "fr" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "it" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "ja" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "ko" {
-    return "MIGRATION REVIEW"
-  }
-  if locale == "pt-BR" {
-    return "MIGRATION REVIEW"
-  }
   if locale == "ru" {
     return "ПРОВЕРКА МИГРАЦИИ"
-  }
-  if locale == "zh-Hans" {
-    return "MIGRATION REVIEW"
   }
   return "MIGRATION REVIEW"
 }
@@ -165,32 +114,8 @@ pub fn message_29(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "PASS"
-  }
-  if locale == "es" {
-    return "PASS"
-  }
-  if locale == "fr" {
-    return "PASS"
-  }
-  if locale == "it" {
-    return "PASS"
-  }
-  if locale == "ja" {
-    return "PASS"
-  }
-  if locale == "ko" {
-    return "PASS"
-  }
-  if locale == "pt-BR" {
-    return "PASS"
-  }
   if locale == "ru" {
     return "ПРОЙДЕНО"
-  }
-  if locale == "zh-Hans" {
-    return "PASS"
   }
   return "PASS"
 }

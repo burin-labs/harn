@@ -134,9 +134,6 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if locale == "fr" {
     return "  entraînement : " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
-  if locale == "it" {
-    return "  training: " + (values[0] ?? "") + " + " + (values[1] ?? "")
-  }
   if locale == "ja" {
     return "  学習: " + (values[0] ?? "") + " + " + (values[1] ?? "")
   }
@@ -164,64 +161,8 @@ pub fn message_29(locale: string, values: list<string>) -> string {
   if len(values) != 5 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "es" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
   if locale == "fr" {
     return "  " + (values[0] ?? "") + " : " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "it" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ja" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ko" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ru" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "zh-Hans" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
       + ", exists="
       + (values[3] ?? "")
       + ")"

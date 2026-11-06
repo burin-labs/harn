@@ -101,9 +101,6 @@ pub fn message_7(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  契約: " + (values[0] ?? "")
   }
-  if locale == "ko" {
-    return "  contract: " + (values[0] ?? "")
-  }
   if locale == "pt-BR" {
     return "  contrato: " + (values[0] ?? "")
   }
@@ -173,17 +170,11 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   if locale == "fr" {
     return "  sortie : " + (values[0] ?? "")
   }
-  if locale == "it" {
-    return "  output: " + (values[0] ?? "")
-  }
   if locale == "ja" {
     return "  出力: " + (values[0] ?? "")
   }
   if locale == "ko" {
     return "  출력: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  output: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  вывод: " + (values[0] ?? "")

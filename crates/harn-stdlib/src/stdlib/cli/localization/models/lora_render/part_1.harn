@@ -26,9 +26,6 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  관찰된 trainer identity: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  observed trainer identity: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  наблюдаемая идентичность обучающего процесса: " + (values[0] ?? "")
   }
@@ -61,12 +58,6 @@ pub fn message_6(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  プローブコマンドテンプレート:"
-  }
-  if locale == "ko" {
-    return "  probe command templates:"
-  }
-  if locale == "pt-BR" {
-    return "  probe command templates:"
   }
   if locale == "ru" {
     return "  шаблоны команд проверки:"
@@ -178,9 +169,6 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  ツールカタログのハッシュ: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  tool catalog hash: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
     return "  hash do catálogo de ferramentas: " + (values[0] ?? "")

@@ -101,9 +101,6 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  推論カタログ: " + (values[0] ?? "")
   }
-  if locale == "ko" {
-    return "  inference catalog: " + (values[0] ?? "")
-  }
   if locale == "pt-BR" {
     return "  catálogo de inferência: " + (values[0] ?? "")
   }
@@ -143,9 +140,6 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  저장할 모듈: 없음"
   }
-  if locale == "pt-BR" {
-    return "  modules to save: none"
-  }
   if locale == "ru" {
     return "  модули для сохранения: нет"
   }
@@ -181,9 +175,6 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  저장할 모듈: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  modules to save: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  модули для сохранения: " + (values[0] ?? "")

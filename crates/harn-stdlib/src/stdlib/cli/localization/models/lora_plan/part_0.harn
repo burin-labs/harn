@@ -42,10 +42,6 @@ pub fn message_0(locale: string, values: list<string>) -> string {
     return "  hparams LoRA: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
       + (values[2] ?? "")
   }
-  if locale == "ru" {
-    return "  LoRA hparams: rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
-      + (values[2] ?? "")
-  }
   if locale == "zh-Hans" {
     return "  LoRA 超参数：rank=" + (values[0] ?? "") + " alpha=" + (values[1] ?? "") + " dropout="
       + (values[2] ?? "")
