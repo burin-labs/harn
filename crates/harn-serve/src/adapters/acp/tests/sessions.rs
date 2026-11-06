@@ -140,10 +140,16 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                 harn_capabilities["extensionContract"],
                 "https://harnlang.com/spec/harn-extensions/v1"
             );
-            assert_eq!(
-                harn_capabilities["sessionUpdateExtensions"],
-                serde_json::json!(HARN_SESSION_UPDATE_EXTENSIONS)
-            );
+            let advertised = harn_capabilities["sessionUpdateExtensions"].as_array().unwrap();
+            let advertised_kinds: std::collections::BTreeSet<_> = advertised
+                .iter().map(|value| value.as_str().unwrap()).collect();
+            assert_eq!(advertised.len(), advertised_kinds.len(), "duplicate advertised updates");
+            for kind in ACP_SESSION_UPDATE_VARIANTS.iter().copied()
+                .filter(|kind| !super::super::schema::is_standard_session_update(kind))
+                .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter().copied())
+            {
+                assert!(advertised_kinds.contains(kind), "missing advertised update {kind}");
+            }
             let agent_event_method =
                 &harn_capabilities["extensionMethods"][HARN_AGENT_EVENT_METHOD];
             assert!(

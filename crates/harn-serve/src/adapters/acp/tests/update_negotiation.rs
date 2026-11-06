@@ -55,6 +55,52 @@ fn unconditional_update_vocabulary_is_upstream_and_extensions_require_exact_gran
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn advertised_grants_deliver_user_message_history_identity() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    let replay = AcpAgentEventSink::for_replay(server.output.clone());
+    let event = AgentEvent::UserMessage {
+        session_id: "session".into(),
+        message_id: "client-message".into(),
+        content: vec![serde_json::json!({"type":"text", "text":"question"})],
+        history_source_event_id: Some("history-event".into()),
+    };
+
+    server.handle_initialize(&serde_json::json!(1), &serde_json::json!({}));
+    let initialized = recv_json(&mut rx).await;
+    let advertised = initialized["result"]["agentCapabilities"]["_meta"]["harn"]
+        ["sessionUpdateExtensions"]
+        .as_array()
+        .expect("the server advertises its gated updates")
+        .clone();
+    assert!(
+        advertised.contains(&serde_json::json!("user_message")),
+        "{advertised:?}"
+    );
+    replay.handle_event(&event);
+    assert!(
+        rx.try_recv().is_err(),
+        "an ungranted nonstandard update must be suppressed"
+    );
+
+    server.handle_initialize(
+        &serde_json::json!(2),
+        &serde_json::json!({
+            "clientCapabilities":{"_meta":{"harn":{"sessionUpdateExtensions":advertised}}}
+        }),
+    );
+    assert_eq!(recv_json(&mut rx).await["id"], 2);
+    replay.handle_event(&event);
+    let frame = recv_json(&mut rx).await;
+    assert_eq!(frame["params"]["update"]["sessionUpdate"], "user_message");
+    assert_eq!(frame["params"]["update"]["messageId"], "client-message");
+    assert_eq!(
+        frame["params"]["update"]["historySourceEventId"],
+        "history-event"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn real_prompt_updates_obey_negotiated_extensions_and_validate_upstream() {
     harn_clock::test_support::with_local_tasks(async {
         let validator = jsonschema::draft202012::new(&upstream_session_update_schema()).unwrap();

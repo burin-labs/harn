@@ -115,34 +115,14 @@ values:
 - `config_option_update`
 - `session_info_update`
 
-Harn emits additional host-facing lifecycle updates outside ACP. They
-ride as top-level `sessionUpdate` discriminators for compatibility with
-existing IDE-host and other host renderers, advertised during
-`initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
-
-- `artifact`
-- `fs_watch`
-- `handoff`
-- `hitl_request`
-- `hitl_resolved`
-- `log`
-- `progress`
-- `reminder_emitted`
-- `skill_activated`
-- `skill_deactivated`
-- `skill_narrow`
-- `skill_scope_tools`
-- `tool_search_query`
-- `tool_search_result`
-- `transcript_compacted`
-- `transcript_projected`
-- `worker_update`
-
-Unknown values should be ignored per ACP forward-compatibility rules.
-Hosts that render Harn extensions should key off the explicit extension
-list from `initialize` instead of a local allow-list.
-Harn retains `user_message` as a legacy nonstandard update and continues to
-advertise `available_commands_update` in its extension list for compatibility.
+Harn advertises its additional `sessionUpdate` discriminators during
+`initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`.
+These include `user_message`, which carries the saved prompt identity for
+rewind, and session-history updates. A client requests the updates it supports
+under `clientCapabilities._meta.harn.sessionUpdateExtensions`; unrequested
+nonstandard updates are suppressed. The server's advertised list is
+authoritative, and clients should ignore unknown values. Harn also advertises
+the standard `available_commands_update` there for compatibility.
 
 Agent-loop prompt results expose the same producer-owned terminal outcome used
 by Harn's runtime under `result._meta.harn.terminal`, advertised through
