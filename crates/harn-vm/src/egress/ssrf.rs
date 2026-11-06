@@ -1,12 +1,7 @@
 //! SSRF / egress IP classifier and a connect-time DNS guard.
 //!
-//! The [`is_disallowed_ip`] classifier is ported verbatim from
-//! a cloud gateway's `url_validation` so the runtime and the
-//! cloud control plane agree on exactly which addresses are off-limits
-//! (loopback, RFC 1918, link-local incl. the `169.254.169.254` cloud-metadata
-//! endpoint, broadcast, unspecified, multicast, documentation, CGNAT
-//! `100.64/10`, benchmark `198.18/15`; and the IPv6 analogues plus IPv4-mapped
-//! addresses re-applying the v4 rules).
+//! [`is_disallowed_ip`] owns runtime address classification for HTTP and child
+//! egress. IPv4-mapped addresses use the same IPv4 rules.
 //!
 //! [`GuardedResolver`] implements [`reqwest::dns::Resolve`] and filters the
 //! resolved [`SocketAddr`]s through the classifier *at connect time*. Because
@@ -434,7 +429,7 @@ mod tests {
                 assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
             }
         }
-        assert!(!is_disallowed_ip(v4("64:ff9b:1::808:808"), false));
+        assert!(!is_disallowed_ip(v4("2001:4860:4860::8888"), false));
     }
 
     #[test]
