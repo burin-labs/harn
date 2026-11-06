@@ -665,6 +665,24 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
     'jobs',fetchRecord);
 }
 
+function candidateArtifacts(jobs, artifacts, source, targets) {
+  if (!Array.isArray(artifacts)) refuse('archive_producer_artifacts_unproven');
+  return [...targets.map(target=>[`harn-${target}`, `Build ${target}`,
+    `Upload candidate archive (${target.includes('windows')?'windows':'unix'})`]),
+    [`candidate-manifest-${source}`, 'Assemble candidate manifest', 'Upload candidate manifest'],
+    ['harn-release-files', 'Assemble candidate manifest', 'Upload release files']].map(([name,jobName,stepName])=>{
+    const steps=jobs.find(job=>job.name===jobName)?.steps?.filter(step=>step.name===stepName) ?? [];
+    const step=steps[0], start=Date.parse(step?.started_at), end=Date.parse(step?.completed_at);
+    if (steps.length!==1 || step.status!=='completed' || step.conclusion!=='success'
+      || typeof step.started_at!=='string' || typeof step.completed_at!=='string'
+      || !Number.isFinite(start) || !Number.isFinite(end) || start>end) refuse('archive_producer_artifacts_unproven');
+    const matches=artifacts.filter(artifact=>artifact.name===name && typeof artifact.created_at==='string'
+      && Date.parse(artifact.created_at)>=start && Date.parse(artifact.created_at)<=end);
+    if (matches.length!==1) refuse('archive_producer_artifacts_unproven');
+    return matches[0];
+  });
+}
+
 /** Build evidence belongs to its producing attempt. A new live promotion can
  * measure a repaired consumer without rerunning those immutable archives. */
 export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, historical = null) {
@@ -729,19 +747,17 @@ export function qualifyArchiveProducer(run, jobs, artifacts, request, targets, h
           || job.status==='completed' && ['success','failure','skipped'].includes(job.conclusion))))) {
     refuse('archive_producer_builds_unproven');
   }
-  const names = [...targets.map(target=>`harn-${target}`),`candidate-manifest-${sourceRevision}`,'harn-release-files'];
-  if (!Array.isArray(artifacts) || names.some(name=>{
-    const matches=artifacts.filter(artifact=>artifact.name===name);
-    const artifact=matches[0];
-    return matches.length!==1 || !Number.isSafeInteger(artifact.id) || artifact.id<1
+  const selected=candidateArtifacts(jobs,artifacts,sourceRevision,targets);
+  if (selected.some(artifact=>!Number.isSafeInteger(artifact.id) || artifact.id<1
       || artifact.expired!==false || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes<1
       || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
-      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==policyRevision;
-  })) refuse('archive_producer_artifacts_unproven');
+      || String(artifact.workflow_run?.id)!==runId || artifact.workflow_run?.head_sha!==policyRevision)) {
+    refuse('archive_producer_artifacts_unproven');
+  }
+  const manifest=selected.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`);
   return {schema:'harn.release.producer_readiness.v1',stage:'candidate-archives',source_sha:sourceRevision,
     producer_run:runId,producer_attempt:attempt,verdict:'pass',observed_jobs:jobs.length,
-    proven_artifacts:names.length,manifest:{id:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).id,
-      digest:artifacts.find(artifact=>artifact.name===`candidate-manifest-${sourceRevision}`).digest},
+    proven_artifacts:selected.length,manifest:{id:manifest.id,digest:manifest.digest},
     pending:auditPending?1:0,pending_jobs:auditPending?['Release residual audit']:[],
     failed_jobs:[],next_action:'measure-consumer-repair'};
 }
@@ -759,10 +775,10 @@ export async function githubArchiveProducer(token, request, fetchRecord=fetch, e
     const response = await githubRead(token,
       `https://api.github.com/repos/${parentRepository}/compare/${request.sourceRevision}...${run.head_sha}`, fetchRecord);
     if (!response.ok) refuse('archive_producer_lineage_read_refused', refusalDiagnostic(response));
-    const manifests = artifacts.filter(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
-    if (manifests.length !== 1) refuse('archive_producer_artifacts_unproven');
-    historical = {lineage:await response.json(),manifest:await githubArtifactJson(token,parentRepository,manifests[0],{
-      runId:request.runId,headSha:run.head_sha,name:manifests[0].name,filename:'candidate-manifest.json',
+    const manifest = candidateArtifacts(jobs,artifacts,request.sourceRevision,targets)
+      .find(item=>item.name===`candidate-manifest-${request.sourceRevision}`);
+    historical = {lineage:await response.json(),manifest:await githubArtifactJson(token,parentRepository,manifest,{
+      runId:request.runId,headSha:run.head_sha,name:manifest.name,filename:'candidate-manifest.json',
     },fetchRecord,extract)};
   }
   return qualifyArchiveProducer(run,jobs,artifacts,request,targets,historical);

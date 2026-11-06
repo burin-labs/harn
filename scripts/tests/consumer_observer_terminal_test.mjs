@@ -373,9 +373,12 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const producerJobs=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest','Release residual audit',
       'Consumer release rehearsal / Decide whether main moved',...targets.map(target=>`Build ${target}`),
       ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)]
-      .map((name,index)=>({id:index+1,run_id:900,run_attempt:1,head_sha:context.source_revision,name,status:'completed',conclusion:'success'}));
+      .map((name,index)=>({id:index+1,run_id:900,run_attempt:1,head_sha:context.source_revision,name,status:'completed',conclusion:'success',
+        steps:(name==='Assemble candidate manifest'?['Upload candidate manifest','Upload release files']:
+          name.startsWith('Build ')?[`Upload candidate archive (${name.includes('windows')?'windows':'unix'})`]:[])
+          .map(name=>({name,status:'completed',conclusion:'success',started_at:'2026-11-02T10:00:00Z',completed_at:'2026-11-02T10:00:02Z'}))}));
     const producerArtifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${context.source_revision}`,'harn-release-files']
-      .map((name,index)=>({id:index+800,name,expired:false,size_in_bytes:100,digest:`sha256:${'d'.repeat(64)}`,
+      .map((name,index)=>({id:index+800,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:100,digest:`sha256:${'d'.repeat(64)}`,
         workflow_run:{id:900,head_sha:context.source_revision}}));
     const producerData={run:producerRun,jobs:producerJobs,artifacts:producerArtifacts};
     const repairRequest={schema:'harn.release.consumer_repair.v1',context,producer_run:'900',producer_attempt:1,consumer_pull:'7'};
