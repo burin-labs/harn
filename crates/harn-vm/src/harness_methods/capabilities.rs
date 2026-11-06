@@ -150,17 +150,38 @@ fn call_harness_system_method(
 ) -> Result<VmValue, VmError> {
     use crate::harness_system as sys;
     let json = match method {
-        "cpu" => sys::cpu_snapshot().map_err(VmError::Runtime)?,
-        "memory" => sys::memory_snapshot().map_err(VmError::Runtime)?,
+        "cpu" => sys::cpu_snapshot(),
+        "memory" => sys::memory_snapshot(),
         "gpus" | "gpu" => sys::gpus_snapshot(),
-        "temperature" => sys::temperature_snapshot().map_err(VmError::Runtime)?,
+        "temperature" => sys::temperature_snapshot(),
         "platform" => sys::platform_snapshot(),
         "identity" => sys::identity_snapshot(),
         "parent_process" => sys::parent_process_snapshot(),
-        "processes" => sys::processes_snapshot().map_err(VmError::Runtime)?,
+        "processes" => sys::processes_snapshot(),
         _ => return Err(method_unsupported(handle, method)),
     };
-    Ok(crate::value::json::json_to_vm_value(&json))
+    project_system_measurement(method, &json)
+}
+
+fn project_system_measurement(method: &str, json: &serde_json::Value) -> Result<VmValue, VmError> {
+    if json.is_null() {
+        return Err(VmError::Runtime(format!("system.{method} measurement unavailable")));
+    }
+    Ok(crate::value::json::json_to_vm_value(json))
+}
+
+#[cfg(test)]
+mod system_measurement_tests {
+    use super::*;
+
+    #[test]
+    fn an_unavailable_measurement_is_not_projected_as_a_value() {
+        assert!(matches!(
+            project_system_measurement("cpu", &serde_json::Value::Null),
+            Err(VmError::Runtime(message)) if message.contains("system.cpu measurement unavailable")
+        ));
+        assert!(project_system_measurement("cpu", &serde_json::json!({"count": 2})).is_ok());
+    }
 }
 
 async fn call_harness_secrets_method(

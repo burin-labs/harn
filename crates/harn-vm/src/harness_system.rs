@@ -90,16 +90,18 @@ fn harn_owned_pids_snapshot() -> BTreeSet<u32> {
 
 /// Snapshot of CPU topology. `count` reflects logical cores; `frequency_mhz`
 /// is the first-core frequency reported by the OS (typically the current
-/// frequency; nominal on many platforms).
-pub fn cpu_snapshot() -> Result<Value, String> {
-    let mut sys = System::new_with_specifics(
+/// frequency; nominal on many platforms). Returns null if the snapshot cannot
+/// be initialized.
+pub fn cpu_snapshot() -> Value {
+    let Ok(mut sys) = System::new_with_specifics(
         RefreshKind::nothing().with_cpu(
             sysinfo::CpuRefreshKind::nothing()
                 .with_usage()
                 .with_frequency(),
         ),
-    )
-    .map_err(|error| format!("CPU snapshot unavailable: {error}"))?;
+    ) else {
+        return Value::Null;
+    };
     sys.refresh_cpu_all();
     let cpus = sys.cpus();
     let count = cpus.len();
@@ -120,22 +122,24 @@ pub fn cpu_snapshot() -> Result<Value, String> {
         let total: f32 = cpus.iter().map(|c| c.usage()).sum();
         Some(total as f64 / cpus.len() as f64)
     };
-    Ok(json!({
+    json!({
         "count": count,
         "physical_count": physical_count,
         "model": model,
         "frequency_mhz": frequency_mhz,
         "usage_pct": cpu_usage,
-    }))
+    })
 }
 
 /// Snapshot of host memory. All sizes are bytes; cross-platform with
-/// graceful zeroes on hosts where a metric is unavailable.
-pub fn memory_snapshot() -> Result<Value, String> {
-    let mut sys = System::new_with_specifics(
+/// graceful zeroes on hosts where a metric is unavailable. Returns null if the
+/// snapshot cannot be initialized.
+pub fn memory_snapshot() -> Value {
+    let Ok(mut sys) = System::new_with_specifics(
         RefreshKind::nothing().with_memory(MemoryRefreshKind::everything()),
-    )
-    .map_err(|error| format!("memory snapshot unavailable: {error}"))?;
+    ) else {
+        return Value::Null;
+    };
     sys.refresh_memory();
     let total = sys.total_memory();
     let used = sys.used_memory();
@@ -155,7 +159,7 @@ pub fn memory_snapshot() -> Result<Value, String> {
             "low"
         }
     };
-    Ok(json!({
+    json!({
         "total_bytes": total,
         "used_bytes": used,
         "available_bytes": available,
@@ -163,7 +167,7 @@ pub fn memory_snapshot() -> Result<Value, String> {
         "used_gb": used_gb,
         "available_gb": available_gb,
         "pressure": pressure,
-    }))
+    })
 }
 
 /// Resident bytes for the current Harn process.
@@ -220,10 +224,11 @@ pub fn gpus_snapshot() -> Value {
 /// fields when the host does not expose a sensor, and an empty list
 /// when no thermal sensors are visible at all — common in containers,
 /// VMs, and on macOS where `sysinfo`'s thermal API has long-standing
-/// gaps.
-pub fn temperature_snapshot() -> Result<Value, String> {
-    let components = Components::new_with_refreshed_list()
-        .map_err(|error| format!("temperature snapshot unavailable: {error}"))?;
+/// gaps. Returns null if the sensor list cannot be initialized.
+pub fn temperature_snapshot() -> Value {
+    let Ok(components) = Components::new_with_refreshed_list() else {
+        return Value::Null;
+    };
     let mut entries = Vec::new();
     for component in &components {
         entries.push(json!({
@@ -233,9 +238,9 @@ pub fn temperature_snapshot() -> Result<Value, String> {
             "critical_celsius": component.critical(),
         }));
     }
-    Ok(json!({
+    json!({
         "components": entries,
-    }))
+    })
 }
 
 /// Snapshot of the host platform: os, arch, version, kernel.
@@ -376,9 +381,11 @@ pub fn parent_process_snapshot() -> Value {
 
 /// Snapshot of visible processes. Peer entries omit arguments, environment,
 /// and working directories. Ownership follows the parent or registration.
-pub fn processes_snapshot() -> Result<Value, String> {
-    let mut sys =
-        System::new().map_err(|error| format!("process snapshot unavailable: {error}"))?;
+/// Returns null if the process snapshot cannot be initialized.
+pub fn processes_snapshot() -> Value {
+    let Ok(mut sys) = System::new() else {
+        return Value::Null;
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         false,
@@ -459,7 +466,7 @@ pub fn processes_snapshot() -> Result<Value, String> {
         );
     }
 
-    Ok(Value::Array(entries))
+    Value::Array(entries)
 }
 
 fn current_process_name(sys: &System, pid: Pid) -> String {
@@ -493,7 +500,7 @@ mod tests {
 
     #[test]
     fn cpu_snapshot_reports_nonzero_count() {
-        let snapshot = cpu_snapshot().expect("CPU snapshot");
+        let snapshot = cpu_snapshot();
         let count = snapshot
             .get("count")
             .and_then(Value::as_u64)
@@ -503,7 +510,7 @@ mod tests {
 
     #[test]
     fn memory_snapshot_has_nonzero_total() {
-        let snapshot = memory_snapshot().expect("memory snapshot");
+        let snapshot = memory_snapshot();
         let total = snapshot
             .get("total_bytes")
             .and_then(Value::as_u64)
@@ -527,7 +534,7 @@ mod tests {
 
     #[test]
     fn temperature_snapshot_returns_components_field() {
-        let snapshot = temperature_snapshot().expect("temperature snapshot");
+        let snapshot = temperature_snapshot();
         assert!(
             snapshot.get("components").is_some(),
             "components field present"
@@ -549,7 +556,7 @@ mod tests {
 
     #[test]
     fn processes_snapshot_includes_self() {
-        let snapshot = processes_snapshot().expect("process snapshot");
+        let snapshot = processes_snapshot();
         let entries = snapshot.as_array().expect("array");
         let our_pid = std::process::id() as u64;
         let self_entry = entries
