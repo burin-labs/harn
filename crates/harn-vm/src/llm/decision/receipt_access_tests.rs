@@ -2,7 +2,7 @@ use super::*;
 use crate::NativeVmExt;
 use harn_parser::builtin_signatures::TyExt;
 
-const PROGRAM: &str = include_str!("fixtures/receipt_access.harn");
+const PROGRAM: &str = include_str!("../testdata/evaluation_receipt_access.harn");
 
 #[test]
 fn public_receipt_access_preserves_accounting_transport_and_execution_isolation() {
