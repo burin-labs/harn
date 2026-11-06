@@ -3,6 +3,21 @@
 pub use crate::vm::flight_recorder::*;
 use std::path::{Path, PathBuf};
 
+/// Storage policy for an enabled VM flight recorder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlightRecordingStorage<'a> {
+    /// Write into Harn's dedicated directory and retain the newest files.
+    Managed {
+        /// Maximum number of newest managed recordings to keep.
+        retain_files: usize,
+    },
+    /// Write to a caller-owned path without rotating sibling files.
+    Custom {
+        /// Exact destination for a run; prompts append their execution ID.
+        output: &'a Path,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub struct FlightRecorderOptions {
     pub enabled: bool,
@@ -35,13 +50,13 @@ impl FlightRecorderOptions {
         }
     }
 
-    pub fn storage(&self) -> Option<crate::orchestration::FlightRecordingStorage<'_>> {
+    pub fn storage(&self) -> Option<FlightRecordingStorage<'_>> {
         self.enabled.then(|| {
             self.out.as_deref().map_or(
-                crate::orchestration::FlightRecordingStorage::Managed {
+                FlightRecordingStorage::Managed {
                     retain_files: self.retain_files,
                 },
-                |output| crate::orchestration::FlightRecordingStorage::Custom { output },
+                |output| FlightRecordingStorage::Custom { output },
             )
         })
     }
@@ -52,33 +67,46 @@ impl FlightRecorderOptions {
         store_base: &Path,
         context: FlightPromptContext<'_>,
     ) -> Result<Option<FlightRecordingArtifact>, String> {
-        if !self.enabled {
-            return Ok(None);
-        }
+        self.storage()
+            .map(|storage| storage.persist(vm, store_base, Some(context)))
+            .transpose()
+    }
+}
+
+impl FlightRecordingStorage<'_> {
+    pub(crate) fn persist(
+        self,
+        vm: &crate::Vm,
+        store_base: &Path,
+        context: Option<FlightPromptContext<'_>>,
+    ) -> Result<FlightRecordingArtifact, String> {
         let recording = vm
             .flight_recording()
-            .ok_or("requested flight recorder is missing")?;
-        let (path, retain) = if let Some(output) = &self.out {
-            let stem = output
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .ok_or("flight recording output needs a file name")?;
-            (
-                crate::run_tape::branch_path(
-                    output.with_file_name(format!("{stem}.{}.json", recording.execution_id)),
-                    "flight recording",
-                ),
-                usize::MAX,
-            )
-        } else {
-            (
+            .ok_or("flight recorder was requested but not installed")?;
+        let (path, retain) = match self {
+            Self::Custom { output } => {
+                let output = if context.is_some() {
+                    let stem = output
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .ok_or("flight recording output needs a file name")?;
+                    output.with_file_name(format!("{stem}.{}.json", recording.execution_id))
+                } else {
+                    output.to_path_buf()
+                };
+                (
+                    crate::run_tape::branch_path(output, "flight recording"),
+                    usize::MAX,
+                )
+            }
+            Self::Managed { retain_files } => (
                 crate::runtime_paths::run_root(store_base)
                     .join("flight-recordings")
                     .join(format!("{}.json", recording.execution_id)),
-                self.retain_files,
-            )
+                retain_files,
+            ),
         };
-        persist_recording_with_context(&recording, &path, retain, Some(context)).map(Some)
+        persist_recording_with_context(&recording, &path, retain, context)
     }
 }
 
