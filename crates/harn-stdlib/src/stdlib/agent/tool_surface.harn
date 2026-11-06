@@ -558,8 +558,18 @@ pub fn agent_apply_tool_surface_narrowing(opts: dict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_reset_tool_surface_narrowing(agent: HarnessAgent, session: dict, opts: dict) {
-  const reset = opts + {_tool_surface_narrowed_tools: nil}
+pub fn agent_reset_tool_surface_narrowing(opts: dict) {
+  return opts + {_tool_surface_narrowed_tools: nil}
+}
+
+/**
+ * Reopen a skill's surface and retain that decision across same-user re-entry.
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_reopen_tool_surface(agent: HarnessAgent, session: dict, opts: dict) {
+  const reset = agent_reset_tool_surface_narrowing(opts)
   return if opts?._tool_surface_user_boundary == nil {
     reset
   } else {
