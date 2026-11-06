@@ -48,6 +48,23 @@ The single-boolean projection uses `verdict` with `value`, or
 `low_confidence` with `candidate`, instead of the batched `answered` arm. It
 shares the remaining refusal and control arms.
 
+## Retained receipt accounting
+
+`harness.llm.evaluation_receipt(reference)` reads the accounting projection for
+an occurrence returned by any evaluator method. It makes no provider request.
+`kind: "retained"` carries a typed `receipt` with schema
+`harn.evaluation.accounting.v1`: occurrence and route identity, outcome,
+physical attempts, accounting status, tokens, settled cost, and budget charge.
+Its optional `native_transport` preserves reported downstream attempts and
+provider, plus the requested data-control posture and outcome. Missing reports
+remain `nil`; a budget charge doesn't establish a settled provider bill.
+
+`kind: "unavailable"` carries `reason: "malformed_reference"`,
+`"foreign_execution"`, or `"not_retained"`. Unknown occurrences and journal
+overflow return `not_retained`. The execution retains at most 1024 receipts;
+child VMs share that journal. Lookup doesn't create receipts or recover dropped
+ones. Full receipts remain in the run record's `evidence.evaluation_receipts`.
+
 The [replay how-to](./decision-replay.md) explains exact request binding and
 the receipt's `source` and `reused_from` fields. A receipt proves what route
 answered and what was charged for this invocation. It does not establish that

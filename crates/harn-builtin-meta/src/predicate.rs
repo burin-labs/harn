@@ -14,6 +14,7 @@ const STRING: Ty = Ty::Named("string");
 const FLOAT: Ty = Ty::Named("float");
 const INT: Ty = Ty::Named("int");
 const BOOL: Ty = Ty::Named("bool");
+const NIL: Ty = Ty::Named("nil");
 
 const DICT_STRING_STRING_ARGS: &[Ty] = &[STRING, STRING];
 const DICT_STRING_STRING: Ty = Ty::Apply("dict", DICT_STRING_STRING_ARGS);
@@ -337,6 +338,89 @@ pub const EVALUATE_REQUEST: BuiltinSignature = BuiltinSignature::simple(
         Param::new("policy", POLICY),
     ],
     EVALUATION_OUTCOME,
+);
+
+/// Accounting facts projected from the execution's retained evaluation receipt.
+pub const EVALUATION_ACCOUNTING: Ty = Ty::Shape(&[
+    Field::new("schema", Ty::LitString("harn.evaluation.accounting.v1")),
+    Field::new("reference", STRING),
+    Field::new("evaluation_id", STRING),
+    Field::new("site_id", STRING),
+    Field::new(
+        "source",
+        Ty::Union(&[
+            Ty::LitString("live"),
+            Ty::LitString("cache"),
+            Ty::LitString("tape"),
+            Ty::LitString("fixture"),
+        ]),
+    ),
+    Field::new("requested_provider", STRING),
+    Field::new("requested_model", STRING),
+    Field::new("served_model", Ty::Union(&[STRING, NIL])),
+    Field::new("outcome_kind", STRING),
+    Field::new("physical_attempts", INT),
+    Field::new(
+        "accounting_status",
+        Ty::Union(&[
+            Ty::LitString("settled"),
+            Ty::LitString("usage_unknown"),
+            Ty::LitString("not_dispatched"),
+        ]),
+    ),
+    Field::new("input_tokens", Ty::Union(&[INT, NIL])),
+    Field::new("output_tokens", Ty::Union(&[INT, NIL])),
+    Field::new("cost_usd", Ty::Union(&[FLOAT, NIL])),
+    Field::new("budget_charge_usd", Ty::Union(&[FLOAT, NIL])),
+    Field::new(
+        "native_transport",
+        Ty::Union(&[
+            NIL,
+            Ty::Shape(&[
+                Field::new("provider_attempts_reported", Ty::Union(&[INT, NIL])),
+                Field::new("final_provider_reported", Ty::Union(&[STRING, NIL])),
+                Field::new(
+                    "data_controls",
+                    Ty::Shape(&[
+                        Field::new("requested_posture", STRING),
+                        Field::new(
+                            "outcome",
+                            Ty::Union(&[
+                                Ty::LitString("not_requested"),
+                                Ty::LitString("applied"),
+                                Ty::LitString("no_control_available"),
+                                Ty::LitString("provider_unresearched"),
+                            ]),
+                        ),
+                        Field::new("provider", STRING),
+                        Field::new("model", STRING),
+                    ]),
+                ),
+            ]),
+        ]),
+    ),
+]);
+
+pub const EVALUATION_RECEIPT: BuiltinSignature = BuiltinSignature::simple(
+    "__cap_llm_evaluation_receipt",
+    &[Param::new("reference", STRING)],
+    Ty::Union(&[
+        Ty::Shape(&[
+            Field::new("kind", Ty::LitString("retained")),
+            Field::new("receipt", EVALUATION_ACCOUNTING),
+        ]),
+        Ty::Shape(&[
+            Field::new("kind", Ty::LitString("unavailable")),
+            Field::new(
+                "reason",
+                Ty::Union(&[
+                    Ty::LitString("malformed_reference"),
+                    Ty::LitString("foreign_execution"),
+                    Ty::LitString("not_retained"),
+                ]),
+            ),
+        ]),
+    ]),
 );
 
 /// Measure a state the way the evaluator's own ceiling measures it.

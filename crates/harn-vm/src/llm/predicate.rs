@@ -60,6 +60,43 @@ async fn evaluate_request_builtin(
     Ok(outcome.into_value())
 }
 
+#[harn_builtin(
+    exposure = "harness.llm.evaluation_receipt",
+    effects = [],
+    sig_expr = harn_builtin_meta::predicate::EVALUATION_RECEIPT,
+    kind = "async",
+    category = "llm.predicate",
+    doc = "Read retained evaluation accounting in this execution without dispatching a model request."
+)]
+async fn evaluation_receipt_builtin(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    use crate::NativeVmExt;
+    let reference = args
+        .first()
+        .map(|value| value.as_str_cow().into_owned())
+        .unwrap_or_default();
+    Ok(ctx.with_child_vm(|vm| {
+        match vm
+            .native()
+            .evaluation
+            .journal
+            .lock()
+            .lookup(&reference, vm.execution_id().as_ref())
+        {
+            Ok(receipt) => VmValue::dict(vec![
+                ("kind", VmValue::string("retained")),
+                ("receipt", receipt.accounting_value()),
+            ]),
+            Err(reason) => VmValue::dict(vec![
+                ("kind", VmValue::string("unavailable")),
+                ("reason", VmValue::string(reason)),
+            ]),
+        }
+    }))
+}
+
 /// What the evaluator thinks a state costs, before sending it.
 ///
 /// This is the number the `state_too_large` arm compares against a route's
