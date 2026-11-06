@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createRequire } = require("node:module");
+const { createRequire, Module } = require("node:module");
 const { pipeline } = require("node:stream/promises");
 const test = require("node:test");
 const { createVSIX } = require("@vscode/vsce");
@@ -80,6 +80,21 @@ test("the actual VSIX resolves runtime dependencies without packaging tools", as
     packagedRequire.resolve("vscode-languageclient/node").startsWith(packagedRoot + path.sep),
     "the activation import resolves inside the actual package",
   );
+  const load = Module._load;
+  let matchGlobPattern;
+  try {
+    Module._load = function (name, ...args) {
+      return name === "vscode" ? {} : load.call(this, name, ...args);
+    };
+    ({ matchGlobPattern } = packagedRequire(path.join(
+      path.dirname(packagedRequire.resolve("vscode-languageclient/node")),
+      "../common/utils/globPattern.js",
+    )));
+  } finally {
+    Module._load = load;
+  }
+  assert.equal(matchGlobPattern("**/*.harn", { fsPath: "src/main.harn" }), true);
+  assert.equal(matchGlobPattern("**/*.harn", { fsPath: "src/main.txt" }), false);
 
   const lock = JSON.parse(fs.readFileSync(path.join(extensionRoot, "package-lock.json")));
   let productionPackages = 0;
