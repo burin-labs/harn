@@ -13,7 +13,6 @@ fn bridge() -> (AcpBridge, tokio::sync::mpsc::UnboundedReceiver<String>) {
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id_counter: AtomicU64::new(1),
             cancellation: SessionCancellation::default().prepare_prompt(),
-            script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
             host_responder: None,
         },

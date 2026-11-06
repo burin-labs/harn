@@ -1035,7 +1035,6 @@ async fn acp_bridge_routes_session_request_permission_response() {
         pending: server.pending.clone(),
         next_id_counter: AtomicU64::new(77),
         cancellation: SessionCancellation::default().prepare_prompt(),
-        script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
         host_responder: None,
     });

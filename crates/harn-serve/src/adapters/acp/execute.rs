@@ -218,7 +218,6 @@ pub(super) async fn execute_chunk(
     let vm_setup_span =
         harn_vm::tracing::span_start(harn_vm::tracing::SpanKind::VmSetup, "acp_vm_setup".into());
     let pipeline_name = pipeline_name_for(setup.source_path);
-    bridge.set_script_name(&pipeline_name);
 
     let runtime_configurator = setup.runtime_configurator.clone();
     let mut vm = if let Some(baseline) = setup.baseline {
@@ -691,7 +690,6 @@ require_declared_operations_served = true
             pending: Arc::new(TokioMutex::new(std::collections::HashMap::new())),
             next_id_counter: AtomicU64::new(1),
             cancellation: cancellation.clone(),
-            script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),
@@ -803,7 +801,6 @@ require_declared_operations_served = true
             pending: client_pending,
             next_id_counter: AtomicU64::new(1),
             cancellation: cancellation.clone(),
-            script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
             ),

@@ -200,7 +200,6 @@ mod tests {
             pending: Default::default(),
             next_id_counter: std::sync::atomic::AtomicU64::new(1),
             cancellation: super::super::SessionCancellation::default().prepare_prompt(),
-            script_name: Mutex::new(String::new()),
             assistant_state: Mutex::new(Default::default()),
             host_responder: None,
         });

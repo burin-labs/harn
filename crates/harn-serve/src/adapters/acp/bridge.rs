@@ -212,8 +212,6 @@ pub(super) struct AcpBridge {
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     pub(super) next_id_counter: AtomicU64,
     pub(super) cancellation: Arc<PromptCancellation>,
-    /// Name of the currently executing Harn script (without .harn suffix).
-    pub(super) script_name: std::sync::Mutex<String>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,
     /// When set, answers host requests in-process instead of the client.
     pub(super) host_responder: Option<Arc<dyn super::HostResponder>>,
@@ -319,20 +317,6 @@ impl AcpBridge {
                 "update": update,
             }),
         );
-    }
-
-    /// Set the currently executing script name (without .harn suffix).
-    pub(super) fn set_script_name(&self, name: &str) {
-        *self.script_name.lock().unwrap_or_else(|e| e.into_inner()) = name.to_string();
-    }
-
-    /// Get the current script name.
-    #[allow(dead_code)]
-    pub(super) fn get_script_name(&self) -> String {
-        self.script_name
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
     }
 
     /// Send a JSON-RPC request to the client and await the response.
