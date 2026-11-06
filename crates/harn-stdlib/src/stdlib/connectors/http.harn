@@ -418,7 +418,64 @@ fn __connector_http_sleep_before_retry(
  * @example: connector_http_header(response, "Retry-After")
  */
 pub fn connector_http_header(headers_or_response: dict?, name: string) -> string? {
-  return http_header(headers_or_response ?? {}, name)
+  const headers = if type_of(headers_or_response?.headers) == "dict" {
+    headers_or_response.headers
+  } else {
+    headers_or_response ?? {}
+  }
+  let normalized = {}
+  for entry in headers.entries() {
+    normalized[trim(to_string(entry.key))] = trim(to_string(entry.value))
+  }
+  return http_header(normalized, name)
+}
+
+/**
+ * Reject private literal addresses and local hostname suffixes without DNS.
+ * Network requests still apply Harn's connect-time address policy.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn connector_http_is_disallowed_host(host: string) -> bool {
+  return http_is_disallowed_host(host)
+}
+
+/**
+ * Validate an HTTPS connector endpoint and return its parsed host. Error
+ * messages include the caller's setting label; no DNS lookup is performed.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn connector_http_validate_url_host(
+  url_value: any,
+  label: string = "URL",
+) -> Result<string, string> {
+  if url_value == nil || trim(to_string(url_value)) == "" {
+    return Err("${label} is required")
+  }
+  const url = trim(to_string(url_value))
+  if !starts_with(lowercase(url), "https://") {
+    return Err("${label} must use https:// scheme")
+  }
+  const parsed = try {
+    url_parse(url)
+  }
+  const host = if is_ok(parsed) {
+    unwrap(parsed).host
+  } else {
+    nil
+  }
+  if host == nil || host == "" {
+    return Err("${label} is missing a host")
+  }
+  if connector_http_is_disallowed_host(host) {
+    return Err(
+      "${label} host `${host}` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
+    )
+  }
+  return Ok(host)
 }
 
 /**
