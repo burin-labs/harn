@@ -1,0 +1,33 @@
+fn evaluate(llm: HarnessLlm, model: string) -> {kind: string, receipt: string} {
+  const outcome = llm.evaluate_request(
+    "receipt.public",
+    {text: "observed"},
+    {safe: {kind: "boolean", instructions: "Safe?"}},
+    {
+      backend: "structured_llm",
+      provider: "mock",
+      model: model,
+      threshold: 0.5,
+      evaluation_cost_limit: 1.0,
+    },
+  )
+  return pick(outcome, ["kind", "receipt"])
+}
+
+pipeline lookup(harness: Harness) {
+  const outcome = evaluate(harness.llm, "fixture")
+  return {outcome: outcome, lookup: harness.llm.evaluation_receipt(outcome.receipt)}
+}
+
+pipeline refusal(harness: Harness) {
+  const outcome = evaluate(harness.llm, "unconfigured-model")
+  return {outcome: outcome, lookup: harness.llm.evaluation_receipt(outcome.receipt)}
+}
+
+pipeline retention(harness: Harness) {
+  let reference = ""
+  for _ in range(0, 1025) {
+    reference = evaluate(harness.llm, "unconfigured-model").receipt
+  }
+  return {lookup: harness.llm.evaluation_receipt(reference)}
+}

@@ -195,6 +195,26 @@ pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness
     }
   }
   const session = "next-tool-claim-" + harness.random.uuid()
+  // Complete a real model/tool turn so the next accepted user message can
+  // narrow from canonical usage history rather than a stale private option.
+  agent_loop(
+    harness,
+    "Inspect the workspace.",
+    nil,
+    {
+      provider: "mock",
+      session_id: session,
+      tools: tools,
+      tool_format: "json",
+      max_iterations: 1,
+      llm_caller: { _call ->
+        return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+      },
+    },
+  )
+  const warmup_calls = harness.runtime.shared_snapshot(calls)
+  assert_eq(warmup_calls.value, ["look"])
+  harness.runtime.shared_cas(calls, warmup_calls, [])
   const base_opts: AgentSpec = {
     provider: "mock",
     session_id: session,
@@ -203,6 +223,7 @@ pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness
     loop_until_done: true,
     done_sentinel: "##DONE##",
     max_iterations: 5,
+    tool_surface_narrowing: {enabled: true, window_turns: 1, mode: "aggressive"},
     llm_caller: mock_llm,
     post_turn_callback: { info ->
       if info.iteration == 0 {
@@ -216,14 +237,18 @@ pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness
       return nil
     },
   }
-  // The claim-producing turn has already hidden `verify`. The callback must
+  // The new user boundary hides unused `verify`. The callback must
   // validate against the canonical registry, then make the claimed tool
   // reachable for exactly the following turn.
-  const opts = base_opts + {_tool_surface_narrowed_tools: ["look"]}
   const captured = agent_capture_events(
     harness.agent,
     session,
-    fn() { return agent_loop(harness, "Inspect, verify, inspect once more, then finish.", nil, opts) },
+    fn() { return agent_loop(
+      harness,
+      "Inspect, verify, inspect once more, then finish.",
+      nil,
+      base_opts,
+    ) },
   )
   const receipts = _claim_receipts(captured.events)
   assert_eq(harness.runtime.shared_snapshot(calls).value, ["look", "verify", "look"])

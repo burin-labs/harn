@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::agent_host_primitives::tool_catalog;
 use crate::agent_events::ToolExecutor;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
@@ -563,34 +564,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 category: ErrorCategory::ToolRejected,
             })
         } else if matches!(declared.as_deref(), Some("host_bridge")) {
-            // Force-route declared host-bridge tools through the bridge
-            // even if a stale `handler` value is present. Without a
-            // bridge, fail clearly instead of silently falling back.
-            let Some(bridge) = bridge else {
-                executor = Some(ToolExecutor::HostBridge);
-                return ToolDispatchOutcome {
-                    handler_outcome: None,
-                    result: Err(VmError::CategorizedError {
-                        message: format!(
-                            "tool '{tool_name}' is declared executor: \"host_bridge\" \
-                             but no host bridge is connected to this environment"
-                        ),
-                        category: ErrorCategory::ToolRejected,
-                    }),
-                    executor,
-                };
-            };
             executor = Some(ToolExecutor::HostBridge);
-            match bridge
-                .call(
-                    "builtin_call",
-                    serde_json::json!({
-                        "name": tool_name,
-                        "args": [tool_args],
-                    }),
-                )
-                .await
-            {
+            match dispatch_declared_host_tool(ctx, tools_val, tool_name, tool_args).await {
                 Err(VmError::CategorizedError {
                     message,
                     category: ErrorCategory::ToolRejected,
@@ -772,12 +747,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     }
 }
 
-/// Inspect `tools_val` for a `_mcp_server` annotation on the entry
-/// matching `tool_name`. Returns the originating server name when the
-/// tool was sourced from `mcp_list_tools`, otherwise `None`. The
-/// annotation is a free-form dict key (it travels alongside the
-/// schema), so we also peek at a `function` sub-dict for OpenAI-shape
-/// entries that nest the metadata.
+/// Read the originating MCP server from a registry entry or its nested
+/// OpenAI-style function descriptor.
 pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
@@ -814,90 +785,63 @@ pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) 
     None
 }
 
-/// Return the canonical declared executor for `tool_name`, if the
-/// registry entry carries one (harn#743). The wire form
-/// (`"harn_builtin"`) is canonicalized to `"harn"` on storage; this
-/// helper returns whatever is stored, so callers can compare against
-/// the documented set without re-aliasing.
-///
-/// `None` means the entry pre-dates the `executor` field (e.g. an
-/// `mcp_list_tools` result the user pushed straight into the
-/// registry) — callers fall back to the historic
-/// handler/`_mcp_server`/bridge heuristic.
+/// Read the stored executor. Entries without one use dispatch's
+/// handler, MCP annotation, or bridge detection.
 pub(super) fn declared_executor_for_tool(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<String> {
-    let dict = tools_val?.as_dict()?;
-    let tools_list = match dict.get("tools") {
-        Some(VmValue::List(l)) => l,
-        _ => return None,
+    declared_tool_string_field(tools_val, tool_name, "executor")
+}
+
+async fn dispatch_declared_host_tool(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    tools: Option<&VmValue>,
+    name: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, VmError> {
+    let refused = |requirement| VmError::CategorizedError {
+        message: format!("tool '{name}' needs {requirement}"),
+        category: ErrorCategory::ToolRejected,
     };
-    for tool in tools_list.iter() {
-        let entry: &crate::value::DictMap = match tool {
-            VmValue::Dict(d) => d,
-            _ => continue,
-        };
-        let name = match entry.get("name") {
-            Some(v) => v.display(),
-            None => continue,
-        };
-        if name != tool_name {
-            continue;
-        }
-        if let Some(VmValue::String(s)) = entry.get("executor") {
-            return Some(s.to_string());
-        }
-        return None;
+    let binding = declared_tool_string_field(tools, name, "host_capability")
+        .ok_or_else(|| refused("a declared host capability"))?;
+    let ctx = ctx.ok_or_else(|| refused("an execution context"))?;
+    if !args.is_object() {
+        return Err(refused("object arguments for its host capability"));
     }
-    None
+    ctx.child_vm()
+        .call_named_builtin(
+            "__host_capability_tool_call",
+            vec![
+                VmValue::string(binding),
+                crate::schema::json_to_vm_value(args),
+            ],
+        )
+        .await
+        .map(|value| super::vm_value_to_json(&value))
+}
+
+fn declared_tool_string_field(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+    field: &str,
+) -> Option<String> {
+    match tool_catalog::entry_for(tools_val, tool_name)?.get(field)? {
+        VmValue::String(value) => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 /// Return the configured `mcp_server` name on `tool_name`'s entry, set
 /// either via `tool_define({executor: "mcp_server", mcp_server: "..."})`
 /// or via the implicit `_mcp_server` annotation `mcp_list_tools` injects.
 fn declared_mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
-    let dict = tools_val?.as_dict()?;
-    let tools_list = match dict.get("tools") {
-        Some(VmValue::List(l)) => l,
-        _ => return None,
-    };
-    for tool in tools_list.iter() {
-        let entry: &crate::value::DictMap = match tool {
-            VmValue::Dict(d) => d,
-            _ => continue,
-        };
-        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
-            continue;
-        }
-        if let Some(VmValue::String(s)) = entry.get("mcp_server") {
-            return Some(s.to_string());
-        }
-        return None;
-    }
-    None
+    declared_tool_string_field(tools_val, tool_name, "mcp_server")
 }
 
 fn declared_mcp_tool_name_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
-    let dict = tools_val?.as_dict()?;
-    let tools_list = match dict.get("tools") {
-        Some(VmValue::List(l)) => l,
-        _ => return None,
-    };
-    for tool in tools_list.iter() {
-        let entry: &crate::value::DictMap = match tool {
-            VmValue::Dict(d) => d,
-            _ => continue,
-        };
-        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
-            continue;
-        }
-        if let Some(VmValue::String(s)) = entry.get("_mcp_tool_name") {
-            return Some(s.to_string());
-        }
-        return None;
-    }
-    None
+    declared_tool_string_field(tools_val, tool_name, "_mcp_tool_name")
 }
 
 /// Look up the Harn-defined handler closure for a tool, if any.
@@ -913,28 +857,10 @@ pub(super) fn find_tool_closure(
     tool_name: &str,
     key: &str,
 ) -> Option<std::sync::Arc<VmClosure>> {
-    let dict = tools_val?.as_dict()?;
-    let tools_list = match dict.get("tools") {
-        Some(VmValue::List(l)) => l,
-        _ => return None,
-    };
-    for tool in tools_list.iter() {
-        let entry: &crate::value::DictMap = match tool {
-            VmValue::Dict(d) => d,
-            _ => continue,
-        };
-        let name = match entry.get("name") {
-            Some(v) => v.display(),
-            None => continue,
-        };
-        if name == tool_name {
-            if let Some(VmValue::Closure(c)) = entry.get(key) {
-                return Some(std::sync::Arc::clone(c));
-            }
-            return None;
-        }
+    match tool_catalog::entry_for(tools_val, tool_name)?.get(key)? {
+        VmValue::Closure(closure) => Some(std::sync::Arc::clone(closure)),
+        _ => None,
     }
-    None
 }
 
 #[cfg(test)]

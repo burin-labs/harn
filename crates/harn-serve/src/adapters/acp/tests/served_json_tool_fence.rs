@@ -17,15 +17,20 @@ impl Drop for MockModeGuard {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_json_tool_fence_is_hidden_and_an_undeclared_call_still_shows_as_failed() {
-    served_tool_fence("nuke_repo", false).await;
+    served_tool_fence("nuke_repo", false, false).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_declared_tool_call_publishes_only_the_accepted_answer() {
-    served_tool_fence("inspect", true).await;
+    served_tool_fence("inspect", true, false).await;
 }
 
-async fn served_tool_fence(tool: &str, accepted: bool) {
+#[tokio::test(flavor = "current_thread")]
+async fn a_declared_host_tool_reaches_its_capability_instead_of_its_tool_name() {
+    served_tool_fence("inspect", true, true).await;
+}
+
+async fn served_tool_fence(tool: &str, accepted: bool, host_tool: bool) {
     harn_clock::test_support::with_local_tasks(async {
             let mocks = [
                 format!("Checking first.\n\n```tool\n{{\"name\":\"{tool}\",\"args\":{{\"path\":\"a\"}}}}\n```"),
@@ -52,7 +57,7 @@ async fn served_tool_fence(tool: &str, accepted: bool) {
 pipeline default(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "inspect", "Inspect a path.", {
-    handler: { args -> "observed " + (args?.path ?? "") },
+    __EXECUTOR_CONFIG__
     parameters: {path: {type: "string"}},
     returns: {type: "string"},
     annotations: {kind: "read", side_effect_level: "read_only"},
@@ -72,7 +77,11 @@ pipeline default(harness: Harness) {
   assert(contains(calls[0].system, "include `##DONE##` exactly once"), "JSON route explicitly requires the completion marker")
   return result
 }
-"#,
+"#.replace("__EXECUTOR_CONFIG__", if host_tool {
+    r#"executor: "host_bridge", host_capability: "proof.inspect", "#
+} else {
+    r#"handler: { args -> "observed " + (args?.path ?? "") },"#
+}),
             )
             .expect("write pipeline");
 
@@ -95,12 +104,21 @@ pipeline default(harness: Harness) {
                 .expect("send session/prompt");
 
             let mut updates = Vec::new();
+            let mut host_calls = Vec::new();
             let response = harn_clock::test_support::within("session/prompt response", async {
                 loop {
                     let line = response_rx.recv().await.expect("ACP channel closed");
                     let message: serde_json::Value = serde_json::from_str(&line).expect("JSON");
                     if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
+                        request_tx.send(serde_json::json!({"jsonrpc": "2.0", "id": message["id"],
+                            "result": {"proof": ["inspect"]}})).unwrap();
+                    } else if message["method"] == "host/call" {
+                        assert!(host_tool, "a Harn handler must not reach the host");
+                        assert_eq!(message["params"]["name"], "proof.inspect");
+                        assert_eq!(message["params"]["args"], serde_json::json!({"path": "a"}));
+                        host_calls.push(message["params"].clone());
+                        request_tx.send(serde_json::json!({"jsonrpc": "2.0", "id": message["id"],
+                            "result": "observed a"})).unwrap();
                     } else if message["id"] == 2 {
                         return message;
                     } else if message["method"] == "session/update" {
@@ -110,6 +128,7 @@ pipeline default(harness: Harness) {
             })
             .await;
             assert!(response["error"].is_null(), "{response:#}");
+            assert_eq!(host_calls.len(), usize::from(host_tool), "exact declared capability dispatch");
 
             let shown: Vec<String> = updates
                 .iter()

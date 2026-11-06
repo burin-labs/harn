@@ -4406,6 +4406,13 @@ as a profile bucket and reuse a prepared VM baseline while preserving clean
 per-turn execution state. `--trace` / `HARN_TRACE=1` enables the LLM trace
 summary printed when the stdio server shuts down.
 
+`--flight-recorder` / `HARN_FLIGHT_RECORDER=1` records each executed ACP
+prompt. The `--flight-recorder-max-events` and `--flight-recorder-retain`
+options have the same bounds as `harn run`. For ACP,
+`--flight-recorder-out recording.json` writes one
+`recording.<execution-id>.json` per prompt. See
+[Record the exact code path](./debugging.md#record-the-exact-code-path).
+
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.
 

@@ -210,6 +210,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
         "reader": "__stance_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "reader": "__tool_surface_hard_keep"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

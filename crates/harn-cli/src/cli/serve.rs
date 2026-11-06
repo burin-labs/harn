@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use ipnet::IpNet;
 
-use super::ProfileArgs;
+use super::{FlightRecorderArgs, ProfileArgs};
 
 /// Parse a `--trusted-proxy` value: either a CIDR range (`10.0.0.0/8`) or
 /// a bare address, which is treated as a single host (`/32` or `/128`).
@@ -158,6 +158,8 @@ pub(crate) struct ServeAcpArgs {
     pub obs: ServeObsMode,
     #[command(flatten)]
     pub profile: ProfileArgs,
+    #[command(flatten)]
+    pub flight_recorder: FlightRecorderArgs,
     /// Path to the `.harn` file to serve. Optional: when omitted, `harn
     /// serve acp` boots a file-less ("attach") ACP server that
     /// waits for `initialize` / `session/new` from the connecting editor

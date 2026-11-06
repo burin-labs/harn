@@ -16,6 +16,7 @@ use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
 mod additional_directories;
 mod client_capabilities;
+mod flight_recorder;
 mod provider_default_tests;
 mod replay_inputs;
 mod root_projection;

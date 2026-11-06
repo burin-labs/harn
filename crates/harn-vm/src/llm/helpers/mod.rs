@@ -18,6 +18,7 @@ impl From<crate::llm_config::ModelResolutionError> for VmError {
     }
 }
 
+pub(crate) use blocks::PUBLIC_VISIBILITY;
 pub(crate) use goal_pin::GoalPinProjection;
 pub use goal_pin::{GoalPinCriterion, GoalPinSpec};
 pub use message_view::{displays_as, MessageView};

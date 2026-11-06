@@ -8,6 +8,11 @@
     ],
     "parameters": [
       {
+        "function": "__tool_surface_hard_keep",
+        "name": "opts",
+        "path": ["read_only_stance"]
+      },
+      {
         "function": "__stance_config",
         "name": "opts",
         "path": [

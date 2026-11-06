@@ -117,7 +117,7 @@ can route badges and latency by transport.
 | `executor` | Required companion field | Backend |
 |---|---|---|
 | `"harn"` *(alias `"harn_builtin"`)* | `handler` (closure) | In-VM Harn handler. The VM stdlib short-circuits `read_file` / `list_directory` even without a registered handler. |
-| `"host_bridge"` | `host_capability: "cap.op"` | Host shell `builtin_call` bridge. `harn check` validates the binding against the host capability manifest. |
+| `"host_bridge"` | `host_capability: "cap.op"` | Declared host capability through its adapter. `harn check` validates the binding against the host capability manifest. |
 | `"mcp_server"` | `mcp_server: "<server_name>"` | Configured MCP server. Tools sourced from `mcp_list_tools` carry the equivalent `_mcp_server` annotation. |
 | `"provider_native"` | *(none)* | Provider-side server tools (e.g. OpenAI Responses-API). Never dispatched locally. |
 
@@ -132,6 +132,13 @@ the historical `[builtin_call] unhandled: <name>` runtime failure.
 `agent_loop` re-validates at startup and refuses to run if any tool in
 the bound registry has no executable backend. The error message names
 the offending tool and the documented set of executors.
+
+Host tools dispatch the declared capability with the tool's argument object.
+Command capabilities retain command policy and approval checks. Capability fixtures
+and recorded tool results retain their existing interception points. An absent or
+unhandled host adapter returns a tool rejection; it can't run a standalone fallback.
+Native embedders install a `HostCallBridge`; a generic `HostBridge` connection alone
+doesn't provide capability dispatch.
 
 ```harn
 const registry = tool_registry()

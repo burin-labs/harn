@@ -8,10 +8,26 @@ import {
 import "./fixtures.harn"
 
 @test
-pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads() {
-  const valid = action()
-  assert_eq(ci_cache_policy_errors(policy(), valid, node_action(), workflows()), [])
-  for index in [2, 3] {
+pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads(harness: Harness) {
+  const valid = action(harness.fs)
+  assert_eq(
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      valid,
+      node_action(harness.fs),
+      workflows(harness.fs),
+    ),
+    [],
+  )
+  const downloads = valid.runs.steps.filter(
+    { step ->
+      return step?.id == "cache"
+        || to_string(step?.uses ?? "").starts_with("actions/cache/restore@")
+    },
+  )
+    .to_list()
+  assert_eq(downloads.len(), 2)
+  for download in downloads {
     for timeout in ["", "10"] {
       const invalid = {
         ...valid,
@@ -19,7 +35,7 @@ pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads() 
           ...valid.runs,
           steps: valid.runs.steps.enumerate().map(
             { item ->
-              return if item.index == index {
+              return if item.value == download {
                 {...item.value, env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: timeout}}
               } else {
                 item.value
@@ -30,9 +46,15 @@ pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads() 
         },
       }
       assert(
-        ci_cache_policy_errors(policy(), invalid, node_action(), workflows()).contains(
-          ".github/actions/rust-cache/action.yml Rust cache restores must bound each download segment to two minutes",
-        ),
+        ci_cache_policy_errors(
+          policy(harness.fs),
+          invalid,
+          node_action(harness.fs),
+          workflows(harness.fs),
+        )
+          .contains(
+            ".github/actions/rust-cache/action.yml Rust cache restores must bound each download segment to two minutes",
+          ),
       )
     }
   }
@@ -43,7 +65,7 @@ pub pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_r
   harness: Harness,
   task: unknown,
 ) {
-  assert_eq(setup_harn_cache_action_errors(setup_harn_action()), [])
+  assert_eq(setup_harn_cache_action_errors(setup_harn_action(harness.fs)), [])
 }
 
 @test
@@ -108,9 +130,15 @@ pub pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(
     },
   }
   assert(
-    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
-      ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
-    ),
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      invalid_action,
+      node_action(harness.fs),
+      workflows(harness.fs),
+    )
+      .contains(
+        ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
+      ),
   )
 }
 
@@ -118,29 +146,40 @@ pub pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
   harness: Harness,
   task: unknown,
 ) {
-  const valid_action = action()
+  const valid_action = action(harness.fs)
   const invalid_action = {
     ...valid_action,
     runs: {
       ...valid_action.runs,
-      steps: [
-        valid_action.runs.steps[0],
-        valid_action.runs.steps[1],
-        {
-          ...valid_action.runs.steps[2],
-          with: {
-            ...valid_action.runs.steps[2]?.with ?? {},
-            "shared-key": gha_expression("inputs.shared-key"),
-            key: gha_expression("inputs.source-key"),
-          },
+      steps: valid_action.runs.steps.map(
+        { step ->
+          return if step?.id == "cache" {
+            {
+              ...step,
+              with: {
+                ...step?.with ?? {},
+                "shared-key": gha_expression("inputs.shared-key"),
+                key: gha_expression("inputs.source-key"),
+              },
+            }
+          } else {
+            step
+          }
         },
-      ],
+      )
+        .to_list(),
     },
   }
   assert(
-    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
-      ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
-    ),
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      invalid_action,
+      node_action(harness.fs),
+      workflows(harness.fs),
+    )
+      .contains(
+        ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
+      ),
   )
 }
 
@@ -148,28 +187,39 @@ pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(
   harness: Harness,
   task: unknown,
 ) {
-  const valid_action = action()
-  const cache = valid_action.runs.steps[2]
+  const valid_action = action(harness.fs)
+  const cache = action_step_by_id(valid_action, "cache")
   const invalid_action = {
     ...valid_action,
     runs: {
       ...valid_action.runs,
-      steps: valid_action.runs.steps.slice(0, 2)
-        + [
-          {
-            ...cache,
-            with: {
-              ...cache?.with ?? {},
-              "shared-key": gha_expression(
-                "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
-              ),
-              "cache-workspace-crates": nil,
-            },
-          },
-        ],
+      steps: valid_action.runs.steps.map(
+        { step ->
+          return if step == cache {
+            {
+              ...cache,
+              with: {
+                ...cache?.with ?? {},
+                "shared-key": gha_expression(
+                  "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+                ),
+                "cache-workspace-crates": nil,
+              },
+            }
+          } else {
+            step
+          }
+        },
+      )
+        .to_list(),
     },
   }
-  const errors = ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    invalid_action,
+    node_action(harness.fs),
+    workflows(harness.fs),
+  )
   assert(
     errors.contains(
       ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
@@ -186,40 +236,73 @@ pub pipeline test_ci_cache_policy_rejects_unmeasured_or_reordered_workspace_gene
   harness: Harness,
   task: unknown,
 ) {
-  const valid = action()
-  const identity = valid.runs.steps[1]
-  const upstream = valid.runs.steps[2]
-  const broad = valid.runs.steps[3]
-  const reuse = valid.runs.steps[4]
+  const valid = action(harness.fs)
+  const identity = action_step_by_id(valid, "cache-paths")
+  const upstream = action_step_by_id(valid, "cache")
+  const fallbacks = valid.runs.steps.filter(
+    { step -> return to_string(step?.uses ?? "").starts_with("actions/cache/restore@") },
+  )
+    .to_list()
+  assert_eq(fallbacks.len(), 1)
+  const broad = fallbacks[0]
   const unmeasured = {
     ...valid,
     runs: {
       ...valid.runs,
-      steps: [
-        valid.runs.steps[0],
-        {
-          ...identity,
-          env: {...identity.env, CACHE_SOURCE_KEY: gha_expression("inputs.source-key")},
+      steps: valid.runs.steps.map(
+        { step ->
+          return if step == identity {
+            {
+              ...identity,
+              env: {...identity.env, CACHE_SOURCE_KEY: gha_expression("inputs.source-key")},
+            }
+          } else {
+            step
+          }
         },
-        upstream,
-        broad,
-        reuse,
-      ],
+      )
+        .to_list(),
     },
   }
   assert(
-    ci_cache_policy_errors(policy(), unmeasured, node_action(), workflows()).contains(
-      ".github/actions/rust-cache/action.yml must derive retained workspace generations from the canonical source fingerprint",
-    ),
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      unmeasured,
+      node_action(harness.fs),
+      workflows(harness.fs),
+    )
+      .contains(
+        ".github/actions/rust-cache/action.yml must derive retained workspace generations from the canonical source fingerprint",
+      ),
   )
   const reordered = {
     ...valid,
-    runs: {...valid.runs, steps: [valid.runs.steps[0], identity, broad, upstream, reuse]},
+    runs: {
+      ...valid.runs,
+      steps: valid.runs.steps.map(
+        { step ->
+          return if step == upstream {
+            broad
+          } else if step == broad {
+            upstream
+          } else {
+            step
+          }
+        },
+      )
+        .to_list(),
+    },
   }
   assert(
-    ci_cache_policy_errors(policy(), reordered, node_action(), workflows()).contains(
-      ".github/actions/rust-cache/action.yml must try the precise source generation before its dependency-compatible fallback",
-    ),
+    ci_cache_policy_errors(
+      policy(harness.fs),
+      reordered,
+      node_action(harness.fs),
+      workflows(harness.fs),
+    )
+      .contains(
+        ".github/actions/rust-cache/action.yml must try the precise source generation before its dependency-compatible fallback",
+      ),
   )
 }
 
@@ -227,14 +310,19 @@ pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(
   harness: Harness,
   task: unknown,
 ) {
-  assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
-  assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
-  assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
+  assert_eq(ci_cache_policy_parse({...policy(harness.fs), unexpected: true}), nil)
+  assert_eq(
+    ci_cache_policy_parse(
+      {...policy(harness.fs), writers: policy(harness.fs).writers + policy(harness.fs).writers},
+    ),
+    nil,
+  )
+  assert_eq(ci_cache_policy_parse({...policy(harness.fs), writers: []}), nil)
 }
 
 pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task: unknown) {
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "windows-nightly.yml": {
       jobs: {
         nextest: {
@@ -248,7 +336,12 @@ pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, tas
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains(
       "windows-nightly.yml:nextest:workspace-windows-renamed is not an authorized persistent cache writer",
@@ -266,13 +359,13 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
   task: unknown,
 ) {
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "ci.yml": {
-      ...workflows()["ci.yml"],
+      ...workflow_for(workflows(harness.fs), "ci.yml"),
       jobs: {
-        ...workflows()["ci.yml"].jobs,
+        ...workflow_for(workflows(harness.fs), "ci.yml").jobs,
         "macos-lint": {
-          ...workflows()["ci.yml"].jobs["macos-lint"],
+          ...workflow_for(workflows(harness.fs), "ci.yml").jobs["macos-lint"],
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "mozilla-actions/sccache-action@exact-pin"},
@@ -284,10 +377,10 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
       },
     },
     "macos-nightly.yml": {
-      ...workflows()["macos-nightly.yml"],
+      ...workflow_for(workflows(harness.fs), "macos-nightly.yml"),
       jobs: {
         nextest: {
-          ...workflows()["macos-nightly.yml"].jobs.nextest,
+          ...workflow_for(workflows(harness.fs), "macos-nightly.yml").jobs.nextest,
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
@@ -297,7 +390,12 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
     + macos_shared_cache_errors(invalid["ci.yml"], invalid["macos-nightly.yml"])
   assert(
     errors.contains(
@@ -327,10 +425,10 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
   task: unknown,
 ) {
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
-        build: workflows()["build-release-binaries.yml"].jobs.build,
+        build: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build,
         cache_budget: {
           permissions: {actions: "read", contents: "read"},
           steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true}],
@@ -338,7 +436,12 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
   )
@@ -348,10 +451,10 @@ pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows()["build-release-binaries.yml"].jobs.build
-  const release_cache = bounded.steps[0]
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
+  const release_cache = cache_step(bounded)
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
         build: {
@@ -364,11 +467,17 @@ pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(
             },
           ],
         },
-        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(errors.contains("build-release-binaries.yml:build must grant actions: write"))
   assert(
     errors.contains(
@@ -381,21 +490,27 @@ pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows()["build-release-binaries.yml"].jobs.build
-  const release_cache = bounded.steps[0]
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
+  const release_cache = cache_step(bounded)
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
         build: {
           ...bounded,
           steps: [{...release_cache, with: {...release_cache.with, "source-key": ""}}],
         },
-        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains(
       "build-release-binaries.yml:build must bind the exact release cache to the runner-compatibility projection",
@@ -407,10 +522,10 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
   harness: Harness,
   task: unknown,
 ) {
-  const bounded = workflows()["build-release-binaries.yml"].jobs.build
-  const release_cache = bounded.steps[0]
+  const bounded = workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build
+  const release_cache = cache_step(bounded)
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "build-release-binaries.yml": {
       jobs: {
         build: {
@@ -427,11 +542,17 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
             },
           ],
         },
-        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+        cache_budget: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs
+          .cache_budget,
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains(
       "build-release-binaries.yml:build must let main warm runs and exact candidate builds refresh the release cache",
@@ -446,7 +567,7 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
 
 pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness, task: unknown) {
   const invalid = {
-    ...workflows(),
+    ...workflows(harness.fs),
     "cli-cold-start-budget.yml": {
       on: {
         pull_request: {
@@ -470,7 +591,12 @@ pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness
       },
     },
   }
-  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  const errors = ci_cache_policy_errors(
+    policy(harness.fs),
+    action(harness.fs),
+    node_action(harness.fs),
+    invalid,
+  )
   assert(
     errors.contains(
       "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
@@ -509,9 +635,9 @@ pub pipeline test_windows_native_admission_accepts_the_free_producer(
 ) {
   assert_eq(
     windows_native_admission_errors(
-      policy(),
-      workflows()["ci.yml"],
-      workflows()["windows-nightly.yml"],
+      policy(harness.fs),
+      workflow_for(workflows(harness.fs), "ci.yml"),
+      workflow_for(workflows(harness.fs), "windows-nightly.yml"),
     ),
     [],
   )
@@ -522,11 +648,15 @@ pub pipeline test_windows_native_admission_rejects_a_paid_producer(
   harness: Harness,
   task: unknown,
 ) {
-  const nightly = workflows()["windows-nightly.yml"]
+  const nightly = workflow_for(workflows(harness.fs), "windows-nightly.yml")
   const invalid = {
     ...nightly,
     jobs: {nextest: {...nightly.jobs.nextest, "runs-on": windows_runner_expression()}},
   }
-  const errors = windows_native_admission_errors(policy(), workflows()["ci.yml"], invalid)
+  const errors = windows_native_admission_errors(
+    policy(harness.fs),
+    workflow_for(workflows(harness.fs), "ci.yml"),
+    invalid,
+  )
   assert(errors.contains("windows-nightly.yml:nextest must use free standard windows-latest"))
 }

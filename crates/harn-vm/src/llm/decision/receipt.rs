@@ -28,6 +28,28 @@ pub struct EvaluationJournal {
 }
 
 impl EvaluationJournal {
+    pub(crate) fn lookup(
+        &self,
+        reference: &str,
+        execution: &str,
+    ) -> Result<&EvaluationReceipt, &'static str> {
+        let (owner, sequence) = reference
+            .rsplit_once("/evaluation/")
+            .ok_or("malformed_reference")?;
+        crate::ExecutionId::parse(owner).map_err(|_| "malformed_reference")?;
+        let sequence = sequence.parse::<u64>().map_err(|_| "malformed_reference")?;
+        if reference != format!("{owner}/evaluation/{sequence}") {
+            return Err("malformed_reference");
+        }
+        if owner != execution {
+            return Err("foreign_execution");
+        }
+        self.receipts
+            .iter()
+            .find(|receipt| receipt.invocation_id.as_deref() == Some(reference))
+            .ok_or("not_retained")
+    }
+
     pub(crate) fn invocation_id(&mut self, execution_id: &str) -> String {
         let sequence = self.next_invocation;
         self.next_invocation = sequence
@@ -185,6 +207,38 @@ pub struct EvaluationReceipt {
 }
 
 impl EvaluationReceipt {
+    pub(crate) fn accounting_value(&self) -> crate::VmValue {
+        let usage_certainty = self.usage.as_ref().map(|usage| {
+            let certainty = crate::llm::usage::summarize_usage_cost_certainty([usage.as_ref()]);
+            serde_json::json!({
+                "known_cost_usd": certainty.known_cost_usd,
+                "provider_call_count": certainty.provider_call_count,
+                "unpriced_calls": certainty.unpriced_calls,
+                "usage_unknown_calls": certainty.usage_unknown_calls,
+                "unpriced_tokens": certainty.unpriced_tokens,
+                "unpriced_reason": certainty.unpriced_reason,
+                "projected_cost_usd": certainty.projected_cost_usd(),
+            })
+        });
+        let transport = self.native_transport.as_ref().map(|transport| {
+            serde_json::json!({
+                "provider_attempts_reported": transport.provider_attempts_reported,
+                "final_provider_reported": transport.final_provider_reported,
+                "data_controls": transport.data_controls,
+            })
+        });
+        crate::schema::json_to_vm_value(&serde_json::json!({
+            "schema": "harn.evaluation.accounting.v1", "reference": self.reference(),
+            "evaluation_id": self.evaluation_id, "site_id": self.site_id, "source": self.source,
+            "requested_provider": self.requested_provider, "requested_model": self.requested_model,
+            "served_model": self.served_model, "outcome_kind": self.outcome_kind,
+            "physical_attempts": self.physical_attempts, "accounting_status": self.accounting_status,
+            "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
+            "cost_usd": self.cost_usd, "budget_charge_usd": self.budget_charge_usd,
+            "native_transport": transport, "usage_certainty": usage_certainty,
+        }))
+    }
+
     /// A receipt for an evaluation that never dispatched. Every local refusal
     /// uses this, so a zero attempt count is written by one owner.
     #[allow(clippy::too_many_arguments)]

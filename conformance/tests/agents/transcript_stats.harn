@@ -1,6 +1,17 @@
 import { workflow_execute } from "std/workflow/execute"
 
 pipeline main(harness: Harness) {
+  const session = harness.agent.open("transcript-stats-" + harness.random.uuid())
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "known public message"})
+  harness.agent.inject(session, {role: "tool_result", content: "internal tool output"})
+  const snapshot = harness.agent.snapshot(session)
+  require snapshot.events.any(
+    { event -> event?.kind == "message" && event?.visibility == "public" },
+  ),
+    "the canonical producer must emit a non-null public message"
+  require transcript_stats(snapshot).visible_event_count == 1,
+    "the canonical public message must count once, excluding internal tool output"
   // --- Unit shape: transcript_stats on a hand-crafted transcript ---
   const crafted = {
     _type: "transcript",
@@ -13,9 +24,9 @@ pipeline main(harness: Harness) {
       {role: "system", content: "ignore"},
     ],
     events: [
-      {kind: "message", visibility: "visible"},
-      {kind: "tool_result", visibility: "hidden"},
-      {kind: "message", visibility: "visible"},
+      {kind: "message", visibility: "public"},
+      {kind: "tool_result", visibility: "internal"},
+      {kind: "message", visibility: "public"},
     ],
   }
   const stats = transcript_stats(crafted)

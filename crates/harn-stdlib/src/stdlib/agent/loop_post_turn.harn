@@ -55,6 +55,7 @@ import {
   agent_session_inject_feedback,
   agent_session_messages,
 } from "std/agent/state"
+import { __agent_reopen_tool_surface } from "std/agent/tool_surface"
 
 pub type AgentLoopPostTurnAction = "break" | "continue"
 
@@ -381,6 +382,9 @@ pub fn agent_loop_post_turn_transition(
       }
   }
   let updated_opts = __apply_post_turn_options(next.opts, outcome)
+  if contains(turn_successful, "load_skill") {
+    updated_opts = __agent_reopen_tool_surface(harness.agent, session, updated_opts)
+  }
   updated_opts = agent_stance_post_turn(harness.agent, harness.runtime, session, updated_opts)
   next = next + {opts: updated_opts}
   const repair_cfg = agent_stall_repair_config(context.turn_opts?.stall_diagnostics)

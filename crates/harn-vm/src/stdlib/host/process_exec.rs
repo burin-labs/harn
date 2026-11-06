@@ -37,6 +37,7 @@ pub(super) async fn dispatch_process_spawn_with_policy(
     ctx: Option<&AsyncBuiltinCtx>,
     params: &crate::value::DictMap,
     caller: serde_json::Value,
+    mode: super::HostDispatch,
 ) -> Result<VmValue, VmError> {
     let params =
         match crate::orchestration::run_command_policy_preflight_with_ctx(ctx, params, caller)
@@ -55,6 +56,15 @@ pub(super) async fn dispatch_process_spawn_with_policy(
             }
         };
 
+    if mode == super::HostDispatch::RequireAdapter {
+        let bridge = super::HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().clone());
+        if let Some(bridge) = bridge {
+            if let Some(result) = bridge.dispatch("process", "spawn", &params).await? {
+                return Ok(result);
+            }
+        }
+        return Err(super::missing_host_adapter("process", "spawn"));
+    }
     match crate::stdlib::process_spawn::dispatch("spawn", &params, async_builtin_cancel_token(ctx))
         .await
     {

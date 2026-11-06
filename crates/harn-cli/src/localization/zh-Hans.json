@@ -2434,7 +2434,7 @@
   "Write the export to this file. Defaults to stdout": "将导出写入此文件。默认输出到 stdout",
   "Write the final state JSON when stdin closes": "当 stdin 关闭时写入最终状态 JSON",
   "Write the fixes to disk. Without this, codemod is a dry-run preview": "将修复写入磁盘。若无此项，codemod 仅为干运行预览",
-  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`": "将飞行记录写入此文件，而不是默认位于 `.harn-runs/flight-recordings/` 下的文件",
+  "Write the flight recording to this file instead of the default under `.harn-runs/flight-recordings/`. Serve appends each execution's ID": "将飞行记录写入此文件，而不是默认位于 `.harn-runs/flight-recordings/` 下的文件。服务器会追加每次执行的 ID",
   "Write the generated types to this file. Prints to stdout when omitted": "将生成的类型写入此文件。省略时打印到 stdout",
   "Write the imported run record to this path": "将导入的运行记录写入此路径",
   "Write the iteration or diff JSON report to this path": "将迭代或差异 JSON 报告写入此路径",

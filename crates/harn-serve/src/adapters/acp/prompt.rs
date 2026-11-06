@@ -652,6 +652,9 @@ impl AcpServer {
         let builtin_profile = (profile_turn != 0).then(harn_vm::builtin_profile::enable);
         let host_bridge_for_response = host_bridge.clone();
         let runtime_configurator = self.runtime_configurator.clone();
+        let flight_recorder = runtime_configurator
+            .flight_recorder(&session_id)
+            .unwrap_or_else(|| self.flight_recorder.clone());
         let execution = runtime_configurator.run_prompt(
             AcpPromptExecutionContext {
                 session_id: &session_id,
@@ -681,6 +684,8 @@ impl AcpServer {
                         messages: &prompt.messages,
                     },
                     execute::VmSetup {
+                        flight_recorder,
+                        prompt_id: prompt.correlation.message_id.as_deref(),
                         source: &source,
                         baseline: vm_baseline.as_ref(),
                         baseline_cache_hit: vm_baseline_cache_hit,

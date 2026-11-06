@@ -1,32 +1,9 @@
 import { with_temp_dir } from "std/testing"
 import "../check_downstream_protocol_bindings.harn"
 
-fn mkdirs(fs: HarnessFs, path: string) -> nil {
-  const parts = split(path_normalize(path), "/")
-  let current = if path.starts_with("/") {
-    "/"
-  } else {
-    ""
-  }
-  for part in parts {
-    if part == "" {
-      continue
-    }
-    current = if current == "" || current == "/" {
-      current + part
-    } else {
-      path_join(current, part)
-    }
-    if !fs.exists(current) {
-      fs.mkdir(current)
-    }
-  }
-  return nil
-}
-
 fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(fs, dirname(path) ?? root)
+  fs.mkdir(dirname(path) ?? root)
   fs.write_text(path, text)
   return nil
 }
@@ -103,7 +80,7 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(
         "Sources/BurinCore/ACP/HarnProtocol.generated.swift",
         "swift stale\n",
       )
-      mkdirs(harness.fs, path_join(downstream_root, "server/src/generated"))
+      harness.fs.mkdir(path_join(downstream_root, "server/src/generated"))
       const report = check_downstream_protocol_bindings(
         harness.env,
         harness.process,

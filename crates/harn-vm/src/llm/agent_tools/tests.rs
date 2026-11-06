@@ -4,11 +4,57 @@
 //! loop.
 
 use super::*;
+use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 use crate::value::VmDictExt;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+#[path = "replay_tests.rs"]
+mod replay;
+
+struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+
+impl crate::HostCallBridge for CapabilityBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+    ) -> crate::HostCallDispatchFuture<'a> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(serde_json::json!({
+                "name": format!("{capability}.{operation}"),
+                "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
+            }));
+            Ok(((capability, operation) == ("session_inputs", "request"))
+                .then(|| VmValue::string("input requested")))
+        })
+    }
+}
+
+async fn dispatch_bound_tool(
+    name: &str,
+    args: &serde_json::Value,
+    tools: &VmValue,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+) -> ToolDispatchOutcome {
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    let ctx = crate::vm::AsyncBuiltinCtx::from_vm(vm);
+    dispatch_tool_execution_with_mcp(
+        (Some(&ctx), crate::tool_registry::ToolAudience::Agent),
+        name,
+        args,
+        Some(tools),
+        None,
+        bridge,
+        0,
+        0,
+    )
+    .await
+}
 
 fn embedded_call_repair_result(
     tool_name: &str,
@@ -57,8 +103,6 @@ fn denied_tool_result_includes_actionable_next_step() {
 // shown and only saw a bare "not permitted" denial.
 #[test]
 fn denied_tool_result_names_available_tools_under_policy() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec![
             "look".to_string(),
@@ -94,8 +138,6 @@ fn denied_tool_result_names_available_tools_under_policy() {
 // shape instead.
 #[test]
 fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
         ..Default::default()
@@ -126,8 +168,6 @@ fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
 // must name the embedded call and show the direct invocation.
 #[test]
 fn embedded_call_repair_names_the_inner_call() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     let args = serde_json::json!(
         "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
     );
@@ -157,8 +197,6 @@ fn embedded_call_repair_names_the_inner_call() {
 
 #[test]
 fn call_shaped_tool_name_gets_parse_repair_feedback() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -184,8 +222,6 @@ fn call_shaped_tool_name_gets_parse_repair_feedback() {
 
 #[test]
 fn malformed_call_shaped_tool_name_is_not_unknown_tool_feedback() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -208,8 +244,6 @@ fn malformed_call_shaped_tool_name_is_not_unknown_tool_feedback() {
 // that carrier. A single string-valued field carrier works the same way.
 #[test]
 fn embedded_call_repair_recovers_alternate_argument_carriers() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -243,8 +277,6 @@ fn embedded_call_repair_recovers_alternate_argument_carriers() {
 // embedded target outside the active policy's tool set.
 #[test]
 fn embedded_call_repair_rejects_ambiguous_payloads() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     let valid =
         serde_json::json!("<tool_call>\nlook({ file: \"a.rs\", intent: \"read\" })\n</tool_call>");
     push_execution_policy(CapabilityPolicy {
@@ -597,16 +629,131 @@ async fn dispatch_honors_declared_host_bridge_executor() {
     entry.put_str("executor", "host_bridge");
     entry.put_str("host_capability", "interaction.ask");
     let tools = tools_dict(vec![("ask_user", entry)]);
-    let outcome = dispatch_tool_execution(
+    let outcome = dispatch_bound_tool(
         "ask_user",
         &serde_json::json!({"prompt": "x"}),
-        Some(&tools),
+        &tools,
         Some(&bridge),
-        0,
-        0,
     )
     .await;
     assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
+    assert!(outcome.result.unwrap()["reason"]
+        .as_str()
+        .unwrap()
+        .contains("host capability adapter"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn host_bridge_dispatches_the_declared_capability() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+    let _guard = crate::install_host_call_bridge(Arc::new(CapabilityBridge(Arc::clone(&calls))));
+    let mut entry = crate::value::DictMap::new();
+    entry.put_str("executor", "host_bridge");
+    entry.put_str("host_capability", "session_inputs.request");
+    let tools = tools_dict(vec![("request_session_input", entry)]);
+    let args = serde_json::json!({"name": "SERVICE_KEY"});
+    let outcome = dispatch_bound_tool("request_session_input", &args, &tools, None).await;
+    assert_eq!(
+        outcome.result.unwrap(),
+        serde_json::json!("input requested")
+    );
+    {
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "session_inputs.request");
+        assert_eq!(calls[0]["args"], args);
+    }
+    for binding in [
+        "interaction.ask",
+        "workspace.project_root",
+        "process.exec",
+        "process.spawn",
+    ] {
+        let mut entry = crate::value::DictMap::new();
+        entry.put_str("executor", "host_bridge");
+        entry.put_str("host_capability", binding);
+        let tools = tools_dict(vec![("must_use_adapter", entry)]);
+        let outcome = dispatch_bound_tool("must_use_adapter", &serde_json::json!({
+            "mode": "shell", "command": "printf adapter-fallback-escaped", "question": "Must not prompt"
+        }), &tools, None).await;
+        let result = outcome.result.unwrap();
+        assert_eq!(result["error"], "permission_denied", "{binding}: {result}");
+        assert!(
+            result["reason"]
+                .as_str()
+                .unwrap()
+                .contains("host capability adapter"),
+            "{binding}: {result}"
+        );
+    }
+    assert_eq!(calls.lock().unwrap().len(), 5);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_process_capability_keeps_command_policy() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CountingBridge(Arc<AtomicUsize>);
+    impl crate::HostCallBridge for CountingBridge {
+        fn dispatch<'a>(
+            &'a self,
+            _capability: &'a str,
+            _operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> crate::HostCallDispatchFuture<'a> {
+            Box::pin(async move {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(crate::json_to_vm_value(&serde_json::json!({
+                    "exit_code": 0, "status": "completed", "stdout": "allowed", "stderr": ""
+                }))))
+            })
+        }
+    }
+    crate::orchestration::clear_command_policies();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge(Arc::clone(&calls))));
+    crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
+        tools: vec!["run".to_string()],
+        default_shell_mode: "shell".to_string(),
+        deny_patterns: vec!["cat *".to_string()],
+        ..Default::default()
+    });
+    let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+        Arc::new(Mutex::new(std::collections::HashMap::new())),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(|_| Err("unexpected builtin call".to_string())),
+        1,
+    ));
+    let mut entry = crate::value::DictMap::new();
+    entry.put_str("executor", "host_bridge");
+    entry.put_str("host_capability", "process.exec");
+    let tools = tools_dict(vec![("read_via_host", entry)]);
+    let outcome = dispatch_bound_tool(
+        "read_via_host",
+        &serde_json::json!({"mode":"shell", "command":"cat Cargo.toml"}),
+        &tools,
+        Some(&bridge),
+    )
+    .await;
+    crate::orchestration::clear_command_policies();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "denied command reached the host"
+    );
+    assert_eq!(outcome.result.unwrap()["status"], "blocked");
+    let allowed = dispatch_bound_tool(
+        "read_via_host",
+        &serde_json::json!({"mode":"shell", "command":"printf allowed"}),
+        &tools,
+        Some(&bridge),
+    )
+    .await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "an allowed command reached the same adapter"
+    );
+    assert_eq!(allowed.result.unwrap()["stdout"], "allowed");
 }
 
 #[tokio::test(flavor = "current_thread")]

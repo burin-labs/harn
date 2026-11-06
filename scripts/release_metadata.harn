@@ -34,58 +34,6 @@ type AgentManifestProjection = {
   distribution: {binary: dict<string, AgentArchiveProjection>},
 }
 
-fn package_manifest_projection_schema() -> Schema<PackageManifestProjection> {
-  return schema_refine(
-    schema_of(PackageManifestProjection),
-    schema_object(
-      {
-        package: schema_field(
-          schema_object({name: schema_field(schema_string())}, {additional_properties: true}),
-        ),
-      },
-      {additional_properties: true},
-    ),
-  )
-}
-
-fn workspace_version_projection_schema() -> Schema<WorkspaceVersionProjection> {
-  const version = schema_field(schema_nullable(schema_string()), false)
-  const package = schema_object({version: version}, {additional_properties: true})
-  const workspace = schema_object(
-    {package: schema_field(schema_nullable(package), false), version: version},
-    {additional_properties: true},
-  )
-  return schema_refine(
-    schema_of(WorkspaceVersionProjection),
-    schema_object(
-      {workspace: schema_field(schema_nullable(workspace), false)},
-      {additional_properties: true},
-    ),
-  )
-}
-
-fn agent_manifest_projection_schema() -> Schema<AgentManifestProjection> {
-  const archive = schema_object(
-    {archive: schema_field(schema_string())},
-    {additional_properties: true},
-  )
-  return schema_refine(
-    schema_of(AgentManifestProjection),
-    schema_object(
-      {
-        version: schema_field(schema_string()),
-        distribution: schema_field(
-          schema_object(
-            {binary: schema_field(schema_dict(archive))},
-            {additional_properties: true},
-          ),
-        ),
-      },
-      {additional_properties: true},
-    ),
-  )
-}
-
 fn default_root(fs: HarnessFs) -> string {
   return path_normalize(path_join(fs.source_dir(), ".."))
 }
@@ -110,7 +58,7 @@ fn distribution_version(fs: HarnessFs, root: string, version: string) -> string 
 }
 
 pub fn workspace_version_from_doc(doc: unknown) -> string {
-  const manifest = match schema_parse(doc, workspace_version_projection_schema()) {
+  const manifest = match schema_parse(doc, schema_of(WorkspaceVersionProjection)) {
     Ok(value) -> { value }
     Err(_) -> {
       throw "missing workspace version"
@@ -231,7 +179,7 @@ pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> li
   for manifest in manifests {
     const doc: PackageManifestProjection = schema_expect(
       toml_parse(fs.read_text(manifest)),
-      package_manifest_projection_schema(),
+      schema_of(PackageManifestProjection),
     )
     const raw = doc.package.name
     if raw == "" {
@@ -397,7 +345,7 @@ fn rewrite_agent_manifest(
   const original = fs.read_text(path)
   const doc: AgentManifestProjection = schema_expect(
     json_parse(original),
-    agent_manifest_projection_schema(),
+    schema_of(AgentManifestProjection),
   )
   if expected_current != nil && doc.version != expected_current {
     throw "agent manifest version does not match workspace version"
@@ -429,7 +377,7 @@ fn rewrite_agent_manifest(
   updated = replace(updated, "/v" + current + "/", "/v" + next + "/")
   const check: AgentManifestProjection = schema_expect(
     json_parse(updated),
-    agent_manifest_projection_schema(),
+    schema_of(AgentManifestProjection),
   )
   if check.version != next {
     throw "failed to update agent manifest version"

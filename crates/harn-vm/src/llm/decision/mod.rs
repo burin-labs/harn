@@ -1009,8 +1009,10 @@ fn apply_structured_usage(
     } else {
         receipt::CostAdmission::AdaptiveProjection
     });
-    receipt.cost_usd = usage.cost_usd;
-    receipt.accounting_status = if usage.cost_usd.is_some() && usage.usage_unknown_calls == 0 {
+    let certainty = super::usage::summarize_usage_cost_certainty(std::iter::once(usage.as_ref()));
+    receipt.cost_usd = certainty.cost_usd();
+    receipt.accounting_status = if receipt.cost_usd.is_some() && certainty.usage_unknown_calls == 0
+    {
         AccountingStatus::Settled
     } else {
         AccountingStatus::UsageUnknown

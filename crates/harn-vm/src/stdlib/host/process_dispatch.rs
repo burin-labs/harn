@@ -5,12 +5,13 @@ use crate::vm::AsyncBuiltinCtx;
 
 use super::bridge::HOST_CALL_BRIDGE;
 use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
+use super::HostDispatch;
 
 pub async fn dispatch_process_exec(
     params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<VmValue, VmError> {
-    dispatch_process_exec_with_policy(None, params, caller).await
+    dispatch_process_exec_with_policy(None, params, caller, HostDispatch::AllowFallback).await
 }
 
 /// Dispatch the sole structured-git form that may cross the generic
@@ -29,6 +30,7 @@ pub async fn dispatch_reviewed_git_push_with_lease(
         params,
         caller,
         crate::orchestration::CommandDispatchOrigin::ReviewedGitPushWithLease,
+        HostDispatch::AllowFallback,
     )
     .await
 }
@@ -37,12 +39,14 @@ pub(super) async fn dispatch_process_exec_with_policy(
     ctx: Option<&AsyncBuiltinCtx>,
     params: &crate::value::DictMap,
     caller: JsonValue,
+    mode: HostDispatch,
 ) -> Result<VmValue, VmError> {
     dispatch_process_exec_with_policy_origin(
         ctx,
         params,
         caller,
         crate::orchestration::CommandDispatchOrigin::ArbitraryProcess,
+        mode,
     )
     .await
 }
@@ -52,13 +56,14 @@ async fn dispatch_process_exec_with_policy_origin(
     params: &crate::value::DictMap,
     caller: JsonValue,
     origin: crate::orchestration::CommandDispatchOrigin,
+    mode: HostDispatch,
 ) -> Result<VmValue, VmError> {
     let args = [VmValue::dict(params.clone())];
     crate::run_tape::taped_command_run(
         "process.exec",
         &args,
         false,
-        Box::pin(dispatch_untaped(ctx, params, caller, origin)),
+        Box::pin(dispatch_untaped(ctx, params, caller, origin, mode)),
     )
     .await
 }
@@ -68,6 +73,7 @@ async fn dispatch_untaped(
     params: &crate::value::DictMap,
     caller: JsonValue,
     origin: crate::orchestration::CommandDispatchOrigin,
+    mode: HostDispatch,
 ) -> Result<VmValue, VmError> {
     let preflight =
         crate::orchestration::run_command_policy_preflight_with_origin(ctx, params, caller, origin)
@@ -111,6 +117,9 @@ async fn dispatch_untaped(
         }
     }
 
+    if mode == HostDispatch::RequireAdapter {
+        return Err(super::missing_host_adapter("process", "exec"));
+    }
     dispatch_process_exec_after_policy(
         ctx,
         &params,

@@ -120,7 +120,7 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
   const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
   opts = pending_prefill.options
-  const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
+  let iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
   agent_emit_event(
     harness.agent,
     session.session_id,
@@ -142,10 +142,13 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     "iteration_start",
     {iteration: iteration_index + 1},
   )
+  opts = agent_narrow_tool_surface_at_user_boundary(harness.agent, session, opts)
+  iteration_opts = iteration_opts
+    + pick(opts, ["_tool_surface_user_boundary", "_tool_surface_narrowed_tools"])
   let turn_opts = agent_skills_match(harness.agent, session, iteration_opts, iteration_index)
   if turn_opts?._skill_activated_this_turn ?? false {
-    opts = agent_reset_tool_surface_narrowing(opts)
-    turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
+    opts = __agent_reopen_tool_surface(harness.agent, session, opts)
+    turn_opts = turn_opts + {_tool_surface_narrowed_tools: nil}
   }
   if opts?.mid_conversation_mcp_mount ?? false {
     const skill_mcp_specs = __agent_loop_active_skill_mcp_specs(turn_opts?.active_skills)

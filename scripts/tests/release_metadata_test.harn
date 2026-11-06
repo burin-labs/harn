@@ -88,16 +88,6 @@ pipeline test_workspace_version_projection_validates_at_boundary() {
   )
 }
 
-fn dependency_schema() -> Schema<DependencyProjection> {
-  return schema_refine(
-    schema_of(DependencyProjection),
-    schema_object(
-      {path: schema_field(schema_string()), version: schema_field(schema_string())},
-      {additional_properties: true},
-    ),
-  )
-}
-
 @test
 pipeline test_development_version_contract_is_exact(harness: Harness, task: unknown) {
   assert_eq(next_version_from_stable("1.2.3"), "1.2.4")
@@ -117,55 +107,15 @@ pipeline test_development_version_contract_is_exact(harness: Harness, task: unkn
 }
 
 fn root_manifest_projection(text: string) -> RootManifestProjection {
-  const schema: Schema<RootManifestProjection> = schema_refine(
-    schema_of(RootManifestProjection),
-    schema_object(
-      {
-        workspace: schema_field(
-          schema_object(
-            {dependencies: schema_field(schema_dict(dependency_schema()))},
-            {additional_properties: true},
-          ),
-        ),
-      },
-      {additional_properties: true},
-    ),
-  )
-  return schema_expect(toml_parse(text), schema)
+  return schema_expect(toml_parse(text), schema_of(RootManifestProjection))
 }
 
 fn member_manifest_projection(text: string) -> MemberManifestProjection {
-  const schema: Schema<MemberManifestProjection> = schema_refine(
-    schema_of(MemberManifestProjection),
-    schema_object(
-      {dependencies: schema_field(schema_dict(dependency_schema()))},
-      {additional_properties: true},
-    ),
-  )
-  return schema_expect(toml_parse(text), schema)
+  return schema_expect(toml_parse(text), schema_of(MemberManifestProjection))
 }
 
 fn agent_projection(text: string) -> AgentProjection {
-  const schema: Schema<AgentProjection> = schema_refine(
-    schema_of(AgentProjection),
-    schema_object(
-      {
-        version: schema_field(schema_string()),
-        distribution: schema_field(
-          schema_object(
-            {
-              binary: schema_field(
-                schema_object(
-                  {linux: schema_field(schema_object({archive: schema_field(schema_string())}))},
-                ),
-              ),
-            },
-          ),
-        ),
-      },
-    ),
-  )
-  return schema_expect(json_parse(text), schema)
+  return schema_expect(json_parse(text), schema_of(AgentProjection))
 }
 
 fn assert_throws_eq(body: unknown, expected: string) -> nil {
@@ -182,24 +132,9 @@ fn assert_throws_eq(body: unknown, expected: string) -> nil {
   return nil
 }
 
-fn mkdirs(fs: HarnessFs, path: string) -> nil {
-  const parts = split(path_normalize(path), "/")
-  let current = path.starts_with("/") ? "/" : ""
-  for part in parts {
-    if part == "" {
-      continue
-    }
-    current = current == "" || current == "/" ? current + part : path_join(current, part)
-    if !fs.exists(current) {
-      fs.mkdir(current)
-    }
-  }
-  return nil
-}
-
 fn write_fixture(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   const path = path_join(root, rel)
-  mkdirs(fs, dirname(path) ?? root)
+  fs.mkdir(dirname(path) ?? root)
   fs.write_text(path, text)
   return nil
 }

@@ -251,14 +251,6 @@ pub fn __apply_post_turn_options(opts: any, outcome: dict) {
   // assigned: after that turn's post-turn outcome, absence clears the claim,
   // including fallback and error-recovery completions.
   updated = updated + {_next_tool_claim: outcome?.next_tool_claim}
-  const narrowing = outcome?.narrowing
-  if narrowing != nil {
-    updated = updated
-      + {
-        _tool_surface_narrowing_history: narrowing?.history ?? [],
-        _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
-      }
-  }
   const llm_patch = outcome?.llm_options
   if llm_patch != nil {
     if type_of(llm_patch) != "dict" {

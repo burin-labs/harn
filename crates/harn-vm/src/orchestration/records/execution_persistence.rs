@@ -8,6 +8,7 @@ use crate::NativeVmExt;
 use std::path::{Path, PathBuf};
 
 use crate::flight_recorder::FlightRecordingArtifact;
+pub use crate::flight_recorder::FlightRecordingStorage;
 
 use super::{RunEvidenceGapRecord, RunExecutionRecord, RunRecord};
 
@@ -27,21 +28,6 @@ impl ExecutionRecordStatus {
             Self::Failed => "failed",
         }
     }
-}
-
-/// Storage policy for an enabled VM flight recorder.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FlightRecordingStorage<'a> {
-    /// Write into Harn's dedicated directory and retain the newest files.
-    Managed {
-        /// Maximum number of newest managed recordings to keep.
-        retain_files: usize,
-    },
-    /// Write exactly to a caller-owned path without rotating sibling files.
-    Custom {
-        /// Exact caller-owned destination.
-        output: &'a Path,
-    },
 }
 
 /// Host facts needed to materialize one automatic execution record.
@@ -130,7 +116,11 @@ pub fn persist_execution_record(
     vm: &crate::Vm,
     request: ExecutionRecordRequest<'_>,
 ) -> Result<PersistedExecutionRecord, ExecutionRecordPersistError> {
-    let flight_recording = match persist_flight_recording(vm, &request) {
+    let flight_recording = match request
+        .flight_recording
+        .map(|storage| storage.persist(vm, request.store_base, None))
+        .transpose()
+    {
         Ok(recording) => recording,
         Err(error) => {
             let mut diagnostics = vec![error.clone()];
@@ -175,33 +165,6 @@ pub fn persist_execution_record(
         run_record_path,
         flight_recording,
     })
-}
-
-fn persist_flight_recording(
-    vm: &crate::Vm,
-    request: &ExecutionRecordRequest<'_>,
-) -> Result<Option<FlightRecordingArtifact>, String> {
-    let Some(options) = request.flight_recording else {
-        return Ok(None);
-    };
-    let recording = vm
-        .flight_recording()
-        .ok_or_else(|| "flight recorder was requested but not installed".to_string())?;
-    let (path, retain_files) = match options {
-        FlightRecordingStorage::Managed { retain_files } => (
-            crate::runtime_paths::run_root(request.store_base)
-                .join("flight-recordings")
-                .join(format!("{}.json", recording.execution_id)),
-            retain_files,
-        ),
-        // A caller-supplied directory may contain unrelated JSON. Rotation is
-        // safe only in Harn's dedicated managed directory.
-        FlightRecordingStorage::Custom { output } => (
-            crate::run_tape::branch_path(output.to_path_buf(), "flight recording"),
-            usize::MAX,
-        ),
-    };
-    crate::flight_recorder::persist_recording(&recording, &path, retain_files).map(Some)
 }
 
 fn persist_run_record(

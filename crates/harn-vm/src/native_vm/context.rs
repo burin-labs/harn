@@ -11,6 +11,7 @@ mod tests;
 
 pub trait NativeBuiltinCtxExt: Sized {
     fn record_evaluation_receipt(&self, receipt: crate::llm::decision::receipt::EvaluationReceipt);
+    fn evaluation_receipt(&self, reference: &str) -> Result<crate::VmValue, &'static str>;
     fn evaluation_invocation_id(&self) -> String;
     fn evaluation_replay(&self) -> Option<crate::llm::decision::replay::EvaluationReplayScope>;
     fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry>;
@@ -31,6 +32,17 @@ pub trait NativeBuiltinCtxExt: Sized {
 impl NativeBuiltinCtxExt for AsyncBuiltinCtx {
     fn record_evaluation_receipt(&self, receipt: crate::llm::decision::receipt::EvaluationReceipt) {
         self.with_child_vm(|vm| vm.native().evaluation.journal.lock().record(receipt));
+    }
+
+    fn evaluation_receipt(&self, reference: &str) -> Result<crate::VmValue, &'static str> {
+        self.with_child_vm(|vm| {
+            vm.native()
+                .evaluation
+                .journal
+                .lock()
+                .lookup(reference, vm.execution_id().as_ref())
+                .map(|receipt| receipt.accounting_value())
+        })
     }
 
     fn evaluation_invocation_id(&self) -> String {

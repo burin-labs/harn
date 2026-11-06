@@ -633,6 +633,13 @@ impl AcpPromptExecutionContext<'_> {
 
 #[async_trait(?Send)]
 pub trait AcpRuntimeConfigurator: Send + Sync {
+    /// Override recording for one session without changing process environment.
+    fn flight_recorder(
+        &self,
+        _session_id: &str,
+    ) -> Option<harn_vm::flight_recorder::FlightRecorderOptions> {
+        None
+    }
     /// Bind authority and credentials around the actual VM execution, including
     /// host capabilities and model calls. UI enqueue scopes cannot reach this
     /// executor. Refusing here leaves the execution future unpolled.
@@ -697,6 +704,12 @@ struct EndpointOverrideRuntimeConfigurator {
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
+    fn flight_recorder(
+        &self,
+        session_id: &str,
+    ) -> Option<harn_vm::flight_recorder::FlightRecorderOptions> {
+        self.inner.flight_recorder(session_id)
+    }
     async fn run_prompt(
         &self,
         context: AcpPromptExecutionContext<'_>,
@@ -770,6 +783,7 @@ pub struct AcpServerConfig {
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
+    pub flight_recorder: harn_vm::flight_recorder::FlightRecorderOptions,
     pub budget: Option<BudgetSpec>,
     pub sandbox: AcpSandboxConfig,
 }
@@ -818,6 +832,7 @@ impl AcpServerConfig {
             llm_config_overrides: None,
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
+            flight_recorder: harn_vm::flight_recorder::FlightRecorderOptions::from_environment(),
             budget: None,
             sandbox: AcpSandboxConfig::default(),
         }
@@ -917,6 +932,14 @@ impl AcpServerConfig {
 
     pub fn with_profile(mut self, profile: AcpProfileConfig) -> Self {
         self.profile = profile;
+        self
+    }
+
+    pub fn with_flight_recorder(
+        mut self,
+        options: harn_vm::flight_recorder::FlightRecorderOptions,
+    ) -> Self {
+        self.flight_recorder = options;
         self
     }
 
@@ -1094,6 +1117,7 @@ pub struct AcpServer {
     vm_baseline_cache: Option<VmBaselineCacheEntry>,
     /// Per-turn profile emission settings.
     profile: AcpProfileConfig,
+    flight_recorder: harn_vm::flight_recorder::FlightRecorderOptions,
     /// Provider/catalog overlays installed by the embedder for this server.
     llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     /// Host-verified endpoint sidecar paired with the catalog overlay.

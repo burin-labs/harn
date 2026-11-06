@@ -67,6 +67,7 @@ impl AcpServer {
             compile_cache: None,
             vm_baseline_cache: None,
             profile: config.profile,
+            flight_recorder: config.flight_recorder,
             llm_config_overrides,
             runtime_provider_endpoint_overrides,
             llm_capability_overrides,

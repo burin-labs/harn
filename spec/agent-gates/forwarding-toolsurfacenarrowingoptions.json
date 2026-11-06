@@ -57,7 +57,7 @@
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
-    "expression": "__tool_surface_removed(candidate_entries, used, config)",
+    "expression": "__tool_surface_removed(\n    candidate_entries,\n    used,\n    config + {hard_keep: hard_keep},\n  )",
     "owner": "__tool_surface_removed",
     "evidence": "Consumer __tool_surface_removed.config in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner.",
     "consumers": [
@@ -67,5 +67,29 @@
         "parameter": "config"
       }
     ]
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_hard_keep(opts)",
+    "owner": "__tool_surface_hard_keep",
+    "evidence": "The shared hard-keep owner reads the nested normalized configuration through its independently bound tool_surface_narrowing parameter path.",
+    "consumers": [{"scope": "ToolSurfaceNarrowingOptions", "function": "__tool_surface_hard_keep", "parameter": "opts", "path": ["tool_surface_narrowing"]}]
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_record_boundary(agent, session, boundary_opts)",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "Recording a derived decision returns unchanged configuration, retaining the independently bound nested configuration origin.",
+    "consumers": [{"scope": "ToolSurfaceNarrowingOptions", "function": "__tool_surface_record_boundary", "parameter": "opts", "path": ["tool_surface_narrowing"]}]
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_record_boundary(\n    agent,\n    session,\n    boundary_opts + {_tool_surface_narrowed_tools: remaining},\n  )",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "Replacing derived selected names leaves normalized narrowing configuration unchanged through this independently bound identity projection.",
+    "consumers": [{"scope": "ToolSurfaceNarrowingOptions", "function": "__tool_surface_record_boundary", "parameter": "opts", "path": ["tool_surface_narrowing"]}]
   }
 ]

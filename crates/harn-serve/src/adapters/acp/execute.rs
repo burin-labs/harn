@@ -110,6 +110,8 @@ pub(super) struct PromptGlobals<'a> {
 }
 
 pub(super) struct VmSetup<'a> {
+    pub flight_recorder: harn_vm::flight_recorder::FlightRecorderOptions,
+    pub prompt_id: Option<&'a str>,
     pub source: &'a str,
     pub baseline: Option<&'a harn_vm::VmBaseline>,
     pub baseline_cache_hit: Option<bool>,
@@ -385,6 +387,9 @@ pub(super) async fn execute_chunk(
     // indistinguishable from one doing real work — the recorder exists in
     // harn-vm but nothing in production had ever switched it on.
     let module_phases = vm.enable_module_phase_timing();
+    if setup.flight_recorder.enabled {
+        vm.enable_flight_recorder(setup.flight_recorder.max_events);
+    }
     let module_progress = ModuleProgressProjector::start(bridge.clone());
     let observed_progress = module_progress.clone();
     module_phases.set_progress_observer(move |stats| observed_progress.advance(stats));
@@ -416,7 +421,24 @@ pub(super) async fn execute_chunk(
     );
     harn_vm::stdlib::process::set_session_environment(None);
     harn_vm::stdlib::process::set_thread_execution_context(None);
-    result
+    let recording = setup.flight_recorder.persist_prompt(
+        &vm,
+        setup.project_root.unwrap_or(setup.cwd),
+        harn_vm::flight_recorder::FlightPromptContext {
+            session_id: &bridge.session_id,
+            prompt_id: setup.prompt_id.unwrap_or(vm.execution_id().as_str()),
+        },
+    );
+    match (result, recording) {
+        (Err(mut error), Err(recording)) => {
+            error
+                .message
+                .push_str(&format!("; flight recording failed: {recording}"));
+            Err(error)
+        }
+        (Ok(_), Err(error)) => Err(error.into()),
+        (result, Ok(_)) => result,
+    }
 }
 
 fn configured_execution_harness(
@@ -720,6 +742,8 @@ require_declared_operations_served = true
                 messages: &[],
             },
             VmSetup {
+                flight_recorder: Default::default(),
+                prompt_id: None,
                 source: &source,
                 baseline: None,
                 baseline_cache_hit: None,
@@ -858,6 +882,8 @@ require_declared_operations_served = true
                 messages: &[],
             },
             VmSetup {
+                flight_recorder: Default::default(),
+                prompt_id: None,
                 source: &source,
                 baseline: None,
                 baseline_cache_hit: None,
