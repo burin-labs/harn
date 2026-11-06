@@ -1,4 +1,5 @@
 use super::*;
+use harn_parser::builtin_signatures::TyExt;
 
 const EVALUATE: &str = r#"
 import { EvaluationOutcome } from "std/predicate"
@@ -18,6 +19,13 @@ pipeline main(harness: Harness) {
 
 #[test]
 fn public_receipt_access_preserves_accounting_transport_and_execution_isolation() {
+    let schema = crate::json_schema_for_type_expr(
+        &harn_builtin_meta::predicate::EVALUATION_RECEIPT
+            .returns
+            .to_type_expr(),
+    )
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
     for (tokens, partial) in [
         (Some(100), false),
         (Some(0), false),
@@ -65,6 +73,10 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
             let value = crate::llm::helpers::vm_value_to_json(&value);
             assert_eq!(value["outcome"]["kind"], "answered");
             assert_eq!(value["lookup"]["kind"], "retained");
+            validator.validate(&value["lookup"]).unwrap();
+            let mut invalid = value["lookup"].clone();
+            invalid["unexpected"] = serde_json::json!(true);
+            assert!(!validator.is_valid(&invalid), "the public return contract must remain closed");
             let receipt = &value["lookup"]["receipt"];
             assert_eq!(receipt["reference"], value["outcome"]["receipt"]);
             assert_eq!(receipt["input_tokens"], serde_json::json!(tokens));
