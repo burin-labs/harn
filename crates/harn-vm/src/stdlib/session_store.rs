@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, SearchFilter, SearchMode, SearchQuery, SessionEventKind,
-    SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
+    SessionImporter, SessionLeaseError, SessionMeta, SessionStatus, SessionStore, SessionType,
     SqliteSessionStore, StoreError, StoredEvent, VerifyReport,
 };
 use serde::Deserialize;
@@ -371,12 +371,28 @@ async fn session_store_database_path_impl(
     ))
 }
 
-pub(crate) fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
+fn open_sqlite_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
     let path = harn_session_store::sqlite::stable_file_path(&store_path(state_dir))
         .map_err(store_error)?;
-    let store = SqliteSessionStore::open_with_hooks(&path, store_hooks(Some(&path)))
-        .map_err(store_error)?;
-    Ok(CanonicalStore::new(store))
+    SqliteSessionStore::open_with_hooks(&path, store_hooks(Some(&path))).map_err(store_error)
+}
+
+pub(crate) fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
+    Ok(CanonicalStore::new(open_sqlite_store(state_dir)?))
+}
+
+/// Inspect the closed session without registering a transient store watcher.
+/// The caller holds the session writer lease; this operation exposes no writer.
+pub(crate) async fn describe_closed_checkpoint(
+    state_dir: &SessionStoreDir,
+    session_id: &str,
+) -> Result<Option<SessionMeta>, VmError> {
+    let store = open_sqlite_store(state_dir)?;
+    match store.describe(session_id).await {
+        Ok(meta) => Ok(Some(meta)),
+        Err(StoreError::NotFound(_)) => Ok(None),
+        Err(error) => Err(VmError::Runtime(format!("session continuation: {error}"))),
+    }
 }
 
 fn open_maintenance_store(

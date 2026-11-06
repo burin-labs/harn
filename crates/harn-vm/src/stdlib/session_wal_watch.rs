@@ -84,6 +84,18 @@ impl Drop for WatchExit {
 /// sidecars in a directory the sibling is asserting on (harn#7960).
 static REGISTERED: RwLock<Vec<(PathBuf, usize)>> = RwLock::new(Vec::new());
 static WATCHERS: RwLock<Vec<(PathBuf, Arc<WatchState>)>> = RwLock::new(Vec::new());
+#[cfg(test)]
+static WATCHER_STARTS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(super) fn watcher_starts_for(path: &Path) -> usize {
+    WATCHER_STARTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|p| *p == path)
+        .count()
+}
 
 fn registered() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, usize)>> {
     REGISTERED
@@ -246,6 +258,8 @@ fn start_watcher(path: PathBuf, running: &mut Vec<(PathBuf, Arc<WatchState>)>) {
     let Ok(initial_version) = data_version(&reader) else {
         return;
     };
+    #[cfg(test)]
+    WATCHER_STARTS.lock().unwrap().push(path.clone());
     seed_session_memory(&path, &reader);
 
     let stop = Arc::new(AtomicBool::new(false));
