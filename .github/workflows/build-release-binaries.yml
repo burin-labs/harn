@@ -1636,12 +1636,7 @@ jobs:
             cp "$downloads/harn-${target}/${archive}" "$archives/${archive}"
           done
 
-          # install.sh and `harn upgrade` verify downloads against this file:
-          # coreutils `<sha256>  <filename>`, one line per archive, by name.
-          (cd "$archives" && sha256sum harn-* | LC_ALL=C sort -k 2) > "$release_files/SHA256SUMS"
-          cat "$release_files/SHA256SUMS"
-
-          # The ACP registry cannot install .tar.xz; its manifest alone names these.
+          # The ACP registry and legacy updaters consume the gzip copies.
           scripts/build_acp_registry_archives.sh --archives-dir "$archives" --output-dir "$release_files"
 
           # The candidate's own Linux CLI renders the target-independent files.
@@ -1672,6 +1667,7 @@ jobs:
             --receipts-dir "$receipts" \
             --archives-dir "$archives" \
             --release-files-dir "$release_files"
+          cat "$release_files/SHA256SUMS"
           cat "$manifest_dir/candidate-manifest.json"
           bash scripts/release_files_provenance.sh "$manifest_dir/candidate-manifest.json" "$VERSION" \
             > "$RUNNER_TEMP/release-files-provenance.json"

@@ -18,9 +18,9 @@ Usage: scripts/assemble_candidate_manifest.sh \
   --run-id ID --run-attempt N --receipts-dir DIR --archives-dir DIR --release-files-dir DIR
 
 Reads the five single-target candidate receipts, checks each archive in
---archives-dir against its receipt, and writes the candidate manifest listing
-those archives and the release files in --release-files-dir (SHA256SUMS,
-release-assets.json, release-notes.md).
+--archives-dir against its receipt, and writes SHA256SUMS and the candidate
+manifest from those archives, their compatibility gzip copies, and the release
+files in --release-files-dir (release-assets.json, release-notes.md).
 EOF
 }
 
@@ -137,19 +137,18 @@ for target in $(candidate_archive_expected_targets_json | jq -r '.[]'); do
   }' "$receipt")")
 done
 
-# kind:file for the release files built beside the archives.
-for release_file in checksums:SHA256SUMS asset-index:release-assets.json notes:release-notes.md; do
-  kind="${release_file%%:*}"
-  file="${release_file#*:}"
+release_file_entry() {
+  local kind="$1" file="$2" digest
   if [[ ! -s "$release_files_dir/$file" ]]; then
     echo "error: missing or empty release file $file in $release_files_dir" >&2
     exit 1
   fi
-  entries+=("$(jq -nc \
+  digest="$(sha256_file "$release_files_dir/$file")" || return 1
+  jq -nc \
     --arg kind "$kind" \
     --arg artifact "$RELEASE_FILES_ARTIFACT" \
     --arg file "$file" \
-    --arg sha256 "$(sha256_file "$release_files_dir/$file")" \
+    --arg sha256 "$digest" \
     --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
     '{
       kind: $kind,
@@ -159,31 +158,33 @@ for release_file in checksums:SHA256SUMS asset-index:release-assets.json notes:r
       attestationPredicateType: $predicate,
       signingStatus: "not_applicable",
       notarizationStatus: "not_applicable"
-    }')")
+    }'
+}
+
+compat_entries=()
+for file in "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  compat_entries+=("$(release_file_entry asset-index "$file")")
 done
 
-# The ACP registry's gzip copies are release files too; only the manifest
-# generator for spec/acp-registry/harn/agent.json points at them.
-for file in "${ACP_REGISTRY_ARCHIVES[@]}"; do
-  if [[ ! -s "$release_files_dir/$file" ]]; then
-    echo "error: missing or empty ACP registry archive $file in $release_files_dir" >&2
-    exit 1
-  fi
-  entries+=("$(jq -nc \
-    --arg file "$file" \
-    --arg sha256 "$(sha256_file "$release_files_dir/$file")" \
-    --arg artifact "$RELEASE_FILES_ARTIFACT" \
-    --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
-    '{
-      kind: "asset-index",
-      artifact: $artifact,
-      file: $file,
-      sha256: $sha256,
-      attestationPredicateType: $predicate,
-      signingStatus: "not_applicable",
-      notarizationStatus: "not_applicable"
-    }')")
+runtime_entries=("${entries[@]}" "${compat_entries[@]}")
+runtime_names=()
+for path in "$archives_dir"/harn-* "$release_files_dir"/harn-*; do
+  [[ -e "$path" || -L "$path" ]] || continue
+  runtime_names+=("${path##*/}")
 done
+if ! printf '%s\n' "${runtime_entries[@]}" | jq -se --args \
+  '(map(.file) | sort) == ($ARGS.positional | sort)' -- "${runtime_names[@]}" >/dev/null; then
+  echo "error: runtime archive files differ from the candidate records" >&2
+  exit 1
+fi
+# Legacy updaters select gzip; checksums and provenance must describe the same bytes.
+printf '%s\n' "${runtime_entries[@]}" | jq -sr \
+  'sort_by(.file)[] | "\(.sha256)  \(.file)"' > "$release_files_dir/SHA256SUMS"
+
+for release_file in checksums:SHA256SUMS asset-index:release-assets.json notes:release-notes.md; do
+  entries+=("$(release_file_entry "${release_file%%:*}" "${release_file#*:}")")
+done
+entries+=("${compat_entries[@]}")
 
 mkdir -p "$(dirname "$output")"
 printf '%s\n' "${entries[@]}" | jq -s \
