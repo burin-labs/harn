@@ -94,10 +94,20 @@ pub const HARN_STAGED_WRITES_PENDING_FIELDS: &[&str] =
     &["pendingCount", "totalBytes", "pendingWrites"];
 pub const HARN_STAGED_WRITE_FIELDS: &[&str] = &["path", "kind", "byteDelta", "snapshotId"];
 pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
+    // The typed payload registry is only part of the negotiated vocabulary:
+    // legacy user-message and session-history updates also require a grant.
+    let session_update_extensions: Vec<&str> = ACP_SESSION_UPDATE_VARIANTS
+        .iter()
+        .copied()
+        .filter(|kind| {
+            !is_standard_session_update(kind) && !HARN_SESSION_UPDATE_EXTENSIONS.contains(kind)
+        })
+        .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter().copied())
+        .collect();
     serde_json::json!({
         "harn": {
             "schemaCompatibility": ACP_SCHEMA_COMPATIBILITY,
-            "sessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
+            "sessionUpdateExtensions": session_update_extensions,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
             "promptResultExtensionFields": HARN_PROMPT_RESULT_EXTENSION_FIELDS,
