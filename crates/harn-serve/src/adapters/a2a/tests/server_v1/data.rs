@@ -94,17 +94,29 @@ async fn streamed_json_data_uses_each_subscribers_wire_version() {
                 assert_legacy_upstream("SendStreamingMessageSuccessResponse", frame);
             }
         }
-        let parts = frames
+        let message = frames
             .iter()
             .find_map(|frame| {
                 frame.pointer(if modern {
-                    "/result/statusUpdate/status/message/parts"
+                    "/result/statusUpdate/status/message"
                 } else {
-                    "/result/message/parts"
+                    "/result/message"
                 })
             })
-            .and_then(JsonValue::as_array)
             .expect("actual reply event");
+        let parts = message["parts"].as_array().unwrap();
+        assert!(message["messageId"].is_string());
+        let (_, retrieved) = rpc(
+            router.clone(),
+            if modern { "1.0" } else { "" },
+            if modern { "GetTask" } else { "tasks/get" },
+            json!({"id":message["taskId"]}),
+        )
+        .await;
+        assert_eq!(
+            retrieved["result"]["history"][1]["messageId"], message["messageId"],
+            "stream and retrieval must project the same canonical reply identity"
+        );
         assert_eq!(parts.len(), expected.len());
         for (part, expected) in parts.iter().zip(&expected) {
             if modern {

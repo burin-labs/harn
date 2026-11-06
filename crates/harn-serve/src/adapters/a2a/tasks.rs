@@ -286,11 +286,12 @@ impl A2aServer {
         let parts = response_parts(&response.value);
         let artifacts = response_artifacts(&response.value, &parts);
         let handoff_metadata = handoff_task_metadata(&response);
+        let message_id = Uuid::now_v7().to_string();
         let message = json!({
             "type": "message",
             "taskId": task_id,
             "message": {
-                "id": Uuid::now_v7().to_string(),
+                "id": message_id,
                 "role": "agent",
                 "parts": parts
             }
@@ -304,7 +305,7 @@ impl A2aServer {
                 return;
             }
             task.history.push(TaskMessage {
-                id: Uuid::now_v7().to_string(),
+                id: message_id,
                 role: "agent".to_string(),
                 parts,
             });
