@@ -131,7 +131,6 @@ pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
         }
         _ if event.get("artifact").is_some() => {
             event["kind"] = json!("artifact-update");
-            canonical_parts(&mut event["artifact"]["parts"]);
         }
         _ => {
             let data = event.clone();
@@ -142,16 +141,30 @@ pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
         }
     }
     task.events.push(event.clone());
-    task.subscribers.retain(|tx| {
-        tx.unbounded_send(wrap_event(JsonValue::Null, event.clone()))
-            .is_ok()
+    task.subscribers.retain(|(version, tx)| {
+        let projected = if version.is_legacy() {
+            wrap_event(JsonValue::Null, event.clone())
+        } else {
+            harn_vm::jsonrpc::response(JsonValue::Null, event.clone())
+        };
+        tx.unbounded_send(projected).is_ok()
     });
     if task.status.is_terminal() {
         task.subscribers.clear();
     }
 }
 
-pub(super) fn wrap_event(rpc_id: JsonValue, event: JsonValue) -> JsonValue {
+pub(super) fn wrap_event(rpc_id: JsonValue, mut event: JsonValue) -> JsonValue {
+    for path in [
+        "/parts",
+        "/message/parts",
+        "/status/message/parts",
+        "/artifact/parts",
+    ] {
+        if let Some(parts) = event.pointer_mut(path) {
+            canonical_parts(parts);
+        }
+    }
     harn_vm::jsonrpc::response(rpc_id, event)
 }
 
@@ -174,6 +187,9 @@ pub(super) fn task_to_json_versioned(
                 "parts": message.parts,
             });
             canonical_message(&mut value, &task.id, context);
+            if version.is_legacy() {
+                canonical_parts(&mut value["parts"]);
+            }
             value
         })
         .collect::<Vec<_>>();
@@ -190,7 +206,10 @@ pub(super) fn task_to_json_versioned(
             value["status"]["timestamp"] = json!(timestamp);
         }
     }
-    if let Some(artifacts) = value["artifacts"].as_array_mut() {
+    if let Some(artifacts) = value["artifacts"]
+        .as_array_mut()
+        .filter(|_| version.is_legacy())
+    {
         for artifact in artifacts {
             canonical_parts(&mut artifact["parts"]);
         }
@@ -230,7 +249,6 @@ fn canonical_message(message: &mut JsonValue, task_id: &str, context: &str) {
     message["messageId"] = message["id"].clone();
     message["taskId"] = json!(task_id);
     message["contextId"] = json!(context);
-    canonical_parts(&mut message["parts"]);
 }
 
 pub(super) fn handoff_task_metadata(

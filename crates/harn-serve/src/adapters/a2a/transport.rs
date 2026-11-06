@@ -113,27 +113,8 @@ impl A2aServer {
             Ok(principal) => principal,
             Err(processed) => return processed,
         };
-        if !version.is_legacy()
-            && matches!(method, "tasks/get" | "tasks/cancel" | "tasks/resubscribe")
-            && !task_id_param(&params).is_some_and(|id| {
-                self.tasks
-                    .lock()
-                    .expect("tasks poisoned")
-                    .get(id)
-                    .is_some_and(|task| task.visible_to(principal.as_ref()))
-            })
-        {
-            return ProcessedRpc {
-                outcome: RpcOutcome::Json(error_response(
-                    rpc_id,
-                    A2A_TASK_NOT_FOUND,
-                    "Task not found",
-                )),
-                deprecation: None,
-                status: None,
-                auth_challenge: None,
-            };
-        }
+        let authorized_task_id =
+            || self.visible_task_id(task_id_param(&params), principal.as_ref());
         let (outcome, deprecation) = match method {
             "message/send" | "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
                 let deprecation = match method {
@@ -215,7 +196,7 @@ impl A2aServer {
             "tasks/resubscribe" | "a2a.ResubscribeTask" => {
                 let deprecation = (method == "a2a.ResubscribeTask")
                     .then_some("Use A2A 0.3.0 method `tasks/resubscribe`.");
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 match task_id
                     .ok_or(super::tasks::TaskAccessError::NotFound)
                     .and_then(|id| self.subscribe_task(id, version))
@@ -242,7 +223,7 @@ impl A2aServer {
             "a2a.GetTask" | "tasks/get" => {
                 let deprecation =
                     (method == "a2a.GetTask").then_some("Use A2A 0.3.0 method `tasks/get`.");
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 match task_id.map(|id| self.task_json_versioned(id, version)) {
                     Some(JsonValue::Null) | None => (
                         RpcOutcome::Json(error_response(
@@ -261,7 +242,7 @@ impl A2aServer {
             "a2a.CancelTask" | "tasks/cancel" => {
                 let deprecation =
                     (method == "a2a.CancelTask").then_some("Use A2A 0.3.0 method `tasks/cancel`.");
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 match task_id
                     .ok_or(super::tasks::TaskAccessError::NotFound)
                     .and_then(|id| self.cancel_task_versioned(id, version))
@@ -270,7 +251,7 @@ impl A2aServer {
                         RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
                         deprecation,
                     ),
-                    Err(super::tasks::TaskAccessError::NotFound) if !version.is_legacy() => (
+                    Err(super::tasks::TaskAccessError::NotFound) => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
                             A2A_TASK_NOT_FOUND,
@@ -298,13 +279,16 @@ impl A2aServer {
                 None,
             ),
             "a2a.ListTasks" | "tasks/list" => (
-                RpcOutcome::Json(task_rpc_response(&rpc_id, self.list_tasks())),
+                RpcOutcome::Json(task_rpc_response(
+                    &rpc_id,
+                    self.list_tasks(principal.as_ref()),
+                )),
                 Some("`tasks/list` is a Harn compatibility method and is not part of A2A 0.3.0."),
             ),
             "CreateTaskPushNotificationConfig" | "tasks/pushNotificationConfig/set" => {
                 let deprecation = (method == "CreateTaskPushNotificationConfig")
                     .then_some("Use A2A 0.3.0 method `tasks/pushNotificationConfig/set`.");
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 let config = params
                     .get("pushNotificationConfig")
                     .or_else(|| params.get("config"))
@@ -332,7 +316,7 @@ impl A2aServer {
                 }
             }
             "tasks/pushNotificationConfig/get" => {
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 let config_id = push_config_id_param(&params);
                 match task_id.and_then(|id| self.push_config(id, config_id).ok()) {
                     Some(config) => (RpcOutcome::Json(task_rpc_response(&rpc_id, config)), None),
@@ -348,7 +332,7 @@ impl A2aServer {
             }
             "tasks/pushNotificationConfig/list" => {
                 let task_id = task_id_param(&params);
-                match self.push_configs(task_id) {
+                match self.visible_push_configs(task_id, principal.as_ref()) {
                     Ok(configs) => (RpcOutcome::Json(task_rpc_response(&rpc_id, configs)), None),
                     Err(error) => (
                         RpcOutcome::Json(push_config_error_response(rpc_id, &error)),
@@ -357,7 +341,7 @@ impl A2aServer {
                 }
             }
             "tasks/pushNotificationConfig/delete" => {
-                let task_id = task_id_param(&params);
+                let task_id = authorized_task_id();
                 let config_id = push_config_id_param(&params);
                 match task_id.zip(config_id) {
                     Some((task_id, config_id)) => {

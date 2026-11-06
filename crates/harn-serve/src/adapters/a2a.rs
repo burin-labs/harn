@@ -211,7 +211,7 @@ struct TaskState {
     artifacts: Vec<JsonValue>,
     metadata: BTreeMap<String, JsonValue>,
     events: Vec<JsonValue>,
-    subscribers: Vec<UnboundedSender<JsonValue>>,
+    subscribers: Vec<(harn_vm::a2a::A2aWireVersion, UnboundedSender<JsonValue>)>,
     cancel_token: Option<Arc<AtomicBool>>,
 }
 

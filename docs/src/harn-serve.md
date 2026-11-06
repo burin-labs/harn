@@ -537,6 +537,11 @@ Behavior today:
   task continuation or push configuration. Listing and task access are scoped
   to the authenticated principal, issuer, and tenant. Missing or empty version
   headers and the REST routes select 0.3.
+- Persisted legacy push configurations remain accessible after restart only on
+  an explicitly unauthenticated server. An authenticated server refuses access
+  when the in-memory task owner is unavailable.
+  Task access and push configuration use the same owner across protocol
+  versions, deprecated aliases, and REST routes.
 - one-cycle compatibility aliases for `a2a.*`, `tasks/send`,
   `tasks/send_and_wait`, `tasks/sendSubscribe`, and `tasks/list`, with
   `Deprecation: true` on legacy HTTP responses

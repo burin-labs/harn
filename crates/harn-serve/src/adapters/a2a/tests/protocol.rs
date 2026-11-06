@@ -733,6 +733,59 @@ async fn push_notification_configs_survive_server_restart() {
         "https://client.example/a2a/persisted"
     );
 
+    let mut authenticated_config = DispatchCoreConfig::for_script(&script);
+    authenticated_config.auth_policy = AuthPolicy {
+        methods: vec![AuthMethodConfig::ApiKey(crate::ApiKeyAuthConfig::single(
+            "restart-key",
+        ))],
+        mcp_allowlist: None,
+    };
+    let authenticated = Arc::new(A2aServer::new(A2aServerConfig::new(
+        DispatchCore::new(authenticated_config).expect("authenticated core"),
+    )));
+    for method in [
+        "tasks/pushNotificationConfig/get",
+        "tasks/pushNotificationConfig/set",
+        "tasks/pushNotificationConfig/list",
+        "tasks/pushNotificationConfig/delete",
+    ] {
+        let request = harn_vm::jsonrpc::request(
+            "unknown-owner",
+            method,
+            json!({"id":task_id,"pushNotificationConfigId":"push-persisted",
+                "pushNotificationConfig":{"id":"forged","url":"https://hooks.example"}}),
+        );
+        let processed = authenticated
+            .clone()
+            .process_rpc(request, auth_request_with_bearer("restart-key"))
+            .await;
+        let RpcOutcome::Json(refused) = processed.outcome else {
+            panic!("expected refusal");
+        };
+        assert_eq!(
+            refused["error"]["code"], A2A_TASK_NOT_FOUND,
+            "{method}: {refused}"
+        );
+    }
+    let processed = authenticated
+        .process_rpc(
+            harn_vm::jsonrpc::request(
+                "unknown-owners",
+                "tasks/pushNotificationConfig/list",
+                json!({}),
+            ),
+            auth_request_with_bearer("restart-key"),
+        )
+        .await;
+    let RpcOutcome::Json(hidden) = processed.outcome else {
+        panic!("expected list");
+    };
+    assert_eq!(
+        hidden["result"],
+        json!([]),
+        "missing ownership must not reveal persisted callbacks"
+    );
+
     let delete = harn_vm::jsonrpc::request(
         "push-delete",
         "tasks/pushNotificationConfig/delete",

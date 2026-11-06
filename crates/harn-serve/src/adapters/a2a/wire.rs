@@ -378,9 +378,6 @@ fn decode_part(part: &mut JsonValue) -> Result<(), &'static str> {
         return Err("Part must have exactly one content field");
     }
     let key = content[0];
-    if key == "data" && !object[key].is_object() {
-        return Err("Data content must be an object");
-    }
     if key != "data" && !object[key].is_string() {
         return Err("Text, raw and URL content must be strings");
     }

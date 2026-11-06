@@ -1,4 +1,5 @@
 use super::*;
+mod data;
 mod listing;
 
 fn upstream_schema(name: &str) -> jsonschema::Validator {
@@ -336,7 +337,6 @@ async fn v1_refuses_mismatched_messages_before_task_creation() {
         json!({"messageId":"a", "role":"ROLE_USER", "parts":[{"text":"hello", "data":{}}]}),
         json!({"messageId":"a", "role":"ROLE_USER", "parts":[{"raw":"not base64"}]}),
         json!({"messageId":"a", "role":"ROLE_USER", "parts":[{"kind":"text", "text":"hello"}]}),
-        json!({"messageId":"a", "role":"ROLE_USER", "parts":[{"data":1}]}),
         json!({"messageId":"a", "role":"ROLE_USER", "parts":[{"text":"hello"}], "contextId":1}),
     ] {
         let (_, result) = rpc(

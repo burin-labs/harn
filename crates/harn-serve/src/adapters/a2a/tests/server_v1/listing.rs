@@ -85,7 +85,17 @@ async fn list_filters_pages_and_projects_real_completed_tasks() {
 
 #[tokio::test]
 async fn authenticated_tasks_are_scoped_by_trusted_principal() {
-    let (_dir, server) = test_server_with(ECHO_SCRIPT, |config| {
+    const SOURCE: &str = r#"
+import { agent_progress } from "std/agent/progress"
+pub fn triage(harness: Harness, task: string) -> string {
+  if task == "hold" {
+    agent_progress(harness.agent, {message: "Owned task reached execution."})
+    while true { if is_cancelled() { return task } }
+  }
+  return task
+}
+"#;
+    let (_dir, server) = test_server_with(SOURCE, |config| {
         config.auth_policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(crate::ApiKeyAuthConfig {
                 keys: ["alice-key", "bob-key"]
@@ -96,7 +106,7 @@ async fn authenticated_tasks_are_scoped_by_trusted_principal() {
             mcp_allowlist: None,
         };
     });
-    let router = http_router(server, LOCAL_URL);
+    let router = http_router(server.clone(), LOCAL_URL);
     let mut alice_id = JsonValue::Null;
     for key in ["alice-key", "bob-key"] {
         let (_, sent) = rpc_as(
@@ -128,17 +138,139 @@ async fn authenticated_tasks_are_scoped_by_trusted_principal() {
     )
     .await;
     assert_eq!(allowed["result"]["id"], alice_id);
-    for method in ["GetTask", "CancelTask", "SubscribeToTask"] {
-        let (_, denied) = rpc_as(
-            router.clone(),
-            "1.0",
-            method,
-            json!({"id":alice_id}),
-            Some("bob-key"),
-        )
-        .await;
-        assert_eq!(denied["error"]["code"], A2A_TASK_NOT_FOUND, "{denied}");
+    let mut hold = send_params();
+    hold["message"]["parts"] = json!([{"text":"hold"}]);
+    hold["configuration"] = json!({"returnImmediately":true});
+    let (_, started) = rpc_as(
+        router.clone(),
+        "1.0",
+        "SendMessage",
+        hold,
+        Some("alice-key"),
+    )
+    .await;
+    let id = started["result"]["task"]["id"].as_str().unwrap();
+    let mut events = server.subscribe(id).unwrap();
+    let mut reached = false;
+    while let Some(event) = events.next().await {
+        if event
+            .pointer("/result/status/message/parts/0/text")
+            .and_then(JsonValue::as_str)
+            == Some("Owned task reached execution.")
+        {
+            reached = true;
+            break;
+        }
     }
+    assert!(reached, "the owned task must actually be running");
+    for (version, methods) in [
+        ("1.0", vec!["GetTask", "CancelTask", "SubscribeToTask"]),
+        (
+            "",
+            vec![
+                "tasks/get",
+                "tasks/cancel",
+                "tasks/resubscribe",
+                "a2a.GetTask",
+                "a2a.CancelTask",
+                "a2a.ResubscribeTask",
+            ],
+        ),
+    ] {
+        for method in methods {
+            let (_, denied) = rpc_as(
+                router.clone(),
+                version,
+                method,
+                json!({"id":id}),
+                Some("bob-key"),
+            )
+            .await;
+            assert_eq!(
+                denied["error"]["code"], A2A_TASK_NOT_FOUND,
+                "{method}: {denied}"
+            );
+            assert!(
+                !server.is_cancelled(id),
+                "a foreign caller must not cancel the running task"
+            );
+        }
+    }
+    for method in ["tasks/list", "a2a.ListTasks"] {
+        let (_, listed) = rpc_as(router.clone(), "", method, json!({}), Some("bob-key")).await;
+        assert_eq!(listed["result"]["tasks"].as_array().unwrap().len(), 1);
+        assert_ne!(listed["result"]["tasks"][0]["id"], alice_id);
+    }
+    for (method, uri) in [
+        (Method::GET, format!("/v1/tasks/{id}")),
+        (Method::POST, format!("/v1/tasks/{id}:cancel")),
+        (Method::POST, format!("/v1/tasks/{id}:subscribe")),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("authorization", "Bearer bob-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(!server.is_cancelled(id));
+    }
+    let config = json!({"id":"owned-hook", "url":"https://hooks.example/callback"});
+    let (_, created) = rpc_as(
+        router.clone(),
+        "",
+        "tasks/pushNotificationConfig/set",
+        json!({"id":alice_id,"pushNotificationConfig":config}),
+        Some("alice-key"),
+    )
+    .await;
+    assert_eq!(created["result"]["id"], "owned-hook", "{created}");
+    for method in [
+        "tasks/pushNotificationConfig/set",
+        "tasks/pushNotificationConfig/get",
+        "tasks/pushNotificationConfig/list",
+        "tasks/pushNotificationConfig/delete",
+    ] {
+        let (_, denied) = rpc_as(router.clone(), "", method,
+            json!({"id":alice_id,"pushNotificationConfigId":"owned-hook","pushNotificationConfig":config}), Some("bob-key")).await;
+        assert_eq!(
+            denied["error"]["code"], A2A_TASK_NOT_FOUND,
+            "{method}: {denied}"
+        );
+    }
+    let (_, own_config) = rpc_as(
+        router.clone(),
+        "",
+        "tasks/pushNotificationConfig/get",
+        json!({"id":alice_id,"pushNotificationConfigId":"owned-hook"}),
+        Some("alice-key"),
+    )
+    .await;
+    assert_eq!(own_config["result"]["id"], "owned-hook");
+    let (_, hidden) = rpc_as(
+        router.clone(),
+        "",
+        "tasks/pushNotificationConfig/list",
+        json!({}),
+        Some("bob-key"),
+    )
+    .await;
+    assert_eq!(hidden["result"], json!([]));
+    let (_, canceled) = rpc_as(
+        router.clone(),
+        "1.0",
+        "CancelTask",
+        json!({"id":id}),
+        Some("alice-key"),
+    )
+    .await;
+    assert_eq!(canceled["result"]["status"]["state"], "TASK_STATE_CANCELED");
     let (status, _) = rpc(router, "1.0", "ListTasks", json!({})).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
