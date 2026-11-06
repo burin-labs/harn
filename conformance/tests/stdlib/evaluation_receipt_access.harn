@@ -13,18 +13,22 @@ pipeline main(harness: Harness) {
   require outcome.kind == "unavailable", "the evaluator reached route refusal"
   const lookup = harness.llm.evaluation_receipt(outcome.receipt)
   match lookup.kind {
-    "retained" => {
+    "retained" -> {
       require lookup.receipt.reference == outcome.receipt, "lookup names the same occurrence"
       require lookup.receipt.physical_attempts == 0, "local refusal did not dispatch"
       require lookup.receipt.accounting_status == "not_dispatched", "accounting retains refusal"
       require lookup.receipt.cost_usd == nil, "missing settled cost stays unknown"
     }
-    "unavailable" => { throw "the returned receipt must be retained" }
+    "unavailable" -> {
+      throw "the returned receipt must be retained"
+    }
   }
   const invalid = harness.llm.evaluation_receipt("not-a-reference")
   require invalid.kind == "unavailable", "malformed references cannot produce receipts"
   match invalid.kind {
-    "unavailable" => { require invalid.reason == "malformed_reference", "invalid syntax is explicit" }
-    "retained" => { throw "an invalid reference cannot be retained" }
+    "unavailable" -> { require invalid.reason == "malformed_reference", "invalid syntax is explicit" }
+    "retained" -> {
+      throw "an invalid reference cannot be retained"
+    }
   }
 }
