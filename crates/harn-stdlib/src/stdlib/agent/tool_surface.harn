@@ -1,8 +1,5 @@
 // Tool-surface narrowing: decide which tools stay on the model's surface
-// after a turn, and project that decision onto a registry and a policy.
-//
-// The post-turn seam calls in with the turn's attempted tools; `std/agent/stance`
-// reuses the registry/policy projections directly.
+// at a user-message boundary, and project that decision onto a registry and a policy.
 import "std/agent/loop_result_status"
 import { agent_session_record_skill_event } from "std/agent/state"
 
@@ -137,14 +134,6 @@ pub fn __tool_surface_attempted_names(llm_result: dict, dispatch_results: list) 
     }
   }
   return names
-}
-
-fn __tool_surface_append_history(history: list, attempted: any, window_turns: int) {
-  let next = history + [attempted]
-  while len(next) > window_turns {
-    next = next[1:]
-  }
-  return next
 }
 
 fn __tool_surface_window_used(history: list) {
@@ -329,6 +318,19 @@ fn __tool_surface_keep_details(
   return details
 }
 
+fn __tool_surface_record_boundary(agent: HarnessAgent, session: dict, opts: dict) -> dict {
+  agent_session_record_skill_event(
+    agent,
+    session.session_id,
+    "tool_surface_boundary",
+    {
+      user_boundary: opts._tool_surface_user_boundary,
+      narrowed_tools: opts?._tool_surface_narrowed_tools,
+    },
+  )
+  return opts
+}
+
 fn __tool_surface_remaining(candidates: list, removed: string | list) {
   let remaining = []
   for name in candidates {
@@ -340,42 +342,81 @@ fn __tool_surface_remaining(candidates: list, removed: string | list) {
 }
 
 /**
- * Internal, shared with `std/agent/postturn`: fold this turn into the
- * narrowing window and return the resulting history and surface.
+ * Narrow once per actual user message using the prior recorded calls. Tool
+ * results and harness directives have distinct canonical event kinds or
+ * visibility, even when their provider transport role is `user`.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __tool_surface_narrowing_post_turn(
+pub fn agent_narrow_tool_surface_at_user_boundary(
   agent: HarnessAgent,
   session: dict,
-  llm_result: dict,
-  dispatch_results: list,
   opts: any,
 ) -> dict {
   const config = opts?.tool_surface_narrowing ?? {}
   if !(config?.enabled ?? true) {
-    return {history: [], narrowed_tools: nil, changed: false}
+    return opts
+  }
+  const snapshot = agent.snapshot(session.session_id)
+  let user_boundary = ""
+  for event in snapshot?.events ?? [] {
+    if event?.kind == "message" && event?.role == "user" && event?.visibility == "visible" {
+      user_boundary = event.id
+    }
+  }
+  if user_boundary == "" || user_boundary == opts?._tool_surface_user_boundary {
+    return opts
+  }
+  const boundary_opts = opts + {_tool_surface_user_boundary: user_boundary}
+  // Re-entering agent_loop for the same accepted user message reuses the
+  // recorded decision, including a deliberate full surface.
+  let retained = nil
+  for event in snapshot?.events ?? [] {
+    if event?.kind == "tool_surface_boundary"
+      && event?.metadata?.user_boundary == user_boundary {
+      retained = event.metadata
+    }
+  }
+  if retained != nil {
+    return boundary_opts + {_tool_surface_narrowed_tools: retained?.narrowed_tools}
   }
   const window_turns = config?.window_turns ?? 5
-  const attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
-  const history = __tool_surface_append_history(
-    opts?._tool_surface_narrowing_history ?? [],
-    attempted,
-    window_turns,
-  )
+  let history = []
+  for message in snapshot?.messages ?? [] {
+    if message?.role == "assistant" {
+      history.push(
+        __tool_surface_attempted_names(
+          {tool_calls: message?._harn?.tool_calls ?? message?.tool_calls ?? []},
+          [],
+        ),
+      )
+      if len(history) > window_turns {
+        history = history[1:]
+      }
+    }
+  }
   const candidate_entries = __tool_surface_current_entries(opts)
   const candidates = __tool_surface_current_names(opts)
   if len(candidates) == 0 || len(history) < window_turns {
-    return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
+    return __tool_surface_record_boundary(agent, session, boundary_opts)
   }
   const used = __tool_surface_window_used(history)
-  const hard_keep = config?.hard_keep ?? []
-  const removed_details = __tool_surface_removed(candidate_entries, used, config)
+  const escape_tool = if len(opts?._read_only_stance_tools ?? []) > 0 {
+    opts?.read_only_stance?.escape_tool ?? "request_write_access"
+  } else {
+    ""
+  }
+  const hard_keep = (config?.hard_keep ?? []) + [escape_tool]
+  const removed_details = __tool_surface_removed(
+    candidate_entries,
+    used,
+    config + {hard_keep: hard_keep},
+  )
   const removed = __tool_surface_removed_names(removed_details)
   if len(removed) == 0 {
-    return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
+    return __tool_surface_record_boundary(agent, session, boundary_opts)
   }
   const remaining = __tool_surface_remaining(candidates, removed)
   const kept_details = __tool_surface_keep_details(candidate_entries, removed, used, hard_keep)
@@ -400,16 +441,11 @@ pub fn __tool_surface_narrowing_post_turn(
       kept_tool_details: kept_details,
     },
   )
-  return {
-    history: history,
-    narrowed_tools: remaining,
-    changed: true,
-    removed_tools: removed,
-    remaining_tools: remaining,
-    removed_tool_details: removed_details,
-    kept_tool_details: kept_details,
-    reason: reason,
-  }
+  return __tool_surface_record_boundary(
+    agent,
+    session,
+    boundary_opts + {_tool_surface_narrowed_tools: remaining},
+  )
 }
 
 fn __tool_surface_keep_entry(entry: dict?, names: list<string>) -> bool {
@@ -524,7 +560,11 @@ pub fn agent_apply_tool_surface_narrowing(opts: dict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_reset_tool_surface_narrowing(opts: dict) {
-  return opts
-    + {_tool_surface_narrowed_tools: nil, _tool_surface_narrowing_history: []}
+pub fn agent_reset_tool_surface_narrowing(agent: HarnessAgent, session: dict, opts: dict) {
+  const reset = opts + {_tool_surface_narrowed_tools: nil}
+  return if opts?._tool_surface_user_boundary == nil {
+    reset
+  } else {
+    __tool_surface_record_boundary(agent, session, reset)
+  }
 }

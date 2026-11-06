@@ -18,7 +18,6 @@ import {
   __tool_surface_claim_authority,
   __tool_surface_claimable_names,
   __tool_surface_current_names,
-  __tool_surface_narrowing_post_turn,
   __tool_surface_tool_allowed,
 } from "std/agent/tool_surface"
 pub import { AgentPostTurnResolvedToolCall } from "std/agent/transcript"
@@ -899,16 +898,8 @@ fn __post_turn_verdict_result(
   return nil
 }
 
-fn __post_turn_with_narrowing(
-  outcome: dict,
-  narrowing: dict?,
-  completion_signal: AgentCompletionSignal,
-) -> dict {
-  const signalled = outcome + {completion_signal: completion_signal}
-  if narrowing == nil {
-    return signalled
-  }
-  return signalled + {narrowing: narrowing}
+fn __post_turn_with_signal(outcome: dict, completion_signal: AgentCompletionSignal) -> dict {
+  return outcome + {completion_signal: completion_signal}
 }
 
 /**
@@ -1111,11 +1102,6 @@ pub fn agent_compute_post_turn(
   }
   __host_fire_session_hook("post_turn", payload)
   agent_session_apply_reminder_post_turn(harness.agent, session.session_id, iteration)
-  const narrowing = if contains(successful_tool_names, "load_skill") {
-    {history: [], narrowed_tools: nil, changed: false}
-  } else {
-    __tool_surface_narrowing_post_turn(harness.agent, session, llm_result, dispatch_results, opts)
-  }
   // The host post-turn callback is consulted before ANY natural terminal is
   // decided. Deciding a terminal above this line does not merely ignore the
   // host verdict, it never asks for one, so `needs_verify` is unreachable for
@@ -1126,37 +1112,33 @@ pub fn agent_compute_post_turn(
   const rejected_tool_attempt = opts?._turn_tool_call_feedback ?? false
   if !has_tool_calls && !rejected_tool_attempt
     && completion_signal.declared {
-    return __post_turn_with_narrowing(
+    return __post_turn_with_signal(
       __completion_result(opts, payload, "sentinel", verdict),
-      narrowing,
       completion_signal,
     )
   }
   if __stop_after_successful_tools(opts, dispatch) {
-    return __post_turn_with_narrowing(
+    return __post_turn_with_signal(
       __completion_result(opts, payload, "natural", verdict) + {turn_end_judge_due: false},
-      narrowing,
       completion_signal,
     )
   }
   // Every claimant for a stalled toolless turn is arbitrated in one place, so
   // this shape must not be adjudicated anywhere below.
   if !has_tool_calls && (trim(text) != "" || rejected_tool_attempt) {
-    return __post_turn_with_narrowing(
+    return __post_turn_with_signal(
       __arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration),
-      narrowing,
       completion_signal,
     )
   }
   const verdict_result = __post_turn_verdict_result(harness.agent, session, opts, verdict)
   if verdict_result != nil {
-    return __post_turn_with_narrowing(verdict_result, narrowing, completion_signal)
+    return __post_turn_with_signal(verdict_result, completion_signal)
   }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
-    return __post_turn_with_narrowing(
+    return __post_turn_with_signal(
       __completion_result(opts, payload, "natural", verdict),
-      narrowing,
       completion_signal,
     )
   }
@@ -1171,9 +1153,8 @@ pub fn agent_compute_post_turn(
     text,
     iteration,
   )
-  return __post_turn_with_narrowing(
+  return __post_turn_with_signal(
     {kind: "continue", turn_end_judge_due: false, nudged_this_turn: confirmation_nudged},
-    narrowing,
     completion_signal,
   )
 }

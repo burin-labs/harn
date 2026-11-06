@@ -1,5 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { agent_session_inject_feedback } from "std/agent/state"
 import { with_llm_script } from "std/testing"
 
 fn events_of(events: any, kind: string) {
@@ -69,33 +70,50 @@ pipeline default(harness: Harness) {
       {tool_calls: [{id: "search-2", name: "search", arguments: {}}]},
       {tool_calls: [{id: "look-3", name: "look", arguments: {}}]},
       {tool_calls: [{id: "done-1", name: "done_sentinel", arguments: {}}]},
+      {tool_calls: [{id: "same-user-done", name: "done_sentinel", arguments: {}}]},
+      {tool_calls: [{id: "next-user-done", name: "done_sentinel", arguments: {}}]},
     ],
     { ->
       const session = "tool-surface-narrowing-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        tools: narrowing_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 6,
+        session_id: session,
+        stop_after_successful_tools: ["done_sentinel"],
+        tool_surface_narrowing: {enabled: true, window_turns: 5},
+      }
       const captured = agent_capture_events(
         harness.agent,
         session,
-        fn() { return agent_loop(
-          harness,
-          "Narrow unused tools.",
-          nil,
-          {
-            provider: "mock",
-            tools: narrowing_tools(),
-            tool_format: "native",
-            loop_until_done: true,
-            max_iterations: 6,
-            session_id: session,
-            stop_after_successful_tools: ["done_sentinel"],
-            tool_surface_narrowing: {enabled: true, window_turns: 5},
-          },
-        ) },
+        fn() {
+          agent_loop(harness, "Keep this user turn stable.", nil, opts)
+          const initial_calls = harness.llm.mock_calls()
+          require len(initial_calls) == 6, "the narrowing window must actually be reached"
+          for call in initial_calls {
+            require call.tools == initial_calls[0].tools,
+              "tool schemas cannot narrow within a user turn"
+            require call.system == initial_calls[0].system,
+              "narrowing cannot change the same-turn system prompt"
+          }
+          harness.agent.inject(
+            session,
+            {role: "user", content: "tool result", _harn: {kind: "tool_result"}},
+          )
+          agent_session_inject_feedback(harness.agent, session, "test", "harness feedback")
+          agent_loop(harness, "", nil, opts)
+          require has_tool(harness.llm.mock_calls()[6].tools, "read_docs"),
+            "re-entering the same user turn must reuse its full-surface decision"
+          return agent_loop(harness, "Now start another user turn.", nil, opts)
+        },
       )
       const narrow = events_of(captured.events, "skill_narrow")
       require len(narrow) >= 1, "skill_narrow should be emitted after the configured window"
       const first = narrow[0]
       const calls = harness.llm.mock_calls()
-      const sixth_tools = calls[5].tools
+      const sixth_tools = calls[7].tools
       harness.stdio.println(captured.result.status)
       harness.stdio.println(len(narrow) >= 1)
       harness.stdio.println(contains(first.removed_tools, "read_docs"))
@@ -125,12 +143,25 @@ pipeline default(harness: Harness) {
       {tool_calls: [{id: "rewiden-search-1", name: "search", arguments: {}}]},
       {tool_calls: [{id: "rewiden-look-2", name: "look", arguments: {}}]},
       {tool_calls: [{id: "rewiden-search-2", name: "search", arguments: {}}]},
-      {tool_calls: [{id: "rewiden-look-3", name: "look", arguments: {}}]},
+      {tool_calls: [{id: "rewiden-done", name: "done_sentinel", arguments: {}}]},
       {tool_calls: [{id: "load-runner", name: "load_skill", arguments: {name: "runner"}}]},
       {tool_calls: [{id: "run-1", name: "run", arguments: {}}]},
     ],
     { ->
       const rewiden_session = "tool-surface-rewiden-" + harness.random.uuid()
+      agent_loop(
+        harness,
+        "Record usage before the next user boundary.",
+        nil,
+        {
+          provider: "mock",
+          tools: narrowing_tools(),
+          tool_format: "native",
+          session_id: rewiden_session,
+          max_iterations: 5,
+          stop_after_successful_tools: ["done_sentinel"],
+        },
+      )
       const rewidened = agent_loop(
         harness,
         "Narrow unused tools, then load runner.",
@@ -156,6 +187,59 @@ pipeline default(harness: Harness) {
         "load_skill should be hard-kept after narrowing"
       require has_tool(rewiden_calls[6].tools, "run"),
         "explicit skill activation should reopen skill-scoped run"
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "stance-look", name: "look", arguments: {}}]},
+      {tool_calls: [{id: "stance-done", name: "done_sentinel", arguments: {}}]},
+      {
+        tool_calls: [
+          {id: "stance-escape", name: "ask_to_edit", arguments: {justification: "not authorized"}},
+        ],
+      },
+      {tool_calls: [{id: "stance-done-2", name: "done_sentinel", arguments: {}}]},
+    ],
+    { ->
+      const session = "narrowing-stance-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        tools: narrowing_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        session_id: session,
+        stop_after_successful_tools: ["done_sentinel"],
+        read_only_stance: {
+          enabled: true,
+          armed: true,
+          escape_tool: "ask_to_edit",
+          hard_keep: ["done_sentinel"],
+          consent_check: { _justification, _session ->
+            {verdict: "deny", consent: "none", reason: "no consent"}
+          },
+        },
+        tool_surface_narrowing: {enabled: true, window_turns: 2, mode: "aggressive"},
+      }
+      agent_loop(harness, "Observe only.", nil, opts)
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Still observe only.", nil, opts) },
+      )
+      const narrow = events_of(captured.events, "skill_narrow")
+      require len(narrow) == 1, "the aggressive narrowing control must actually fire"
+      require contains(narrow[0].removed_tools, "read_docs"),
+        "unused observational tools still narrow"
+      require !contains(narrow[0].removed_tools, "ask_to_edit"),
+        "configured stance escape is hard-kept"
+      require has_tool(harness.llm.mock_calls()[2].tools, "ask_to_edit"),
+        "the model can reach the unused escape tool"
+      require events_of(captured.events, "stance_transition").any(
+        { event -> event.phase == "write_access_denied" },
+      ),
+        "the real escape handler and consent check must fire"
     },
   )
 }

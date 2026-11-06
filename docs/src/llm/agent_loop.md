@@ -372,7 +372,7 @@ Same as `harness.llm.call`, plus additional options:
 | `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls inside one independent effect phase from a planner turn. Results are recorded in emitted order even when calls complete out of order |
 | `intra_turn_resource_fail_fast` | bool | `true` | When an annotated mutating tool call fails, skip later sibling calls in the same assistant response that target the same declared path resource. Set `false` only for legacy dispatch-all behavior |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
-| `tool_surface_narrowing` | bool \| `ToolSurfaceNarrowingOptions` | `{enabled: true, window_turns: 5, mode: "safe"}` | Between turns, remove model-visible tools that were unused across the rolling window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; record configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
+| `tool_surface_narrowing` | bool \| `ToolSurfaceNarrowingOptions` | `{enabled: true, window_turns: 5, mode: "safe"}` | At a new user message, remove model-visible tools unused across the prior recorded-call window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; record configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
 | `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive task-list entries as canonical `plan` updates and message-only reports as Harn `progress` narration |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
 | `daemon` | bool | `false` | Idle instead of terminating after text-only turns |
@@ -1419,10 +1419,16 @@ The loop emits one `skill_matched` event per match pass (including
 zero-candidate passes so replayers see the boundary), one
 `skill_activated` per activated skill, and one `skill_scope_tools`
 event per activation whose `allowed_tools` narrowed the surface. When
-`tool_surface_narrowing` removes unused tools between turns, the loop
+`tool_surface_narrowing` removes unused tools at a new user message, the loop
 also emits `skill_narrow` with `removed_tools`, `remaining_tools`, the
 narrowing reason, policy details, removed-tool details, and kept-tool
 details.
+
+The surface stays fixed across model calls for the same user message, including
+loop re-entry. Tool results and harness feedback do not open a new narrowing
+boundary. The next user message uses the prior recorded-call window, and an
+armed read-only stance always keeps its configured escape tool, including in
+aggressive mode. Explicit skill activation can still reopen its tools.
 
 The default narrowing policy is safe by class: only tools classified as
 `read_only` are prunable. Tools classified as `mutating`, `approval`,
