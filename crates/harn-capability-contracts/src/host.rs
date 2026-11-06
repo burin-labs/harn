@@ -51,8 +51,8 @@ capability_method!(
     net_child_network_allow,
     "harness.net.child_network_allow",
     ["state.mutate@const=egress-policy"],
-    "__cap_net_child_network_allow(host: string) -> bool",
-    "Admit one public DNS name through the server's child egress proxy for every session until it stops; a server holds one user and one trust domain."
+    "__cap_net_child_network_allow(host: string, port?: int) -> bool",
+    "Admit one public DNS name on the requested port, or ports 80 and 443, through the server's child egress proxy until it stops."
 );
 capability_method!(
     net_post,

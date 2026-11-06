@@ -181,14 +181,17 @@ An ACP server takes its children's hosts from `AcpSandboxConfig::child_network_a
 instead of the live policy: the proxy admits only the listed hosts, and Harn's own
 calls keep their separate policy. A pipeline reads what the proxy refused with
 `harness.net.child_network_refusals()`, which returns each destination once, and
-adds a host for the life of the server with `harness.net.child_network_allow(host)`.
+adds a host for the life of the server with `harness.net.child_network_allow(host, port?)`.
+An omitted port grants only 80 and 443; an explicit port must be between 1 and 65535.
 Refusals are per server, so commands running in parallel cannot be told apart, and
 an approval applies to every session on that server. Share a server this way only
 when it serves one user and one trust domain.
 
 An added host must be one DNS name, marked `can_approve` on its refusal. Addresses,
 single-label names, and all-digit labels are refused, and an added name that resolves
-to a loopback, private, or link-local address does not connect. A host listed at
+to a loopback, private, reserved, or local interface address does not connect.
+The proxy refreshes local interface addresses for each connection and refuses an
+approved host when it cannot inspect those addresses. A host listed at
 start keeps its private reach, so a list can name an internal registry.
 
 The managed boundary is available on macOS, and on Linux when the policy names

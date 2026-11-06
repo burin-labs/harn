@@ -1,0 +1,30 @@
+pipeline test_child_network_approval_ports(harness: Harness) {
+  assert_eq(harness.net.child_network_allow("registry.example"), false)
+  assert_eq(harness.net.child_network_allow("registry.example", nil), false)
+  for port in [1, 443, 65535] {
+    assert_eq(harness.net.child_network_allow("registry.example", port), false)
+  }
+  for port in [-1, 0, 65536] {
+    const refusal = try {
+      harness.net.child_network_allow("registry.example", port)
+      ""
+    } catch (error) {
+      to_string(error)
+    }
+    assert(
+      refusal.contains("child_network_allow: port must be an integer from 1 to 65535"),
+      "invalid port ${port} must reach range validation: ${refusal}",
+    )
+  }
+  for raw in ["1.5", "\"443\"", "true"] {
+    const port = json_parse(raw)
+    const refused = try {
+      harness.net.child_network_allow("registry.example", port)
+      false
+    } catch {
+      true
+    }
+    assert(refused, "noninteger port ${raw} must refuse")
+  }
+  harness.stdio.println("child network approval ports verified")
+}

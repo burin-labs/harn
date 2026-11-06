@@ -1,9 +1,11 @@
 import { filter_nil } from "std/collections"
 pub import {
   connector_http_header,
+  connector_http_is_disallowed_host,
   connector_http_json,
   connector_http_rate_limit,
   connector_http_request,
+  connector_http_validate_url_host,
 } from "std/connectors/http"
 import { JsonParseFailure, merge } from "std/json"
 

@@ -1,12 +1,7 @@
 //! SSRF / egress IP classifier and a connect-time DNS guard.
 //!
-//! The [`is_disallowed_ip`] classifier is ported verbatim from
-//! a cloud gateway's `url_validation` so the runtime and the
-//! cloud control plane agree on exactly which addresses are off-limits
-//! (loopback, RFC 1918, link-local incl. the `169.254.169.254` cloud-metadata
-//! endpoint, broadcast, unspecified, multicast, documentation, CGNAT
-//! `100.64/10`, benchmark `198.18/15`; and the IPv6 analogues plus IPv4-mapped
-//! addresses re-applying the v4 rules).
+//! [`is_disallowed_ip`] owns runtime address classification for HTTP and child
+//! egress. IPv4-mapped addresses use the same IPv4 rules.
 //!
 //! [`GuardedResolver`] implements [`reqwest::dns::Resolve`] and filters the
 //! resolved [`SocketAddr`]s through the classifier *at connect time*. Because
@@ -36,6 +31,27 @@ pub fn is_disallowed_ip(ip: IpAddr, allow_loopback: bool) -> bool {
     match ip {
         IpAddr::V4(v4) => is_disallowed_ipv4(v4, allow_loopback),
         IpAddr::V6(v6) => is_disallowed_ipv6(v6, allow_loopback),
+    }
+}
+
+/// Classify a literal IP or hostname without resolving DNS. Connections still
+/// require the connect-time resolver guard to reject private DNS answers.
+pub fn is_disallowed_host(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_disallowed_ip(ip, false);
+    }
+    match url::Host::parse(host) {
+        Ok(url::Host::Ipv4(ip)) => is_disallowed_ip(IpAddr::V4(ip), false),
+        Ok(url::Host::Ipv6(ip)) => is_disallowed_ip(IpAddr::V6(ip), false),
+        Ok(url::Host::Domain(host)) => {
+            let host = host.trim_end_matches('.');
+            host.is_empty()
+                || host == "localhost"
+                || [".localhost", ".local", ".internal"]
+                    .iter()
+                    .any(|suffix| host.ends_with(suffix))
+        }
+        Err(_) => true,
     }
 }
 
@@ -70,12 +86,12 @@ fn is_disallowed_ipv4(ip: Ipv4Addr, allow_loopback: bool) -> bool {
     if ip.is_unspecified() || ip.is_multicast() || ip.is_documentation() {
         return true;
     }
-    // Cloud-metadata endpoint (AWS / GCP / Azure all front this IP).
-    if ip.octets() == [169, 254, 169, 254] {
+    let [a, b, _, _] = ip.octets();
+    // "This network" (RFC 1122) covers the entire 0/8, not just 0.0.0.0.
+    if a == 0 {
         return true;
     }
     // Carrier-grade NAT (RFC 6598).
-    let [a, b, _, _] = ip.octets();
     if a == 100 && (64..=127).contains(&b) {
         return true;
     }
@@ -108,6 +124,10 @@ fn is_disallowed_ipv6(ip: Ipv6Addr, allow_loopback: bool) -> bool {
         return true;
     }
     let segments = ip.segments();
+    // RFC 6052 and RFC 8215 translation prefixes can target refused IPv4 ranges.
+    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] || segments[..3] == [0x64, 0xff9b, 1] {
+        return true;
+    }
     // Link-local fe80::/10.
     if (segments[0] & 0xffc0) == 0xfe80 {
         return true;
@@ -390,6 +410,32 @@ mod tests {
         assert!(!is_disallowed_ip(v4("192.0.1.1"), false));
         assert!(!is_disallowed_ip(v4("192.88.98.1"), false));
         assert!(!is_disallowed_ip(v4("192.88.100.1"), false));
+    }
+
+    #[test]
+    fn ipv4_blocks_entire_this_network_range() {
+        for ip in ["0.1.2.3", "0.255.255.255"] {
+            for allow_loopback in [false, true] {
+                assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
+            }
+        }
+        assert!(!is_disallowed_ip(v4("1.0.0.0"), false));
+    }
+
+    #[test]
+    fn ipv6_blocks_well_known_nat64_range() {
+        for ip in [
+            "64:ff9b::7f00:1",
+            "64:ff9b::808:808",
+            "64:ff9b:1::",
+            "64:ff9b:1::7f00:1",
+            "64:ff9b:1:ffff:ffff:ffff:ffff:ffff",
+        ] {
+            for allow_loopback in [false, true] {
+                assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
+            }
+        }
+        assert!(!is_disallowed_ip(v4("2001:4860:4860::8888"), false));
     }
 
     #[test]

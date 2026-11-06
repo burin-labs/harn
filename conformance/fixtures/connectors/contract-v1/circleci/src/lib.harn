@@ -1,3 +1,5 @@
+import { connector_http_header, connector_http_validate_url_host } from "std/connectors/http"
+
 const CIRCLECI_PROVIDER_ID = "circleci"
 
 const CIRCLECI_STATE_KEY = "harn-circleci-connector.state"
@@ -85,7 +87,7 @@ pub fn activate(harness: Harness, bindings: list? = []) {
   let seen_paths = {}
   for binding in bindings ?? [] {
     const binding_id = binding?.binding_id ?? binding?.id
-      ?? ("binding-" + to_string(len(by_id.keys())))
+      ?? "binding-" + to_string(len(by_id.keys()))
     const path = binding?.path ?? binding?.match?.path
     if path != nil && path != "" {
       if seen_paths.get(path) {
@@ -368,18 +370,8 @@ fn __reject_err(err: dict) {
   return __reject(status, code, message)
 }
 
-fn __header(headers: dict?, name: any) {
-  const wanted = lowercase(name)
-  for entry in (headers ?? {}).entries() {
-    if lowercase(trim(to_string(entry.key))) == wanted {
-      return trim(to_string(entry.value))
-    }
-  }
-  return nil
-}
-
 fn __event_type_from_header(headers: dict?) {
-  const raw_header = __header(headers, "circleci-event-type")
+  const raw_header = connector_http_header(headers, "circleci-event-type")
   if raw_header == nil || raw_header == "" {
     return nil
   }
@@ -451,7 +443,7 @@ fn __verify_circleci_signature(
       "circleci signing_secret is required; configure circleci/webhook-secret to verify inbound webhooks",
     )
   }
-  const header = __header(headers, "circleci-signature")
+  const header = connector_http_header(headers, "circleci-signature")
   if header == nil || header == "" {
     return __err("missing_signature", "missing circleci-signature header")
   }
@@ -537,7 +529,7 @@ fn __build_event(
   }
   return {
     dedupe_key: dedupe_key,
-    headers: {"circleci-event-type": __header(headers, "circleci-event-type")},
+    headers: {"circleci-event-type": connector_http_header(headers, "circleci-event-type")},
     kind: event_type,
     occurred_at: __occurred_at(event_type, payload),
     payload: normalized_payload,
@@ -703,100 +695,11 @@ fn __circleci_api_url(api_base_url: any, path: any) {
 
 @complexity(allow)
 fn __validate_api_base_url(api_base_url: any) {
-  if api_base_url == nil || trim(to_string(api_base_url)) == "" {
-    return __err("invalid_api_base_url", "api_base_url is required")
-  }
-  const url = trim(to_string(api_base_url))
-  if !starts_with(lowercase(url), "https://") {
-    return __err("invalid_api_base_url", "api_base_url must use https:// scheme")
-  }
-  const after_scheme = url[8:len(url)]
-  const slash_idx = __index_of(after_scheme, "/")
-  const host_port = if slash_idx >= 0 {
-    after_scheme[0:slash_idx]
-  } else {
-    after_scheme
-  }
-  const host = __strip_port(host_port)
-  if host == "" {
-    return __err("invalid_api_base_url", "api_base_url is missing a host")
-  }
-  const host_lc = lowercase(host)
-  if __is_disallowed_host(host_lc) {
-    return __err(
-      "invalid_api_base_url",
-      "api_base_url host `" + host
-        + "` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
-    )
+  const checked = connector_http_validate_url_host(api_base_url, "api_base_url")
+  if is_err(checked) {
+    return __err("invalid_api_base_url", unwrap_err(checked))
   }
   return Ok(true)
-}
-
-fn __strip_port(host_port: any) {
-  if starts_with(host_port, "[") {
-    const close = __index_of(host_port, "]")
-    if close >= 0 {
-      return host_port[1:close]
-    }
-    return host_port
-  }
-  const colon = __index_of(host_port, ":")
-  if colon >= 0 {
-    return host_port[0:colon]
-  }
-  return host_port
-}
-
-fn __index_of(text: any, needle: any) {
-  const n = len(text)
-  const m = len(needle)
-  if m == 0 {
-    return 0
-  }
-  let i = 0
-  while i + m <= n {
-    if text[i:i + m] == needle {
-      return i
-    }
-    i = i + 1
-  }
-  return -1
-}
-
-@complexity(allow)
-fn __is_disallowed_host(host_lc: any) {
-  if host_lc == "localhost" {
-    return true
-  }
-  if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
-    || ends_with(host_lc, ".internal") {
-    return true
-  }
-  if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
-    return true
-  }
-  if starts_with(host_lc, "127.") || starts_with(host_lc, "10.")
-    || starts_with(host_lc, "169.254.")
-    || starts_with(host_lc, "192.168.") {
-    return true
-  }
-  if starts_with(host_lc, "172.") {
-    const rest = host_lc[4:len(host_lc)]
-    const dot = __index_of(rest, ".")
-    if dot > 0 {
-      const octet_str = rest[0:dot]
-      const parsed = try {
-        to_int(octet_str)
-      }
-      if !is_err(parsed) {
-        const octet = unwrap(parsed)
-        if octet >= 16 && octet <= 31 {
-          return true
-        }
-      }
-    }
-  }
-  return false
 }
 
 fn __pagination_query(args: dict?) {
@@ -874,11 +777,11 @@ fn __circleci_json(
 
 @complexity(allow)
 fn __maybe_wait_for_rate_limit(clock: HarnessClock, response: dict) {
-  const remaining = __header(response.headers ?? {}, "x-ratelimit-remaining")
+  const remaining = connector_http_header(response.headers ?? {}, "x-ratelimit-remaining")
   if remaining == nil || trim(to_string(remaining)) != "0" {
     return Ok(false)
   }
-  const retry_after = __header(response.headers ?? {}, "retry-after")
+  const retry_after = connector_http_header(response.headers ?? {}, "retry-after")
   if retry_after == nil || trim(to_string(retry_after)) == "" {
     return Ok(true)
   }

@@ -24,10 +24,10 @@ fn embedded_agent_modules_load_under_the_native_runtime_without_compiling() {
                 vm.load_module_exports_from_source(
                     PathBuf::from("<test>/embedded-agent.harn"),
                     "import { agent_loop } from \"std/agent/loop\"\n\
-                     import * as cancel from \"std/cli/localization/models/batch_cancel/part_2\"\n\
-                     import * as status from \"std/cli/localization/models/batch_status/part_2\"\n\
-                     assert_eq(cancel.message_10(\"de\", []), \"Fehler\")\n\
-                     assert_eq(status.message_10(\"de\", []), \"Fehler\")\n\
+                     import * as cancel from \"std/cli/localization/models/batch_cancel\"\n\
+                     import * as status from \"std/cli/localization/models/batch_status\"\n\
+                     assert_eq(cancel.cli_message(\"de\", \"errors\", []), \"Fehler\")\n\
+                     assert_eq(status.cli_message(\"de\", \"errors\", []), \"Fehler\")\n\
                      pub const run = agent_loop\n",
                 )
                 .await
