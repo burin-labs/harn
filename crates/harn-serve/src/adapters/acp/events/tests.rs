@@ -2,7 +2,7 @@ use super::super::schema::{
     ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
     HARN_SESSION_UPDATE_EXTENSIONS,
 };
-use super::test_support::update_harn_meta;
+use super::test_support::{self, update_harn_meta};
 use super::{AcpAgentEventSink, AcpOutput};
 use harn_vm::agent_events::{
     AgentEvent, AgentEventSink, AttachmentFlavor, AttachmentRendering, FsWatchEvent,
