@@ -2,21 +2,7 @@ use super::*;
 use crate::NativeVmExt;
 use harn_parser::builtin_signatures::TyExt;
 
-const EVALUATE: &str = r#"
-fn evaluate(llm: HarnessLlm, model: string) -> {kind: string, receipt: string} {
-  const outcome = llm.evaluate_request("receipt.public", {text: "observed"},
-    {safe: {kind: "boolean", instructions: "Safe?"}},
-    {backend: "structured_llm", provider: "mock", model: model, threshold: 0.5,
-      evaluation_cost_limit: 1.0})
-  return {kind: outcome.kind, receipt: outcome.receipt}
-}
-"#;
-const LOOKUP: &str = r#"
-pipeline main(harness: Harness) {
-  const outcome = evaluate(harness.llm, "fixture")
-  return {outcome: outcome, lookup: harness.llm.evaluation_receipt(outcome.receipt)}
-}
-"#;
+const PROGRAM: &str = include_str!("fixtures/receipt_access.harn");
 
 #[test]
 fn public_receipt_access_preserves_accounting_transport_and_execution_isolation() {
@@ -80,7 +66,7 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
         crate::test_support::current_thread_runtime().block_on(harn_clock::test_support::with_local_tasks(async {
             let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
-            let value = vm.execute(&crate::compile_source(&format!("{EVALUATE}{LOOKUP}")).unwrap()).await.unwrap();
+            let value = vm.execute(&crate::compile_source_named(PROGRAM, "lookup").unwrap()).await.unwrap();
             let value = crate::llm::helpers::vm_value_to_json(&value);
             assert_eq!(value["outcome"]["kind"], "answered");
             assert_eq!(value["lookup"]["kind"], "retained");
@@ -121,14 +107,10 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
 
 #[test]
 fn public_receipt_access_distinguishes_refusal_absence_and_bounded_retention() {
-    let source = format!(
-        "{EVALUATE}{}",
-        LOOKUP.replace("\"fixture\"", "\"unconfigured-model\"")
-    );
     crate::test_support::current_thread_runtime().block_on(harn_clock::test_support::with_local_tasks(async {
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
-        let value = vm.execute(&crate::compile_source(&source).unwrap()).await.unwrap();
+        let value = vm.execute(&crate::compile_source_named(PROGRAM, "refusal").unwrap()).await.unwrap();
         let value = crate::llm::helpers::vm_value_to_json(&value);
         assert_eq!(value["outcome"]["kind"], "unavailable");
         assert_eq!(value["lookup"]["kind"], "retained");
@@ -141,18 +123,9 @@ fn public_receipt_access_distinguishes_refusal_absence_and_bounded_retention() {
             let value = child.execute(&crate::compile_source(&source).unwrap()).await.unwrap();
             assert_eq!(crate::llm::helpers::vm_value_to_json(&value)["reason"], reason);
         }
-        let source = format!(r#"{EVALUATE}
-pipeline main(harness: Harness) {{
-  let reference = ""
-  for _ in range(0, 1025) {{
-    reference = evaluate(harness.llm, "unconfigured-model").receipt
-  }}
-  return {{lookup: harness.llm.evaluation_receipt(reference)}}
-}}
-"#);
         let mut retention_vm = crate::new_vm();
         crate::register_vm_stdlib(&mut retention_vm);
-        let value = retention_vm.execute(&crate::compile_source(&source).unwrap()).await.unwrap();
+        let value = retention_vm.execute(&crate::compile_source_named(PROGRAM, "retention").unwrap()).await.unwrap();
         assert_eq!(crate::llm::helpers::vm_value_to_json(&value)["lookup"]["reason"], "not_retained");
         let evidence = retention_vm.execution_evidence(None, Vec::new());
         assert_eq!(evidence.evaluation_receipts.unwrap().len(), 1024);
