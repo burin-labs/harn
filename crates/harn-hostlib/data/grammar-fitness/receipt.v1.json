@@ -253,11 +253,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:24e0ab4505990bfe30051761d40a7bf4033ce5a81c9eda9e20e987a5cdc84826",
-        "checksum": "24e0ab4505990bfe30051761d40a7bf4033ce5a81c9eda9e20e987a5cdc84826",
+        "artifact_digest": "sha256:c554730d29306d9c7cdd26912638d2401378c26961e12d161a071df43f49b81b",
+        "checksum": "c554730d29306d9c7cdd26912638d2401378c26961e12d161a071df43f49b81b",
         "name": "tree-sitter-scala",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.26.2"
+        "version": "0.26.3"
       }
     },
     {
@@ -477,14 +477,14 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882",
-        "checksum": "2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882",
+        "artifact_digest": "sha256:8ed661bfe3c264961425f77cd89ad2998bf5d629e71ce8bab1e5d7e940d6246e",
+        "checksum": "8ed661bfe3c264961425f77cd89ad2998bf5d629e71ce8bab1e5d7e940d6246e",
         "name": "tree-sitter-md",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.5.3"
+        "version": "0.5.4"
       }
     }
   ],
   "schema_version": 1,
-  "tree_sitter_runtime": "0.27.0"
+  "tree_sitter_runtime": "0.27.1"
 }
