@@ -8,6 +8,14 @@ impl harn_session_store::SessionChangeObserver for NoopSessionObserver {
     fn session_updated(&self, _meta: &harn_session_store::SessionMeta) {}
 }
 
+struct SpendObserver(std::sync::mpsc::Sender<u64>);
+
+impl harn_session_store::SessionChangeObserver for SpendObserver {
+    fn session_updated(&self, meta: &harn_session_store::SessionMeta) {
+        let _ = self.0.send(meta.usage_cost_usd_micros);
+    }
+}
+
 #[tokio::test]
 async fn canonical_maintenance_open_preserves_hooks_and_watch_ownership() {
     let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
@@ -69,5 +77,52 @@ async fn closed_checkpoint_inspection_does_not_start_a_watcher() {
         crate::stdlib::session_wal_watch::watcher_starts_for(&database),
         after_control,
         "the transient checkpoint read must not start and synchronously join a watcher"
+    );
+}
+
+#[tokio::test]
+async fn transient_spend_operations_notify_without_starting_watchers() {
+    use harn_session_store::{CreateSession, SessionStore};
+
+    let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+    let root = tempfile::tempdir().expect("store root");
+    let store = open_canonical_store(root.path()).expect("open canonical store");
+    store
+        .create(CreateSession {
+            id: Some("spend-stop".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("create session");
+    let database = store.path().to_path_buf();
+    drop(store);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _subscription = crate::subscribe_session_changes(Arc::new(SpendObserver(tx)));
+    let store = open_canonical_store(root.path()).expect("control store");
+    let before = crate::stdlib::session_wal_watch::watcher_starts_for(&database);
+    assert!(
+        before > 0,
+        "a normal open starts a watcher for this database"
+    );
+    drop(store);
+
+    crate::agent_session_spend::record_session_llm_spend_usd(root.path(), "spend-stop", 1.25)
+        .await
+        .expect("record spend");
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(3))
+            .expect("committed update reaches the observer"),
+        1_250_000
+    );
+    assert_eq!(
+        crate::agent_session_spend::load_session_llm_spend_usd(root.path(), "spend-stop")
+            .await
+            .expect("load spend"),
+        1.25
+    );
+    assert_eq!(
+        crate::stdlib::session_wal_watch::watcher_starts_for(&database),
+        before,
+        "transient spend operations do not start or join watchers"
     );
 }
