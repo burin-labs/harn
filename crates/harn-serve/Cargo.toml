@@ -94,7 +94,7 @@ harn-flock = { path = "../harn-flock", version = "=0.10.189" }
 rstest.workspace = true
 zeroize = "1"
 harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.189" }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite.workspace = true
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.189", features = ["test-support"] }
