@@ -78,7 +78,7 @@ categories = ["compilers", "command-line-utilities"]
 jsonschema = { version = "0.60.2", default-features = false }
 rstest = { version = "0.28", default-features = false }
 # Native SQLite has one links owner across Harn and embedding hosts.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # One HTTP client and one TLS crypto provider. reqwest's `rustls` feature and
 # rustls's default features both select aws-lc-rs, the provider the runtime
 # installs process-wide. HTTPS and WSS clients verify servers against the OS
