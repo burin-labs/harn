@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_vm::NativeVmState;
+use crate::NativeVmExt;
 use harn_parser::builtin_signatures::TyExt;
 
 const EVALUATE: &str = r#"
@@ -27,11 +27,12 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
     )
     .unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
-    for (tokens, partial) in [
-        (Some(100), false),
-        (Some(0), false),
-        (None, false),
-        (Some(100), true),
+    for (tokens, partial, unknown_usage) in [
+        (Some(100), false, false),
+        (Some(0), false, false),
+        (None, false, false),
+        (Some(100), true, true),
+        (Some(100), true, false),
     ] {
         let mut response = answering(0.95);
         response.input_tokens = tokens;
@@ -62,7 +63,15 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
                     "fixture",
                     &ProviderUsageReceipt::new(Some(100), Some(0), Some(0.25), false),
                 ),
-                LlmUsage::unknown_attempts(1),
+                if unknown_usage {
+                    LlmUsage::unknown_attempts(1)
+                } else {
+                    LlmUsage::from_provider_receipt(
+                        "mock",
+                        "fixture",
+                        &ProviderUsageReceipt::new(Some(100), Some(0), None, false),
+                    )
+                },
             ])));
         }
         let backend = Arc::new(MockDecisionBackend::scripted(vec![Ok(response)]));
@@ -81,7 +90,8 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
             assert!(!validator.is_valid(&invalid), "the public contract must preserve the attempt count's type");
             let receipt = &value["lookup"]["receipt"];
             assert_eq!(receipt["reference"], value["outcome"]["receipt"]);
-            assert_eq!(receipt["input_tokens"], serde_json::json!(tokens));
+            let expected_input = if partial && !unknown_usage { Some(200) } else { tokens };
+            assert_eq!(receipt["input_tokens"], serde_json::json!(expected_input));
             assert_eq!(receipt["physical_attempts"], 1);
             assert_eq!(receipt["accounting_status"], if tokens.is_some() && !partial {"settled"} else {"usage_unknown"});
             assert_eq!(receipt["cost_usd"].is_null(), tokens.is_none() || partial);
@@ -93,7 +103,7 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
                 assert_eq!(receipt["usage_certainty"]["known_cost_usd"], 0.25);
                 assert_eq!(receipt["usage_certainty"]["provider_call_count"], 2);
                 assert_eq!(receipt["usage_certainty"]["unpriced_calls"], 1);
-                assert_eq!(receipt["usage_certainty"]["usage_unknown_calls"], 1);
+                assert_eq!(receipt["usage_certainty"]["usage_unknown_calls"], i64::from(unknown_usage));
                 assert!(receipt["usage_certainty"]["projected_cost_usd"].is_null());
             } else { assert!(receipt["usage_certainty"].is_null()); }
             let reference = serde_json::to_string(&receipt["reference"]).unwrap();
@@ -140,10 +150,12 @@ pipeline main(harness: Harness) {{
   return {{lookup: harness.llm.evaluation_receipt(reference)}}
 }}
 "#);
-        let value = vm.execute(&crate::compile_source(&source).unwrap()).await.unwrap();
+        let mut retention_vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut retention_vm);
+        let value = retention_vm.execute(&crate::compile_source(&source).unwrap()).await.unwrap();
         assert_eq!(crate::llm::helpers::vm_value_to_json(&value)["lookup"]["reason"], "not_retained");
-        let (retained, dropped) = vm.native().evaluation.journal.lock().snapshot();
-        assert_eq!(retained.len(), 1024);
-        assert_eq!(dropped, 1);
+        let evidence = retention_vm.execution_evidence(None, Vec::new());
+        assert_eq!(evidence.evaluation_receipts.unwrap().len(), 1024);
+        assert_eq!(evidence.gaps.iter().filter(|gap| gap.component == "evaluation_receipts" && gap.code == "receipt_limit_exceeded").count(), 1);
     }));
 }

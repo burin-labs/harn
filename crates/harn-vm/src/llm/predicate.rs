@@ -72,29 +72,21 @@ async fn evaluation_receipt_builtin(
     ctx: AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    use crate::native_vm::NativeVmState;
+    use crate::NativeBuiltinCtxExt;
     let reference = args
         .first()
         .map(|value| value.as_str_cow().into_owned())
         .unwrap_or_default();
-    Ok(ctx.with_child_vm(|vm| {
-        match vm
-            .native()
-            .evaluation
-            .journal
-            .lock()
-            .lookup(&reference, vm.execution_id().as_ref())
-        {
-            Ok(receipt) => VmValue::dict(vec![
-                ("kind", VmValue::string("retained")),
-                ("receipt", receipt.accounting_value()),
-            ]),
-            Err(reason) => VmValue::dict(vec![
-                ("kind", VmValue::string("unavailable")),
-                ("reason", VmValue::string(reason)),
-            ]),
-        }
-    }))
+    Ok(match ctx.evaluation_receipt(&reference) {
+        Ok(receipt) => VmValue::dict(vec![
+            ("kind", VmValue::string("retained")),
+            ("receipt", receipt),
+        ]),
+        Err(reason) => VmValue::dict(vec![
+            ("kind", VmValue::string("unavailable")),
+            ("reason", VmValue::string(reason)),
+        ]),
+    })
 }
 
 /// What the evaluator thinks a state costs, before sending it.
