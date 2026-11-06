@@ -891,7 +891,13 @@ pub(super) fn rest_response(processed: ProcessedRpc) -> Response {
     let auth_challenge = processed.auth_challenge.clone();
     let response = match processed.outcome {
         RpcOutcome::Json(response) if response.get("error").is_some() => {
-            let status = processed.status.unwrap_or(StatusCode::BAD_REQUEST);
+            let status = processed.status.unwrap_or_else(|| {
+                if response["error"]["code"].as_i64() == Some(A2A_TASK_NOT_FOUND) {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::BAD_REQUEST
+                }
+            });
             response_with_deprecation(
                 (status, Json(response)).into_response(),
                 processed.deprecation,

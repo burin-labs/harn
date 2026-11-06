@@ -1,0 +1,13 @@
+import { agent_progress } from "std/agent/progress"
+
+pub fn triage(harness: Harness, task: string) -> string {
+  if task == "hold" {
+    agent_progress(harness.agent, {message: "Owned task reached execution."})
+    while true {
+      if is_cancelled() {
+        return task
+      }
+    }
+  }
+  return task
+}

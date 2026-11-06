@@ -515,17 +515,7 @@ async fn legacy_discovery_and_stream_match_the_upstream_contract() {
 
 #[tokio::test]
 async fn both_versions_cancel_after_real_dispatch_progress() {
-    const SOURCE: &str = r#"
-import { agent_progress } from "std/agent/progress"
-pub fn triage(harness: Harness, task: string) -> string {
-  agent_progress(harness.agent, {message: "Ready for HTTP cancellation."})
-  while true {
-    if is_cancelled() {
-      return task
-    }
-  }
-}
-"#;
+    const SOURCE: &str = include_str!("fixtures/cancel_after_progress.harn");
     for version in ["0.3", "1.0"] {
         let (_dir, server) = test_server(SOURCE);
         let router = http_router(server.clone(), LOCAL_URL);

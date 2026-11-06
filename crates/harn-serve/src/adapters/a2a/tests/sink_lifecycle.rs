@@ -26,14 +26,7 @@ fn test_task_params(text: &str) -> JsonValue {
 
 #[tokio::test]
 async fn cancellation_before_dispatch_prevents_execution_and_late_publication() {
-    let (dir, server) = test_server(
-        r#"
-pub fn triage(harness: Harness, task: string) -> string {
-  harness.fs.write_text(task, "actual execution")
-  return task
-}
-"#,
-    );
+    let (dir, server) = test_server(include_str!("fixtures/write_task.harn"));
     let blocked = dir.path().join("blocked.txt");
     let task = server
         .prepare_task(

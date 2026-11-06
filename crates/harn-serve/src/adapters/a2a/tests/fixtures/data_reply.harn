@@ -1,0 +1,14 @@
+type DataPart = {type: string, data: any}
+
+type Reply = {parts: list<DataPart>}
+
+pub fn triage(task: string) -> Reply {
+  return {
+    parts: [
+      {type: "data", data: 2},
+      {type: "data", data: [1, "two"]},
+      {type: "data", data: nil},
+      {type: "data", data: task},
+    ],
+  }
+}

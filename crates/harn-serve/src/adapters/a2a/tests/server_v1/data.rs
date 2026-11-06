@@ -39,14 +39,7 @@ async fn arbitrary_json_data_survives_modern_tasks_and_legacy_projection() {
 
 #[tokio::test]
 async fn streamed_json_data_uses_each_subscribers_wire_version() {
-    const SOURCE: &str = r#"
-type DataPart = {type: string, data: any}
-type Reply = {parts: list<DataPart>}
-pub fn triage(task: string) -> Reply {
-  return {parts: [{type: "data", data: 2}, {type: "data", data: [1, "two"]},
-    {type: "data", data: nil}, {type: "data", data: task}]}
-}
-"#;
+    const SOURCE: &str = include_str!("../fixtures/data_reply.harn");
     let (_dir, server) = test_server(SOURCE);
     let router = http_router(server, LOCAL_URL);
     let expected = [json!(2), json!([1, "two"]), JsonValue::Null, json!("hello")];

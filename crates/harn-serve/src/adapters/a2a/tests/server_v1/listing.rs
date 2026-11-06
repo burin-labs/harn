@@ -85,16 +85,7 @@ async fn list_filters_pages_and_projects_real_completed_tasks() {
 
 #[tokio::test]
 async fn authenticated_tasks_are_scoped_by_trusted_principal() {
-    const SOURCE: &str = r#"
-import { agent_progress } from "std/agent/progress"
-pub fn triage(harness: Harness, task: string) -> string {
-  if task == "hold" {
-    agent_progress(harness.agent, {message: "Owned task reached execution."})
-    while true { if is_cancelled() { return task } }
-  }
-  return task
-}
-"#;
+    const SOURCE: &str = include_str!("../fixtures/owned_task.harn");
     let (_dir, server) = test_server_with(SOURCE, |config| {
         config.auth_policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(crate::ApiKeyAuthConfig {
