@@ -58,6 +58,22 @@ fn fake_call(scenario: string, args: list<string>) -> dict {
 
 fn fake_json(scenario: string, repo: string, args: list<string>) -> unknown {
   const path = args[len(args) - 1]
+  if args[0] == "pr" && args[1] == "list" {
+    const candidate = {
+      number: 42,
+      headRefName: branch_name(OTHER, OLD),
+      baseRefName: "main",
+      headRepository: {nameWithOwner: scenario == "foreign_open" ? "example/fork" : repo},
+    }
+    if scenario == "too_many" {
+      let items = []
+      for _ in 0..101 {
+        items = items + [candidate]
+      }
+      return items
+    }
+    return ["other_open", "foreign_open"].contains(scenario) ? [candidate] : []
+  }
   if path == "repos/" + repo {
     return {default_branch: "main"}
   }
@@ -131,6 +147,40 @@ fn fake_github(scenario: string, repo: string = "burin-labs/harn") -> FakeGitHub
     },
   }
   return {gh: gh, writes: fn() { return writes }, written_paths: fn() { return written_paths }}
+}
+
+pipeline test_existing_pin_review_prevents_duplicate_candidates() {
+  const existing = fake_github("other_open")
+  const result = process_request(
+    existing.gh,
+    existing.gh,
+    request("smart-ship.yml"),
+    "burin-labs/harn",
+    "run",
+  )
+  assert(result.contains("open pull request #42"), result)
+  assert_eq(existing.writes(), [])
+  const foreign = fake_github("foreign_open")
+  const opened = process_request(
+    foreign.gh,
+    foreign.gh,
+    request("smart-ship.yml"),
+    "burin-labs/harn",
+    "run",
+  )
+  assert(opened.contains("opened pull request #42"), opened)
+  const incomplete = fake_github("too_many")
+  assert_error_contains(
+    fn() { process_request(
+      incomplete.gh,
+      incomplete.gh,
+      request("smart-ship.yml"),
+      "burin-labs/harn",
+      "run",
+    ) },
+    "open pull request census",
+  )
+  assert_eq(incomplete.writes(), [])
 }
 
 pipeline test_consumer_cli_publishes_only_a_measured_signed_candidate() {
@@ -254,7 +304,15 @@ pipeline test_cli_entrypoint_uses_the_scoped_github_adapter(harness: Harness) {
   const fixture = path_join(source, "fixtures/shared-pin-gh")
   const script = path_join(source, "../ci/shared_pin_bump_cli.harn")
   const binary = harness.env.get_or("HARN_BIN", "harn")
-  for scenario in ["ok", "unsigned", "truncated", "backwards", "missing", "waiting"] {
+  for scenario in [
+    "ok",
+    "existing_open",
+    "unsigned",
+    "truncated",
+    "backwards",
+    "missing",
+    "waiting",
+  ] {
     const root = harness.fs.mkdtemp_in_workspace("shared-pin-cli-test-")
     const log = path_join(root, "calls.jsonl")
     harness.fs.write_text(log, "")
@@ -306,6 +364,11 @@ pipeline test_cli_entrypoint_uses_the_scoped_github_adapter(harness: Harness) {
       assert(result.stdout.contains("opened pull request #42"), result.stdout)
       assert(calls.contains("/git/refs"), "the candidate ref must actually be published")
       assert(calls.contains("/pulls"), "the pull request must actually be opened")
+    } else if scenario == "existing_open" {
+      assert(result.success, result.stderr)
+      assert(result.stdout.contains("open pull request #42"), result.stdout)
+      assert(!calls.contains("/git/refs"), "an open update must not publish a second branch")
+      assert(!calls.contains("/pulls"), "an open update must not open a second pull request")
     } else {
       assert(!result.success, scenario + " must fail closed")
       assert(!calls.contains("/git/refs"), scenario + " must never publish a ref")
