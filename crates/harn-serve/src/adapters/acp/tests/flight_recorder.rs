@@ -56,10 +56,15 @@ async fn session_selection_records_each_executed_prompt_with_complete_intern_tab
                 reached |= frame["params"]["update"]["content"]["text"].as_str().is_some_and(|text| text.contains("flight-probe"));
                 if frame["id"] == id && frame.get("method").is_none() {
                     assert_eq!(frame.get("error").is_some(), text == "fail", "{frame}");
+                    if text == "fail" {
+                        assert!(frame["error"]["message"].as_str().is_some_and(|message| message.contains("flight-failure")), "the actual entry must throw its controlled failure: {frame}");
+                    }
                     break;
                 }
             }
-            assert!(reached, "the actual entry pipeline must run");
+            if text == "pass" {
+                assert!(reached, "the actual entry pipeline must run");
+            }
             let files = recordings(root.path());
             assert_eq!(files.len(), (id - 1) as usize);
             let file = files.iter().find(|file| file["context"]["prompt_id"] == format!("prompt-{id}")).unwrap();
