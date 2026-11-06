@@ -65,9 +65,6 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  손실 범위: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  loss scope: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  область расчёта потерь: " + (values[0] ?? "")
   }
@@ -103,9 +100,6 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  최소 시도 횟수: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  minimum trials: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  минимальное число попыток: " + (values[0] ?? "")
@@ -143,9 +137,6 @@ pub fn message_13(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  모델 인식 선택: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  model-aware selection: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  выбор с учётом модели: " + (values[0] ?? "")
   }
@@ -181,9 +172,6 @@ pub fn message_14(locale: string, values: list<string>) -> string {
   }
   if locale == "ko" {
     return "  기본 도구: " + (values[0] ?? "") + ", 선호: " + (values[1] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  native tools: " + (values[0] ?? "") + ", preferred: " + (values[1] ?? "")
   }
   if locale == "ru" {
     return "  встроенные инструменты: " + (values[0] ?? "") + ", предпочтительно: "

@@ -11,23 +11,14 @@ pub fn message_5(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "  Korpus: " + (values[0] ?? "")
   }
-  if locale == "es" {
-    return "  corpus: " + (values[0] ?? "")
-  }
   if locale == "fr" {
     return "  corpus : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  corpus: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  コーパス: " + (values[0] ?? "")
   }
   if locale == "ko" {
     return "  코퍼스: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  corpus: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  корпус: " + (values[0] ?? "")
@@ -191,9 +182,6 @@ pub fn message_9(locale: string, values: list<string>) -> string {
   if locale == "pt-BR" {
     return "  ajuste: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " (" + (values[2] ?? "")
       + ")"
-  }
-  if locale == "ru" {
-    return "  fit: " + (values[0] ?? "") + "/" + (values[1] ?? "") + " (" + (values[2] ?? "") + ")"
   }
   if locale == "zh-Hans" {
     return "  适配：" + (values[0] ?? "") + "/" + (values[1] ?? "") + " (" + (values[2] ?? "") + ")"

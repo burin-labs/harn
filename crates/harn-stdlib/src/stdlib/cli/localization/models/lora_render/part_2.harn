@@ -23,9 +23,6 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  ツールカタログID: " + (values[0] ?? "")
   }
-  if locale == "ko" {
-    return "  tool catalog id: " + (values[0] ?? "")
-  }
   if locale == "pt-BR" {
     return "  ID do catálogo de ferramentas: " + (values[0] ?? "")
   }
@@ -61,9 +58,6 @@ pub fn message_11(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  ツールカタログのポリシー: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  tool catalog policy: " + (values[0] ?? "")
   }
   if locale == "pt-BR" {
     return "  política do catálogo de ferramentas: " + (values[0] ?? "")

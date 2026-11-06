@@ -130,23 +130,14 @@ pub fn message_8(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "  Korpus: " + (values[0] ?? "")
   }
-  if locale == "es" {
-    return "  corpus: " + (values[0] ?? "")
-  }
   if locale == "fr" {
     return "  corpus : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  corpus: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  コーパス: " + (values[0] ?? "")
   }
   if locale == "ko" {
     return "  코퍼스: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  corpus: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  корпус: " + (values[0] ?? "")

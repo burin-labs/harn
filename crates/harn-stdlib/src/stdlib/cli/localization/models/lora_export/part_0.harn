@@ -140,12 +140,6 @@ pub fn message_3(locale: string, values: list<string>) -> string {
     return "  strati di comportamento: source=" + (values[0] ?? "") + " emitted="
       + (values[1] ?? "")
   }
-  if locale == "ja" {
-    return "  behavior strata: source=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
-  }
-  if locale == "ko" {
-    return "  behavior strata: source=" + (values[0] ?? "") + " emitted=" + (values[1] ?? "")
-  }
   if locale == "pt-BR" {
     return "  estratos de comportamento: source=" + (values[0] ?? "") + " emitted="
       + (values[1] ?? "")

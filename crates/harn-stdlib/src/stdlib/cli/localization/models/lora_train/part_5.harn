@@ -8,64 +8,8 @@ pub fn message_25(locale: string, values: list<string>) -> string {
   if len(values) != 5 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "es" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
   if locale == "fr" {
     return "  " + (values[0] ?? "") + " : " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "it" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ja" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ko" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "ru" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
-      + ", exists="
-      + (values[3] ?? "")
-      + ")"
-      + (values[4] ?? "")
-  }
-  if locale == "zh-Hans" {
-    return "  " + (values[0] ?? "") + ": " + (values[1] ?? "") + " (" + (values[2] ?? "")
       + ", exists="
       + (values[3] ?? "")
       + ")"
@@ -86,33 +30,6 @@ pub fn message_25(locale: string, values: list<string>) -> string {
 pub fn message_26(locale: string, values: list<string>) -> string {
   if len(values) != 1 {
     throw "CLI localization argument count does not match its registered template"
-  }
-  if locale == "de" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "es" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "fr" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "ja" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "ru" {
-    return " sha256=" + (values[0] ?? "")
-  }
-  if locale == "zh-Hans" {
-    return " sha256=" + (values[0] ?? "")
   }
   return " sha256=" + (values[0] ?? "")
 }
@@ -197,23 +114,11 @@ pub fn message_28(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "Backend"
   }
-  if locale == "es" {
-    return "backend"
-  }
-  if locale == "fr" {
-    return "backend"
-  }
-  if locale == "it" {
-    return "backend"
-  }
   if locale == "ja" {
     return "バックエンド"
   }
   if locale == "ko" {
     return "백엔드"
-  }
-  if locale == "pt-BR" {
-    return "backend"
   }
   if locale == "ru" {
     return "бэкенд"

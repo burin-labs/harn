@@ -92,12 +92,6 @@ pub fn message_17(locale: string, values: list<string>) -> string {
   if locale == "es" {
     return "PEFT guardar notas"
   }
-  if locale == "fr" {
-    return "PEFT save notes"
-  }
-  if locale == "it" {
-    return "PEFT save notes"
-  }
   if locale == "ja" {
     return "PEFT notes を保存"
   }

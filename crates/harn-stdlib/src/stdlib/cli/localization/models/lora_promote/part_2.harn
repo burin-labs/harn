@@ -8,32 +8,8 @@ pub fn message_10(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "FAIL"
-  }
-  if locale == "es" {
-    return "FAIL"
-  }
-  if locale == "fr" {
-    return "FAIL"
-  }
-  if locale == "it" {
-    return "FAIL"
-  }
-  if locale == "ja" {
-    return "FAIL"
-  }
-  if locale == "ko" {
-    return "FAIL"
-  }
-  if locale == "pt-BR" {
-    return "FAIL"
-  }
   if locale == "ru" {
     return "СБОЙ"
-  }
-  if locale == "zh-Hans" {
-    return "FAIL"
   }
   return "FAIL"
 }
@@ -86,32 +62,8 @@ pub fn message_12(locale: string, values: list<string>) -> string {
   if len(values) != 0 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return "PASS"
-  }
-  if locale == "es" {
-    return "PASS"
-  }
-  if locale == "fr" {
-    return "PASS"
-  }
-  if locale == "it" {
-    return "PASS"
-  }
-  if locale == "ja" {
-    return "PASS"
-  }
-  if locale == "ko" {
-    return "PASS"
-  }
-  if locale == "pt-BR" {
-    return "PASS"
-  }
   if locale == "ru" {
     return "ПРОЙДЕНО"
-  }
-  if locale == "zh-Hans" {
-    return "PASS"
   }
   return "PASS"
 }

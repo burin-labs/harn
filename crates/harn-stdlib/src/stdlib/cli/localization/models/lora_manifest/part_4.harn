@@ -95,9 +95,6 @@ pub fn message_22(locale: string, values: list<string>) -> string {
   if locale == "fr" {
     return "  modèle : " + (values[0] ?? "")
   }
-  if locale == "it" {
-    return "  template: " + (values[0] ?? "")
-  }
   if locale == "ja" {
     return "  テンプレート: " + (values[0] ?? "")
   }
@@ -142,9 +139,6 @@ pub fn message_23(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  ツール形式: " + (values[0] ?? "") + " (要求 " + (values[1] ?? "") + ")"
   }
-  if locale == "ko" {
-    return "  tool format: " + (values[0] ?? "") + " (requested " + (values[1] ?? "") + ")"
-  }
   if locale == "pt-BR" {
     return "  formato da ferramenta: " + (values[0] ?? "") + " (solicitado " + (values[1] ?? "")
       + ")"
@@ -175,9 +169,6 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   }
   if locale == "fr" {
     return "  formateur : " + (values[0] ?? "")
-  }
-  if locale == "it" {
-    return "  trainer: " + (values[0] ?? "")
   }
   if locale == "ja" {
     return "  トレーナー: " + (values[0] ?? "")

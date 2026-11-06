@@ -11,14 +11,8 @@ pub fn message_50(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "nein"
   }
-  if locale == "es" {
-    return "no"
-  }
   if locale == "fr" {
     return "non"
-  }
-  if locale == "it" {
-    return "no"
   }
   if locale == "ja" {
     return "いいえ"

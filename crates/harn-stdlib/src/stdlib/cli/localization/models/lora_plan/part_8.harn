@@ -167,14 +167,8 @@ pub fn message_44(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "Auswertung"
   }
-  if locale == "es" {
-    return "eval"
-  }
   if locale == "fr" {
     return "évaluation"
-  }
-  if locale == "it" {
-    return "eval"
   }
   if locale == "ja" {
     return "評価"
@@ -184,9 +178,6 @@ pub fn message_44(locale: string, values: list<string>) -> string {
   }
   if locale == "pt-BR" {
     return "avaliar"
-  }
-  if locale == "ru" {
-    return "eval"
   }
   if locale == "zh-Hans" {
     return "评估"

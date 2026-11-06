@@ -8,69 +8,6 @@ pub fn message_25(locale: string, values: list<string>) -> string {
   if len(values) != 5 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "es" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "fr" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "it" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "ja" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "ko" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "pt-BR" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "ru" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
-  if locale == "zh-Hans" {
-    return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
-      + (values[3] ?? "")
-      + " SKIP="
-      + (values[4] ?? "")
-      + "\n"
-  }
   return (values[0] ?? "") + "OK=" + (values[1] ?? "") + " WARN=" + (values[2] ?? "") + " FAIL="
     + (values[3] ?? "")
     + " SKIP="

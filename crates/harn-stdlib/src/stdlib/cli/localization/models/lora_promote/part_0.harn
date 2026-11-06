@@ -62,9 +62,6 @@ pub fn message_1(locale: string, values: list<string>) -> string {
   if locale == "ja" {
     return "  評価データセット: " + (values[0] ?? "")
   }
-  if locale == "ko" {
-    return "  eval dataset: " + (values[0] ?? "")
-  }
   if locale == "pt-BR" {
     return "  conjunto de dados de avaliação: " + (values[0] ?? "")
   }
@@ -104,9 +101,6 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  최소 시도 횟수: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  minimum trials: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  минимальное число попыток: " + (values[0] ?? "")
   }
@@ -143,9 +137,6 @@ pub fn message_3(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  probe 케이스:"
   }
-  if locale == "pt-BR" {
-    return "  probe cases:"
-  }
   if locale == "ru" {
     return "  случаи проверки:"
   }
@@ -178,12 +169,6 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "ja" {
     return "  プローブroot: " + (values[0] ?? "")
-  }
-  if locale == "ko" {
-    return "  probe root: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  probe root: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  корень проверки: " + (values[0] ?? "")

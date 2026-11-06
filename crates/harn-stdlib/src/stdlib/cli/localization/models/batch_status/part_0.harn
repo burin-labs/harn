@@ -104,9 +104,6 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "ko" {
     return "  작업: " + (values[0] ?? "")
   }
-  if locale == "pt-BR" {
-    return "  jobs: " + (values[0] ?? "")
-  }
   if locale == "ru" {
     return "  задания: " + (values[0] ?? "")
   }
@@ -175,9 +172,6 @@ pub fn message_4(locale: string, values: list<string>) -> string {
   }
   if locale == "it" {
     return "  sha256 della ricevuta: " + (values[0] ?? "")
-  }
-  if locale == "ja" {
-    return "  receipt sha256: " + (values[0] ?? "")
   }
   if locale == "ko" {
     return "  수신증 sha256: " + (values[0] ?? "")

@@ -95,17 +95,11 @@ pub fn message_2(locale: string, values: list<string>) -> string {
   if locale == "fr" {
     return "  adaptateur : " + (values[0] ?? "")
   }
-  if locale == "it" {
-    return "  adapter: " + (values[0] ?? "")
-  }
   if locale == "ja" {
     return "  アダプタ: " + (values[0] ?? "")
   }
   if locale == "ko" {
     return "  어댑터: " + (values[0] ?? "")
-  }
-  if locale == "pt-BR" {
-    return "  adapter: " + (values[0] ?? "")
   }
   if locale == "ru" {
     return "  адаптер: " + (values[0] ?? "")

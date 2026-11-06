@@ -11,14 +11,8 @@ pub fn message_20(locale: string, values: list<string>) -> string {
   if locale == "de" {
     return "nein"
   }
-  if locale == "es" {
-    return "no"
-  }
   if locale == "fr" {
     return "non"
-  }
-  if locale == "it" {
-    return "no"
   }
   if locale == "ja" {
     return "いいえ"
@@ -164,32 +158,14 @@ pub fn message_24(locale: string, values: list<string>) -> string {
   if len(values) != 3 {
     throw "CLI localization argument count does not match its registered template"
   }
-  if locale == "de" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
-  }
   if locale == "es" {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " mediante " + (values[2] ?? "")
-  }
-  if locale == "fr" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   if locale == "it" {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " tramite " + (values[2] ?? "")
   }
-  if locale == "ja" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
-  }
-  if locale == "ko" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
-  }
-  if locale == "pt-BR" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
-  }
   if locale == "ru" {
     return (values[0] ?? "") + " -> " + (values[1] ?? "") + " через " + (values[2] ?? "")
-  }
-  if locale == "zh-Hans" {
-    return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
   }
   return (values[0] ?? "") + " -> " + (values[1] ?? "") + " via " + (values[2] ?? "")
 }
