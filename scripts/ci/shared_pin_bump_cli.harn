@@ -9,6 +9,8 @@
 import { command_output_tail, command_run } from "std/command"
 import {
   Request,
+  SECURITY_POLICY_PATH,
+  SECURITY_PROOF_REF,
   WorkflowFile,
   branch_name,
   commit_message,
@@ -221,7 +223,8 @@ fn workflow_files(gh: Gh, repo: string, sha: string) -> list<WorkflowFile> {
     }
     const workflow = regex_match("^\\.github/workflows/[^/]+\\.ya?ml$", entry.path) != nil
     const action = regex_match("^\\.github/actions/.+/action\\.ya?ml$", entry.path) != nil
-    if !workflow && !action {
+    const security_policy = entry.path == SECURITY_POLICY_PATH
+    if !workflow && !action && !security_policy {
       continue
     }
     if entry.type != "blob" || entry.mode != "100644" {
@@ -377,6 +380,10 @@ pub fn process_request(
   const head = branch_head(gh, repo, branch)
   const base = main_sha
   const files = workflow_files(gh, repo, base)
+  if repo == "burin-labs/harn" && request.references.contains(SECURITY_PROOF_REF)
+    && !files.any({ file -> file.path == SECURITY_POLICY_PATH }) {
+    throw "dependency security signer policy is missing from the measured tree"
+  }
   const release_workflow_names = read_release_workflows(gh, repo, base, files)
   const changed = rewrite_files(files, request)
   const release_path = request.release_path
