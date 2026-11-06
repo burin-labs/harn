@@ -1,6 +1,6 @@
 use crate::value::VmValue;
 
-fn entry_for<'a>(
+pub(crate) fn entry_for<'a>(
     tools_val: Option<&'a VmValue>,
     tool_name: &str,
 ) -> Option<&'a crate::value::DictMap> {

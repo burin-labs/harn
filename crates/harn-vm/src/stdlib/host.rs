@@ -48,6 +48,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_CAPABILITIES_BUILTIN_DEF,
     &HOST_HAS_BUILTIN_DEF,
     &HOST_CALL_BUILTIN_DEF,
+    &HOST_CAPABILITY_TOOL_CALL_BUILTIN_DEF,
     &HOST_TOOL_LIST_BUILTIN_DEF,
     &HOST_TOOL_CALL_BUILTIN_DEF,
 ];
@@ -780,6 +781,38 @@ pub async fn dispatch_host_operation_with_ctx(
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    dispatch_host_operation_with_mode(
+        ctx,
+        capability,
+        operation,
+        params,
+        HostDispatch::AllowFallback,
+    )
+    .await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum HostDispatch {
+    AllowFallback,
+    RequireAdapter,
+}
+
+fn missing_host_adapter(capability: &str, operation: &str) -> VmError {
+    VmError::CategorizedError {
+        message: format!(
+            "declared host capability {capability}.{operation} needs a host capability adapter"
+        ),
+        category: crate::value::ErrorCategory::ToolRejected,
+    }
+}
+
+async fn dispatch_host_operation_with_mode(
+    ctx: Option<&AsyncBuiltinCtx>,
+    capability: &str,
+    operation: &str,
+    params: &crate::value::DictMap,
+    mode: HostDispatch,
+) -> Result<VmValue, VmError> {
     let _invalidation = turn_cache::invalidation_scope(capability, operation);
     if let Some(ctx) = ctx {
         if let Some(fixtured) = crate::harness::context_fixtures(ctx)?
@@ -799,7 +832,7 @@ pub async fn dispatch_host_operation_with_ctx(
             "operation": "exec",
             "session_id": crate::llm::current_agent_session_id(),
         });
-        return dispatch_process_exec_with_policy(ctx, params, caller).await;
+        return dispatch_process_exec_with_policy(ctx, params, caller, mode).await;
     }
 
     // process.spawn is the non-blocking sibling of exec. Route it through the
@@ -815,9 +848,12 @@ pub async fn dispatch_host_operation_with_ctx(
             "operation": "spawn",
             "session_id": crate::llm::current_agent_session_id(),
         });
-        return dispatch_process_spawn_with_policy(ctx, params, caller).await;
+        return dispatch_process_spawn_with_policy(ctx, params, caller, mode).await;
     }
-    if capability == "process" && matches!(operation, "poll" | "wait" | "kill" | "release") {
+    if mode == HostDispatch::AllowFallback
+        && capability == "process"
+        && matches!(operation, "poll" | "wait" | "kill" | "release")
+    {
         if let Some(result) = crate::stdlib::process_spawn::dispatch(
             operation,
             params,
@@ -840,6 +876,9 @@ pub async fn dispatch_host_operation_with_ctx(
         }
     }
 
+    if mode == HostDispatch::RequireAdapter {
+        return Err(missing_host_adapter(capability, operation));
+    }
     dispatch_builtin_host_operation(capability, operation, params).await
 }
 
@@ -1094,6 +1133,14 @@ async fn host_call_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
+    host_call_with_mode(ctx, args, HostDispatch::AllowFallback).await
+}
+
+async fn host_call_with_mode(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+    mode: HostDispatch,
+) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let params = args
         .get(1)
@@ -1112,7 +1159,24 @@ async fn host_call_builtin(
             "host_call {capability}.{operation} is unavailable inside a tool handler; read host input at the trusted entry boundary and pass the value into the handler"
         )));
     }
-    dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
+    dispatch_host_operation_with_mode(Some(&ctx), capability, operation, &params, mode).await
+}
+
+/// Dispatch a declared host tool through the same policy-bearing host-call
+/// path, while refusing the standalone fallbacks intended for ordinary scripts.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_capability_tool_call(name: string, args: dict) -> any",
+    kind = "async",
+    category = "host",
+    runtime_only = true
+)]
+async fn host_capability_tool_call_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    host_call_with_mode(ctx, args, HostDispatch::RequireAdapter).await
 }
 
 #[harn_builtin(
