@@ -19,6 +19,7 @@ mod client_capabilities;
 mod provider_default_tests;
 mod replay_inputs;
 mod root_projection;
+mod update_negotiation;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -140,7 +141,10 @@ async fn start_acp_channel_session_with_params(
     request_tx
         .send(serde_json::json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
-            "params": {"protocolVersion": 1, "clientCapabilities": {"terminal": true}},
+            "params": {"protocolVersion": 1, "clientCapabilities": {"terminal": true,
+                "_meta": {"harn": {"sessionUpdateExtensions":
+                    ACP_SESSION_UPDATE_VARIANTS.iter().chain(HARN_SESSION_UPDATE_EXTENSIONS.iter()).collect::<Vec<_>>()}}
+            }},
         }))
         .expect("advertise test terminal support");
     assert!(recv_response_with_id(&mut response_rx, 0)

@@ -2,24 +2,38 @@
 pub const ACP_SCHEMA_COMPATIBILITY: &str =
     "agentclientprotocol/agent-client-protocol schema v1.26.0";
 
-pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
-    "user_message",
-    "user_message_chunk",
-    "agent_message_chunk",
-    "agent_thought_chunk",
-    "tool_call",
-    "tool_call_update",
-    "plan",
-    "available_commands_update",
-    "current_mode_update",
-    "config_option_update",
-    "session_info_update",
-    "session_redo",
-    "session_rollback",
-    "session_truncated",
-];
+macro_rules! session_update_vocabulary {
+    (updates [$($kind:literal => $standard:literal),* $(,)?], extensions [$($extension:literal),* $(,)?]) => {
+        pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[$($kind,)*];
+        pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[$($extension,)*];
 
-pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+        pub(super) fn is_standard_session_update(kind: &str) -> bool {
+            match kind {
+                $($kind => $standard,)*
+                _ => false,
+            }
+        }
+    };
+}
+
+session_update_vocabulary! {
+  updates [
+    "user_message" => false,
+    "user_message_chunk" => true,
+    "agent_message_chunk" => true,
+    "agent_thought_chunk" => true,
+    "tool_call" => true,
+    "tool_call_update" => true,
+    "plan" => true,
+    "available_commands_update" => true,
+    "current_mode_update" => true,
+    "config_option_update" => true,
+    "session_info_update" => true,
+    "session_redo" => false,
+    "session_rollback" => false,
+    "session_truncated" => false,
+  ],
+  extensions [
     "artifact",
     "available_commands_update",
     "fs_watch",
@@ -42,7 +56,8 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "transcript_compacted",
     "transcript_projected",
     "worker_update",
-];
+  ]
+}
 
 /// JSON-RPC method name for the ACP `ExtNotification` envelope that
 /// carries Harn pipeline-loop milestones. The leading `_` puts it in

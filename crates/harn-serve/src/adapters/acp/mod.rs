@@ -1055,7 +1055,7 @@ struct VmBaselineCacheEntry {
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
     replay_inputs: Option<Arc<replay_inputs::InputRecorder>>,
-    client_capabilities: client_capabilities::ClientCapabilities,
+    client_capabilities: Arc<std::sync::RwLock<client_capabilities::ClientCapabilities>>,
     launcher_environment: harn_vm::security::LauncherEnvironment,
     launcher_session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
     host_responder: Option<Arc<dyn HostResponderBinder>>,

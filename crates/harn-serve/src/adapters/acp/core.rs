@@ -12,6 +12,10 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        let client_capabilities = Arc::new(std::sync::RwLock::new(
+            client_capabilities::ClientCapabilities::default(),
+        ));
+        let output = output.for_client(client_capabilities.clone());
         let replay_inputs = super::replay_inputs::InputRecorder::capture();
         let output = match &replay_inputs {
             Some(recorder) => recorder.observe_output(output),
@@ -38,7 +42,7 @@ impl AcpServer {
         concurrent_controls.machine_spend_quota = config.machine_spend_quota.clone();
 
         Self {
-            client_capabilities: client_capabilities::ClientCapabilities::default(),
+            client_capabilities,
             launcher_environment: config.launcher_environment,
             launcher_session_environment: config.launcher_session_environment,
             host_responder: config.host_responder,

@@ -15,7 +15,11 @@ fn test_bridge(
     server: &AcpServer,
 ) -> Arc<AcpBridge> {
     Arc::new(AcpBridge {
-        client_capabilities: server.client_capabilities.clone(),
+        client_capabilities: server
+            .client_capabilities
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
         session_id: "turn-cache-session".to_string(),
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),

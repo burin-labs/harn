@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(super) struct ClientCapabilities {
+    #[serde(rename = "_meta", deserialize_with = "object_or_default")]
+    pub meta: ClientMeta,
     #[serde(deserialize_with = "object_or_default")]
     pub fs: FileSystemCapabilities,
     #[serde(deserialize_with = "or_default")]
@@ -13,6 +15,20 @@ pub(super) struct ClientCapabilities {
     pub elicitation: Option<ElicitationCapabilities>,
     #[serde(deserialize_with = "object_or_default")]
     pub session: Option<SessionCapabilities>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub(super) struct ClientMeta {
+    #[serde(deserialize_with = "object_or_default")]
+    pub harn: HarnCapabilities,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(super) struct HarnCapabilities {
+    #[serde(deserialize_with = "or_default")]
+    pub session_update_extensions: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -86,6 +102,11 @@ where
 }
 
 impl ClientCapabilities {
+    pub(super) fn supports_session_update(&self, kind: &str) -> bool {
+        super::schema::is_standard_session_update(kind)
+            || self.meta.harn.session_update_extensions.contains(kind)
+    }
+
     pub(super) fn from_initialize(params: &serde_json::Value) -> Self {
         params
             .get("clientCapabilities")

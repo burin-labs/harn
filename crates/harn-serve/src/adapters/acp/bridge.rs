@@ -61,6 +61,30 @@ pub enum AcpOutput {
 }
 
 impl AcpOutput {
+    pub(super) fn for_client(
+        self,
+        capabilities: Arc<std::sync::RwLock<client_capabilities::ClientCapabilities>>,
+    ) -> Self {
+        Self::callback(move |line| {
+            let Ok(frame) = serde_json::from_str::<serde_json::Value>(line) else {
+                return;
+            };
+            if frame["method"] == "session/update"
+                && !frame["params"]["update"]["sessionUpdate"]
+                    .as_str()
+                    .is_some_and(|kind| {
+                        capabilities
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .supports_session_update(kind)
+                    })
+            {
+                return;
+            }
+            self.write_line(line);
+        })
+    }
+
     /// Create an output sink that writes one JSON-RPC line per stdout line.
     pub fn stdout() -> Self {
         Self::Stdout(Arc::new(std::sync::Mutex::new(())))
