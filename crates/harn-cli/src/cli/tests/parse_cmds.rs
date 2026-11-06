@@ -32,13 +32,39 @@ fn test_run_flight_recorder_is_explicit_and_bounded() {
     let Command::Run(args) = cli.command.unwrap() else {
         panic!("expected run command");
     };
-    assert!(args.flight_recorder);
-    assert_eq!(args.flight_recorder_max_events, Some(42));
-    assert_eq!(args.flight_recorder_retain, Some(3));
+    assert!(args.flight_recorder.enabled);
+    assert_eq!(args.flight_recorder.max_events, Some(42));
+    assert_eq!(args.flight_recorder.retain, Some(3));
     assert_eq!(
-        args.flight_recorder_out.as_deref(),
+        args.flight_recorder.out.as_deref(),
         Some(std::path::Path::new("recording.json"))
     );
+    let Command::Serve(serve) = Cli::parse_from([
+        "harn",
+        "serve",
+        "acp",
+        "--flight-recorder",
+        "--flight-recorder-max-events",
+        "42",
+        "--flight-recorder-retain",
+        "3",
+        "--flight-recorder-out",
+        "recording.json",
+        "main.harn",
+    ])
+    .command
+    .unwrap() else {
+        panic!("expected serve");
+    };
+    let crate::cli::ServeCommand::Acp(serve) = serve.command else {
+        panic!("expected ACP");
+    };
+    let run_options = args.flight_recorder.options();
+    let serve_options = serve.flight_recorder.options();
+    assert_eq!(serve_options.enabled, run_options.enabled);
+    assert_eq!(serve_options.out, run_options.out);
+    assert_eq!(serve_options.max_events, run_options.max_events);
+    assert_eq!(serve_options.retain_files, run_options.retain_files);
 
     assert_eq!(
         Cli::try_parse_from([

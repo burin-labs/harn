@@ -154,19 +154,17 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
                 .to_string(),
         );
     }
+    let mut config = crate::acp::server_config(args.file.clone(), auth_policy.clone())?
+        .with_profile(profile)
+        .with_flight_recorder(args.flight_recorder.options())
+        .with_sandbox(sandbox);
+    if let Some(policy) = args.session_environment {
+        config = config.with_launcher_session_environment(policy.kind());
+    }
     match args.transport {
         AcpServeTransport::Stdio => {
             let confinement = acp_server_confinement(args);
-            crate::acp::run_acp_server(
-                args.file.as_deref(),
-                auth_policy,
-                args.trace,
-                profile,
-                sandbox,
-                args.session_environment.map(|policy| policy.kind()),
-                confinement,
-            )
-            .await
+            crate::acp::run_acp_server(config, args.trace, confinement).await
         }
         AcpServeTransport::Websocket => {
             let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
@@ -175,12 +173,6 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
                 harn_vm::llm::enable_tracing();
             }
             crate::acp::ensure_acp_event_log(args.file.as_deref());
-            let mut config = crate::acp::server_config(args.file.clone(), auth_policy)?
-                .with_profile(profile)
-                .with_sandbox(sandbox);
-            if let Some(policy) = args.session_environment {
-                config = config.with_launcher_session_environment(policy.kind());
-            }
             let result = harn_serve::run_acp_websocket_server(
                 config,
                 AcpWebSocketServeOptions {

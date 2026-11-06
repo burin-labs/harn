@@ -128,6 +128,26 @@ path. Harn won't rotate other JSON files beside a caller-selected path. The
 artifact is written when the VM returns, exits, or fails. A force-killed process
 can lose its in-memory recording.
 
+To record ACP prompts, start the server with the same options:
+
+```bash
+harn serve acp --flight-recorder main.harn
+```
+
+`HARN_FLIGHT_RECORDER=1` also enables recording. Each executed prompt writes
+one file under `.harn-runs/flight-recordings/`, including failed prompts.
+The file's `context.session_id` and `context.prompt_id` identify its owner;
+without a caller message ID, `prompt_id` is the execution ID. Function and
+source tables remain complete when the ring drops events; `dropped_events`
+reports that loss.
+
+For ACP, `--flight-recorder-out recording.json` writes
+`recording.<execution-id>.json` for each prompt. Harn doesn't rotate those
+caller-selected files. Embedding hosts set defaults with
+`AcpServerConfig::with_flight_recorder` and override individual sessions through
+`AcpRuntimeConfigurator::flight_recorder`, returning `Some(options)` to select
+or disable recording and `None` to keep the defaults.
+
 ## Correlating delegated runs
 
 Build one report from the root run when several agents participated:

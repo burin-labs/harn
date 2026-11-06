@@ -1236,14 +1236,7 @@ async fn execute_run_inner_scoped(
             harn_vm::orchestration::ExecutionRecordStatus::Failed
         }
     };
-    let flight_recording = flight_recorder.enabled.then(|| {
-        flight_recorder.out.as_deref().map_or(
-            harn_vm::orchestration::FlightRecordingStorage::Managed {
-                retain_files: flight_recorder.retain_files,
-            },
-            |output| harn_vm::orchestration::FlightRecordingStorage::Custom { output },
-        )
-    });
+    let flight_recording = flight_recorder.storage();
     let persisted_evidence = match harn_vm::orchestration::persist_execution_record(
         &vm,
         harn_vm::orchestration::ExecutionRecordRequest {

@@ -2,9 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use harn_serve::{
-    AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServerConfig, AuthPolicy,
-};
+use harn_serve::{AcpRuntimeConfigurator, AcpServerConfig, AuthPolicy};
 
 /// Opts a server out of warming the code index when a session opens.
 pub(crate) const DISABLE_CODE_INDEX_WARM_ENV: &str = "HARN_DISABLE_CODE_INDEX_WARM";
@@ -266,23 +264,13 @@ pub(crate) fn ensure_acp_event_log(pipeline: Option<&str>) {
 }
 
 pub(crate) async fn run_acp_server(
-    pipeline: Option<&str>,
-    auth_policy: AuthPolicy,
+    config: AcpServerConfig,
     trace: bool,
-    profile: AcpProfileConfig,
-    sandbox: AcpSandboxConfig,
-    session_environment: Option<harn_vm::security::EnvironmentPolicyKind>,
     confinement: Option<harn_serve::AcpServerConfinement>,
 ) -> Result<(), String> {
-    ensure_acp_event_log(pipeline);
+    ensure_acp_event_log(config.pipeline.as_deref());
     if trace {
         harn_vm::llm::enable_tracing();
-    }
-    let mut config = server_config(pipeline.map(str::to_string), auth_policy)?
-        .with_profile(profile)
-        .with_sandbox(sandbox);
-    if let Some(kind) = session_environment {
-        config = config.with_launcher_session_environment(kind);
     }
     // Confine last, once everything that reads the host has run. On Linux
     // the process was confined before its runtime started instead.

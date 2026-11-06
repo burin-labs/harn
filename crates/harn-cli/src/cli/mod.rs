@@ -32,6 +32,7 @@ mod dump;
 mod eval;
 mod explain;
 mod fix;
+mod flight_recorder;
 mod flow;
 mod graph;
 mod guard;
@@ -131,6 +132,7 @@ pub use eval::{
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::FixArgs;
+pub(crate) use flight_recorder::FlightRecorderArgs;
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,
     FlowShipCommand, FlowShipWatchArgs,
