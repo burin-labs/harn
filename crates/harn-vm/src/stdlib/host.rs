@@ -835,12 +835,8 @@ async fn dispatch_host_operation_with_mode(
         return dispatch_process_exec_with_policy(ctx, params, caller, mode).await;
     }
 
-    // process.spawn is the non-blocking sibling of exec. Route it through the
-    // SAME command-policy preflight so deny-patterns/approval/sandbox gating
-    // are identical; only the completion semantics differ (returns a handle
-    // immediately instead of awaiting). poll/wait/kill/release are pure
-    // registry operations on an already-gated spawn, so they bypass the
-    // command policy.
+    // Non-blocking spawn shares command preflight. Polling an existing
+    // handle doesn't execute another command.
     if (capability, operation) == ("process", "spawn") {
         let caller = serde_json::json!({
             "surface": "host_call",

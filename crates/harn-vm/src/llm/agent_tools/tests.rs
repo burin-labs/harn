@@ -10,6 +10,29 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[path = "replay_tests.rs"]
+mod replay;
+
+struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+
+impl crate::HostCallBridge for CapabilityBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+    ) -> crate::HostCallDispatchFuture<'a> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(serde_json::json!({
+                "name": format!("{capability}.{operation}"),
+                "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
+            }));
+            Ok(((capability, operation) == ("session_inputs", "request"))
+                .then(|| VmValue::string("input requested")))
+        })
+    }
+}
+
 async fn dispatch_bound_tool(
     name: &str,
     args: &serde_json::Value,
@@ -635,24 +658,6 @@ async fn dispatch_honors_declared_host_bridge_executor() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn host_bridge_dispatches_the_declared_capability() {
-    struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
-    impl crate::HostCallBridge for CapabilityBridge {
-        fn dispatch<'a>(
-            &'a self,
-            capability: &'a str,
-            operation: &'a str,
-            params: &'a crate::value::DictMap,
-        ) -> crate::HostCallDispatchFuture<'a> {
-            Box::pin(async move {
-                self.0.lock().unwrap().push(serde_json::json!({
-                    "name": format!("{capability}.{operation}"),
-                    "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
-                }));
-                Ok(((capability, operation) == ("session_inputs", "request"))
-                    .then(|| VmValue::string("input requested")))
-            })
-        }
-    }
     let calls = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
     let _guard = crate::install_host_call_bridge(Arc::new(CapabilityBridge(Arc::clone(&calls))));
     let mut entry = crate::value::DictMap::new();

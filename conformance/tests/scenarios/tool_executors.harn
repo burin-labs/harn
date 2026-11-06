@@ -52,9 +52,11 @@ pipeline test(harness: Harness, task: unknown) {
         {},
       )
       const calls = harness.testing.calls()
-      require answer.ok && answer.result == "fixture answer", "declared capability uses its fixture"
-      require len(calls) == 1 && calls[0].capability == "interaction" && calls[0].method == "ask",
-        "one host operation reaches the fixture without a live adapter"
+      assert(answer.ok && answer.result == "fixture answer", "declared capability uses its fixture")
+      assert(
+        len(calls) == 1 && calls[0].capability == "interaction" && calls[0].method == "ask",
+        "one host operation reaches the fixture without a live adapter",
+      )
     },
   )
   const mcp_tool = tool_find(r, "github_search_issues")

@@ -747,12 +747,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     }
 }
 
-/// Inspect `tools_val` for a `_mcp_server` annotation on the entry
-/// matching `tool_name`. Returns the originating server name when the
-/// tool was sourced from `mcp_list_tools`, otherwise `None`. The
-/// annotation is a free-form dict key (it travels alongside the
-/// schema), so we also peek at a `function` sub-dict for OpenAI-shape
-/// entries that nest the metadata.
+/// Read the originating MCP server from a registry entry or its nested
+/// OpenAI-style function descriptor.
 pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
@@ -789,16 +785,8 @@ pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) 
     None
 }
 
-/// Return the canonical declared executor for `tool_name`, if the
-/// registry entry carries one (harn#743). The wire form
-/// (`"harn_builtin"`) is canonicalized to `"harn"` on storage; this
-/// helper returns whatever is stored, so callers can compare against
-/// the documented set without re-aliasing.
-///
-/// `None` means the entry pre-dates the `executor` field (e.g. an
-/// `mcp_list_tools` result the user pushed straight into the
-/// registry) — callers fall back to the historic
-/// handler/`_mcp_server`/bridge heuristic.
+/// Read the stored executor. Entries without one use dispatch's
+/// handler, MCP annotation, or bridge detection.
 pub(super) fn declared_executor_for_tool(
     tools_val: Option<&VmValue>,
     tool_name: &str,
