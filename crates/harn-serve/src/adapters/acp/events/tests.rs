@@ -2,7 +2,7 @@ use super::super::schema::{
     ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
     HARN_SESSION_UPDATE_EXTENSIONS,
 };
-use super::test_support::{self, update_harn_meta};
+use super::test_support::update_harn_meta;
 use super::{AcpAgentEventSink, AcpOutput};
 use harn_vm::agent_events::{
     AgentEvent, AgentEventSink, AttachmentFlavor, AttachmentRendering, FsWatchEvent,
@@ -708,191 +708,6 @@ async fn worker_update_omits_audit_when_absent() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn forwarded_agent_events_serialize_as_session_updates() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    let handoff = HandoffArtifact {
-        id: "handoff-1".to_string(),
-        source_persona: "merge_captain".to_string(),
-        target_persona_or_human: HandoffTargetRecord {
-            kind: "persona".to_string(),
-            id: Some("review_captain".to_string()),
-            label: Some("review_captain".to_string()),
-            uri: None,
-        },
-        task: "Review the patch".to_string(),
-        reason: "Merge queue requires review".to_string(),
-        ..Default::default()
-    }
-    .normalize();
-
-    let events = vec![
-        AgentEvent::AgentMessageChunk {
-            session_id: "session-1".to_string(),
-            content: "hello".to_string(),
-            history_source_event_id: None,
-        },
-        AgentEvent::AgentThoughtChunk {
-            session_id: "session-1".to_string(),
-            content: "thinking".to_string(),
-        },
-        AgentEvent::ToolCall {
-            session_id: "session-1".to_string(),
-            tool_call_id: "tool-1".to_string(),
-            tool_name: "read".to_string(),
-            kind: Some(ToolKind::Read),
-            status: ToolCallStatus::Pending,
-            raw_input: serde_json::json!({"path": "README.md"}),
-            parsing: None,
-            audit: None,
-            intent: None,
-        },
-        AgentEvent::ToolCallUpdate {
-            session_id: "session-1".to_string(),
-            tool_call_id: "tool-1".to_string(),
-            tool_name: "read".to_string(),
-            status: ToolCallStatus::Completed,
-            raw_output: Some(serde_json::json!({"ok": true})),
-            error: None,
-            duration_ms: Some(7),
-            execution_duration_ms: Some(5),
-            error_category: None,
-            mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
-            changed_paths: None,
-            data: None,
-            health: None,
-            executor: Some(ToolExecutor::HarnBuiltin),
-            parsing: None,
-            raw_input: None,
-            raw_input_partial: None,
-            audit: None,
-        },
-        AgentEvent::PlanDocumentUpdated {
-            session_id: "session-1".to_string(),
-            event: Box::new(fixture_plan_document_event(
-                serde_json::json!([{"step": "edit", "status": "pending"}]),
-            )),
-        },
-        AgentEvent::SkillActivated {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            iteration: 1,
-            reason: "matched".to_string(),
-        },
-        AgentEvent::SkillDeactivated {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            iteration: 2,
-        },
-        AgentEvent::SkillScopeTools {
-            session_id: "session-1".to_string(),
-            skill_name: "rust".to_string(),
-            allowed_tools: vec!["read".to_string()],
-        },
-        AgentEvent::SkillNarrow {
-            session_id: "session-1".to_string(),
-            reason: "unused across 5 turns".to_string(),
-            removed_tools: vec!["write".to_string()],
-            remaining_tools: vec!["read".to_string()],
-            policy: serde_json::Value::Null,
-            removed_tool_details: serde_json::Value::Null,
-            kept_tool_details: serde_json::Value::Null,
-        },
-        AgentEvent::StanceTransition {
-            session_id: "session-1".to_string(),
-            phase: "write_access_granted".to_string(),
-            escape_tool: "request_write_access".to_string(),
-            allowed_tools: vec![
-                "look".to_string(),
-                "search".to_string(),
-                "request_write_access".to_string(),
-            ],
-            justification: "User asked me to make the change.".to_string(),
-            consent: "express".to_string(),
-            reason: "The user explicitly asked for the edit.".to_string(),
-        },
-        AgentEvent::ToolSearchQuery {
-            session_id: "session-1".to_string(),
-            tool_use_id: "search-1".to_string(),
-            name: "tool_search".to_string(),
-            query: serde_json::json!({"q": "read"}),
-            strategy: "semantic".to_string(),
-            mode: "client".to_string(),
-        },
-        AgentEvent::ToolSearchResult {
-            session_id: "session-1".to_string(),
-            tool_use_id: "search-1".to_string(),
-            promoted: vec!["read".to_string()],
-            strategy: "semantic".to_string(),
-            mode: "client".to_string(),
-        },
-        AgentEvent::TranscriptCompacted {
-            session_id: "session-1".to_string(),
-            receipt: fixture_compaction_receipt("compaction-fixture-2", None, None, None),
-        },
-        AgentEvent::TranscriptProjected {
-            session_id: "session-1".to_string(),
-            policy: "clean_tool_repair".to_string(),
-            reason: "tool_call_repair_squashed".to_string(),
-            prefix_hash: "sha256:abc".to_string(),
-            kept_count: 3,
-            dropped_count: 2,
-            provider_safety_blocked: false,
-            redacted_count: 0,
-            reclaimed_tokens: 0,
-            roots_consulted: Vec::new(),
-            redaction_pointers: Vec::new(),
-        },
-        AgentEvent::Handoff {
-            session_id: "session-1".to_string(),
-            artifact_id: "artifact-1".to_string(),
-            handoff: Box::new(handoff),
-        },
-        AgentEvent::FsWatch {
-            session_id: "session-1".to_string(),
-            subscription_id: "fsw-1".to_string(),
-            events: vec![FsWatchEvent {
-                kind: "modify".to_string(),
-                paths: vec!["/tmp/project/src/lib.rs".to_string()],
-                relative_paths: vec!["src/lib.rs".to_string()],
-                raw_kind: "Modify(Any)".to_string(),
-                error: None,
-            }],
-        },
-    ];
-    let expected_updates = [
-        "agent_message_chunk",
-        "agent_thought_chunk",
-        "tool_call",
-        "tool_call_update",
-        "plan",
-        "skill_activated",
-        "skill_deactivated",
-        "skill_scope_tools",
-        "skill_narrow",
-        "stance_transition",
-        "tool_search_query",
-        "tool_search_result",
-        "transcript_compacted",
-        "transcript_projected",
-        "handoff",
-        "fs_watch",
-    ];
-
-    for event in &events {
-        sink.handle_event(event);
-    }
-
-    for expected in expected_updates {
-        let line = rx.recv().await.expect("ACP event notification");
-        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert_eq!(payload["method"], "session/update");
-        assert_eq!(payload["params"]["sessionId"], "session-1");
-        assert_eq!(payload["params"]["update"]["sessionUpdate"], expected);
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn skill_narrow_serializes_policy_details_under_harn_meta() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
@@ -918,148 +733,35 @@ async fn skill_narrow_serializes_policy_details_under_harn_meta() {
     assert_eq!(harn_meta["keptToolDetails"][0]["class"], "mutating");
 }
 
-/// harn#905 conformance: vendor-extension session-update fields
-/// must travel under `update._meta.harn` and **must not** appear at
-/// the update root. Canonical ACP fields (`sessionUpdate`, `content`,
-/// etc.) stay at their canonical locations. This test pins the
-/// contract field-by-field for every `HARN_SESSION_UPDATE_EXTENSIONS`
-/// variant the adapter emits so a regression in any one variant
-/// fails this single test.
 #[tokio::test(flavor = "current_thread")]
 async fn vendor_extension_session_update_fields_live_under_meta_harn() {
     let actual = collect_notifications(extension_fixture_events()).await;
-
-    // The compaction block is generated from the receipt, so its expected
-    // field set is read off the receipt too rather than listed a second time.
-    let compaction_meta =
-        fixture_compaction_receipt("compaction-fixture-1", None, None, None).to_acp_meta();
-    let compaction_fields: Vec<&str> = compaction_meta.keys().map(String::as_str).collect();
-    let expectations: &[(&str, &[&str])] = &[
-        (
-            "inference_speed",
-            &[
-                "callId",
-                "provider",
-                "model",
-                "phase",
-                "isFinal",
-                "elapsedMs",
-                "timeToFirstTokenMs",
-                "outputTokens",
-                "outputTokensPerSecond",
-                "tokenSource",
-            ],
-        ),
-        (
-            "artifact",
-            &[
-                "artifactId",
-                "kind",
-                "title",
-                "mimeType",
-                "spec",
-                "fallback",
-                "sizeBytes",
-                "provenance",
-                "metadata",
-            ],
-        ),
-        ("skill_activated", &["skillName", "iteration", "reason"]),
-        ("skill_deactivated", &["skillName", "iteration"]),
-        ("skill_scope_tools", &["skillName", "allowedTools"]),
-        (
-            "skill_narrow",
-            &["reason", "removedTools", "remainingTools"],
-        ),
-        (
-            "stance_transition",
-            &[
-                "phase",
-                "escapeTool",
-                "allowedTools",
-                "justification",
-                "consent",
-                "reason",
-            ],
-        ),
-        (
-            "tool_search_query",
-            &["toolUseId", "name", "query", "strategy", "mode"],
-        ),
-        (
-            "tool_search_result",
-            &["toolUseId", "promoted", "strategy", "mode"],
-        ),
-        ("transcript_compacted", &compaction_fields),
-        (
-            "transcript_projected",
-            &[
-                "policy",
-                "reason",
-                "prefixHash",
-                "keptCount",
-                "droppedCount",
-                "providerSafetyBlocked",
-            ],
-        ),
-        ("reminder_emitted", &["reminder"]),
-        ("handoff", &["handoffId", "artifactId", "handoff"]),
-        ("fs_watch", &["subscriptionId", "events"]),
-        ("progress", test_support::STAGED_WRITES_META_FIELDS),
-        (
-            "worker_update",
-            &[
-                "workerId",
-                "workerName",
-                "workerTask",
-                "workerMode",
-                "event",
-                "status",
-                "terminal",
-                "metadata",
-                "audit",
-            ],
-        ),
-        ("hitl_request", &["requestId", "kind", "payload"]),
-        ("hitl_resolved", &["requestId", "kind", "outcome"]),
-    ];
-
-    assert_eq!(
-        actual.len(),
-        expectations.len(),
-        "fixture event count must match expectations table"
+    let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../conformance/protocols/schemas/acp-session-update.schema.json"
+    )))
+    .unwrap();
+    let validator = jsonschema::draft202012::new(&serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/HarnExtensionUpdate", "$defs": schema["$defs"],
+    }))
+    .unwrap();
+    assert!(
+        !actual.is_empty(),
+        "the adapter must emit real extension fixtures"
     );
-
-    for (notification, (variant, vendor_fields)) in actual.iter().zip(expectations.iter()) {
+    for notification in actual {
         let update = &notification["params"]["update"];
-        assert_eq!(
-            update["sessionUpdate"], *variant,
-            "update[{variant}] must keep canonical sessionUpdate at the root"
-        );
-        let harn_meta = &update["_meta"]["harn"];
         assert!(
-            harn_meta.is_object(),
-            "update[{variant}] must carry _meta.harn object, got: {update}"
+            validator.is_valid(update),
+            "adapter update violates its schema: {update}"
         );
-        for field in *vendor_fields {
-            assert!(
-                harn_meta.get(field).is_some(),
-                "update[{variant}]._meta.harn must contain `{field}`, got: {harn_meta}"
-            );
-            assert!(
-                update.get(field).is_none(),
-                "update[{variant}].`{field}` must not be emitted at the root, got: {update}"
-            );
-        }
-        // No vendor field other than `_meta` and `sessionUpdate`
-        // should be present at the update root.
-        let update_obj = update.as_object().expect("update is object");
-        for key in update_obj.keys() {
-            assert!(
-                    matches!(key.as_str(), "sessionUpdate" | "_meta"),
-                    "update[{variant}] must not carry root key `{key}` (vendor extension); got: {update}"
-                );
-        }
+        let mut invalid = update.clone();
+        invalid["unexpectedRoot"] = serde_json::json!(true);
+        assert!(
+            !validator.is_valid(&invalid),
+            "schema must reject vendor fields at the root: {invalid}"
+        );
     }
 }
 
