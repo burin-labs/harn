@@ -10,7 +10,7 @@
 name: Merge override dispatch
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] calls only the pinned shared dispatcher, which reads the PR through the API and never checks out its code
     types: [labeled]
 
 permissions:
