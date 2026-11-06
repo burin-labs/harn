@@ -70,12 +70,12 @@ fn is_disallowed_ipv4(ip: Ipv4Addr, allow_loopback: bool) -> bool {
     if ip.is_unspecified() || ip.is_multicast() || ip.is_documentation() {
         return true;
     }
-    // Cloud-metadata endpoint (AWS / GCP / Azure all front this IP).
-    if ip.octets() == [169, 254, 169, 254] {
+    let [a, b, _, _] = ip.octets();
+    // "This network" (RFC 1122) covers the entire 0/8, not just 0.0.0.0.
+    if a == 0 {
         return true;
     }
     // Carrier-grade NAT (RFC 6598).
-    let [a, b, _, _] = ip.octets();
     if a == 100 && (64..=127).contains(&b) {
         return true;
     }
@@ -108,6 +108,10 @@ fn is_disallowed_ipv6(ip: Ipv6Addr, allow_loopback: bool) -> bool {
         return true;
     }
     let segments = ip.segments();
+    // Well-known NAT64 prefix can translate to otherwise refused IPv4 targets.
+    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        return true;
+    }
     // Link-local fe80::/10.
     if (segments[0] & 0xffc0) == 0xfe80 {
         return true;
@@ -390,6 +394,26 @@ mod tests {
         assert!(!is_disallowed_ip(v4("192.0.1.1"), false));
         assert!(!is_disallowed_ip(v4("192.88.98.1"), false));
         assert!(!is_disallowed_ip(v4("192.88.100.1"), false));
+    }
+
+    #[test]
+    fn ipv4_blocks_entire_this_network_range() {
+        for ip in ["0.1.2.3", "0.255.255.255"] {
+            for allow_loopback in [false, true] {
+                assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
+            }
+        }
+        assert!(!is_disallowed_ip(v4("1.0.0.0"), false));
+    }
+
+    #[test]
+    fn ipv6_blocks_well_known_nat64_range() {
+        for ip in ["64:ff9b::7f00:1", "64:ff9b::808:808"] {
+            for allow_loopback in [false, true] {
+                assert!(is_disallowed_ip(v4(ip), allow_loopback), "{ip}");
+            }
+        }
+        assert!(!is_disallowed_ip(v4("64:ff9b:1::808:808"), false));
     }
 
     #[test]

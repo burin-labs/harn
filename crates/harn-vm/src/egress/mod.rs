@@ -374,10 +374,26 @@ pub fn register_egress_builtins(vm: &mut Vm) {
             let Some(VmValue::String(host)) = args.first() else {
                 return Err(vm_error("child_network_allow: requires a host string"));
             };
+            let port = match args.get(1) {
+                None | Some(VmValue::Nil) => None,
+                Some(VmValue::Int(port)) => Some(
+                    u16::try_from(*port)
+                        .ok()
+                        .filter(|port| *port != 0)
+                        .ok_or_else(|| {
+                            vm_error("child_network_allow: port must be an integer from 1 to 65535")
+                        })?,
+                ),
+                _ => {
+                    return Err(vm_error(
+                        "child_network_allow: port must be an integer from 1 to 65535",
+                    ))
+                }
+            };
             let granted = match crate::orchestration::current_execution_policy()
                 .and_then(|policy| policy.process_network_proxy)
             {
-                Some(proxy) => process_proxy::allow_child_network_host(proxy, host)
+                Some(proxy) => process_proxy::allow_child_network_host(proxy, host, port)
                     .map_err(|error| vm_error(format!("child_network_allow: {error}")))?,
                 None => false,
             };
