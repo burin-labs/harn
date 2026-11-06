@@ -14,7 +14,14 @@ const target = '3'.repeat(40);
 const candidate = '2'.repeat(40);
 const send = (value) => process.stdout.write(JSON.stringify(value));
 
-if (args[0] === 'run') {
+if (args[0] === 'pr' && args[1] === 'list') {
+  send(scenario === 'existing_open' ? [{
+    number: 42,
+    headRefName: `ci/shared-pin-bump/${'4'.repeat(40)}-${old}`,
+    baseRefName: 'main',
+    headRepository: { nameWithOwner: 'burin-labs/harn' },
+  }] : []);
+} else if (args[0] === 'run') {
   send(scenario === 'waiting' && args.includes('waiting') ? [{ databaseId: 7 }] : []);
 } else if (args[0] !== 'api') {
   throw new Error('unexpected gh command');

@@ -158,7 +158,7 @@ pub fn release_gate(request: Request, running: list<string>) -> string? {
   return "a release run is active or queued (" + join(running, ", ")
     + "), so the release-path bump to "
     + request.sha
-    + " waits for the next owner change"
+    + " waits for the next dispatcher retry"
 }
 
 pub fn pr_title(sha: string) -> string {

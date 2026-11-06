@@ -35,6 +35,15 @@ type PullRequest = {number: int, body: string?, labels: list<Label>}
 
 type PullRequests = list<PullRequest>
 
+type OpenPullRequest = {
+  number: int,
+  headRefName: string,
+  baseRefName: string,
+  headRepository: {nameWithOwner: string}?,
+}
+
+type OpenPullRequests = list<OpenPullRequest>
+
 type Repository = {default_branch: string}
 
 type GitRef = {object: {sha: string}}
@@ -145,6 +154,38 @@ fn running_releases(gh: Gh, repo: string, workflows: list<string>) -> list<strin
     }
   }
   return running
+}
+
+fn open_pin_reviews(gh: Gh, repo: string, default_branch: string) -> list<int> {
+  const pulls = schema_expect(
+    gh.json(
+      [
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--limit",
+        "101",
+        "--json",
+        "number,headRefName,headRepository,baseRefName",
+      ],
+    ),
+    schema_of(OpenPullRequests),
+  )
+  if len(pulls) >= 101 {
+    throw repo + " open pull request census reached its 101-item limit"
+  }
+  return pulls.filter(
+    { pull ->
+      pull.baseRefName == default_branch
+        && pull.headRepository?.nameWithOwner == repo
+        && regex_match("^ci/shared-pin-bump/[0-9a-f]{40}-[0-9a-f]{40}$", pull.headRefName) != nil
+    },
+  )
+    .map({ pull -> pull.number })
+    .to_list()
 }
 
 fn branch_head(gh: Gh, repo: string, branch: string) -> string? {
@@ -325,6 +366,13 @@ pub fn process_request(
     gh.json(["api", "repos/" + repo + "/git/ref/heads/" + default_branch]),
     schema_of(GitRef),
   ).object.sha
+  require_owner_ancestor(gh, request.sha, "main")
+  const open_reviews = open_pin_reviews(gh, repo, default_branch)
+  if len(open_reviews) > 0 {
+    return "found " + to_string(len(open_reviews)) + " open pull request #"
+      + join(open_reviews.map({ number -> to_string(number) }).to_list(), ", #")
+      + "; retry after review completes"
+  }
   const branch = branch_name(request.sha, main_sha)
   const head = branch_head(gh, repo, branch)
   const base = main_sha
@@ -346,7 +394,6 @@ pub fn process_request(
   if blocked != nil {
     throw "not updating the bump pull request: " + blocked
   }
-  require_owner_ancestor(gh, request.sha, "main")
   let checked: list<string> = []
   for ref in request.references {
     for old_sha in pin_shas(files, ref) {
