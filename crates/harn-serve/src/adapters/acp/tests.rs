@@ -170,6 +170,21 @@ async fn start_acp_channel_session_with_params(
     (request_tx, response_rx, server, session_id)
 }
 
+async fn negotiate_harn_updates(server: &mut AcpServer, rx: &mut mpsc::UnboundedReceiver<String>) {
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": {
+                "_meta": {"harn": {"sessionUpdateExtensions":
+                    ACP_SESSION_UPDATE_VARIANTS.iter()
+                        .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter()).collect::<Vec<_>>()
+                }}
+            }}
+        }))
+        .await;
+    assert!(recv_response_with_id(rx, 0).await.get("result").is_some());
+}
+
 async fn start_acp_code_session_with_config(
     config: AcpServerConfig,
     cwd: serde_json::Value,
@@ -689,6 +704,7 @@ async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together()
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    negotiate_harn_updates(&mut server, &mut rx).await;
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
