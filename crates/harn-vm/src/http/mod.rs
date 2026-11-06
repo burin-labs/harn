@@ -1038,6 +1038,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&HTTP_RESPONSE_JSON_IMPL_DEF);
     vm.register_builtin_def(&HTTP_RESPONSE_BYTES_IMPL_DEF);
     vm.register_builtin_def(&HTTP_HEADER_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_IS_DISALLOWED_HOST_IMPL_DEF);
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "http_response(status?: int, body?: any, headers?: dict) -> dict", category = "http")]
