@@ -2771,7 +2771,7 @@ jobs:
       - name: Check Dependabot config
         # Always-on delivery-policy gate owned by burin-labs/.github. Harn's
         # family-membership deepening stays in `make check-dependabot-groups`.
-        uses: burin-labs/.github/.github/actions/check-dependabot-config@afd182de69c70f74aef97e24b2ac12801983eec4
+        uses: burin-labs/.github/.github/actions/check-dependabot-config@8dafcca16b882ac2bddf14280bdd2707ca56c944
       - name: Check hosted runner labels
         # Always-on org gate: reject the floating latest-Ubuntu label, which
         # GitHub moves to a new image without a commit here. Router code that
