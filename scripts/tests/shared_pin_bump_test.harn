@@ -50,7 +50,7 @@ fn fake_github(scenario: string, repo: string = "burin-labs/harn") -> FakeGitHub
           return {success: false, stdout: "", stderr: "unreadable"}
         }
         const name = scenario == "hidden_release" ? "promote-release.yml" : scenario
-          == "host_release" ? "deploy.yml" : "ci.yml"
+          == "host_release" ? "deploy.yml" : scenario == "missing_release_file" ? "absent.yml" : "ci.yml"
         return {
           success: true,
           stdout: json_stringify({schema_version: 1, workflows: [name]}),
@@ -181,7 +181,7 @@ pipeline test_consumer_cli_publishes_only_a_measured_signed_candidate() {
     !unsigned.writes().any({ call -> call.ends_with("/git/refs") }),
     "unsigned commits never reach a ref",
   )
-  for scenario in ["truncated", "missing", "backwards", "missing_policy"] {
+  for scenario in ["truncated", "missing", "backwards", "missing_policy", "missing_release_file"] {
     const invalid = fake_github(scenario)
     assert_error_contains(
       fn() { process_request(
@@ -192,7 +192,8 @@ pipeline test_consumer_cli_publishes_only_a_measured_signed_candidate() {
         "run",
       ) },
       scenario == "truncated" ? "truncated" : scenario == "missing" ? "requested pins were not found" : scenario
-        == "missing_policy" ? "shared-pin-release-policy.json" : "not an ancestor",
+        == "missing_policy" ? "shared-pin-release-policy.json" : scenario
+        == "missing_release_file" ? "absent.yml" : "not an ancestor",
     )
     assert_eq(invalid.writes(), [])
   }
