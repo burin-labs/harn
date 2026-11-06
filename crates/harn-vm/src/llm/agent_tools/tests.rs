@@ -4,6 +4,7 @@
 //! loop.
 
 use super::*;
+use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 use crate::value::VmDictExt;
 
 use std::sync::atomic::AtomicBool;
@@ -102,8 +103,6 @@ fn denied_tool_result_includes_actionable_next_step() {
 // shown and only saw a bare "not permitted" denial.
 #[test]
 fn denied_tool_result_names_available_tools_under_policy() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec![
             "look".to_string(),
@@ -139,8 +138,6 @@ fn denied_tool_result_names_available_tools_under_policy() {
 // shape instead.
 #[test]
 fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
         ..Default::default()
@@ -171,8 +168,6 @@ fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
 // must name the embedded call and show the direct invocation.
 #[test]
 fn embedded_call_repair_names_the_inner_call() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     let args = serde_json::json!(
         "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
     );
@@ -202,8 +197,6 @@ fn embedded_call_repair_names_the_inner_call() {
 
 #[test]
 fn call_shaped_tool_name_gets_parse_repair_feedback() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -229,8 +222,6 @@ fn call_shaped_tool_name_gets_parse_repair_feedback() {
 
 #[test]
 fn malformed_call_shaped_tool_name_is_not_unknown_tool_feedback() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -253,8 +244,6 @@ fn malformed_call_shaped_tool_name_is_not_unknown_tool_feedback() {
 // that carrier. A single string-valued field carrier works the same way.
 #[test]
 fn embedded_call_repair_recovers_alternate_argument_carriers() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     push_execution_policy(CapabilityPolicy {
         tools: vec!["look".to_string(), "search".to_string()],
         ..Default::default()
@@ -288,8 +277,6 @@ fn embedded_call_repair_recovers_alternate_argument_carriers() {
 // embedded target outside the active policy's tool set.
 #[test]
 fn embedded_call_repair_rejects_ambiguous_payloads() {
-    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-
     let valid =
         serde_json::json!("<tool_call>\nlook({ file: \"a.rs\", intent: \"read\" })\n</tool_call>");
     push_execution_policy(CapabilityPolicy {
