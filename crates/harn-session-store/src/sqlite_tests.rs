@@ -7,6 +7,29 @@ use super::{write_transaction, StoreContention, StoreError};
 static IMMEDIATE_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 static DEFERRED_BUSY_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn read_only_store_distinguishes_first_initialization_from_an_old_schema() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("initializing.sqlite");
+    let held = crate::process_locks::register(&path);
+    let writer = Connection::open(&path).unwrap();
+    writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+    writer
+        .execute_batch("BEGIN IMMEDIATE; CREATE TABLE pending_schema (id INTEGER)")
+        .unwrap();
+    assert!(matches!(
+        super::SqliteSessionStore::open_read_only(&path),
+        Err(StoreError::Uninitialized)
+    ));
+    writer.execute_batch("COMMIT").unwrap();
+    assert!(matches!(
+        super::SqliteSessionStore::open_read_only(&path),
+        Err(StoreError::Backend(_))
+    ));
+    drop(writer);
+    drop(held);
+}
+
 #[tokio::test]
 async fn directory_metadata_survives_reopen_without_a_schema_upgrade() {
     use crate::{CreateSession, SessionStore, SqliteSessionStore, UpdateSession};

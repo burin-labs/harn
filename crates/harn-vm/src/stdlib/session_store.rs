@@ -419,9 +419,11 @@ fn open_read_store(state_dir: &SessionStoreDir) -> Result<StoreRead<SqliteSessio
     if !path.is_file() {
         return Ok(StoreRead::Absent);
     }
-    SqliteSessionStore::open_read_only_with_hooks(&path, store_hooks(Some(&path)))
-        .map(StoreRead::Present)
-        .map_err(store_error)
+    match SqliteSessionStore::open_read_only_with_hooks(&path, store_hooks(Some(&path))) {
+        Ok(store) => Ok(StoreRead::Present(store)),
+        Err(StoreError::Uninitialized) => Ok(StoreRead::Absent),
+        Err(error) => Err(store_error(error)),
+    }
 }
 
 async fn open_read_session(

@@ -544,6 +544,21 @@ fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    exposure = "pure",
+    sig = "render_stdlib_prompt(path: string, bindings?: dict) -> string",
+    category = "strings",
+    doc = "Render an embedded stdlib prompt asset. Includes remain inside the embedded catalog; filesystem paths are refused."
+)]
+fn render_stdlib_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|arg| arg.display()).unwrap_or_default();
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        &path,
+        args.get(1).and_then(VmValue::as_dict),
+    )
+    .map(VmValue::string)
+}
+
+#[harn_builtin(
     exposure = "runtime_internal",
     sig = "render_string(template: string, bindings?: dict) -> string",
     category = "strings"
@@ -753,6 +768,27 @@ fn word_wrap_str(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{dedent_str, word_wrap_str};
+
+    #[test]
+    fn stdlib_prompt_rendering_refuses_existing_files_and_unknown_assets() {
+        let template = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(template.path(), "filesystem template").unwrap();
+        for path in [
+            template.path().to_str().unwrap(),
+            "std/missing.harn.prompt",
+            "../../missing.harn.prompt",
+        ] {
+            let error = super::render_stdlib_prompt_impl(
+                &[super::VmValue::string(path)],
+                &mut String::new(),
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("unknown stdlib prompt asset"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn dedent_preserves_line_structure() {

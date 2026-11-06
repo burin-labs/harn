@@ -670,6 +670,15 @@ headerless clients can still use the in-band ACP `authenticate` method.
 
 ### Protocol overview
 
+Harn sends standard ACP session updates to every client. To receive Harn
+extension updates, list their exact kinds in
+`initialize.params.clientCapabilities._meta.harn.sessionUpdateExtensions`,
+for example `["log", "progress", "inference_speed"]`. An omitted, malformed,
+or empty list enables no extension updates. This also applies to replayed
+updates and the history kinds `user_message`, `session_redo`,
+`session_rollback`, and `session_truncated`. Standard updates, including
+`plan` and `available_commands_update`, require no Harn extension grant.
+
 The ACP server supports these JSON-RPC methods:
 
 | Method | Description |

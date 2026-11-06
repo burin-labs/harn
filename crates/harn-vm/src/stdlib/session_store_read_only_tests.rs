@@ -72,6 +72,20 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     assert!(durable_inventory(dir.path()).is_empty());
 
     let state_dir = SessionStoreDir::under_root(dir.path());
+    fs::create_dir_all(state_dir.as_path()).unwrap();
+    let writer = rusqlite::Connection::open(store_path(&state_dir)).unwrap();
+    drop(writer);
+    let before = durable_inventory(dir.path());
+    let list = session_store_list_impl(ctx(), vec![options.clone()])
+        .await
+        .unwrap();
+    assert_read_state(&list, "absent");
+    let events =
+        session_store_events_impl(ctx(), vec![VmValue::string("missing"), options.clone()])
+            .await
+            .unwrap();
+    assert_read_state(&events, "absent");
+    assert_eq!(durable_inventory(dir.path()), before);
     drop(open_store(&state_dir).unwrap());
     let before = durable_inventory(dir.path());
     let list = session_store_list_impl(ctx(), vec![options.clone()])
@@ -90,6 +104,15 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     assert!(session_store_list_impl(ctx(), vec![malformed])
         .await
         .is_err());
+    assert_eq!(durable_inventory(dir.path()), before);
+
+    let writer = rusqlite::Connection::open(store_path(&state_dir)).unwrap();
+    writer
+        .execute("UPDATE _harn_sqlite_schema_versions SET version = 5", [])
+        .unwrap();
+    drop(writer);
+    let before = durable_inventory(dir.path());
+    assert!(session_store_list_impl(ctx(), vec![options]).await.is_err());
     assert_eq!(durable_inventory(dir.path()), before);
 }
 

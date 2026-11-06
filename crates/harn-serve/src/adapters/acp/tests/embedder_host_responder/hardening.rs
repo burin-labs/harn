@@ -115,7 +115,6 @@ async fn reanchor_keeps_host_calls_and_filesystem_on_the_turn_root() {
         pending: Arc::default(),
         next_id_counter: AtomicU64::new(1),
         cancellation: SessionCancellation::default().prepare_prompt(),
-        script_name: Mutex::default(),
         assistant_state: Mutex::default(),
         host_responder: Some(FixtureBinder(Arc::default()).bind(&first_root).unwrap()),
     };

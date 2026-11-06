@@ -2,7 +2,11 @@ use super::*;
 
 impl AcpServer {
     pub(super) fn handle_initialize(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
-        self.client_capabilities = client_capabilities::ClientCapabilities::from_initialize(params);
+        *self
+            .client_capabilities
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) =
+            client_capabilities::ClientCapabilities::from_initialize(params);
         self.send_response(
             id,
             serde_json::json!({

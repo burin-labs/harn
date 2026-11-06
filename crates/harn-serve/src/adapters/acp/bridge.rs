@@ -61,6 +61,30 @@ pub enum AcpOutput {
 }
 
 impl AcpOutput {
+    pub(super) fn for_client(
+        self,
+        capabilities: Arc<std::sync::RwLock<client_capabilities::ClientCapabilities>>,
+    ) -> Self {
+        Self::callback(move |line| {
+            let Ok(frame) = serde_json::from_str::<serde_json::Value>(line) else {
+                return;
+            };
+            if frame["method"] == "session/update"
+                && !frame["params"]["update"]["sessionUpdate"]
+                    .as_str()
+                    .is_some_and(|kind| {
+                        capabilities
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .supports_session_update(kind)
+                    })
+            {
+                return;
+            }
+            self.write_line(line);
+        })
+    }
+
     /// Create an output sink that writes one JSON-RPC line per stdout line.
     pub fn stdout() -> Self {
         Self::Stdout(Arc::new(std::sync::Mutex::new(())))
@@ -188,8 +212,6 @@ pub(super) struct AcpBridge {
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     pub(super) next_id_counter: AtomicU64,
     pub(super) cancellation: Arc<PromptCancellation>,
-    /// Name of the currently executing Harn script (without .harn suffix).
-    pub(super) script_name: std::sync::Mutex<String>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,
     /// When set, answers host requests in-process instead of the client.
     pub(super) host_responder: Option<Arc<dyn super::HostResponder>>,
@@ -264,20 +286,6 @@ impl AcpBridge {
         );
     }
 
-    /// Send a canonical ACP `plan` update. Per ACP, each plan update is
-    /// a full replacement for the client's current plan state.
-    #[allow(dead_code)]
-    pub(super) fn send_plan(&self, entries: serde_json::Value) {
-        let update = acp_plan_update(entries);
-        self.send_notification(
-            "session/update",
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "update": update,
-            }),
-        );
-    }
-
     /// Send a structured `session/update` with log level, message, and
     /// fields. `log` is a harn vendor-extension; canonical ACP has no
     /// log channel on the session-update stream, so all vendor fields
@@ -309,20 +317,6 @@ impl AcpBridge {
                 "update": update,
             }),
         );
-    }
-
-    /// Set the currently executing script name (without .harn suffix).
-    pub(super) fn set_script_name(&self, name: &str) {
-        *self.script_name.lock().unwrap_or_else(|e| e.into_inner()) = name.to_string();
-    }
-
-    /// Get the current script name.
-    #[allow(dead_code)]
-    pub(super) fn get_script_name(&self) -> String {
-        self.script_name
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
     }
 
     /// Send a JSON-RPC request to the client and await the response.

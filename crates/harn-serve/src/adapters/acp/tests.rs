@@ -19,6 +19,7 @@ mod client_capabilities;
 mod provider_default_tests;
 mod replay_inputs;
 mod root_projection;
+mod update_negotiation;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -140,7 +141,10 @@ async fn start_acp_channel_session_with_params(
     request_tx
         .send(serde_json::json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
-            "params": {"protocolVersion": 1, "clientCapabilities": {"terminal": true}},
+            "params": {"protocolVersion": 1, "clientCapabilities": {"terminal": true,
+                "_meta": {"harn": {"sessionUpdateExtensions":
+                    ACP_SESSION_UPDATE_VARIANTS.iter().chain(HARN_SESSION_UPDATE_EXTENSIONS.iter()).collect::<Vec<_>>()}}
+            }},
         }))
         .expect("advertise test terminal support");
     assert!(recv_response_with_id(&mut response_rx, 0)
@@ -164,6 +168,21 @@ async fn start_acp_channel_session_with_params(
         .to_string();
 
     (request_tx, response_rx, server, session_id)
+}
+
+async fn negotiate_harn_updates(server: &mut AcpServer, rx: &mut mpsc::UnboundedReceiver<String>) {
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": {
+                "_meta": {"harn": {"sessionUpdateExtensions":
+                    ACP_SESSION_UPDATE_VARIANTS.iter()
+                        .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter()).collect::<Vec<_>>()
+                }}
+            }}
+        }))
+        .await;
+    assert!(recv_response_with_id(rx, 0).await.get("result").is_some());
 }
 
 async fn start_acp_code_session_with_config(
@@ -685,6 +704,7 @@ async fn acp_session_rollback_and_redo_move_transcript_and_filesystem_together()
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    negotiate_harn_updates(&mut server, &mut rx).await;
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",

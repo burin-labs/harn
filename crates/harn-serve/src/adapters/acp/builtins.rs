@@ -294,21 +294,35 @@ pub(super) async fn register_acp_builtins(
     });
 
     let b = bridge.clone();
-    vm.register_builtin("progress", move |args, _out| {
+    let progress = move |args: &[harn_vm::VmValue], _out: &mut String| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let progress_val = args.get(2).and_then(|a| a.as_int());
-        let total_val = args.get(3).and_then(|a| a.as_int());
-        let data = args.get(4).and_then(|a| {
-            if matches!(a, harn_vm::VmValue::Nil) {
-                None
-            } else {
-                Some(harn_vm::llm::vm_value_to_json(a))
-            }
+        let options = args.get(2).and_then(|value| value.as_dict());
+        let progress_val = args.get(2).and_then(|a| a.as_int()).or_else(|| {
+            options
+                .and_then(|options| options.get("current").or_else(|| options.get("step")))
+                .and_then(|value| value.as_int())
         });
+        let total_val = args.get(3).and_then(|a| a.as_int()).or_else(|| {
+            options
+                .and_then(|options| options.get("total"))
+                .and_then(|value| value.as_int())
+        });
+        let data = args
+            .get(4)
+            .or_else(|| options.and_then(|options| options.get("data")))
+            .and_then(|a| {
+                if matches!(a, harn_vm::VmValue::Nil) {
+                    None
+                } else {
+                    Some(harn_vm::llm::vm_value_to_json(a))
+                }
+            });
         b.send_progress(&phase, &message, progress_val, total_val, data);
         Ok(harn_vm::VmValue::Nil)
-    });
+    };
+    vm.register_builtin("progress", progress.clone());
+    vm.override_capability_method(harn_builtin_meta::CapabilityId::Stdio, "progress", progress);
 
     // Product paths call `harness.runtime.emit_response` after capability
     // migration. Without a typed override that path goes through `host/call`

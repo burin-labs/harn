@@ -549,13 +549,16 @@ impl AcpServer {
             ),
         ));
         let bridge = Arc::new(AcpBridge {
-            client_capabilities: self.client_capabilities.clone(),
+            client_capabilities: self
+                .client_capabilities
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
             session_id: session_id.clone(),
             output: output.clone(),
             pending: self.pending.clone(),
             next_id_counter: AtomicU64::new(self.next_id.fetch_add(1000, Ordering::SeqCst)),
             cancellation: cancellation.clone(),
-            script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
             host_responder,
         });

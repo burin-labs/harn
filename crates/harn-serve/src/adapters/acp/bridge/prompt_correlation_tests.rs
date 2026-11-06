@@ -107,7 +107,6 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         pending: pending.clone(),
         next_id_counter: AtomicU64::new(first_id),
         cancellation: SessionCancellation::default().prepare_prompt(),
-        script_name: std::sync::Mutex::new(String::new()),
         assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         host_responder: None,
     };

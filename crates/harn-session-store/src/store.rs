@@ -378,6 +378,8 @@ impl std::fmt::Display for StoreContention {
 /// Errors returned by every backend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
+    /// A valid database has no committed application schema yet.
+    Uninitialized,
     NotFound(String),
     AlreadyExists(String),
     Conflict(String),
@@ -410,6 +412,7 @@ pub enum StoreError {
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Uninitialized => f.write_str("store has no committed schema"),
             Self::NotFound(message) => write!(f, "not found: {message}"),
             Self::AlreadyExists(message) => write!(f, "already exists: {message}"),
             Self::Conflict(message) => write!(f, "conflict: {message}"),

@@ -128,6 +128,7 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
         StoreError::SchemaIncompatible { .. } => {
             (StatusCode::INTERNAL_SERVER_ERROR, "schema_incompatible")
         }
+        StoreError::Uninitialized => (StatusCode::SERVICE_UNAVAILABLE, "store_uninitialized"),
         StoreError::Backend(_) => (StatusCode::INTERNAL_SERVER_ERROR, "backend_error"),
     };
     (

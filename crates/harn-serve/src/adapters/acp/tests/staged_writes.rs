@@ -22,6 +22,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
     let discarded_file = dir.path().join("discard.txt");
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    negotiate_harn_updates(&mut server, &mut rx).await;
 
     let created = request_json(
         &mut server,
