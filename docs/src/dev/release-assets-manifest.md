@@ -69,11 +69,11 @@ may ignore that extra binary unless they are assembling the container
 root filesystem.
 
 Each release also publishes `harn-<triple>.tar.gz` for the four macOS and Linux
-targets: the same contents as the `.tar.xz` archive, for the ACP Agent Registry,
-which cannot unpack `.tar.xz`. Only `spec/acp-registry/harn/agent.json` names
-them. They are not in `release-assets.json` or `SHA256SUMS`; installers must
-not use them. They are listed in the candidate manifest so promotion attests
-and publishes them with the other release files.
+targets, with the same contents as the `.tar.xz` archive. The ACP Agent Registry
+and older Harn updaters consume these copies. Candidate assembly generates
+`SHA256SUMS` from all nine runtime archive records, including the gzip copies.
+The candidate manifest and signed release-file provenance bind those same
+digests. Current consumers continue to select XZ through `release-assets.json`.
 
 Generated Agents API SDK clients are a separate release contract. They are
 not entries in `release-assets.json`. Downstream SDK repositories pin a

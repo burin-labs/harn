@@ -23,10 +23,16 @@ fail() {
   exit 1
 }
 
-mkdir -p "$tmp/archives" "$tmp/receipts" "$tmp/files"
+mkdir -p "$tmp/archives" "$tmp/receipts" "$tmp/files" "$tmp/payload"
 for target in $(candidate_archive_expected_targets_json | jq -r '.[]'); do
   archive="$(archive_for_target "$target")"
-  printf 'archive bytes for %s\n' "$target" > "$tmp/archives/$archive"
+  printf 'binary for %s\n' "$target" > "$tmp/payload/harn"
+  if [[ "$archive" == *.zip ]]; then
+    cp "$tmp/payload/harn" "$tmp/payload/harn.exe"
+    (cd "$tmp/payload" && zip -q "$tmp/archives/$archive" harn.exe)
+  else
+    tar -C "$tmp/payload" -cf - harn | xz -6 > "$tmp/archives/$archive"
+  fi
   signing=not_applicable
   notarization=not_applicable
   if [[ "$target" == *-apple-darwin ]]; then
@@ -46,12 +52,13 @@ for target in $(candidate_archive_expected_targets_json | jq -r '.[]'); do
     --run-id "$run_id" \
     --run-attempt "$run_attempt" >/dev/null
 done
-printf 'abc  harn-x86_64-unknown-linux-gnu.tar.xz\n' > "$tmp/files/SHA256SUMS"
+for archive in "${EXPECTED_RELEASE_ARCHIVES[@]}"; do
+  printf '%s  %s\n' "$(sha256_file "$tmp/archives/$archive")" "$archive"
+done > "$tmp/files/SHA256SUMS"
+[[ "$(wc -l < "$tmp/files/SHA256SUMS" | tr -d ' ')" == 5 ]] || fail 'legacy checksum fixture is not five-only'
 printf '{"assets":[]}\n' > "$tmp/files/release-assets.json"
 printf '## v1.2.3\n\nNotes.\n' > "$tmp/files/release-notes.md"
-for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
-  printf 'gzip copy %s\n' "$gz" > "$tmp/files/$gz"
-done
+"$root/scripts/build_acp_registry_archives.sh" --archives-dir "$tmp/archives" --output-dir "$tmp/files"
 
 assemble() {
   local output=$1
@@ -81,6 +88,22 @@ expect_refusal() {
 
 manifest="$tmp/candidate-manifest.json"
 assemble "$manifest" >/dev/null
+[[ "$(wc -l < "$tmp/files/SHA256SUMS" | tr -d ' ')" == 9 ]] || fail 'published runtime checksum census is incomplete'
+mkdir "$tmp/verified"
+cp "$tmp/archives/"harn-* "$tmp/files/"harn-* "$tmp/verified/"
+checksum_command=(shasum -a 256 -c)
+if command -v sha256sum >/dev/null; then checksum_command=(sha256sum -c); fi
+(cd "$tmp/verified" && "${checksum_command[@]}" "$tmp/files/SHA256SUMS") >/dev/null \
+  || fail 'generated runtime checksums do not verify the actual archives'
+for archive in "${EXPECTED_RELEASE_ARCHIVES[@]}" "${ACP_REGISTRY_ARCHIVES[@]}"; do
+  expected="$(awk -v archive="$archive" '$2 == archive {print $1}' "$tmp/files/SHA256SUMS")"
+  [[ "$expected" == "$(sha256_file "$tmp/verified/$archive")" ]] || fail "missing or wrong checksum for $archive"
+done
+printf 'substituted\n' >> "$tmp/verified/${ACP_REGISTRY_ARCHIVES[0]}"
+if (cd "$tmp/verified" && "${checksum_command[@]}" "$tmp/files/SHA256SUMS") > "$tmp/tampered.out" 2>&1; then
+  fail 'generated checksums accepted a changed compatibility archive'
+fi
+grep -Fq "${ACP_REGISTRY_ARCHIVES[0]}: FAILED" "$tmp/tampered.out" || fail 'tamper control did not reach gzip verification'
 jq -e \
   --arg schema "$CANDIDATE_MANIFEST_SCHEMA" \
   --arg repository "$repository" \
@@ -113,6 +136,8 @@ jq -e \
 recorded="$(jq -r '.artifacts[] | select(.file == "release-notes.md") | .sha256' "$manifest")"
 [[ "$recorded" == "$(sha256_file "$tmp/files/release-notes.md")" ]] \
   || fail "release notes digest is not the file's digest"
+recorded="$(jq -r '.artifacts[] | select(.file == "SHA256SUMS") | .sha256' "$manifest")"
+[[ "$recorded" == "$(sha256_file "$tmp/files/SHA256SUMS")" ]] || fail 'provenance does not bind the complete checksum manifest'
 predicate="$tmp/release-files-provenance.json"
 bash "$root/scripts/release_files_provenance.sh" "$manifest" 0.10.182 > "$predicate"
 jq -e --slurpfile manifest "$manifest" '
@@ -171,18 +196,20 @@ FILES="$tmp/files-no-gz" expect_refusal \
   "assembler wrote a manifest without every ACP registry archive" \
   "$tmp/missing-gz.json" assemble "$tmp/missing-gz.json"
 
+cp -R "$tmp/files" "$tmp/files-unknown"
+cp "$tmp/files/${ACP_REGISTRY_ARCHIVES[0]}" "$tmp/files-unknown/harn-unknown.tar.gz"
+FILES="$tmp/files-unknown" expect_refusal \
+  "assembler omitted an unknown published runtime archive" \
+  "$tmp/unknown-gz.json" assemble "$tmp/unknown-gz.json"
+grep -Fq 'runtime archive files differ from the candidate records' "$tmp/refusal.out" \
+  || fail 'unknown archive control did not reach the runtime census'
+
 # The gzip copies are the xz archives' own tar streams.
-acp_in="$tmp/acp-in"
-mkdir -p "$acp_in/payload"
-printf 'binary\n' > "$acp_in/payload/harn"
 for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
-  tar -C "$acp_in/payload" -cf - harn | xz -6 > "$acp_in/${gz%.tar.gz}.tar.xz"
-done
-"$root/scripts/build_acp_registry_archives.sh" --archives-dir "$acp_in" --output-dir "$tmp/acp-out"
-for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
-  cmp <(tar -xOzf "$tmp/acp-out/$gz" harn) "$acp_in/payload/harn" \
+  cmp <(tar -xOzf "$tmp/files/$gz" harn) \
+    <(printf 'binary for %s\n' "$(target_for_archive "${gz%.tar.gz}.tar.xz")") \
     || fail "$gz does not carry the xz archive's contents"
-  cmp <(xz -dc "$acp_in/${gz%.tar.gz}.tar.xz") <(gzip -dc "$tmp/acp-out/$gz") \
+  cmp <(xz -dc "$tmp/archives/${gz%.tar.gz}.tar.xz") <(gzip -dc "$tmp/files/$gz") \
     || fail "$gz is not the xz archive's tar stream"
 done
 if "$root/scripts/build_acp_registry_archives.sh" --archives-dir "$tmp/archives-none" --output-dir "$tmp/acp-none" 2>/dev/null; then

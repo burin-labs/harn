@@ -26,10 +26,9 @@ EXPECTED_RELEASE_ARCHIVES=(
 )
 
 # The ACP agent registry installs only .zip/.tar.gz/.tar.bz2/.tgz archives, so
-# spec/acp-registry/harn/agent.json is the sole consumer of these gzip copies of
-# the unix .tar.xz archives. Installers, `harn upgrade`, SHA256SUMS and
-# release-assets.json never name them. Delete this list and
-# scripts/build_acp_registry_archives.sh once the registry accepts .tar.xz.
+# older updaters also consume these gzip copies of the unix .tar.xz archives.
+# They share SHA256SUMS and candidate provenance with the canonical archives;
+# release-assets.json continues to select XZ for current consumers.
 ACP_REGISTRY_ARCHIVES=(
   harn-aarch64-apple-darwin.tar.gz
   harn-aarch64-unknown-linux-gnu.tar.gz
