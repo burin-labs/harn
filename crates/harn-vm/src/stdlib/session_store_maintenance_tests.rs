@@ -110,8 +110,7 @@ async fn transient_spend_operations_notify_without_starting_watchers() {
         .await
         .expect("record spend");
     assert_eq!(
-        rx.recv_timeout(std::time::Duration::from_secs(3))
-            .expect("committed update reaches the observer"),
+        harn_clock::test_support::recv_within("committed spend update reaches the observer", &rx),
         1_250_000
     );
     assert_eq!(
