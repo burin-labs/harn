@@ -3281,13 +3281,5 @@
     "owner": "__tool_surface_record_boundary",
     "evidence": "Explicit skill activation records a derived full-surface decision through the same identity projection, without interpreting configuration at the forwarding site.",
     "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_record_boundary", "parameter": "opts"}]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_post_turn.harn",
-    "expression": "__agent_reopen_tool_surface(harness.agent, session, updated_opts)",
-    "owner": "__agent_reopen_tool_surface",
-    "evidence": "A successful explicit load_skill reopens the derived surface through the same session-aware owner used for matched activation. The owner retains an independently bound AgentSpec parameter and identity return.",
-    "consumers": [{"scope": "AgentSpec", "function": "__agent_reopen_tool_surface", "parameter": "opts"}]
   }
 ]
