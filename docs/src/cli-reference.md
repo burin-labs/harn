@@ -4372,6 +4372,16 @@ is preserved and rewrites internally to `harn serve a2a <file>`. The listener
 binds to `127.0.0.1:8080` by default; use `--bind 0.0.0.0:PORT` only with
 explicit auth and TLS or a trusted edge proxy.
 
+Send `A2A-Version: 1.0` on discovery and JSON-RPC requests to use the 1.0
+interface. It supports `SendMessage`, `SendStreamingMessage`, `GetTask`,
+`ListTasks`, `CancelTask`, `SubscribeToTask`, and `GetExtendedAgentCard`, with 1.0 message
+parts, roles, task states, and stream response unions. Subscriptions to terminal
+tasks are refused. Task continuation and push configuration are
+not supported on this interface. Missing or empty version headers select 0.3;
+the REST routes remain 0.3. Unsupported versions are refused before dispatch.
+`ListTasks` filters the authenticated caller's tasks by context, state, and status
+timestamp, with cursor pagination and optional history and artifacts.
+
 `harn serve acp` starts the packaged ACP adapter on stdio for editor and IDE
 hosts. Pass `--transport websocket` to expose the same single-connection ACP
 session server at `--bind` and `--path` instead. It creates ACP sessions,

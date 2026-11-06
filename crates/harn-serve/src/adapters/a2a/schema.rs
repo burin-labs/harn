@@ -101,7 +101,46 @@ impl A2aServer {
     }
 }
 
-pub(super) fn publish_locked(task: &mut TaskState, event: JsonValue) {
+pub(super) fn publish_locked(task: &mut TaskState, mut event: JsonValue) {
+    let context = task.context_id.as_deref().unwrap_or(&task.id);
+    event["contextId"] = json!(context);
+    match event
+        .get("type")
+        .or_else(|| event.get("kind"))
+        .and_then(JsonValue::as_str)
+    {
+        Some("status" | "status-update") => {
+            task.status_updated_at = Some(current_timestamp_rfc3339());
+            event["kind"] = json!("status-update");
+            event["final"] = json!(task.status.is_terminal());
+            if event["status"]["state"] == "cancelled" {
+                event["status"]["state"] = json!("canceled");
+            }
+            if let Some(message) = event["status"].get_mut("message") {
+                canonical_message(message, &task.id, context);
+            }
+        }
+        Some("message") => {
+            let mut message = event["message"].clone();
+            canonical_message(&mut message, &task.id, context);
+            event["message"] = message.clone();
+            event
+                .as_object_mut()
+                .expect("message event")
+                .extend(message.as_object().expect("message object").clone());
+        }
+        _ if event.get("artifact").is_some() => {
+            event["kind"] = json!("artifact-update");
+            canonical_parts(&mut event["artifact"]["parts"]);
+        }
+        _ => {
+            let data = event.clone();
+            event["kind"] = json!("message");
+            event["messageId"] = json!(Uuid::now_v7().to_string());
+            event["role"] = json!("agent");
+            event["parts"] = json!([{"kind":"data", "data":data}]);
+        }
+    }
     task.events.push(event.clone());
     task.subscribers.retain(|tx| {
         tx.unbounded_send(wrap_event(JsonValue::Null, event.clone()))
@@ -117,31 +156,81 @@ pub(super) fn wrap_event(rpc_id: JsonValue, event: JsonValue) -> JsonValue {
 }
 
 pub(super) fn task_to_json(task: &TaskState) -> JsonValue {
+    task_to_json_versioned(task, harn_vm::a2a::A2aWireVersion::V0_3)
+}
+
+pub(super) fn task_to_json_versioned(
+    task: &TaskState,
+    version: harn_vm::a2a::A2aWireVersion,
+) -> JsonValue {
+    let context = task.context_id.as_deref().unwrap_or(&task.id);
     let history = task
         .history
         .iter()
         .map(|message| {
-            json!({
+            let mut value = json!({
                 "id": message.id,
                 "role": message.role,
                 "parts": message.parts,
-            })
+            });
+            canonical_message(&mut value, &task.id, context);
+            value
         })
         .collect::<Vec<_>>();
     let mut value = json!({
+        "kind": "task",
         "id": task.id,
-        "status": {"state": task.status.as_str()},
+        "contextId": context,
+        "status": {"state": if task.status == TaskStatus::Cancelled { "canceled" } else { task.status.as_str() }},
         "history": history,
         "artifacts": task.artifacts.clone(),
     });
-    if let Some(context_id) = task.context_id.as_ref() {
-        value["contextId"] = JsonValue::String(context_id.clone());
+    if !version.is_legacy() {
+        if let Some(timestamp) = &task.status_updated_at {
+            value["status"]["timestamp"] = json!(timestamp);
+        }
+    }
+    if let Some(artifacts) = value["artifacts"].as_array_mut() {
+        for artifact in artifacts {
+            canonical_parts(&mut artifact["parts"]);
+        }
     }
     if !task.metadata.is_empty() {
         value["metadata"] = serde_json::to_value(&task.metadata)
             .unwrap_or_else(|_| JsonValue::Object(Default::default()));
     }
-    value
+    if version.is_legacy() {
+        value
+    } else {
+        super::wire::encode_task(&value, None)
+    }
+}
+
+fn canonical_parts(parts: &mut JsonValue) {
+    if let Some(parts) = parts.as_array_mut() {
+        for part in parts {
+            if part_kind(part) == Some("data")
+                && part.get("data").is_some_and(|data| !data.is_object())
+            {
+                let metadata = part.get("metadata").cloned();
+                *part = json!({"kind":"text", "type":"text", "text":part["data"].to_string(), "mediaType":"application/json"});
+                if let Some(metadata) = metadata {
+                    part["metadata"] = metadata;
+                }
+            }
+            if let Some(kind) = part_kind(part).map(str::to_owned) {
+                part["kind"] = json!(kind);
+            }
+        }
+    }
+}
+
+fn canonical_message(message: &mut JsonValue, task_id: &str, context: &str) {
+    message["kind"] = json!("message");
+    message["messageId"] = message["id"].clone();
+    message["taskId"] = json!(task_id);
+    message["contextId"] = json!(context);
+    canonical_parts(&mut message["parts"]);
 }
 
 pub(super) fn handoff_task_metadata(
@@ -259,33 +348,6 @@ pub(super) fn supported_wire_version() -> &'static str {
     A2A_PROTOCOL_VERSION
         .rsplit_once('.')
         .map_or(A2A_PROTOCOL_VERSION, |(version, _)| version)
-}
-
-pub(super) fn accepts_version_header(headers: &HeaderMap) -> bool {
-    let all_values = headers.get_all(A2A_VERSION_HEADER);
-    let mut values = all_values.iter();
-    let Some(value) = values.next() else {
-        return true;
-    };
-    if values.next().is_some() {
-        return false;
-    }
-    let Ok(value) = value.to_str() else {
-        return false;
-    };
-    let value = value.trim();
-    if value.is_empty() {
-        return true;
-    }
-    let parts: Vec<_> = value.split('.').collect();
-    if !(2..=3).contains(&parts.len())
-        || parts
-            .iter()
-            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return false;
-    }
-    format!("{}.{}", parts[0], parts[1]) == supported_wire_version()
 }
 
 pub(super) fn return_immediately(params: &JsonValue) -> bool {

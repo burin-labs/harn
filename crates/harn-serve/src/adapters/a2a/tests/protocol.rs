@@ -202,7 +202,7 @@ async fn a2a_version_header_rejects_unsupported_versions_before_dispatch() {
     let query_result: JsonValue = serde_json::from_slice(&query_body).unwrap();
     assert_eq!(query_result["result"]["status"]["state"], "completed");
     let task_count = server.tasks.lock().unwrap().len();
-    for header_value in ["1.0", "9.9.9", "garbage", "0.3.", "0.3.+1"] {
+    for header_value in ["1.1", "9.9.9", "garbage", "0.3.", "0.3.+1"] {
         let response = router
             .clone()
             .oneshot(
@@ -227,13 +227,13 @@ async fn a2a_version_header_rejects_unsupported_versions_before_dispatch() {
         );
         assert_eq!(
             value["error"]["data"][0]["metadata"]["supportedVersions"],
-            "0.3"
+            "0.3,1.0"
         );
         assert_eq!(server.tasks.lock().unwrap().len(), task_count);
     }
     for uri in [
-        "/?A2A-Version=1.0",
-        "/?a2a-version=1%2E0",
+        "/?A2A-Version=1.1",
+        "/?a2a-version=1%2E1",
         "/?A2A-Version=0.3&A2A-Version=1.0",
     ] {
         let response = router
@@ -559,7 +559,7 @@ async fn rest_v1_full_task_lifecycle_uses_canonical_paths() {
         .expect("body");
     let cancelled: JsonValue = serde_json::from_slice(&bytes).expect("task json");
     assert_eq!(cancelled["id"], task_id);
-    assert_eq!(cancelled["status"]["state"], "cancelled");
+    assert_eq!(cancelled["status"]["state"], "canceled");
 
     // POST /v1/tasks/{id}:subscribe — empty resubscribe yields an SSE
     // stream; we just validate the content-type since the task is

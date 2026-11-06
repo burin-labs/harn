@@ -250,6 +250,8 @@ pub(super) fn generate_manifest_with_vocabularies(
         },
         "a2a": {
             "protocolVersion": A2A_PROTOCOL_VERSION,
+            "jsonRpcVersions": [{"protocolVersion": "0.3", "methods": A2A_METHODS},
+                {"protocolVersion": "1.0", "methods": harn_serve::adapters::a2a::a2a_v1_jsonrpc_methods()}],
             "methods": A2A_METHODS,
             "taskStates": A2A_TASK_STATES,
             "taskEventTypes": A2A_TASK_EVENT_TYPES,
@@ -364,6 +366,8 @@ pub(super) fn generate_readme() -> String {
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\
            profile (`{ACP_SCHEMA_COMPATIBILITY}`).\n\
          - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{A2A_PROTOCOL_VERSION}`).\n\
+         - `schemas/a2a-1.0.1.schema.json`: self-contained JSON shape schemas generated\n\
+           from the upstream A2A 1.0.1 protobuf contract.\n\
          - `schemas/mcp-2026-07-28.schema.json`: Harn's stable MCP schema profile\n\
            (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\

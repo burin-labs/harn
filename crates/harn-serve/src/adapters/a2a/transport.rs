@@ -84,6 +84,24 @@ impl A2aServer {
         auth: AuthRequest,
         public_url: &str,
     ) -> ProcessedRpc {
+        self.process_rpc_versioned(
+            request,
+            auth,
+            public_url,
+            harn_vm::a2a::A2aWireVersion::V0_3,
+            None,
+        )
+        .await
+    }
+
+    pub(super) async fn process_rpc_versioned(
+        self: Arc<Self>,
+        request: JsonValue,
+        auth: AuthRequest,
+        public_url: &str,
+        version: harn_vm::a2a::A2aWireVersion,
+        listing: Option<super::wire::ListQuery>,
+    ) -> ProcessedRpc {
         let rpc_id = request.get("id").cloned().unwrap_or(JsonValue::Null);
         let method = request
             .get("method")
@@ -95,6 +113,27 @@ impl A2aServer {
             Ok(principal) => principal,
             Err(processed) => return processed,
         };
+        if !version.is_legacy()
+            && matches!(method, "tasks/get" | "tasks/cancel" | "tasks/resubscribe")
+            && !task_id_param(&params).is_some_and(|id| {
+                self.tasks
+                    .lock()
+                    .expect("tasks poisoned")
+                    .get(id)
+                    .is_some_and(|task| task.visible_to(principal.as_ref()))
+            })
+        {
+            return ProcessedRpc {
+                outcome: RpcOutcome::Json(error_response(
+                    rpc_id,
+                    A2A_TASK_NOT_FOUND,
+                    "Task not found",
+                )),
+                deprecation: None,
+                status: None,
+                auth_challenge: None,
+            };
+        }
         let (outcome, deprecation) = match method {
             "message/send" | "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
                 let deprecation = match method {
@@ -110,11 +149,14 @@ impl A2aServer {
                 } else {
                     !return_immediately(&params)
                 };
-                match self.prepare_task(&params, auth).await {
+                match self.prepare_task(&params, auth, principal.as_ref()).await {
                     Ok(task) if wait => {
                         self.run_task_to_completion(&task).await;
                         (
-                            RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task.id))),
+                            RpcOutcome::Json(task_rpc_response(
+                                &rpc_id,
+                                self.task_json_versioned(&task.id, version),
+                            )),
                             deprecation,
                         )
                     }
@@ -125,7 +167,10 @@ impl A2aServer {
                             server.run_task_to_completion(&task).await;
                         });
                         (
-                            RpcOutcome::Json(task_rpc_response(&rpc_id, self.task_json(&task_id))),
+                            RpcOutcome::Json(task_rpc_response(
+                                &rpc_id,
+                                self.task_json_versioned(&task_id, version),
+                            )),
                             deprecation,
                         )
                     }
@@ -141,9 +186,21 @@ impl A2aServer {
                     }
                     _ => None,
                 };
-                match self.prepare_task(&params, auth).await {
+                match self.prepare_task(&params, auth, principal.as_ref()).await {
                     Ok(task) => {
-                        let rx = self.subscribe(&task.id).unwrap_or_else(empty_stream);
+                        let rx = match self.subscribe_task(&task.id, version) {
+                            Ok(receiver) => receiver,
+                            Err(_) => {
+                                return prepare_error_to_processed(
+                                    A2aPrepareError::new(
+                                        -32603,
+                                        "Prepared task subscription unavailable",
+                                    ),
+                                    rpc_id,
+                                    deprecation,
+                                )
+                            }
+                        };
                         let server = self.clone();
                         tokio::spawn(async move {
                             server.run_task_to_completion(&task).await;
@@ -159,9 +216,20 @@ impl A2aServer {
                 let deprecation = (method == "a2a.ResubscribeTask")
                     .then_some("Use A2A 0.3.0 method `tasks/resubscribe`.");
                 let task_id = task_id_param(&params);
-                match task_id.and_then(|id| self.subscribe(id)) {
-                    Some(rx) => (RpcOutcome::Sse(rx), deprecation),
-                    None => (
+                match task_id
+                    .ok_or(super::tasks::TaskAccessError::NotFound)
+                    .and_then(|id| self.subscribe_task(id, version))
+                {
+                    Ok(rx) => (RpcOutcome::Sse(rx), deprecation),
+                    Err(super::tasks::TaskAccessError::Terminal) => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            super::wire::UNSUPPORTED_OPERATION,
+                            "Cannot subscribe to a terminal task",
+                        )),
+                        deprecation,
+                    ),
+                    Err(super::tasks::TaskAccessError::NotFound) => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
                             A2A_TASK_NOT_FOUND,
@@ -175,7 +243,7 @@ impl A2aServer {
                 let deprecation =
                     (method == "a2a.GetTask").then_some("Use A2A 0.3.0 method `tasks/get`.");
                 let task_id = task_id_param(&params);
-                match task_id.map(|id| self.task_json(id)) {
+                match task_id.map(|id| self.task_json_versioned(id, version)) {
                     Some(JsonValue::Null) | None => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
@@ -194,12 +262,23 @@ impl A2aServer {
                 let deprecation =
                     (method == "a2a.CancelTask").then_some("Use A2A 0.3.0 method `tasks/cancel`.");
                 let task_id = task_id_param(&params);
-                match task_id.and_then(|id| self.cancel_task(id).ok()) {
-                    Some(task) => (
+                match task_id
+                    .ok_or(super::tasks::TaskAccessError::NotFound)
+                    .and_then(|id| self.cancel_task_versioned(id, version))
+                {
+                    Ok(task) => (
                         RpcOutcome::Json(task_rpc_response(&rpc_id, task)),
                         deprecation,
                     ),
-                    None => (
+                    Err(super::tasks::TaskAccessError::NotFound) if !version.is_legacy() => (
+                        RpcOutcome::Json(error_response(
+                            rpc_id,
+                            A2A_TASK_NOT_FOUND,
+                            "Task not found",
+                        )),
+                        deprecation,
+                    ),
+                    Err(_) => (
                         RpcOutcome::Json(error_response(
                             rpc_id,
                             A2A_TASK_NOT_CANCELABLE,
@@ -209,6 +288,15 @@ impl A2aServer {
                     ),
                 }
             }
+            "tasks/list" if !version.is_legacy() => (
+                RpcOutcome::Json(task_rpc_response(
+                    &rpc_id,
+                    listing
+                        .expect("typed A2A 1.0 listing")
+                        .execute(&self, principal.as_ref()),
+                )),
+                None,
+            ),
             "a2a.ListTasks" | "tasks/list" => (
                 RpcOutcome::Json(task_rpc_response(&rpc_id, self.list_tasks())),
                 Some("`tasks/list` is a Harn compatibility method and is not part of A2A 0.3.0."),
@@ -407,8 +495,21 @@ async fn version_query_header(
     next.run(request).await
 }
 
-pub(super) async fn agent_card_request(State(state): State<HttpState>) -> Response {
-    Json(state.server.agent_card(&state.public_url)).into_response()
+pub(super) async fn agent_card_request(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = unsupported_version_response(&headers, None, true) {
+        return response;
+    }
+    let mut card = state.server.agent_card(&state.public_url);
+    if super::wire::requested_version(&headers) == Some(harn_vm::a2a::A2aWireVersion::V1_0) {
+        super::wire::encode_card(&mut card);
+        if let Some(secret) = state.server.card_signing_secret.as_deref() {
+            sign_card(&mut card, secret);
+        }
+    }
+    Json(card).into_response()
 }
 
 pub(super) async fn jsonrpc_request(
@@ -417,7 +518,7 @@ pub(super) async fn jsonrpc_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
+    let mut request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
             return (
@@ -431,15 +532,38 @@ pub(super) async fn jsonrpc_request(
                 .into_response()
         }
     };
-    if let Some(response) = unsupported_version_response(&headers, Some(&request)) {
+    if let Some(response) = unsupported_version_response(&headers, Some(&request), true) {
         return response;
     }
+    let mut versioned =
+        if super::wire::requested_version(&headers) == Some(harn_vm::a2a::A2aWireVersion::V1_0) {
+            match super::wire::V1Request::decode(&mut request) {
+                Ok(request) => Some(request),
+                Err(error) => return Json(error).into_response(),
+            }
+        } else {
+            None
+        };
     let auth = AuthRequest::from_http(&method, "/", body.to_vec(), &headers);
+    let rpc_id = request.get("id").cloned().unwrap_or(JsonValue::Null);
     let processed = state
         .server
-        .process_rpc_with_public_url(request, auth, &state.public_url)
+        .clone()
+        .process_rpc_versioned(
+            request,
+            auth,
+            &state.public_url,
+            super::wire::requested_version(&headers).expect("validated version"),
+            versioned
+                .as_mut()
+                .and_then(|request| request.listing.take()),
+        )
         .await;
-    rpc_response(processed)
+    let processed = match versioned {
+        Some(request) => request.encode(processed, state.server),
+        None => processed,
+    };
+    rpc_response(processed, rpc_id)
 }
 
 // ---- Legacy REST aliases (non-canonical; emit deprecation warnings).
@@ -746,7 +870,7 @@ pub(super) async fn rest_dispatch_no_body(
     rpc_method: &str,
     params: JsonValue,
 ) -> Response {
-    if let Some(response) = unsupported_version_response(&headers, None) {
+    if let Some(response) = unsupported_version_response(&headers, None, false) {
         return response;
     }
     let auth = AuthRequest::from_http(&method, auth_path, Vec::new(), &headers);
@@ -767,7 +891,7 @@ pub(super) async fn rest_dispatch_with_body(
     rpc_method: &str,
     params: JsonValue,
 ) -> Response {
-    if let Some(response) = unsupported_version_response(&headers, None) {
+    if let Some(response) = unsupported_version_response(&headers, None, false) {
         return response;
     }
     let auth = AuthRequest::from_http(&method, auth_path, body.to_vec(), &headers);
@@ -792,7 +916,9 @@ pub(super) fn rest_response(processed: ProcessedRpc) -> Response {
         RpcOutcome::Json(response) => {
             response_with_deprecation(Json(response["result"].clone()), processed.deprecation)
         }
-        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
+        RpcOutcome::Sse(rx) => {
+            response_with_deprecation(sse_response(rx, SseEnvelope::Rest), processed.deprecation)
+        }
     };
     apply_auth_challenge(response, auth_challenge)
 }
@@ -805,7 +931,7 @@ pub(super) async fn rest_task_request(
     rpc_method: &str,
     rest_deprecation: Option<&'static str>,
 ) -> Response {
-    if let Some(response) = unsupported_version_response(&headers, None) {
+    if let Some(response) = unsupported_version_response(&headers, None, false) {
         return response;
     }
     let params = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
@@ -840,11 +966,18 @@ pub(super) async fn rest_task_request(
 fn unsupported_version_response(
     headers: &HeaderMap,
     request: Option<&JsonValue>,
+    supports_v1: bool,
 ) -> Option<Response> {
-    if accepts_version_header(headers) {
+    if super::wire::requested_version(headers)
+        .is_some_and(|version| supports_v1 || version.is_legacy())
+    {
         return None;
     }
-    let supported = json!([supported_wire_version()]);
+    let supported = if supports_v1 {
+        json!(["0.3", "1.0"])
+    } else {
+        json!([supported_wire_version()])
+    };
     if let Some(request) = request {
         let mut response = error_response(
             request.get("id").cloned().unwrap_or(JsonValue::Null),
@@ -855,7 +988,7 @@ fn unsupported_version_response(
             "@type": "type.googleapis.com/google.rpc.ErrorInfo",
             "reason": "VERSION_NOT_SUPPORTED",
             "domain": "a2a-protocol.org",
-            "metadata": {"supportedVersions": supported_wire_version()},
+            "metadata": {"supportedVersions": "0.3,1.0"},
         }]);
         return Some((StatusCode::BAD_REQUEST, Json(response)).into_response());
     }
@@ -877,7 +1010,7 @@ fn unsupported_version_response(
     Some(response)
 }
 
-pub(super) fn rpc_response(processed: ProcessedRpc) -> Response {
+fn rpc_response(processed: ProcessedRpc, rpc_id: JsonValue) -> Response {
     let auth_challenge = processed.auth_challenge.clone();
     let response = match processed.outcome {
         RpcOutcome::Json(response) => {
@@ -887,7 +1020,10 @@ pub(super) fn rpc_response(processed: ProcessedRpc) -> Response {
             }
             http
         }
-        RpcOutcome::Sse(rx) => response_with_deprecation(sse_response(rx), processed.deprecation),
+        RpcOutcome::Sse(rx) => response_with_deprecation(
+            sse_response(rx, SseEnvelope::JsonRpc(rpc_id)),
+            processed.deprecation,
+        ),
     };
     apply_auth_challenge(response, auth_challenge)
 }
@@ -922,20 +1058,34 @@ pub(super) fn response_with_deprecation(
     response
 }
 
-pub(super) fn sse_response(
-    rx: UnboundedReceiver<JsonValue>,
-) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
-    Sse::new(sse_events(rx)).keep_alive(KeepAlive::default())
+enum SseEnvelope {
+    JsonRpc(JsonValue),
+    Rest,
 }
 
-pub(super) fn sse_events(
+fn sse_response(
     rx: UnboundedReceiver<JsonValue>,
+    envelope: SseEnvelope,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    Sse::new(sse_events(rx, envelope)).keep_alive(KeepAlive::default())
+}
+
+fn sse_events(
+    rx: UnboundedReceiver<JsonValue>,
+    envelope: SseEnvelope,
 ) -> impl futures::Stream<Item = Result<Event, Infallible>> {
-    rx.map(|message| {
+    rx.map(move |mut message| {
+        let message = match &envelope {
+            SseEnvelope::JsonRpc(id) => {
+                message["id"] = id.clone();
+                message
+            }
+            SseEnvelope::Rest => message.get("result").cloned().unwrap_or(message),
+        };
         Ok(Event::default()
             .id(Uuid::now_v7().to_string())
             .event("message")
-            .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string())))
+            .data(message.to_string()))
     })
 }
 

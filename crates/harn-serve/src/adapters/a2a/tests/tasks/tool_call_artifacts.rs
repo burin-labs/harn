@@ -4,6 +4,8 @@ use super::*;
 fn noncompleted_tool_calls_do_not_emit_artifact_updates() {
     let task_id = "task-tool-pending".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: None,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,

@@ -26,7 +26,10 @@ pub(super) async fn collect_task_stream_until_terminal(
 }
 
 fn is_terminal_status(status: &str) -> bool {
-    matches!(status, "completed" | "failed" | "cancelled" | "rejected")
+    matches!(
+        status,
+        "completed" | "failed" | "canceled" | "cancelled" | "rejected"
+    )
 }
 
 pub(super) fn events_json(events: &[JsonValue]) -> String {

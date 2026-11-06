@@ -46,10 +46,16 @@ mod tasks;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod wire;
 
 use schema::{derived_agent_name, load_push_configs};
 
 pub const A2A_PROTOCOL_VERSION: &str = harn_vm::a2a::A2A_PROTOCOL_VERSION;
+
+/// JSON-RPC methods implemented by the A2A 1.0 server boundary.
+pub fn a2a_v1_jsonrpc_methods() -> Vec<&'static str> {
+    wire::v1_methods()
+}
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
@@ -197,6 +203,8 @@ struct TaskMessage {
 #[derive(Debug)]
 struct TaskState {
     id: String,
+    principal: Option<crate::AuthenticatedPrincipal>,
+    status_updated_at: Option<String>,
     context_id: Option<String>,
     status: TaskStatus,
     history: Vec<TaskMessage>,
@@ -208,6 +216,21 @@ struct TaskState {
 }
 
 type TaskStore = Arc<Mutex<HashMap<String, TaskState>>>;
+
+impl TaskState {
+    fn visible_to(&self, principal: Option<&crate::AuthenticatedPrincipal>) -> bool {
+        match (&self.principal, principal) {
+            (Some(owner), Some(principal)) => {
+                owner.subject == principal.subject
+                    && owner.issuer == principal.issuer
+                    && owner.tenant_id == principal.tenant_id
+                    && owner.scheme == principal.scheme
+            }
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
 type PushConfigStore = Arc<Mutex<HashMap<String, BTreeMap<String, JsonValue>>>>;
 
 struct PreparedTask {

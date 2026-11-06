@@ -5,6 +5,8 @@ use super::*;
 fn a2a_worker_sink_publishes_plan_extension_to_task_stream() {
     let task_id = "task-plan".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: None,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,
@@ -69,6 +71,8 @@ fn a2a_plan_document_preserves_revision_and_resolution_receipt() {
 
     let task_id = "task-plan-receipt".to_string();
     let task = TaskState {
+        principal: None,
+        status_updated_at: None,
         id: task_id.clone(),
         context_id: None,
         status: TaskStatus::Working,

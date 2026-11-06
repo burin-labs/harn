@@ -37,7 +37,7 @@ pub fn triage(harness: Harness, task: string) -> string {
 "#,
     );
     let task = server
-        .prepare_task(&test_task_params("hello"), AuthRequest::default())
+        .prepare_task(&test_task_params("hello"), AuthRequest::default(), None)
         .await
         .unwrap_or_else(|_| panic!("prepare task"));
     let session_id = super::a2a_worker_session_id(&task.id);
@@ -75,7 +75,7 @@ pub fn triage(harness: Harness, task: string) -> string {
 "#,
     );
     let task = server
-        .prepare_task(&test_task_params("cancel me"), AuthRequest::default())
+        .prepare_task(&test_task_params("cancel me"), AuthRequest::default(), None)
         .await
         .unwrap_or_else(|_| panic!("prepare task"));
     let session_id = super::a2a_worker_session_id(&task.id);
@@ -89,17 +89,24 @@ pub fn triage(harness: Harness, task: string) -> string {
         })
     };
 
+    let mut reached_progress = false;
     while let Some(event) = events.next().await {
-        if event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update") {
+        if event
+            .pointer("/result/status/message/parts/0/text")
+            .and_then(JsonValue::as_str)
+            == Some("Ready for cancellation.")
+        {
+            reached_progress = true;
             break;
         }
     }
+    assert!(reached_progress, "task did not reach cancellable progress");
     let cancelled = server.cancel_task(&task_id).expect("cancel running task");
-    assert_eq!(cancelled["status"]["state"], "cancelled");
+    assert_eq!(cancelled["status"]["state"], "canceled");
     runner.await.expect("task runner");
 
     let task_json = server.task_json(&task_id);
-    assert_eq!(task_json["status"]["state"], "cancelled");
+    assert_eq!(task_json["status"]["state"], "canceled");
     assert!(task_json["metadata"]["harn"]["persistenceError"]
         .as_str()
         .expect("cancelled task persistence error")

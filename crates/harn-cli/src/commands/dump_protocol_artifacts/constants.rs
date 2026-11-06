@@ -267,6 +267,11 @@ pub(super) const SCHEMA_COPIES: &[SchemaCopy] = &[
         artifact: "schemas/a2a-0.3.0.schema.json",
     },
     SchemaCopy {
+        protocol: "a2a",
+        source: "conformance/protocols/schemas/a2a-1.0.1.schema.json",
+        artifact: "schemas/a2a-1.0.1.schema.json",
+    },
+    SchemaCopy {
         protocol: "mcp",
         source: "conformance/protocols/schemas/mcp-2026-07-28.schema.json",
         artifact: "schemas/mcp-2026-07-28.schema.json",
