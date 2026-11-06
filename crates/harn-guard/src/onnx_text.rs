@@ -45,7 +45,7 @@ impl OnnxTextEmbedder {
             path: model_path,
             source,
         })?;
-        let session = Session::builder()
+        let session = Session::builder(&crate::onnx_runtime::environment()?)
             .map_err(inference_err)?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(inference_err)?
