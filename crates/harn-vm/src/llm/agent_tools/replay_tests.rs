@@ -26,11 +26,12 @@ async fn dispatch(tools: VmValue) -> VmValue {
     ]).await.unwrap()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
+#[test]
+fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
     let _lock = run_tape::TEST_PROCESS_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
+    crate::test_support::current_thread_runtime().block_on(async {
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
@@ -105,4 +106,5 @@ async fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
     let report = branch.finish();
     assert_eq!(report.served_tool_calls, 1);
     assert!(report.divergence.is_none());
+    });
 }

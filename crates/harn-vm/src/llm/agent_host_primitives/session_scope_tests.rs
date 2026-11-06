@@ -1,72 +1,34 @@
 use crate::NativeBuiltinCtxExt;
-use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex as StdMutex};
-
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::host_agent_dispatch_tool_call;
-use crate::bridge::HostBridge;
+struct SessionObservingBridge(Arc<Mutex<Vec<Option<String>>>>);
 
-struct HostBridgeGuard {
-    previous: Option<Arc<HostBridge>>,
-}
-
-impl HostBridgeGuard {
-    fn replace(bridge: Arc<HostBridge>) -> Self {
-        Self {
-            previous: crate::llm::swap_current_host_bridge(Some(bridge)),
-        }
-    }
-}
-
-impl Drop for HostBridgeGuard {
-    fn drop(&mut self) {
-        let _ = crate::llm::swap_current_host_bridge(self.previous.take());
-    }
-}
-
-fn session_observing_bridge(observed: Arc<StdMutex<Option<String>>>) -> Arc<HostBridge> {
-    let pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    let response_pending = pending.clone();
-    let writer = Arc::new(move |line: &str| {
-        *observed
+impl crate::HostCallBridge for SessionObservingBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+    ) -> crate::HostCallDispatchFuture<'a> {
+        assert_eq!((capability, operation), ("proof", "session"));
+        assert!(params.is_empty());
+        self.0
             .lock()
-            .map_err(|_| "observed-session mutex poisoned".to_string())? =
-            crate::agent_sessions::current_session_id();
-        let request: serde_json::Value = serde_json::from_str(line)
-            .map_err(|error| format!("invalid bridge request: {error}"))?;
-        let id = request
-            .get("id")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| "bridge request missing numeric id".to_string())?;
-        let sender = response_pending
-            .try_lock()
-            .map_err(|_| "bridge pending map unexpectedly locked".to_string())?
-            .remove(&id)
-            .ok_or_else(|| "bridge request was not pending".to_string())?;
-        sender
-            .send(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {"status": "ok"},
-            }))
-            .map_err(|_| "bridge caller dropped before response".to_string())
-    });
-    Arc::new(HostBridge::from_parts_with_writer(
-        pending,
-        Arc::new(AtomicBool::new(false)),
-        writer,
-        1,
-    ))
+            .expect("observed-session mutex")
+            .push(crate::agent_sessions::current_session_id());
+        crate::host_call_ready(Ok(Some(crate::schema::json_to_vm_value(
+            &serde_json::json!({"status": "ok"}),
+        ))))
+    }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller() {
     crate::agent_sessions::reset_session_store();
-    let observed = Arc::new(StdMutex::new(None));
-    let _bridge = HostBridgeGuard::replace(session_observing_bridge(observed.clone()));
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let _bridge =
+        crate::install_host_call_bridge(Arc::new(SessionObservingBridge(observed.clone())));
     let _ambient = crate::agent_sessions::enter_current_session("unrelated-ambient-session");
     let tools = crate::schema::json_to_vm_value(&serde_json::json!({
         "_type": "tool_registry",
@@ -74,6 +36,7 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
             "name": "session_probe",
             "description": "Observe the dispatch session at the host execution boundary.",
             "executor": "host_bridge",
+            "host_capability": "proof.session",
             "parameters": {},
         }],
     }));
@@ -88,8 +51,10 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
         crate::schema::json_to_vm_value(&serde_json::json!("resolved-dispatch-session")),
     );
 
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
+        crate::vm::AsyncBuiltinCtx::for_test(vm),
         call,
         Some(&tools),
         &options,
@@ -99,9 +64,10 @@ async fn resolved_dispatch_session_owns_host_execution_and_restores_the_caller()
     let result = crate::llm::helpers::vm_value_to_json(&result);
 
     assert_eq!(result["ok"], serde_json::json!(true));
+    assert_eq!(result["result"]["status"], "ok");
     assert_eq!(
-        observed.lock().expect("observed-session mutex").as_deref(),
-        Some("resolved-dispatch-session")
+        *observed.lock().expect("observed-session mutex"),
+        vec![Some("resolved-dispatch-session".to_string())]
     );
     assert_eq!(
         crate::agent_sessions::current_session_id().as_deref(),
