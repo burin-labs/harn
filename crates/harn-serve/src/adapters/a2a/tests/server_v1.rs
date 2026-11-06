@@ -22,29 +22,50 @@ fn assert_upstream(name: &str, value: &JsonValue) {
     assert!(errors.is_empty(), "{name}: {errors:?}\n{value}");
 }
 
-fn legacy_upstream_schema(name: &str) -> jsonschema::Validator {
+fn legacy_profile_schema(name: &str) -> jsonschema::Validator {
     let mut schema: JsonValue = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../conformance/protocols/schemas/a2a-0.3.0.schema.json"
     )))
     .unwrap();
     schema.as_object_mut().unwrap().remove("anyOf");
-    let name = if name == "SendStreamingMessageSuccessResponse" {
-        "JsonRpcResultResponse"
-    } else {
-        name
-    };
     schema["$ref"] = json!(format!("#/$defs/{name}"));
     jsonschema::validator_for(&schema).unwrap()
 }
 
-fn assert_legacy_upstream(name: &str, value: &JsonValue) {
-    let validator = legacy_upstream_schema(name);
+fn assert_legacy_profile(name: &str, value: &JsonValue) {
+    let validator = legacy_profile_schema(name);
     let errors: Vec<_> = validator
         .iter_errors(value)
         .map(|error| error.to_string())
         .collect();
     assert!(errors.is_empty(), "{name}: {errors:?}\n{value}");
+}
+
+// These fixtures emit status and reply events. Validate their exact profile
+// shapes, avoiding the generic result union's overlapping push-config branch.
+fn legacy_fixture_stream_valid(value: &JsonValue) -> bool {
+    let event = &value["result"];
+    legacy_profile_schema("StreamEventResponse").is_valid(value)
+        && value.get("error").is_none()
+        && value
+            .get("id")
+            .is_some_and(|id| legacy_profile_schema("RequestId").is_valid(id))
+        && event["contextId"].as_str().is_some_and(|id| !id.is_empty())
+        && !["task", "statusUpdate", "artifactUpdate"]
+            .iter()
+            .any(|key| event.get(key).is_some())
+        && match event["kind"].as_str() {
+            Some("status-update") => event["type"] == "status" && event["final"].is_boolean(),
+            Some("message") => {
+                event["type"] == "message"
+                    && legacy_profile_schema("Message").is_valid(&event["message"])
+                    && event["message"]["messageId"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty())
+            }
+            _ => false,
+        }
 }
 
 fn send_params() -> JsonValue {
@@ -427,7 +448,7 @@ async fn v1_file_parts_round_trip_through_shared_task_storage() {
         json!({"id":result["result"]["task"]["id"]}),
     )
     .await;
-    assert_legacy_upstream("Task", &legacy["result"]);
+    assert_legacy_profile("Task", &legacy["result"]);
     assert_eq!(
         legacy["result"]["history"][0]["parts"][2]["data"],
         json!({"value":1})
@@ -446,10 +467,10 @@ async fn both_versions_share_task_identity_with_distinct_wire_shapes() {
     )
     .await;
     assert_eq!(legacy["result"]["status"]["state"], "completed", "{legacy}");
-    assert_legacy_upstream("Task", &legacy["result"]);
+    assert_legacy_profile("Task", &legacy["result"]);
     let mut malformed = legacy["result"].clone();
     malformed.as_object_mut().unwrap().remove("id");
-    assert!(!legacy_upstream_schema("Task").is_valid(&malformed));
+    assert!(!legacy_profile_schema("Task").is_valid(&malformed));
     let id = &legacy["result"]["id"];
     let (_, modern) = rpc(router.clone(), "1.0", "GetTask", json!({"id":id})).await;
     assert_upstream("Task", &modern["result"]);
@@ -461,7 +482,7 @@ async fn both_versions_share_task_identity_with_distinct_wire_shapes() {
 }
 
 #[tokio::test]
-async fn legacy_discovery_and_stream_match_the_upstream_contract() {
+async fn legacy_discovery_and_stream_match_the_pinned_profile() {
     let (_dir, server) = echo_server();
     let router = http_router(server, LOCAL_URL);
     let card = router
@@ -476,7 +497,7 @@ async fn legacy_discovery_and_stream_match_the_upstream_contract() {
         .unwrap();
     let card: JsonValue =
         serde_json::from_slice(&to_bytes(card.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_legacy_upstream("AgentCard", &card);
+    assert_legacy_profile("AgentCard", &card);
     let request = harn_vm::jsonrpc::request(
         "legacy-stream",
         "message/stream",
@@ -508,9 +529,31 @@ async fn legacy_discovery_and_stream_match_the_upstream_contract() {
         .collect();
     assert!(!frames.is_empty(), "{text}");
     for frame in &frames {
-        assert_legacy_upstream("SendStreamingMessageSuccessResponse", frame);
+        assert!(legacy_fixture_stream_valid(frame), "{frame}");
         assert_eq!(frame["id"], "legacy-stream");
     }
+    for (path, value) in [
+        ("/jsonrpc", json!("1.0")),
+        ("/id", json!({})),
+        ("/result/kind", json!("unknown-event")),
+        ("/result/status/state", json!("unknown-state")),
+    ] {
+        let mut malformed = frames[0].clone();
+        *malformed.pointer_mut(path).expect("actual emitted field") = value;
+        assert!(!legacy_fixture_stream_valid(&malformed), "{malformed}");
+    }
+    let mut missing_id = frames[0].clone();
+    missing_id.as_object_mut().unwrap().remove("id");
+    assert!(!legacy_fixture_stream_valid(&missing_id));
+    let modern_wrapper = json!({"jsonrpc":"2.0", "id":"legacy-stream", "result":{"statusUpdate":frames[0]["result"]}});
+    assert!(!legacy_fixture_stream_valid(&modern_wrapper));
+    let mut broken_message = frames
+        .iter()
+        .find(|frame| frame["result"]["kind"] == "message")
+        .expect("actual reply event")
+        .clone();
+    broken_message["result"]["message"]["parts"] = json!([]);
+    assert!(!legacy_fixture_stream_valid(&broken_message));
     assert_eq!(
         frames.last().unwrap()["result"]["status"]["state"],
         "completed"
@@ -546,9 +589,9 @@ async fn legacy_discovery_and_stream_match_the_upstream_contract() {
             frame.get("result").is_none(),
             "REST returned a JSON-RPC envelope: {frame}"
         );
-        assert_legacy_upstream(
-            "SendStreamingMessageSuccessResponse",
-            &json!({"jsonrpc":"2.0", "id":"rest", "result":frame}),
+        assert!(
+            legacy_fixture_stream_valid(&json!({"jsonrpc":"2.0", "id":"rest", "result":frame})),
+            "{frame}"
         );
     }
     assert_eq!(frames.last().unwrap()["status"]["state"], "completed");
@@ -628,7 +671,7 @@ async fn both_versions_cancel_after_real_dispatch_progress() {
         if modern {
             assert_upstream("Task", &cancelled["result"]);
         } else {
-            assert_legacy_upstream("Task", &cancelled["result"]);
+            assert_legacy_profile("Task", &cancelled["result"]);
         }
     }
 }

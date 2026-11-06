@@ -60,7 +60,7 @@ async fn arbitrary_json_data_survives_modern_tasks_and_legacy_projection() {
         assert_eq!(task["history"][0]["parts"][1]["data"], data);
         assert_eq!(task["history"][1]["parts"][0]["text"], "hello");
         let (_, legacy) = rpc(router.clone(), "", "tasks/get", json!({"id":task["id"]})).await;
-        assert_legacy_upstream("Task", &legacy["result"]);
+        assert_legacy_profile("Task", &legacy["result"]);
         let part = &legacy["result"]["history"][0]["parts"][1];
         if data.is_object() {
             assert_eq!(part["data"], data);
@@ -129,7 +129,7 @@ async fn streamed_json_data_uses_each_subscribers_wire_version() {
             if modern {
                 assert_upstream("StreamResponse", &frame["result"]);
             } else {
-                assert_legacy_upstream("SendStreamingMessageSuccessResponse", frame);
+                assert!(legacy_fixture_stream_valid(frame), "{frame}");
             }
         }
         let message = frames
