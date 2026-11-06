@@ -84,7 +84,7 @@ impl OnnxInjectionClassifier {
             path: model_path,
             source,
         })?;
-        let session = Session::builder()
+        let session = Session::builder(&crate::onnx_runtime::environment()?)
             .map_err(inference_err)?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(inference_err)?
@@ -123,8 +123,11 @@ impl OnnxInjectionClassifier {
         })
     }
 
-    /// Run inference for `text`, returning the malicious-class probability.
-    fn score_inner(&self, text: &str) -> Result<f64> {
+    /// Run model inference and return the malicious-class probability.
+    ///
+    /// Unlike the classifier trait, this reports inference errors directly
+    /// instead of falling back to the built-in heuristic.
+    pub fn try_score(&self, text: &str) -> Result<f64> {
         let encoding = self
             .tokenizer
             .encode(text, true)
@@ -174,7 +177,7 @@ impl InjectionClassifier for OnnxInjectionClassifier {
     }
 
     fn score(&self, text: &str) -> f64 {
-        match self.score_inner(text) {
+        match self.try_score(text) {
             Ok(score) => score,
             Err(error) => {
                 // Degrade to the heuristic rather than silently scoring 0: an

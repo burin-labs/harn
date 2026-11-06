@@ -26,6 +26,8 @@ pub mod store;
 #[cfg(feature = "neural")]
 mod neural;
 #[cfg(feature = "neural")]
+mod onnx_runtime;
+#[cfg(feature = "neural")]
 mod onnx_text;
 
 pub use catalog::{
@@ -37,6 +39,8 @@ pub use store::{sha256_hex, GuardStore, Manifest, ManifestFile};
 
 #[cfg(feature = "neural")]
 pub use neural::OnnxInjectionClassifier;
+#[cfg(feature = "neural")]
+pub use onnx_runtime::set_onnx_environment;
 #[cfg(feature = "neural")]
 pub use onnx_text::OnnxTextEmbedder;
 
