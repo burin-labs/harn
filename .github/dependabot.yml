@@ -73,6 +73,11 @@ updates:
     # Scoped to the one release that dropped the field, so a 3.1.5 or a later
     # version that restores it still arrives as a normal update for review.
     ignore:
+      # The published AWS graph currently admits smithy-types below 1.9.
+      # Lift this ceiling with the SDK compatibility change in harn-vm.
+      - dependency-name: "aws-smithy-types"
+        versions:
+          - ">=1.9.0"
       - dependency-name: "rmcp"
         versions:
           - "3.2.0"
