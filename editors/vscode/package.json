@@ -251,6 +251,9 @@
   "overrides": {
     "@azure/identity": {
       "@azure/msal-node": "7.1.0"
+    },
+    "@vscode/vsce": {
+      "minimatch@^10": "11.0.5"
     }
   },
   "l10n": "./l10n"
