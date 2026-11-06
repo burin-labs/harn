@@ -96,7 +96,7 @@ fn default_transport() -> McpTransport {
 
 /// Internal state for an MCP client connection.
 pub(crate) enum McpClientInner {
-    Sdk(SdkMcpClientInner),
+    Sdk(Box<SdkMcpClientInner>),
     Http(HttpMcpClientInner),
 }
 

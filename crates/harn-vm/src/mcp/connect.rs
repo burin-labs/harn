@@ -74,12 +74,14 @@ pub(crate) async fn mcp_connect_stdio_impl(
 
     let handle = VmMcpClientHandle {
         name: command.to_string(),
-        inner: Arc::new(Mutex::new(Some(McpClientInner::Sdk(SdkMcpClientInner {
-            running,
-            handler,
-            raw_responses,
-            child,
-        })))),
+        inner: Arc::new(Mutex::new(Some(McpClientInner::Sdk(Box::new(
+            SdkMcpClientInner {
+                running,
+                handler,
+                raw_responses,
+                child,
+            },
+        ))))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
         discovery_result: Arc::new(Mutex::new(Some(discovery_result))),
         cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
