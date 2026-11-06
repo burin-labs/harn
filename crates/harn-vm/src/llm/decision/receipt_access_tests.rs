@@ -99,7 +99,7 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
             let reference = serde_json::to_string(&receipt["reference"]).unwrap();
             let lookup = crate::compile_source(&format!("pipeline main(harness: Harness) {{ return harness.llm.evaluation_receipt({reference}) }}")).unwrap();
             let mut child = vm.child_vm();
-            assert_eq!(child.execute(&lookup).await.unwrap(), crate::schema::json_to_vm_value(&value["lookup"]));
+            assert_eq!(crate::llm::helpers::vm_value_to_json(&child.execute(&lookup).await.unwrap()), value["lookup"]);
             let mut foreign = crate::new_vm();
             crate::register_vm_stdlib(&mut foreign);
             let unavailable = foreign.execute(&lookup).await.unwrap();
