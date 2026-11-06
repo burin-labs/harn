@@ -43,6 +43,7 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
             data_controls: serde_json::from_value(serde_json::json!({
                 "requested_posture":"strictest_available", "outcome":"applied",
                 "provider":"mock", "model":"fixture", "note":"Only retention confirmed",
+                "training_default":"does_not_train", "account_confirmation_applied":true, "control_scope":"per_request",
                 "applied":[{"location":"header", "name":"X-Retention", "value":"none",
                     "effect":"retention", "caveat":"Training remains account-dependent"}],
                 "inference_boundary_rule":"credential-bound-no-training",
@@ -76,8 +77,8 @@ fn public_receipt_access_preserves_accounting_transport_and_execution_isolation(
             assert_eq!(value["lookup"]["kind"], "retained");
             validator.validate(&value["lookup"]).unwrap();
             let mut invalid = value["lookup"].clone();
-            invalid["unexpected"] = serde_json::json!(true);
-            assert!(!validator.is_valid(&invalid), "the public return contract must remain closed");
+            invalid["receipt"]["physical_attempts"] = serde_json::json!("unmeasured");
+            assert!(!validator.is_valid(&invalid), "the public contract must preserve the attempt count's type");
             let receipt = &value["lookup"]["receipt"];
             assert_eq!(receipt["reference"], value["outcome"]["receipt"]);
             assert_eq!(receipt["input_tokens"], serde_json::json!(tokens));
