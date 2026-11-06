@@ -132,7 +132,7 @@ jobs:
       - name: Install the published paperwork interpreter
         if: steps.development.outputs.required == 'true'
         id: published-runtime
-        uses: burin-labs/harn/.github/actions/setup-harn@389a3aeb579e70d73999d7af6eac7b22a30c7808
+        uses: burin-labs/harn/.github/actions/setup-harn@dbf2821c6ac2987d751c4e37460127c0c485ec81
         with:
           version: ${{ steps.development.outputs.published_tag }}
           cache-dir: ${{ runner.temp }}/paperwork-runtime-cache
