@@ -86,7 +86,7 @@ fn options(input_len: usize) -> serde_saphyr::Options {
     serde_saphyr::options! {
         budget: Some(budget),
         strict_booleans: true,
-        reject_non_finite_typeless_float: false,
+        non_finite_float_policy: serde_saphyr::NonFiniteFloatPolicy::AsString,
     }
 }
 

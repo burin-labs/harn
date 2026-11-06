@@ -299,7 +299,7 @@ fn locate_sources(enabled: &[&Grammar]) -> Result<Vec<PathBuf>, String> {
                             .join(index.file_name()?)
                             .join(format!("{dir}.crate"));
                         let matches = fs::read(archive)
-                            .is_ok_and(|data| format!("{:x}", Sha256::digest(data)) == checksum);
+                            .is_ok_and(|data| hex::encode(Sha256::digest(data)) == checksum);
                         (matches && root.is_dir()).then_some(root)
                     })
                     .ok_or_else(|| format!("{dir} is not in Cargo's registry"))?

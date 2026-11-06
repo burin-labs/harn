@@ -208,7 +208,7 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 keyring-core = "1.0"
 rusqlite = { version = "0.41", features = ["bundled"] }
-sysinfo = { version = "0.40", default-features = false, features = ["system", "component"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system", "component"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 thiserror = "2"
