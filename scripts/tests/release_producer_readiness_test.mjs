@@ -16,11 +16,15 @@ const run={id:42,run_attempt:1,head_sha:source,head_branch:'main',event:'push',s
 const names=['Resolve release context','Prepare CLI AOT payload','Assemble candidate manifest',
   'Consumer release rehearsal / Decide whether main moved',...targets.map(target=>`Build ${target}`),
   ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)];
-const jobs=names.map((name,index)=>({id:index+1,run_id:42,run_attempt:1,head_sha:source,name,status:'completed',conclusion:'success'}));
+const upload=name=>({name,status:'completed',conclusion:'success',
+  started_at:'2026-11-02T10:00:00Z',completed_at:'2026-11-02T10:00:02Z'});
+const jobs=names.map((name,index)=>({id:index+1,run_id:42,run_attempt:1,head_sha:source,name,status:'completed',conclusion:'success',
+  steps:name==='Assemble candidate manifest'?[upload('Upload candidate manifest'),upload('Upload release files')]:
+    name.startsWith('Build ')?[upload(`Upload candidate archive (${name.includes('windows')?'windows':'unix'})`)]:[]}));
 jobs.push({id:99,run_id:42,run_attempt:1,head_sha:source,name:'Consumer release rehearsal / Consumer canary',status:'in_progress',conclusion:null});
 jobs.push({id:98,run_id:42,run_attempt:1,head_sha:source,name:'Release residual audit',status:'completed',conclusion:'success'});
 const artifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${source}`,'harn-release-files'].map((name,index)=>({
-  id:index+100,name,expired:false,size_in_bytes:100,digest:`sha256:${'b'.repeat(64)}`,workflow_run:{id:42,head_sha:source},
+  id:index+100,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:100,digest:`sha256:${'b'.repeat(64)}`,workflow_run:{id:42,head_sha:source},
 }));
 
 test('archive readiness is independent of a later consumer failure and requires every build and smoke',()=>{
@@ -44,7 +48,8 @@ test('archive readiness is independent of a later consumer failure and requires 
   assert.throws(()=>qualifyArchiveProducer(run,[...jobs,jobs[0]],artifacts,request,targets),/identity_unproven/);
   for(const artifact of artifacts) {
     assert.throws(()=>qualifyArchiveProducer(run,jobs,artifacts.filter(item=>item!==artifact),request,targets),/artifacts_unproven/);
-    for(const change of [{expired:true},{size_in_bytes:0},{digest:null},{workflow_run:{id:43,head_sha:source}}]) {
+    for(const change of [{expired:true},{size_in_bytes:0},{digest:null},{created_at:null},{created_at:'invalid'},
+      {workflow_run:{id:43,head_sha:source}}]) {
       assert.throws(()=>qualifyArchiveProducer(run,jobs,artifacts.map(item=>item===artifact?{...item,...change}:item),request,targets),/artifacts_unproven/);
     }
   }
@@ -112,6 +117,28 @@ test('the owning reader uses the producing attempt and refuses partial authentic
     {ok:true,json:async()=>({total_count:jobs.length+1,jobs})}:read(url,options)),/census_unmeasured/);
 });
 
+test('the producing upload interval selects rerun archives and refuses ambiguous or unmeasured uploads',async()=>{
+  const previous=artifacts.map(item=>({...item,id:item.id+1000,created_at:'2026-11-02T09:00:01Z'}));
+  const read=(census,steps=jobs)=>async url=>({ok:true,json:async()=>url.includes('/jobs')?
+    {total_count:steps.length,jobs:steps}:url.includes('/artifacts')?{total_count:census.length,artifacts:census}:run});
+  const proof=await githubArchiveProducer('fixture-read',request,read([...previous,...artifacts]));
+  assert.deepEqual(proof.manifest,{id:artifacts.at(-2).id,digest:artifacts.at(-2).digest});
+  for(const item of artifacts) {
+    await assert.rejects(githubArchiveProducer('fixture-read',request,read([...artifacts,{...item,id:item.id+1000}])),/artifacts_unproven/);
+    await assert.rejects(githubArchiveProducer('fixture-read',request,read(artifacts.map(other=>other===item?
+      {...item,created_at:'2026-11-02T09:00:01Z'}:other))),/artifacts_unproven/);
+  }
+  for(const change of [{started_at:null},{completed_at:'invalid'},{started_at:'2026-11-02T11:00:00Z'},
+    {status:'in_progress'},{conclusion:'failure'}]) {
+    const altered=jobs.map(job=>({...job,steps:job.steps?.map(step=>({...step,...change}))}));
+    await assert.rejects(githubArchiveProducer('fixture-read',request,read(artifacts,altered)),/artifacts_unproven/);
+  }
+  for(const steps of [[],[upload('Upload candidate manifest'),upload('Upload candidate manifest'),upload('Upload release files')]]) {
+    await assert.rejects(githubArchiveProducer('fixture-read',request,read(artifacts,
+      jobs.map(job=>job.name==='Assemble candidate manifest'?{...job,steps}:job))),/artifacts_unproven/);
+  }
+});
+
 test('historical source admission reads the exact manifest bytes under its main build policy',async()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-historical-producer-'));
   try {
@@ -126,6 +153,8 @@ test('historical source admission reads the exact manifest bytes under its main 
     const historicalArtifacts=artifacts.map(item=>({...item,workflow_run:{id:42,head_sha:policy},
       ...(item.name===`candidate-manifest-${source}`?{size_in_bytes:bytes.length,
         digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}:{})}));
+    historicalArtifacts.unshift({...historicalArtifacts.at(-2),id:999,created_at:'2026-11-02T09:00:01Z',
+      digest:`sha256:${'e'.repeat(64)}`});
     const read=async(url)=>{
       if(url.endsWith('/zip')) return {ok:true,arrayBuffer:async()=>bytes};
       const record=url.includes('/compare/')?{status:'ahead',merge_base_commit:{sha:source}}:

@@ -23,7 +23,6 @@ on:
       - CLI end-to-end behavior
       - Lean embedding surface
       - macOS workspace tests
-      - Merge override dispatch
       - Portable kernel browser Wasm
       - PR gates
       - Public metadata privacy
