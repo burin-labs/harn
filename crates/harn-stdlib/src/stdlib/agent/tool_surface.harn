@@ -283,9 +283,11 @@ fn __tool_surface_removed(candidates: list, used: string | list, config: dict) {
 }
 
 fn __tool_surface_hard_keep(opts: dict) -> list {
-  const configured = opts?.tool_surface_narrowing?.hard_keep ?? []
+  const config = opts?.tool_surface_narrowing ?? {}
+  const stance = opts?.read_only_stance ?? {}
+  const configured = config?.hard_keep ?? []
   return if len(opts?._read_only_stance_tools ?? []) > 0 {
-    configured + [opts?.read_only_stance?.escape_tool ?? "request_write_access"]
+    configured + [stance?.escape_tool ?? "request_write_access"]
   } else {
     configured
   }

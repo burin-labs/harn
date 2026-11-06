@@ -3249,5 +3249,37 @@
         "parameter": "_opts"
       }
     ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_hard_keep(opts)",
+    "owner": "__tool_surface_hard_keep",
+    "evidence": "The shared hard-keep projection reads only normalized narrowing and stance configuration through its independently bound AgentSpec parameter.",
+    "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_hard_keep", "parameter": "opts"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_record_boundary(agent, session, boundary_opts)",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "This identity projection records only the derived source identity and chosen names, then returns the same options. Its independent parameter origin preserves configuration auditing.",
+    "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_record_boundary", "parameter": "opts"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_record_boundary(\n    agent,\n    session,\n    boundary_opts + {_tool_surface_narrowed_tools: remaining},\n  )",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "A completed narrowing decision changes only derived names before the same identity projection records it; independent parameter binding retains configuration reads.",
+    "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_record_boundary", "parameter": "opts"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_record_boundary(agent, session, reset)",
+    "owner": "__tool_surface_record_boundary",
+    "evidence": "Explicit skill activation records a derived full-surface decision through the same identity projection, without interpreting configuration at the forwarding site.",
+    "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_record_boundary", "parameter": "opts"}]
   }
 ]

@@ -46,9 +46,16 @@
       {
         "function": "__tool_surface_removed",
         "name": "config"
+      },
+      {
+        "function": "__tool_surface_record_boundary",
+        "name": "opts",
+        "path": ["tool_surface_narrowing"]
       }
     ],
-    "normalizers": [],
+    "normalizers": [
+      {"function": "__tool_surface_record_boundary", "argument": 2}
+    ],
     "containers": []
   }
 }
