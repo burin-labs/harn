@@ -695,6 +695,7 @@
     "render",
     "render_always_on_catalog",
     "render_prompt",
+    "render_stdlib_prompt",
     "render_string",
     "repeat",
     "replace",
