@@ -234,8 +234,12 @@
     ]
   },
   "scripts": {
+    "postinstall": "node scripts/patch-language-client.cjs",
+    "precompile": "node scripts/patch-language-client.cjs",
     "compile": "tsc -p ./",
+    "pretest": "node scripts/patch-language-client.cjs",
     "test": "node --test test/*.test.js",
+    "prepackage": "node scripts/patch-language-client.cjs",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -246,7 +250,7 @@
     "yauzl": "^3.4.0"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.2"
+    "vscode-languageclient": "10.1.2"
   },
   "overrides": {
     "@azure/identity": {
@@ -254,6 +258,9 @@
     },
     "@vscode/vsce": {
       "minimatch@^10": "11.0.5"
+    },
+    "vscode-languageclient": {
+      "minimatch": "11.0.5"
     }
   },
   "l10n": "./l10n"
