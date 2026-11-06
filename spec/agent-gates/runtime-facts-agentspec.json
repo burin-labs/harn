@@ -649,5 +649,12 @@
     "expression": "omit(base, [\"prefill\", \"_harn_one_shot_prefill\"])",
     "owner": "llm_clear_one_shot_prefill",
     "evidence": "Dictionary key removal into a new value, not an option read."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "pick(opts, [\"_tool_surface_user_boundary\", \"_tool_surface_narrowed_tools\"])",
+    "owner": "agent_narrow_tool_surface_at_user_boundary",
+    "evidence": "This exact literal projection carries only the canonical user source identity and its derived selected tool names into already-resolved iteration options. It selects no caller setting and does not repeat route or narrowing policy."
   }
 ]
