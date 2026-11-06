@@ -715,7 +715,9 @@ async fn declared_process_capability_keeps_command_policy() {
         ) -> crate::HostCallDispatchFuture<'a> {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(VmValue::Nil))
+                Ok(Some(crate::json_to_vm_value(&serde_json::json!({
+                    "exit_code": 0, "status": "completed", "stdout": "allowed", "stderr": ""
+                }))))
             })
         }
     }
@@ -752,6 +754,19 @@ async fn declared_process_capability_keeps_command_policy() {
         "denied command reached the host"
     );
     assert_eq!(outcome.result.unwrap()["status"], "blocked");
+    let allowed = dispatch_bound_tool(
+        "read_via_host",
+        &serde_json::json!({"mode":"shell", "command":"printf allowed"}),
+        &tools,
+        Some(&bridge),
+    )
+    .await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "an allowed command reached the same adapter"
+    );
+    assert_eq!(allowed.result.unwrap()["stdout"], "allowed");
 }
 
 #[tokio::test(flavor = "current_thread")]
