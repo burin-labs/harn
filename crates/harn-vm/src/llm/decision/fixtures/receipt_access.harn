@@ -11,7 +11,7 @@ fn evaluate(llm: HarnessLlm, model: string) -> {kind: string, receipt: string} {
       evaluation_cost_limit: 1.0,
     },
   )
-  return {kind: outcome.kind, receipt: outcome.receipt}
+  return pick(outcome, ["kind", "receipt"])
 }
 
 pipeline lookup(harness: Harness) {
