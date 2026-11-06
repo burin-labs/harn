@@ -29,9 +29,12 @@ const jobs=['Resolve release context','Prepare CLI AOT payload','Assemble candid
   'Consumer release rehearsal / Decide whether main moved','Release residual audit',
   ...targets.map(target=>`Build ${target}`),
   ...['linux','linux-arm64','windows','macos'].map(target=>`Release smoke / Release smoke (${target})`)]
-  .map((name,index)=>({id:index+1,name,run_id:42,run_attempt:1,head_sha:source,status:'completed',conclusion:'success'}));
+  .map((name,index)=>({id:index+1,name,run_id:42,run_attempt:1,head_sha:source,status:'completed',conclusion:'success',
+    steps:(name==='Assemble candidate manifest'?['Upload candidate manifest','Upload release files']:
+      name.startsWith('Build ')?[`Upload candidate archive (${name.includes('windows')?'windows':'unix'})`]:[])
+      .map(name=>({name,status:'completed',conclusion:'success',started_at:'2026-11-02T10:00:00Z',completed_at:'2026-11-02T10:00:02Z'}))}));
 const artifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${source}`,'harn-release-files']
-  .map((name,index)=>({id:index+100,name,expired:false,size_in_bytes:100,digest:`sha256:${'d'.repeat(64)}`,
+  .map((name,index)=>({id:index+100,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:100,digest:`sha256:${'d'.repeat(64)}`,
     workflow_run:{id:42,head_sha:source}}));
 const child={id:73,run_attempt:1,head_sha:head,head_branch:'repair',head_repository:{full_name:consumer.repository},
   repository:{full_name:consumer.repository},path:consumer.workflow,event:'workflow_dispatch',status:'in_progress',
@@ -49,7 +52,7 @@ function fixture(changes={}){
     fs.writeFileSync(input,JSON.stringify(value));
     execFileSync('zip',['-j',zip,input]);
     const bytes=fs.readFileSync(zip);
-    return {bytes,artifact:{id,name,expired:false,size_in_bytes:bytes.length,
+    return {bytes,artifact:{id,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:bytes.length,
       digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:runId,head_sha:sha}}};
   };
   const manifest=metadata(502,`candidate-manifest-${source}`,42,source,
