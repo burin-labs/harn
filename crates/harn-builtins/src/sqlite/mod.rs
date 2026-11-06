@@ -455,7 +455,6 @@ async fn query_rows(
         .map_err(|error| runtime_error(format!("{builtin}: prepare failed: {error}")))?;
     let names = stmt
         .column_names()
-        .into_iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     let mut rows = stmt
