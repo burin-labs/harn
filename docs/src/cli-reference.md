@@ -4381,6 +4381,8 @@ not supported on this interface. Missing or empty version headers select 0.3;
 the REST routes remain 0.3. Unsupported versions are refused before dispatch.
 `ListTasks` filters the authenticated caller's tasks by context, state, and status
 timestamp, with cursor pagination and optional history and artifacts.
+Raw byte parts accept standard or URL-safe base64, with or without padding,
+and return canonical padded standard base64.
 
 `harn serve acp` starts the packaged ACP adapter on stdio for editor and IDE
 hosts. Pass `--transport websocket` to expose the same single-connection ACP

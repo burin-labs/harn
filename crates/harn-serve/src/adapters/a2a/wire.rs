@@ -381,12 +381,10 @@ fn decode_part(part: &mut JsonValue) -> Result<(), &'static str> {
     if key != "data" && !object[key].is_string() {
         return Err("Text, raw and URL content must be strings");
     }
-    if key == "raw"
-        && base64::engine::general_purpose::STANDARD
-            .decode(object[key].as_str().unwrap_or_default())
-            .is_err()
-    {
-        return Err("Raw content must be base64");
+    if key == "raw" {
+        let bytes = harn_vm::a2a::decode_raw_bytes(object[key].as_str().unwrap_or_default())
+            .map_err(|_| "Raw content must be base64")?;
+        object["raw"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes));
     }
     if matches!(key, "raw" | "url") {
         let content = object.remove(key).expect("validated content");

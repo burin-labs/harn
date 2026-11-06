@@ -1,6 +1,44 @@
 use super::*;
 
 #[tokio::test]
+async fn protojson_raw_encodings_preserve_bytes_through_send_and_get() {
+    let (_dir, server) = echo_server();
+    let router = http_router(server.clone(), LOCAL_URL);
+    for encoded in ["+/8=", "+/8", "-_8=", "-_8"] {
+        let mut params = send_params();
+        params["message"]["parts"] = json!([{"text":"hello"},{"raw":encoded}]);
+        let (_, sent) = rpc(router.clone(), "1.0", "SendMessage", params).await;
+        let task = &sent["result"]["task"];
+        assert_eq!(
+            task["status"]["state"], "TASK_STATE_COMPLETED",
+            "{encoded}: {sent}"
+        );
+        assert_eq!(task["history"][1]["parts"][0]["text"], "hello");
+        assert_upstream("SendMessageResponse", &sent["result"]);
+        assert_eq!(task["history"][0]["parts"][1]["raw"], "+/8=");
+        let (_, retrieved) = rpc(router.clone(), "1.0", "GetTask", json!({"id":task["id"]})).await;
+        let raw = retrieved["result"]["history"][0]["parts"][1]["raw"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(raw)
+                .unwrap(),
+            vec![0xfb, 0xff]
+        );
+    }
+    let count = server.tasks.lock().unwrap().len();
+    assert_eq!(count, 4);
+    for malformed in ["not base64", "+/8===", "+", "-_9"] {
+        let mut params = send_params();
+        params["message"]["parts"] = json!([{"text":"hello"},{"raw":malformed}]);
+        let (_, refused) = rpc(router.clone(), "1.0", "SendMessage", params).await;
+        assert_eq!(refused["error"]["code"], -32602, "{malformed}: {refused}");
+        assert_eq!(server.tasks.lock().unwrap().len(), count);
+    }
+}
+
+#[tokio::test]
 async fn arbitrary_json_data_survives_modern_tasks_and_legacy_projection() {
     let (_dir, server) = echo_server();
     let router = http_router(server, LOCAL_URL);
