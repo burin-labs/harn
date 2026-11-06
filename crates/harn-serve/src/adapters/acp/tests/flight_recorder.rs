@@ -18,7 +18,7 @@ impl AcpRuntimeConfigurator for RecordOneSession {
 }
 
 fn recordings(root: &Path) -> Vec<serde_json::Value> {
-    let path = root.join(".harn-runs/flight-recordings");
+    let path = harn_vm::runtime_paths::run_root(root).join("flight-recordings");
     let entries = match std::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
