@@ -138,16 +138,17 @@ for target in $(candidate_archive_expected_targets_json | jq -r '.[]'); do
 done
 
 release_file_entry() {
-  local kind="$1" file="$2"
+  local kind="$1" file="$2" digest
   if [[ ! -s "$release_files_dir/$file" ]]; then
     echo "error: missing or empty release file $file in $release_files_dir" >&2
     exit 1
   fi
+  digest="$(sha256_file "$release_files_dir/$file")" || return 1
   jq -nc \
     --arg kind "$kind" \
     --arg artifact "$RELEASE_FILES_ARTIFACT" \
     --arg file "$file" \
-    --arg sha256 "$(sha256_file "$release_files_dir/$file")" \
+    --arg sha256 "$digest" \
     --arg predicate "$RELEASE_ARCHIVE_PREDICATE_TYPE" \
     '{
       kind: $kind,

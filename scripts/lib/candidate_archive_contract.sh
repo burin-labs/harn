@@ -25,8 +25,8 @@ EXPECTED_RELEASE_ARCHIVES=(
   harn-x86_64-unknown-linux-gnu.tar.xz
 )
 
-# The ACP agent registry installs only .zip/.tar.gz/.tar.bz2/.tgz archives, so
-# older updaters also consume these gzip copies of the unix .tar.xz archives.
+# These gzip copies of the Unix .tar.xz archives serve the ACP agent registry
+# and older updaters. The registry cannot install .tar.xz.
 # They share SHA256SUMS and candidate provenance with the canonical archives;
 # release-assets.json continues to select XZ for current consumers.
 ACP_REGISTRY_ARCHIVES=(

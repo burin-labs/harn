@@ -204,6 +204,33 @@ FILES="$tmp/files-unknown" expect_refusal \
 grep -Fq 'runtime archive files differ from the candidate records' "$tmp/refusal.out" \
   || fail 'unknown archive control did not reach the runtime census'
 
+mkdir "$tmp/hash-shim"
+cat > "$tmp/hash-shim/sha256sum" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${REAL_HASH##*/}" == shasum ]]; then set -- -a 256 "$@"; fi
+line="$("$REAL_HASH" "$@")"
+count="$(cat "$HASH_COUNT")"
+count=$((count + 1))
+printf '%s\n' "$count" > "$HASH_COUNT"
+if [[ "$count" == 6 ]]; then
+  [[ "${line%% *}" == "$COMPAT_SHA" ]]
+  printf 'first compatibility archive reached\n' > "$HASH_REACHED"
+  exit 1
+fi
+printf '%s\n' "$line"
+SH
+chmod +x "$tmp/hash-shim/sha256sum"
+printf '0\n' > "$tmp/hash-count"
+hash_status=0
+REAL_HASH="$(command -v sha256sum || command -v shasum)" HASH_COUNT="$tmp/hash-count" \
+  COMPAT_SHA="$(sha256_file "$tmp/files/${ACP_REGISTRY_ARCHIVES[0]}")" HASH_REACHED="$tmp/hash-reached" \
+  PATH="$tmp/hash-shim:$PATH" assemble "$tmp/hash-failed.json" > "$tmp/refusal.out" 2>&1 || hash_status=$?
+[[ -s "$tmp/hash-reached" ]] || fail 'hash failure control did not reach the first compatibility archive'
+[[ "$hash_status" != 0 ]] || fail 'assembler masked a compatibility archive hash failure'
+[[ "$(cat "$tmp/hash-count")" == 6 ]] || fail 'assembler continued hashing after the tool failure'
+[[ ! -e "$tmp/hash-failed.json" ]] || fail 'hash failure wrote a candidate manifest'
+
 # The gzip copies are the xz archives' own tar streams.
 for gz in "${ACP_REGISTRY_ARCHIVES[@]}"; do
   cmp <(tar -xOzf "$tmp/files/$gz" harn) \
