@@ -106,6 +106,12 @@ pipeline default(harness: Harness) {
           agent_loop(harness, "", nil, opts)
           require has_tool(harness.llm.mock_calls()[6].tools, "read_docs"),
             "re-entering the same user turn must reuse its full-surface decision"
+          for _ in [1, 2, 3, 4, 5] {
+            harness.agent.inject(
+              session,
+              {role: "assistant", content: "withdrawn", harn_bookkeeping_turn: true},
+            )
+          }
           return agent_loop(harness, "Now start another user turn.", nil, opts)
         },
       )
@@ -114,6 +120,8 @@ pipeline default(harness: Harness) {
       const first = narrow[0]
       const calls = harness.llm.mock_calls()
       const sixth_tools = calls[7].tools
+      require has_tool(sixth_tools, "look") && has_tool(sixth_tools, "search"),
+        "bookkeeping placeholders cannot displace actual model-call usage"
       harness.stdio.println(captured.result.status)
       harness.stdio.println(len(narrow) >= 1)
       harness.stdio.println(contains(first.removed_tools, "read_docs"))

@@ -369,7 +369,8 @@ pub fn agent_narrow_tool_surface_at_user_boundary(
   if user_boundary == "" || user_boundary == opts?._tool_surface_user_boundary {
     return opts
   }
-  const boundary_opts = opts + {_tool_surface_user_boundary: user_boundary}
+  const boundary_opts = opts
+    + {_tool_surface_user_boundary: user_boundary, _tool_surface_narrowed_tools: nil}
   // Re-entering agent_loop for the same accepted user message reuses the
   // recorded decision, including a deliberate full surface.
   let retained = nil
@@ -385,13 +386,10 @@ pub fn agent_narrow_tool_surface_at_user_boundary(
   const window_turns = config?.window_turns ?? 5
   let history = []
   for message in snapshot?.messages ?? [] {
-    if message?.role == "assistant" {
-      history.push(
-        __tool_surface_attempted_names(
-          {tool_calls: message?._harn?.tool_calls ?? message?.tool_calls ?? []},
-          [],
-        ),
-      )
+    // Only completed model receipts own a usage sample. Bookkeeping and
+    // withdrawn placeholders have no assistant pairing receipt.
+    if message?.role == "assistant" && message?._harn?.kind == "assistant" {
+      history.push(__tool_surface_attempted_names({tool_calls: message._harn.tool_calls}, []))
       if len(history) > window_turns {
         history = history[1:]
       }
