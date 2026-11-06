@@ -180,7 +180,7 @@ pub fn pr_body(request: Request, changed: list<string>, run_url: string) -> stri
     parts = parts
       + [
         RELEASE_PATH_LINE
-          + " A person must land it at a moment they choose, not Smart Ship, so it is opened without `ship`.",
+          + " Review the release impact before choosing when to add `ship`.",
       ]
   }
   parts = parts
@@ -190,7 +190,7 @@ pub fn pr_body(request: Request, changed: list<string>, run_url: string) -> stri
         + request.sha
         + ". Only the commit SHA after each listed `uses:` reference changes; every other byte of the workflow files stays as it was.",
       "Why: a fix in a shared workflow reaches this repository only when its pin moves, and these pins run owner code that changed since they were pinned. The owner commits are listed below.",
-      "Risk: the new owner commit changes how these shared workflows behave here. Some of them, such as Smart Ship, run only on events this pull request's own CI does not reproduce, so a regression in them can first show on main. This pull request is not automatically labeled `ship`; review its release impact before shipping it.",
+      "Risk: the new owner commit changes how these shared workflows behave here. Some run only on events this pull request's CI does not reproduce. This update changes workflow and action definitions only; review and refresh any consumer-owned generated projections before adding `ship`.",
       "Verified: the rewrite is the offline truth table in scripts/tests/shared_pin_bump_test.harn, and this pull request's CI runs the workflows it triggers at the new commit. Produced by "
         + run_url
         + ".",

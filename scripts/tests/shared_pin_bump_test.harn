@@ -475,7 +475,8 @@ pipeline test_the_pull_request_text() {
     "https://example.test/run/1",
   )
   assert(release.starts_with(RELEASE_PATH_LINE), "a release-path bump says so on its first line")
-  assert(release.contains("must land it at a moment they choose"), "it names who lands it")
+  assert(release.contains("Review the release impact before choosing when to add `ship`"))
+  assert(release.contains("review and refresh any consumer-owned generated projections"))
   assert(!release.contains("<!--"), "the body never opens an HTML comment")
   assert(release.contains("- `.github/workflows/promote-release.yml`"))
   assert(
