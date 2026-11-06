@@ -12,12 +12,12 @@ const WAL_CONVERSION_RETRY_INTERVAL: Duration = Duration::from_millis(5);
 
 impl HostLeaseStore {
     pub(super) fn connection(&self, busy_timeout: Duration) -> Result<Connection, HostLeaseError> {
-        let mut conn = Connection::open(&self.db_path)?;
+        let conn = Connection::open(&self.db_path)?;
         // Install lock patience (busy timeout, or the test busy handler) before
         // the first statement runs. It covers ordinary query-layer contention,
         // but SQLite deliberately bypasses it for the exclusive-lock upgrade the
         // WAL conversion needs, so enable_wal_journal does its own retry.
-        self.install_lock_patience(&mut conn, busy_timeout)?;
+        self.install_lock_patience(&conn, busy_timeout)?;
         self.enable_wal_journal(&conn, busy_timeout)?;
         Ok(conn)
     }
@@ -66,7 +66,7 @@ impl HostLeaseStore {
 
     fn install_lock_patience(
         &self,
-        conn: &mut Connection,
+        conn: &Connection,
         busy_timeout: Duration,
     ) -> Result<(), HostLeaseError> {
         #[cfg(test)]
