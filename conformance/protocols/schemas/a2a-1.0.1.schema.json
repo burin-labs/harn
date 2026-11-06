@@ -96,7 +96,7 @@
       "description": "A self-describing manifest for an agent. It provides essential\n metadata including the agent's identity, capabilities, skills, supported\n communication methods, and security requirements.\n Next ID: 20",
       "patternProperties": {
         "^(default_input_modes)$": {
-          "description": "protolint:enable REPEATED_FIELD_NAMES_PLURALIZED\n The set of interaction modes that the agent supports across all skills.\n This can be overridden per skill. Defined as media types.",
+          "description": "The set of interaction modes that the agent supports across all skills.\n This can be overridden per skill. Defined as media types.",
           "items": {
             "type": "string"
           },
@@ -148,7 +148,7 @@
           "description": "A2A Capability set supported by the agent."
         },
         "defaultInputModes": {
-          "description": "protolint:enable REPEATED_FIELD_NAMES_PLURALIZED\n The set of interaction modes that the agent supports across all skills.\n This can be overridden per skill. Defined as media types.",
+          "description": "The set of interaction modes that the agent supports across all skills.\n This can be overridden per skill. Defined as media types.",
           "items": {
             "type": "string"
           },
@@ -1702,7 +1702,7 @@
     "lf.a2a.v1.StringList.jsonschema.json": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
-      "description": "protolint:disable REPEATED_FIELD_NAMES_PLURALIZED\n A list of strings.",
+      "description": "A list of strings.",
       "properties": {
         "list": {
           "description": "The individual string values.",
@@ -1759,7 +1759,7 @@
           "type": "string"
         },
         "history": {
-          "description": "protolint:disable REPEATED_FIELD_NAMES_PLURALIZED\n The history of interactions from a `Task`.",
+          "description": "The history of interactions from a `Task`.",
           "items": {
             "$ref": "#/$defs/lf.a2a.v1.Message.jsonschema.json"
           },
@@ -1772,7 +1772,7 @@
         },
         "metadata": {
           "$ref": "#/$defs/google.protobuf.Struct.jsonschema.json",
-          "description": "protolint:enable REPEATED_FIELD_NAMES_PLURALIZED\n A key/value object to store custom metadata about a task."
+          "description": "A key/value object to store custom metadata about a task."
         },
         "status": {
           "$ref": "#/$defs/lf.a2a.v1.TaskStatus.jsonschema.json",
