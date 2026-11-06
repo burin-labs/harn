@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "workflows": [
+    "build-release-binaries.yml",
+    "build-smart-ship-package.yml",
+    "bump-release.yml",
+    "macos-packaged-cli-install-proof.yml",
+    "promote-release.yml",
+    "promote-smart-ship-package.yml",
+    "publish-release.yml",
+    "publish-vscode.yml",
+    "release-smoke.yml"
+  ]
+}

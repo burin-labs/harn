@@ -1,0 +1,205 @@
+/**
+ * Move this repository's pins on burin-labs/.github's shared workflows and
+ * actions to a new owner commit.
+ *
+ * The owner's bump-consumer-pins.yml decides which pins are stale and starts
+ * .github/workflows/bump-shared-pin.yml here with them. This module owns what
+ * that workflow does with the request: which bytes of which workflow file
+ * change, whether an active release blocks the update, and what the bump pull
+ * request says. Everything here is a function of
+ * its inputs; scripts/ci/shared_pin_bump_cli.harn does the GitHub calls.
+ */
+pub const OWNER = "burin-labs/.github"
+
+/** Each bump is rooted at an immutable main snapshot and owner target. */
+pub fn branch_name(owner_sha: string, main_sha: string) -> string {
+  return "ci/shared-pin-bump/" + owner_sha + "-" + main_sha
+}
+
+pub type ReleasePolicy = {schema_version: int, workflows: list<string>}
+
+/** Decode the consumer-owned release policy before trusting a quiet run list. */
+pub fn release_workflows(raw: unknown) -> list<string> {
+  const policy = schema_expect(raw, schema_of(ReleasePolicy))
+  if policy.schema_version != 1 || len(policy.workflows) == 0 {
+    throw "shared-pin release policy must name at least one workflow in schema version 1"
+  }
+  let seen: list<string> = []
+  for name in policy.workflows {
+    if regex_match("^[A-Za-z0-9_.-]+\\.ya?ml$", name) == nil || seen.contains(name) {
+      throw "shared-pin release policy has an invalid or duplicate workflow: " + name
+    }
+    seen = seen + [name]
+  }
+  return seen
+}
+
+/** The first line of a bump that must be landed by a person. */
+pub const RELEASE_PATH_LINE =
+  "**Release path:** this pull request moves a pin that a release workflow runs."
+
+pub type Request = {references: list<string>, sha: string, release_path: bool, changes: string}
+
+pub type WorkflowFile = {path: string, text: string}
+
+const REFERENCE = "^\\.github/(workflows/[A-Za-z0-9_.-]+\\.ya?ml|actions/[A-Za-z0-9_.-]+)$"
+
+fn normalize_reference(raw: string) -> string {
+  if regex_match("^[A-Za-z0-9_.-]+\\.ya?ml$", raw) != nil {
+    return ".github/workflows/" + raw
+  }
+  if regex_match(REFERENCE, raw) == nil {
+    throw raw
+      + " is not a shared workflow file name or an owner path such as .github/actions/<name>"
+  }
+  return raw
+}
+
+/** The workflow_dispatch inputs, exactly as the workflow received them. */
+pub type RawRequest = {workflow: string, sha: string, release_path: string, changes: string}
+
+/** Validate the workflow_dispatch inputs once, at the boundary. */
+pub fn parse_request(raw: RawRequest) -> Request {
+  const workflow = raw.workflow
+  const sha = raw.sha
+  const release_path = raw.release_path
+  const changes = raw.changes
+  const names = regex_split(trim(workflow), "[\\s,]+").filter({ name -> name != "" })
+  if len(names) == 0 {
+    throw "workflow names no shared workflow or action to move"
+  }
+  let references = []
+  for name in names {
+    const ref = normalize_reference(name)
+    if !references.contains(ref) {
+      references = references + [ref]
+    }
+  }
+  if regex_match("^[0-9a-f]{40}$", trim(sha)) == nil {
+    throw "sha must be a full 40-hex commit, got " + sha
+  }
+  if !["true", "false"].contains(trim(release_path)) {
+    throw "release_path must be true or false, got " + release_path
+  }
+  return {
+    references: references,
+    sha: trim(sha),
+    release_path: trim(release_path) == "true",
+    changes: trim(changes),
+  }
+}
+
+/**
+ * Move every full-SHA pin on the named owner references to `sha`. Nothing
+ * else changes: other references, short or symbolic refs, comments, quoting,
+ * and line endings stay byte-identical.
+ */
+fn pin_pattern(ref: string) -> string {
+  return "(^|[^A-Za-z0-9_./-])burin-labs/\\.github/" + ref.replace(".", "\\.")
+    + "@([0-9a-f]{40})\\b"
+}
+
+/** Every exact SHA currently used for one requested reference. */
+pub fn pin_shas(files: list<WorkflowFile>, ref: string) -> list<string> {
+  let shas: list<string> = []
+  for file in files {
+    for capture in regex_captures(pin_pattern(ref), file.text, "m") {
+      const sha = capture.groups[1]
+      if !shas.contains(sha) {
+        shas = shas + [sha]
+      }
+    }
+  }
+  return shas
+}
+
+pub fn rewrite_pins(text: string, references: list<string>, sha: string) -> string {
+  let result = text
+  for ref in references {
+    result = regex_replace(
+      pin_pattern(ref),
+      "$" + "{1}burin-labs/.github/" + ref + "@" + sha,
+      result,
+      "m",
+    )
+  }
+  return result
+}
+
+/** The workflow files a request changes, with their new text. */
+pub fn rewrite_files(files: list<WorkflowFile>, request: Request) -> list<WorkflowFile> {
+  let missing = []
+  for ref in request.references {
+    if len(pin_shas(files, ref)) == 0 {
+      missing = missing + [ref]
+    }
+  }
+  if len(missing) > 0 {
+    throw "requested pins were not found in the measured definitions: " + join(missing, ", ")
+  }
+  let changed = []
+  for file in files {
+    const text = rewrite_pins(file.text, request.references, request.sha)
+    if text != file.text {
+      changed = changed + [{path: file.path, text: text}]
+    }
+  }
+  return changed
+}
+
+/**
+ * Why this run must leave the pull request alone, or nil to proceed. A
+ * release-path bump never lands under a release that is already running.
+ */
+pub fn release_gate(request: Request, running: list<string>) -> string? {
+  if !request.release_path || len(running) == 0 {
+    return nil
+  }
+  return "a release run is active or queued (" + join(running, ", ")
+    + "), so the release-path bump to "
+    + request.sha
+    + " waits for the next owner change"
+}
+
+pub fn pr_title(sha: string) -> string {
+  return "[CI] Move shared workflow pins to " + sha[0:8]
+}
+
+pub fn commit_message(request: Request) -> string {
+  return pr_title(request.sha) + "\n\n"
+    + join(request.references.map({ ref -> "- " + ref }).to_list(), "\n")
+}
+
+/**
+ * The pull request description. It never contains an HTML comment opener,
+ * which the description checker mishandles.
+ */
+pub fn pr_body(request: Request, changed: list<string>, run_url: string) -> string {
+  let parts = []
+  if request.release_path {
+    parts = parts
+      + [
+        RELEASE_PATH_LINE
+          + " A person must land it at a moment they choose, not Smart Ship, so it is opened without `ship`.",
+      ]
+  }
+  parts = parts
+    + [
+      "This moves the pins this repository holds on shared workflows and actions in " + OWNER
+        + " to commit "
+        + request.sha
+        + ". Only the commit SHA after each listed `uses:` reference changes; every other byte of the workflow files stays as it was.",
+      "Why: a fix in a shared workflow reaches this repository only when its pin moves, and these pins run owner code that changed since they were pinned. The owner commits are listed below.",
+      "Risk: the new owner commit changes how these shared workflows behave here. Some of them, such as Smart Ship, run only on events this pull request's own CI does not reproduce, so a regression in them can first show on main. This pull request is not automatically labeled `ship`; review its release impact before shipping it.",
+      "Verified: the rewrite is the offline truth table in scripts/tests/shared_pin_bump_test.harn, and this pull request's CI runs the workflows it triggers at the new commit. Produced by "
+        + run_url
+        + ".",
+      "Moved:\n" + join(request.references.map({ ref -> "- `" + ref + "`" }).to_list(), "\n"),
+      "Files this update changed:\n"
+        + join(changed.map({ path -> "- `" + path + "`" }).to_list(), "\n"),
+    ]
+  if request.changes != "" {
+    parts = parts + ["Owner commits since the old pins:\n" + request.changes]
+  }
+  return join(parts, "\n\n").replace("<!--", "< !--")
+}

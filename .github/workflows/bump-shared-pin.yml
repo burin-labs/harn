@@ -1,0 +1,39 @@
+name: Bump shared workflow pins
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: Owner references to move, separated by spaces
+        required: true
+        type: string
+      sha:
+        description: Owner commit on main
+        required: true
+        type: string
+      release_path:
+        description: Whether the owner identified a release-path pin
+        required: true
+        type: boolean
+      changes:
+        description: Owner commits since the old pins
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bump:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/shared-pin-bump-impl.yml
+    with:
+      workflow: ${{ inputs.workflow }}
+      sha: ${{ inputs.sha }}
+      release_path: ${{ inputs.release_path }}
+      changes: ${{ inputs.changes }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

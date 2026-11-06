@@ -1,0 +1,531 @@
+import { read_yaml } from "std/fs"
+import { assert_error_contains } from "std/testing"
+import {
+  RELEASE_PATH_LINE,
+  Request,
+  branch_name,
+  parse_request,
+  pr_body,
+  pr_title,
+  release_gate,
+  release_workflows,
+  rewrite_files,
+  rewrite_pins,
+} from "../ci/shared_pin_bump"
+import { Gh, process_request } from "../ci/shared_pin_bump_cli"
+
+const OLD = "1111111111111111111111111111111111111111"
+
+const OTHER = "2222222222222222222222222222222222222222"
+
+const NEW = "3333333333333333333333333333333333333333"
+
+type FakeGitHub = {gh: Gh, writes: fn() -> list<string>, written_paths: fn() -> list<string>}
+
+fn fake_github(scenario: string, repo: string = "burin-labs/harn") -> FakeGitHub {
+  let writes: list<string> = []
+  let written_paths: list<string> = []
+  const gh: Gh = {
+    call: fn(args) {
+      const path = args[len(args) - 1]
+      if path.contains("/contents/.github/workflows/ci.yml?") {
+        const text = scenario == "missing" ? "jobs: {}\n" : ship_workflow(OLD)
+        return {success: true, stdout: text, stderr: ""}
+      }
+      if path.contains("/contents/.github/workflows/promote-release.yml?") {
+        return {success: true, stdout: ship_workflow(OLD), stderr: ""}
+      }
+      if path.contains("/contents/.github/workflows/deploy.yml?") {
+        return {success: true, stdout: ship_workflow(OLD), stderr: ""}
+      }
+      if path.contains("/contents/.github/actions/nested/action.yml?") {
+        return {
+          success: true,
+          stdout: "uses: burin-labs/.github/.github/actions/ci-job-proof@" + OLD,
+          stderr: "",
+        }
+      }
+      if path.contains("/contents/.github/shared-pin-release-policy.json?") {
+        if scenario == "missing_policy" {
+          return {success: false, stdout: "", stderr: "unreadable"}
+        }
+        const name = scenario == "hidden_release" ? "promote-release.yml" : scenario
+          == "host_release" ? "deploy.yml" : "ci.yml"
+        return {
+          success: true,
+          stdout: json_stringify({schema_version: 1, workflows: [name]}),
+          stderr: "",
+        }
+      }
+      throw "unexpected GitHub call " + join(args, " ")
+    },
+    json: fn(args) {
+      const path = args[len(args) - 1]
+      if path == "repos/" + repo {
+        return {default_branch: "main"}
+      }
+      if path == "repos/" + repo + "/git/ref/heads/main" {
+        return {object: {sha: OLD}}
+      }
+      if path.contains("/git/matching-refs/heads/ci/shared-pin-bump/") {
+        return scenario == "existing" ? [
+          {ref: "refs/heads/" + branch_name(NEW, OLD), object: {sha: OTHER}},
+        ] : []
+      }
+      if path.starts_with("repos/burin-labs/.github/compare/") {
+        return {
+          status: scenario == "backwards" && path.ends_with(OLD + "..." + NEW) ? "behind" : "ahead",
+        }
+      }
+      if path.contains("/git/trees/") {
+        return {
+          truncated: scenario == "truncated",
+          tree: [
+            {
+              path: scenario == "hidden_release" ? ".github/workflows/promote-release.yml" : scenario
+                == "host_release" ? ".github/workflows/deploy.yml" : ".github/workflows/ci.yml",
+              type: "blob",
+              mode: "100644",
+            },
+          ]
+            + (scenario == "action" ? [
+              {path: ".github/actions/nested/action.yml", type: "blob", mode: "100644"},
+            ] : []),
+        }
+      }
+      if path == "repos/" + repo + "/git/commits/" + OLD {
+        return {tree: {sha: "base-tree"}}
+      }
+      if path == "repos/" + repo + "/git/commits/" + OTHER {
+        return {
+          tree: {sha: "candidate-tree"},
+          parents: [{sha: OLD}],
+          verification: {verified: true},
+        }
+      }
+      if path.contains("/pulls?state=open") {
+        return scenario == "existing" ? [{number: 42, body: "body", labels: []}] : []
+      }
+      if args[0] == "run" {
+        return ["waiting", "hidden_release", "host_release"].contains(scenario)
+          && args.contains("waiting") ? [{databaseId: 7}] : []
+      }
+      throw "unexpected GitHub JSON call " + join(args, " ")
+    },
+    write: fn(method, path, body) {
+      writes = writes + [method + " " + path]
+      if path.ends_with("/git/trees") {
+        written_paths = body.tree.map({ item -> item.path }).to_list()
+        return {sha: "candidate-tree"}
+      }
+      if path.ends_with("/git/commits") {
+        return {sha: OTHER, verification: {verified: scenario != "unsigned"}}
+      }
+      if path.ends_with("/git/refs") {
+        return {object: {sha: OTHER}}
+      }
+      if path.ends_with("/pulls") {
+        return {number: 42}
+      }
+      throw "unexpected GitHub write " + method + " " + path
+    },
+  }
+  return {gh: gh, writes: fn() { return writes }, written_paths: fn() { return written_paths }}
+}
+
+pipeline test_consumer_cli_publishes_only_a_measured_signed_candidate() {
+  const fake = fake_github("new")
+  const result = process_request(
+    fake.gh,
+    fake.gh,
+    request("smart-ship.yml"),
+    "burin-labs/harn",
+    "run",
+  )
+  assert(result.contains("read 1 workflow and action files"))
+  assert(result.contains("opened pull request #42"))
+  assert_eq(
+    fake.writes(),
+    [
+      "POST repos/burin-labs/harn/git/trees",
+      "POST repos/burin-labs/harn/git/commits",
+      "POST repos/burin-labs/harn/git/refs",
+      "POST repos/burin-labs/harn/pulls",
+    ],
+  )
+  const action = fake_github("action")
+  const action_result = process_request(
+    action.gh,
+    action.gh,
+    request("smart-ship.yml .github/actions/ci-job-proof"),
+    "burin-labs/harn",
+    "run",
+  )
+  assert(action_result.contains("read 2 workflow and action files"))
+  assert_eq(
+    action.written_paths(),
+    [".github/workflows/ci.yml", ".github/actions/nested/action.yml"],
+  )
+  const unsigned = fake_github("unsigned")
+  assert_error_contains(
+    fn() { process_request(
+      unsigned.gh,
+      unsigned.gh,
+      request("smart-ship.yml"),
+      "burin-labs/harn",
+      "run",
+    ) },
+    "did not sign",
+  )
+  assert(
+    !unsigned.writes().any({ call -> call.ends_with("/git/refs") }),
+    "unsigned commits never reach a ref",
+  )
+  for scenario in ["truncated", "missing", "backwards", "missing_policy"] {
+    const invalid = fake_github(scenario)
+    assert_error_contains(
+      fn() { process_request(
+        invalid.gh,
+        invalid.gh,
+        request("smart-ship.yml"),
+        "burin-labs/harn",
+        "run",
+      ) },
+      scenario == "truncated" ? "truncated" : scenario == "missing" ? "requested pins were not found" : scenario
+        == "missing_policy" ? "shared-pin-release-policy.json" : "not an ancestor",
+    )
+    assert_eq(invalid.writes(), [])
+  }
+}
+
+pipeline test_consumer_cli_retries_the_same_verified_snapshot_and_refuses_waiting_releases() {
+  const existing = fake_github("existing")
+  const result = process_request(
+    existing.gh,
+    existing.gh,
+    request("smart-ship.yml"),
+    "burin-labs/harn",
+    "run",
+  )
+  assert(result.contains("found pull request #42"))
+  assert_eq(existing.writes(), ["POST repos/burin-labs/harn/git/trees"])
+  const waiting = fake_github("waiting")
+  assert_error_contains(
+    fn() { process_request(
+      waiting.gh,
+      waiting.gh,
+      request("smart-ship.yml", "true"),
+      "burin-labs/harn",
+      "run",
+    ) },
+    "waiting",
+  )
+  assert_eq(waiting.writes(), [])
+  const hidden_release = fake_github("hidden_release")
+  assert_error_contains(
+    fn() { process_request(
+      hidden_release.gh,
+      hidden_release.gh,
+      request("smart-ship.yml"),
+      "burin-labs/harn",
+      "run",
+    ) },
+    "waiting",
+  )
+  assert_eq(hidden_release.writes(), [])
+  const host_release = fake_github("host_release", "example/host")
+  assert_error_contains(
+    fn() { process_request(
+      host_release.gh,
+      host_release.gh,
+      request("smart-ship.yml"),
+      "example/host",
+      "run",
+    ) },
+    "deploy.yml run 7",
+  )
+  assert_eq(host_release.writes(), [])
+}
+
+pipeline test_cli_entrypoint_uses_the_scoped_github_adapter(harness: Harness) {
+  const source = harness.fs.source_dir()
+  const checkout = path_join(source, "../..")
+  const fixture = path_join(source, "fixtures/shared-pin-gh")
+  const script = path_join(source, "../ci/shared_pin_bump_cli.harn")
+  const binary = harness.env.get_or("HARN_BIN", "harn")
+  for scenario in ["ok", "unsigned", "truncated", "backwards", "missing", "waiting"] {
+    const root = harness.fs.mkdtemp_in_workspace("shared-pin-cli-test-")
+    const log = path_join(root, "calls.jsonl")
+    harness.fs.write_text(log, "")
+    const token = "fixture|" + scenario + "|" + log
+    const result = harness.process.run(
+      {
+        program: binary,
+        args: [
+          "run",
+          "--no-sandbox",
+          "--grant",
+          "path=env:PATH,expose=PATH",
+          "--grant",
+          "gh_token=env:GH_TOKEN,expose=GH_TOKEN",
+          "--grant",
+          "read_token=env:BUMP_READ_TOKEN,expose=BUMP_READ_TOKEN",
+          "--grant",
+          "workflow=env:BUMP_WORKFLOW,expose=BUMP_WORKFLOW",
+          "--grant",
+          "sha=env:BUMP_SHA,expose=BUMP_SHA",
+          "--grant",
+          "release_path=env:BUMP_RELEASE_PATH,expose=BUMP_RELEASE_PATH",
+          "--grant",
+          "changes=env:BUMP_CHANGES,expose=BUMP_CHANGES",
+          "--grant",
+          "run_url=env:BUMP_RUN_URL,expose=BUMP_RUN_URL",
+          "--grant",
+          "repository=env:GITHUB_REPOSITORY,expose=GITHUB_REPOSITORY",
+          script,
+        ],
+        cwd: checkout,
+        env: {
+          PATH: fixture + ":" + harness.env.get_or("PATH", ""),
+          GH_TOKEN: token,
+          BUMP_READ_TOKEN: token,
+          BUMP_WORKFLOW:
+            scenario == "missing" ? "smart-ship.yml .github/actions/ci-job-proof cargo-deny.yml" : "smart-ship.yml .github/actions/ci-job-proof",
+          BUMP_SHA: NEW,
+          BUMP_RELEASE_PATH: scenario == "waiting" ? "true" : "false",
+          BUMP_CHANGES: "",
+          BUMP_RUN_URL: "https://example.test/run/1",
+          GITHUB_REPOSITORY: "burin-labs/harn",
+        },
+      },
+    )
+    const calls = harness.fs.read_text(log)
+    if scenario == "ok" {
+      assert(result.success, result.stderr)
+      assert(result.stdout.contains("opened pull request #42"), result.stdout)
+      assert(calls.contains("/git/refs"), "the candidate ref must actually be published")
+      assert(calls.contains("/pulls"), "the pull request must actually be opened")
+    } else {
+      assert(!result.success, scenario + " must fail closed")
+      assert(!calls.contains("/git/refs"), scenario + " must never publish a ref")
+      assert(!calls.contains("/pulls"), scenario + " must never open a pull request")
+    }
+    harness.fs.delete(root)
+  }
+}
+
+fn request(workflow: string, release_path: string = "false", changes: string = "") -> Request {
+  return parse_request({workflow: workflow, sha: NEW, release_path: release_path, changes: changes})
+}
+
+fn ship_workflow(sha: string) -> string {
+  return "jobs:\n  ship:\n    uses: burin-labs/.github/.github/workflows/smart-ship.yml@" + sha
+    + " # carries approvals\r\n    secrets: inherit\n"
+}
+
+pipeline test_the_rewrite_truth_table() {
+  const smart_ship = request("smart-ship.yml")
+  for case in [
+    {
+      name: "a stale pin moves and nothing else on the line changes",
+      text: ship_workflow(OLD),
+      expected: ship_workflow(NEW),
+    },
+    {
+      name: "an already-current pin is left alone",
+      text: ship_workflow(NEW),
+      expected: ship_workflow(NEW),
+    },
+    {
+      name: "an unrelated shared workflow is left alone",
+      text: "    uses: burin-labs/.github/.github/workflows/runner-availability.yml@" + OLD + "\n",
+      expected: "    uses: burin-labs/.github/.github/workflows/runner-availability.yml@" + OLD
+        + "\n",
+    },
+    {
+      name: "a branch, short SHA, or placeholder ref is left alone",
+      text: "#   uses: burin-labs/.github/.github/workflows/smart-ship.yml@<sha>\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@main\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@1111111\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@"
+        + OLD
+        + "1\n",
+      expected: "#   uses: burin-labs/.github/.github/workflows/smart-ship.yml@<sha>\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@main\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@1111111\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml@"
+        + OLD
+        + "1\n",
+    },
+    {
+      name: "another repository's look-alike path is left alone",
+      text: "    uses: other/burin-labs/.github/.github/workflows/smart-ship.yml@" + OLD + "\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml.bak@"
+        + OLD
+        + "\n",
+      expected: "    uses: other/burin-labs/.github/.github/workflows/smart-ship.yml@" + OLD + "\n"
+        + "    uses: burin-labs/.github/.github/workflows/smart-ship.yml.bak@"
+        + OLD
+        + "\n",
+    },
+    {
+      name: "every occurrence moves, quoted or not, whatever its old SHA",
+      text: "  a:\n    uses: 'burin-labs/.github/.github/workflows/smart-ship.yml@" + OLD + "'\n"
+        + "  b:\n    uses: \"burin-labs/.github/.github/workflows/smart-ship.yml@"
+        + OTHER
+        + "\"\n",
+      expected: "  a:\n    uses: 'burin-labs/.github/.github/workflows/smart-ship.yml@" + NEW
+        + "'\n"
+        + "  b:\n    uses: \"burin-labs/.github/.github/workflows/smart-ship.yml@"
+        + NEW
+        + "\"\n",
+    },
+  ] {
+    assert_eq(
+      rewrite_pins(case.text, smart_ship.references, smart_ship.sha),
+      case.expected,
+      case.name,
+    )
+  }
+}
+
+pipeline test_action_pins_and_several_files() {
+  const both = request(".github/workflows/smart-ship.yml .github/actions/ci-job-proof")
+  const files = [
+    {path: ".github/workflows/smart-ship.yml", text: ship_workflow(OLD)},
+    {
+      path: ".github/workflows/ci.yml",
+      text: "      - uses: burin-labs/.github/.github/actions/ci-job-proof@" + OLD + "\n"
+        + "      - uses: burin-labs/.github/.github/actions/ci-job-proof-extra@"
+        + OLD
+        + "\n",
+    },
+    {
+      path: ".github/workflows/untouched.yml",
+      text: "      - uses: burin-labs/.github/.github/actions/hosted-runner-labels@" + OLD + "\n",
+    },
+    {path: ".github/workflows/current.yml", text: ship_workflow(NEW)},
+  ]
+  assert_eq(
+    rewrite_files(files, both),
+    [
+      {path: ".github/workflows/smart-ship.yml", text: ship_workflow(NEW)},
+      {
+        path: ".github/workflows/ci.yml",
+        text: "      - uses: burin-labs/.github/.github/actions/ci-job-proof@" + NEW + "\n"
+          + "      - uses: burin-labs/.github/.github/actions/ci-job-proof-extra@"
+          + OLD
+          + "\n",
+      },
+    ],
+  )
+  // A partial or empty rewrite is not proof that every requested pin is current.
+  assert_error_contains(
+    fn() { rewrite_files(files, request("smart-ship.yml cargo-deny.yml")) },
+    ".github/workflows/cargo-deny.yml",
+  )
+  assert_eq(
+    rewrite_files([{path: "current", text: ship_workflow(NEW)}], request("smart-ship.yml")),
+    [],
+  )
+}
+
+pipeline test_requests_are_validated_at_the_boundary() {
+  assert_eq(
+    request("smart-ship.yml, .github/actions/ci-job-proof smart-ship.yml").references,
+    [".github/workflows/smart-ship.yml", ".github/actions/ci-job-proof"],
+  )
+  assert_error_contains(fn() { request("") }, "names no shared workflow")
+  assert_error_contains(fn() { request("../../evil.yml") }, "is not a shared workflow file name")
+  assert_error_contains(
+    fn() { request(".github/actions/a/b") },
+    "is not a shared workflow file name",
+  )
+  assert_error_contains(
+    fn() { parse_request(
+      {workflow: "smart-ship.yml", sha: "main", release_path: "false", changes: ""},
+    ) },
+    "sha must be a full 40-hex commit",
+  )
+  assert_error_contains(
+    fn() { request("smart-ship.yml", "yes") },
+    "release_path must be true or false",
+  )
+}
+
+pipeline test_a_running_release_holds_only_a_release_path_bump() {
+  const running = ["publish-release.yml run 7"]
+  assert_eq(release_gate(request("smart-ship.yml"), running), nil)
+  assert_eq(release_gate(request("promote-release.yml", "true"), []), nil)
+  assert(
+    release_gate(request("promote-release.yml", "true"), running)?.contains(
+      "publish-release.yml run 7",
+    ),
+    "a release-path bump must wait for the running release",
+  )
+}
+
+pipeline test_the_pull_request_text() {
+  assert_eq(pr_title(NEW), "[CI] Move shared workflow pins to 33333333")
+  const changes = "- 222222222222 [CI] Carry an approval <!-- across merges"
+  const release = pr_body(
+    request("promote-release.yml smart-ship.yml", "true", changes),
+    [".github/workflows/release.yml"],
+    "https://example.test/run/1",
+  )
+  assert(release.starts_with(RELEASE_PATH_LINE), "a release-path bump says so on its first line")
+  assert(release.contains("must land it at a moment they choose"), "it names who lands it")
+  assert(!release.contains("<!--"), "the body never opens an HTML comment")
+  assert(release.contains("- `.github/workflows/promote-release.yml`"))
+  assert(
+    release.contains("Owner commits since the old pins:\n- 222222222222 [CI] Carry an approval"),
+  )
+  const ordinary = pr_body(request("smart-ship.yml"), [".github/workflows/smart-ship.yml"], "u")
+  assert(!ordinary.contains("Release path"), "an ordinary bump carries no release-path line")
+  const prose = regex_split(trim(ordinary.split("Moved:")[0] ?? ""), "\\s+")
+  assert(len(prose) >= 20, "the description checker needs at least 20 words of prose")
+}
+
+pipeline test_the_workflow_keeps_one_serialized_bump_with_scoped_tokens(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/bump-shared-pin.yml")
+  const implementation = read_yaml(harness.fs, "../../.github/workflows/shared-pin-bump-impl.yml")
+  assert_eq(keys(workflow["on"]), ["workflow_dispatch"])
+  assert_eq(workflow.jobs.bump.uses, "./.github/workflows/shared-pin-bump-impl.yml")
+  assert_eq(keys(implementation["on"]), ["workflow_call"])
+  assert_eq(
+    implementation.concurrency,
+    {group: "shared-pin-bump-" + "$" + "{{ github.repository }}", "cancel-in-progress": false},
+  )
+  const steps = implementation.jobs.bump.steps
+  const checkout = steps.find(
+    { step -> step?.name == "Check out the implementation at its own commit" },
+  )
+  assert_eq(checkout.with.repository, "$" + "{{ fromJSON(toJSON(job)).workflow_repository }}")
+  assert_eq(checkout.with.ref, "$" + "{{ fromJSON(toJSON(job)).workflow_sha }}")
+  assert_eq(checkout.with["persist-credentials"], false)
+  const token = steps.find({ step -> step?.id == "app-token" })
+  assert_eq(
+    keys(token.with).filter({ key -> key.starts_with("permission-") }).to_list().sorted(),
+    ["permission-contents", "permission-pull-requests", "permission-workflows"],
+  )
+  assert_eq(token.with["permission-contents"], "write")
+  assert_eq(token.with["permission-pull-requests"], "write")
+  assert_eq(token.with["permission-workflows"], "write")
+  const run = steps.find({ step -> step?.id == "bump" })
+  assert_eq(run.env.GH_TOKEN, "$" + "{{ steps.app-token.outputs.token }}")
+  assert_eq(run.env.BUMP_READ_TOKEN, "$" + "{{ github.token }}")
+  assert_eq(branch_name(NEW, OLD), "ci/shared-pin-bump/" + NEW + "-" + OLD)
+  // Every release workflow the gate watches exists.
+  const policy = json_parse(harness.fs.read_text("../../.github/shared-pin-release-policy.json"))
+  for name in release_workflows(policy) {
+    assert(harness.fs.exists("../../.github/workflows/" + name), name + " must exist")
+  }
+  assert_error_contains(
+    fn() { release_workflows({schema_version: 1, workflows: []}) },
+    "at least one workflow",
+  )
+  assert_error_contains(
+    fn() { release_workflows({schema_version: 1, workflows: ["../bad.yml"]}) },
+    "invalid",
+  )
+}

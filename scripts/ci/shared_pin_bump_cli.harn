@@ -1,0 +1,415 @@
+/**
+ * Open or recover a shared-pin bump pull request for an immutable snapshot.
+ *
+ * Every write goes through the GitHub API with the App token the workflow
+ * mints, so GitHub signs each commit and the pull request starts CI. Reads of
+ * workflow runs use the workflow's own read-only token. Nothing is pushed
+ * from the runner and the branch is never moved or force-updated.
+ */
+import { command_output_tail, command_run } from "std/command"
+import {
+  Request,
+  WorkflowFile,
+  branch_name,
+  commit_message,
+  parse_request,
+  pin_shas,
+  pr_body,
+  pr_title,
+  release_gate,
+  release_workflows,
+  rewrite_files,
+} from "./shared_pin_bump"
+
+type TreeEntry = {path: string, type: string, mode: string}
+
+type GitTree = {truncated: bool, tree: list<TreeEntry>}
+
+type Run = {databaseId: int}
+
+type Runs = list<Run>
+
+type Label = {name: string}
+
+type PullRequest = {number: int, body: string?, labels: list<Label>}
+
+type PullRequests = list<PullRequest>
+
+type Repository = {default_branch: string}
+
+type GitRef = {object: {sha: string}}
+
+type NamedGitRef = {ref: string, object: {sha: string}}
+
+type NamedGitRefs = list<NamedGitRef>
+
+type Comparison = {status: string}
+
+type CommitTree = {tree: {sha: string}}
+
+type Created = {sha: string}
+
+type SignedCommit = {sha: string, verification: {verified: bool}}
+
+type ExistingCommit = {
+  tree: {sha: string},
+  parents: list<{sha: string}>,
+  verification: {verified: bool},
+}
+
+type CreatedPullRequest = {number: int}
+
+type Capabilities = {fs: HarnessFs, tools: HarnessTools}
+
+pub type Gh = {
+  call: fn(list<string>) -> dict,
+  json: fn(list<string>) -> unknown,
+  write: fn(string, string, dict) -> unknown,
+}
+
+fn required_env(env: HarnessEnv, name: string) -> string {
+  const value = trim(env.get_or(name, ""))
+  if value == "" {
+    throw "shared_pin_bump: " + name + " is required"
+  }
+  return value
+}
+
+fn diagnostic(tools: HarnessTools, result: dict) -> string {
+  const stderr = command_output_tail(tools, result, {source: "stderr", length: 12000}).content
+  const lines = trim(stderr).split("\n")
+  const text = trim(join(lines[max(0, len(lines) - 3):len(lines)], " "))
+  return text == "" ? "exit " + to_string(result?.exit_code) : text
+}
+
+fn gh_client(caps: Capabilities, token: string, scratch: string) -> Gh {
+  const options = {
+    capture: {max_inline_bytes: 16000000},
+    env: {
+      GH_TOKEN: token,
+      GH_CONFIG_DIR: path_join(scratch, "config"),
+      XDG_CACHE_HOME: path_join(scratch, "cache"),
+      XDG_STATE_HOME: path_join(scratch, "state"),
+      XDG_DATA_HOME: path_join(scratch, "data"),
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+      NO_COLOR: "1",
+    },
+    timeout_ms: 120000,
+  }
+  const call = fn(args) { return command_run(caps.tools, ["gh"] + args, options) }
+  const json = fn(args) {
+    const result = call(args)
+    if !result.success {
+      throw "gh " + join(args, " ") + " failed: " + diagnostic(caps.tools, result)
+    }
+    return json_parse(result.stdout)
+  }
+  let writes = 0
+  return {
+    call: call,
+    json: json,
+    write: fn(method, path, body) {
+      writes = writes + 1
+      const input = path_join(scratch, "request-" + to_string(writes) + ".json")
+      caps.fs.write_text(input, json_stringify(body))
+      return json(["api", "-X", method, path, "--input", input])
+    },
+  }
+}
+
+fn running_releases(gh: Gh, repo: string, workflows: list<string>) -> list<string> {
+  let running = []
+  for workflow in workflows {
+    for status in ["queued", "requested", "waiting", "pending", "in_progress"] {
+      const raw = gh.json(
+        [
+          "run",
+          "list",
+          "--all",
+          "--repo",
+          repo,
+          "--workflow",
+          workflow,
+          "--status",
+          status,
+          "--json",
+          "databaseId",
+          "--limit",
+          "100",
+        ],
+      )
+      for run in schema_expect(raw, schema_of(Runs)) {
+        running = running + [workflow + " run " + to_string(run.databaseId) + " (" + status + ")"]
+      }
+    }
+  }
+  return running
+}
+
+fn branch_head(gh: Gh, repo: string, branch: string) -> string? {
+  const refs = schema_expect(
+    gh.json(["api", "repos/" + repo + "/git/matching-refs/heads/" + branch]),
+    schema_of(NamedGitRefs),
+  )
+  const matches = refs.filter({ ref -> ref.ref == "refs/heads/" + branch }).to_list()
+  if len(matches) > 1 {
+    throw "multiple exact refs returned for " + branch
+  }
+  if len(matches) == 0 {
+    return nil
+  }
+  const found: NamedGitRef = matches[0]
+  return found.object.sha
+}
+
+fn workflow_files(gh: Gh, repo: string, sha: string) -> list<WorkflowFile> {
+  const listing = schema_expect(
+    gh.json(["api", "repos/" + repo + "/git/trees/" + sha + "?recursive=1"]),
+    schema_of(GitTree),
+  )
+  if listing.truncated {
+    throw repo + " returned a truncated Git tree; shared pins are unmeasured"
+  }
+  let files = []
+  let workflows = 0
+  for entry in listing.tree {
+    if (entry.path.starts_with(".github/actions/") || entry.path == ".github/actions")
+      && (entry.mode == "120000" || entry.type == "commit") {
+      throw repo + " " + entry.path + " is a symlink or submodule; shared pins are unmeasured"
+    }
+    const workflow = regex_match("^\\.github/workflows/[^/]+\\.ya?ml$", entry.path) != nil
+    const action = regex_match("^\\.github/actions/.+/action\\.ya?ml$", entry.path) != nil
+    if !workflow && !action {
+      continue
+    }
+    if entry.type != "blob" || entry.mode != "100644" {
+      throw repo + " " + entry.path + " is not a regular non-executable file"
+    }
+    if workflow {
+      workflows = workflows + 1
+    }
+    const result = gh.call(
+      [
+        "api",
+        "-H",
+        "Accept: application/vnd.github.raw+json",
+        "repos/" + repo + "/contents/" + entry.path + "?ref=" + sha,
+      ],
+    )
+    if !result.success {
+      throw "reading " + entry.path + " at " + sha + " failed: " + result.stderr
+    }
+    files = files + [{path: entry.path, text: result.stdout}]
+  }
+  // An empty listing must not read as "every pin is already current".
+  if workflows == 0 {
+    throw repo + " lists no workflow files at " + sha
+  }
+  return files
+}
+
+fn read_release_workflows(
+  gh: Gh,
+  repo: string,
+  sha: string,
+  files: list<WorkflowFile>,
+) -> list<string> {
+  const path = ".github/shared-pin-release-policy.json"
+  const result = gh.call(
+    [
+      "api",
+      "-H",
+      "Accept: application/vnd.github.raw+json",
+      "repos/" + repo + "/contents/" + path + "?ref=" + sha,
+    ],
+  )
+  if !result.success {
+    throw "reading " + repo + " " + path + " at " + sha + " failed: " + result.stderr
+  }
+  const names = release_workflows(json_parse(result.stdout))
+  const missing = names.filter(
+    { name -> !files.any({ file -> file.path == ".github/workflows/" + name }) },
+  )
+    .to_list()
+  if len(missing) > 0 {
+    throw repo + " release policy names missing workflow files: " + join(missing, ", ")
+  }
+  return names
+}
+
+fn signed(sha: string, verified: bool, what: string) -> string {
+  if !verified {
+    throw "GitHub did not sign " + what + " " + sha + ", so it is not published"
+  }
+  return sha
+}
+
+fn require_owner_ancestor(gh: Gh, older: string, newer: string) {
+  if older == newer {
+    return
+  }
+  const comparison = schema_expect(
+    gh.json(["api", "repos/burin-labs/.github/compare/" + older + "..." + newer]),
+    schema_of(Comparison),
+  )
+  if comparison.status != "ahead" && comparison.status != "identical" {
+    throw "owner commit " + older + " is not an ancestor of " + newer + ": " + comparison.status
+  }
+}
+
+fn publish(
+  gh: Gh,
+  repo: string,
+  base: string,
+  changed: list<WorkflowFile>,
+  request: Request,
+  branch: string,
+  head: string?,
+) -> string {
+  const parent = schema_expect(
+    gh.json(["api", "repos/" + repo + "/git/commits/" + base]),
+    schema_of(CommitTree),
+  )
+  const tree = schema_expect(
+    gh.write(
+      "POST",
+      "repos/" + repo + "/git/trees",
+      {
+        base_tree: parent.tree.sha,
+        tree: changed.map(
+          { file -> {path: file.path, mode: "100644", type: "blob", content: file.text} },
+        )
+          .to_list(),
+      },
+    ),
+    schema_of(Created),
+  )
+  if head != nil {
+    const existing = schema_expect(
+      gh.json(["api", "repos/" + repo + "/git/commits/" + head]),
+      schema_of(ExistingCommit),
+    )
+    if existing.tree.sha != tree.sha
+      || existing.parents.map({ candidate_parent -> candidate_parent.sha }).to_list() != [base]
+      || !existing.verification.verified {
+      throw "existing bump branch " + branch + " does not match the signed candidate on " + base
+    }
+    return head
+  }
+  // No author or committer: GitHub then signs the commit as the App.
+  const commit = schema_expect(
+    gh.write(
+      "POST",
+      "repos/" + repo + "/git/commits",
+      {message: commit_message(request), tree: tree.sha, parents: [base]},
+    ),
+    schema_of(SignedCommit),
+  )
+  const sha = signed(commit.sha, commit.verification.verified, "the pin commit")
+  gh.write("POST", "repos/" + repo + "/git/refs", {ref: "refs/heads/" + branch, sha: sha})
+  return sha
+}
+
+pub fn process_request(
+  gh: Gh,
+  reader: Gh,
+  request: Request,
+  repo: string,
+  run_url: string,
+) -> string {
+  const owner = repo.split("/")[0] ?? ""
+  const default_branch = schema_expect(gh.json(["api", "repos/" + repo]), schema_of(Repository))
+    .default_branch
+  const main_sha = schema_expect(
+    gh.json(["api", "repos/" + repo + "/git/ref/heads/" + default_branch]),
+    schema_of(GitRef),
+  ).object.sha
+  const branch = branch_name(request.sha, main_sha)
+  const head = branch_head(gh, repo, branch)
+  const base = main_sha
+  const files = workflow_files(gh, repo, base)
+  const release_workflow_names = read_release_workflows(gh, repo, base, files)
+  const changed = rewrite_files(files, request)
+  const release_path = request.release_path
+    || changed.any(
+      { file ->
+        file.path.starts_with(".github/actions/")
+          || release_workflow_names.contains(file.path.split("/")[2] ?? "")
+      },
+    )
+  const effective = request + {release_path: release_path}
+  const blocked = release_gate(
+    effective,
+    release_path ? running_releases(reader, repo, release_workflow_names) : [],
+  )
+  if blocked != nil {
+    throw "not updating the bump pull request: " + blocked
+  }
+  require_owner_ancestor(gh, request.sha, "main")
+  let checked: list<string> = []
+  for ref in request.references {
+    for old_sha in pin_shas(files, ref) {
+      if !checked.contains(old_sha) {
+        require_owner_ancestor(gh, old_sha, request.sha)
+        checked = checked + [old_sha]
+      }
+    }
+  }
+  const measured = "read " + to_string(len(files)) + " workflow and action files at " + base
+    + "; changed="
+    + to_string(len(changed))
+    + "; requested="
+    + to_string(len(request.references))
+  if len(changed) == 0 {
+    return measured + "; every requested pin is already at " + request.sha + " on " + default_branch
+  }
+  const branch_sha = publish(gh, repo, base, changed, request, branch, head)
+  const open = schema_expect(
+    gh.json(["api", "repos/" + repo + "/pulls?state=open&head=" + owner + ":" + branch]),
+    schema_of(PullRequests),
+  )
+  const body = pr_body(effective, changed.map({ file -> file.path }).to_list(), run_url)
+  let number = 0
+  const existing = open[0]
+  if existing == nil {
+    const created = schema_expect(
+      gh.write(
+        "POST",
+        "repos/" + repo + "/pulls",
+        {title: pr_title(request.sha), head: branch, base: default_branch, body: body},
+      ),
+      schema_of(CreatedPullRequest),
+    )
+    number = created.number
+  } else {
+    number = existing.number
+  }
+  return measured + "; " + (existing == nil ? "opened" : "found") + " pull request #"
+    + to_string(number)
+    + " at "
+    + branch_sha
+    + " without automatically arming ship"
+}
+
+fn main(harness: Harness) {
+  const request = parse_request(
+    {
+      workflow: required_env(harness.env, "BUMP_WORKFLOW"),
+      sha: required_env(harness.env, "BUMP_SHA"),
+      release_path: required_env(harness.env, "BUMP_RELEASE_PATH"),
+      changes: harness.env.get_or("BUMP_CHANGES", ""),
+    },
+  )
+  const repo = required_env(harness.env, "GITHUB_REPOSITORY")
+  const run_url = required_env(harness.env, "BUMP_RUN_URL")
+  const scratch = harness.fs.mkdtemp_in_workspace("shared-pin-bump-")
+  const caps: Capabilities = pick(harness, ["fs", "tools"])
+  const reader = gh_client(
+    caps,
+    required_env(harness.env, "BUMP_READ_TOKEN"),
+    path_join(scratch, "read"),
+  )
+  const gh = gh_client(caps, required_env(harness.env, "GH_TOKEN"), path_join(scratch, "write"))
+  harness.stdio.println(process_request(gh, reader, request, repo, run_url))
+}

@@ -1,0 +1,56 @@
+#!/usr/bin/env node
+// Stateful, offline GitHub API fixture for the shared-pin CLI entry point.
+const fs = require('node:fs');
+
+const [prefix, scenario, log] = (process.env.GH_TOKEN || '').split('|');
+if (prefix !== 'fixture' || !scenario || !log) throw new Error('missing fixture token');
+const args = process.argv.slice(2);
+const methodIndex = args.indexOf('-X');
+const method = methodIndex < 0 ? 'GET' : args[methodIndex + 1];
+const path = args.find((arg) => arg.startsWith('repos/')) || args[1];
+fs.appendFileSync(log, JSON.stringify({ method, path }) + '\n');
+const old = '1'.repeat(40);
+const target = '3'.repeat(40);
+const candidate = '2'.repeat(40);
+const send = (value) => process.stdout.write(JSON.stringify(value));
+
+if (args[0] === 'run') {
+  send(scenario === 'waiting' && args.includes('waiting') ? [{ databaseId: 7 }] : []);
+} else if (args[0] !== 'api') {
+  throw new Error('unexpected gh command');
+} else if (path === 'repos/burin-labs/harn') {
+  send({ default_branch: 'main' });
+} else if (path === 'repos/burin-labs/harn/git/ref/heads/main') {
+  send({ object: { sha: old } });
+} else if (path.includes('/git/matching-refs/heads/')) {
+  send([]);
+} else if (path.includes('/git/trees/') && method === 'GET') {
+  send({ truncated: scenario === 'truncated', tree: [
+    { path: '.github/workflows/ci.yml', type: 'blob', mode: '100644' },
+    { path: '.github/actions/nested/action.yml', type: 'blob', mode: '100644' },
+  ] });
+} else if (path.includes('/contents/.github/shared-pin-release-policy.json?')) {
+  send({ schema_version: 1, workflows: ['ci.yml'] });
+} else if (path.includes('/contents/.github/workflows/ci.yml?')) {
+  process.stdout.write(`uses: burin-labs/.github/.github/workflows/smart-ship.yml@${old}\n`);
+} else if (path.includes('/contents/.github/actions/nested/action.yml?')) {
+  process.stdout.write(`uses: burin-labs/.github/.github/actions/ci-job-proof@${old}\n`);
+} else if (path.startsWith('repos/burin-labs/.github/compare/')) {
+  send({ status: scenario === 'backwards' && path.endsWith(`${old}...${target}`) ? 'behind' : 'ahead' });
+} else if (path === `repos/burin-labs/harn/git/commits/${old}`) {
+  send({ tree: { sha: 'base-tree' } });
+} else if (path === 'repos/burin-labs/harn/git/trees' && method === 'POST') {
+  const body = JSON.parse(fs.readFileSync(args[args.indexOf('--input') + 1], 'utf8'));
+  if (body.tree.length !== 2) throw new Error('both definitions must change');
+  send({ sha: 'candidate-tree' });
+} else if (path === 'repos/burin-labs/harn/git/commits' && method === 'POST') {
+  send({ sha: candidate, verification: { verified: scenario !== 'unsigned' } });
+} else if (path === 'repos/burin-labs/harn/git/refs' && method === 'POST') {
+  send({ object: { sha: candidate } });
+} else if (path.includes('/pulls?state=open')) {
+  send([]);
+} else if (path === 'repos/burin-labs/harn/pulls' && method === 'POST') {
+  send({ number: 42 });
+} else {
+  throw new Error(`unexpected fixture request ${method} ${path}`);
+}
