@@ -27,6 +27,24 @@ const artifacts=[...targets.map(target=>`harn-${target}`),`candidate-manifest-${
   id:index+100,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:100,digest:`sha256:${'b'.repeat(64)}`,workflow_run:{id:42,head_sha:source},
 }));
 
+test('an archive-only candidate is recoverable only with its skipped rehearsal and successful qualification',()=>{
+  const job=(name,id,conclusion='success')=>({id,run_id:42,run_attempt:1,head_sha:source,
+    name,status:'completed',conclusion,steps:[]});
+  const archiveOnly=jobs.filter(item=>!item.name.startsWith('Consumer release rehearsal /'));
+  archiveOnly.push(job('Qualify candidate source',201),job('Qualify native release source',202),
+    job('Consumer release rehearsal',203,'skipped'),job('Release candidate verdict',204));
+  const settled={...run,event:'workflow_dispatch',status:'completed',conclusion:'success'};
+  const proof=qualifyArchiveProducer(settled,archiveOnly,artifacts,request,targets);
+  assert.equal(proof.verdict,'pass');
+  assert.equal(proof.proven_artifacts,7);
+  for(const name of ['Qualify candidate source','Qualify native release source',
+    'Consumer release rehearsal','Release candidate verdict']) {
+    assert.throws(()=>qualifyArchiveProducer(settled,archiveOnly.filter(item=>item.name!==name),artifacts,request,targets),/builds_unproven/);
+    const bad=name==='Consumer release rehearsal'?'success':'failure';
+    assert.throws(()=>qualifyArchiveProducer(settled,archiveOnly.map(item=>item.name===name?{...item,conclusion:bad}:item),artifacts,request,targets),/builds_unproven/);
+  }
+});
+
 test('archive readiness is independent of a later consumer failure and requires every build and smoke',()=>{
   const proof=qualifyArchiveProducer(run,jobs,artifacts,request,targets);
   assert.equal(proof.proven_artifacts,7);
