@@ -50,5 +50,9 @@ default = []
 # default so the release binary never links a model runtime.
 neural = ["dep:ort", "dep:tokenizers"]
 
+[[example]]
+name = "neural_smoke"
+required-features = ["neural"]
+
 [lints]
 workspace = true
