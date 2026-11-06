@@ -359,7 +359,7 @@ pub fn agent_narrow_tool_surface_at_user_boundary(
   const snapshot = agent.snapshot(session.session_id)
   let user_boundary = ""
   for event in snapshot?.events ?? [] {
-    if event?.kind == "message" && event?.role == "user" && event?.visibility == "visible" {
+    if event?.kind == "message" && event?.role == "user" && event?.visibility == "public" {
       user_boundary = event.id
     }
   }

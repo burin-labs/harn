@@ -22,11 +22,13 @@
 //! the id a call ran under, and injection knows the message index a result
 //! landed at. Together they make the sidecar self-describing on every channel.
 //!
-//! # Observability-only
+//! # Durable message facts and sidecar observations
 //!
-//! Like `resolved_dispatch`, nothing recorded here re-enters request
-//! construction. The model's next-turn payload is byte-identical with or
-//! without these events.
+//! Sidecar events describe dispatch without changing request construction.
+//! The `_harn` facts attached to durable messages also own provider-neutral
+//! tool identity and usage history. Tool-surface narrowing reads those facts
+//! at a new user-message boundary. Provider adapters strip `_harn` from wire
+//! messages; it never changes a historical message's provider payload.
 
 use crate::orchestration::{TOOL_CALL_RECEIPT_VERSION, TOOL_RESULT_RECEIPT_VERSION};
 use crate::value::VmValue;
