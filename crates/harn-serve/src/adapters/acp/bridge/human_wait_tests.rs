@@ -105,7 +105,8 @@ async fn stop_settles_a_human_call_after_the_deadline_window() {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn disconnect_settles_a_human_call_after_the_deadline_window() {
-    let (bridge, mut rx) = bridge();
+    let (mut bridge, mut rx) = bridge();
+    bridge.client_capabilities.terminal = true;
     let call = bridge.call_client(
         "host/call",
         serde_json::json!({"name": "interaction.ask", "args": {}}),
