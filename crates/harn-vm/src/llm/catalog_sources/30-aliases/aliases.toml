@@ -86,12 +86,6 @@ provider = "openrouter"
 id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
-# Meter-measured interim automatic route for Burin hosts. Keep the generic
-# `mid` tier independent: this alias names the exact provider/model receipt.
-[aliases."fw-gpt-oss-120b"]
-id = "accounts/fireworks/models/gpt-oss-120b"
-provider = "fireworks"
-
 # GPT-6 tiers: Astra is the frontier, Sol the balanced tier (GPT-6 has no
 # Terra; Sol is cheaper than GPT-5.6 Terra), Luna the small tier. The balanced
 # tier tracks the newest Sol, GPT-6.1 Sol (2026-09-29); GPT-6 Sol stays
@@ -339,11 +333,6 @@ provider = "baseten"
 tool_format = "native"
 
 # SambaNova Cloud — fast RDU inference.
-[aliases."sambanova-deepseek"]
-id = "sambanova/DeepSeek-V3.2"
-provider = "sambanova"
-tool_format = "native"
-
 [aliases."sambanova-llama"]
 id = "sambanova/Meta-Llama-3.3-70B-Instruct"
 provider = "sambanova"
@@ -835,11 +824,7 @@ tool_format = "native"
 id = "glm-4.6"
 provider = "zai"
 
-# Together mirrors for MiniMax M3 / Kimi K2.7 Code.
-[aliases."together-minimax-m3"]
-id = "MiniMaxAI/MiniMax-M3"
-provider = "together"
-
+# Together mirror for Kimi K2.7 Code.
 [aliases."together-kimi-k2.7-code"]
 id = "moonshotai/Kimi-K2.7-Code"
 provider = "together"

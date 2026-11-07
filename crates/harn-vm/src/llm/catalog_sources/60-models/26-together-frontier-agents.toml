@@ -141,6 +141,9 @@ models_dev = {provider = "togetherai", model = "zai-org/GLM-5.2", fields = ["con
 [models."MiniMaxAI/MiniMax-M3"]
 name = "MiniMax M3 (Together)"
 provider = "together"
+deprecated = true
+deprecation_note = "Together removed this serverless route on 2026-11-06 and recommends MiniMaxAI/MiniMax-M3.1-Flash. Dedicated endpoints remain supported and require their own endpoint identity; evaluate the recommendation for your workload: https://docs.together.ai/docs/deprecations"
+sunset_date = "2026-11-06"
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
 tier = "frontier"
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]

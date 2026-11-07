@@ -128,7 +128,7 @@ fn the_embedded_catalog_declares_valid_retirement_fields() {
 }
 
 #[test]
-fn announced_retirements_are_structured_and_recorded() {
+fn completed_retirements_are_structured_and_recorded() {
     let catalog = artifact_embedded(None, None);
     let inkling = catalog
         .models
@@ -136,10 +136,11 @@ fn announced_retirements_are_structured_and_recorded() {
         .find(|model| model.id == "together/thinkingmachines/Inkling")
         .expect("the Together Inkling route is cataloged");
     assert_eq!(
-        inkling.deprecation.retires_on.as_deref(),
+        inkling.deprecation.sunset_date.as_deref(),
         Some("2026-11-06")
     );
-    assert_eq!(inkling.deprecation.status, DeprecationStatus::Active);
+    assert_eq!(inkling.deprecation.retires_on, None);
+    assert_eq!(inkling.deprecation.status, DeprecationStatus::Deprecated);
     // Negative control: a route with no announced retirement carries no date.
     let silent = catalog
         .models
@@ -154,6 +155,108 @@ fn announced_retirements_are_structured_and_recorded() {
             .iter()
             .all(|problem| !problem.starts_with(&silent.id))
     );
+}
+
+#[test]
+fn november_retirements_preserve_provider_scope_and_require_explicit_migration() {
+    let catalog = artifact_embedded(None, None);
+    let model = |id: &str| {
+        catalog
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .unwrap_or_else(|| panic!("missing catalog route {id}"))
+    };
+    for (id, date, recommendation) in [
+        (
+            "MiniMaxAI/MiniMax-M3",
+            "2026-11-06",
+            "MiniMaxAI/MiniMax-M3.1-Flash",
+        ),
+        (
+            "together/thinkingmachines/Inkling",
+            "2026-11-06",
+            "meta-models/Muse-Spark-Open-816B-A42B",
+        ),
+        (
+            "accounts/fireworks/models/inkling",
+            "2026-11-07",
+            "Muse Spark Open",
+        ),
+        (
+            "accounts/fireworks/models/gpt-oss-120b",
+            "2026-11-07",
+            "dedicated GPT-OSS 120B",
+        ),
+        (
+            "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+            "2026-11-07",
+            "dedicated Nemotron Super VL",
+        ),
+        (
+            "sambanova/DeepSeek-V3.2",
+            "2026-11-03",
+            "MiniMax-M3.1-Flash",
+        ),
+    ] {
+        let route = model(id);
+        assert_eq!(
+            route.deprecation.status,
+            DeprecationStatus::Deprecated,
+            "{id}"
+        );
+        assert_eq!(route.deprecation.sunset_date.as_deref(), Some(date), "{id}");
+        assert_eq!(route.deprecation.retires_on, None, "{id}");
+        assert_eq!(route.deprecation.superseded_by, None, "{id}");
+        assert!(route.aliases.is_empty(), "{id}");
+        assert!(route
+            .deprecation
+            .note
+            .as_deref()
+            .unwrap_or_default()
+            .contains(recommendation));
+    }
+    for id in [
+        "moonshot/kimi-k2.6",
+        "moonshot/kimi-k2.7-code",
+        "moonshot/kimi-k2.7-code-highspeed",
+    ] {
+        let route = model(id);
+        assert_eq!(route.deprecation.status, DeprecationStatus::Active, "{id}");
+        assert_eq!(route.deprecation.retires_on, None, "{id}");
+        assert!(route
+            .deprecation
+            .note
+            .as_deref()
+            .unwrap_or_default()
+            .contains("end of December 2026"));
+    }
+    for id in [
+        "thinkingmachines/inkling",
+        "openai/gpt-oss-120b",
+        "groq/openai/gpt-oss-120b",
+        "deepinfra/MiniMaxAI/MiniMax-M3",
+        "nvidia/nemotron-3.5-lightning",
+        "deepseek/deepseek-v3.2",
+    ] {
+        let route = model(id);
+        assert_eq!(route.deprecation.status, DeprecationStatus::Active, "{id}");
+        assert_eq!(route.deprecation.sunset_date, None, "{id}");
+        assert_eq!(route.deprecation.retires_on, None, "{id}");
+    }
+    assert!(catalog.variants.iter().all(|variant| {
+        model(&variant.model_id).deprecation.status == DeprecationStatus::Active
+    }));
+    let balanced = catalog
+        .variants
+        .iter()
+        .find(|variant| variant.id == "balanced")
+        .expect("balanced picker choice");
+    assert_eq!(balanced.model_id, "qwen/qwen3-coder-next");
+    assert!(balanced.automatic_eligibility.is_none());
+    let llama = model("sambanova/Meta-Llama-3.3-70B-Instruct");
+    assert_eq!(llama.deprecation.status, DeprecationStatus::Active);
+    assert_eq!(llama.deprecation.retires_on.as_deref(), Some("2026-11-17"));
 }
 
 #[test]
