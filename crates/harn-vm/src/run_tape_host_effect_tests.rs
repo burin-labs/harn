@@ -25,28 +25,25 @@ fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
                     .map(|contract| contract.effects)
             })
     };
-    let mut unclassified = Vec::new();
+    let mut file_mutations = 0;
+    let mut index_mutations = 0;
     for method in harn_capability_contracts::declared_capability_method_names("code_index") {
-        let writes = contract(CapabilityId::CodeIndex, method).is_some_and(|effects| {
-            effects
-                .iter()
-                .any(|effect| !matches!(effect.access, EffectAccess::Read | EffectAccess::Observe))
-        });
-        let admitted = prefix::WORKSPACE_INDEX_METHODS.contains(&method);
-        let refused = REFUSED_CODE_INDEX_METHODS.contains(&method);
-        assert!(
-            !(admitted && refused),
-            "`{method}` is both admitted and refused"
-        );
-        if writes && !admitted && !refused {
-            unclassified.push(method);
+        let effects = contract(CapabilityId::CodeIndex, method).expect("index method contract");
+        for effect in effects {
+            if matches!(effect.access, EffectAccess::Read | EffectAccess::Observe) {
+                continue;
+            }
+            if REFUSED_CODE_INDEX_METHODS.contains(&method) {
+                assert_eq!(effect.kind, EffectKind::Fs, "{method} writes source files");
+                file_mutations += 1;
+            } else {
+                assert_eq!(effect.kind, EffectKind::State, "{method} owns index state");
+                index_mutations += 1;
+            }
         }
     }
-    assert!(
-        unclassified.is_empty(),
-        "classify these code_index methods in WORKSPACE_INDEX_METHODS or \
-         REFUSED_CODE_INDEX_METHODS: {unclassified:?}"
-    );
+    assert_eq!(file_mutations, REFUSED_CODE_INDEX_METHODS.len());
+    assert!(index_mutations >= 10);
 
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
@@ -147,4 +144,105 @@ fn command_output_reads_are_served_from_the_recording() {
         "a read the recording never made diverges"
     );
     drop(replay);
+}
+
+#[test]
+fn startup_preflight_lists_every_supplied_refusal_without_executing_calls() {
+    use harn_builtin_meta::CapabilityId;
+    let temporary = tempfile::tempdir().unwrap();
+    let root = [crate::schema::json_to_vm_value(&serde_json::json!({
+        "root": temporary.path()
+    }))];
+    let marker = temporary.path().join("never-executed");
+    let command = [crate::schema::json_to_vm_value(&serde_json::json!({
+        "argv": ["touch", marker], "cwd": temporary.path()
+    }))];
+    let calls = [
+        PrefixEffectCall {
+            capability: Some(CapabilityId::CodeIndex),
+            name: "rebuild",
+            args: &root,
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::CodeIndex),
+            name: "agent_register",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::CodeIndex),
+            name: "rename_symbol",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::HostLease),
+            name: "acquire",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::HostLease),
+            name: "release",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: None,
+            name: "unknown_startup_builtin",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::Fs),
+            name: "cwd",
+            args: &[],
+        },
+        PrefixEffectCall {
+            capability: Some(CapabilityId::Tools),
+            name: "run_command",
+            args: &command,
+        },
+    ];
+    let report = preflight_prefix_calls(temporary.path(), &calls);
+    assert_eq!(report.supplied_calls, 8);
+    assert_eq!(report.decisions.len(), 8);
+    assert_eq!(report.refused_calls, 4);
+    assert_eq!(report.decisions[0].action, PrefixEffectAction::Run);
+    assert_eq!(report.decisions[1].action, PrefixEffectAction::Run);
+    let refused: Vec<_> = report
+        .decisions
+        .iter()
+        .filter(|decision| decision.action == PrefixEffectAction::Refused)
+        .collect();
+    assert_eq!(
+        refused
+            .iter()
+            .map(|decision| decision.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "rename_symbol",
+            "acquire",
+            "release",
+            "unknown_startup_builtin"
+        ]
+    );
+    assert!(refused[0].reason.as_ref().unwrap().contains("Fs Mutate"));
+    assert!(refused[1]
+        .reason
+        .as_ref()
+        .unwrap()
+        .contains("outside the replayed prefix"));
+    assert!(refused[3]
+        .reason
+        .as_ref()
+        .unwrap()
+        .contains("no effect contract"));
+    assert_eq!(report.decisions[6].action, PrefixEffectAction::RecordedRead);
+    assert_eq!(
+        report.decisions[7].action,
+        PrefixEffectAction::RecordedCommand
+    );
+    assert!(!marker.exists());
+    let empty = preflight_prefix_calls(temporary.path(), &[]);
+    assert_eq!(
+        empty.supplied_calls, 0,
+        "an empty inventory must remain visibly empty"
+    );
+    assert!(empty.decisions.is_empty());
 }
