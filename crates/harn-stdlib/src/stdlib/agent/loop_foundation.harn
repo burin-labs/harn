@@ -96,10 +96,11 @@ pub const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_ca
 //
 // The tool-call gate (`__host_agent_truncated_tool_call`) fires ONLY on a real
 // length truncation with zero usable calls AND a partial-call signal. A second
-// gate covers hidden-reasoning-only truncation: strict providers can return no
-// visible text/tool calls, `stop_reason: length`, and non-empty reasoning. That
-// is still a budget exhaustion, so retry with a larger output cap instead of
-// handing an empty turn to the normal loop body.
+// gate covers every other length truncation that produced no usable call:
+// hidden reasoning only, or visible text cut off before any call (a preamble
+// announcing the edit it never made). Neither is a finished answer; both are a
+// budget exhaustion, so retry with a larger output cap instead of handing the
+// cut-off turn to the normal loop body as if the model had chosen to stop.
 
 // -------------------------------------------------------------------------------------------------
 
@@ -185,7 +186,7 @@ pub fn __autocontinue_is_length_stop(stop_reason: string?) {
   return normalized == "length" || normalized == "max_tokens"
 }
 
-pub fn __autocontinue_hidden_reasoning_truncated(llm_result: dict, tool_call_count: int) {
+pub fn __autocontinue_toolless_truncated(llm_result: dict, tool_call_count: int) {
   if !__autocontinue_is_length_stop(llm_result?.stop_reason) {
     return false
   }
@@ -193,7 +194,7 @@ pub fn __autocontinue_hidden_reasoning_truncated(llm_result: dict, tool_call_cou
     return false
   }
   if trim(to_string(llm_result?.text ?? "")) != "" {
-    return false
+    return true
   }
   const thinking = trim(to_string(llm_result?.thinking ?? ""))
   const summary = trim(to_string(llm_result?.thinking_summary ?? ""))
@@ -231,7 +232,7 @@ pub fn __autocontinue_should_continue(agent: HarnessAgent, call: dict, turn_opts
   ) {
     return true
   }
-  return __autocontinue_hidden_reasoning_truncated(llm_result, len(tool_calls))
+  return __autocontinue_toolless_truncated(llm_result, len(tool_calls))
 }
 
 /**

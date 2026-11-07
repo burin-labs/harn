@@ -4,9 +4,10 @@ import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 /**
  * Length-truncation auto-continue must change the request it re-sends. A
- * reasoning-only `max_tokens` stop is re-issued with a cap larger than the one
- * that truncated, including when the caller left `max_tokens` unset and the
- * provider default applied. When no larger cap exists, nothing is re-sent.
+ * `max_tokens` stop with no usable tool call is re-issued with a cap larger
+ * than the one that truncated, including when the caller left `max_tokens`
+ * unset and the provider default applied. When no larger cap exists, nothing
+ * is re-sent.
  */
 fn hidden_reasoning_truncation(output_tokens: int) -> dict {
   return {
@@ -20,25 +21,21 @@ fn hidden_reasoning_truncation(output_tokens: int) -> dict {
 fn request_caps(
   harness: Harness,
   turns: list<dict>,
-  max_tokens: int?,
-) -> {caps: list<int>, identical_resends: int} {
-  const base = {
+  extra: dict,
+) -> {caps: list<int>, identical_resends: int, status: string} {
+  const opts = {
     provider: "mock",
     tool_format: "text",
     loop_until_done: true,
     max_iterations: 3,
     max_nudges: 3,
   }
-  const opts = if max_tokens == nil {
-    base
-  } else {
-    base + {max_tokens: max_tokens}
-  }
+    + extra
   return with_llm_script(
     harness.llm,
     turns,
     { ->
-      agent_loop(harness, "Fix the bug.", nil, opts)
+      const result = agent_loop(harness, "Fix the bug.", nil, opts)
       const calls = harness.llm.mock_calls()
       let caps = []
       let identical = 0
@@ -51,9 +48,13 @@ fn request_caps(
         previous = request
         caps = caps + [call.max_tokens]
       }
-      return {caps: caps, identical_resends: identical}
+      return {caps: caps, identical_resends: identical, status: to_string(result.status)}
     },
   )
+}
+
+fn caps_line(caps: list<int>) -> string {
+  return join(caps.map({ cap -> to_string(cap) }), ",")
 }
 
 pipeline default(harness: Harness) {
@@ -67,9 +68,9 @@ pipeline default(harness: Harness) {
       hidden_reasoning_truncation(32768),
       llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
     ],
-    nil,
+    {},
   )
-  harness.stdio.println("unset_caps=" + join(unset.caps.map({ cap -> to_string(cap) }), ","))
+  harness.stdio.println("unset_caps=" + caps_line(unset.caps))
   contract_effect(harness.stdio, "unset_cap_continuation_raised", unset.caps[1] > unset.caps[0])
   contract_negative(harness.stdio, "unset_cap_identical_resend", unset.identical_resends > 0)
   // Trigger: an explicit cap truncated. The continuation doubles it.
@@ -79,10 +80,31 @@ pipeline default(harness: Harness) {
       hidden_reasoning_truncation(4096),
       llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
     ],
-    4096,
+    {max_tokens: 4096},
   )
-  harness.stdio.println("explicit_caps=" + join(explicit.caps.map({ cap -> to_string(cap) }), ","))
+  harness.stdio.println("explicit_caps=" + caps_line(explicit.caps))
   contract_negative(harness.stdio, "explicit_cap_identical_resend", explicit.identical_resends > 0)
+  // Trigger: visible text cut off before any tool call. A single-shot loop
+  // must not end on the truncated preamble as a finished answer; it continues
+  // with a raised cap.
+  const preamble = request_caps(
+    harness,
+    [
+      {
+        text: "I'll replace the matcher with a port of the upstream rules.",
+        output_tokens: 16384,
+        stop_reason: "max_tokens",
+      },
+      llm_text("Replaced the matcher."),
+    ],
+    {loop_until_done: false},
+  )
+  harness.stdio.println("preamble_caps=" + caps_line(preamble.caps))
+  contract_effect(
+    harness.stdio,
+    "preamble_truncation_continued",
+    len(preamble.caps) == 2 && preamble.caps[1] > preamble.caps[0],
+  )
   // Negative: the cap already sits at the ceiling, so no continuation fires.
   const ceiling = request_caps(
     harness,
@@ -90,8 +112,8 @@ pipeline default(harness: Harness) {
       hidden_reasoning_truncation(32768),
       llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
     ],
-    32768,
+    {max_tokens: 32768},
   )
-  harness.stdio.println("ceiling_caps=" + join(ceiling.caps.map({ cap -> to_string(cap) }), ","))
+  harness.stdio.println("ceiling_caps=" + caps_line(ceiling.caps))
   contract_negative(harness.stdio, "ceiling_cap_identical_resend", ceiling.identical_resends > 0)
 }
