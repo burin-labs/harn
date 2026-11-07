@@ -135,13 +135,25 @@ fn assert_missing_process_error(error: HostlibError, expected_requested_cwd: Opt
 
 #[test]
 fn real_run_command_reports_missing_program_as_typed_not_found() {
-    let mut req = dict_map();
-    req.insert(
-        "argv".into(),
-        vlist_str(&["harn-command-that-does-not-exist-5662"]),
-    );
-    let error = call("hostlib_tools_run_command", req).expect_err("missing program must fail");
-    assert_missing_process_error(error, None);
+    let workspace = tempfile::tempdir().unwrap();
+    let cwd = workspace.path().canonicalize().unwrap();
+    let cwd = cwd.to_str().unwrap();
+    for background in [false, true] {
+        for requested_cwd in [None, Some(cwd)] {
+            let mut req = dict_map();
+            req.insert(
+                "argv".into(),
+                vlist_str(&["harn-command-that-does-not-exist-5662"]),
+            );
+            req.insert("background".into(), VmValue::Bool(background));
+            if let Some(cwd) = requested_cwd {
+                req.insert("cwd".into(), vm_string(cwd));
+            }
+            let error =
+                call("hostlib_tools_run_command", req).expect_err("missing program must fail");
+            assert_missing_process_error(error, requested_cwd);
+        }
+    }
 }
 
 #[test]

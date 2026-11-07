@@ -244,7 +244,7 @@ impl Drop for PreparedToken {
         let trace = self.trace.clone();
         // Unused preparations never started a child. A dropped execution still
         // sends cancellation; an awaited execution waits for cleanup's reply.
-        self.cleanup_runtime.spawn(async move {
+        crate::task_spawn::spawn_on(&self.cleanup_runtime, async move {
             if let Err(error) = release(transport.as_ref(), &token, &trace).await {
                 tracing::warn!(%error, "releasing executor-bound command failed");
             }

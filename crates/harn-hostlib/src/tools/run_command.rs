@@ -154,15 +154,15 @@ pub(crate) fn prepare(
         );
     }
     let (program, args) = parse_command(&params)?;
-    let cwd = harn_vm::orchestration::prepare_local_command_cwd(
-        optional_string(NAME, &params, "cwd")?.as_deref(),
-    )
-    .map_err(|error| command_parameter_error(error, "cwd"))?;
+    let requested_cwd = optional_string(NAME, &params, "cwd")?;
+    let cwd = harn_vm::orchestration::prepare_local_command_cwd(requested_cwd.as_deref())
+        .map_err(|error| command_parameter_error(error, "cwd"))?;
     let invocation = harn_vm::orchestration::CommandInvocation::new(
         std::iter::once(program).chain(args).collect(),
         cwd,
     )
     .map_err(|error| command_parameter_error(error, "argv"))?;
+    let requested_cwd = requested_cwd.map(|_| to_agent_path(invocation.cwd()));
     invocation.bind_directory(&mut params);
     let retained_params = std::sync::Arc::new(params.clone());
     let retained_invocation = invocation.clone();
@@ -170,7 +170,15 @@ pub(crate) fn prepare(
         params,
         invocation,
         handler: std::sync::Arc::new(move |_| {
-            handle_bound(retained_params.clone(), &retained_invocation)
+            let mut result = handle_bound(retained_params.clone(), &retained_invocation);
+            if let Err(HostlibError::ProcessSpawn {
+                requested_cwd: reported,
+                ..
+            }) = &mut result
+            {
+                *reported = requested_cwd.clone();
+            }
+            result
         }),
     })
 }

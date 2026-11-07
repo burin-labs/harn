@@ -124,7 +124,7 @@ async fn dispatch_untaped(
         PreparedCommand::Local(command) => {
             dispatch_process_exec_after_policy(
                 ctx,
-                command,
+                *command,
                 command_policy_context,
                 command_policy_decisions,
             )

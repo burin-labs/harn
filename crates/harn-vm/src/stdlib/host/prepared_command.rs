@@ -31,7 +31,7 @@ pub trait PreparedHostCommand: Send {
 }
 
 pub(super) enum PreparedCommand {
-    Local(super::process_exec::PreparedLocalCommand),
+    Local(Box<super::process_exec::PreparedLocalCommand>),
     Host {
         params: DictMap,
         command: Box<dyn PreparedHostCommand>,
@@ -48,7 +48,7 @@ impl CommandPolicyParameters for PreparedCommand {
 
     fn invocation(&self) -> Option<serde_json::Value> {
         match self {
-            Self::Local(command) => CommandPolicyParameters::invocation(command),
+            Self::Local(command) => CommandPolicyParameters::invocation(command.as_ref()),
             Self::Host { command, .. } => Some(command.invocation().audit()),
         }
     }
@@ -92,7 +92,7 @@ pub(super) async fn prepare_command(
     if mode == super::HostDispatch::RequireAdapter {
         return Err(super::missing_host_adapter("process", operation));
     }
-    Ok(PreparedCommand::Local(
+    Ok(PreparedCommand::Local(Box::new(
         super::process_exec::PreparedLocalCommand::prepare(params, operation)?,
-    ))
+    )))
 }
