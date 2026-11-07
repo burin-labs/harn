@@ -1,1 +1,3 @@
 pub type ImportedFields = {max_tokens?: int, nested: {name: string}}
+
+pub type ImportedEnvelope<Row> = {label: string, ...Row}

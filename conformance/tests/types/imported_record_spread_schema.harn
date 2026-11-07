@@ -1,10 +1,14 @@
 import { get_typed_report, schema_json } from "std/schema"
 import { assert_error_contains } from "std/testing"
-import { ImportedFields } from "../../fixtures/schema/imported_record_fields"
+import { ImportedEnvelope, ImportedFields } from "../../fixtures/schema/imported_record_fields"
 
 type Request = {label: string, ...ImportedFields}
 
 type OpenRequest = {label: string, ...dict}
+
+type GenericRequest = ImportedEnvelope<ImportedFields>
+
+type GenericOpenRequest = ImportedEnvelope<dict>
 
 fn accepts_request(value: Request) -> bool {
   return true
@@ -37,5 +41,16 @@ fn main(harness: Harness) {
   assert(!get_typed_report(good + {max_tokens: "invalid"}, exported).ok)
   assert(!get_typed_report(good + {nested: {name: 7}}, exported).ok)
   assert(get_typed_report({label: "open", extension: {anything: true}}, schema_of(OpenRequest)).ok)
+  const generic = schema_of(GenericRequest)
+  assert(get_typed_report(good, generic).ok)
+  assert(!get_typed_report(good + {max_tokens: "invalid"}, generic).ok)
+  assert(!get_typed_report({label: "missing nested"}, generic).ok)
+  assert(!get_typed_report(good + {nested: {name: 7}}, generic).ok)
+  assert(get_typed_report(good + {max_tokens: nil}, generic).ok)
+  assert(!get_typed_report(good + {max_tokens: "invalid"}, schema_json(generic)).ok)
+  const open = schema_of(GenericOpenRequest)
+  assert(get_typed_report({label: "open", extension: {anything: true}}, open).ok)
+  assert(!get_typed_report({extension: {anything: true}}, open).ok)
+  assert(!get_typed_report({label: 7, extension: {anything: true}}, open).ok)
   harness.stdio.println("imported fields enforce validation and parameter constraints")
 }
