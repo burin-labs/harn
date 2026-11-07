@@ -1,5 +1,7 @@
+import { CiWorkflow } from "./workflow_model.harn"
+
 /** Required verification cannot exempt an unmeasured result with a rollout flag. */
-pub fn warn_only_needs_errors(workflows: dict) -> list<string> {
+pub fn warn_only_needs_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const aggregate = workflows["ci.yml"]?.jobs?.["ci-status"]
   const step = (aggregate?.steps ?? []).filter({ item -> item?.name == "Verify required CI jobs" })
     .to_list()

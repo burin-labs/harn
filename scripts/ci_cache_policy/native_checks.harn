@@ -2,8 +2,8 @@ import { RUST_LINT_LEGS } from "./linux_checks.harn"
 import "./policy_core.harn"
 
 fn native_shared_cache_errors(
-  ci_workflow: dict,
-  nightly_workflow: dict,
+  ci_workflow: CiWorkflow?,
+  nightly_workflow: CiWorkflow?,
   platform: string,
   cache_key: string,
   expected_source_key: string,
@@ -78,19 +78,19 @@ fn native_shared_cache_errors(
   return errors
 }
 
-fn step_run_contains(step: dict, marker: string) -> bool {
+fn step_run_contains(step: CiStep?, marker: string) -> bool {
   return contains(trim(step?.run ?? ""), marker)
 }
 
-fn matching_run_steps(job: dict, marker: string) -> list {
+fn matching_run_steps(job: CiJob?, marker: string) -> list<CiStep> {
   return (job?.steps ?? []).filter({ step -> return step_run_contains(step, marker) }).to_list()
 }
 
-fn matching_named_steps(job: dict, name: string) -> list {
+fn matching_named_steps(job: CiJob?, name: string) -> list<CiStep> {
   return (job?.steps ?? []).filter({ step -> return trim(step?.name ?? "") == name }).to_list()
 }
 
-fn matching_upload_steps(job: dict, artifact_name: string) -> list {
+fn matching_upload_steps(job: CiJob?, artifact_name: string) -> list<CiStep> {
   return (job?.steps ?? []).filter(
     { step ->
       return step_uses(step).starts_with("actions/upload-artifact@")
@@ -107,7 +107,7 @@ fn matching_upload_steps(job: dict, artifact_name: string) -> list {
  * No pull-request or merge-group job consumes this cache any more; the writer's
  * own next run and the dispatch-only diagnostic lane restore it.
  */
-pub fn windows_shared_cache_errors(nightly_workflow: dict) -> list<string> {
+pub fn windows_shared_cache_errors(nightly_workflow: CiWorkflow?) -> list<string> {
   const producer = nightly_workflow?.jobs?.nextest
   if producer == nil {
     return ["${WINDOWS_CACHE_KEY} must be written by windows-nightly.yml:nextest"]
@@ -152,7 +152,7 @@ pub fn windows_shared_cache_errors(nightly_workflow: dict) -> list<string> {
 /** Exact candidates warm from a main-produced artifact outside the Actions cache pool. */
 pub fn windows_release_certify_warm_errors(
   policy: CiCachePolicy,
-  nightly_workflow: dict,
+  nightly_workflow: CiWorkflow?,
 ) -> list<string> {
   const warm = policy.windows_workspace_warm
   const job = nightly_workflow?.jobs?.[warm.job]
@@ -232,7 +232,7 @@ pub fn windows_release_certify_warm_errors(
  * cache rather than the artifact that replaced it. A structural check that
  * cannot report the absence of the thing it governs is not a check.
  */
-fn macos_producer_bootstrap_errors(job: dict, identity: string) -> list<string> {
+fn macos_producer_bootstrap_errors(job: CiJob?, identity: string) -> list<string> {
   let errors: list<string> = []
   const caches = matching_steps(job, "./.github/actions/rust-cache")
   if caches.count != 1 || caches[0]?.id != "rust-cache" {
@@ -267,8 +267,8 @@ fn macos_producer_bootstrap_errors(job: dict, identity: string) -> list<string> 
 
 pub fn macos_warm_errors(
   policy: CiCachePolicy,
-  nightly_workflow: dict,
-  ci_workflow: dict,
+  nightly_workflow: CiWorkflow?,
+  ci_workflow: CiWorkflow?,
 ) -> list<string> {
   const warm = policy.macos_workspace_warm
   const job = nightly_workflow?.jobs?.[warm.job]
@@ -319,7 +319,7 @@ pub fn macos_warm_errors(
   // toolchain pin, so a pin change leaves every pull request cold until some
   // producer run publishes again. The producer must republish on main when an
   // input the manifest binds changes, not wait for the nightly schedule.
-  const push_paths = nightly_workflow["on"]?.push?.paths ?? []
+  const push_paths = workflow_events(nightly_workflow).push?.paths ?? []
   for input in MACOS_WARM_MANIFEST_PUSH_INPUTS {
     if !push_paths.contains(input) {
       errors = errors
@@ -371,23 +371,12 @@ fn windows_dev_drive_guard() -> string {
   return "$" + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}"
 }
 
-fn exact_step_env(job: dict, step_name: string, key: string) -> string {
+fn exact_step_env(job: CiJob?, step_name: string, key: string) -> string {
   const step = step_by_name(job?.steps ?? [], step_name)
   return trim(to_string(step?.env?.[key] ?? "<unset>"))
 }
 
-fn job_needs(job: dict) -> list {
-  const needs = job?.needs
-  if needs == nil {
-    return []
-  }
-  if type_of(needs) == "list" {
-    return needs
-  }
-  return [needs]
-}
-
-fn windows_nightly_storage_budget_errors(job: dict) -> list<string> {
+fn windows_nightly_storage_budget_errors(job: CiJob?) -> list<string> {
   let errors: list<string> = []
   for receipt in [
     {name: WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP, phase: "before_build"},
@@ -430,8 +419,8 @@ fn windows_nightly_storage_budget_errors(job: dict) -> list<string> {
  */
 pub fn windows_native_admission_errors(
   policy: CiCachePolicy,
-  ci_workflow: dict,
-  nightly_workflow: dict,
+  ci_workflow: CiWorkflow?,
+  nightly_workflow: CiWorkflow?,
 ) -> list<string> {
   const warm = policy.windows_workspace_warm
   const producer = nightly_workflow?.jobs?.[warm.job]
@@ -448,7 +437,7 @@ pub fn windows_native_admission_errors(
 
 fn ci_native_windows_job_errors(
   warm: WindowsWorkspaceWarmPolicy,
-  ci_workflow: dict,
+  ci_workflow: CiWorkflow?,
 ) -> list<string> {
   const ci_jobs = ci_workflow?.jobs ?? {}
   if len(ci_jobs.keys()) == 0 {
@@ -468,9 +457,9 @@ fn ci_native_windows_job_errors(
 
 fn windows_nightly_trigger_errors(
   warm: WindowsWorkspaceWarmPolicy,
-  nightly_workflow: dict,
+  nightly_workflow: CiWorkflow?,
 ) -> list<string> {
-  const nightly_on = nightly_workflow["on"] ?? {}
+  const nightly_on = nightly_workflow?.["on"] ?? {}
   const triggers = if type_of(nightly_on) == "dict" {
     nightly_on.keys()
   } else {
@@ -499,7 +488,7 @@ fn windows_nightly_trigger_errors(
 
 fn windows_nightly_route_errors(
   warm: WindowsWorkspaceWarmPolicy,
-  nightly_workflow: dict,
+  nightly_workflow: CiWorkflow?,
 ) -> list<string> {
   let errors: list<string> = []
   const route = nightly_workflow?.jobs?.[WINDOWS_ROUTE_JOB]
@@ -531,8 +520,8 @@ fn windows_nightly_route_errors(
 
 fn windows_nightly_producer_errors(
   warm: WindowsWorkspaceWarmPolicy,
-  nightly_workflow: dict,
-  producer: dict,
+  nightly_workflow: CiWorkflow?,
+  producer: CiJob,
 ) -> list<string> {
   let errors: list<string> = []
   if trim(producer["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
@@ -563,7 +552,10 @@ fn windows_nightly_producer_errors(
 }
 
 /** Every workflow nextest@ pin must match the single cache-policy owner. */
-pub fn nextest_version_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+pub fn nextest_version_errors(
+  policy: CiCachePolicy,
+  workflows: dict<string, CiWorkflow>,
+) -> list<string> {
   const expected = "nextest@${policy.nextest_version}"
   let errors: list<string> = []
   let installs = 0
@@ -618,7 +610,10 @@ pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
 }
 
 /** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */
-pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> list<string> {
+pub fn macos_shared_cache_errors(
+  ci_workflow: CiWorkflow?,
+  nightly_workflow: CiWorkflow?,
+) -> list<string> {
   const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
   let errors = native_shared_cache_errors(
     ci_workflow,
@@ -691,7 +686,7 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
   return errors + macos_lint_receipt_errors(lint_job ?? {}, lint_steps)
 }
 
-fn macos_lint_receipt_errors(job: dict, lint_steps: list) -> list<string> {
+fn macos_lint_receipt_errors(job: CiJob?, lint_steps: list<CiStep>) -> list<string> {
   let expected_outputs: dict = {}
   for leg in RUST_LINT_LEGS {
     expected_outputs[leg] = "$" + "{{ steps.lint-proof.outputs['${leg}'] }}"

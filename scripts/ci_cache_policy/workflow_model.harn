@@ -1,0 +1,114 @@
+/** GitHub YAML scalars used by action inputs and environment variables. */
+pub type CiScalar = string | bool | int | float
+
+pub type CiStep = {
+  id?: string,
+  name?: string,
+  uses?: string,
+  run?: string,
+  shell?: string,
+  if?: string | bool,
+  with?: dict<string, CiScalar>,
+  env?: dict<string, CiScalar>,
+  ...dict,
+}
+
+pub type CiConcurrency = {group?: string, ...dict}
+
+pub type CiMatrixRow = dict<string, CiScalar>
+
+pub type CiMatrix = {
+  include?: string | list<CiMatrixRow>,
+  exclude?: string | list<CiMatrixRow>,
+  ...dict<string, CiScalar | list<CiScalar> | list<CiMatrixRow>>,
+}
+
+pub type CiJob = {
+  steps?: list<CiStep>,
+  env?: dict<string, CiScalar>,
+  needs?: string | list<string>,
+  if?: string | bool,
+  uses?: string,
+  with?: dict<string, CiScalar>,
+  permissions?: string | dict<string, string>,
+  outputs?: dict<string, string>,
+  strategy?: {matrix?: string | CiMatrix, ...dict},
+  concurrency?: string | CiConcurrency,
+  ...dict,
+}
+
+pub type CiInput = {type?: string, default?: CiScalar, options?: list<CiScalar>, ...dict}
+
+pub type CiTrigger = {
+  inputs?: dict<string, CiInput>,
+  branches?: list<string>,
+  tags?: list<string>,
+  paths?: list<string>,
+  ...dict,
+}
+
+pub type CiEvents = {
+  workflow_call?: CiTrigger,
+  workflow_dispatch?: CiTrigger,
+  push?: CiTrigger,
+  pull_request?: CiTrigger,
+  merge_group?: CiTrigger,
+  schedule?: list<{cron: string}>,
+  ...dict,
+}
+
+pub type CiWorkflow = {
+  jobs?: dict<string, CiJob>,
+  env?: dict<string, CiScalar>,
+  on?: string | list<string> | CiEvents,
+  concurrency?: string | CiConcurrency,
+  ...dict,
+}
+
+pub type CiAction = {
+  inputs?: dict<string, CiInput>,
+  outputs?: dict<string, {value?: string, ...dict}>,
+  runs?: {using?: string, steps?: list<CiStep>, ...dict},
+  ...dict,
+}
+
+pub type CiReleaseRunnerPolicy = {
+  targets?: list<{target?: string, runners?: dict<string, string>, ...dict}>,
+  jobs?: dict<string, dict<string, string>>,
+  runner_registry?: dict<string, {provider?: string, usd_per_minute?: int | float, ...dict}>,
+  ...dict,
+}
+
+pub fn job_needs(job: CiJob?) -> list<string> {
+  const needs = job?.needs
+  if needs == nil {
+    return []
+  }
+  if type_of(needs) == "list" {
+    return needs
+  }
+  return [needs]
+}
+
+/** Event-name shorthand has no event configuration to inspect. */
+pub fn workflow_events(workflow: CiWorkflow?) -> CiEvents {
+  const events = workflow?.on
+  if events == nil {
+    return {}
+  }
+  if type_of(events) == "dict" {
+    return events
+  }
+  return {}
+}
+
+pub fn workflow_inputs(workflow: CiWorkflow?, event: string) -> dict<string, CiInput> {
+  const events = workflow_events(workflow)
+  if event == "workflow_call" {
+    return events.workflow_call?.inputs ?? {}
+  }
+  if event == "workflow_dispatch" {
+    return events.workflow_dispatch?.inputs ?? {}
+  }
+  return {}
+}
