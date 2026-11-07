@@ -396,6 +396,66 @@ fn run_partitioned_reads(harness: Harness, counters: dict) {
   return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
+fn network_tools(runtime: HarnessRuntime, counters: dict, read_only: bool) {
+  return tool_define(
+    phase_tools(runtime, counters),
+    "web_lookup",
+    "Search the web.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.web, 1)
+        return "found"
+      },
+      parameters: {query: {type: "string"}},
+      annotations: if read_only {
+        {kind: "search", side_effect_level: "network", readOnlyHint: true}
+      } else {
+        {kind: "search", side_effect_level: "network"}
+      },
+    },
+  )
+}
+
+/** A web search proposed first, beside a read, in one response. */
+fn run_network_lookup(harness: Harness, counters: dict, read_only: bool) {
+  reset_counts(harness.runtime, counters)
+  harness.runtime.atomic_set(counters.web, 0)
+  const session = "effect-phases-network-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              {id: "lookup-web", name: "web_lookup", arguments: {query: "spec"}},
+              read_call("lookup-read"),
+            ],
+          },
+          {tool_calls: [done_call("lookup-done")]},
+          {tool_calls: [done_call("lookup-done-2")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: network_tools(harness.runtime, counters, read_only),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(harness, "Check the spec on the web, then read the file.", nil, opts)
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
 fn run_read_effect_status(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-status-" + harness.random.uuid()
@@ -614,7 +674,23 @@ pipeline main(harness: Harness) {
     verify: harness.runtime.atomic(0),
     run: harness.runtime.atomic(0),
     done: harness.runtime.atomic(0),
+    web: harness.runtime.atomic(0),
   }
+  // A read-only network tool observes: it runs with the reads in its batch.
+  const lookup = run_network_lookup(harness, counters, true)
+  require lookup.result.status == "done", "the read-only lookup batch should finish"
+  require harness.runtime.atomic_get(counters.web) == 1,
+    "a readOnlyHint network tool must run in the observation phase"
+  require harness.runtime.atomic_get(counters.read) == 1, "the sibling read must run"
+  require lookup.receipts.deferred == 0,
+    "nothing in an all-observation batch may defer: "
+    + to_string(lookup.receipts.deferred)
+  harness.stdio.println("lookup.deferred=" + to_string(lookup.receipts.deferred))
+  // Without the hint a network effect still fails closed behind the reads.
+  const effect = run_network_lookup(harness, counters, false)
+  require effect.result.status == "done", "the network-effect batch should finish"
+  require effect.receipts.deferred >= 1, "an unhinted network tool must still defer"
+  harness.stdio.println("network_effect.deferred=" + to_string(effect.receipts.deferred))
   const phased = run_phased(harness, counters)
   require phased.result.status == "done", "the phased batch should reach terminal completion"
   require harness.runtime.atomic_get(counters.read) == 1, "the observation call must execute once"
