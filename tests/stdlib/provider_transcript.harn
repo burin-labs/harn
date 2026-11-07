@@ -38,6 +38,18 @@ pipeline test_prepared_requests_cannot_invent_dispatches() {
   )
   assert(legacy.provider_request_count == nil && legacy.measurement_state == "incomplete")
   assert(legacy.unmeasured_call_ids == ["legacy"])
+  const configured = census(
+    [
+      {
+        type: "provider_call_request",
+        call_id: "thinking",
+        thinking: {type: "enabled", budget_tokens: 1024},
+      },
+      {type: "provider_call_measurement", call_id: "thinking", provider_dispatch_count: 1},
+      {type: "provider_call_response", call_id: "thinking", thinking: "reasoning text"},
+    ],
+  )
+  assert(configured.provider_request_count == 1 && configured.terminal_complete)
 }
 
 pipeline test_complete_physical_attempts_do_not_sum_aggregate_usage() {

@@ -59,13 +59,17 @@ type RecordHeader = {type: string}
 
 type TimestampValue = string | int | float
 
-type WireProviderRecord = ProviderResponseToolProjection \
-  & {
+type WireProviderIdentity = {
   type: string,
   call_id?: string?,
   timestamp?: TimestampValue?,
   provider_dispatch_count?: int?,
   retained_response?: bool,
+}
+
+type WireProviderResponse = ProviderResponseToolProjection \
+  & {
+  type: string,
   text?: string?,
   thinking?: string?,
   reasoning?: string?,
@@ -87,7 +91,7 @@ fn __timestamp_ms(value: TimestampValue?) -> float? {
   return is_ok(parsed) ? (to_float(unwrap(parsed)) ?? 0.0) * 1000.0 : nil
 }
 
-fn __content(record: WireProviderRecord) -> ProviderResponseContentShape {
+fn __content(record: WireProviderResponse) -> ProviderResponseContentShape {
   const calls: WireToolCalls = schema_expect(
     provider_response_tool_calls(record),
     schema_of(WireToolCalls),
@@ -160,12 +164,12 @@ pub fn provider_transcript_normalize(records: list) -> list<ProviderTranscriptRe
         if kind == "other" {
           row = row + {kind: "other"}
         } else {
-          match schema_parse(raw, schema_of(WireProviderRecord)) {
+          match schema_parse(raw, schema_of(WireProviderIdentity)) {
             Err(_) -> {
             }
             Ok(record) -> {
               const content = try {
-                kind == "response" ? __content(record) : nil
+                kind == "response" ? provider_response_content_shape(raw) : nil
               }
               if is_ok(content) {
                 row = row
@@ -203,7 +207,7 @@ pub fn transcript_records(fs: HarnessFs, path: string) -> list<ProviderTranscrip
  * @errors: [validation]
  */
 pub fn provider_response_content_shape(record: unknown) -> ProviderResponseContentShape {
-  return __content(schema_expect(record, schema_of(WireProviderRecord)))
+  return __content(schema_expect(record, schema_of(WireProviderResponse)))
 }
 
 type CallRows = {
