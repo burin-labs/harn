@@ -1,3 +1,4 @@
+import { assert_error_contains, llm_text, with_llm_script } from "std/testing"
 import { NoticeExtraction, ProviderCatalogCandidate } from "../provider_catalog_notice/types.harn"
 import "../provider_catalog_notice/workflow.harn"
 import {
@@ -342,6 +343,25 @@ pipeline test_live_extraction_uses_provider_catalog_identity(harness: Harness, t
   assert_eq(len(rows), 1)
   assert_eq(rows[0].id, input.extraction.candidate.model_id)
   assert_eq(rows[0].pricing.input_per_mtok, input.extraction.candidate.old_value)
+  with_llm_script(
+    harness.llm,
+    [llm_text(json_stringify(input.extraction))],
+    fn() {
+      const extracted = extract_notice(harness.llm, input.notice, BASE_CATALOG, {provider: "mock"})
+      assert_eq(extracted, input.extraction)
+      assert_eq(len(harness.llm.mock_calls()), 1, "the real extraction path must dispatch")
+      assert_error_contains(
+        fn() { return extract_notice(
+          harness.llm,
+          input.notice,
+          BASE_CATALOG,
+          {provider: "mock", temperature: "invalid"},
+        ) },
+        "temperature",
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1, "invalid settings must refuse before dispatch")
+    },
+  )
 }
 
 @test
