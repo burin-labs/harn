@@ -1005,6 +1005,40 @@ fn public_type_shape_closing_line_comment_stays_on_the_alias() {
 }
 
 #[test]
+fn open_shape_field_comments_stay_inside_the_record() {
+    let source = "pub type Base = {provider: string}\n\npub type Model<Row> = {\n  /** Child run identifier. */\n  run_id?: string,\n  // Host workspace anchor.\n  anchor?: dict,\n  ...Base,\n  ...Row,\n} // public contract\n\npub type Other = {name: string}\n";
+    for line_width in [40, 100] {
+        let options = FmtOptions {
+            line_width,
+            ..FmtOptions::default()
+        };
+        let formatted = format_source_opts(source, &options).unwrap();
+        let model = formatted.find("pub type Model").unwrap();
+        let run_doc = formatted.find("/** Child run identifier. */").unwrap();
+        let run = formatted.find("run_id?: string,").unwrap();
+        let anchor_doc = formatted.find("// Host workspace anchor.").unwrap();
+        let anchor = formatted.find("anchor?: dict,").unwrap();
+        let base = formatted.find("...Base,").unwrap();
+        let row = formatted.find("...Row,").unwrap();
+        let end = formatted.find("}  // public contract").unwrap();
+        let other = formatted.find("pub type Other").unwrap();
+        assert!(
+            model < run_doc
+                && run_doc < run
+                && run < anchor_doc
+                && anchor_doc < anchor
+                && anchor < base
+                && base < row
+                && row < end
+                && end < other,
+            "{formatted}"
+        );
+        assert_eq!(format_source_opts(&formatted, &options).unwrap(), formatted);
+    }
+    assert_roundtrip(source);
+}
+
+#[test]
 fn struct_field_line_comment_stays_in_the_struct() {
     let source =
         "struct S {\n  a: int\n  // FIELD_B_NOTE\n  b: int\n}\n\nfn later() -> int {\n  return 2\n}\n";

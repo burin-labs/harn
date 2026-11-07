@@ -3,7 +3,7 @@ use harn_parser::{Node, ParallelMode, SNode, ShapeField, TypeExpr};
 use crate::helpers::{
     column_after, escape_string, format_attribute, format_catch_param, format_pattern,
     format_throws_clause, format_type_ann_wrapped, format_type_expr, format_type_expr_wrapped,
-    format_type_params, text_width,
+    format_type_expr_wrapped_with_suffix, format_type_params, text_width,
 };
 
 use super::Formatter;
@@ -615,12 +615,16 @@ impl Formatter<'_> {
                     + text_width(name)
                     + text_width(&params)
                     + text_width(" = ");
-                let has_field_comments = matches!(type_expr, TypeExpr::Shape(_))
-                    && self.has_unclaimed_comments_in_range(node_line + 1, node_end_line);
-                if has_field_comments {
-                    let TypeExpr::Shape(fields) = type_expr else {
-                        unreachable!("only shape aliases can carry shape-field comments")
-                    };
+                let shape = match type_expr {
+                    TypeExpr::Shape(fields) => Some((fields.as_slice(), &[][..])),
+                    TypeExpr::OpenShape { fields, rests } => {
+                        Some((fields.as_slice(), rests.as_slice()))
+                    }
+                    _ => None,
+                };
+                if let Some((fields, rests)) = shape
+                    .filter(|_| self.has_unclaimed_comments_in_range(node_line + 1, node_end_line))
+                {
                     self.writeln(&format!("{pub_prefix}type {name}{params} = {{"));
                     self.indent();
                     self.format_members(
@@ -630,6 +634,16 @@ impl Formatter<'_> {
                         Some(node_end_line),
                         |formatter, field| formatter.format_shape_field(field),
                     );
+                    for rest in rests {
+                        let rest = format_type_expr_wrapped_with_suffix(
+                            rest,
+                            self.indent,
+                            self.indent * 2 + 3,
+                            self.line_width,
+                            1,
+                        );
+                        self.writeln(&format!("...{rest},"));
+                    }
                     self.dedent();
                     self.writeln("}");
                 } else {
