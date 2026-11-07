@@ -78,6 +78,10 @@ fn probe_case(
   opts: AgentSpec,
   task: string,
 ) -> list<string> {
+  const session_id = opts.session_id
+  if session_id == nil {
+    throw "Loop equivalence probes require a session id"
+  }
   let lines: list<string> = []
   with_llm_script(
     harness.llm,
@@ -85,7 +89,7 @@ fn probe_case(
     { ->
       const captured = agent_capture_events(
         harness.agent,
-        opts.session_id,
+        session_id,
         fn() { return agent_loop(harness, task, nil, opts) },
       )
       lines = lines + [label + " status=" + to_string(captured.result?.status)]

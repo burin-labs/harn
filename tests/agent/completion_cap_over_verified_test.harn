@@ -23,7 +23,7 @@ import { llm_done, with_llm_script } from "std/testing"
 
 const VERIFIED_CAP_REASON = "judge_cap_reached_over_verified_pass"
 
-fn __completion_receipts(events: unknown) {
+fn __completion_receipts(events: list<unknown>) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -36,7 +36,7 @@ fn __completion_receipts(events: unknown) {
 }
 
 /** The receipt that carried the stop, if any stop action was taken at all. */
-fn __stop_receipt(events: unknown) {
+fn __stop_receipt(events: list<unknown>) {
   for receipt in __completion_receipts(events) {
     if receipt?.action == "stop_verified" || receipt?.action == "stop_unverified" {
       return receipt
@@ -132,7 +132,7 @@ fn __run_to_cap(harness: Harness, label: string, observed: string) {
         session,
         fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }

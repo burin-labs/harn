@@ -63,7 +63,7 @@ fn __idle_tools() {
  * against `type` matches nothing and a demotion test built on it passes while
  * measuring an empty list. That is how this mechanism first read as unreachable.
  */
-fn __nudge_receipts(events: unknown) {
+fn __nudge_receipts(events: list<unknown>) {
   return events.filter(
     { event ->
       to_string(event.type) == "feedback_injected"
@@ -82,7 +82,7 @@ fn __nudge_receipts(events: unknown) {
  * text: a mechanism that stopped delivering and one whose wording changed would
  * look the same in a text search.
  */
-fn __nudge_feedback(events: unknown) {
+fn __nudge_feedback(events: list<unknown>) {
   return events.filter(
     { event ->
       to_string(event.type) == "feedback_injected"
@@ -155,7 +155,7 @@ fn __run_polling_stall(harness: Harness, label: string, pairs: int, max_nudges: 
           __stall_spec(session, 3 + pairs * 2, max_nudges),
         ) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }
@@ -232,7 +232,7 @@ pipeline test_the_text_only_budget_still_seals_the_run(harness: Harness, task: u
           __stall_spec(session, 6, 2),
         ) },
       )
-      return {events: inner.events, result: inner.result}
+      return pick(inner, ["events", "result"])
     },
   )
   assert_eq(captured.result.status, "stuck")

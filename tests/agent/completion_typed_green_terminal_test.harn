@@ -18,7 +18,7 @@ import { llm_done, with_llm_script } from "std/testing"
 
 const SKIP_OUTCOME = "skipped_verified_after_write"
 
-fn __completion_receipts(events: unknown) {
+fn __completion_receipts(events: list<unknown>) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -38,7 +38,7 @@ fn __completion_receipts(events: unknown) {
  * be satisfied by a judge that ran and agreed, which is precisely the outcome
  * this mechanism must be distinguished from.
  */
-fn __judge_calls(events: unknown) -> int {
+fn __judge_calls(events: list<unknown>) -> int {
   return len(events.filter({ event -> event.type == "judge_started" }).to_list())
 }
 
@@ -101,7 +101,7 @@ fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
         session,
         fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }
@@ -453,7 +453,7 @@ fn __run_to_cap(harness: Harness, label: string, script: list, opts_extra: dict)
         session,
         fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }

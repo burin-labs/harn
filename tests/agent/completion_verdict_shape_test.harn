@@ -167,7 +167,7 @@ pipeline test_a_refusal_naming_only_a_class_is_not_shapeless(harness: Harness, t
 // -------------------------------------------------------------------------------------------------
 
 /** Judge checkpoints the validator had to send back. */
-fn __repaired_judge_calls(events: unknown) -> int {
+fn __repaired_judge_calls(events: list<unknown>) -> int {
   return len(
     events.filter(
       { event ->
@@ -181,7 +181,7 @@ fn __repaired_judge_calls(events: unknown) -> int {
 }
 
 /** Re-asks, by their own receipt rather than by judge-call arithmetic. */
-fn __reasks(events: unknown) -> int {
+fn __reasks(events: list<unknown>) -> int {
   return len(
     events.filter(
       { event ->
@@ -234,7 +234,7 @@ fn __run(harness: Harness, label: string, script: list) {
           },
         ) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }
@@ -274,7 +274,7 @@ pipeline test_the_measured_judge_call_count_is_one(harness: Harness, task: unkno
 }
 
 /** Judge checkpoints, repaired or not. */
-fn events_of_judge(events: unknown) -> int {
+fn events_of_judge(events: list<unknown>) -> int {
   return len(
     events.filter(
       { event ->
