@@ -18,7 +18,6 @@
 2	agents/reserved_terminal_verify_guard.harn	HARN-LNT-049
 4	agents/suspend_continue_transcript_false.harn	HARN-LNT-014
 2	agents/suspend_nested.harn	HARN-LNT-014
-5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 2	agents/tool_precheck.harn	HARN-LNT-049
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
