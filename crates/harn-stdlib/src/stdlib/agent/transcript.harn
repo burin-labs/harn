@@ -1,12 +1,3 @@
-import { agent_is_tool_result_message } from "std/agent/state"
-// std/agent/transcript — canonical transcript normalization helpers.
-//
-// Agent transcripts are persisted by the Harn runtime, so Harn owns the
-// compatibility layer for reading them. Downstream eval/reporting tools should
-// consume these normalized rows instead of guessing at provider-specific or
-// historical JSONL shapes.
-import { ReadJsonlOptions, read_jsonl } from "std/jsonl"
-import "std/schema"
 pub import {
   ProviderCallCensus,
   ProviderCallMeasurementState,
@@ -18,6 +9,15 @@ pub import {
   provider_transcript_normalize,
   transcript_records,
 } from "std/agent/provider_transcript"
+import { agent_is_tool_result_message } from "std/agent/state"
+// std/agent/transcript — canonical transcript normalization helpers.
+//
+// Agent transcripts are persisted by the Harn runtime, so Harn owns the
+// compatibility layer for reading them. Downstream eval/reporting tools should
+// consume these normalized rows instead of guessing at provider-specific or
+// historical JSONL shapes.
+import { ReadJsonlOptions, read_jsonl } from "std/jsonl"
+import "std/schema"
 
 const TRANSCRIPT_ROW_SCHEMA = "harn.agent.transcript.row.v1"
 
