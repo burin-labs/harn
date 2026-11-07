@@ -169,13 +169,6 @@ anchors = ["crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn"]
 marker = "budget_exhausted"
 
 [[audited]]
-id = "agent_loop_stall"
-title = "Stall detection and hard stop"
-event = "agent_event:agent_loop_stall_warning"
-anchors = ["crates/harn-stdlib/src/stdlib/agent/stall_observation.harn"]
-marker = "agent_loop_stall_warning"
-
-[[audited]]
 id = "llm_transport"
 title = "Provider transport failure"
 event = "vm_error:thrown(build_llm_error_dict)"
