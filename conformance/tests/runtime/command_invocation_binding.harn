@@ -3,25 +3,22 @@ import "../_common"
 type ChildEvidence = {cwd: string, args: list<string>}
 
 pipeline default(harness: Harness) {
-  if len(argv) == 0 {
+  const owner = harness.env.get("HARN_EXT_COMMAND_INVOCATION_OWNER")
+  assert(owner == nil || owner == "sandboxed-owner")
+  if owner == nil {
     // Conformance intentionally skips OS process confinement; use the normal CLI.
     const repo = trim(harness.process.exec("git", "rev-parse", "--show-toplevel").stdout)
     const binary = resolve_harn_bin(harness, repo)
     const child = harness.process.run(
       {
         program: binary,
-        args: [
-          "run",
-          path_join(repo, "conformance/tests/runtime/command_invocation_binding.harn"),
-          "--",
-          "sandboxed-owner",
-        ],
+        args: ["run", path_join(repo, "conformance/tests/runtime/command_invocation_binding.harn")],
+        env: {HARN_EXT_COMMAND_INVOCATION_OWNER: "sandboxed-owner"},
       },
     )
     assert_eq(child.exit_code, 0, child.stderr)
     return nil
   }
-  assert_eq(argv, ["sandboxed-owner"])
   const root = harness.fs.mkdtemp_in_workspace("command-invocation-")
   defer {
     harness.fs.delete(root)
