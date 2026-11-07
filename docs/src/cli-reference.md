@@ -137,7 +137,6 @@ harn run --sandbox-write-root /path/to/tool-cache main.harn
 harn run --sandbox-read-root /path/to/sdk main.harn
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 harn run --environment-policy isolated eval_child.harn
-harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
 harn run --attest --receipt-out receipt.json <file.harn>
@@ -176,7 +175,6 @@ harn run --resume .harn/workers/worker_...json
 | `--sandbox-unix-socket-root <path>` | Let spawned subprocesses bind and connect Unix-domain sockets whose socket file lives under this root, without opening any IP networking. Build servers (sbt, Gradle, MSBuild) need this. Supported on macOS; other local sandbox backends fail closed. |
 | `--environment-policy <inherited\|isolated\|granted>` | Choose which launch-time environment values this session and its subprocesses may read. Default: `inherited`. |
 | `--grant <spec>` | Grant one named value to this session; repeatable. Selects `granted` when the policy is omitted. See [Environment policies and grants](#environment-policies-and-grants). |
-| `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
 | `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
@@ -922,7 +920,6 @@ harn try "Use local Ollama"
 | `--llm <provider:model>` | Override the provider/model selection for this invocation |
 | `--llm-mock <path>` | Replay LLM responses from a JSONL fixture file instead of calling the provider |
 | `--llm-mock-record <path>` | Record executed LLM responses into a JSONL fixture file |
-| `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--watch` | Re-run when the host module or script changes |
 
 `harn playground` type-checks the host module, merges its exported function

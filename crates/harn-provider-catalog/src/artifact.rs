@@ -30,7 +30,7 @@ pub struct ProviderCatalogArtifact {
     pub portal_defaults: BTreeMap<String, CatalogPortalDefault>,
     /// Credential-gated automatic defaults, best first. A host with no model
     /// choice takes the first entry whose provider it holds a credential for,
-    /// and falls back to a local model when none matches.
+    /// Unmatched credentials require setup or a host-selected local route.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automatic_defaults: Vec<CatalogAutomaticDefault>,
 }

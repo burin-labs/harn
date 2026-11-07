@@ -149,9 +149,6 @@ pub(crate) struct RunArgs {
     /// Reuse complete identical evaluations within this execution (1024-entry bound).
     #[arg(long)]
     pub evaluation_cache: bool,
-    /// Accept first-run provider setup prompts.
-    #[arg(long)]
-    pub yes: bool,
     /// Emit a signed provenance receipt after the run.
     #[arg(long)]
     pub attest: bool,

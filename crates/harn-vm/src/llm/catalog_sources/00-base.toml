@@ -25,7 +25,7 @@
 # equivalent data as Rust literals in llm_config.rs — that creates the
 # parallel system this catalog exists to eliminate.
 
-# The provider a call uses when it names neither a provider nor a model. Its
-# model comes from `provider_defaults.<provider>.runtime`, like every other
-# provider's; there is no separate global fallback model.
-default_provider = "anthropic"
+# Calls with no selected route use the credential-gated `automatic` provider
+# and model entries, ordered by `automatic_order`. Explicit provider defaults
+# continue to read that provider's `runtime` entry.
+default_provider = "auto"

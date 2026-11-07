@@ -140,13 +140,11 @@ The direct route's introductory pricing ends November 30, 2026. Its catalog
 promotion restores the published regular rates on December 1. Gateway routes
 have separate rate cards. See [Google's migration reference](https://ai.google.dev/gemini-api/docs/latest-model).
 
-On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
-programs that call provider-backed LLM builtins such as `harness.llm.call`,
-`harness.llm.stream_call`, or `agent_loop`. If no user or project provider config is
-present and local Ollama responds at
-`http://127.0.0.1:11434/api/tags`, Harn offers to write
-`~/.config/harn/providers.toml` with Ollama as the default provider. Pass
-`--yes` to accept that setup without an interactive prompt.
+Run `harn quickstart` to discover local Ollama models and create provider
+configuration. To configure a local route without prompts, use
+`harn quickstart --non-interactive --provider ollama --model <model>`.
+See [Configure a model provider](../provider-setup.md) for configuration paths
+and credential setup. Execution uses the selected route; setup is explicit.
 
 For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
 something like `http://192.0.2.10:8000` and either pass

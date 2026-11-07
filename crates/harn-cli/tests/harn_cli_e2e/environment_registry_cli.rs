@@ -272,7 +272,7 @@ fn playground_setup_errors_use_stderr_diagnostics() {
 }
 
 #[test]
-fn playground_rejects_malformed_host_ceiling_before_provider_bootstrap_or_source_load() {
+fn playground_rejects_malformed_host_ceiling_before_source_load() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let host = root.join("examples/playground/host.harn");
     let script = root.join("examples/playground/echo.harn");

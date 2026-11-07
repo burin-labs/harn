@@ -49,14 +49,6 @@ pub(crate) async fn run_command(
 ) -> Result<(), String> {
     {
         let _environment = crate::commands::run::environment::process_host_environment_scope()?;
-        crate::provider_bootstrap::maybe_seed_ollama_for_playground(
-            Path::new(&args.host),
-            Path::new(&args.script),
-            args.yes,
-            args.llm.is_some(),
-            args.llm_mock.is_some(),
-        )
-        .await;
     }
     let config = PlaygroundConfig {
         host: canonicalize_or_err(&args.host)?,
