@@ -1,0 +1,7 @@
+fn http_get(value: int) -> int {
+  return value
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(http_get(7))
+}

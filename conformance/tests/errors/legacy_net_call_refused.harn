@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  http_get("https://example.com")
+}

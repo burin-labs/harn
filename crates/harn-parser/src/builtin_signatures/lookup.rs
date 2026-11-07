@@ -61,17 +61,17 @@ pub fn lookup_with_privileged_wire(
             return lookup(canonical);
         }
     }
-    static_signature_index().get(name).copied()
+    fallback_signature_index().get(name).copied()
 }
 
-/// Name index over the hand-written static fallback tables.
+/// Name index over static helpers and typed capability migration projections.
 ///
 /// The static groups hold several hundred signatures, and the fallback fires
 /// for *every* name the registry does not know — including every user-defined
 /// function call the type checker resolves — so a linear scan of every group
 /// per miss was a measurable slice of whole-file typechecking. The tables are
 /// `'static`, so one lazily-built index serves every lookup.
-fn static_signature_index(
+fn fallback_signature_index(
 ) -> &'static std::collections::HashMap<&'static str, &'static BuiltinSignature> {
     static INDEX: std::sync::OnceLock<
         std::collections::HashMap<&'static str, &'static BuiltinSignature>,
@@ -84,8 +84,31 @@ fn static_signature_index(
                 index.entry(sig.name).or_insert(sig);
             }
         }
+        for &(legacy, _) in crate::diagnostic::HARNESS_NET_REPLACEMENTS {
+            let Some((field, method)) = harness_method_for_ambient_name(legacy) else {
+                continue;
+            };
+            if let Some(entry) = capability_method_entry(field, method) {
+                index.entry(legacy).or_insert(entry.signature);
+            }
+        }
         index
     })
+}
+
+fn fallback_signatures() -> impl Iterator<Item = (&'static str, &'static BuiltinSignature)> {
+    signatures::groups()
+        .into_iter()
+        .flat_map(|group| group.iter().map(|signature| (signature.name, signature)))
+        .chain(
+            crate::diagnostic::HARNESS_NET_REPLACEMENTS
+                .iter()
+                .filter_map(|&(name, _)| {
+                    fallback_signature_index()
+                        .get(name)
+                        .map(|signature| (name, *signature))
+                }),
+        )
 }
 
 /// Resolve an unqualified legacy method name only when the typed manifest has
@@ -212,11 +235,9 @@ pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
             .map(|entry| entry.name)
             .collect();
     installed.into_iter().map(|entry| entry.name).chain(
-        signatures::groups()
-            .into_iter()
-            .flat_map(|g| g.iter())
-            .filter(move |s| !installed_names.contains(s.name))
-            .map(|s| s.name),
+        fallback_signatures()
+            .map(|(name, _)| name)
+            .filter(move |name| !installed_names.contains(name)),
     )
 }
 
@@ -262,13 +283,11 @@ pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
             return_types: builtin_return_type_names(entry.signature),
         })
         .chain(
-            signatures::groups()
-                .into_iter()
-                .flat_map(|g| g.iter())
-                .filter(move |s| !installed_names.contains(s.name))
-                .map(|sig| BuiltinMetadata {
-                    name: sig.name,
-                    return_types: builtin_return_type_names(sig),
+            fallback_signatures()
+                .filter(move |(name, _)| !installed_names.contains(*name))
+                .map(|(name, signature)| BuiltinMetadata {
+                    name,
+                    return_types: builtin_return_type_names(signature),
                 }),
         )
 }

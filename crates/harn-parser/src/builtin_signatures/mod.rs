@@ -90,6 +90,62 @@ mod tests {
     }
 
     #[test]
+    fn legacy_net_signatures_share_the_capability_owner() {
+        let _guard = crate::legacy_ambient_capabilities_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let migrations = crate::diagnostic::HARNESS_NET_REPLACEMENTS;
+        assert_eq!(
+            migrations.len(),
+            50,
+            "the full migration census must be reached"
+        );
+        let names: HashSet<_> = iter_builtin_names().collect();
+        let static_names: HashSet<_> = static_signature_names().collect();
+        let metadata: HashSet<_> = iter_builtin_metadata().map(|entry| entry.name).collect();
+        for &(legacy, replacement) in migrations {
+            let method = replacement.strip_prefix("harness.net.").unwrap();
+            let owner = capability_method_entry("net", method).expect("typed migration owner");
+            assert!(
+                std::ptr::eq(lookup(legacy).unwrap(), owner.signature),
+                "{legacy}"
+            );
+            assert_eq!(
+                crate::diagnostic::harness_net_replacement(legacy),
+                Some(replacement)
+            );
+            assert!(
+                names.contains(legacy) && metadata.contains(legacy),
+                "{legacy}"
+            );
+            assert!(
+                !static_names.contains(legacy),
+                "duplicate static signature: {legacy}"
+            );
+        }
+        assert!(lookup("http_definitely_not_registered").is_none());
+        assert!(
+            lookup("__cap_net_get").is_none(),
+            "a migration is not ambient authority"
+        );
+        let (_, diagnostics) = crate::check_source("fn wrong() { http_get(7) }").unwrap();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("expected string, found int")),
+            "{diagnostics:?}"
+        );
+        let (_, diagnostics) = crate::check_source(
+            "fn http_get(n: int) -> int { return n }\nfn local() -> int { return http_get(7) }",
+        )
+        .unwrap();
+        assert!(
+            diagnostics.is_empty(),
+            "local functions must shadow migration names: {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn lookup_hits_and_misses() {
         assert!(is_builtin("snake_to_camel"));
         assert!(is_builtin("log"));
