@@ -294,18 +294,24 @@ impl<'a> JavaBindings<'a> {
     fn type_parameter(&self, at: Node<'_>, name: &str) -> bool {
         let mut outer = Some(at);
         while let Some(node) = outer {
-            if let Some(parameters) = node.child_by_field_name("type_parameters") {
-                if descendants(parameters).any(|parameter| {
-                    parameter.kind() == "type_parameter"
-                        && type_parameter_name(parameter)
-                            .is_some_and(|id| text(id, self.source) == name)
-                }) {
-                    return true;
-                }
+            if self.declares_type_parameter(node, name) {
+                return true;
             }
             outer = node.parent();
         }
         false
+    }
+
+    fn declares_type_parameter(&self, scope: Node<'_>, name: &str) -> bool {
+        scope
+            .child_by_field_name("type_parameters")
+            .is_some_and(|parameters| {
+                children(parameters).any(|parameter| {
+                    parameter.kind() == "type_parameter"
+                        && type_parameter_name(parameter)
+                            .is_some_and(|id| text(id, self.source) == name)
+                })
+            })
     }
 
     fn variable_type(&self, at: Node<'_>, name: &str, fields_only: bool) -> BindingType<String> {

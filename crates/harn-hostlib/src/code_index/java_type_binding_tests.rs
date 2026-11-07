@@ -23,6 +23,7 @@ fn type_namespace_preserves_imports_nested_types_parameters_and_namesakes() {
         ("package app; import other.DocumentStore; class Page { DocumentStore field; }", 0),
         ("package lab; class Page<DocumentStore> { DocumentStore field; }", 0),
         ("package lab; class Page { static class DocumentStore {} DocumentStore field; }", 0),
+        ("package lab; class Page<DocumentStore> { void use() { class DocumentStore {} DocumentStore local; } }", 0),
         ("package lab; class Page { void use() { class DocumentStore {} DocumentStore local; } }", 0),
         ("package lab; class Page { int use(DocumentStore value) { int DocumentStore = 1; return DocumentStore; } }", 1),
         ("package lab; class Page { int use() { return DocumentStore.size(); } }", 1),
@@ -71,11 +72,33 @@ fn nested_type_and_constructor_identity_share_one_declared_owner() {
 }
 
 #[test]
+fn a_nearer_local_type_shadows_an_outer_type_parameter() {
+    let source = "package lab; class Page<DocumentStore> { void use() { class DocumentStore {} DocumentStore local; } }";
+    let catalog = catalog(&[TARGET, source]);
+    let tree = parse_tree(source, Language::Java).unwrap();
+    let bindings = JavaBindings::new(&tree, source);
+    let reference = descendants(tree.root_node())
+        .filter(|node| node.kind() == "type_identifier" && text(*node, source) == "DocumentStore")
+        .max_by_key(|node| node.start_byte())
+        .unwrap();
+    let actual = bindings
+        .type_occurrence(reference, &catalog)
+        .unwrap()
+        .unwrap();
+    assert!(
+        actual.starts_with("#local:"),
+        "the local declaration must actually win, got {actual}"
+    );
+}
+
+#[test]
 fn ambiguous_type_imports_inheritance_and_patterns_refuse_real_occurrences() {
     for source in [
         "package app; import lab.*; import other.*; class Page { DocumentStore field; }",
         "package app; import lab.DocumentStore; import other.DocumentStore; class Page { DocumentStore field; }",
         "package lab; class Page extends UnknownBase { DocumentStore field; }",
+        "package lab; class Page<DocumentStore> { class Child extends UnknownBase { DocumentStore field; } }",
+        "package lab; class Page { static class DocumentStore {} class Child extends UnknownBase { DocumentStore field; } }",
         "package lab; class Page { int use(Object value) { if (value instanceof Page DocumentStore) { return DocumentStore.hashCode(); } return 0; } }",
     ] {
         let catalog = catalog(&[TARGET, OTHER, source]);

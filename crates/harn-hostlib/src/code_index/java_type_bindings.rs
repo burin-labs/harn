@@ -354,12 +354,11 @@ impl JavaBindings<'_> {
         } else {
             String::new()
         };
-        if self.type_parameter(at, first) {
-            return Ok(format!("#parameter:{first}{suffix}"));
-        }
-        let mut inherited = false;
         let mut outer = Some(at);
         while let Some(scope) = outer {
+            if self.declares_type_parameter(scope, first) {
+                return Ok(format!("#parameter:{first}{suffix}"));
+            }
             if scope.kind() == "enum_constant"
                 || scope.kind() == "object_creation_expression"
                     && children(scope).any(|child| child.kind() == "class_body")
@@ -401,7 +400,11 @@ impl JavaBindings<'_> {
                             .ok_or("the Java member owner is absent".into());
                     }
                 }
-                inherited |= within_body.is_some() && has_supertypes(scope);
+                if within_body.is_some() && has_supertypes(scope) {
+                    return Err(
+                        "inherited Java member type bindings require compiler resolution".into(),
+                    );
+                }
             }
             if is_local_scope(scope) {
                 let locals = local_declarations(scope)
@@ -425,9 +428,6 @@ impl JavaBindings<'_> {
                 }
             }
             outer = scope.parent();
-        }
-        if inherited {
-            return Err("inherited Java member type bindings require compiler resolution".into());
         }
         let imports = self
             .imports
