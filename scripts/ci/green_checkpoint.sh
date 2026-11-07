@@ -18,8 +18,8 @@
 #
 # A pass can also keep the full release build exercised. With
 # GREEN_SOURCE_CANDIDATE_HOURS set, it dispatches a signed source candidate of
-# main's tip when none is running, the tip has none, and the last one started
-# at least that long ago. Unset starts nothing. With
+# main's tip when none is running, no promotion is active, the tip has none,
+# and the last one started at least that long ago. Unset starts nothing. With
 # GREEN_REQUIRES_SOURCE_CANDIDATE=true, a run moves green only when its commit
 # has a successful candidate; otherwise older runs are considered.
 #
@@ -168,7 +168,7 @@ settle_run() {
 
 # Dispatch a source candidate of main's tip when one is due, and say why not otherwise.
 start_source_candidate() {
-  local runs tip decision
+  local runs tip decision promotions promotion_state active
   if [[ -z "$candidate_hours" ]]; then
     echo "Source candidates: not started by this workflow (GREEN_SOURCE_CANDIDATE_HOURS is unset)."
     return 0
@@ -192,6 +192,31 @@ start_source_candidate() {
       else "start" end' <<< "$runs") || return 1
   echo "Source candidates: $decision"
   [[ "$decision" == start ]] || return 0
+  # A promotion already owns a certified source and its platform artifacts.
+  # Building another source at the same unreleased version is wasted work if
+  # it publishes. Include every age and branch: a long-waiting promotion must
+  # not disappear merely because it fell outside the CI census window.
+  promotions=$(gh api --paginate --slurp \
+    "repos/$repo/actions/workflows/promote-release.yml/runs?per_page=100") || return 1
+  promotion_state=$(jq -c '
+    if type != "array" or length == 0
+      or any(.[]; (.total_count | type) != "number" or (.workflow_runs | type) != "array")
+      or (map(.total_count) | unique | length) != 1
+      or (map(.workflow_runs | length) | add) != .[0].total_count
+    then error("incomplete promotion census") else . end
+    | [.[].workflow_runs[]] as $runs
+    | if any($runs[]; (.id | type) != "number" or .id <= 0
+        or (.status != "queued" and .status != "in_progress" and .status != "requested"
+            and .status != "waiting" and .status != "pending" and .status != "completed"))
+      then error("malformed promotion run") else . end
+    | {total: ($runs | length), active: [$runs[] | select(.status != "completed") | .id]}' \
+    <<< "$promotions") || return 1
+  active=$(jq -r '.active | length' <<< "$promotion_state") || return 1
+  echo "Source candidates: promotions total=$(jq -r '.total' <<< "$promotion_state") active=$active ids=$(jq -r '.active | join(",")' <<< "$promotion_state")"
+  if (( active > 0 )); then
+    echo "Source candidates: deferred while release promotion is active."
+    return 0
+  fi
   jq -n '{ref: "main", inputs: {source_candidate: "true"}}' \
     | gh api -X POST "repos/$repo/actions/workflows/build-release-binaries.yml/dispatches" --input - > /dev/null || return 1
   echo "Source candidates: dispatched at $tip."
