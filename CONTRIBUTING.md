@@ -15,7 +15,7 @@ the source checkout without compiling Rust:
 ```sh
 git clone https://github.com/burin-labs/harn.git
 cd harn
-make setup-bootstrap
+make install-hooks
 npm ci
 HARN_BIN="$(command -v harn)" HARN_BIN_NO_BUILD=1 make check-docs-snippets
 ```
