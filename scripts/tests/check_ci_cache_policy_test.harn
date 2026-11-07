@@ -1302,7 +1302,7 @@ pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_polic
   const workflow = release_binary_workflow(harness.fs)
   const filter_step = setup_step_by_id(workflow, "release-build-inputs")
   const invalid = {
-    concurrency: workflow.concurrency,
+    ...workflow,
     jobs: {
       setup: {
         steps: [
@@ -1814,7 +1814,10 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
   )
   const unpinned_consumer = {
     ...ci,
-    jobs: {...ci.jobs, "macos-lint": {...ci.jobs["macos-lint"], env: {RUSTFLAGS: "-D warnings"}}},
+    jobs: {
+      ...ci.jobs,
+      "macos-lint": {...workflow_job(ci, "macos-lint"), env: {RUSTFLAGS: "-D warnings"}},
+    },
   }
   assert(
     macos_warm_errors(declared_policy, producer, unpinned_consumer).contains(
@@ -1944,8 +1947,8 @@ pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
     jobs: {
       ...ci.jobs,
       "macos-lint": {
-        ...ci.jobs["macos-lint"],
-        steps: ci.jobs["macos-lint"].steps.filter(
+        ...workflow_job(ci, "macos-lint"),
+        steps: workflow_job_steps(ci, "macos-lint").filter(
           { step ->
             return !contains(
               trim(step?.run ?? ""),

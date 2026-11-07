@@ -1,6 +1,8 @@
 import { RUST_LINT_LEGS } from "./linux_checks.harn"
 import "./policy_core.harn"
 
+const trim = ci_text
+
 fn native_shared_cache_errors(
   ci_workflow: CiWorkflow?,
   nightly_workflow: CiWorkflow?,
@@ -655,10 +657,7 @@ pub fn macos_shared_cache_errors(
     errors = errors
       + ["ci.yml:macos-lint must retain bounded source-bound workspace compile timings"]
   }
-  const kinds = (lint_job?.strategy?.matrix?.include ?? []).map(
-    { entry -> trim(entry?.kind ?? "") },
-  )
-    .to_list()
+  const kinds = matrix_include_rows(lint_job).map({ entry -> trim(entry?.kind ?? "") }).to_list()
   const expected_name = "Rust on macOS strict lint ($" + "{{ matrix.kind }})"
   if kinds != RUST_LINT_LEGS || lint_job?.strategy?.["fail-fast"] != false
     || lint_job?.["runs-on"] != "macos-latest"

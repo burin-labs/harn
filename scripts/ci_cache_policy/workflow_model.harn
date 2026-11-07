@@ -1,6 +1,11 @@
 /** GitHub YAML scalars used by action inputs and environment variables. */
 pub type CiScalar = string | bool | int | float
 
+/** Normalize GitHub's scalar condition, input, and environment spellings. */
+pub fn ci_text(value: CiScalar?) -> string {
+  return to_string(value ?? "").trim()
+}
+
 pub type CiStep = {
   id?: string,
   name?: string,
@@ -70,6 +75,19 @@ pub type CiAction = {
   outputs?: dict<string, {value?: string, ...dict}>,
   runs?: {using?: string, steps?: list<CiStep>, ...dict},
   ...dict,
+}
+
+/** Policy checks that enumerate legs require a statically declared matrix. */
+pub fn matrix_include_rows(job: CiJob?) -> list<CiMatrixRow> {
+  const matrix = job?.strategy?.matrix
+  if type_of(matrix) == "string" {
+    throw "CI policy requires a static include matrix, not a matrix expression"
+  }
+  const include = matrix?.include
+  if type_of(include) == "string" {
+    throw "CI policy requires static include rows, not an include expression"
+  }
+  return include ?? []
 }
 
 pub type CiReleaseRunnerPolicy = {
