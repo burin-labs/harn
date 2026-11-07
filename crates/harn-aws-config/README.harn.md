@@ -31,8 +31,9 @@ doctests are disabled in the package manifest. A recorded crate-level
 `cfg(not(test))` also disables the unavailable internal test target when Cargo
 forces every target to compile. The normal SDK library remains enabled, and
 Harn's owning SDK tests consume it as a dependency. Upstream development
-dependencies and the example target are omitted. Runtime dependency declarations
-and the remaining features are preserved.
+dependencies and the example target are omitted. The recorded manifest also
+updates the SHA-1 and SHA-256 dependencies used for credential cache paths;
+the remaining runtime dependency declarations and features are preserved.
 The recorded manifest names only upstream's unused `bytes` declaration in
 `cargo-machete` metadata, preserving that dependency without exempting the crate
 from dependency checks.
