@@ -1,0 +1,31 @@
+import { with_temp_dir } from "std/testing"
+
+fn main(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    fn(root: string) {
+      const path = "${root}/source.ts"
+      harness.fs.write_text(path, "export function oldName() { return 1; } // valid\n")
+      require harness.code_index.rebuild({root: root}).files_indexed == 1,
+        "The real rename declaration must be indexed"
+      const original = bytes_from_hex(
+        "6578706f72742066756e6374696f6e206f6c644e616d652829207b2072657475726e20313b207d202f2f20ff0a",
+      )
+      harness.fs.write_bytes(path, original)
+      const outcome = try {
+        harness.code_index.rename_symbol(
+          {
+            symbol_ref: {name: "oldName", path: "source.ts"},
+            new_name: "newName",
+            scope: "workspace",
+            backend: "syntax_tree",
+          },
+        )
+      }
+      require is_err(outcome) && contains(to_string(unwrap_err(outcome)), "source is not UTF-8"),
+        "Renaming invalid UTF-8 must refuse before a lossy rewrite"
+      require harness.fs.read_bytes(path) == original, "A refused rename must retain every byte"
+      harness.stdio.println("invalid UTF-8: refused, original bytes retained")
+    },
+  )
+}

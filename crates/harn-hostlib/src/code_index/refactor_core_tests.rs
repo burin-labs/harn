@@ -4,6 +4,22 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn refactor_source_refuses_invalid_utf8_without_replacing_bytes() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("a.ts");
+    let source = b"export const value = 1; // \xff\n";
+    fs::write(&path, source).unwrap();
+    let error = read_source("test_refactor", dir.path(), "a.ts", None).unwrap_err();
+    assert!(error.to_string().contains("source is not UTF-8"));
+    assert_eq!(fs::read(&path).unwrap(), source);
+    fs::write(&path, "export const value = 1; // λ\n").unwrap();
+    assert_eq!(
+        read_source("test_refactor", dir.path(), "a.ts", None).unwrap(),
+        "export const value = 1; // λ\n"
+    );
+}
+
+#[test]
 fn positioned_seed_selection_is_exact_while_other_refactors_keep_legacy_paths() {
     let (_, state) = index(&[(
         "src/lib/a.ts",

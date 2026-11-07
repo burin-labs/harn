@@ -734,7 +734,10 @@ pub(super) fn read_source(
             message: format!("read `{}`: {err}", path.display()),
         })?
     };
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    String::from_utf8(bytes).map_err(|err| HostlibError::Backend {
+        builtin,
+        message: format!("read `{}`: source is not UTF-8: {err}", path.display()),
+    })
 }
 
 /// Paths whose current text differs from the text their plan was built
