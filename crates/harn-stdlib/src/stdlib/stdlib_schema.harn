@@ -6,6 +6,7 @@
  * @effects: []
  * @errors: []
  */
+import { omit } from "std/json"
 pub import {
   JsonTypedReport,
   JsonTypedStage,
@@ -303,7 +304,7 @@ pub fn schema_dict(value_schema: unknown = nil, options: dict? = nil) -> dict {
  * @errors: []
  */
 pub fn schema_field(schema: dict, required: bool = true) -> dict {
-  return schema + {required: required}
+  return schema + {__harn_field_required: required}
 }
 
 /**
@@ -318,8 +319,13 @@ pub fn schema_object(fields: dict, options: dict? = nil) -> dict {
   let required = []
   for entry in fields {
     const raw_schema = entry.value
-    const is_required = raw_schema.required == nil || raw_schema.required
-    const field_schema = schema_omit(raw_schema, ["required"])
+    const legacy_required = type_of(raw_schema.required) == "bool"
+    const is_required = raw_schema.__harn_field_required
+      ?? (legacy_required ? raw_schema.required : true)
+    const field_schema = omit(
+      raw_schema,
+      legacy_required ? ["__harn_field_required", "required"] : ["__harn_field_required"],
+    )
     properties = properties + {[entry.key]: field_schema}
     if is_required {
       required = required + [entry.key]
@@ -399,7 +405,7 @@ pub fn schema_nullable(schema: dict) -> dict {
  * @errors: []
  */
 pub fn schema_default(schema: dict, value: unknown) -> dict {
-  return schema + {default: value, required: false}
+  return schema_field(schema + {default: value}, false)
 }
 
 /**

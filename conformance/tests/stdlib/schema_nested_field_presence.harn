@@ -1,0 +1,53 @@
+import {
+  get_typed_report,
+  schema_closed_object,
+  schema_default,
+  schema_field,
+  schema_object,
+  schema_string,
+} from "std/schema"
+
+fn main(harness: Harness) {
+  const child = schema_closed_object({name: schema_string(), required: schema_string()})
+  const sample = {name: "reached", required: "ordinary field"}
+  for field in [child, schema_field(child), schema_field(child, false)] {
+    const parent = schema_object({receipt: field})
+    assert(
+      get_typed_report({receipt: sample}, parent).ok,
+      "valid nested object must reach validation",
+    )
+    assert(!get_typed_report({receipt: {}}, parent).ok, "nested required fields must survive")
+    assert(
+      !get_typed_report({receipt: {name: "reached"}}, parent).ok,
+      "a field named required remains required",
+    )
+    assert(
+      !get_typed_report({receipt: sample + {extra: true}}, parent).ok,
+      "nested closure remains enforced",
+    )
+  }
+  const optional = schema_object({receipt: schema_field(child, false)})
+  assert(get_typed_report({}, optional).ok, "optional parent field may be absent")
+  assert(!get_typed_report({receipt: nil}, optional).ok, "optional does not mean nullable")
+  assert(
+    !get_typed_report({}, schema_object({receipt: child})).ok,
+    "bare child schema remains required",
+  )
+  const defaulted = schema_object({receipt: schema_default(child, sample)})
+  const report = get_typed_report({}, defaulted, true)
+  assert(report.ok, "nested default must be valid")
+  assert_eq(report.value, {receipt: sample})
+  assert(
+    !get_typed_report({receipt: {}}, defaulted, true).ok,
+    "default does not replace an invalid present object",
+  )
+  const legacy = schema_object(
+    {optional: schema_string() + {required: false}, present: schema_string() + {required: true}},
+  )
+  assert(
+    get_typed_report({present: "reached"}, legacy).ok,
+    "legacy presence flags remain supported",
+  )
+  assert(!get_typed_report({}, legacy).ok, "legacy required flag remains enforced")
+  harness.stdio.println("nested field presence ok")
+}
