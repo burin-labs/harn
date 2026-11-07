@@ -157,7 +157,7 @@ async fn dropped_calls_cancel_the_exact_remote_request_and_retire_only_their_wai
             bridge.cancellation.cancelled.clone(),
             bridge.cancellation.notify.clone(),
             Default::default(),
-            harn_vm::tool_call_cancellations::fresh_registry(),
+            Arc::new(harn_vm::tool_call_cancellations::CancellationRegistry::default()),
         ),
     );
     let second = host.call(
