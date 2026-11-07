@@ -57,7 +57,7 @@ struct AcpWorker {
     request_tx: Mutex<Option<mpsc::UnboundedSender<JsonValue>>>,
     clients: Mutex<BTreeMap<String, AcpClient>>,
     host_owner_client_id: Mutex<Option<String>>,
-    pending_client_requests: Mutex<BTreeMap<String, String>>,
+    pending_client_requests: Mutex<BTreeMap<String, AcpClientRequest>>,
     host_requests: Mutex<AcpHostRequests>,
     sessions: Mutex<BTreeMap<String, AcpSessionSummary>>,
     replay_buffer: Mutex<VecDeque<AcpReplayEvent>>,
@@ -79,6 +79,11 @@ struct AcpClient {
     connection_id: String,
     role: AcpAttachRole,
     socket_tx: mpsc::UnboundedSender<String>,
+}
+
+struct AcpClientRequest {
+    client_id: String,
+    delivery: bool,
 }
 
 struct AcpAttachOptions {
@@ -802,7 +807,16 @@ impl AcpWorker {
                 if pending.contains_key(&id_key) {
                     return Err(AcpClientRequestError::DuplicateRequestId);
                 }
-                pending.insert(id_key, client_id.to_string());
+                pending.insert(
+                    id_key,
+                    AcpClientRequest {
+                        client_id: client_id.to_string(),
+                        delivery: value["method"] == "session/prompt"
+                            && value
+                                .pointer("/params/delivery")
+                                .is_some_and(|value| !value.is_null()),
+                    },
+                );
             }
         }
 
@@ -1043,8 +1057,8 @@ impl AcpWorker {
                         .unwrap_or_else(|e| e.into_inner())
                         .remove(&id_key)
                 });
-                if let Some(client_id) = target {
-                    if !self.send_to_client(&client_id, annotated.clone()) {
+                if let Some(request) = target {
+                    if !self.send_to_client(&request.client_id, annotated.clone()) {
                         self.send_to_host_owner(annotated);
                     }
                 } else {
