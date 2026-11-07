@@ -1,5 +1,12 @@
 type ExecutorSpec = {
-  mode: "normal" | "rewrite" | "deny" | "unsupported" | "cancel",
+  mode: "normal" \
+    | "rewrite" \
+    | "deny" \
+    | "unsupported" \
+    | "cancel" \
+    | "cancel_prepare" \
+    | "malformed_argv" \
+    | "malformed_cwd",
   root: string,
   python: string,
 }
@@ -51,7 +58,7 @@ pipeline default(harness: Harness) {
       },
     ),
   )
-  if spec.mode == "unsupported" {
+  if contains(["unsupported", "malformed_argv", "malformed_cwd"], spec.mode) {
     const outcome = try {
       harness.process.run({program: spec.python, args: original[1:len(original)]})
     }

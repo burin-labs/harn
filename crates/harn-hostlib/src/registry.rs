@@ -425,7 +425,13 @@ impl HostlibRegistry {
                                 params,
                                 caller,
                                 harn_vm::orchestration::CommandDispatchOrigin::ArbitraryProcess,
-                                |params| async move { prepare(params).map_err(VmError::from) },
+                                |params| async move {
+                                    let validated = crate::schemas::validate_request_args(
+                                        ambient_name, module, method, &[VmValue::dict(params)],
+                                    ).map_err(VmError::from)?;
+                                    prepare(validated.as_dict().expect("validated command dict").clone())
+                                        .map_err(VmError::from)
+                                },
                             )
                             .await?
                             {
@@ -452,22 +458,11 @@ impl HostlibRegistry {
                                     decisions,
                                 } => {
                                     let PreparedCommand { params, handler, .. } = params;
-                                    // Hooks may rewrite command fields. Revalidate
-                                    // the rewritten request at the owning schema
-                                    // boundary before the hostlib parser sees it.
-                                    let rewritten = VmValue::dict(params.clone());
-                                    let validated = crate::schemas::validate_request_args(
-                                        ambient_name,
-                                        module,
-                                        method,
-                                        &[rewritten],
-                                    )
-                                    .map_err(VmError::from)?;
                                     let result = run_interruptible(
                                         &ctx,
                                         ambient_name,
                                         handler,
-                                        validated,
+                                        VmValue::dict(params.clone()),
                                     )
                                     .await?;
                                     if crate::tools::run_command_request_is_background(&params) {

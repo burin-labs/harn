@@ -404,7 +404,7 @@ async fn spawn(
 
 pub(crate) async fn spawn_prepared(
     params: &crate::value::DictMap,
-    prepared: crate::stdlib::host::process_exec::PreparedProcessCommand,
+    prepared: crate::stdlib::host::PreparedProcessCommand,
     owner_cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<VmValue, VmError> {
     let timeout_ms = optional_i64(params, "timeout")

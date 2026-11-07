@@ -74,7 +74,11 @@ handle; releasing the preparation doesn't terminate that handle-owned child.
 Ordinary runtime spawn handles remain local. Remote spawn requires an explicitly
 host-bound capability and host-owned handle operations.
 Harn awaits this acknowledgement after execution, including
-ordinary cancellation. Dropping an execution future also sends release. Hosts
+ordinary cancellation. Dropping an execution future also sends release. A malformed
+bound reply with a valid token releases that token without requesting consent.
+Before a preparation reply arrives, ACP cancellation names the original request
+in `$/cancel_request`; the executor must retire that preparation without starting
+a child. Hosts
 must reclaim pending tokens and active children on disconnect and session close;
 a transport failure cannot prove that a remote child terminated.
 

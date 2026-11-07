@@ -167,19 +167,28 @@ pub async fn prepare_remote_command(
             false,
         )
         .await?;
+    // Own a valid returned token before decoding the remaining launch facts.
+    // A malformed invocation must release the host's retained request too.
+    let retained = reply
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| reply["status"] == "bound" && !token.is_empty() && token.len() <= 4096)
+        .map(|token| PreparedToken {
+            transport: transport.clone(),
+            token: Some(token.to_owned()),
+            trace: trace.clone(),
+            cleanup_runtime,
+        });
     match serde_json::from_value(reply).map_err(|error| {
         VmError::Runtime(format!("invalid executor command preparation: {error}"))
     })? {
         Preparation::Bound { token, invocation } => {
-            if token.is_empty() || token.len() > 4096 {
-                return Err(VmError::Runtime("invalid executor command token".into()));
-            }
+            let retained = retained
+                .filter(|retained| retained.token.as_deref() == Some(token.as_str()))
+                .ok_or_else(|| VmError::Runtime("invalid executor command token".into()))?;
             Ok(HostCommandPreparation::Bound(Box::new(BoundProcess {
-                transport,
-                token: Some(token),
+                binding: retained,
                 invocation,
-                trace: trace.clone(),
-                cleanup_runtime,
             })))
         }
         Preparation::Unhandled => Ok(HostCommandPreparation::Unhandled),
@@ -188,9 +197,13 @@ pub async fn prepare_remote_command(
 }
 
 struct BoundProcess {
+    binding: PreparedToken,
+    invocation: CommandInvocation,
+}
+
+struct PreparedToken {
     transport: Arc<dyn PreparedCommandTransport>,
     token: Option<String>,
-    invocation: CommandInvocation,
     trace: HostRequestTrace,
     cleanup_runtime: tokio::runtime::Handle,
 }
@@ -205,23 +218,24 @@ impl PreparedHostCommand for BoundProcess {
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send>> {
         Box::pin(async move {
             let result = self
+                .binding
                 .transport
                 .call(
                     "execute_prepared",
-                    json!({"token": self.token}),
-                    &self.trace,
+                    json!({"token": self.binding.token}),
+                    &self.binding.trace,
                     false,
                 )
                 .await;
-            let token = self.token.as_ref().expect("bound command token");
-            release(self.transport.as_ref(), token, &self.trace).await?;
-            self.token.take();
+            let token = self.binding.token.as_ref().expect("bound command token");
+            release(self.binding.transport.as_ref(), token, &self.binding.trace).await?;
+            self.binding.token.take();
             result.map(|result| crate::bridge::json_result_to_vm_value(&result))
         })
     }
 }
 
-impl Drop for BoundProcess {
+impl Drop for PreparedToken {
     fn drop(&mut self) {
         let Some(token) = self.token.take() else {
             return;

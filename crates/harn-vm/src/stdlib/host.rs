@@ -19,7 +19,7 @@ pub use prepared_command::{
 };
 pub mod process_admission;
 pub mod process_dispatch;
-pub(crate) mod process_exec;
+mod process_exec;
 pub mod trace;
 // Public so tests and embedders can share the per-turn memo allowlist even
 // when probing host_call outside the stdlib builtin (harn#5190).
@@ -33,8 +33,8 @@ pub use bridge::{
 
 use process_dispatch::dispatch_process_exec_with_policy;
 pub use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
-pub(crate) use process_exec::build_sandboxed_command;
 use process_exec::dispatch_process_spawn_with_policy;
+pub(crate) use process_exec::{build_sandboxed_command, PreparedProcessCommand};
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
