@@ -16,6 +16,7 @@
 [models."moonshot/kimi-k2.6"]
 name = "Kimi K2.6 (Moonshot direct)"
 provider = "moonshot"
+deprecation_note = "Moonshot closed K2 models to newly registered users on 2026-10-31; existing users retain access. Retirement is planned by the end of December 2026, with no exact date announced: https://platform.kimi.ai/docs/pricing/chat"
 wire_model = "kimi-k2.6"
 logical_model = "moonshot-kimi-k2.6"
 equivalence_group = "moonshot-kimi-k2.6"
@@ -49,6 +50,7 @@ models_dev = {provider = "moonshotai", model = "kimi-k3", fields = ["context_win
 [models."moonshot/kimi-k2.7-code"]
 name = "Kimi K2.7 Code (Moonshot direct)"
 provider = "moonshot"
+deprecation_note = "Moonshot closed K2 models to newly registered users on 2026-10-31; existing users retain access. Retirement is planned by the end of December 2026, with no exact date announced: https://platform.kimi.ai/docs/pricing/chat"
 wire_model = "kimi-k2.7-code"
 logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"
@@ -68,6 +70,7 @@ models_dev = {provider = "moonshotai", model = "kimi-k2.7-code", fields = ["cont
 [models."moonshot/kimi-k2.7-code-highspeed"]
 name = "Kimi K2.7 Code Highspeed (Moonshot direct)"
 provider = "moonshot"
+deprecation_note = "Moonshot closed K2 models to newly registered users on 2026-10-31; existing users retain access. Retirement is planned by the end of December 2026, with no exact date announced: https://platform.kimi.ai/docs/pricing/chat"
 wire_model = "kimi-k2.7-code-highspeed"
 logical_model = "moonshot-kimi-k2.7-code"
 equivalence_group = "moonshot-kimi-k2.7-code"
@@ -301,8 +304,9 @@ models_dev = {provider = "deepinfra", model = "openai/gpt-oss-120b", fields = ["
 [models."sambanova/DeepSeek-V3.2"]
 name = "DeepSeek V3.2 (SambaNova)"
 provider = "sambanova"
-deprecation_note = "SambaNova's authenticated customer notice received 2026-10-23 retires this SambaCloud route on 2026-11-03; cutoff time and timezone are unspecified. SambaStack and SambaManaged remain available. The public record https://docs.sambanova.ai/docs/en/models/deprecations does not yet include this notice (read 2026-10-23)."
-retires_on = "2026-11-03"
+deprecated = true
+deprecation_note = "SambaNova retired this SambaCloud route on 2026-11-03 and recommends MiniMax-M3.1-Flash. SambaStack and SambaManaged remain available. The current cloud roster omits DeepSeek: https://cloud.sambanova.ai/plans/pricing (verified 2026-11-07)."
+sunset_date = "2026-11-03"
 wire_model = "DeepSeek-V3.2"
 logical_model = "deepseek-v3.2"
 equivalence_group = "deepseek-v3.2"

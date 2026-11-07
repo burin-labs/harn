@@ -26,8 +26,9 @@ models_dev = {provider = "openrouter", model = "thinkingmachines/inkling-small",
 name = "Inkling (Together)"
 provider = "together"
 wire_model = "thinkingmachines/Inkling"
-deprecation_note = "Together retires this route on 2026-11-06 per its notice to account holders. The notice is not yet listed on https://docs.together.ai/docs/deprecations (read 2026-10-24), which does list the earlier 2026-09-14 retirement of Inkling Small. No replacement is named."
-retires_on = "2026-11-06"
+deprecated = true
+deprecation_note = "Together removed this serverless route on 2026-11-06 and recommends meta-models/Muse-Spark-Open-816B-A42B. Dedicated endpoints remain supported and require their own endpoint identity; evaluate the recommendation for your workload: https://docs.together.ai/docs/deprecations"
+sunset_date = "2026-11-06"
 capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
 tier = "frontier"
 family = "thinkingmachines-inkling"
@@ -37,8 +38,9 @@ models_dev = {provider = "togetherai", model = "thinkingmachines/Inkling", field
 [models."accounts/fireworks/models/inkling"]
 name = "Inkling (Fireworks)"
 provider = "fireworks"
-deprecation_note = "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
-retires_on = "2026-11-07"
+deprecated = true
+deprecation_note = "Fireworks retired this serverless route on 2026-11-07 and recommends Muse Spark Open on its US endpoint. Dedicated deployments and Reserved Throughput remain supported with deployment-qualified model IDs. Source: https://docs.fireworks.ai/updates/changelog (verified 2026-11-07)."
+sunset_date = "2026-11-07"
 capabilities = ["tools", "streaming", "thinking", "vision"]
 tier = "frontier"
 family = "thinkingmachines-inkling"
