@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 tmp_root="$(mktemp -d)"
+tmp_root="$(realpath "$tmp_root")"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
 mkdir -p "$fixture/scripts/lib" "$tmp_root/bin" "$fixture/target"
@@ -47,35 +48,50 @@ SH
 chmod +x "$tmp_root/bin/fake-harn"
 export HARN_BIN="$tmp_root/bin/fake-harn"
 export CAPTURE_ARGS="$tmp_root/args"
-export POLICY_CALLS="$tmp_root/policy-calls"
-export POLICY_MODE=valid
-export POLICY_IMPLEMENTATION="$tmp_root/implementation.py"
-export POLICY_STATE="$tmp_root/budget-state"
-export POLICY_REAL="$(realpath /usr/bin/true)"
-touch "$POLICY_IMPLEMENTATION"
+export REFRESH_CALLS="$tmp_root/refresh-calls"
+export REFRESH_FAIL=0
+export GITHUB_TOKEN=must-not-reach-refresh
+export GODEBUG=must-not-reach-child
+implementation="$tmp_root/bin/implementation.py"
+state="$tmp_root/budget-state"
+native="$(realpath /usr/bin/true)"
+interpreter="$(realpath "$(command -v python3)")"
+mkdir "$state"
+cat > "$implementation" <<'PY'
+import os
+from pathlib import Path
+import sys
+assert sys.argv[1:] == ["--budget-refresh-account-index"]
+assert "GH_TOKEN" not in os.environ and "GITHUB_TOKEN" not in os.environ
+assert os.environ["GH_DEBUG"] == ""
+assert os.environ["GH_BUDGET_PRINT_REAL"] == ""
+assert os.environ["GH_CONFIG_DIR"].endswith("/accounts")
+assert Path(os.environ["GH_BUDGET_REAL_GH"]).is_file()
+assert Path(os.environ["GH_BUDGET_STATE_DIR"]).is_dir()
+with Path(os.environ["REFRESH_CALLS"]).open("a") as stream:
+    stream.write("refreshed\n")
+sys.exit(int(os.environ["REFRESH_FAIL"]))
+PY
 cat > "$tmp_root/bin/gh" <<'SH'
 #!/bin/bash
-printf '%s:%s\n' "${GH_BUDGET_PRINT_REAL:-}" "$*" >> "$POLICY_CALLS"
-[[ "$*" == --budget-subprocess-policy && "$GH_BUDGET_PRINT_REAL" == 1 ]] || exit 97
-case "$POLICY_MODE" in
-  unavailable) exit 64 ;;
-  old-wrapper) printf '%s\n' "$POLICY_REAL"; exit 0 ;;
-  malformed) echo '{'; exit 0 ;;
-esac
-jq -nc --arg executable "$(realpath "$0")" --arg implementation "$POLICY_IMPLEMENTATION" \
-  --arg real "$POLICY_REAL" --arg state "$POLICY_STATE" --arg mode "$POLICY_MODE" '
-  {schema:"gh-budget.subprocess-policy.v1", executable:$executable,
-   implementation:$implementation, real_executable:$real, state_directory:$state} |
-  if $mode == "identity" then .executable = $real
-  elif $mode == "schema" then .schema = "unknown"
-  elif $mode == "extra" then .arbitrary_root = "/"
-  elif $mode == "relative" then .state_directory = "relative"
-  elif $mode == "newline" then .state_directory = "/tmp/\nroot"
-  elif $mode == "missing" then .real_executable = "/absent/gh"
-  else . end'
+echo 'launcher executed the unvalidated wrapper' >&2
+exit 97
 SH
-chmod +x "$tmp_root/bin/gh"
-export GODEBUG=netdns=go
+chmod +x "$tmp_root/bin/gh" "$implementation"
+source "$repo_root/scripts/lib/sha256.sh"
+owner="$tmp_root/bin/.harn-github-budget-owner.json"
+records='{}'
+for pair in "wrapper:$tmp_root/bin/gh" "implementation:$implementation" "adapter:$implementation" \
+  "interpreter:$interpreter" "native_gh:$native"; do
+  role="${pair%%:*}"
+  file="${pair#*:}"
+  digest="$(sha256_file_hex "$file")"
+  records="$(jq -nc --argjson records "$records" --arg role "$role" --arg path "$file" --arg sha256 "$digest" \
+    '$records + {($role):{path:$path,sha256:$sha256}}')"
+done
+jq -nc --argjson records "$records" --arg state "$state" --arg account "$tmp_root/accounts/hosts.yml" \
+  '$records + {schema:"github.budget-owner.v1",state_directory:$state,account_config:$account}' > "$owner"
+cp "$owner" "$tmp_root/valid-owner.json"
 for expected in 0 1 2 3 64; do
   export FAKE_STATUS="$expected"
   set +e
@@ -84,23 +100,28 @@ for expected in 0 1 2 3 64; do
   set -e
   [[ "$status" == "$expected" ]]
 done
-grep -Fxq 'gh_dns=env:GODEBUG,expose=GODEBUG,for=gh' "$CAPTURE_ARGS"
 grep -Fxq 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh' "$CAPTURE_ARGS"
-grep -Fxq 'gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh' "$CAPTURE_ARGS"
 grep -Fxq -- '--sandbox-read-root' "$CAPTURE_ARGS"
-grep -Fxq "$POLICY_IMPLEMENTATION" "$CAPTURE_ARGS"
-grep -Fxq "$POLICY_REAL" "$CAPTURE_ARGS"
-grep -Fxq -- '--sandbox-write-root' "$CAPTURE_ARGS"
-grep -Fxq "$POLICY_STATE" "$CAPTURE_ARGS"
-grep -Fxq 'gh_budget_state=env:GH_BUDGET_STATE_DIR,expose=GH_BUDGET_STATE_DIR,for=gh' "$CAPTURE_ARGS"
-grep -Fxq 'gh_budget_real=env:GH_BUDGET_REAL_GH,expose=GH_BUDGET_REAL_GH,for=gh' "$CAPTURE_ARGS"
-if grep -Fxq -- '--no-sandbox' "$CAPTURE_ARGS"; then exit 1; fi
-config_dir="$(awk '/^--sandbox-read-root$/{getline; value=$0} END{print value}' "$CAPTURE_ARGS")"
-[[ -n "$config_dir" && ! -e "$config_dir" ]]
-[[ ! -e "$POLICY_STATE" ]]
+[[ "$(wc -l < "$REFRESH_CALLS" | tr -d ' ')" == 5 ]]
+if grep -Eq 'gh_budget_|gh_config=|gh_dns=|--sandbox-write-root|--no-sandbox' "$CAPTURE_ARGS"; then exit 1; fi
 
-for mode in unavailable old-wrapper malformed identity schema extra relative newline missing; do
-  export POLICY_MODE="$mode"
+for mode in unavailable malformed identity schema extra relative newline missing digest refresh; do
+  cp "$tmp_root/valid-owner.json" "$owner"
+  case "$mode" in
+    unavailable) rm "$owner" ;;
+    malformed) printf '{' > "$owner" ;;
+    refresh) export REFRESH_FAIL=78 ;;
+    *) jq --arg mode "$mode" '
+      if $mode == "identity" then .wrapper.path = .native_gh.path
+      elif $mode == "schema" then .schema = "unknown"
+      elif $mode == "extra" then .arbitrary_root = "/"
+      elif $mode == "relative" then .state_directory = "relative"
+      elif $mode == "newline" then .state_directory = "/tmp/\nroot"
+      elif $mode == "missing" then .native_gh.path = "/absent/gh"
+      elif $mode == "digest" then .adapter.sha256 = ("0" * 64)
+      else error("unhandled refusal fixture") end
+      ' "$tmp_root/valid-owner.json" > "$owner" ;;
+  esac
   rm -f "$CAPTURE_ARGS"
   set +e
   /bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture > "$tmp_root/$mode.log" 2>&1
@@ -109,15 +130,15 @@ for mode in unavailable old-wrapper malformed identity schema extra relative new
   [[ "$status" == 3 && ! -e "$CAPTURE_ARGS" ]] || { cat "$tmp_root/$mode.log"; exit 1; }
   grep -Fq 'no check census was measured' "$tmp_root/$mode.log"
 done
-if grep -Fxv '1:--budget-subprocess-policy' "$POLICY_CALLS"; then exit 1; fi
-export POLICY_MODE=valid
+export REFRESH_FAIL=0
+cp "$tmp_root/valid-owner.json" "$owner"
 
 unset GODEBUG
 export FAKE_STATUS=0
 /bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture
 if grep -Fq 'env:GODEBUG' "$CAPTURE_ARGS"; then exit 1; fi
 # A native CLI keeps its own executable and needs no wrapper state or grants.
-cp "$POLICY_REAL" "$tmp_root/bin/gh"
+cp "$native" "$tmp_root/bin/gh"
 /bin/bash "$fixture/scripts/gh_check_state.sh" --repo example/repo --sha fixture
 grep -Fxq "$(realpath "$tmp_root/bin/gh")" "$CAPTURE_ARGS"
 if grep -Eq 'gh_budget_|--sandbox-write-root' "$CAPTURE_ARGS"; then exit 1; fi

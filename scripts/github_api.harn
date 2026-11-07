@@ -1,3 +1,5 @@
+import { command_output_range, command_run } from "std/command"
+
 pub type GitHubApiFailureKind = "command" | "invalid_json" | "transient_transport"
 
 pub type GitHubApiAttempt = {success: bool, stdout: string, stderr: string, timed_out: bool}
@@ -15,6 +17,49 @@ pub type GitHubApiReceipt = {
 pub type GitHubApiAdapters = {request: fn(string) -> GitHubApiAttempt, wait: fn(int) -> nil}
 
 const DEFAULT_RETRY_POLICY: GitHubApiRetryPolicy = {max_attempts: 3, delay_ms: 1000}
+
+type GitHubCommandCapture = {
+  stdout_truncated: bool,
+  stderr_truncated: bool,
+  stdout_path: string,
+  stderr_path: string,
+  byte_count: int,
+  timed_out: bool,
+}
+
+type GitHubCommandRange = {
+  content: string,
+  total_bytes: int,
+  offset: int,
+  bytes_read: int,
+  eof: bool,
+  path: string,
+}
+
+fn complete_stream(
+  tools: HarnessTools,
+  path: string,
+  inline: string,
+  truncated: bool,
+  byte_count: int,
+) -> string {
+  if !truncated {
+    return inline
+  }
+  if path == "" || byte_count <= 0 {
+    throw "GitHub API command returned incomplete output without a measured artifact"
+  }
+  const output: GitHubCommandRange = schema_expect(
+    command_output_range(tools, {path: path}, {length: byte_count}),
+    schema_of(GitHubCommandRange),
+  )
+  if !output.eof || output.offset != 0 || output.bytes_read != output.total_bytes
+    || output.total_bytes <= 0
+    || output.path != path {
+    throw "GitHub API command artifact was not read completely"
+  }
+  return output.content
+}
 
 /**
  * Classify only known transport failures as retryable. "stream error: stream ID"
@@ -95,15 +140,38 @@ pub fn github_api_json_with_retry(
 }
 
 pub fn github_api_json_result(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   path: string,
   policy: GitHubApiRetryPolicy? = nil,
 ) -> GitHubApiReceipt {
   const adapters: GitHubApiAdapters = {
     request: { requested_path ->
-      const result = process.run({program: "gh", args: ["api", requested_path], timeout_ms: 30000})
-      return pick(result, ["success", "stdout", "stderr", "timed_out"])
+      const api_path = if requested_path.starts_with("/") {
+        requested_path[1:]
+      } else {
+        requested_path
+      }
+      const result = command_run(tools, ["gh", "api", api_path], {timeout_ms: 30000})
+      const capture: GitHubCommandCapture = schema_expect(result, schema_of(GitHubCommandCapture))
+      return {
+        success: result.success,
+        stdout: complete_stream(
+          tools,
+          capture.stdout_path,
+          result.stdout,
+          capture.stdout_truncated,
+          capture.byte_count,
+        ),
+        stderr: complete_stream(
+          tools,
+          capture.stderr_path,
+          result.stderr,
+          capture.stderr_truncated,
+          capture.byte_count,
+        ),
+        timed_out: capture.timed_out,
+      }
     },
     wait: { delay_ms -> clock.sleep_ms(delay_ms) },
   }
@@ -112,12 +180,12 @@ pub fn github_api_json_result(
 
 /** Return parsed JSON or fail closed with the typed retry receipt's detail. */
 pub fn github_api_json(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   path: string,
   policy: GitHubApiRetryPolicy? = nil,
 ) -> unknown {
-  const receipt = github_api_json_result(process, clock, path, policy)
+  const receipt = github_api_json_result(tools, clock, path, policy)
   if !receipt.ok {
     throw receipt.detail ?? "GitHub API request failed"
   }

@@ -141,12 +141,12 @@ pub fn verified_terminal_job(
 
 /** Read one run's jobs, retaining unresolved and failed evidence explicitly. */
 pub fn completed_run_jobs(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   identity: CiJobIdentity,
 ) -> CiJobCensus {
   const data = github_api_json(
-    process,
+    tools,
     clock,
     "/repos/" + identity.repository + "/actions/runs/" + to_string(identity.run_id)
       + "/jobs?per_page=100",
@@ -161,7 +161,7 @@ pub fn completed_run_jobs(
     let observed = raw_job
     if path != nil {
       const lookup = try {
-        github_api_json(process, clock, path)
+        github_api_json(tools, clock, path)
       }
       if is_ok(lookup) {
         const evidence = verified_terminal_job(identity, raw_job, unwrap(lookup))

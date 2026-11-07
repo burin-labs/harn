@@ -1,4 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { command_exists } from "std/os"
 import { render_table } from "std/table"
 import { github_api_json_result } from "./github_api.harn"
 
@@ -207,15 +208,14 @@ fn current_utc_year(process: HarnessProcess) -> string {
 }
 
 fn require_gh(harness: Harness) {
-  const res = harness.process.run({program: "gh", args: ["--version"]})
-  if !res.success {
+  if !command_exists(harness.tools, harness.system, "gh") {
     harness.stdio.eprintln("gha_spend_report: gh CLI not found")
     harness.runtime.exit(1)
   }
 }
 
-fn gh_api_json(process: HarnessProcess, clock: HarnessClock, path: string) {
-  const receipt = github_api_json_result(process, clock, path)
+fn gh_api_json(tools: HarnessTools, clock: HarnessClock, path: string) {
+  const receipt = github_api_json_result(tools, clock, path)
   if !receipt.ok {
     return nil
   }
@@ -223,7 +223,7 @@ fn gh_api_json(process: HarnessProcess, clock: HarnessClock, path: string) {
 }
 
 fn collect_run_timing_rows(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   org: string,
   repos: list<string>,
@@ -232,13 +232,13 @@ fn collect_run_timing_rows(
   let samples = []
   for repo in repos {
     const runs = gh_api_json(
-      process,
+      tools,
       clock,
       "/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}",
     )
     for ref in action_run_refs(runs) {
       const timing = gh_api_json(
-        process,
+        tools,
         clock,
         "/repos/${org}/${repo}/actions/runs/${ref.id}/timing",
       )
@@ -276,7 +276,7 @@ fn main(harness: Harness) {
   require_gh(harness)
   const billing_path =
     "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness.process)}"
-  const billing = gh_api_json(harness.process, harness.clock, billing_path)
+  const billing = gh_api_json(harness.tools, harness.clock, billing_path)
   if parsed?.json ?? false {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
@@ -304,7 +304,7 @@ fn main(harness: Harness) {
     )
     harness.stdio.println(
       render_spend_table(
-        collect_run_timing_rows(harness.process, harness.clock, org, repos, runs_per_repo),
+        collect_run_timing_rows(harness.tools, harness.clock, org, repos, runs_per_repo),
       ),
     )
   }

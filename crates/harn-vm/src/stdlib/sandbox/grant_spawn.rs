@@ -83,6 +83,17 @@ pub(crate) fn trusted_program(
     entries: &[PathBuf],
     untrusted: &[PathBuf],
 ) -> Option<PathBuf> {
+    trusted_candidate(program, entries, untrusted).filter(|path| is_native_executable(path))
+}
+
+/// Resolve the same trusted first program before its executable format is
+/// checked. A script candidate may only supply an enrolled budget owner;
+/// it never receives the command-bound credential itself.
+pub(crate) fn trusted_candidate(
+    program: &str,
+    entries: &[PathBuf],
+    untrusted: &[PathBuf],
+) -> Option<PathBuf> {
     let requested = Path::new(program);
     let name = requested.file_name()?.to_str()?;
     if requested.components().count() > 1 && !requested.is_absolute() {
@@ -94,7 +105,7 @@ pub(crate) fn trusted_program(
             .find(|candidate| is_executable_file(candidate))
     })?;
     let canonical = std::fs::canonicalize(found).ok()?;
-    if is_untrusted(&canonical, untrusted) || !is_native_executable(&canonical) {
+    if is_untrusted(&canonical, untrusted) {
         return None;
     }
     if requested.is_absolute() && std::fs::canonicalize(requested).ok()? != canonical {
@@ -105,7 +116,7 @@ pub(crate) fn trusted_program(
 
 /// Whether `path` is a compiled executable, not a script or a version-manager
 /// shim that would pick the real program from files in the working directory.
-fn is_native_executable(path: &Path) -> bool {
+pub(crate) fn is_native_executable(path: &Path) -> bool {
     use std::io::Read;
     let mut magic = [0u8; 4];
     let read = std::fs::File::open(path).and_then(|mut file| file.read_exact(&mut magic));

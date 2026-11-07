@@ -1,0 +1,56 @@
+type BudgetConsentFixture = {cwd: string, native: string, approval: string, changed_etag: string}
+
+fn main(harness: Harness) {
+  const fixture = schema_expect(json_parse(argv[0]), schema_of(BudgetConsentFixture))
+  const approved = harness.runtime.atomic(0)
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [path_join(fixture.cwd, "approval-only")],
+        require_approval: ["outside_workspace"],
+        consent: { ctx ->
+          const count = harness.runtime.atomic_add(approved, 1)
+          const expected = if count == 0 {
+            "\"initial\""
+          } else {
+            fixture.changed_etag
+          }
+          assert_eq(ctx.invocation.cwd, fixture.cwd)
+          assert_eq(ctx.request.cwd, fixture.cwd)
+          assert_eq(
+            ctx.invocation.argv,
+            [
+              fixture.native,
+              "api",
+              "repos/example/repo/commits/pinned",
+              "--include",
+              "--header",
+              "If-None-Match: ${expected}",
+            ],
+          )
+          const answer = harness.tools.read_file({path: fixture.approval})
+          assert_eq(answer.content, "allow")
+          return true
+        },
+      },
+    ),
+  )
+  defer {
+    harness.runtime.command_policy_pop()
+  }
+  const refused = harness.tools.run_command(
+    {argv: ["gh", "api", "repos/example/repo/commits/pinned"], cwd: fixture.cwd},
+  )
+  assert_eq(refused.exit_code, 77)
+  assert(refused.pid == nil, "changed consent plan must not start a native child")
+  const fresh = harness.tools.run_command(
+    {argv: ["gh", "api", "repos/example/repo/commits/pinned"], cwd: fixture.cwd},
+  )
+  assert_eq(fresh.exit_code, 0)
+  assert(fresh.pid != nil, "fresh preparation must run the actual native child")
+  assert_eq(fresh.stdout, "{\"reached\":true}\n")
+  assert_eq(harness.runtime.atomic_get(approved), 2)
+  harness.stdio.println(
+    "retained native argv and cwd approved; stale plan refused; fresh child reached",
+  )
+}

@@ -9,6 +9,7 @@
 //! ([`strip_profiled_grants`]), so a seam that never calls `granted_spawn`
 //! runs the program without the credential instead of with an open exec path.
 
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -119,10 +120,43 @@ pub struct GrantedSpawn {
     pub program: String,
     pub env: Vec<(String, String)>,
     pub remove: Vec<String>,
+    pub github_budget: Option<super::github_budget::GitHubBudgetOwner>,
     _dir: grant_spawn::SpawnDir,
+    source_program: String,
+    source_args: Vec<String>,
+    bound_vars: Vec<String>,
+    credential_digest: String,
 }
 
 impl GrantedSpawn {
+    /// Reuse the current grant validator after assessment. A closed or changed
+    /// credential source cannot lend its earlier private login to execution.
+    pub fn validate_current_authority(&self, cwd: &Path) -> Result<(), VmError> {
+        let overlay = self
+            .env
+            .iter()
+            .filter(|(key, _)| kept_variable(key))
+            .cloned()
+            .collect();
+        let fresh = prepare_command_spawn(&self.source_program, &self.source_args, cwd, &overlay)?;
+        if !fresh.as_ref().is_some_and(|fresh| {
+            fresh.program == self.program
+                && fresh.bound_vars == self.bound_vars
+                && fresh.credential_digest == self.credential_digest
+                && match (&fresh.github_budget, &self.github_budget) {
+                    (None, None) => true,
+                    (Some(current), Some(prepared)) => current.same_enrollment(prepared),
+                    _ => false,
+                }
+        }) {
+            return Err(refusal(
+                &gh_config::GH_PROFILE,
+                "the command-bound authority changed; prepare the command again".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Hold while launching the program: its own sandbox profile may then
     /// read its private directory, which every other confined child is
     /// denied.
@@ -149,6 +183,28 @@ pub fn granted_spawn(
     cwd: &Path,
     overlay: &BTreeMap<String, String>,
 ) -> Result<Option<GrantedSpawn>, VmError> {
+    let granted = prepare_command_spawn(program, args, cwd, overlay)?;
+    if granted
+        .as_ref()
+        .is_some_and(|spawn| spawn.github_budget.is_some())
+    {
+        return Err(refusal(
+            &gh_config::GH_PROFILE,
+            "an enrolled budget owner requires a prepared foreground command_run".into(),
+        ));
+    }
+    Ok(granted)
+}
+
+/// Prepare the exact executable and private login before command assessment.
+/// An enrolled budget owner must also be prepared by the foreground command
+/// owner; its script never receives the private login.
+pub fn prepare_command_spawn(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    overlay: &BTreeMap<String, String>,
+) -> Result<Option<GrantedSpawn>, VmError> {
     let Some(profile) = profile_for(program) else {
         return Ok(None);
     };
@@ -159,7 +215,7 @@ pub fn granted_spawn(
     if let Some(reason) = (profile.refusal)(args) {
         return Err(refusal(profile, reason.to_string()));
     }
-    if !(profile.grants)(args) || overlay.keys().any(|key| reopens_exec_path(profile, key)) {
+    if overlay.keys().any(|key| reopens_exec_path(profile, key)) {
         return Ok(None);
     }
     let Some(session) = super::session_env_with_command_grants(program)? else {
@@ -168,8 +224,34 @@ pub fn granted_spawn(
     let untrusted = grant_spawn::untrusted_roots(cwd);
     let path = session.get("PATH").cloned().unwrap_or_default();
     let entries = grant_spawn::trusted_path_entries(&path, &untrusted);
-    let Some(canonical) = grant_spawn::trusted_program(program, &entries, &untrusted) else {
+    let Some(candidate) = grant_spawn::trusted_candidate(program, &entries, &untrusted) else {
         return Ok(None);
+    };
+    let mut github_budget = if profile.program == "gh" {
+        super::github_budget::GitHubBudgetOwner::discover(&candidate, &untrusted)
+            .map_err(|reason| refusal(profile, reason))?
+    } else {
+        None
+    };
+    let canonical = match &github_budget {
+        Some(owner) => {
+            if args.len() != 2 || args[0] != "api" || !(profile.grants)(args) {
+                return Err(refusal(
+                    profile,
+                    "budgeted GitHub commands require exactly `gh api <path>`".into(),
+                ));
+            }
+            owner.native_gh.clone()
+        }
+        None if !(profile.grants)(args) => return Ok(None),
+        None => match grant_spawn::trusted_program(program, &entries, &untrusted) {
+            Some(path) => path,
+            None => return Err(refusal(
+                profile,
+                    "the selected program is neither trusted native code nor an enrolled budget owner; no ambient fallback is allowed"
+                    .into(),
+            )),
+        },
     };
     let home = crate::user_dirs::home_dir()
         .and_then(|home| std::fs::canonicalize(home).ok())
@@ -213,6 +295,10 @@ pub fn granted_spawn(
     let Some(token) = vars.iter().find_map(|var| session.get(var).cloned()) else {
         return Ok(None);
     };
+    let credential_digest = format!("{:x}", Sha256::digest(token.as_bytes()));
+    if let Some(owner) = github_budget.as_mut() {
+        owner.credential_digest = credential_digest.clone();
+    }
     let mut subdirs: Vec<&str> = profile.dir_env.iter().map(|(_, dir)| *dir).collect();
     subdirs.push(HOOKS_DIR);
     let dir = grant_spawn::create_spawn_dir(&untrusted, &subdirs)
@@ -286,7 +372,12 @@ pub fn granted_spawn(
         program: canonical.display().to_string(),
         env,
         remove,
+        github_budget,
         _dir: dir,
+        source_program: program.into(),
+        source_args: args.to_vec(),
+        bound_vars: vars,
+        credential_digest,
     }))
 }
 

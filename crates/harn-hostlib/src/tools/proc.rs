@@ -34,6 +34,7 @@ use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
+mod github_budget;
 mod toolchain_path;
 
 pub(crate) use self::artifacts::{
@@ -91,6 +92,61 @@ pub(crate) struct SpawnOutcome {
 }
 
 pub(crate) use crate::process::EnvMode;
+
+#[derive(Default)]
+pub(crate) struct PreparedSpawn {
+    grant: Option<Arc<harn_vm::stdlib::process::GrantedSpawn>>,
+    budget: Option<github_budget::BudgetPlan>,
+}
+
+impl PreparedSpawn {
+    pub(crate) fn bind_argv(&self, params: &mut harn_vm::value::DictMap, argv: &[String]) {
+        if self.grant.is_some() {
+            params.put_str("mode", "argv");
+            params.put("argv", VmValue::strings(argv.iter().cloned()));
+        }
+    }
+
+    pub(crate) fn argv(&self, program: &str, args: &[String]) -> Vec<String> {
+        self.budget.as_ref().map_or_else(
+            || {
+                std::iter::once(
+                    self.grant
+                        .as_ref()
+                        .map_or_else(|| program.to_string(), |grant| grant.program.clone()),
+                )
+                .chain(args.iter().cloned())
+                .collect()
+            },
+            |plan| plan.argv.clone(),
+        )
+    }
+}
+
+pub(crate) fn prepare_command_spawn(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+    budget_supported: bool,
+) -> Result<PreparedSpawn, HostlibError> {
+    let grant = harn_vm::stdlib::process::prepare_command_spawn(program, args, cwd, env)
+        .map_err(|error| HostlibError::Backend {
+            builtin: super::run_command::NAME,
+            message: error.to_string(),
+        })?
+        .map(Arc::new);
+    let budget = match grant.as_ref().filter(|grant| grant.github_budget.is_some()) {
+        Some(grant) if budget_supported => Some(github_budget::BudgetPlan::prepare(Arc::clone(grant), args.to_vec(), cwd)?),
+        Some(_) => return Err(HostlibError::InvalidParameter {
+            builtin: super::run_command::NAME,
+            param: "argv",
+            message: "budgeted GitHub reads require a foreground pipe capture without stdin or named input bindings".into(),
+        }),
+        None => None,
+    };
+    Ok(PreparedSpawn { grant, budget })
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CaptureConfig {
@@ -155,6 +211,22 @@ pub(crate) fn run_with_filter(
     req: SpawnRequest,
     private_filter: harn_vm::session_inputs::OutputFilter,
 ) -> Result<SpawnOutcome, HostlibError> {
+    run_prepared(req, Arc::new(private_filter), None)
+}
+
+pub(crate) fn run_with_prepared_filter(
+    req: SpawnRequest,
+    private_filter: Arc<harn_vm::session_inputs::OutputFilter>,
+    prepared: &PreparedSpawn,
+) -> Result<SpawnOutcome, HostlibError> {
+    run_prepared(req, private_filter, Some(prepared))
+}
+
+fn run_prepared(
+    req: SpawnRequest,
+    private_filter: Arc<harn_vm::session_inputs::OutputFilter>,
+    prepared: Option<&PreparedSpawn>,
+) -> Result<SpawnOutcome, HostlibError> {
     let started = std::time::Instant::now();
     let started_at = now_rfc3339();
     let command_id = next_command_id();
@@ -173,14 +245,47 @@ pub(crate) fn run_with_filter(
     // The one seam a command-bound grant on a program that runs others
     // reaches: inheriting, piped, and redacted below. Held until the child is
     // reaped, because it owns the spawn's private directory.
-    let granted = if req.env_mode == EnvMode::Replace || file_capture.is_some() {
+    let granted = if let Some(prepared) = prepared {
+        prepared.grant.clone()
+    } else if req.env_mode == EnvMode::Replace || file_capture.is_some() {
         None
     } else {
         harn_vm::stdlib::process::granted_spawn(&req.program, &req.args, &effective_cwd, &req.env)
             .map_err(|error| HostlibError::Backend {
-            builtin: req.builtin,
-            message: error.to_string(),
-        })?
+                builtin: req.builtin,
+                message: error.to_string(),
+            })?
+            .map(Arc::new)
+    };
+    if prepared.is_some() {
+        if let Some(granted) = &granted {
+            granted
+                .validate_current_authority(&effective_cwd)
+                .map_err(|error| HostlibError::Backend {
+                    builtin: req.builtin,
+                    message: error.to_string(),
+                })?;
+        }
+    }
+    let deadline = req.timeout.map(|timeout| started + timeout);
+    let mut budget = if let Some(plan) = prepared.and_then(|prepared| prepared.budget.as_ref()) {
+        plan.validate_invocation(&req.program, &req.args, &effective_cwd)?;
+        match plan.admit(deadline)? {
+            github_budget::Admission::Run(rpc) => Some((plan, rpc)),
+            github_budget::Admission::Completed(output) => {
+                return github_budget::cached_outcome(
+                    &req,
+                    &private_filter,
+                    command_id,
+                    effective_cwd,
+                    started_at,
+                    started,
+                    output,
+                );
+            }
+        }
+    } else {
+        None
     };
     // A granted spawn sets only what `granted_spawn` chose and removes every
     // other inherited name, so no caller or ambient variable reaches it.
@@ -228,6 +333,14 @@ pub(crate) fn run_with_filter(
     let cleanup = scope.and_then(|scope| scope.register(handle.as_ref()));
     drop(launch_permit);
 
+    if let Some((plan, rpc)) = budget.as_mut() {
+        if let Err(error) = plan.started(rpc) {
+            let _ = handle.killer().kill();
+            let _ = handle.wait_with_timeout(Some(Duration::from_secs(1)), &|| false);
+            return Err(error);
+        }
+    }
+
     let pid = handle.pid();
     let missing_program = handle.missing_program().map(str::to_string);
     let process_group_id = handle.process_group_id();
@@ -250,10 +363,13 @@ pub(crate) fn run_with_filter(
     // child's process group instead of orphaning it. `background: true`
     // spawns bypass this path (see `tools/long_running.rs`) and remain the
     // fire-and-forget escape hatch.
-    let deadline = req.timeout.map(|timeout| started + timeout);
-    let wait_result = handle.wait_with_timeout(req.timeout, &|| {
-        harn_vm::op_interrupt::requested() || scope.is_some_and(|scope| scope.cancel_requested())
-    });
+    let wait_result = handle.wait_with_timeout(
+        deadline.map(|deadline| deadline.saturating_duration_since(std::time::Instant::now())),
+        &|| {
+            harn_vm::op_interrupt::requested()
+                || scope.is_some_and(|scope| scope.cancel_requested())
+        },
+    );
     if wait_result.is_ok() {
         if let Some(cleanup) = &cleanup {
             cleanup.update_root_pid(None);
@@ -263,9 +379,14 @@ pub(crate) fn run_with_filter(
         let _ = killer.kill();
     }
 
-    let outcome = wait_result.map_err(|error| HostlibError::Backend {
-        builtin: req.builtin,
-        message: format!("wait failed: {error}"),
+    let outcome = wait_result.map_err(|error| {
+        budget.as_ref().map_or_else(
+            || HostlibError::Backend {
+                builtin: req.builtin,
+                message: format!("wait failed: {error}"),
+            },
+            |(_, rpc)| rpc.native_failure(&format!("wait failed: {error}")),
+        )
     })?;
     let wait_killed = matches!(
         outcome,
@@ -293,8 +414,8 @@ pub(crate) fn run_with_filter(
         Some(files) => files.read(req.builtin)?,
         None => (stdout_drain.bytes, stderr_drain.bytes),
     };
-    let stdout_bytes = private_filter.redact_bytes(&stdout_bytes);
-    let stderr_bytes = private_filter.redact_bytes(&stderr_bytes);
+    let mut stdout_bytes = private_filter.redact_bytes(&stdout_bytes).into_owned();
+    let mut stderr_bytes = private_filter.redact_bytes(&stderr_bytes).into_owned();
     let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
     let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
     let mut drain_cleanup = stdout_drain.process_cleanup;
@@ -399,6 +520,20 @@ pub(crate) fn run_with_filter(
     );
     if let Some(refusal) = sandbox_assessment.refusal.as_ref() {
         refusal.emit();
+    }
+    if let Some((plan, rpc)) = budget.as_mut() {
+        let output = plan.finish(
+            rpc,
+            exit_code,
+            &stdout_bytes,
+            &stderr_bytes,
+            wait_killed || drain_timed_out || drain_interrupted,
+        )?;
+        if command_status == CommandStatus::Completed {
+            exit_code = output.exit_code;
+        }
+        stdout_bytes = private_filter.redact_bytes(&output.stdout).into_owned();
+        stderr_bytes = private_filter.redact_bytes(&output.stderr).into_owned();
     }
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);

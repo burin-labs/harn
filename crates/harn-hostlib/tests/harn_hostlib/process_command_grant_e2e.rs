@@ -30,6 +30,8 @@ use harn_vm::VmValue;
 
 use super::support::*;
 
+mod github_budget;
+
 const GRANTED: &str = "GH_TOKEN";
 const PROBE: &str = "harn-probe-gh-grant";
 const SECRET_ACCOUNT: &str = "gh-grant-e2e";
@@ -793,14 +795,28 @@ fn a_session_grant_is_redacted_only_when_declared_a_credential() {
 
 /// A script `gh` on a trusted `PATH` entry, such as a version-manager shim
 /// that picks the real program from files in the working directory, gets no
-/// grant.
+/// grant and cannot run as an ambient fallback without budget enrollment.
 #[test]
 fn a_script_gh_on_a_trusted_path_receives_no_grant() {
     let _env_guard = super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
-    write_executable(&fixture.user.path().join("bin/gh"), FAKE_GH);
-    let out = fixture.shell("gh issue list");
-    assert!(out.contains("gh-grant=absent"), "{out}");
+    let marker = fixture.workspace("unenrolled-wrapper-ran");
+    write_executable(
+        &fixture.user.path().join("bin/gh"),
+        &format!(
+            "#!/bin/sh\nprintf reached > '{}'\n{FAKE_GH}",
+            marker.display()
+        ),
+    );
+    let error = fixture
+        .shell_in(fixture.workspace.path(), "gh issue list")
+        .unwrap_err();
+    assert!(
+        error.contains("command_grant_refused") && error.contains("no ambient fallback"),
+        "{error}"
+    );
+    assert!(!error.contains(DECLARED));
+    assert!(!marker.exists(), "the unenrolled wrapper must not execute");
 }
 
 /// A write root over the user's SSH or git configuration refuses the grant:

@@ -654,13 +654,8 @@ fn is_hex40(value: string) -> bool {
   return true
 }
 
-fn api_json(
-  process: HarnessProcess,
-  clock: HarnessClock,
-  stdio: HarnessStdio,
-  path: string,
-) -> any {
-  const receipt = github_api_json_result(process, clock, path)
+fn api_json(tools: HarnessTools, clock: HarnessClock, stdio: HarnessStdio, path: string) -> any {
+  const receipt = github_api_json_result(tools, clock, path)
   if !receipt.ok {
     stdio.eprintln(receipt.detail ?? "GitHub API request failed")
     return nil
@@ -677,7 +672,7 @@ pub fn more_pages(batch_len: int, page: int) -> bool {
 
 /** Best-effort: open PRs headed at `sha` that conflict with their base. */
 fn lookup_blocks(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   stdio: HarnessStdio,
   repo: string,
@@ -687,7 +682,7 @@ fn lookup_blocks(
   let page = 1
   while page <= MAX_PAGES {
     const batch = api_json(
-      process,
+      tools,
       clock,
       stdio,
       "/repos/${repo}/commits/${sha}/pulls?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
@@ -706,7 +701,7 @@ fn lookup_blocks(
     if to_string(entry?.state ?? "") != "open" {
       continue
     }
-    const pull = api_json(process, clock, stdio, "/repos/${repo}/pulls/${to_string(entry?.number)}")
+    const pull = api_json(tools, clock, stdio, "/repos/${repo}/pulls/${to_string(entry?.number)}")
     if pull == nil {
       return {blocked_by: [], blocked_lookup: "unavailable"}
     }
@@ -718,7 +713,7 @@ fn lookup_blocks(
 type CollectedChecks = {ok: bool, observations: list<CheckObservation>, detail?: string}
 
 fn collect_inventory(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   stdio: HarnessStdio,
   repo: string,
@@ -740,7 +735,7 @@ fn collect_inventory(
   const path = "/repos/${repo}/commits/${sha}/${endpoint}"
   while page <= MAX_PAGES {
     const payload = api_json(
-      process,
+      tools,
       clock,
       stdio,
       "${path}?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
@@ -788,22 +783,22 @@ fn collect_inventory(
 }
 
 fn collect_observations(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   stdio: HarnessStdio,
   repo: string,
   sha: string,
 ) -> CollectedChecks {
-  const checks = collect_inventory(process, clock, stdio, repo, sha, "check_runs")
+  const checks = collect_inventory(tools, clock, stdio, repo, sha, "check_runs")
   if !checks.ok {
     return checks
   }
-  const statuses = collect_inventory(process, clock, stdio, repo, sha, "statuses")
+  const statuses = collect_inventory(tools, clock, stdio, repo, sha, "statuses")
   return statuses + {observations: checks.observations + statuses.observations}
 }
 
 fn changed_paths(
-  process: HarnessProcess,
+  tools: HarnessTools,
   clock: HarnessClock,
   stdio: HarnessStdio,
   repo: string,
@@ -811,7 +806,7 @@ fn changed_paths(
   sha: string,
 ) -> any {
   const payload = api_json(
-    process,
+    tools,
     clock,
     stdio,
     "/repos/${repo}/compare/${base}...${sha}?per_page=${to_string(PAGE_SIZE)}",
@@ -928,7 +923,7 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(EXIT_MISSING)
   }
-  const collected = collect_observations(harness.process, harness.clock, harness.stdio, repo, sha)
+  const collected = collect_observations(harness.tools, harness.clock, harness.stdio, repo, sha)
   if !collected.ok {
     harness.stdio.eprintln(
       "gh_check_state: could not read check state for ${sha}; treating it as unobservable",
@@ -956,14 +951,7 @@ fn main(harness: Harness) {
       workflow_owner = workflow_repository(harness.fs, harness.process, path)
       if (workflow_owner ?? "").lower() == WORKFLOW_REGISTRY_REPOSITORY {
         filters = workflow_surface_filters(workflow, "surface_filter")
-        const changed = changed_paths(
-          harness.process,
-          harness.clock,
-          harness.stdio,
-          repo,
-          base,
-          sha,
-        )
+        const changed = changed_paths(harness.tools, harness.clock, harness.stdio, repo, base, sha)
         diff = {ok: changed.ok, paths: changed.paths}
       }
     }
@@ -982,7 +970,7 @@ fn main(harness: Harness) {
     expectations.source,
   )
   if census.verdict == "missing" {
-    census = census + lookup_blocks(harness.process, harness.clock, harness.stdio, repo, sha)
+    census = census + lookup_blocks(harness.tools, harness.clock, harness.stdio, repo, sha)
   }
   harness.stdio.println(
     if parsed?.json ?? false {

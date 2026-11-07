@@ -2,8 +2,124 @@ import {
   GitHubApiAdapters,
   GitHubApiAttempt,
   github_api_failure_kind,
+  github_api_json_result,
   github_api_json_with_retry,
 } from "../github_api.harn"
+
+type RecordedGitHubCalls = list<{method: string, args: list<unknown>}>
+
+fn command_capture(stdout: string, truncated: bool) -> dict {
+  return {
+    status: "completed",
+    exit_code: 0,
+    cwd: "",
+    stdout: stdout,
+    stderr: "",
+    stdout_truncated: truncated,
+    stderr_truncated: false,
+    stdout_path: "fixture.stdout",
+    stderr_path: "fixture.stderr",
+    byte_count: 11,
+    timed_out: false,
+  }
+}
+
+pipeline test_github_api_uses_the_command_owner_and_reads_complete_truncated_output(
+  harness: Harness,
+) {
+  for truncated in [false, true] {
+    harness.testing.clear()
+    harness.testing.respond(
+      "tools",
+      "run_command",
+      command_capture(
+        if truncated {
+          "{"
+        } else {
+          "{\"known\":1}"
+        },
+        truncated,
+      ),
+    )
+    harness.testing.respond(
+      "tools",
+      "read_command_output",
+      {
+        content: "{\"known\":1}",
+        total_bytes: 11,
+        offset: 0,
+        bytes_read: 11,
+        eof: true,
+        path: "fixture.stdout",
+      },
+    )
+    const receipt = github_api_json_result(harness.tools, harness.clock, "/repos/o/r")
+    assert_eq(receipt.ok, true)
+    assert_eq(receipt.value, {known: 1})
+    const calls: RecordedGitHubCalls = schema_expect(
+      harness.testing.calls(),
+      schema_of(RecordedGitHubCalls),
+    )
+    assert_eq(
+      len(calls),
+      if truncated {
+        2
+      } else {
+        1
+      },
+    )
+    assert_eq(calls[0]?.method, "run_command")
+    assert_eq(calls[0]?.args, [{mode: "argv", argv: ["gh", "api", "repos/o/r"], timeout_ms: 30000}])
+    if truncated {
+      assert_eq(calls[1]?.method, "read_command_output")
+      assert_eq(calls[1]?.args, [{path: "fixture.stdout", offset: 0, length: 11}])
+    }
+  }
+}
+
+pipeline test_github_api_refuses_missing_partial_or_foreign_command_artifacts(harness: Harness) {
+  for output in [
+    {},
+    {
+      content: "{\"known\":1}",
+      total_bytes: 11,
+      offset: 0,
+      bytes_read: 10,
+      eof: false,
+      path: "fixture.stdout",
+    },
+    {
+      content: "{\"known\":1}",
+      total_bytes: 11,
+      offset: 1,
+      bytes_read: 11,
+      eof: true,
+      path: "fixture.stdout",
+    },
+    {
+      content: "{\"known\":1}",
+      total_bytes: 11,
+      offset: 0,
+      bytes_read: 11,
+      eof: true,
+      path: "other.stdout",
+    },
+  ] {
+    harness.testing.clear()
+    harness.testing.respond("tools", "run_command", command_capture("{", true))
+    harness.testing.respond("tools", "read_command_output", output)
+    const result = try {
+      github_api_json_result(harness.tools, harness.clock, "repos/o/r")
+    }
+    assert_eq(is_err(result), true)
+    const calls: RecordedGitHubCalls = schema_expect(
+      harness.testing.calls(),
+      schema_of(RecordedGitHubCalls),
+    )
+    assert_eq(len(calls), 2)
+    assert_eq(calls[1]?.method, "read_command_output")
+  }
+}
 
 fn failed(detail: string) -> GitHubApiAttempt {
   return {success: false, stdout: "", stderr: detail, timed_out: false}

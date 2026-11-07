@@ -370,10 +370,9 @@ caches, the workspace temp directory, and the host temp directory. Relative
 and empty `PATH` entries are ignored. A program named by a relative path
 (`./gh`), a file inside an untrusted root, or an absolute path that is not the
 resolved file runs without the grant. The resolved file must be a native
-executable (ELF, Mach-O or PE). A script, such as a version-manager shim that
-picks the real program from files in the working directory, runs without the
-grant. The grant is exposed only to the resolved file, which Harn spawns by its
-canonical path.
+executable (ELF, Mach-O or PE), or an installed budget owner described below.
+An otherwise granted read through an unenrolled script is refused. Harn
+spawns the selected native executable by its canonical path.
 
 A granted read is refused when any untrusted root contains, or lies inside,
 `~/.gitconfig`, `~/.config/git`, `~/.ssh`, `~/.config/gh`, the resolved `gh`
@@ -407,6 +406,37 @@ refused and the grant is not exposed.
 every other `gh auth` subcommand except a plain `gh auth status` are refused,
 because they print or change the credential. A user alias that expands to
 `auth` is dropped from the private config.
+
+##### Installed GitHub budget owners
+
+A trusted wrapper can enroll a native GitHub CLI through the adjacent
+`.harn-github-budget-owner.json` manifest, schema `github.budget-owner.v1`.
+The manifest binds the wrapper, ledger implementation, token-free adapter,
+interpreter and native `gh` by canonical path and SHA-256. It also identifies
+a dedicated ledger directory and the account configuration used for its
+credential fingerprint. These paths must remain outside untrusted roots.
+
+Enrolled reads accept exactly `gh api <relative-REST-path>` through foreground
+`run_command` with pipe capture and the session environment. Additional flags,
+GraphQL, pagination, watch commands and writes are refused. Harn adds
+[`--include`](https://cli.github.com/manual/gh_api) internally to observe response
+headers, then returns the response body. The native CLI receives the private
+login described above; the ledger adapter receives no token or login directory
+and has no network access. Its writable authority is the dedicated ledger.
+
+Harn prepares the literal native arguments, working directory and cached ETag
+before command assessment. Admission runs after approval. Changed credentials,
+enrollment files or ETags refuse the old plan; prepare again for a new
+assessment. A cache hit starts no native child and reports a nil PID. Helper
+failures preserve whether a request ran, did not run, or could not be measured.
+Final response headers do not establish how many redirects or retries the
+native CLI performed; the ledger must retain that uncertainty.
+
+The owner's installer maintains enrollment and its credential fingerprint
+index. Refresh the index through that trusted owner before a confined launch.
+`scripts/gh_check_state.sh` validates enrollment and refreshes the index without
+inheriting token variables. Changed digests require reinstalling the owner. Missing or
+unusable enrollment never falls back to an ambient wrapper.
 
 A read that would otherwise receive the grant is refused when it names an
 output filter, `--jq`/`-q` or `--template`/`-t` in any spelling (`--jq=...`,

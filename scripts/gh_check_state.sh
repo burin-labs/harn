@@ -3,9 +3,8 @@ set -euo pipefail
 
 # Read one head commit's CI check state as a typed census.
 #
-# The Harn entry point runs inside the default worktree sandbox. Grant gh its
-# token, temporary config, exact executable files, and any wrapper-owned budget
-# state. The wrapper describes its own paths; the launcher keeps the sandbox.
+# The native command grant owns credential confinement. Installed budget owners
+# refresh their account index before Harn prepares a retained native invocation.
 #
 # usage: scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex> [--base REF]
 #                                  [--workflow PATH] [--expect NAME ...] [--json]
@@ -34,58 +33,60 @@ if ! gh_program="$(command -v gh)" || [[ ! -f "$gh_program" ]] \
   exit 3
 fi
 gh_policy_args=(--sandbox-read-root "$gh_program")
-# Native gh needs only its executable. Script wrappers own additional paths;
-# require their typed contract rather than guessing installation or state roots.
+gh_auth_program="$gh_program"
 if [[ "$(head -c 2 "$gh_program")" == '#!' ]]; then
-  if ! gh_policy="$(GH_BUDGET_PRINT_REAL=1 "$gh_program" --budget-subprocess-policy)" \
-    || ! jq -e --arg executable "$gh_program" '
+  source "$script_dir/lib/sha256.sh"
+  owner="$(dirname "$gh_program")/.harn-github-budget-owner.json"
+  if [[ ! -f "$owner" ]] || ! jq -e --arg executable "$gh_program" '
       type == "object" and
-      (keys == ["executable", "implementation", "real_executable", "schema", "state_directory"]) and
-      .schema == "gh-budget.subprocess-policy.v1" and .executable == $executable and
-      ([.executable, .implementation, .real_executable, .state_directory] |
-        all(type == "string" and startswith("/") and (explode | all(. >= 32))))
-    ' <<< "$gh_policy" >/dev/null; then
-    echo "gh_check_state: wrapper subprocess policy unavailable or invalid; no check census was measured" >&2
+      (keys == ["account_config", "adapter", "implementation", "interpreter", "native_gh", "schema", "state_directory", "wrapper"]) and
+      .schema == "github.budget-owner.v1" and .wrapper.path == $executable and
+      ([.account_config, .state_directory] | all(type == "string" and startswith("/") and (explode | all(. >= 32)))) and
+      ([.wrapper, .implementation, .adapter, .interpreter, .native_gh] | all(
+        type == "object" and keys == ["path", "sha256"] and
+        (.path | type == "string" and startswith("/") and (explode | all(. >= 32))) and
+        (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))))
+    ' "$owner" >/dev/null; then
+    echo "gh_check_state: enrolled budget owner unavailable or invalid; no check census was measured" >&2
     exit 3
   fi
-  gh_implementation="$(jq -r '.implementation' <<< "$gh_policy")"
-  export GH_BUDGET_REAL_GH="$(jq -r '.real_executable' <<< "$gh_policy")"
-  export GH_BUDGET_STATE_DIR="$(jq -r '.state_directory' <<< "$gh_policy")"
-  if [[ ! -f "$gh_implementation" || ! -f "$GH_BUDGET_REAL_GH" \
-    || ! -x "$GH_BUDGET_REAL_GH" ]]; then
-    echo "gh_check_state: wrapper subprocess policy files unavailable; no check census was measured" >&2
+  for role in wrapper implementation adapter interpreter native_gh; do
+    file="$(jq -r --arg role "$role" '.[$role].path' "$owner")"
+    expected="$(jq -r --arg role "$role" '.[$role].sha256' "$owner")"
+    if [[ ! -f "$file" || ! -x "$file" ]] || ! actual="$(sha256_file_hex "$file")" \
+      || [[ "$actual" != "$expected" ]] || [[ "$(realpath "$file")" != "$file" ]]; then
+      echo "gh_check_state: enrolled budget owner identity changed; no check census was measured" >&2
+      exit 3
+    fi
+  done
+  interpreter="$(jq -r '.interpreter.path' "$owner")"
+  implementation="$(jq -r '.implementation.path' "$owner")"
+  gh_auth_program="$(jq -r '.native_gh.path' "$owner")"
+  account_config="$(jq -r '.account_config' "$owner")"
+  if [[ "$(dirname "$implementation")" != "$(dirname "$gh_program")" \
+    || "$(basename "$account_config")" != hosts.yml ]] \
+    || ! env -u GH_TOKEN -u GITHUB_TOKEN GH_DEBUG= GH_BUDGET_PRINT_REAL= \
+      GH_BUDGET_REAL_GH="$gh_auth_program" \
+      GH_BUDGET_STATE_DIR="$(jq -r '.state_directory' "$owner")" \
+      GH_CONFIG_DIR="$(dirname "$account_config")" \
+      "$interpreter" -I "$implementation" --budget-refresh-account-index; then
+    echo "gh_check_state: enrolled account refresh failed; no check census was measured" >&2
     exit 3
   fi
-  gh_policy_args+=(--sandbox-read-root "$gh_implementation"
-    --sandbox-read-root "$GH_BUDGET_REAL_GH"
-    --sandbox-write-root "$GH_BUDGET_STATE_DIR"
-    --grant 'gh_budget_state=env:GH_BUDGET_STATE_DIR,expose=GH_BUDGET_STATE_DIR,for=gh'
-    --grant 'gh_budget_real=env:GH_BUDGET_REAL_GH,expose=GH_BUDGET_REAL_GH,for=gh')
 fi
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
-  if ! GH_TOKEN="$(gh auth token 2>/dev/null)" || [[ -z "$GH_TOKEN" ]]; then
+  if ! GH_TOKEN="$("$gh_auth_program" auth token 2>/dev/null)" || [[ -z "$GH_TOKEN" ]]; then
     echo "gh_check_state: no GH_TOKEN and \`gh auth token\` produced none" >&2
     exit 3
   fi
   export GH_TOKEN
 fi
 
-gh_config_dir="$(mktemp -d "${TMPDIR:-/tmp}/gh-check-state-cfg.XXXXXX")"
-trap 'rm -rf "$gh_config_dir"' EXIT
-export GH_CONFIG_DIR="$gh_config_dir"
-
 run_args=(run \
   --allow-process-network \
   "${gh_policy_args[@]}" \
-  --sandbox-read-root "$gh_config_dir" \
-  --grant 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh' \
-  --grant 'gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh')
-# Preserve an explicitly supplied Go resolver setting for gh alone. Do not
-# inherit the parent environment into arbitrary sandboxed child processes.
-if [[ -n "${GODEBUG:-}" ]]; then
-  run_args+=(--grant 'gh_dns=env:GODEBUG,expose=GODEBUG,for=gh')
-fi
+  --grant 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh')
 
 set +e
 "$harn_bin" "${run_args[@]}" "$script_dir/gh_check_state.harn" -- "$@"

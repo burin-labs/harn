@@ -129,6 +129,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 pub(crate) fn prepare(
     mut params: harn_vm::value::DictMap,
 ) -> Result<crate::registry::PreparedCommand, HostlibError> {
+    let private_filter =
+        std::sync::Arc::new(harn_vm::session_inputs::OutputFilter::capture_for_spawn());
     let _profile_guard = optional_string(NAME, &params, "sandbox_profile")?
         .as_deref()
         .map(harn_vm::process_sandbox::push_sandbox_profile_override)
@@ -157,20 +159,55 @@ pub(crate) fn prepare(
     let requested_cwd = optional_string(NAME, &params, "cwd")?;
     let cwd = harn_vm::orchestration::prepare_local_command_cwd(requested_cwd.as_deref())
         .map_err(|error| command_parameter_error(error, "cwd"))?;
-    let invocation = harn_vm::orchestration::CommandInvocation::new(
-        std::iter::once(program).chain(args).collect(),
-        cwd,
-    )
-    .map_err(|error| command_parameter_error(error, "argv"))?;
+    let mut environment = optional_string_map(NAME, &params, "env")?.unwrap_or_default();
+    let env_mode = optional_env_mode(NAME, &params, !environment.is_empty())?;
+    let inputs = optional_string_map(NAME, &params, "input_env")?.unwrap_or_default();
+    let has_inputs = !inputs.is_empty();
+    if has_inputs {
+        environment.extend(
+            harn_vm::session_inputs::command_environment(inputs).map_err(|error| {
+                HostlibError::InvalidParameter {
+                    builtin: NAME,
+                    param: "input_env",
+                    message: error.to_string(),
+                }
+            })?,
+        );
+    }
+    let capture = parse_capture(&params)?;
+    let spawn = if env_mode == proc::EnvMode::Replace
+        || capture.transport == proc::CaptureTransport::File
+    {
+        proc::PreparedSpawn::default()
+    } else {
+        proc::prepare_command_spawn(
+            &program,
+            &args,
+            &cwd,
+            &environment,
+            !request_is_background(&params)
+                && !has_inputs
+                && optional_string(NAME, &params, "stdin")?.is_none(),
+        )?
+    };
+    let invocation =
+        harn_vm::orchestration::CommandInvocation::new(spawn.argv(&program, &args), cwd)
+            .map_err(|error| command_parameter_error(error, "argv"))?;
     let requested_cwd = requested_cwd.map(|_| to_agent_path(invocation.cwd()));
     invocation.bind_directory(&mut params);
+    spawn.bind_argv(&mut params, invocation.argv());
     let retained_params = std::sync::Arc::new(params.clone());
     let retained_invocation = invocation.clone();
     Ok(crate::registry::PreparedCommand {
         params,
         invocation,
         handler: std::sync::Arc::new(move |_| {
-            let mut result = handle_bound(retained_params.clone(), &retained_invocation);
+            let mut result = handle_bound(
+                retained_params.clone(),
+                &retained_invocation,
+                &spawn,
+                private_filter.clone(),
+            );
             if let Err(HostlibError::ProcessSpawn {
                 requested_cwd: reported,
                 ..
@@ -186,8 +223,9 @@ pub(crate) fn prepare(
 fn handle_bound(
     map: std::sync::Arc<harn_vm::value::DictMap>,
     invocation: &harn_vm::orchestration::CommandInvocation,
+    spawn: &proc::PreparedSpawn,
+    private_filter: std::sync::Arc<harn_vm::session_inputs::OutputFilter>,
 ) -> Result<VmValue, HostlibError> {
-    let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
     let program = invocation.argv()[0].clone();
     let args_tail = invocation.argv()[1..].to_vec();
     let cwd = Some(invocation.cwd().to_path_buf());
@@ -337,7 +375,7 @@ fn handle_bound(
         return Ok(info.into_handle_response());
     }
 
-    let outcome = proc::run_with_filter(
+    let outcome = proc::run_with_prepared_filter(
         SpawnRequest {
             builtin: NAME,
             program,
@@ -351,6 +389,7 @@ fn handle_bound(
             capture,
         },
         private_filter,
+        spawn,
     )?;
 
     Ok(proc::build_response(outcome, None, policy_context))

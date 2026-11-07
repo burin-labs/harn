@@ -56,6 +56,24 @@ pub enum HostlibError {
         message: String,
     },
 
+    /// The installed GitHub budget owner could not complete its accounting.
+    /// A missing spawn acknowledgement is unknown execution, never false.
+    #[error("hostlib: {builtin}: GitHub budget unavailable ({phase}, {operation}): {message}")]
+    GitHubBudgetUnavailable {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Admission, request execution, or post-request accounting phase.
+        phase: &'static str,
+        /// Operation owned by the installed budget adapter.
+        operation: String,
+        /// Whether the native child was launched, if its acknowledgement arrived.
+        request_executed: Option<bool>,
+        /// Whether final GitHub response headers were observed.
+        response_observed: bool,
+        /// Credential-free failure detail.
+        message: String,
+    },
+
     /// The requested native secret-store backend is unavailable in the current
     /// host session. `reason` is a stable machine-readable classifier;
     /// `message` retains the platform detail for diagnostics.
@@ -149,6 +167,7 @@ impl HostlibError {
             | HostlibError::MissingParameter { builtin, .. }
             | HostlibError::InvalidParameter { builtin, .. }
             | HostlibError::Backend { builtin, .. }
+            | HostlibError::GitHubBudgetUnavailable { builtin, .. }
             | HostlibError::NativeSecretStoreUnavailable { builtin, .. }
             | HostlibError::ProcessSpawn { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
@@ -177,6 +196,7 @@ impl From<HostlibError> for VmError {
             HostlibError::MissingParameter { .. } => "missing_parameter",
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
+            HostlibError::GitHubBudgetUnavailable { .. } => "github_budget_unavailable",
             HostlibError::NativeSecretStoreUnavailable { .. } => "backend_unavailable",
             HostlibError::ProcessSpawn { kind, .. } => *kind,
             HostlibError::SandboxViolation { .. } => "tool_rejected",
@@ -244,6 +264,22 @@ impl From<HostlibError> for VmError {
         if let Some(reason) = unavailable_reason {
             dict.put_str("reason", reason.as_str());
         }
+        if let HostlibError::GitHubBudgetUnavailable {
+            phase,
+            operation,
+            request_executed,
+            response_observed,
+            ..
+        } = err
+        {
+            dict.put_str("phase", phase);
+            dict.put_str("operation", operation);
+            dict.put(
+                "request_executed",
+                request_executed.map_or(VmValue::Nil, VmValue::Bool),
+            );
+            dict.put_bool("response_observed", response_observed);
+        }
         VmError::Thrown(VmValue::dict(dict))
     }
 }
@@ -251,6 +287,33 @@ impl From<HostlibError> for VmError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_budget_failure_preserves_unknown_execution_and_observed_response() {
+        for executed in [None, Some(false), Some(true)] {
+            let error = HostlibError::GitHubBudgetUnavailable {
+                builtin: "hostlib_tools_run_command",
+                phase: "after_request",
+                operation: "response_recording".into(),
+                request_executed: executed,
+                response_observed: true,
+                message: "cause=storage_full".into(),
+            };
+            let VmError::Thrown(VmValue::Dict(fields)) = VmError::from(error) else {
+                panic!("expected a structured budget failure");
+            };
+            assert_eq!(
+                fields.get("request_executed").map(VmValue::display),
+                Some(executed.map_or_else(|| "nil".into(), |value| value.to_string()))
+            );
+            assert!(matches!(
+                fields.get("response_observed"),
+                Some(VmValue::Bool(true))
+            ));
+            assert_eq!(fields["kind"].as_str(), Some("github_budget_unavailable"));
+            assert_eq!(fields["phase"].as_str(), Some("after_request"));
+        }
+    }
 
     #[test]
     fn process_spawn_error_lowers_to_typed_io_value() {

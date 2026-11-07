@@ -611,7 +611,7 @@ pipeline main(harness: Harness, task: unknown) {
     "&created=%3E%3D${policy.topology_epoch}"
   }
   const runs_data = github_api_json(
-    harness.process,
+    harness.tools,
     harness.clock,
     "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}${created_bound}",
   )
@@ -623,7 +623,7 @@ pipeline main(harness: Harness, task: unknown) {
         + job_samples_from_api(
           run.id,
           github_api_json(
-            harness.process,
+            harness.tools,
             harness.clock,
             "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
           ),
@@ -641,7 +641,7 @@ pipeline main(harness: Harness, task: unknown) {
   let detailed_jobs: list<CiDetailedJobSample> = []
   for run in candidates {
     const jobs_read = completed_run_jobs(
-      harness.process,
+      harness.tools,
       harness.clock,
       {
         repository: repository,
