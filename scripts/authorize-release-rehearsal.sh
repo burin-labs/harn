@@ -24,6 +24,18 @@ case "${REQUIRES_ATTACHED_CONSUMER:-false}" in
     ;;
   *) echo '::error::Unreported attached-child decision.' >&2; exit 1 ;;
 esac
+case "${REPAIR_REUSED:-false}" in
+  true)
+    [[ "${REQUIRES_CONSUMER_REPAIR:-false}" == true && "${REQUIRES_REHEARSAL:-}" == true &&
+       "${REHEARSAL_RESULT:-}" == skipped && -z "${REHEARSAL_VERDICT:-}" &&
+       -z "${REHEARSAL_SOURCE_SHA:-}" && "${REPAIR_RESULT:-}" == success ]] || {
+      echo '::error::Prior consumer repair was not authenticated.' >&2
+      exit 1
+    }
+    ;;
+  false) ;;
+  *) echo '::error::Unreported prior repair decision.' >&2; exit 1 ;;
+esac
 case "${REQUIRES_REHEARSAL:-}" in
   false)
     [[ "${REHEARSAL_RESULT:-}" == skipped ]] || {
@@ -32,7 +44,7 @@ case "${REQUIRES_REHEARSAL:-}" in
     }
     ;;
   true)
-    [[ "${REHEARSAL_RESULT:-}" == success &&
+    [[ "${REPAIR_REUSED:-false}" == true ]] || [[ "${REHEARSAL_RESULT:-}" == success &&
        "${REHEARSAL_VERDICT:-}" == pass &&
        "${REHEARSAL_SOURCE_SHA:-}" == "$SOURCE_SHA" ]] || {
       echo "::error::Recovery consumer rehearsal is unqualified: result=${REHEARSAL_RESULT:-missing} verdict=${REHEARSAL_VERDICT:-unmeasured} source=${REHEARSAL_SOURCE_SHA:-missing}." >&2
@@ -46,18 +58,18 @@ case "${REQUIRES_REHEARSAL:-}" in
 esac
 case "${REQUIRES_CONSUMER_REPAIR:-false}" in
   true)
-    [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == false &&
-       "${REQUIRES_REHEARSAL:-}" == true && "${REPAIR_RESULT:-}" == success ]] &&
-      jq -e --arg source "$SOURCE_SHA" --arg producer "${CANDIDATE_RUN_ID:-}" \
+    if ! [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == false &&
+       "${REQUIRES_REHEARSAL:-}" == true && "${REPAIR_RESULT:-}" == success ]] ||
+      ! jq -e --arg source "$SOURCE_SHA" --arg producer "${CANDIDATE_RUN_ID:-}" \
         --arg attempt "${PRODUCER_ATTEMPT:-}" --arg pull "${CONSUMER_PULL:-}" '
         .schema == "harn.release.consumer_repair.v1" and .context.source_revision == $source and
         .producer_run == $producer and (.producer_attempt | tostring) == $attempt and
         .consumer_pull == $pull and ($producer | test("^[1-9][0-9]*$")) and
         ($attempt | test("^[1-9][0-9]*$")) and ($pull | test("^[1-9][0-9]*$"))
-      ' <<< "${REPAIR_REQUEST:-}" >/dev/null || {
+      ' <<< "${REPAIR_REQUEST:-}" >/dev/null; then
         echo '::error::Authenticated consumer repair is absent or mismatched.' >&2
         exit 1
-      }
+    fi
     ;;
   false)
     [[ "${REPAIR_RESULT:-skipped}" == skipped && -z "${REPAIR_REQUEST:-}" ]] || {

@@ -285,6 +285,12 @@ requires full-suite CI at its own source, so a red source never publishes.
   manifest artifact ID and digest, and publication reauthenticates that same
   evidence and current repair head. Missing, expired or failed archive proof
   refuses. The original candidate run stays unchanged.
+  If that exact repair rehearsal passed but a later publication step failed,
+  add `-f rehearsal_promotion_run_id=PRIOR_PROMOTION` together with the same
+  `consumer_pull_request`. The reader authenticates the prior parent and its
+  successful child, then rechecks the original producer, artifact identities,
+  and current pull-request head. A changed, closed, failed, or unmeasured repair
+  refuses rather than borrowing the old result.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus

@@ -346,11 +346,11 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const selectEntry=fileURLToPath(new URL('../ci/consumer-observer-select.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
-    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false,repair=false)=>{
+    const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false,repair=false,priorRepair=false)=>{
       const output=path.join(scratch,`reuse-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
       const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,
-        ...(repair?['--repair']:recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
+        ...(priorRepair?['--prior-repair']:repair?['--repair']:recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
         SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
         CANARY_WORKFLOW:'rehearsal.yml',GITHUB_OUTPUT:output,REHEARSAL_PROMOTION_RUN_ID:'42',
@@ -439,6 +439,24 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(repairedValue.reading.product.verdict,'pass');
     assert.equal(repairedValue.producer.producer_run,'900');
     assert.equal(repairedValue.owned,false);
+    const priorRepair=(changes={},env={})=>readParent({...repairInputs,
+      parent:{...repairInputs.parent,status:'completed',conclusion:'failure'},...changes},{
+      REQUIRE_CURRENT_DEFAULT:'false',PARENT_ROLE:'promotion',PRODUCER_RUN:'900',PRODUCER_ATTEMPT:'1',
+      CONSUMER_PULL:'7',...env},false,false,true,false,false,true);
+    const reusedRepair=priorRepair();
+    assert.equal(reusedRepair.run.status,0,reusedRepair.run.stderr);
+    assert.equal(JSON.parse(reusedRepair.run.stdout).reading.product.verdict,'pass');
+    assert.match(reusedRepair.text,/^repair_reused=true$/m);
+    assert.deepEqual(JSON.parse(/^repair_request=(.+)$/m.exec(reusedRepair.text)[1]),repairRequest);
+    // The repair reader below separately falsifies missing custody, artifacts,
+    // and a mismatched producer. These cases exercise the new parent selector.
+    for(const [changes,env] of [[{finalPull:{...pairedPull,head:{...pairedPull.head,sha:'d'.repeat(40)}}},{}],
+      [{parent:{...repairInputs.parent,status:'completed',conclusion:'cancelled'}},{}],
+      [{},{PRODUCER_ATTEMPT:'2'}],[{},{REQUIRE_CURRENT_DEFAULT:'true'}]]) {
+      const refused=priorRepair(changes,env);
+      assert.equal(refused.run.status,1,refused.run.stdout);
+      assert.equal(refused.text,'','a mismatched prior repair cannot authorize publication');
+    }
     for(const changes of [{runs:[]},{runs:[pairedChild,{...pairedChild,id:74}]},{missing:0},{missing:1},{missing:2},{archives},
       {child:{...pairedChild,id:74},runs:[{...pairedChild,id:74}]},
       {finalPull:{...pairedPull,state:'closed'}},{finalPull:{...pairedPull,head:{...pairedPull.head,sha:'d'.repeat(40)}}},

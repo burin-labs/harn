@@ -42,7 +42,7 @@ on:
         default: ''
         type: string
       rehearsal_promotion_run_id:
-        description: Prior promotion with a measured successful rehearsal of this candidate
+        description: Prior promotion with a measured successful rehearsal or paired repair of this candidate
         required: false
         type: string
       completed_consumer_run_id:
@@ -265,7 +265,9 @@ jobs:
   consumer-rehearsal:
     name: Measure consumer rehearsal
     needs: plan
-    if: needs.plan.outputs.promote == 'true' && needs.plan.outputs.requires_rehearsal == 'true'
+    if: >-
+      needs.plan.outputs.promote == 'true' && needs.plan.outputs.requires_rehearsal == 'true' &&
+      !(needs.plan.outputs.requires_consumer_repair == 'true' && inputs.rehearsal_promotion_run_id != '')
     permissions:
       actions: read
       contents: read
@@ -340,16 +342,21 @@ jobs:
           PRODUCER_ATTEMPT: ${{ needs.plan.outputs.producer_attempt }}
           CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
           ISSUED_CONTEXT: ${{ needs.consumer-rehearsal.outputs.observer_context }}
+          PARENT_RUN_ID: ${{ inputs.rehearsal_promotion_run_id }}
           REQUIRE_CURRENT_DEFAULT: 'false'
           CANARY_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
         run: |
           set -euo pipefail
-          OBSERVER_CONTEXT="$(jq -cn --argjson context "$ISSUED_CONTEXT" --arg run "$PRODUCER_RUN" \
-            --argjson attempt "$PRODUCER_ATTEMPT" --arg pull "$CONSUMER_PULL" \
-            '{schema:"harn.release.consumer_repair.v1",context:$context,producer_run:$run,producer_attempt:$attempt,consumer_pull:$pull}')"
-          export OBSERVER_CONTEXT
-          node scripts/ci/consumer-observer-read-decision.mjs --repair
+          if [[ -n "$PARENT_RUN_ID" ]]; then
+            node scripts/ci/consumer-observer-read-decision.mjs --prior-repair
+          else
+            OBSERVER_CONTEXT="$(jq -cn --argjson context "$ISSUED_CONTEXT" --arg run "$PRODUCER_RUN" \
+              --argjson attempt "$PRODUCER_ATTEMPT" --arg pull "$CONSUMER_PULL" \
+              '{schema:"harn.release.consumer_repair.v1",context:$context,producer_run:$run,producer_attempt:$attempt,consumer_pull:$pull}')"
+            export OBSERVER_CONTEXT
+            node scripts/ci/consumer-observer-read-decision.mjs --repair
+          fi
       - name: Attach completed exact-source consumer
         if: needs.plan.outputs.requires_attached_consumer == 'true'
         id: attached-consumer
@@ -430,6 +437,7 @@ jobs:
           REQUIRES_CONSUMER_REPAIR: ${{ needs.plan.outputs.requires_consumer_repair }}
           REPAIR_RESULT: ${{ steps.consumer-repair.outcome }}
           REPAIR_REQUEST: ${{ steps.consumer-repair.outputs.repair_request }}
+          REPAIR_REUSED: ${{ steps.consumer-repair.outputs.repair_reused || 'false' }}
           PRODUCER_ATTEMPT: ${{ needs.plan.outputs.producer_attempt }}
           CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
         run: bash scripts/authorize-release-rehearsal.sh

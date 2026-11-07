@@ -52,4 +52,16 @@ for refusal in REQUIRES_CONSUMER_REPAIR=unknown REPAIR_RESULT= REPAIR_RESULT=ski
   [[ ! -s "$tmp/output" ]] || fail "unauthorized repair output for $refusal"
 done
 if authorize REPAIR_RESULT=success REPAIR_REQUEST="$request"; then fail 'unexpected repair accepted'; fi
+reuse() {
+  repair REHEARSAL_RESULT=skipped REHEARSAL_VERDICT= REHEARSAL_SOURCE_SHA= REPAIR_REUSED=true "$@"
+}
+reuse || fail 'authenticated prior repair refused'
+grep -Fxq 'ready=true' "$tmp/output" || fail 'reused repair emitted no authorization'
+for refusal in REPAIR_REUSED=unknown REPAIR_REUSED=false REPAIR_RESULT= REPAIR_RESULT=failure \
+  REPAIR_REQUEST= REPAIR_REQUEST=null CANDIDATE_RUN_ID=124 PRODUCER_ATTEMPT=2 CONSUMER_PULL=8 \
+  REQUIRES_CONSUMER_REPAIR=false REQUIRES_REHEARSAL=false REHEARSAL_RESULT=failure \
+  REHEARSAL_VERDICT=pass REHEARSAL_SOURCE_SHA="$sha"; do
+  if reuse "$refusal"; then fail "accepted reused repair $refusal"; fi
+  [[ ! -s "$tmp/output" ]] || fail "unauthorized reused repair output for $refusal"
+done
 echo 'release_rehearsal_authorization_test: ok'
