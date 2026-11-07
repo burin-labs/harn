@@ -494,9 +494,17 @@ jobs:
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         run: make gen-cli-aot && make check-cli-aot
 
+      - name: Set up verified Harn for release notices
+        if: needs.setup.outputs.should_package_archives == 'true'
+        id: notice_runtime
+        uses: ./.github/actions/setup-harn
+
       - name: Generate locked release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
         shell: bash
+        env:
+          HARN_BIN: ${{ steps.notice_runtime.outputs.path }}
+          HARN_BIN_NO_BUILD: "1"
         run: |
           set -euo pipefail
           tools="$(mktemp -d "${RUNNER_TEMP}/harn-notices-tools.XXXXXX")"
