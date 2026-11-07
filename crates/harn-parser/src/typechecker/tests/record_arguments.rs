@@ -119,3 +119,32 @@ fn closed_builtin_record_parameter_rejects_extra_literal_field() {
     assert!(errs[0].contains("unknown field `max_toknes` in closed record"));
     assert!(errs[0].contains("did you mean `max_tokens`?"));
 }
+
+#[test]
+fn optional_record_fields_accept_nil_unions_in_closed_and_open_records() {
+    for tail in ["", ", ...rest"] {
+        let source = format!(
+            "type Maybe = string?\ntype Record = {{name?: string{tail}}}\n\
+             fn build(name: Maybe) -> Record {{ return {{name: name}} }}\n\
+             fn missing() -> Record {{ return {{}} }}\n\
+             fn literal_nil() -> Record {{ return {{name: nil}} }}"
+        );
+        let checked = errors(&source);
+        assert!(checked.is_empty(), "{tail}: {checked:?}");
+    }
+}
+
+#[test]
+fn optional_record_fields_reject_wrong_union_members_and_missing_required_fields() {
+    for source in [
+        "fn wrong(value: int?) -> {name?: string} { return {name: value} }",
+        "fn wrong(value: string | int | nil) -> {name?: string, ...rest} { return {name: value} }",
+        "fn wrong(value: unknown) -> {name?: string} { return {name: value} }",
+        "fn wrong(value: string?) -> {name: string} { return {name: value} }",
+        "fn wrong(value: {name?: string}) -> {name: string?} { return value }",
+    ] {
+        let checked = errors(source);
+        assert_eq!(checked.len(), 1, "{source}: {checked:?}");
+        assert!(checked[0].contains("return value"), "{checked:?}");
+    }
+}
