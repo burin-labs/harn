@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[path = "registry_index_replay_tests.rs"]
+#[cfg(feature = "ast")]
 mod index_replay;
 
 #[test]

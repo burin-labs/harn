@@ -27,10 +27,10 @@ fn indexed_run(
         });
         let path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/index_replay_warmup.harn"
+            "/src/fixtures/index_replay_warmup.harn"
         ));
         let chunk = harn_vm::compile_source_at_path(
-            include_str!("../../../tests/fixtures/index_replay_warmup.harn"),
+            include_str!("fixtures/index_replay_warmup.harn"),
             path,
             None,
         )
