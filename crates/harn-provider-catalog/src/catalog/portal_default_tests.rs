@@ -74,15 +74,13 @@ fn the_artifact_ranks_credential_gated_automatic_defaults() {
             ("openai", "gpt-6.1-sol")
         ]
     );
-    for entry in &catalog.automatic_defaults {
+    for CatalogAutomaticDefault { provider, model_id } in &catalog.automatic_defaults {
         assert!(
             catalog
                 .models
                 .iter()
-                .any(|row| row.provider == entry.provider && row.id == entry.model_id),
-            "{} automatic default {} has no catalog row",
-            entry.provider,
-            entry.model_id
+                .any(|row| &row.provider == provider && &row.id == model_id),
+            "{provider} automatic default {model_id} has no catalog row"
         );
     }
     let config = config_from_artifact(&catalog);

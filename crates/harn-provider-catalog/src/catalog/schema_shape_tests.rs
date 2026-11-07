@@ -38,7 +38,7 @@ fn fields(value: &Value) -> Result<BTreeSet<String>, String> {
 
 fn pinned_fields(version: u64) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let (root, model) = match version {
-        14 | 15 | 16 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
+        14..=16 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
         other => {
             return Err(format!(
                 "catalog schema version {other} has no field-set pin"
