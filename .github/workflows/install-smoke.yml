@@ -32,6 +32,10 @@ on:
         description: 'Optional release tag to install, e.g. v0.8.65. Empty installs the latest published release.'
         required: false
         type: string
+      release_only:
+        description: 'Skip cold source builds and test only the release installers.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,7 +52,7 @@ env:
 jobs:
   cargo-install:
     name: cargo install harn-cli (${{ matrix.platform }})
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !inputs.release_only
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     strategy:
