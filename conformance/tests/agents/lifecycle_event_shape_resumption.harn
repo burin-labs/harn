@@ -1,16 +1,41 @@
+type Resumption = {
+  handle: string,
+  initiator: string,
+  initiator_id: string,
+  input: {approved: bool},
+  input_hash: string,
+  continue_transcript: bool,
+  trigger_match: {source: string, event_id: string, filter_summary: string},
+  linked_suspension_span_id: string,
+  resumed_at_turn: int,
+}
+
+type ResumptionEvent = {
+  kind: string,
+  role: string,
+  visibility: string,
+  text: string,
+  resumption: Resumption,
+  metadata: Resumption,
+  ...dict,
+}
+
 pipeline main(harness: Harness) {
-  const evt = transcript_resumption_event(
-    {
-      handle: "worker://triage/42",
-      initiator: "drain_agent",
-      initiator_id: "settlement-session-1",
-      input: {approved: true},
-      input_hash: "sha256:abc",
-      continue_transcript: true,
-      trigger_match: {source: "github", event_id: "evt-1", filter_summary: "label matched"},
-      linked_suspension_span_id: "span-1",
-      resumed_at_turn: 6,
-    },
+  const evt = schema_expect(
+    transcript_resumption_event(
+      {
+        handle: "worker://triage/42",
+        initiator: "drain_agent",
+        initiator_id: "settlement-session-1",
+        input: {approved: true},
+        input_hash: "sha256:abc",
+        continue_transcript: true,
+        trigger_match: {source: "github", event_id: "evt-1", filter_summary: "label matched"},
+        linked_suspension_span_id: "span-1",
+        resumed_at_turn: 6,
+      },
+    ),
+    schema_of(ResumptionEvent),
   )
   harness.stdio.println(evt?.kind == "resumption")
   harness.stdio.println(evt?.role == "system")
