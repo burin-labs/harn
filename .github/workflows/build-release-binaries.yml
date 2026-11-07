@@ -498,6 +498,8 @@ jobs:
         if: needs.setup.outputs.should_package_archives == 'true'
         id: notice_runtime
         uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
 
       - name: Generate locked release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
