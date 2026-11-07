@@ -8,8 +8,14 @@
     "name": "RepairDiagnostics.post_edit_reverify",
     "reachability": "unknown",
     "readers": [
-      {"file": "crates/harn-stdlib/src/stdlib/agent/repair.harn", "reader": "agent_repair_config"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn", "reader": "__agent_loop_post_edit_reverify_mandated"}
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "reader": "__agent_loop_post_edit_reverify_mandated"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/repair.harn",
+        "reader": "agent_repair_config"
+      }
     ],
     "reason": "Preserve caller-requested verification while retiring repeat detection.",
     "verdict": "KEEP-with-expiry"
@@ -23,10 +29,22 @@
     "name": "RepairDiagnostics.reserved_terminal_verify",
     "reachability": "unknown",
     "readers": [
-      {"file": "crates/harn-stdlib/src/stdlib/agent/repair.harn", "reader": "agent_repair_config"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn", "reader": "__agent_loop_call_budget_new"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn", "reader": "agent_loop_run_settings"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn", "reader": "__agent_loop_should_spend_reserve"}
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
+        "reader": "__agent_loop_call_budget_new"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "reader": "__agent_loop_should_spend_reserve"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/repair.harn",
+        "reader": "agent_repair_config"
+      }
     ],
     "reason": "Preserve explicit final verification independently of repeat detection.",
     "verdict": "KEEP-with-expiry"
@@ -40,9 +58,18 @@
     "name": "RepairDiagnostics.reserved_terminal_verify_iterations",
     "reachability": "unknown",
     "readers": [
-      {"file": "crates/harn-stdlib/src/stdlib/agent/repair.harn", "reader": "agent_repair_config"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn", "reader": "__agent_loop_call_budget_new"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn", "reader": "agent_loop_run_settings"}
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
+        "reader": "__agent_loop_call_budget_new"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/repair.harn",
+        "reader": "agent_repair_config"
+      }
     ],
     "reason": "Retain the existing resource ceiling for explicit terminal verification.",
     "verdict": "KEEP-with-expiry"
@@ -56,10 +83,22 @@
     "name": "RepairDiagnostics.zero_write_terminal_verify",
     "reachability": "unknown",
     "readers": [
-      {"file": "crates/harn-stdlib/src/stdlib/agent/repair.harn", "reader": "agent_repair_config"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn", "reader": "__agent_loop_call_budget_new"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn", "reader": "agent_loop_run_settings"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn", "reader": "__agent_loop_should_spend_reserve"}
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn",
+        "reader": "__agent_loop_call_budget_new"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "reader": "__agent_loop_should_spend_reserve"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/repair.harn",
+        "reader": "agent_repair_config"
+      }
     ],
     "reason": "Preserve explicit caller verification independently of repeat detection.",
     "verdict": "KEEP-with-expiry"

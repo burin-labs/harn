@@ -7,12 +7,7 @@
     "layer": "stop decision",
     "name": "JudgeConfig.cadence",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "__turn_end_judge_cadence"
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
