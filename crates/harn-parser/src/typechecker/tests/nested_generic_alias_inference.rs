@@ -1,4 +1,5 @@
 use super::*;
+use crate::TypeExpr;
 
 #[test]
 fn declared_type_projection_shares_imports_spreads_and_recursive_resolution() {
