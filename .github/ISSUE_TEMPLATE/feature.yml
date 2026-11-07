@@ -1,0 +1,23 @@
+name: Feature request
+description: Explain a developer task Harn should support.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What are you trying to do?
+      description: Describe the concrete task and what currently prevents it.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should happen?
+      description: Include a small example of the API, command, or result you need.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: Describe what you do today, if anything.

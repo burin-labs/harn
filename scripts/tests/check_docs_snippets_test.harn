@@ -48,20 +48,49 @@ pipeline test_readme_agent_executes_its_declared_tool(harness: Harness) {
   assert_readme_agent_execution(harness, false)
 }
 
+pipeline test_readme_intro_agent_runs_offline(harness: Harness) {
+  const source = readme_example(harness.fs, "agent.harn")
+  const binary = resolve_harn_bin(harness)
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      harness.fs.write_text(path_join(dir, "main.harn"), source)
+      const outcome = harness.process.run(
+        {
+          program: binary,
+          args: ["run", "main.harn"],
+          cwd: dir,
+          env: {HARN_LLM_CALLS_DISABLED: "1"},
+          timeout_ms: 30000,
+        },
+      )
+      assert(outcome.success, outcome.stdout + outcome.stderr)
+      assert_eq(
+        outcome.stdout,
+        "Running: Say hello.\ndone\nMock response to 2-word prompt: Say hello.\n",
+      )
+    },
+  )
+}
+
 pipeline test_readme_agent_repairs_rejected_tool_before_done(harness: Harness) {
   assert_readme_agent_execution(harness, true)
 }
 
+fn readme_example(fs: HarnessFs, title: string) -> string {
+  const root = path_normalize(path_join(fs.cwd(), "../.."))
+  const examples = extract_blocks(fs.read_text(path_join(root, "README.md"))).filter(
+    { event ->
+      event.kind == "block" && event.mode == "check"
+        && event.info == "harn,check title=\"${title}\""
+    },
+  )
+  assert_eq(examples.count, 1, "execute the named README example, without a second source copy")
+  return examples[0].content
+}
+
 fn assert_readme_agent_execution(harness: Harness, reject_first: bool) {
-  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
-  const examples = extract_blocks(harness.fs.read_text(path_join(root, "README.md"))).filter(
-    { event -> event.kind == "block" && event.mode == "check" },
-  )
-  assert_eq(
-    examples.count,
-    1,
-    "execute the exact introductory example, without a second source copy",
-  )
+  const example = readme_example(harness.fs, "read-project.harn")
   const binary = resolve_harn_bin(harness)
   with_temp_dir(
     harness.fs,
@@ -69,7 +98,7 @@ fn assert_readme_agent_execution(harness: Harness, reject_first: bool) {
       const source = path_join(dir, "main.harn")
       const tape = path_join(dir, "responses.jsonl")
       const canary = "README_DOC_PROBE_CANARY"
-      harness.fs.write_text(source, examples[0].content)
+      harness.fs.write_text(source, example)
       harness.fs.write_text(
         path_join(dir, "README.md"),
         "# Task tracker\nA small task tracker. ${canary}\n",
