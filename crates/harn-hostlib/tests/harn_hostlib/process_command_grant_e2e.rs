@@ -817,6 +817,10 @@ fn a_write_root_over_the_users_git_or_ssh_config_refuses_the_grant() {
         let mut policy = CapabilityPolicy::default();
         policy
             .process_sandbox
+            .read_roots
+            .push(fixture.workspace.path().display().to_string());
+        policy
+            .process_sandbox
             .write_roots
             .push(protected.display().to_string());
         push_execution_policy(policy);
