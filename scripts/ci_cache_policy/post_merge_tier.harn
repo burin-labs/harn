@@ -52,15 +52,11 @@ fn gha(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
 
-fn needs_of(job: dict?) -> list<string> {
-  const needs = job?.needs
-  if type_of(needs) == "string" {
-    return [trim(needs)]
-  }
-  return (needs ?? []).map({ value -> trim(to_string(value)) }).to_list()
+fn needs_of(job: CiJob?) -> list<string> {
+  return job_needs(job).map({ value -> trim(value) }).to_list()
 }
 
-fn step_with_id(job: dict?, id: string) {
+fn step_with_id(job: CiJob?, id: string) -> CiStep? {
   for step in job?.steps ?? [] {
     if trim(to_string(step?.id ?? "")) == id {
       return step
@@ -69,7 +65,7 @@ fn step_with_id(job: dict?, id: string) {
   return nil
 }
 
-fn checkout_before_decision(job: dict?) -> bool {
+fn checkout_before_decision(job: CiJob?) -> bool {
   let checked_out = false
   for step in job?.steps ?? [] {
     if trim(to_string(step?.id ?? "")) == TIER_STEP_ID {
@@ -100,7 +96,7 @@ fn require_call(command: string, result_var: string) -> string {
   return call
 }
 
-pub fn post_merge_tier_errors(workflows: dict) -> list<string> {
+pub fn post_merge_tier_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const ci = workflows["ci.yml"]
   let errors: list<string> = []
   const changes = ci?.jobs?.changes

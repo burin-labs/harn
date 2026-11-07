@@ -1,4 +1,5 @@
 import { filter_matches_paths } from "../gh_check_state.harn"
+import { CiWorkflow } from "./workflow_model.harn"
 
 /**
  * Path-gated ci.yml jobs whose whole proof is one Make target. The job's
@@ -40,7 +41,7 @@ pub fn make_target_recipe_paths(makefile: string, target: string) -> list<string
 }
 
 pub fn make_target_path_gate_errors(
-  ci_workflow: dict,
+  ci_workflow: CiWorkflow?,
   makefile: string,
   gates: list = MAKE_TARGET_PATH_GATES,
 ) -> list<string> {

@@ -1,4 +1,4 @@
-import { read_json_result, read_yaml } from "std/fs"
+import { read_json_result, read_json_typed_result, read_yaml, read_yaml_typed } from "std/fs"
 import { empty_scope_failure } from "../guard_scope.harn"
 import { scan_glob } from "../path_visibility.harn"
 import "./generation_projection.harn"
@@ -19,7 +19,7 @@ import "./warn_only_needs.harn"
  * outage, not a style nit. Keep this in step with ~/.local/bin/sccache and the
  * `sccache-server` systemd unit on the self-hosted Linux runners.
  */
-fn sccache_install_action_errors(install_action: dict) -> list<string> {
+fn sccache_install_action_errors(install_action: CiAction?) -> list<string> {
   guard install_action != nil else {
     return ["${SCCACHE_INSTALL_ACTION_PATH} must exist as the sole sccache install point"]
   }
@@ -57,7 +57,11 @@ pub fn run_ci_cache_policy(harness: Harness) {
   // Read as a result, never a defaulted value: an unreadable runner policy
   // must fail here rather than pass the Linux confinement contract by holding
   // no runners at all.
-  const release_runners_loaded = read_json_result(harness.fs, RELEASE_RUNNER_POLICY_PATH)
+  const release_runners_loaded = read_json_typed_result(
+    harness.fs,
+    RELEASE_RUNNER_POLICY_PATH,
+    schema_of(CiReleaseRunnerPolicy),
+  )
   guard is_ok(release_runners_loaded) else {
     harness.stdio.eprintln(json_stringify(unwrap_err(release_runners_loaded)))
     harness.runtime.exit(1)
@@ -76,25 +80,41 @@ pub fn run_ci_cache_policy(harness: Harness) {
     )
     harness.runtime.exit(1)
   }
-  const action = read_yaml(harness.fs, ACTION_PATH, nil)
-  const generation_action = read_yaml(
+  const action = read_yaml_typed(harness.fs, ACTION_PATH, schema_of(CiAction))
+  const generation_action = read_yaml_typed(
     harness.fs,
     ".github/actions/rust-cache-generation/action.yml",
-    nil,
+    schema_of(CiAction),
   )
   const generation_pin = unwrap(
-    read_json_result(harness.fs, ".github/actions/rust-cache/pinned-config.json"),
+    read_json_typed_result(
+      harness.fs,
+      ".github/actions/rust-cache/pinned-config.json",
+      schema_of(CiCachePin),
+    ),
   )
   const workspace_reuse_script = harness.fs.read_text(WORKSPACE_REUSE_SCRIPT)
-  const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
-  const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
-  const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
-  const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
-  const harn_check_cache_action = read_yaml(harness.fs, HARN_CHECK_CACHE_ACTION_PATH, nil)
-  const harn_check_cache_save_action = read_yaml(harness.fs, HARN_CHECK_CACHE_SAVE_ACTION_PATH, nil)
-  let workflows = {}
+  const node_action = read_yaml_typed(harness.fs, NODE_ACTION_PATH, schema_of(CiAction))
+  const setup_harn_action = read_yaml_typed(harness.fs, SETUP_HARN_ACTION_PATH, schema_of(CiAction))
+  const sccache_action = read_yaml_typed(harness.fs, SCCACHE_ACTION_PATH, schema_of(CiAction))
+  const sccache_install_action = read_yaml_typed(
+    harness.fs,
+    SCCACHE_INSTALL_ACTION_PATH,
+    schema_of(CiAction),
+  )
+  const harn_check_cache_action = read_yaml_typed(
+    harness.fs,
+    HARN_CHECK_CACHE_ACTION_PATH,
+    schema_of(CiAction),
+  )
+  const harn_check_cache_save_action = read_yaml_typed(
+    harness.fs,
+    HARN_CHECK_CACHE_SAVE_ACTION_PATH,
+    schema_of(CiAction),
+  )
+  let workflows: dict<string, CiWorkflow> = {}
   for path in scan_glob(harness.fs, "check-ci-cache-policy", WORKFLOW_GLOB).sorted() {
-    workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
+    workflows[workflow_name(path)] = read_yaml_typed(harness.fs, path, schema_of(CiWorkflow))
   }
   const empty = empty_scope_failure("CI cache policy", len(workflows.keys()), WORKFLOW_GLOB)
   if empty != "" {
@@ -122,9 +142,17 @@ pub fn run_ci_cache_policy(harness: Harness) {
     e2e_hosted_runner_errors(workflows["e2e.yml"]),
     consumer_canary_errors(
       workflows[CONSUMER_CANARY_WORKFLOW],
-      read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
+      read_yaml_typed(
+        harness.fs,
+        ".github/actions/observe-consumer/action.yml",
+        schema_of(CiAction),
+      ),
       node_action,
-      read_yaml(harness.fs, ".github/actions/consumer-observer-declare/action.yml", nil),
+      read_yaml_typed(
+        harness.fs,
+        ".github/actions/consumer-observer-declare/action.yml",
+        schema_of(CiAction),
+      ),
     ),
     e2e_workflow_concurrency_errors(workflows["e2e.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
