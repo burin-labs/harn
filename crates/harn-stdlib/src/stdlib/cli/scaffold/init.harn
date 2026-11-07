@@ -814,7 +814,8 @@ fn main(harness: Harness) {
     )
   }
   const files = try {
-    __template_files(template, project_name, harn_range, harn_version)
+    [[".gitignore", "# Harn local runtime state\n/.harn/\n/.harn-runs/\n"]]
+      + __template_files(template, project_name, harn_range, harn_version)
   } catch (e) {
     harness.stdio.eprintln(to_string(e))
     harness.runtime.exit(2)
