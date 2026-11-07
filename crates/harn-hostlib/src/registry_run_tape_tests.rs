@@ -21,13 +21,23 @@ fn owner_death_guardian_fixture() {
 
 fn registry() -> HostlibRegistry {
     let mut registry = HostlibRegistry::new().with(crate::tools::ToolsCapability);
-    let command = registry
+    registry
         .builtins
+        .command_policy_builtins
+        .insert("hostlib_tools_run_command", prepare_command_with_guardian);
+    registry
+}
+
+fn prepare_command_with_guardian(
+    params: harn_vm::value::DictMap,
+) -> Result<super::PreparedCommand, crate::error::HostlibError> {
+    let registry = HostlibRegistry::new().with(crate::tools::ToolsCapability);
+    let prepare = registry
         .builtins
-        .iter_mut()
-        .find(|entry| entry.name == "hostlib_tools_run_command")
+        .command_preparer("hostlib_tools_run_command")
         .unwrap();
-    let handler = Arc::clone(&command.handler);
+    let mut command = prepare(params)?;
+    let handler = command.handler;
     command.handler = Arc::new(move |args| {
         // Libtest owns main, so the managed child enters this fixture on re-exec.
         let _guardian = crate::process::owner_death::install_guardian_reexec_args([
@@ -37,7 +47,7 @@ fn registry() -> HostlibRegistry {
         ]);
         handler(args)
     });
-    registry
+    Ok(command)
 }
 
 fn run(source: &str, root: &Path) -> (harn_vm::VmValue, String) {
