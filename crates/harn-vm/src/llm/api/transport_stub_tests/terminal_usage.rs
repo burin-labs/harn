@@ -330,6 +330,28 @@ message_wire_format = "openai"
         assert_eq!(trace.len(), 1, "terminal error has one logical trace call");
         assert_eq!(trace[0].usage.input_tokens, 30);
         assert_eq!(trace[0].usage.provider_call_count, Some(2));
+        let census = crate::llm::agent_observe::transcript_census_tests::census(&events).await;
+        assert_eq!(census["measurement_state"], "measured");
+        assert_eq!(census["terminal_complete"], true);
+        assert_eq!(
+            census["provider_request_count"],
+            request_count.load(std::sync::atomic::Ordering::SeqCst),
+            "public reader must reconcile with actual HTTP requests"
+        );
+        assert_eq!(census["provider_request_count"].as_i64(), trace[0].usage.provider_call_count);
+        assert_eq!(census["provider_response_count"], 2);
+        assert_eq!(census["provider_error_count"], 2);
+        assert_eq!(census["duplicate_terminal_call_ids"], serde_json::json!([]));
+        let mut control = events.clone();
+        for event in &mut control {
+            if event["type"] == "provider_call_error" {
+                event.as_object_mut().unwrap().remove("retained_response");
+            }
+        }
+        let refused = crate::llm::agent_observe::transcript_census_tests::census(&control).await;
+        assert_eq!(refused["measurement_state"], "incomplete");
+        assert!(refused["provider_request_count"].is_null());
+        assert_eq!(refused["duplicate_terminal_call_ids"].as_array().unwrap().len(), 2);
         let rendered_metrics = metrics.render_prometheus();
         for expected in [
             "harn_llm_calls_total{model=\"paid-empty\",outcome=\"retries_exhausted\",provider=\"terminal-openai-priced-empty\"} 1",

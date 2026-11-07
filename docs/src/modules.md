@@ -1546,9 +1546,37 @@ GUARANTEED / OPTIONAL / MODEL / REDACTED / UNSTABLE in the module source.
 | `agent_transcript_path(run, name?)` | Resolve the standard `agent-llm/llm_transcript.jsonl` path for a run |
 
 Stable event families: `system_prompt`, `context_manifest`, `tool_schemas`, `routing_decision`,
-`provider_call_request`, `provider_call_response`, `resolved_dispatch`. Legacy
+`provider_call_request`, `provider_call_response`, `provider_call_error`,
+`provider_call_measurement`, `resolved_dispatch`. Legacy
 transcripts and results (no `schema_version`) read as version 1; the current
 typed contract is version 2.
+
+### std/agent/transcript
+
+Provider transcript readers normalize records before accounting or presentation.
+`std/agent/provider_transcript` exposes the same provider functions separately
+from the agent-message lifecycle helpers.
+
+| Function | Result |
+|---|---|
+| `provider_transcript_normalize(records)` | Typed records, with malformed provider rows marked `invalid` |
+| `transcript_records(fs, path)` | Strict JSONL read followed by normalization; unreadable files and malformed JSON throw |
+| `provider_call_census(records, transcript_present)` | Physical dispatch count, prepared request count, outcomes, pending identities and invalid or duplicate records |
+| `provider_response_content_shape(record)` | Visible text, distinct reasoning blocks, canonical parsed tool calls and completion flags |
+
+Normalize raw records once, then pass the typed list to `provider_call_census`.
+The runtime writes a `provider_call_measurement` after each provider attempt
+settles. Its `provider_dispatch_count` comes from the transport ledger.
+A prepared request can settle with zero dispatches when admission refuses it.
+Terminal usage can aggregate earlier retries, so the reader doesn't sum it.
+Older transcripts without per-attempt measurements remain `incomplete`.
+
+`provider_request_count` is `nil` for missing or incomplete measurements.
+An existing transcript with no provider attempts reports a measured zero.
+`terminal_complete` also requires an outcome for every prepared request.
+An unusable response and its error count as one terminal only when the error
+explicitly carries `retained_response: true`; both records remain available.
+An empty text channel with native tool calls isn't an empty completion.
 
 ### std/config
 

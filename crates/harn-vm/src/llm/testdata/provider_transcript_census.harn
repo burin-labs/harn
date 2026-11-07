@@ -1,0 +1,6 @@
+import { provider_call_census, provider_transcript_normalize } from "std/agent/transcript"
+
+fn main(harness: Harness) {
+  const records = provider_transcript_normalize(json_parse(argv[0]))
+  harness.stdio.println(json_stringify(provider_call_census(records, true)))
+}

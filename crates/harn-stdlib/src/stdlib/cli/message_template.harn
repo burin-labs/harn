@@ -1,0 +1,36 @@
+pub type MessageSegment = string | int
+
+pub type MessageTemplate = {
+  arity: int,
+  fallback: list<MessageSegment>,
+  translations: dict<string, list<MessageSegment>>,
+}
+
+/**
+ * Render a compiled CLI message plan without parsing literal argument values.
+ * @effects: []
+ * @errors: ["CLI localization argument count does not match its registered template", "Compiled CLI message argument slot is out of range"]
+ */
+pub fn render_message(template: MessageTemplate, locale: string, values: list<string>) -> string {
+  if len(values) != template.arity {
+    throw "CLI localization argument count does not match its registered template"
+  }
+  const plan = template.translations[locale] ?? template.fallback
+  let parts: list<string> = []
+  for segment in plan {
+    if type_of(segment) == "string" {
+      parts.push(segment)
+    } else {
+      const value = if segment >= 0 {
+        values[segment]
+      } else {
+        nil
+      }
+      if value == nil {
+        throw "Compiled CLI message argument slot is out of range"
+      }
+      parts.push(value)
+    }
+  }
+  return parts.join("")
+}

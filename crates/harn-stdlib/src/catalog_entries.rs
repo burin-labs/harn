@@ -120,6 +120,7 @@ catalog_entries! {
     "cli/argparse" => "stdlib/cli/argparse.harn",
     "cli/envelope" => "stdlib/cli/envelope.harn",
     "cli/render" => "stdlib/cli/render.harn",
+    "cli/message_template" => "stdlib/cli/message_template.harn",
     // BEGIN GENERATED CLI LOCALIZATION MODULES
     "cli/localization" => "stdlib/cli/localization.harn",
     "cli/localization/doctor" => "stdlib/cli/localization/doctor.harn",
@@ -317,6 +318,7 @@ catalog_entries! {
     "agent/events" => "stdlib/agent/events.harn",
     "agent/feedback" => "stdlib/agent/feedback.harn",
     "agent/transcript" => "stdlib/agent/transcript.harn",
+    "agent/provider_transcript" => "stdlib/agent/provider_transcript.harn",
     "agent/artifacts" => "stdlib/agent/artifacts.harn",
     "agent/primitives" => "stdlib/agent/primitives.harn",
     "agent/progress" => "stdlib/agent/progress.harn",
