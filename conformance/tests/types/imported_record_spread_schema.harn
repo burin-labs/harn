@@ -1,0 +1,41 @@
+import { get_typed_report, schema_json } from "std/schema"
+import { assert_error_contains } from "std/testing"
+import { ImportedFields } from "../../fixtures/schema/imported_record_fields"
+
+type Request = {label: string, ...ImportedFields}
+
+type OpenRequest = {label: string, ...dict}
+
+fn accepts_request(value: Request) -> bool {
+  return true
+}
+
+fn main(harness: Harness) {
+  const contract = schema_of(Request)
+  const good = {label: "reached", max_tokens: 8, nested: {name: "actual"}}
+  assert(get_typed_report(good, contract).ok)
+  assert(accepts_request(good))
+  harness.stdio.println("imported spread positive reached")
+  for defaults in [false, true] {
+    assert(
+      !get_typed_report(good + {max_tokens: "invalid"}, contract, defaults).ok,
+      "imported optional int must reject a string",
+    )
+    assert(!get_typed_report({label: "missing nested"}, contract, defaults).ok)
+    assert(!get_typed_report(good + {nested: {name: 7}}, contract, defaults).ok)
+    assert(get_typed_report(good + {max_tokens: nil}, contract, defaults).ok)
+  }
+  assert_error_contains(
+    fn() { return accepts_request(
+      json_parse("{\"label\":\"bad\",\"max_tokens\":\"invalid\",\"nested\":{\"name\":\"ok\"}}"),
+    ) },
+    "max_tokens",
+  )
+  const exported = schema_json(contract)
+  assert(exported.allOf != nil, "imported fields must survive JSON Schema export")
+  assert(get_typed_report(good, exported).ok)
+  assert(!get_typed_report(good + {max_tokens: "invalid"}, exported).ok)
+  assert(!get_typed_report(good + {nested: {name: 7}}, exported).ok)
+  assert(get_typed_report({label: "open", extension: {anything: true}}, schema_of(OpenRequest)).ok)
+  harness.stdio.println("imported fields enforce validation and parameter constraints")
+}

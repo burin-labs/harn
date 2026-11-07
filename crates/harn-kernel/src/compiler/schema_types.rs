@@ -400,10 +400,7 @@ impl Compiler {
                     // alias tails (`...SomeShape`) still merge as an `all_of`
                     // branch below.
                     if let TypeExpr::Named(name) = rest {
-                        let is_bound_alias = self
-                            .type_aliases
-                            .get(name)
-                            .is_some_and(|alias| alias.body.is_some());
+                        let is_bound_alias = self.type_aliases.contains_key(name);
                         if !is_bound_alias {
                             continue;
                         }
