@@ -1,0 +1,5 @@
+pub type ToolEvent = {tool_name: string, ...dict}
+
+pub fn tool_event_schema() -> Schema<ToolEvent> {
+  return schema_of(ToolEvent)
+}

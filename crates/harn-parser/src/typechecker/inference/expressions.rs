@@ -925,6 +925,16 @@ impl TypeChecker {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
             TypeExpr::Shape(fields) => Self::shape_property_type(fields, property, optional),
+            TypeExpr::OpenShape { fields, rests } => {
+                if fields.iter().any(|field| field.name == property) {
+                    return Self::shape_property_type(fields, property, optional);
+                }
+                let inferred = rests
+                    .iter()
+                    .map(|rest| self.infer_property_type_from_type(rest, property, scope, optional))
+                    .collect::<Option<Vec<_>>>()?;
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
+            }
             TypeExpr::List(inner) => {
                 Self::list_property_type(Some(inner.as_ref()), property, optional)
             }
