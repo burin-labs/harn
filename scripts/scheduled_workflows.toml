@@ -120,21 +120,6 @@ job_ids = ["report"]
 health_exempt = "This is the reader. A failed run of it is a red check on the main commit it ran for."
 
 [[workflow]]
-path = ".github/workflows/provider-contract-probe.yml"
-name = "Provider contract probe"
-claim = "Live provider adapters still satisfy their public contracts"
-crons = ["17 11 * * 1"]
-cadence_reason = "Weekly limits paid provider calls while detecting upstream API drift."
-job_ids = ["probe", "notify-live-failure"]
-health_failures = 2
-# A manual run counts only when it was live: the workflow's run-name marks a
-# live run "(live)", and a default-input dispatch, which makes no provider
-# calls, keeps the plain title and is passed over. Scheduled runs are always
-# live.
-health_events = ["schedule", "workflow_dispatch"]
-health_dispatch_title = "Provider contract probe (live)"
-
-[[workflow]]
 path = ".github/workflows/release-size-watch.yml"
 name = "Release size baseline freshness"
 claim = "The release-size baseline tracks the latest successful main build"
