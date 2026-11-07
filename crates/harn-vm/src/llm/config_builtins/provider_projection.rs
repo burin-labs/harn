@@ -31,7 +31,10 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
     };
     let mut region = crate::value::DictMap::new();
     region.put_str("override_key", "region");
-    region.insert(crate::value::intern_key("envs"), VmValue::strings(envs));
+    region.insert(
+        crate::value::intern_key("envs"),
+        VmValue::strings(envs.iter().copied()),
+    );
     region.insert(
         crate::value::intern_key("resolved"),
         match resolved {
