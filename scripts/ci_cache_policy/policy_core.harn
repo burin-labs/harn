@@ -1461,7 +1461,7 @@ pub fn cache_budget_reporter_errors(workflows: dict<string, CiWorkflow>) -> list
         "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
       ]
   }
-  const tolerant_reporters = reporters.filter({ step -> step?.["continue-on-error"] ?? false })
+  const tolerant_reporters = reporters.filter({ step -> step["continue-on-error"] ?? false })
     .to_list()
   if len(tolerant_reporters) > 0 {
     errors = errors
@@ -1577,7 +1577,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict<string, CiWorkflow>) -> list
     errors = errors
       + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs"]
   }
-  if job?.["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
+  if job["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
@@ -1589,7 +1589,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict<string, CiWorkflow>) -> list
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
       ]
-  } else if build_step?.["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
+  } else if build_step["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",

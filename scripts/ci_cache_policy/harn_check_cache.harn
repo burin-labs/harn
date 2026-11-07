@@ -148,7 +148,7 @@ fn check_cache_families(job: CiJob?, step: CiStep?) -> list<string> {
   const field = matrix_field[0].groups[0]
   let families: list<string> = []
   for entry in job?.strategy?.matrix?.include ?? [] {
-    const value = trim(to_string(entry?.[field] ?? ""))
+    const value = trim(to_string(entry[field] ?? ""))
     if value != "" {
       families = families + [value]
     }
@@ -179,7 +179,7 @@ fn writer_routing_errors(
   const triggers = workflow_events(workflow_doc)
   const push_branches = (triggers?.push?.branches ?? []).map({ branch -> trim(to_string(branch)) })
     .to_list()
-  const crons = (triggers?.schedule ?? []).filter({ row -> trim(to_string(row?.cron ?? "")) != "" })
+  const crons = (triggers?.schedule ?? []).filter({ row -> trim(to_string(row.cron ?? "")) != "" })
     .to_list()
   if push_branches.contains("main") && len(crons) > 0
     && !contains(to_string(triggers.keys()), "merge_group")

@@ -284,7 +284,7 @@ fn producer_step_budget_errors(
     const step = step_named(job, name)
     if step == nil {
       errors = errors + ["ci.yml:${job_name} must keep the budgeted step '${name}'"]
-    } else if trim(to_string(step?.["timeout-minutes"] ?? "")) != to_string(expected) {
+    } else if trim(to_string(step["timeout-minutes"] ?? "")) != to_string(expected) {
       errors = errors
         + [
           "ci.yml:${job_name} step '${name}' must carry its own ${expected} budget so the cache save reserve stays reserved",
@@ -350,7 +350,7 @@ fn hosted_compile_lane_errors(
     return ["ci.yml:${job_name} must define the hosted Linux compile lane"]
   }
   let errors: list<string> = []
-  if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
@@ -400,7 +400,7 @@ fn rust_lint_lane_errors(workflow: CiWorkflow?) -> list<string> {
     return ["ci.yml:${job_name} must define the strict Clippy lane"]
   }
   let errors: list<string> = []
-  if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(to_string(job?.env?.[RUNNER_TIER_ENV] ?? "")) != HOSTED_RUNNER_TIER {
@@ -440,7 +440,7 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
   }
-  if trim(job?.["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
+  if trim(job["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
     errors = errors
       + [
         "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} then ${PRODUCER_HOSTED_LINUX_RUNNER}",
@@ -453,7 +453,7 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? ""))
+  if trim(to_string(job["timeout-minutes"] ?? ""))
     != producer_job_timeout_expression(job_name, budgets) {
     errors = errors
       + [
@@ -526,7 +526,7 @@ fn hosted_refresh_lane_errors(workflow: CiWorkflow?) -> list<string> {
     ]
   }
   let errors: list<string> = []
-  if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -678,15 +678,15 @@ pub fn rust_cache_refresh_prerequisite_errors(workflow: CiWorkflow?) -> list<str
     return ["Cache refresh requires an explicit CLI prerequisite and dependent producer"]
   }
   let errors: list<string> = []
-  if job?.needs != "rust-cache-refresh-cli" || job?.["if"] != nil || cli?.needs != nil
-    || cli?.["if"] != nil {
+  if job?.needs != "rust-cache-refresh-cli" || job["if"] != nil || cli?.needs != nil
+    || cli["if"] != nil {
     errors = errors
       + [
         "Cache refresh must wait for the complete successful CLI lifecycle without a conditional bypass",
       ]
   }
   for field in ["runs-on", "timeout-minutes", "permissions", "env", "steps"] {
-    if job?.[field] != cli?.[field] {
+    if job[field] != cli[field] {
       errors = errors + ["Cache refresh producers must share their owning ${field} configuration"]
     }
   }
@@ -793,7 +793,7 @@ fn archived_workspace_test_consumer_errors(
     return []
   }
   let errors: list<string> = []
-  if trim(consumer?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(consumer["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -804,7 +804,7 @@ fn archived_workspace_test_consumer_errors(
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
     errors = errors + ["ci.yml:${job_name} must match rust-check-inputs RUSTFLAGS"]
   }
-  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
+  if trim(to_string(consumer["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
     errors = errors
       + [
         "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
@@ -1286,7 +1286,7 @@ fn early_source_policy_errors(workflow: CiWorkflow?) -> list<string> {
   if len(mirror_steps) != 1
     || mirror_steps[0]?.if != nil
     || (mirror_steps[0]?.["continue-on-error"] ?? false) != false
-    || (shell_job?.["continue-on-error"] ?? false) != false {
+    || (shell_job["continue-on-error"] ?? false) != false {
     errors = errors
       + ["ci.yml:shell-gates must run and enforce the recorded AWS SDK mirror before merge"]
   }

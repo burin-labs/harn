@@ -89,7 +89,10 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(is_type(captured, agent_event_capture_schema()))
   harness.stdio.println(agent_event_capture_report(captured).ok)
-  const result = schema_expect(agent_event_capture_value(captured).result, schema_of(CapturedResult))
+  const result = schema_expect(
+    agent_event_capture_value(captured).result,
+    schema_of(CapturedResult),
+  )
   harness.stdio.println(result.ok)
   // The schema remains open to future readers; the host emitter itself must
   // only publish fields its current AgentEvent variant can preserve.
