@@ -59,6 +59,17 @@ pipeline test_pending_is_visible_and_unmeasured_until_transport_settles() {
   assert(settled.provider_request_count == 1 && !settled.terminal_complete)
 }
 
+pipeline test_unknown_provider_rows_and_missing_ids_cannot_be_measured_empty() {
+  const future = census([{type: "provider_call_future"}])
+  assert(future.invalid_record_count == 1 && future.provider_request_count == nil)
+  const missing_id = census([{type: "response"}])
+  assert(missing_id.provider_response_count == 1 && missing_id.orphan_outcome_count == 1)
+  assert(missing_id.provider_request_count == nil)
+  const identities = census(attempt(" id ") + [{type: "response", call_id: "id"}])
+  assert(identities.orphan_outcome_count == 1 && identities.pending_call_ids == [" id "])
+  assert(identities.provider_request_count == nil)
+}
+
 pipeline test_orphans_and_duplicates_refuse_exact_count() {
   const cases = [
     [{type: "provider_call_response", call_id: "orphan"}],
