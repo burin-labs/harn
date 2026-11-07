@@ -3,7 +3,7 @@ type Step = {with?: {name?: string}}
 type Job = {steps?: list<Step>}
 
 fn names(job: Job) -> string? {
-  const steps = (job.steps ?? []).filter({ step -> step?.with?.name == "x" }).to_list()
+  const steps = (job.steps ?? []).filter({ step -> step.with?.name == "x" }).to_list()
   return steps[0]?.with?.name
 }
 
@@ -25,6 +25,8 @@ fn mutable_empty() -> list {
 fn main(harness: Harness) {
   assert_eq(names({steps: [{with: {name: "x"}}]}), "x")
   assert_eq(names({}), nil)
+  assert_eq(names({steps: [{}]}), nil)
+  assert_eq(names({steps: [{with: {}}]}), nil)
   assert_eq(joined([1, 2]), [1, 2])
   assert_eq(joined(["a"]), ["a"])
   assert_eq(nullable(nil), nil)
