@@ -685,6 +685,8 @@ withholds the update when either required context measurement is unknown.
 `cost: null` means at least one call has an unknown price; a measured zero
 remains `amount: 0`. `_meta.harn.knownCostUsd` retains the priced subtotal,
 and `_meta.harn.contextMeasurement` identifies the context estimate.
+After an assistant message enters the session, Harn refreshes the estimate
+and identifies that message in `_meta.harn.historySourceEventId`.
 
 Standard `notice` updates require `clientCapabilities.session.notices: {}`.
 Standard `compaction_update` updates require

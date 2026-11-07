@@ -32,6 +32,38 @@ pub(crate) struct LlmContextTokenBreakdown {
     pub provider_tool_count: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RequestContextUsage {
+    pub session_id: String,
+    pub model: String,
+    pub used_tokens: Option<u64>,
+    pub context_window: Option<u64>,
+}
+
+impl RequestContextUsage {
+    pub(crate) fn emit(&self, history_source_event_id: Option<String>) {
+        crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::ContextUsage {
+            session_id: self.session_id.clone(),
+            used_tokens: self.used_tokens,
+            context_window: self.context_window,
+            estimated: true,
+            history_source_event_id,
+        });
+    }
+
+    pub(crate) fn with_assistant(&self, message: &crate::value::VmValue) -> Self {
+        let appended =
+            estimate_json_tokens(&crate::llm::helpers::vm_value_to_json(message), &self.model);
+        Self {
+            used_tokens: self
+                .used_tokens
+                .zip(u64::try_from(appended).ok())
+                .map(|(before, appended)| before.saturating_add(appended)),
+            ..self.clone()
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct LlmContextTokenSegment {
     pub id: &'static str,

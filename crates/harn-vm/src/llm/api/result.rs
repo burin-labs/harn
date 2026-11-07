@@ -79,6 +79,9 @@ impl From<RawProviderToolCall> for serde_json::Value {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub(crate) struct LlmResult {
+    /// Keep the request estimate on its result across nested and concurrent calls.
+    #[serde(skip)]
+    pub request_context: Option<crate::llm::cost_context::RequestContextUsage>,
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
     /// Derived text-channel projection. The observed-call boundary attaches
@@ -218,6 +221,7 @@ impl ProviderAttempts {
 impl Default for LlmResult {
     fn default() -> Self {
         Self {
+            request_context: None,
             text: String::new(),
             tool_calls: Vec::new(),
             text_projection: None,
@@ -686,6 +690,12 @@ pub(crate) fn vm_build_llm_result(
     let mut dict = crate::value::DictMap::new();
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
+    if let Some(context) = &result.request_context {
+        dict.put(
+            "_request_context",
+            json_to_vm_value(&serde_json::to_value(context).expect("request context serializes")),
+        );
+    }
     if let Some(tool_format) = projection.effective_tool_format.as_deref() {
         dict.put_str("_effective_tool_format", tool_format);
     }

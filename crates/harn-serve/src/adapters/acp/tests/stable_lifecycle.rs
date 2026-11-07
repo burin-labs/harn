@@ -182,6 +182,15 @@ async fn actual_provider_usage_reports_resident_context_and_cumulative_session_c
             assert!(update["size"].as_u64().is_some_and(|tokens| tokens >= 100000));
             assert_eq!(update["_meta"]["harn"]["contextMeasurement"], "estimated");
             harn_vm::agent_sessions::canonical_history_boundaries(&store, root.path(), &session).await.unwrap();
+            let source = update["_meta"]["harn"]["historySourceEventId"].as_str().expect("the fresh estimate must identify its actual appended message");
+            let journal = store.read(&session, harn_session_store::ReadRange::default()).await.unwrap();
+            let reply = journal.events.iter().find(|event| event.payload["transcript_event"]["id"] == source)
+                .expect("context refresh must refer to the session's committed assistant source");
+            assert_eq!(reply.payload["raw_message"]["role"], "assistant");
+            assert_eq!(reply.payload["raw_message"]["content"], "measured reply");
+            let before_append = updates.iter().rev().find(|update| update["_meta"]["harn"]["historySourceEventId"].is_null())
+                .expect("the actual request context must also have been observed");
+            assert!(update["used"].as_u64() > before_append["used"].as_u64(), "the canonical reply must refresh the resident estimate");
             let recorded = harn_vm::agent_session_spend::load_session_llm_cost_from_store(&store, &session).await.unwrap();
             if call == 3 {
                 assert!(update["cost"].is_null(), "missing provider usage must not invent a price");

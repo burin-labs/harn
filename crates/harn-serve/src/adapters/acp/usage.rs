@@ -8,7 +8,14 @@ pub(super) struct PromptUsageView {
     prior: SessionLlmCost,
     runs: BTreeMap<String, SessionLlmCost>,
     unidentified_cost: bool,
-    context: Option<(u64, u64, bool)>,
+    context: Option<ContextSnapshot>,
+}
+
+struct ContextSnapshot {
+    used: u64,
+    size: u64,
+    estimated: bool,
+    source_event_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -47,6 +54,7 @@ mod tests {
                 used_tokens: Some(17),
                 context_window: Some(128000),
                 estimated: true,
+                history_source_event_id: None,
             })
             .is_none(),
             "preparation does not invent a settled cost"
@@ -85,6 +93,7 @@ mod tests {
             used_tokens: Some(17),
             context_window: None,
             estimated: true,
+            history_source_event_id: None,
         });
         assert!(
             view.observe(&settled("r", 4000, 0.5, Some(0.5))).is_none(),
@@ -113,13 +122,23 @@ impl PromptUsageView {
                 used_tokens,
                 context_window,
                 estimated,
+                history_source_event_id,
                 ..
             } => {
                 self.context = used_tokens
                     .zip(*context_window)
                     .filter(|(_, size)| *size > 0)
-                    .map(|(used, size)| (used, size, *estimated));
-                return None;
+                    .map(|(used, size)| ContextSnapshot {
+                        used,
+                        size,
+                        estimated: *estimated,
+                        source_event_id: history_source_event_id.clone(),
+                    });
+                if history_source_event_id.is_none()
+                    || (self.runs.is_empty() && !self.unidentified_cost)
+                {
+                    return None;
+                }
             }
             AgentEvent::ProviderUsage { run_usage, .. } => {
                 if run_usage.run_id.is_empty() {
@@ -136,7 +155,7 @@ impl PromptUsageView {
             }
             _ => return None,
         }
-        let (used, size, estimated) = self.context?;
+        let context = self.context.as_ref()?;
         let mut known = self.prior.known_cost_usd;
         let mut total = self.prior.cost_usd.filter(|_| !self.unidentified_cost);
         for cost in self.runs.values() {
@@ -150,11 +169,12 @@ impl PromptUsageView {
             "sessionId": self.session_id,
             "update": {
                 "sessionUpdate": "usage_update",
-                "used": used,
-                "size": size,
+                "used": context.used,
+                "size": context.size,
                 "cost": cost,
                 "_meta": {"harn": {
-                    "contextMeasurement": if estimated { "estimated" } else { "reported" },
+                    "contextMeasurement": if context.estimated { "estimated" } else { "reported" },
+                    "historySourceEventId": context.source_event_id,
                     "knownCostUsd": known,
                 }},
             },

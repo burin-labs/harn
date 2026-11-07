@@ -5,18 +5,20 @@ pub(super) fn context(
     session_id: Option<&str>,
     opts: &crate::llm::api::LlmCallOptions,
     resident_tokens: i64,
-) {
-    let Some(session_id) = session_id else { return };
+) -> Option<crate::llm::cost_context::RequestContextUsage> {
+    let session_id = session_id?;
     let context_window = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
         .and_then(|id| crate::llm_config::model_catalog_entry(&id))
         .map(|model| model.runtime_context_window.unwrap_or(model.context_window))
         .filter(|tokens| *tokens > 0);
-    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::ContextUsage {
+    let context = crate::llm::cost_context::RequestContextUsage {
         session_id: session_id.to_string(),
+        model: opts.model.clone(),
         used_tokens: u64::try_from(resident_tokens).ok(),
         context_window,
-        estimated: true,
-    });
+    };
+    context.emit(None);
+    Some(context)
 }
 
 #[inline(never)]

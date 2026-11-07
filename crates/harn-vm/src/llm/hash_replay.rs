@@ -145,6 +145,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
     Some(LlmResult {
         attempts: Default::default(),
         text_projection: None,
+        request_context: None,
         served_fast: json["served_fast"].as_bool().unwrap_or(false),
         text: json["text"].as_str().unwrap_or("").to_string(),
         tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),

@@ -445,6 +445,7 @@ pub(crate) struct ObservedAttemptToken {
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
     rate_limit: super::rate_limit::LlmCallAdmission,
     token_projection: super::cost_context::LlmCallTokenProjection,
+    request_context: Option<super::cost_context::RequestContextUsage>,
     inference_speed: super::inference_speed::InferenceMeter,
 }
 
@@ -456,7 +457,8 @@ impl ObservedAttemptToken {
         resident_context_tokens: i64,
     ) -> Self {
         let session_id = super::agent_runtime::current_agent_session_id();
-        live_usage::context(session_id.as_deref(), opts, resident_context_tokens);
+        let request_context =
+            live_usage::context(session_id.as_deref(), opts, resident_context_tokens);
         Self {
             inference_speed: super::inference_speed::InferenceMeter::new(
                 session_id.clone(),
@@ -469,6 +471,7 @@ impl ObservedAttemptToken {
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_call(opts, call_id),
             rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
             token_projection,
+            request_context,
         }
     }
 
@@ -773,7 +776,8 @@ pub(crate) async fn observed_llm_call(
         let mut settled_usage_recorded = false;
         // A call refused at settlement was already paid for.
         let llm_result = match llm_result {
-            Ok(settled) => {
+            Ok(mut settled) => {
+                settled.result.request_context = observed_attempt.request_context.clone();
                 settled_usage_recorded =
                     live_usage::settled(&observed_attempt, &call_id, &settled.result);
                 match settled.stop {

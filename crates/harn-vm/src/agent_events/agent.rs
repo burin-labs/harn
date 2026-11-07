@@ -324,12 +324,13 @@ pub enum AgentEvent {
         model: String,
         speed: crate::llm::inference_speed::InferenceSpeed,
     },
-    /// The resident input measured for the current provider request.
+    /// The resident request estimate, refreshed when its assistant message commits.
     ContextUsage {
         session_id: String,
         used_tokens: Option<u64>,
         context_window: Option<u64>,
         estimated: bool,
+        history_source_event_id: Option<String>,
     },
     /// The session's physical usage after a provider attempt settles.
     ProviderUsage {
