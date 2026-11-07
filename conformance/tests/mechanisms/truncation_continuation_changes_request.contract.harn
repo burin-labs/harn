@@ -1,0 +1,97 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+/**
+ * Length-truncation auto-continue must change the request it re-sends. A
+ * reasoning-only `max_tokens` stop is re-issued with a cap larger than the one
+ * that truncated, including when the caller left `max_tokens` unset and the
+ * provider default applied. When no larger cap exists, nothing is re-sent.
+ */
+fn hidden_reasoning_truncation(output_tokens: int) -> dict {
+  return {
+    text: "",
+    thinking: "working it out",
+    output_tokens: output_tokens,
+    stop_reason: "max_tokens",
+  }
+}
+
+fn request_caps(
+  harness: Harness,
+  turns: list<dict>,
+  max_tokens: int?,
+) -> {caps: list<int>, identical_resends: int} {
+  const base = {
+    provider: "mock",
+    tool_format: "text",
+    loop_until_done: true,
+    max_iterations: 3,
+    max_nudges: 3,
+  }
+  const opts = if max_tokens == nil {
+    base
+  } else {
+    base + {max_tokens: max_tokens}
+  }
+  return with_llm_script(
+    harness.llm,
+    turns,
+    { ->
+      agent_loop(harness, "Fix the bug.", nil, opts)
+      const calls = harness.llm.mock_calls()
+      let caps = []
+      let identical = 0
+      let previous = nil
+      for call in calls {
+        const request = json_stringify({messages: call.messages, max_tokens: call.max_tokens})
+        if previous == request {
+          identical = identical + 1
+        }
+        previous = request
+        caps = caps + [call.max_tokens]
+      }
+      return {caps: caps, identical_resends: identical}
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // Trigger: the provider default (16384) truncated hidden reasoning. The
+  // continuation must raise the cap past it, and a continuation that itself
+  // truncates at the ceiling ends auto-continue.
+  const unset = request_caps(
+    harness,
+    [
+      hidden_reasoning_truncation(16384),
+      hidden_reasoning_truncation(32768),
+      llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
+    ],
+    nil,
+  )
+  harness.stdio.println("unset_caps=" + join(unset.caps.map({ cap -> to_string(cap) }), ","))
+  contract_effect(harness.stdio, "unset_cap_continuation_raised", unset.caps[1] > unset.caps[0])
+  contract_negative(harness.stdio, "unset_cap_identical_resend", unset.identical_resends > 0)
+  // Trigger: an explicit cap truncated. The continuation doubles it.
+  const explicit = request_caps(
+    harness,
+    [
+      hidden_reasoning_truncation(4096),
+      llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
+    ],
+    4096,
+  )
+  harness.stdio.println("explicit_caps=" + join(explicit.caps.map({ cap -> to_string(cap) }), ","))
+  contract_negative(harness.stdio, "explicit_cap_identical_resend", explicit.identical_resends > 0)
+  // Negative: the cap already sits at the ceiling, so no continuation fires.
+  const ceiling = request_caps(
+    harness,
+    [
+      hidden_reasoning_truncation(32768),
+      llm_text("<user_response>Fixed.</user_response><done>##DONE##</done>"),
+    ],
+    32768,
+  )
+  harness.stdio.println("ceiling_caps=" + join(ceiling.caps.map({ cap -> to_string(cap) }), ","))
+  contract_negative(harness.stdio, "ceiling_cap_identical_resend", ceiling.identical_resends > 0)
+}

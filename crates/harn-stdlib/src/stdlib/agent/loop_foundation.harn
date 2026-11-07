@@ -146,6 +146,40 @@ pub fn __autocontinue_raised_cap(current: int, llm_opts: dict) {
   return raised
 }
 
+/**
+ * The output cap for the next continuation of a length-truncated `call`, or
+ * nil when no larger cap exists. A request that left `max_tokens` unset ran
+ * under the provider's resolved default, which the script never sees; a length
+ * stop bills output up to the cap it ran under, so the billed output tokens
+ * recover that cap. The next cap must exceed it: re-sending the cap that just
+ * truncated is an identical request that truncates the same way.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __autocontinue_next_cap(requested: any, call: dict, llm_opts: dict) -> int? {
+  const configured = if type_of(requested) == "int" && requested > 0 {
+    requested
+  } else {
+    0
+  }
+  const billed = to_int(call?.value?.usage?.output_tokens ?? 0) ?? 0
+  const applied = if billed > configured {
+    billed
+  } else {
+    configured
+  }
+  const raised = __autocontinue_raised_cap(configured, llm_opts)
+  if raised > applied {
+    return raised
+  }
+  const doubled = __autocontinue_raised_cap(applied, llm_opts)
+  if doubled > applied {
+    return doubled
+  }
+  return nil
+}
+
 pub fn __autocontinue_is_length_stop(stop_reason: string?) {
   const normalized = lowercase(trim(to_string(stop_reason ?? "")))
   return normalized == "length" || normalized == "max_tokens"
@@ -231,10 +265,11 @@ pub fn __invoke_llm_with_autocontinue(
   let cap = llm_opts?.max_tokens ?? 0
   while attempts < max_continuations
     && __autocontinue_should_continue(harness.agent, call, turn_opts) {
-    const raised = __autocontinue_raised_cap(cap, llm_opts)
-    // No headroom left to raise — re-issuing would just truncate again at the
-    // same cap, so stop and let parse-guidance take the turn.
-    if type_of(cap) == "int" && cap > 0 && raised <= cap {
+    const raised = __autocontinue_next_cap(cap, call, llm_opts)
+    // A continuation must change the request. When the cap cannot grow past
+    // the one that just truncated, stop and let the normal loop body take the
+    // turn instead of paying for the same truncation again.
+    if raised == nil {
       break
     }
     attempts = attempts + 1
