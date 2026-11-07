@@ -4,6 +4,27 @@
 use tree_sitter::{Node, Tree};
 
 use crate::ast::java::{direct_members, is_object_method, type_parameter_name};
+pub(super) use crate::ast::java::{has_modifier, is_type};
+
+#[path = "java_type_bindings.rs"]
+mod types;
+pub(super) use types::JavaTypeCatalog;
+
+#[cfg(test)]
+#[path = "java_type_binding_tests.rs"]
+mod type_tests;
+
+struct JavaImport {
+    path: String,
+    wildcard: bool,
+    is_static: bool,
+}
+
+impl JavaImport {
+    fn short_name(&self) -> &str {
+        self.path.rsplit('.').next().unwrap_or(&self.path)
+    }
+}
 
 #[derive(Clone, Copy)]
 enum BindingType<T> {
@@ -37,8 +58,7 @@ impl<T> BindingType<T> {
 pub(super) struct JavaBindings<'a> {
     source: &'a str,
     package: String,
-    imports: Vec<(String, String)>,
-    wildcard_import: bool,
+    imports: Vec<JavaImport>,
     unresolved_syntax: bool,
 }
 
@@ -47,29 +67,27 @@ impl<'a> JavaBindings<'a> {
         let root = tree.root_node();
         let mut package = String::new();
         let mut imports = Vec::new();
-        let mut wildcard_import = false;
         for node in children(root) {
             match node.kind() {
                 "package_declaration" => {
                     if let Some(name) = children(node)
                         .find(|child| matches!(child.kind(), "identifier" | "scoped_identifier"))
                     {
-                        package = text(name, source).to_string();
+                        package = source_name(name, source);
                     }
                 }
                 "import_declaration" => {
-                    let raw = text(node, source);
-                    if raw.starts_with("import static ") {
-                        continue;
-                    }
-                    if raw.contains('*') {
-                        wildcard_import = true;
-                    } else if let Some(name) = children(node)
+                    if let Some(name) = children(node)
                         .find(|child| matches!(child.kind(), "identifier" | "scoped_identifier"))
                     {
-                        let full = text(name, source).to_string();
-                        let short = full.rsplit('.').next().unwrap_or(&full).to_string();
-                        imports.push((short, full));
+                        let mut cursor = node.walk();
+                        imports.push(JavaImport {
+                            path: source_name(name, source),
+                            wildcard: children(node).any(|child| child.kind() == "asterisk"),
+                            is_static: node
+                                .children(&mut cursor)
+                                .any(|child| child.kind() == "static"),
+                        });
                     }
                 }
                 _ => {}
@@ -79,7 +97,6 @@ impl<'a> JavaBindings<'a> {
             source,
             package,
             imports,
-            wildcard_import,
             unresolved_syntax: root.has_error()
                 || source.contains("\\u")
                 || descendants(root).any(|node| {
@@ -252,10 +269,10 @@ impl<'a> JavaBindings<'a> {
         let imported: Vec<_> = self
             .imports
             .iter()
-            .filter(|(short, _)| short == first)
+            .filter(|import| !import.is_static && !import.wildcard && import.short_name() == first)
             .collect();
         if imported.len() == 1 {
-            return Some(format!("{}{}", imported[0].1, name.strip_prefix(first)?));
+            return Some(format!("{}{}", imported[0].path, name.strip_prefix(first)?));
         }
         if !imported.is_empty() {
             return None;
@@ -264,7 +281,11 @@ impl<'a> JavaBindings<'a> {
             // A dotted source name may start with a relative type, not a package.
             return None;
         }
-        if self.wildcard_import {
+        if self
+            .imports
+            .iter()
+            .any(|import| import.wildcard && !import.is_static)
+        {
             return None;
         }
         Some(self.in_package(name))
@@ -406,32 +427,10 @@ impl<'a> JavaBindings<'a> {
     }
 }
 
-fn is_type(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "class_declaration"
-            | "interface_declaration"
-            | "enum_declaration"
-            | "record_declaration"
-            | "annotation_type_declaration"
-    )
-}
-
 fn has_supertypes(node: Node<'_>) -> bool {
     node.child_by_field_name("superclass").is_some()
         || node.child_by_field_name("interfaces").is_some()
         || children(node).any(|child| child.kind() == "extends_interfaces")
-}
-
-fn has_modifier(node: Node<'_>, modifier: &str) -> bool {
-    let Some(modifiers) = children(node).find(|child| child.kind() == "modifiers") else {
-        return false;
-    };
-    let mut cursor = modifiers.walk();
-    let found = modifiers
-        .children(&mut cursor)
-        .any(|child| child.kind() == modifier);
-    found
 }
 
 fn is_local_scope(node: Node<'_>) -> bool {
@@ -461,6 +460,18 @@ pub(super) fn text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     source.get(node.byte_range()).unwrap_or_default()
 }
 
+fn source_name(node: Node<'_>, source: &str) -> String {
+    let mut parts: Vec<_> = descendants(node)
+        .filter(|node| matches!(node.kind(), "identifier" | "type_identifier"))
+        .collect();
+    parts.sort_by_key(Node::start_byte);
+    parts
+        .iter()
+        .map(|node| text(*node, source))
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 fn children(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
@@ -468,7 +479,7 @@ fn children(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
         .into_iter()
 }
 
-fn descendants(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
+pub(super) fn descendants(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
     let mut pending = vec![node];
     std::iter::from_fn(move || {
         let next = pending.pop()?;

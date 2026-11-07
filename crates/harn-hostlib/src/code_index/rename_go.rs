@@ -293,105 +293,15 @@ fn read_workspace_bounded(
     max_source_bytes: usize,
     call: Option<&HostCallContext>,
 ) -> Result<Vec<(String, String)>, String> {
-    let mut pending = vec![root.to_path_buf()];
-    let mut paths = BTreeSet::<PathBuf>::new();
-    let mut entries_seen = 0usize;
-    while let Some(dir) = pending.pop() {
-        for entry in std::fs::read_dir(&dir).map_err(|err| err.to_string())? {
-            if let Some(call) = call {
-                if call.interrupted().is_some() {
-                    return Err("Go workspace coverage was interrupted".into());
-                }
-                call.heartbeat(Phase::Resolving, "checking Go workspace sources");
-            }
-            entries_seen += 1;
-            if entries_seen > max_entries {
-                return Err("Go workspace census exceeded its entry limit".into());
-            }
-            let entry = entry.map_err(|err| err.to_string())?;
-            let path = entry.path();
-            let kind = entry.file_type().map_err(|err| err.to_string())?;
-            if kind.is_dir() {
-                if entry.file_name() != ".git" {
-                    if super::walker::is_sensitive(&path) {
-                        return Err(
-                            "a sensitive workspace directory prevents Go coverage proof".into()
-                        );
-                    }
-                    pending.push(path);
-                }
-            } else if kind.is_symlink() {
-                // A non-sensitive link could hide a directory or a Go file.
-                // Inspect only the target's type; never descend into a linked
-                // directory or read a linked Go file to establish coverage.
-                if path.extension().is_some_and(|extension| extension == "go") {
-                    return Err("a workspace symbolic link prevents Go coverage proof".into());
-                }
-                if !super::walker::is_sensitive(&path)
-                    && std::fs::metadata(&path)
-                        .map_err(|err| err.to_string())?
-                        .is_dir()
-                {
-                    return Err("a workspace symbolic link prevents Go coverage proof".into());
-                }
-            } else if kind.is_file() && path.extension().is_some_and(|extension| extension == "go")
-            {
-                if entry.metadata().map_err(|err| err.to_string())?.len()
-                    > super::walker::MAX_FILE_BYTES
-                {
-                    return Err("a Go workspace source exceeds the inspection limit".into());
-                }
-                paths.insert(path);
-            } else if path.extension().is_some_and(|extension| extension == "go") {
-                return Err("a Go workspace source is not a regular file".into());
-            }
-        }
-    }
-    if let Some(session_id) = session_id {
-        for path in crate::fs::staged_pending_paths(session_id).map_err(|err| err.to_string())? {
-            entries_seen += 1;
-            if entries_seen > max_entries {
-                return Err("Go workspace census exceeded its entry limit".into());
-            }
-            if let Some(call) = call {
-                if call.interrupted().is_some() {
-                    return Err("Go workspace coverage was interrupted".into());
-                }
-                call.heartbeat(Phase::Resolving, "checking staged Go workspace sources");
-            }
-            if path.extension().is_some_and(|extension| extension == "go") {
-                paths.insert(path);
-            }
-        }
-    }
-    let mut sources = Vec::new();
-    let mut bytes = 0usize;
-    for path in paths {
-        if let Some(call) = call {
-            if call.interrupted().is_some() {
-                return Err("Go workspace coverage was interrupted".into());
-            }
-            call.heartbeat(Phase::Resolving, "reading Go workspace sources");
-        }
-        if super::walker::is_sensitive(&path) {
-            return Err("a Go workspace source cannot be safely inspected".into());
-        }
-        let relative = path.strip_prefix(root).map_err(|err| err.to_string())?;
-        let relative = relative
-            .to_str()
-            .ok_or("a Go workspace path is not UTF-8")?;
-        let source = read_source(super::rename::BUILTIN, root, relative, session_id)
-            .map_err(|err| err.to_string())?;
-        if source.len() as u64 > super::walker::MAX_FILE_BYTES {
-            return Err("a Go workspace source exceeds the inspection limit".into());
-        }
-        bytes = bytes.saturating_add(source.len());
-        if bytes > max_source_bytes {
-            return Err("Go workspace census exceeded its source-size limit".into());
-        }
-        sources.push((relative.replace('\\', "/"), source));
-    }
-    Ok(sources)
+    super::rename_workspace::read_sources(
+        root,
+        session_id,
+        "go",
+        "Go",
+        max_entries,
+        max_source_bytes,
+        call,
+    )
 }
 
 fn read_package(

@@ -114,6 +114,7 @@ mod rename_java;
 mod rename_python_stub;
 mod rename_reach;
 mod rename_rust_residue;
+mod rename_workspace;
 mod repo_map;
 mod signature_syntax;
 mod snapshot;

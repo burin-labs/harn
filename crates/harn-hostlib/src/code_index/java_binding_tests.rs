@@ -222,8 +222,9 @@ fn java_same_named_method_is_not_a_constructor() {
                 && node.col == Some(source.rfind("DocumentStore").unwrap() as u32 + 1)
         })
         .expect("the method is indexed");
-    let tree = crate::ast::api::parse_tree(source, crate::ast::Language::Java).unwrap();
-    assert!(!super::rename_java::is_constructor(&tree, source, seed));
+    assert!(super::rename_java::prepare_type(state, seed, None)
+        .unwrap()
+        .is_none());
     drop(index);
     let result = ws.rename(
         "DocumentStore",

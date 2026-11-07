@@ -1,0 +1,192 @@
+use super::{descendants, text, JavaBindings, JavaTypeCatalog};
+use crate::ast::{api::parse_tree, Language};
+
+const TARGET: &str = "package lab; public class DocumentStore { public DocumentStore() {} static int size() { return 1; } }";
+const OTHER: &str = "package other; public class DocumentStore {}";
+
+fn catalog(sources: &[&str]) -> JavaTypeCatalog {
+    let mut catalog = JavaTypeCatalog::default();
+    for source in sources {
+        let tree = parse_tree(source, Language::Java).unwrap();
+        assert!(!tree.root_node().has_error(), "{source}");
+        catalog.add(&JavaBindings::new(&tree, source), tree.root_node());
+    }
+    catalog
+}
+
+#[test]
+fn type_namespace_preserves_imports_nested_types_parameters_and_namesakes() {
+    for (source, expected) in [
+        ("package lab; class Page { DocumentStore first; DocumentStore[] second = new DocumentStore[0]; }", 3),
+        ("package app; import lab.DocumentStore; class Page { DocumentStore field = new DocumentStore(); }", 3),
+        ("package app; class Page { lab.DocumentStore field = new lab.DocumentStore(); }", 2),
+        ("package app; import other.DocumentStore; class Page { DocumentStore field; }", 0),
+        ("package lab; class Page<DocumentStore> { DocumentStore field; }", 0),
+        ("package lab; class Page { static class DocumentStore {} DocumentStore field; }", 0),
+        ("package lab; class Page { void use() { class DocumentStore {} DocumentStore local; } }", 0),
+        ("package lab; class Page { int use(DocumentStore value) { int DocumentStore = 1; return DocumentStore; } }", 1),
+        ("package lab; class Page { int use() { return DocumentStore.size(); } }", 1),
+    ] {
+        let catalog = catalog(&[TARGET, OTHER, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let mut selected = 0;
+        for node in descendants(tree.root_node()).filter(|node| {
+            matches!(node.kind(), "identifier" | "type_identifier") && text(*node, source) == "DocumentStore"
+        }) {
+            selected += usize::from(bindings.type_occurrence(node, &catalog).unwrap().as_deref() == Some("lab.DocumentStore"));
+        }
+        assert_eq!(selected, expected, "{source}");
+    }
+}
+
+#[test]
+fn nested_type_and_constructor_identity_share_one_declared_owner() {
+    let source = "package lab; class Outer { static class DocumentStore { DocumentStore() {} void DocumentStore() {} } DocumentStore field; }";
+    let catalog = catalog(&[source]);
+    let tree = parse_tree(source, Language::Java).unwrap();
+    let bindings = JavaBindings::new(&tree, source);
+    let identities = descendants(tree.root_node())
+        .filter(|node| {
+            matches!(node.kind(), "identifier" | "type_identifier")
+                && text(*node, source) == "DocumentStore"
+        })
+        .map(|node| bindings.type_occurrence(node, &catalog).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        identities
+            .iter()
+            .filter(|identity| identity.as_deref() == Some("lab.Outer.DocumentStore"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        identities
+            .iter()
+            .filter(|identity| identity.is_none())
+            .count(),
+        1,
+        "the same-named method is not a constructor"
+    );
+}
+
+#[test]
+fn ambiguous_type_imports_inheritance_and_patterns_refuse_real_occurrences() {
+    for source in [
+        "package app; import lab.*; import other.*; class Page { DocumentStore field; }",
+        "package app; import lab.DocumentStore; import other.DocumentStore; class Page { DocumentStore field; }",
+        "package lab; class Page extends UnknownBase { DocumentStore field; }",
+        "package lab; class Page { int use(Object value) { if (value instanceof Page DocumentStore) { return DocumentStore.hashCode(); } return 0; } }",
+    ] {
+        let catalog = catalog(&[TARGET, OTHER, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let occurrences = descendants(tree.root_node()).filter(|node| {
+            matches!(node.kind(), "identifier" | "type_identifier") && text(*node, source) == "DocumentStore"
+        }).collect::<Vec<_>>();
+        assert!(!occurrences.is_empty(), "{source}");
+        assert!(occurrences.into_iter().any(|node| bindings.type_occurrence(node, &catalog).is_err()), "{source}");
+    }
+}
+
+#[test]
+fn proposed_type_names_follow_declaration_grammar_and_restricted_identifiers() {
+    for name in [
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
+        "_",
+        "null",
+        "true",
+        "false",
+        "var",
+        "yield",
+        "record",
+        "sealed",
+        "permits",
+        "bad-name",
+    ] {
+        assert!(!crate::ast::java::is_type_name(name), "{name}");
+    }
+    for name in [
+        "DocumentLibrary",
+        "module",
+        "open",
+        "with",
+        "Library2",
+        "$Library",
+    ] {
+        assert!(crate::ast::java::is_type_name(name), "{name}");
+    }
+}
+
+#[test]
+fn renamed_simple_types_refuse_lexical_import_and_value_receiver_capture() {
+    for (source, expected) in [
+        ("package lab; class Page<DocumentLibrary> { DocumentStore field; }", true),
+        ("package app; import lab.DocumentStore; import other.DocumentLibrary; class Page { DocumentStore field; }", true),
+        ("package lab; class Page { int use(int DocumentLibrary) { return DocumentStore.size(); } }", true),
+        ("package lab; class Page { DocumentStore use(int DocumentLibrary) { return null; } }", false),
+        ("package app; class Page<DocumentLibrary> { lab.DocumentStore field; }", false),
+        ("package lab; class Page { DocumentStore field; }", false),
+    ] {
+        let catalog = catalog(&[TARGET, OTHER, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let selected = descendants(tree.root_node()).filter(|node| {
+            matches!(node.kind(), "identifier" | "type_identifier")
+                && text(*node, source) == "DocumentStore"
+                && bindings.type_occurrence(*node, &catalog).unwrap().as_deref() == Some("lab.DocumentStore")
+        }).collect::<Vec<_>>();
+        assert!(!selected.is_empty(), "the original type must actually bind: {source}");
+        let capture = selected.into_iter().any(|node| bindings.type_name_capture(node, "DocumentLibrary", &catalog).unwrap());
+        assert_eq!(capture, expected, "{source}");
+    }
+}

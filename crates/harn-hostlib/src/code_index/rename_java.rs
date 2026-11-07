@@ -7,39 +7,13 @@ use super::refactor_core::{IdentifierSpan, ShadowSite};
 use super::state::IndexState;
 use super::symbol_graph::Node;
 
+#[path = "rename_java_type.rs"]
+mod types;
+pub(super) use types::{prepare_type, JavaTypeRename, JavaTypeSeed};
+
 pub(super) struct RenameSites {
     pub targets: Vec<IdentifierSpan>,
     pub shadows: Vec<ShadowSite>,
-}
-
-pub(super) fn is_constructor(tree: &Tree, source: &str, seed: &Node) -> bool {
-    let positions = super::source_positions::LineIndex::new(source);
-    let mut pending = vec![tree.root_node()];
-    while let Some(node) = pending.pop() {
-        if matches!(
-            node.kind(),
-            "constructor_declaration" | "compact_constructor_declaration"
-        ) {
-            if let Some(name) = node.child_by_field_name("name") {
-                let line = seed.line as usize;
-                if (node.start_position().row + 1 == line || name.start_position().row + 1 == line)
-                    && source.get(name.byte_range()) == Some(seed.name.as_str())
-                    && seed.col.is_some_and(|col| {
-                        positions
-                            .position(name.start_byte(), super::source_positions::Encoding::Utf16)
-                            .character
-                            + 1
-                            == col
-                    })
-                {
-                    return true;
-                }
-            }
-        }
-        let mut cursor = node.walk();
-        pending.extend(node.named_children(&mut cursor));
-    }
-    false
 }
 
 pub(super) fn check_new_name(name: &str) -> Result<(), String> {
@@ -148,6 +122,9 @@ fn occurrence(
         .root_node()
         .named_descendant_for_byte_range(span.start_byte, span.end_byte)
         .ok_or("the Java occurrence has no syntax node")?;
+    if node.kind() == "type_identifier" {
+        return Ok(None);
+    }
     let parent = node.parent().ok_or("the Java occurrence has no parent")?;
     if parent
         .child_by_field_name("name")
