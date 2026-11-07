@@ -46,10 +46,8 @@ permissions:
   contents: read
 
 jobs:
-  availability:
-    # A schedule sweeps every ship PR; every other route names one PR, so a
-    # blank dispatch never reaches the sweep. Then count the exact large Linux
-    # pool used by the merger.
+  ship:
+    # A schedule sweeps every ship PR; every other route names one PR.
     if: >-
       github.repository == 'burin-labs/harn'
       && vars.HARN_SMART_SHIP == 'on'
@@ -74,25 +72,9 @@ jobs:
       && format('{0}', github.event.workflow_run.pull_requests[0].base.repo.id) == github.repository_id
       && github.event.workflow_run.pull_requests[0].base.ref == 'main'
       && github.event.workflow_run.pull_requests[0].number > 0))
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@afd182de69c70f74aef97e24b2ac12801983eec4
-    with:
-      owned_only: true
-      require_measured: true
-      linux_probe_runner_tag: harn-ci-big
-      minimum_online_by_pool: '{"linux_big":1}'
-    secrets:
-      RUNNER_PROBE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RUNNER_PROBE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-  ship:
-    needs: [availability]
-    if: >-
-      ${{ needs.availability.result == 'success'
-      && fromJSON(needs.availability.outputs.capacity).linux_big.measured == true
-      && fromJSON(needs.availability.outputs.capacity).linux_big.eligible == true }}
     uses: burin-labs/.github/.github/workflows/smart-ship.yml@afd182de69c70f74aef97e24b2ac12801983eec4
     with:
-      runs-on: ${{ toJSON(fromJSON('["self-hosted","Linux","X64","harn-ci-big"]')) }}
+      runs-on: '"ubuntu-24.04"'
       repair: false
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}

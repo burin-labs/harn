@@ -70,26 +70,6 @@ const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
 const PRODUCER_STEP_BUDGETS: list<StepBudget> = CLI_PRODUCER_STEP_BUDGETS
   + TEST_PRODUCER_STEP_BUDGETS
 
-// Owned CI attempts with one compiler and no restored target timed out at
-// 600s and 900s. A separate private-target, one-compiler build completed in
-// 679s with compiler-cache hits unmeasured; that does not replace the slower
-// canonical observation. This bounded retry clears the 900s lower bound by
-// the policy margin. It is not proof of completed cold CI or portable replay.
-// Those observations were of the dev profile; the shared CLI now builds in
-// ci-cli, whose cold build measured 1.56x the dev one on the same host, so the
-// lower bound is scaled by that ratio. One owned ci-cli cold build has since
-// completed in 875s (cattrick-w3, run 36952725704), inside this bound.
-const PRODUCER_OWNED_CLI_MINUTES = 31
-
-const PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS = 1404
-
-// The canonical owned producer reached the workspace test graph but timed out
-// at 960s before archiving it. Filtering archive contents still compiles the
-// full workspace. Record this lower bound, not a completed cold measurement.
-const PRODUCER_OWNED_SECURITY_MINUTES = 24
-
-const PRODUCER_OWNED_SECURITY_COLD_LOWER_BOUND_SECONDS = 960
-
 fn step_budget_minutes(budgets: list<StepBudget>, name: string) -> int {
   for budget in budgets {
     if budget.name == name {
@@ -102,14 +82,12 @@ fn step_budget_minutes(budgets: list<StepBudget>, name: string) -> int {
 /** The hosted step fuse is the hosted step budget, so the two cannot drift. */
 pub fn producer_security_timeout_expression() -> string {
   const hosted = step_budget_minutes(TEST_PRODUCER_STEP_BUDGETS, "Build security test archive")
-  return "$"
-    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_SECURITY_MINUTES} || ${hosted} }}"
+  return to_string(hosted)
 }
 
 pub fn producer_cli_timeout_expression() -> string {
   const hosted = step_budget_minutes(CLI_PRODUCER_STEP_BUDGETS, "Build portable Harn CLI")
-  return "$"
-    + "{{ env.HARN_RUNNER_TIER == 'self-hosted' && ${PRODUCER_OWNED_CLI_MINUTES} || ${hosted} }}"
+  return to_string(hosted)
 }
 
 /**
@@ -144,20 +122,6 @@ pub fn step_budget_margin_errors(
 /** The shipped producer table, measured against its own recorded cold walls. */
 pub fn producer_step_budget_margin_errors() -> list<string> {
   return step_budget_margin_errors(PRODUCER_STEP_BUDGETS)
-    + step_budget_margin_errors(
-      [
-        {
-          name: "Owned portable Harn CLI",
-          minutes: PRODUCER_OWNED_CLI_MINUTES,
-          cold_seconds: PRODUCER_OWNED_CLI_COLD_LOWER_BOUND_SECONDS,
-        },
-        {
-          name: "Owned security test archive",
-          minutes: PRODUCER_OWNED_SECURITY_MINUTES,
-          cold_seconds: PRODUCER_OWNED_SECURITY_COLD_LOWER_BOUND_SECONDS,
-        },
-      ],
-    )
 }
 
 /** Checkout, disk reclaim, mold, toolchain, cache restore, nextest, uploads. */
@@ -171,26 +135,6 @@ pub fn producer_cache_save_reserve_minutes() -> int {
   return PRODUCER_CACHE_SAVE_RESERVE_MINUTES
 }
 
-/**
- * The owned rung never saves a cache, so it does not carry the save's reserve.
- * CLI and security allowances include observed timeouts on shared capacity.
- * This is a hang backstop, not a completed-build or performance claim.
- */
-fn owned_ceiling_minutes(budgets: list<StepBudget>) -> int {
-  let total = PRODUCER_SETUP_OVERHEAD_MINUTES
-  for budget in budgets {
-    total = total
-      + if budget.name == "Build portable Harn CLI" {
-        PRODUCER_OWNED_CLI_MINUTES
-      } else if budget.name == "Build security test archive" {
-        PRODUCER_OWNED_SECURITY_MINUTES
-      } else {
-        budget.minutes
-      }
-  }
-  return total
-}
-
 fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
   let total = PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_CACHE_SAVE_RESERVE_MINUTES
   for budget in budgets {
@@ -199,20 +143,12 @@ fn hosted_ceiling_minutes(budgets: list<StepBudget>) -> int {
   return total
 }
 
-fn timeout_expression(budgets: list<StepBudget>, owned_rung: bool = true) -> string {
-  // The hosted rung writes the main-branch cache, so it carries the hosted
-  // ceiling, cache-save reserve included.
+fn timeout_expression(budgets: list<StepBudget>) -> string {
   const hosted = to_string(hosted_ceiling_minutes(budgets))
-  return producer_rung_expression(
-    {owned: owned_rung ? to_string(owned_ceiling_minutes(budgets)) : "", hosted: hosted},
-  )
+  return "$" + "{{ ${hosted} }}"
 }
 
 /** Ceilings of the workspace test producer, `rust-check-inputs`. */
-pub fn producer_owned_ceiling_minutes() -> int {
-  return owned_ceiling_minutes(TEST_PRODUCER_STEP_BUDGETS)
-}
-
 pub fn producer_hosted_ceiling_minutes() -> int {
   return hosted_ceiling_minutes(TEST_PRODUCER_STEP_BUDGETS)
 }
@@ -226,32 +162,9 @@ pub fn cli_producer_hosted_ceiling_minutes() -> int {
   return hosted_ceiling_minutes(CLI_PRODUCER_STEP_BUDGETS)
 }
 
-fn producer_job_runner_expression(job_name: string) -> string {
-  return producer_runner_expression(producer_uses_owned_pool(job_name))
-}
-
-fn producer_job_tier_expression(job_name: string) -> string {
-  return producer_tier_expression(producer_uses_owned_pool(job_name))
-}
-
-fn producer_job_timeout_expression(job_name: string, budgets: list<StepBudget>) -> string {
-  return timeout_expression(budgets, producer_uses_owned_pool(job_name))
-}
-
-fn producer_job_ladder(job_name: string) -> string {
-  if producer_uses_owned_pool(job_name) {
-    return " the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests,"
-  }
-  return ""
-}
-
-/** Trusted PR producers require a measured capacity decision before dispatch. */
+/** Scope producers to changes requiring Rust proof on every event. */
 pub fn producer_admission_expression() -> string {
-  return "$"
-    + "{{ !cancelled() && needs.changes.outputs.rust == 'true'"
-    + "\n  && (needs.rust-producer-capacity.result == 'success'"
-    + "\n  || github.event_name != 'pull_request'"
-    + "\n  || github.event.pull_request.head.repo.full_name != github.repository) }}"
+  return "$" + "{{ !cancelled() && needs.changes.outputs.rust == 'true' }}"
 }
 
 fn step_named(job: CiJob?, name: string) -> CiStep? {
@@ -437,17 +350,15 @@ fn persistent_compile_lane_errors(
   }
   let errors: list<string> = []
   if trim(job?.if ?? "") != producer_admission_expression()
-    || !strings_of(job?.needs ?? []).contains("rust-producer-capacity") {
+    || strings_of(job?.needs ?? []) != ["changes"] {
     errors = errors
-      + ["ci.yml:${job_name} must require a successful capacity decision on trusted pull requests"]
+      + ["ci.yml:${job_name} must depend only on the Rust change decision"]
   }
-  if trim(job["runs-on"] ?? "") != producer_job_runner_expression(job_name) {
+  if trim(job["runs-on"] ?? "") != producer_runner_expression() {
     errors = errors
-      + [
-        "ci.yml:${job_name} must ladder${producer_job_ladder(job_name)} then ${PRODUCER_HOSTED_LINUX_RUNNER}",
-      ]
+      + ["ci.yml:${job_name} must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]
   }
-  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_job_tier_expression(job_name) {
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != producer_tier_expression() {
     errors = errors
       + ["ci.yml:${job_name} must mirror every one of its runner tiers"]
   }
@@ -455,10 +366,10 @@ fn persistent_compile_lane_errors(
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
   if trim(to_string(job["timeout-minutes"] ?? ""))
-    != producer_job_timeout_expression(job_name, budgets) {
+    != timeout_expression(budgets) {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the ${owned_ceiling_minutes(budgets)}-minute owned ceiling and the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+        "ci.yml:${job_name} must keep the ${hosted_ceiling_minutes(budgets)}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
   errors = errors + producer_step_budget_errors(job, job_name, budgets)

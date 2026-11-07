@@ -181,35 +181,13 @@ pub const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 pub const HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 /** The isolated runner that can install the slow E2E namespace grant. */
-pub const E2E_HOSTED_RUNNER = "ubuntu-8core"
+pub const E2E_HOSTED_RUNNER = "ubuntu-24.04"
 
-/**
- * The producers' rung after the owned pool: GitHub's free standard runner.
- *
- * This repository is public, and public-repository CI runs only on free
- * standard runners or owned machines (harn#9370): no larger GitHub runner,
- * Ubicloud or Blacksmith, even though the producers build slower on 4 vCPU.
- */
+/** Standard hosted capacity for both Rust producers. */
 pub const PRODUCER_HOSTED_LINUX_RUNNER = "ubuntu-24.04"
 
 pub const HOSTED_RUNNER_TIER = "github-hosted"
 
-/**
- * The org's own Linux pool. Named as its own tier rather than folded into the
- * hosted one because every `${RUNNER_TIER_ENV} ==` guard has to answer for it:
- * a guard that lists only the tiers it knows turns a new tier into a silent
- * skip, and the first owned run would then compile cold, report success, and
- * say nothing about the cache step it never entered (#8334).
- */
-pub const SELFHOSTED_RUNNER_TIER = "self-hosted"
-
-/** The owned Linux label set the Rust workspace producer may prefer. */
-pub const SELFHOSTED_LINUX_BIG_RUNNER = "[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]"
-
-/** The census pool that answers for that label set. */
-pub const SELFHOSTED_LINUX_BIG_POOL = "linux_big"
-
-/** The input that carries the evacuation switch into that decision. */
 pub const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Compile fan-out on the producer is measured, not typed, and the ceiling now
@@ -1984,47 +1962,6 @@ pub fn e2e_workflow_concurrency_errors(workflow: CiWorkflow?) -> list<string> {
 }
 
 /**
- * The owned rung reads the capacity job's named route, not the census. The
- * script is the one owner of that decision, and a census the routing
- * expression parsed itself would fail the whole job on malformed JSON instead
- * of falling back hosted by name.
- */
-pub fn owned_producer_condition() -> string {
-  return "(needs.rust-producer-capacity.outputs.route == 'owned'"
-}
-
-/**
- * Three rungs, one shape, used for `runs-on`, `timeout-minutes` and the tier
- * mirror. They are generated from one function so the three can never disagree
- * about which events reach which capacity: a mirror that drifted from its
- * `runs-on` is how a tier guard starts naming a route the job never took.
- */
-/**
- * The workspace producer's rungs. An empty `owned` drops that rung; `hosted`,
- * the free standard runner, is the rung every producer keeps. Merge groups
- * take the hosted rung: the owned capacity decision routes pull requests
- * only, and the datacenter host's merge-group route ran the security archive
- * past its step limit (#9428).
- */
-pub type ProducerRungs = {owned: string, hosted: string}
-
-pub fn producer_rung_expression(rungs: ProducerRungs) -> string {
-  const {owned, hosted} = rungs
-  // An empty `owned` drops the owned rung: a lane that must not wait on the
-  // owned pool's per-host compile budget goes straight to free hosted capacity.
-  const owned_rung = if owned == "" {
-    ""
-  } else {
-    "${owned_producer_condition()}" + "\n  && ${owned})" + "\n  || "
-  }
-  return "$"
-    + "{{ "
-    + owned_rung
-    + hosted
-    + " }}"
-}
-
-/**
  * Linux runner label prefixes whose hosts cannot confine a Harn child.
  *
  * Since #9068 a Harn child process on Linux refuses to start without Landlock
@@ -2211,7 +2148,7 @@ pub const PAID_CAPACITY_ROUTE_INPUTS = [
   "CAPACITY_VENDOR_RUNNER",
 ]
 
-/** Paid public capacity is reserved for the isolated namespace E2E suite. */
+/** Public workflows use standard hosted runners. */
 pub fn public_repository_runner_errors(
   workflows: dict<string, CiWorkflow>,
   release_runner_policy: CiReleaseRunnerPolicy,
@@ -2221,10 +2158,13 @@ pub fn public_repository_runner_errors(
     const workflow = workflows[workflow_name] ?? {}
     for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
       for label in job_runner_labels(workflow, job) {
-        const e2e_exception = workflow_name == "e2e.yml" && job_name == "e2e"
-          && label == E2E_HOSTED_RUNNER
-          && job?.["runs-on"] == E2E_HOSTED_RUNNER
-        if paid_public_runner_selector(label, release_runner_policy) && !e2e_exception {
+        if label == "self-hosted"
+          && !["build-release-binaries.yml", "macos-nightly.yml", "release-smoke.yml"].contains(
+            workflow_name,
+          ) {
+          errors = errors + ["${workflow_name}:${job_name} must not request a self-hosted runner"]
+        }
+        if paid_public_runner_selector(label, release_runner_policy) {
           errors = errors
             + [
               "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
@@ -2284,36 +2224,12 @@ pub fn landlock_incapable_runner_errors(
   return errors
 }
 
-/**
- * Whether a producer may land on the shared owned pool.
- *
- * The shared CLI may not. Every Harn proof lane waits for it, and an owned
- * carrier shares four cores among six runners, so its compile budget is one
- * job: with no target restored and no sccache it hit its 31-minute step
- * timeout in run 36987728246, while a cold build on the vendor rung took
- * 693s. Its reserved runners did no better: their compiles ran in the host's
- * shared compiler cache server and took a median 22.9 minutes against 15.7
- * hosted (#9435), so it always runs on the free hosted runner. The workspace
- * test producer keeps the shared owned rung; nothing waits on its finish
- * except the verdict.
- */
-pub fn producer_uses_owned_pool(job_name: string) -> bool {
-  return job_name != "rust-cli"
+pub fn producer_runner_expression() -> string {
+  return "$" + "{{ '${PRODUCER_HOSTED_LINUX_RUNNER}' }}"
 }
 
-pub fn producer_runner_expression(owned_rung: bool = true) -> string {
-  return producer_rung_expression(
-    {
-      owned: owned_rung ? "fromJSON('${SELFHOSTED_LINUX_BIG_RUNNER}')" : "",
-      hosted: "'${PRODUCER_HOSTED_LINUX_RUNNER}'",
-    },
-  )
-}
-
-pub fn producer_tier_expression(owned_rung: bool = true) -> string {
-  return producer_rung_expression(
-    {owned: owned_rung ? "'${SELFHOSTED_RUNNER_TIER}'" : "", hosted: "'${HOSTED_RUNNER_TIER}'"},
-  )
+pub fn producer_tier_expression() -> string {
+  return "$" + "{{ '${HOSTED_RUNNER_TIER}' }}"
 }
 
 /** The text of ci-status's requirement for one result variable, up to the next blank line. */
@@ -2380,19 +2296,10 @@ pub fn minimal_pr_capacity_errors(ci: CiWorkflow?, publish: CiWorkflow?) -> list
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
-  // The Rust workspace producer carries more rungs than its siblings.
-  // A same-repository pull request prefers the owned pool when its census
-  // reports an idle carrier; a fully busy pool routes hosted (#9086).
-  // Merge groups take the hosted rung: merge throughput must not depend on an
-  // owned machine's health (#6217), and the datacenter host's merge-group
-  // route ran the security archive past its step limit (#9428). Main pushes
-  // are NOT eligible either: they are the authorized cache writer.
   if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
     != producer_runner_expression() {
     errors = errors
-      + [
-        "ci.yml:rust-check-inputs must ladder the owned ${SELFHOSTED_LINUX_BIG_POOL} pool on same-repository pull requests, then ${PRODUCER_HOSTED_LINUX_RUNNER}",
-      ]
+      + ["ci.yml:rust-check-inputs must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]
   }
   // `audit-scripts` is a cheap refusal now (about five minutes on the shared
   // CLI): the loop below refuses any event term, and this pins the one gate

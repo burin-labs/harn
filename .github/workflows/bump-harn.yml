@@ -15,10 +15,10 @@ on:
   workflow_call:
     inputs:
       runs-on:
-        description: "Runner label for refresh and validation. The default is the burin-labs large Linux pool; other organizations must supply an available label."
+        description: "Runner label for refresh and validation."
         required: false
         type: string
-        default: harn-ci-big
+        default: ubuntu-24.04
       version:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
