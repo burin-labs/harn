@@ -17,7 +17,7 @@ import { verification_gate_input } from "std/verification"
 pub fn agent_repair_config(raw: RepairDiagnostics?) -> AgentRepairConfig {
   const config: RepairDiagnostics = raw ?? {}
   return {
-    post_edit_reverify: config?.post_edit_reverify ?? true,
+    post_edit_reverify: config?.post_edit_reverify ?? false,
     reserved_terminal_verify: config?.reserved_terminal_verify ?? false,
     reserved_terminal_verify_iterations: max(1, config?.reserved_terminal_verify_iterations ?? 2),
     zero_write_terminal_verify: config?.zero_write_terminal_verify ?? false,

@@ -522,7 +522,7 @@ fn agent_loop_options_is_superset_of_llm_call_options() {
 }
 
 /// Smoke-pin the agent-side aliases that have no Rust struct twin
-/// (stall diagnostics, judges, and iteration budgets are stdlib-owned):
+/// (verification controls, judges, and iteration budgets are stdlib-owned):
 /// assert a few load-bearing keys so a rename in the alias file cannot go
 /// unnoticed by CI even before the conformance suite runs.
 #[test]
@@ -571,9 +571,14 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
             "ReadOnlyStanceOptions lost key `{key}`"
         );
     }
-    let stall = harn_alias_keys(agent_options_types_harn(), "StallDiagnostics");
-    for key in ["enabled", "threshold", "inject_feedback", "max_feedback"] {
-        assert!(stall.contains(key), "StallDiagnostics lost key `{key}`");
+    let repair = harn_alias_keys(agent_options_types_harn(), "RepairDiagnostics");
+    for key in [
+        "post_edit_reverify",
+        "reserved_terminal_verify",
+        "reserved_terminal_verify_iterations",
+        "zero_write_terminal_verify",
+    ] {
+        assert!(repair.contains(key), "RepairDiagnostics lost key `{key}`");
     }
     let judge = harn_alias_keys(agent_options_types_harn(), "JudgeConfig");
     for key in ["provider", "model", "max_invocations", "cadence"] {

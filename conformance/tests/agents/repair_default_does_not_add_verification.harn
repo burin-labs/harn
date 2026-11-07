@@ -1,0 +1,43 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
+pipeline default(harness: Harness) {
+  const probes = harness.runtime.shared_cell(
+    {scope: "task_group", key: "default-verification-${harness.random.uuid()}", initial: 0},
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      llm_text("Finished. ##DONE##"),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Repair the failing test.",
+        nil,
+        {
+          provider: "mock",
+          tools: repair_test_tools("test failed", true, "read"),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          final_wrapup: false,
+          done_sentinel: "##DONE##",
+          verify_completion: { info ->
+            if info.stop_reason == "post_edit_reverify" {
+              const snapshot = harness.runtime.shared_snapshot(probes)
+              harness.runtime.shared_cas(probes, snapshot, snapshot.value + 1)
+            }
+            return nil
+          },
+        },
+      )
+    },
+  )
+  assert_eq(len(result.tools.calls), 2)
+  assert(result.tools.successful.contains("apply_fix"), "the corrective edit must have dispatched")
+  harness.stdio.println(harness.runtime.shared_snapshot(probes).value)
+}

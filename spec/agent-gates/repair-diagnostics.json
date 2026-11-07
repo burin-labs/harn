@@ -1,6 +1,6 @@
 [
   {
-    "default": "true",
+    "default": "false; presets explicitly enable it",
     "evidence": "agent_repair_config normalizes this explicit verification control; repair_post_edit_reverify_mandate exercises its positive and disabled paths.",
     "expiry": "2026-12-31",
     "kind": "boolean option",
