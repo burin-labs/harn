@@ -90,9 +90,9 @@ pub struct CommandPolicyDecision {
 }
 
 #[derive(Clone, Debug)]
-pub enum CommandPolicyPreflight {
+pub enum CommandPolicyPreflight<P = crate::value::DictMap> {
     Proceed {
-        params: crate::value::DictMap,
+        params: P,
         context: JsonValue,
         decisions: Vec<CommandPolicyDecision>,
     },
@@ -112,7 +112,7 @@ pub enum CommandPolicyPreflight {
 /// this final process dispatch. It may bypass only the generic text classifier's
 /// force-push catastrophe; every configured policy rule still applies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommandDispatchOrigin {
+pub enum CommandDispatchOrigin {
     ArbitraryProcess,
     ReviewedGitPushWithLease,
 }
@@ -446,6 +446,8 @@ pub fn command_llm_risk_scan_value(
     Ok(crate::stdlib::json_to_vm_value(&scan))
 }
 
+/// Inspect a request without binding an executor. Launchers must use
+/// [`run_prepared_command_policy_preflight`] to retain their assessed invocation.
 pub async fn run_command_policy_preflight(
     params: &crate::value::DictMap,
     caller: JsonValue,
@@ -467,12 +469,22 @@ pub async fn run_command_policy_preflight_with_ctx(
     .await
 }
 
-pub(crate) async fn run_command_policy_preflight_with_origin(
+/// Assess the exact request retained by the executor. The preparation callback
+/// must not launch a child; it is also called after every accepted rewrite.
+pub async fn run_prepared_command_policy_preflight<P, F, Fut>(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     params: &crate::value::DictMap,
     caller: JsonValue,
     origin: CommandDispatchOrigin,
-) -> Result<CommandPolicyPreflight, VmError> {
+    mut prepare: F,
+) -> Result<CommandPolicyPreflight<P>, VmError>
+where
+    P: CommandPolicyParameters,
+    F: FnMut(crate::value::DictMap) -> Fut,
+    Fut: std::future::Future<Output = Result<P, VmError>>,
+{
+    let mut prepared = prepare(params.clone()).await?;
+    let params = prepared.parameters();
     let Some(policy) = current_command_policy() else {
         // No `command_policy` is on the stack. The catastrophic floor still
         // applies as a universal backstop — a bare `host_process_exec` must not
@@ -486,7 +498,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
         // policy path does, so the argv-quoting `sh -c "…"` wrapper bypass stays
         // closed here too.
         let default_policy = CommandPolicy::default();
-        let context = command_context_json(params, &default_policy, caller);
+        let context = prepared_command_context(&prepared, &default_policy, caller);
         let mut scan = command_risk_scan_json(&context, None);
         exempt_reviewed_git_push_lease_from_catastrophic_floor(&mut scan, origin);
         let is_catastrophic = scan
@@ -512,14 +524,14 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
         // policy is installed, `approval_required_label` below always routes
         // unresolved execution through its real consent gate.
         return Ok(CommandPolicyPreflight::Proceed {
-            params: params.clone(),
+            params: prepared,
             context: JsonValue::Null,
             decisions: Vec::new(),
         });
     };
 
     if command_policy_hook_depth() > 0 && !policy.allow_recursive {
-        let context = command_context_json(params, &policy, caller);
+        let context = prepared_command_context(&prepared, &policy, caller);
         let decision = decision(
             "deny",
             Some("command policy hooks cannot recursively call process.exec".to_string()),
@@ -536,7 +548,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
     }
 
     let mut current_params = params.clone();
-    let mut context = command_context_json(&current_params, &policy, caller);
+    let mut context = prepared_command_context(&prepared, &policy, caller);
     let mut decisions = Vec::new();
     let mut rewritten_by_hook = false;
     let mut scan = command_risk_scan_json(&context, Some(&policy));
@@ -772,6 +784,8 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
             }
             ParsedPreHookAction::Rewrite(rewrite) => {
                 apply_command_rewrite(&mut current_params, &rewrite)?;
+                prepared = prepare(current_params).await?;
+                current_params = prepared.parameters().clone();
                 rewritten_by_hook = true;
                 decisions.push(decision(
                     "rewrite",
@@ -780,7 +794,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
                     risk_labels,
                     1.0,
                 ));
-                context = command_context_json(&current_params, &policy, context["caller"].clone());
+                context = prepared_command_context(&prepared, &policy, context["caller"].clone());
             }
         }
     }
@@ -895,7 +909,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
     }
 
     Ok(CommandPolicyPreflight::Proceed {
-        params: current_params,
+        params: prepared,
         context,
         decisions,
     })
@@ -1311,6 +1325,9 @@ fn apply_command_rewrite(
     params: &mut crate::value::DictMap,
     rewrite: &crate::value::DictMap,
 ) -> Result<(), VmError> {
+    if rewrite.contains_key("shell_id") && !rewrite.contains_key("shell") {
+        params.remove("shell");
+    }
     for (key, value) in rewrite {
         match key.as_str() {
             "mode" | "argv" | "command" | "shell" | "shell_id" | "cwd" | "env" | "env_remove"
@@ -1442,6 +1459,10 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
 
 mod catastrophic;
 mod hook_depth;
+mod invocation;
+use invocation::prepared_command_context;
+pub(crate) use invocation::run_command_policy_preflight_with_origin;
+pub use invocation::{prepare_local_command_cwd, CommandInvocation, CommandPolicyParameters};
 // Re-exported so `command_policy::command_policy_hook_depth` keeps naming the
 // same thing it always did; only the file it lives in moved.
 pub use hook_depth::command_policy_hook_depth;

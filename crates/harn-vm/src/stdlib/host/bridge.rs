@@ -73,6 +73,17 @@ pub(super) async fn dispatch_cached(
 /// (ACP `host/call`, DAP reverse requests) can await without blocking the
 /// caller. Sync bridges can return [`host_call_ready`].
 pub trait HostCallBridge: Send + Sync {
+    /// Bind a process request before policy or consent. Legacy generic dispatch
+    /// cannot promise launch facts and is deliberately unsupported by default.
+    fn prepare_command<'a>(
+        &'a self,
+        _operation: &'a str,
+        _params: &'a crate::value::DictMap,
+        _trace: &'a HostRequestTrace,
+    ) -> super::HostCommandPreparationFuture<'a> {
+        Box::pin(async { Ok(super::HostCommandPreparation::Unsupported) })
+    }
+
     fn dispatch<'a>(
         &'a self,
         capability: &'a str,

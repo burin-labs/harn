@@ -37,6 +37,7 @@ mod live_clients;
 mod modes;
 mod module_progress;
 mod plan_documents;
+mod prepared_process;
 mod prompt;
 mod prompt_owner;
 pub mod replay_inputs;

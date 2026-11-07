@@ -77,6 +77,14 @@ pub(super) fn generate_manifest_with_vocabularies(
         "provenance": {"owner": "harn-vm::orchestration", "schema_version": 1},
     }));
     let receipt_schema = tool_call_receipt_schema();
+    for (name, _) in harn_vm::stdlib::host::command_binding_schemas() {
+        schemas.push(json!({
+            "protocol": "harn",
+            "source": "crates/harn-vm/src/stdlib/host/prepared_command/remote.rs",
+            "artifact": format!("schemas/{}.schema.json", super::records::snake_ident(name).replace('_', "-")),
+            "provenance": {"owner": "harn-vm::stdlib::host", "schema_version": 1},
+        }));
+    }
     for (name, _) in super::inference_admission::schemas() {
         schemas.push(json!({
             "protocol": "harn",

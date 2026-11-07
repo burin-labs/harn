@@ -3,9 +3,10 @@ use serde_json::Value as JsonValue;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
-use super::bridge::HOST_CALL_BRIDGE;
+use super::prepared_command::{prepare_command, PreparedCommand};
 use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
 use super::HostDispatch;
+use crate::orchestration::CommandPolicyParameters;
 
 pub async fn dispatch_process_exec(
     params: &crate::value::DictMap,
@@ -75,9 +76,14 @@ async fn dispatch_untaped(
     origin: crate::orchestration::CommandDispatchOrigin,
     mode: HostDispatch,
 ) -> Result<VmValue, VmError> {
-    let preflight =
-        crate::orchestration::run_command_policy_preflight_with_origin(ctx, params, caller, origin)
-            .await?;
+    let preflight = crate::orchestration::run_prepared_command_policy_preflight(
+        ctx,
+        params,
+        caller,
+        origin,
+        |params| prepare_command(ctx, params, "exec", mode),
+    )
+    .await?;
     let (params, command_policy_context, command_policy_decisions) = match preflight {
         crate::orchestration::CommandPolicyPreflight::Proceed {
             params,
@@ -99,34 +105,32 @@ async fn dispatch_untaped(
         // A command-policy pre-hook may have rewritten the request after its
         // initial validation. Re-check before either a host bridge or the
         // local process path can observe the command.
-        validate_reviewed_git_push_with_lease(&params)?;
+        validate_reviewed_git_push_with_lease(params.parameters())?;
     }
 
-    let bridge = HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().clone());
-    if let Some(bridge) = bridge {
-        if let Some(value) = bridge.dispatch("process", "exec", &params).await? {
+    match params {
+        PreparedCommand::Host { params, command } => {
+            let value = command.execute().await?;
             let value = restore_wrapped_spawn_error(value)?;
-            return crate::orchestration::run_command_policy_postflight_with_ctx(
+            crate::orchestration::run_command_policy_postflight_with_ctx(
                 ctx,
                 &params,
                 value,
                 command_policy_context,
                 command_policy_decisions,
             )
-            .await;
+            .await
+        }
+        PreparedCommand::Local(command) => {
+            dispatch_process_exec_after_policy(
+                ctx,
+                command,
+                command_policy_context,
+                command_policy_decisions,
+            )
+            .await
         }
     }
-
-    if mode == HostDispatch::RequireAdapter {
-        return Err(super::missing_host_adapter("process", "exec"));
-    }
-    dispatch_process_exec_after_policy(
-        ctx,
-        &params,
-        command_policy_context,
-        command_policy_decisions,
-    )
-    .await
 }
 
 fn restore_wrapped_spawn_error(value: VmValue) -> Result<VmValue, VmError> {

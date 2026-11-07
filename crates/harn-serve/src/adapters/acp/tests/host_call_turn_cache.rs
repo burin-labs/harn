@@ -34,6 +34,7 @@ fn install_acp_host_bridge(bridge: Arc<AcpBridge>) {
     set_host_call_bridge(Arc::new(super::super::builtins::AcpHostCallBridge::new(
         bridge,
         VmValue::List(Arc::new(Vec::new())),
+        VmValue::Nil,
     )));
 }
 

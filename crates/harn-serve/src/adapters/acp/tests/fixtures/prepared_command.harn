@@ -1,0 +1,92 @@
+type ExecutorSpec = {
+  mode: "normal" | "rewrite" | "deny" | "unsupported" | "cancel",
+  root: string,
+  python: string,
+}
+
+type ChildEvidence = {cwd: string, args: list<string>}
+
+pipeline default(harness: Harness) {
+  const spec = schema_expect(json_parse(prompt), schema_of(ExecutorSpec))
+  const asks = harness.runtime.atomic(0)
+  const source = if spec.mode == "cancel" {
+    "import threading; print('READY',flush=True); threading.Event().wait()"
+  } else {
+    "import os,sys,json; value={'cwd':os.getcwd(),'args':sys.argv[1:]}; json.dump(value,open('executor-child.json','w')); print(json.dumps(value))"
+  }
+  const payload = [" spaced argument ", "", "literal$HOME", "日本語"]
+  const original = [spec.python, "-c", source] + payload
+  const rewritten = [spec.python, "-c", source, "rewritten", ""]
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [path_join(spec.root, "approval-only-root")],
+        require_approval: ["outside_workspace"],
+        pre: { _ctx ->
+          if spec.mode == "rewrite" {
+            return {rewrite: {argv: rewritten}}
+          }
+          return nil
+        },
+        consent: { ctx ->
+          harness.runtime.atomic_add(asks, 1)
+          assert_eq(ctx.active_cwd, spec.root, "consent must use the executor directory")
+          assert_eq(ctx.invocation.cwd, spec.root)
+          assert_eq(
+            ctx.invocation.argv,
+            ctx.request.argv,
+            "the executor retained the literal request",
+          )
+          harness.stdio.println("EXECUTOR_CONSENT_REACHED")
+          if spec.mode == "deny" {
+            return {decision: "invalid-consent"}
+          }
+          return true
+        },
+      },
+    ),
+  )
+  if spec.mode == "unsupported" {
+    const outcome = try {
+      harness.process.run({program: spec.python, args: original[1:len(original)]})
+    }
+    harness.runtime.command_policy_pop()
+    assert(is_err(outcome), "a host without binding cannot execute or fall back locally")
+    assert_eq(harness.runtime.atomic_get(asks), 0)
+  } else {
+    const result = harness.process.run({program: spec.python, args: original[1:len(original)]})
+    harness.runtime.command_policy_pop()
+    if spec.mode == "deny" {
+      assert_eq(result.status, "consent_denied")
+    } else {
+      assert_eq(result.exit_code, 0, "the real executor child must succeed")
+      const actual = schema_expect(json_parse(result.stdout), schema_of(ChildEvidence))
+      assert_eq(path_normalize(actual.cwd), path_normalize(spec.root))
+      assert_eq(
+        actual.args,
+        if spec.mode == "rewrite" {
+          ["rewritten", ""]
+        } else {
+          payload
+        },
+      )
+      assert_eq(
+        result.command_policy.context.invocation.argv,
+        if spec.mode == "rewrite" {
+          rewritten
+        } else {
+          original
+        },
+      )
+    }
+    assert_eq(
+      harness.runtime.atomic_get(asks),
+      if spec.mode == "rewrite" {
+        2
+      } else {
+        1
+      },
+    )
+  }
+  harness.stdio.println("BOUND_COMMAND_DONE")
+}

@@ -23,6 +23,66 @@ Rust embedders receive this metadata through
 `dispatch`, so existing bridges continue to work. Typed Harness methods and
 privileged `host_call` invocations use the same attribution path.
 
+## Prepared process execution
+
+Process executors bind command arguments and the launch directory before Harn
+assesses a command or requests consent. Rust bridges implement
+`HostCallBridge::prepare_command` and return `Unhandled`, `Unsupported`, or
+`Bound`. A bound `PreparedHostCommand` owns its invocation and consumes itself
+when executed. Its execution method accepts no replacement arguments.
+
+`Unhandled` permits a local fallback unless the caller requires a host adapter.
+`Unsupported` refuses execution. The default implementation returns
+`Unsupported`; implementing generic `dispatch("process", "exec", ...)` alone
+doesn't establish a binding.
+
+ACP hosts advertise `exec` or `spawn` plus `prepare`, `execute_prepared`, and
+`release_prepared` in the process capability's `ops`. Without a declared process
+executor, ACP selects the local runtime. A declared executor missing the binding
+operations is refused. DAP carries the same operations through `harnHostCall`.
+Both adapters use Harn's shared token protocol:
+
+| Operation | Arguments | Result |
+| --- | --- | --- |
+| `process.prepare` | `{operation: "exec" \| "spawn", request: object}` | A preparation response below |
+| `process.execute_prepared` | `{token: string}` | The existing process result |
+| `process.release_prepared` | `{token: string}` | `{status: "released", token: string}` |
+
+Preparation returns exactly `{status: "unhandled"}`, `{status: "unsupported"}`,
+or this bound response:
+
+```json
+{
+  "status": "bound",
+  "token": "executor-request-1",
+  "invocation": {
+    "argv": ["python3", "script.py", " spaced argument ", ""],
+    "cwd": "/executor/workspace"
+  }
+}
+```
+
+Preparation must not start a child. The executor resolves inherited, relative,
+and symlink directories using its own filesystem. It retains the exact argv and
+absolute directory it returns. Tokens are nonempty, at most 4096 UTF-8 bytes,
+bound to one authenticated session, and executable once. A rewrite discards the
+old preparation and requires fresh assessment and consent.
+
+Release is idempotent. It cancels and reaps in-flight execution before acknowledging
+the same token. A completed `spawn` transfers the child to its returned host
+handle; releasing the preparation doesn't terminate that handle-owned child.
+Ordinary runtime spawn handles remain local. Remote spawn requires an explicitly
+host-bound capability and host-owned handle operations.
+Harn awaits this acknowledgement after execution, including
+ordinary cancellation. Dropping an execution future also sends release. Hosts
+must reclaim pending tokens and active children on disconnect and session close;
+a transport failure cannot prove that a remote child terminated.
+
+The generated [preparation schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-preparation.schema.json)
+and [release schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-release.schema.json)
+come from the runtime's typed response contracts. Request attribution remains
+value-free and accompanies preparation, execution, and release over ACP.
+
 ## Host response deadlines
 
 Human questions and approvals wait for a response, cancellation, or transport

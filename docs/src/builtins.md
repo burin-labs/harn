@@ -1994,6 +1994,20 @@ tracked by the enclosing Git worktree. New files, untracked files, and dynamic
 shell paths remain outside this never-approvable floor. They still receive the
 normal write-intent classification, so policy can deny them or require consent.
 Blocked commands return `status: "blocked"` without starting a child process.
+
+Consent and audit context include `invocation.argv` and `invocation.cwd` from
+the executor's retained preparation. `active_cwd` and `request.cwd` use that
+same canonical launch directory, including sandbox-selected inheritance.
+Rewrites prepare and assess a new invocation before requesting fresh consent.
+The native and host-library runners consume these retained values.
+
+Command scans report `execution_syntax_complete` separately from
+`io_coverage.complete`. Shell stages have a nullable `cwd`; `null` means the
+scanner hasn't established that stage's directory. A remote executor's
+filesystem isn't available to the VM scanner, so its I/O coverage remains
+unmeasured. Inspection-only preflight has no bound `invocation`. See
+[Prepared process execution](bridge-protocol.md#prepared-process-execution)
+for the host migration contract.
 Pushes that delete a remote ref (`--delete`, `--prune`, or a `:ref` refspec)
 are not on the floor. They carry the `git_force_push` risk label along with
 force-pushes, so policy can deny them or require consent.

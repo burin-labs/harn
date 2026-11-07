@@ -119,6 +119,7 @@ impl HostlibCapability for ToolsCapability {
             "hostlib_tools_run_command",
             "run_command",
             run_command::handle,
+            run_command::prepare,
         );
         registry.register_fn(
             "tools",

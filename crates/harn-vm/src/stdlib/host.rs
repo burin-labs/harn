@@ -11,9 +11,15 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 mod bridge;
 pub(crate) mod fixtured_operations;
 mod operation_registry;
+mod prepared_command;
+pub use prepared_command::{
+    command_binding_schemas, prepare_remote_command, CommandTransportFuture,
+    HostCommandPreparation, HostCommandPreparationFuture, PreparedCommandTransport,
+    PreparedHostCommand,
+};
 pub mod process_admission;
 pub mod process_dispatch;
-mod process_exec;
+pub(crate) mod process_exec;
 pub mod trace;
 // Public so tests and embedders can share the per-turn memo allowlist even
 // when probing host_call outside the stdlib builtin (harn#5190).

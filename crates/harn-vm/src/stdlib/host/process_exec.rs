@@ -39,62 +39,62 @@ pub(super) async fn dispatch_process_spawn_with_policy(
     caller: serde_json::Value,
     mode: super::HostDispatch,
 ) -> Result<VmValue, VmError> {
-    let params =
-        match crate::orchestration::run_command_policy_preflight_with_ctx(ctx, params, caller)
-            .await?
-        {
-            crate::orchestration::CommandPolicyPreflight::Proceed { params, .. } => params,
-            crate::orchestration::CommandPolicyPreflight::Blocked {
-                status,
-                message,
-                context,
-                decisions,
-            } => {
-                return Ok(crate::orchestration::blocked_command_response(
-                    params, status, &message, context, decisions,
-                ));
-            }
-        };
-
-    if mode == super::HostDispatch::RequireAdapter {
-        let bridge = super::HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().clone());
-        if let Some(bridge) = bridge {
-            if let Some(result) = bridge.dispatch("process", "spawn", &params).await? {
-                return Ok(result);
-            }
-        }
-        return Err(super::missing_host_adapter("process", "spawn"));
-    }
-    match crate::stdlib::process_spawn::dispatch("spawn", &params, async_builtin_cancel_token(ctx))
-        .await
+    let prepared = match crate::orchestration::run_prepared_command_policy_preflight(
+        ctx,
+        params,
+        caller,
+        crate::orchestration::CommandDispatchOrigin::ArbitraryProcess,
+        |params| super::prepared_command::prepare_command(ctx, params, "spawn", mode),
+    )
+    .await?
     {
-        Some(result) => result,
-        None => Err(VmError::Runtime(
-            "host_call process.spawn: dispatch returned None".to_string(),
-        )),
+        crate::orchestration::CommandPolicyPreflight::Proceed { params, .. } => params,
+        crate::orchestration::CommandPolicyPreflight::Blocked {
+            status,
+            message,
+            context,
+            decisions,
+        } => {
+            return Ok(crate::orchestration::blocked_command_response(
+                params, status, &message, context, decisions,
+            ));
+        }
+    };
+
+    match prepared {
+        super::prepared_command::PreparedCommand::Host { command, .. } => command.execute().await,
+        super::prepared_command::PreparedCommand::Local(prepared) => {
+            crate::stdlib::process_spawn::spawn_prepared(
+                &prepared.params,
+                prepared.command,
+                async_builtin_cancel_token(ctx),
+            )
+            .await
+        }
     }
 }
 
 pub(super) async fn dispatch_process_exec_after_policy(
     ctx: Option<&AsyncBuiltinCtx>,
-    params: &crate::value::DictMap,
+    prepared: PreparedLocalCommand,
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
+    let PreparedLocalCommand { params, command } = prepared;
+    let params = &params;
     // Workspace effects govern mutation and approval, not host resource cost.
     // Read-only compilers and formatters still contend for the same process,
     // CPU, and toolchain lanes as writers, so every spawned command participates.
     let _process_admission = super::process_admission::acquire_process_admission(ctx).await?;
-    let (tape_program, tape_args) = process_exec_argv(params)?;
+    let argv = command.invocation.argv();
+    let (tape_program, tape_args) = (&argv[0], &argv[1..]);
     let stdin = process_exec_stdin(params, "process.exec")?;
-    let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
+    let tape_cwd = Some(command.invocation.cwd());
     let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
     let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
-    if let Some(intercepted) = crate::testbench::process_tape::intercept_spawn(
-        &tape_program,
-        &tape_args,
-        tape_cwd.as_deref(),
-    ) {
+    if let Some(intercepted) =
+        crate::testbench::process_tape::intercept_spawn(tape_program, tape_args, tape_cwd)
+    {
         let output = intercepted.map_err(|message| VmError::Thrown(VmValue::string(message)))?;
         let exit_code = output.status.code().unwrap_or(-1);
         let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
@@ -124,11 +124,8 @@ pub(super) async fn dispatch_process_exec_after_policy(
         )
         .await;
     }
-    let tape_recording = crate::testbench::process_tape::start_recording(
-        &tape_program,
-        &tape_args,
-        tape_cwd.as_deref(),
-    );
+    let tape_recording =
+        crate::testbench::process_tape::start_recording(tape_program, tape_args, tape_cwd);
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
@@ -136,7 +133,8 @@ pub(super) async fn dispatch_process_exec_after_policy(
     let PreparedProcessCommand {
         command: mut cmd,
         witness,
-    } = build_sandboxed_command(params, "process.exec")?;
+        ..
+    } = command;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
     let cleanup_token = crate::op_interrupt::new_process_cleanup_token();
     cmd.env(
@@ -412,6 +410,42 @@ async fn terminate_process_exec_child(
 pub(crate) struct PreparedProcessCommand {
     pub(crate) command: tokio::process::Command,
     pub(crate) witness: Option<crate::verifier_provenance::VerifierExecutionWitness>,
+    pub(crate) invocation: crate::orchestration::CommandInvocation,
+}
+
+pub(super) struct PreparedLocalCommand {
+    pub(super) params: crate::value::DictMap,
+    pub(super) command: PreparedProcessCommand,
+}
+
+impl PreparedLocalCommand {
+    pub(super) fn prepare(
+        mut params: crate::value::DictMap,
+        operation: &str,
+    ) -> Result<Self, VmError> {
+        if optional_string(&params, "mode")
+            .as_deref()
+            .unwrap_or("shell")
+            == "shell"
+        {
+            let shell =
+                crate::shells::resolve_shell_from_vm_params(&params).map_err(VmError::Runtime)?;
+            params.put("shell", crate::shells::shell_descriptor_to_vm_value(&shell));
+        }
+        let command = build_sandboxed_command(&params, operation)?;
+        command.invocation.bind_directory(&mut params);
+        Ok(Self { params, command })
+    }
+}
+
+impl crate::orchestration::CommandPolicyParameters for PreparedLocalCommand {
+    fn parameters(&self) -> &crate::value::DictMap {
+        &self.params
+    }
+
+    fn invocation(&self) -> Option<JsonValue> {
+        Some(self.command.invocation.audit())
+    }
 }
 
 impl std::fmt::Debug for PreparedProcessCommand {
@@ -434,6 +468,12 @@ pub(crate) fn build_sandboxed_command(
         crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
     )?;
     let launch = ProcessExecLaunch::from_params(params, label)?;
+    let invocation = crate::orchestration::CommandInvocation::new(
+        std::iter::once(launch.program.clone())
+            .chain(launch.args.clone())
+            .collect(),
+        launch.cwd.clone().expect("normalized process cwd"),
+    )?;
     let verifier = crate::prepared_run::prepared_verifier(
         &launch.program,
         &launch.args,
@@ -490,6 +530,7 @@ pub(crate) fn build_sandboxed_command(
     Ok(PreparedProcessCommand {
         command: cmd,
         witness,
+        invocation,
     })
 }
 
@@ -512,13 +553,10 @@ impl ProcessExecLaunch {
     fn from_params(params: &crate::value::DictMap, label: &str) -> Result<Self, VmError> {
         let (program, args) = process_exec_argv(params)?;
         let execution_context = crate::stdlib::process::current_execution_context();
-        let cwd = match optional_string(params, "cwd") {
-            Some(cwd) => resolve_process_exec_cwd(&cwd),
-            None => crate::stdlib::process::inherited_process_cwd()
-                .map_err(|error| contextualize_process_error(label, "cwd", error))?,
-        };
-        crate::process_sandbox::enforce_process_cwd(&cwd)
-            .map_err(|error| contextualize_process_error(label, "cwd", error))?;
+        let cwd = crate::orchestration::prepare_local_command_cwd(
+            optional_string(params, "cwd").as_deref(),
+        )
+        .map_err(|error| contextualize_process_error(label, "cwd", error))?;
 
         let closed_env = match optional_string(params, "env_mode")
             .as_deref()

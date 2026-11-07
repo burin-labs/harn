@@ -1111,6 +1111,7 @@ mod injection_admission;
 mod model_routing;
 mod modes;
 mod oauth_redirect;
+mod prepared_command;
 mod prompt_delivery;
 mod prompt_errors;
 mod reasoning_receipts;
