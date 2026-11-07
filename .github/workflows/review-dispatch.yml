@@ -117,7 +117,10 @@ jobs:
           fi
 
   dispatch:
-    if: github.event_name == 'pull_request_target' && needs.eligibility.outputs.dispatch == 'true'
+    if: >-
+      github.event_name == 'pull_request_target'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.eligibility.outputs.dispatch == 'true'
     needs: eligibility
     # Only a successful dispatch is a request record. The sweep ignores the
     # skipped check this job produces for an ineligible pull request.
