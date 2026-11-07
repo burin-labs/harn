@@ -80,7 +80,7 @@ Mock response to 2-word prompt: Say hello.
 
 The loop accepts a task, optional system prompt, and options. `max_iterations`
 bounds model requests; `done` means the loop completed. The mock provider
-supplies deterministic output without a provider request. It doesn't measure
+supplies deterministic output without a model request. It doesn't measure
 how well a real model follows your instructions.
 
 ## Check your program
