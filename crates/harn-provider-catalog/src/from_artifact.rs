@@ -51,12 +51,19 @@ pub fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::P
             .portal_defaults
             .iter()
             .map(|(provider, portal)| {
+                let automatic = artifact
+                    .automatic_defaults
+                    .iter()
+                    .position(|entry| &entry.provider == provider);
                 (
                     provider.clone(),
                     llm_config::ProviderDefaultModels {
                         runtime: None,
                         portal: Some(portal.model_id.clone()),
                         portal_reasoning_effort: portal.reasoning_effort.clone(),
+                        automatic: automatic
+                            .map(|index| artifact.automatic_defaults[index].model_id.clone()),
+                        automatic_order: automatic.map(|index| index as u16),
                     },
                 )
             })

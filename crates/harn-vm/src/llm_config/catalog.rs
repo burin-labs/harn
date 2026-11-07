@@ -1410,6 +1410,7 @@ pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
         for (surface, model) in [
             ("runtime", defaults.runtime.as_deref()),
             ("portal", defaults.portal.as_deref()),
+            ("automatic", defaults.automatic.as_deref()),
         ] {
             if let Some(model) = model {
                 issues.extend(check(

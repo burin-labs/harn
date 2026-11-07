@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 
 use super::{artifact_embedded, schema_value, ProviderCatalogArtifact};
 
-// v14 adds regional endpoint data controls; v15 adds provider account facts.
-// Neither changes root or model fields.
+// v14 adds regional endpoint data controls; v15 adds provider account facts;
+// v16 adds the root `automatic_defaults` list. None changes root or model fields.
 const ROOT_FIELDS_V14: &str = "
-    aliases families generated_by models portal_defaults providers qc_defaults
+    automatic_defaults aliases families generated_by models portal_defaults providers qc_defaults
     routing_routes schema schema_version variants
 ";
 
@@ -38,7 +38,7 @@ fn fields(value: &Value) -> Result<BTreeSet<String>, String> {
 
 fn pinned_fields(version: u64) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let (root, model) = match version {
-        14 | 15 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
+        14..=16 => (ROOT_FIELDS_V14, MODEL_FIELDS_V14),
         other => {
             return Err(format!(
                 "catalog schema version {other} has no field-set pin"

@@ -15614,6 +15614,8 @@ order = 60
 kind = "largest_vision_context"
 
 [provider_defaults.anthropic]
+automatic = "claude-sonnet-5-5"
+automatic_order = 10
 portal = "claude-sonnet-5-5"
 runtime = "claude-sonnet-5-5"
 
@@ -15630,6 +15632,8 @@ portal = "gemma4:26b"
 runtime = "llama3.2"
 
 [provider_defaults.openai]
+automatic = "gpt-6.1-sol"
+automatic_order = 20
 portal = "gpt-6-luna"
 portal_reasoning_effort = "high"
 runtime = "gpt-6-luna"

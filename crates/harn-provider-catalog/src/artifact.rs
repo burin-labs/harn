@@ -28,6 +28,19 @@ pub struct ProviderCatalogArtifact {
     /// `qc_defaults`, the cheap quality-check route.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub portal_defaults: BTreeMap<String, CatalogPortalDefault>,
+    /// Credential-gated automatic defaults, best first. A host with no model
+    /// choice takes the first entry whose provider it holds a credential for,
+    /// and falls back to a local model when none matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automatic_defaults: Vec<CatalogAutomaticDefault>,
+}
+
+/// One provider's mid-tier automatic default route.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogAutomaticDefault {
+    pub provider: String,
+    pub model_id: String,
 }
 
 /// One provider's setup-UI default route.

@@ -58,3 +58,33 @@ fn the_artifact_carries_each_providers_setup_ui_default() {
         Some("high")
     );
 }
+
+#[test]
+fn the_artifact_ranks_credential_gated_automatic_defaults() {
+    let catalog = artifact_embedded(None, None);
+    let ranked: Vec<_> = catalog
+        .automatic_defaults
+        .iter()
+        .map(|entry| (entry.provider.as_str(), entry.model_id.as_str()))
+        .collect();
+    assert_eq!(
+        ranked,
+        [
+            ("anthropic", "claude-sonnet-5-5"),
+            ("openai", "gpt-6.1-sol")
+        ]
+    );
+    for CatalogAutomaticDefault { provider, model_id } in &catalog.automatic_defaults {
+        assert!(
+            catalog
+                .models
+                .iter()
+                .any(|row| &row.provider == provider && &row.id == model_id),
+            "{provider} automatic default {model_id} has no catalog row"
+        );
+    }
+    let config = config_from_artifact(&catalog);
+    let anthropic = &config.provider_defaults["anthropic"];
+    assert_eq!(anthropic.automatic.as_deref(), Some("claude-sonnet-5-5"));
+    assert!(anthropic.automatic_order < config.provider_defaults["openai"].automatic_order);
+}
