@@ -87,7 +87,8 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(is_type(captured, agent_event_capture_schema()))
   harness.stdio.println(agent_event_capture_report(captured).ok)
-  harness.stdio.println(agent_event_capture_value(captured).result.ok)
+  const result = schema_expect(agent_event_capture_value(captured).result, schema_of({ok: bool}))
+  harness.stdio.println(result.ok)
   // The schema remains open to future readers; the host emitter itself must
   // only publish fields its current AgentEvent variant can preserve.
   harness.stdio.println(
@@ -103,9 +104,11 @@ pipeline default(harness: Harness) {
     agent_event_value(captured.events[0], agent_tool_lifecycle_event_schema()).tool_name,
   )
   harness.stdio.println(agent_event_report(captured.events[1], agent_tool_audit_event_schema()).ok)
-  harness.stdio.println(
-    agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt.status,
-  )
+  const receipt = agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt
+  if receipt == nil {
+    throw "The emitted tool audit must retain its receipt"
+  }
+  harness.stdio.println(receipt.status)
   harness.stdio.println(
     agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok,
   )

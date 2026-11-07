@@ -41,7 +41,11 @@ fn check_assessment(harness: Harness, answer: string, assessment: dict?, expecte
       )
       assert_eq(len(harness.llm.mock_calls()), 2, "One actor call and one existing judge call")
       assert_eq(result.status, "done", "Goal assessment must not create another stopping policy")
-      assert_eq(result.goal_outcome.kind, expected)
+      const goal = result.goal_outcome
+      if goal == nil {
+        throw "The completion judge must publish its assessed goal outcome"
+      }
+      assert_eq(goal.kind, expected)
       const terminals = transcript_events_by_kind(result.transcript, "agent_run_terminal")
       assert_eq(len(terminals), 1)
       assert_eq(terminals[0].metadata.goal_outcome, result.goal_outcome)
