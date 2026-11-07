@@ -9,16 +9,10 @@ pub(crate) fn read_events(directory: &std::path::Path) -> Vec<Value> {
 }
 
 pub(crate) async fn census(events: &[Value]) -> Value {
-    let source = r#"
-import { provider_call_census, provider_transcript_normalize } from "std/agent/transcript"
-fn main(harness: Harness) {
-  const records = provider_transcript_normalize(json_parse(argv[0]))
-  harness.stdio.println(json_stringify(provider_call_census(records, true)))
-}
-"#;
+    let source = include_str!("../testdata/provider_transcript_census.harn");
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/llm/agent_observe/transcript_census.harn"
+        "/src/llm/testdata/provider_transcript_census.harn"
     ));
     let chunk = crate::compile_source_at_path(source, path, None)
         .expect("public transcript facade compiles");
