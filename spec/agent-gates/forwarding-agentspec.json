@@ -784,25 +784,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "agent_monologue_actuation_take_for_turn(\n    harness.agent,\n    harness.llm,\n    session.session_id,\n    iteration_index + 1,\n    stall_state.monologue_actuation,\n    turn_opts,\n    turn_llm_opts,\n    pending_prefill.prefill == \"\",\n    agent_tool_call_paradigm(harness.llm, turn_llm_opts),\n  )",
-    "owner": "agent_monologue_actuation_take_for_turn",
-    "evidence": "Consumer agent_monologue_actuation_take_for_turn.llm_options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_monologue_actuation_take_for_turn",
-        "parameter": "turn_options"
-      },
-      {
-        "scope": "AgentSpec",
-        "function": "agent_monologue_actuation_take_for_turn",
-        "parameter": "llm_options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
     "expression": "agent_prefill_eligibility(\n    harness.llm,\n    one_shot_prefill,\n    direct_llm_opts,\n  )",
     "owner": "agent_prefill_eligibility",
     "evidence": "Consumer agent_prefill_eligibility.options in crates/harn-stdlib/src/stdlib/agent/prefill.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -867,20 +848,6 @@
         "scope": "AgentSpec",
         "function": "agent_stance_apply",
         "parameter": "turn_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "agent_tool_call_paradigm(harness.llm, turn_llm_opts)",
-    "owner": "agent_tool_call_paradigm",
-    "evidence": "Consumer agent_tool_call_paradigm.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_tool_call_paradigm",
-        "parameter": "options"
       }
     ]
   },
@@ -1007,76 +974,6 @@
         "scope": "AgentSpec",
         "function": "__with_mcp_tool_ceiling",
         "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "__agent_monologue_actuation_route_suppression(\n    llm,\n    actuation_prefill,\n    llm_options,\n  )",
-    "owner": "__agent_monologue_actuation_route_suppression",
-    "evidence": "Consumer __agent_monologue_actuation_route_suppression.options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__agent_monologue_actuation_route_suppression",
-        "parameter": "options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "agent_has_tools(turn_options)",
-    "owner": "agent_has_tools",
-    "evidence": "Consumer agent_has_tools.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_has_tools",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "agent_monologue_actuation_take(\n    agent,\n    llm,\n    session_id,\n    iteration,\n    state,\n    config,\n    agent_has_tools(turn_options),\n    llm_options,\n    prefill_available,\n    paradigm,\n    agent_tool_resolve_workspace_write_name(\n      turn_options?.tools,\n      turn_options?.policy,\n      config.write_tool,\n    ),\n  )",
-    "owner": "agent_monologue_actuation_take",
-    "evidence": "Consumer agent_monologue_actuation_take.llm_options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_monologue_actuation_take",
-        "parameter": "llm_options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "agent_prefill_eligibility(llm, prefill, options)",
-    "owner": "agent_prefill_eligibility",
-    "evidence": "Consumer agent_prefill_eligibility.options in crates/harn-stdlib/src/stdlib/agent/prefill.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_prefill_eligibility",
-        "parameter": "options"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "agent_render_tool_call_prefix(llm, commit_tool_name, llm_options)",
-    "owner": "agent_render_tool_call_prefix",
-    "evidence": "Consumer agent_render_tool_call_prefix.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_render_tool_call_prefix",
-        "parameter": "options"
       }
     ]
   },

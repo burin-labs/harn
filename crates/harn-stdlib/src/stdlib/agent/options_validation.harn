@@ -4,7 +4,6 @@ import {
   __validate_llm_caller,
 } from "std/agent/caller_transport"
 import { __completion_requirement_contract_checked } from "std/agent/completion_requirements"
-import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import "std/agent/options_formats"
 import "std/agent/options_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"

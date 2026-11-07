@@ -3,7 +3,6 @@ import {
   __normalize_llm_caller_transport,
   __validate_llm_caller,
 } from "std/agent/caller_transport"
-import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import "std/agent/options_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"

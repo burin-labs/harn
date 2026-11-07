@@ -1,4 +1,4 @@
-# Three offline examples
+# First-hour examples
 
 Run these examples with an installed Harn release. They use synthetic model
 responses, need no credentials, and make no model requests.

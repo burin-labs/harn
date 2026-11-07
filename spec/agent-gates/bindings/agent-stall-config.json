@@ -137,7 +137,6 @@
     ],
     "containers": [
       "repair_diagnostics",
-      "monologue_actuation",
       "no_net_progress_predicates"
     ]
   }

@@ -22,13 +22,6 @@ fn lookup_tools() {
   )
 }
 
-fn actuation_receipts(events: list) -> list {
-  return events.filter({ event -> event.type == "typed_checkpoint" }).filter(
-    { event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" },
-  )
-    .to_list()
-}
-
 fn options(
   capabilities: AgentLoopCapabilities,
   session: string,
@@ -176,17 +169,10 @@ pipeline default(harness: Harness) {
   require undeclared_caller.calls[1].prefill == nil, "an opaque custom caller must fail closed"
   // INVERSE: a healthy loop with no recovery decision must never manufacture
   // a prefill, even when the selected route could accept one.
-  const no_stall = run_after_tool_prefill(
-    harness,
-    "haiku45",
-    false,
-    {stall_diagnostics: {enabled: true, monologue_actuation: {enabled: true, read_only_turns: 2}}},
-  )
+  const no_stall = run_after_tool_prefill(harness, "haiku45", false)
   require no_stall.result.status == "done", "the no-stall control must reach natural completion"
   require no_stall.calls.all({ call -> call.prefill == nil }),
     "a no-stall loop must not inject an assistant prefill"
-  require len(actuation_receipts(no_stall.events)) == 0,
-    "a below-threshold successful turn must not emit an actuation decision"
   require no_stall.equivalent_failover_observations[1],
     "an ordinary no-prefill request must retain default equivalent failover"
   harness.stdio.println("prefill capability gate ok")

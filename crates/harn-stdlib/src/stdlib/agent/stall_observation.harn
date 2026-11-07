@@ -1,6 +1,5 @@
 import { agent_feedback_emit } from "std/agent/feedback"
 import { AgentToolDispatch } from "std/agent/loop_result_status"
-import { agent_monologue_actuation_observe } from "std/agent/monologue_actuation"
 import {
   __agent_stall_completed_result,
   __agent_stall_delta_signature,
@@ -1309,27 +1308,10 @@ pub fn __agent_stall_apply_action_signal(
   )
 }
 
-pub fn __agent_stall_observe_monologue_actuation(
-  observation: AgentStallObservation,
-) -> AgentStallObservation {
-  return observation
-    + {
-      state: observation.state
-        + {
-          monologue_actuation: agent_monologue_actuation_observe(
-            observation.state.monologue_actuation,
-            observation.config.monologue_actuation,
-            to_string(observation.warning?.pattern ?? ""),
-          ),
-        },
-    }
-}
-
 /**
- * Fold one turn through stall, repair, action, verification, and optional
- * actuation detectors. `turn_made_edit` describes the prior dispatch;
- * `payload` reaches configured host fact callbacks only. Completed-dispatch
- * actuation credit is owned by the loop after tool results exist.
+ * Fold one turn through stall, repair, action, and verification detectors.
+ * `turn_made_edit` describes the prior dispatch; `payload` reaches configured
+ * host fact callbacks only.
  * `verification_dispatch` contains only completed declared verification results,
  * in execution order. Its empty default supplies no verification evidence;
  * raw `prev_dispatch` remains the action/repetition input, never a passing check.
@@ -1420,5 +1402,5 @@ pub fn agent_stall_observe_tool_calls(
         ),
       }
   }
-  return __agent_stall_observe_monologue_actuation(resolved)
+  return resolved
 }
