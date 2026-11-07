@@ -41,6 +41,9 @@ case "$method $endpoint" in
   "GET repos/o/r/actions/workflows/build-release-binaries.yml/runs?"*)
     [[ -z "${BUILD_CENSUS_FAIL:-}" ]] || exit 1
     cat "$S/builds.json" ;;
+  "GET repos/o/r/actions/workflows/promote-release.yml/runs?"*)
+    [[ -z "${PROMOTION_CENSUS_FAIL:-}" ]] || exit 1
+    cat "$S/promotions.json" ;;
   "POST repos/o/r/actions/workflows/build-release-binaries.yml/dispatches")
     jq -e '.ref == "main" and .inputs.source_candidate == "true"' <<< "$input" > /dev/null
     echo "dispatch candidate" >> "$S/writes" ;;
@@ -229,7 +232,7 @@ build() {
     --arg title "${5:-Build release binaries [source-candidate]}" \
     '{id: $id, head_sha: $sha, created_at: $created, status: $status, display_title: $title}'
 }
-fresh_builds() { fresh "$B" "$B...$B identical"; run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"; printf '%s' "$C" > "$S/main"; }
+fresh_builds() { fresh "$B" "$B...$B identical"; run 2 "$B" 2026-10-17T12:00:00Z | census > "$S/census.json"; printf '%s' "$C" > "$S/main"; census < /dev/null > "$S/promotions.json"; }
 
 # Every recent timestamp is relative, because the cadence reads the clock.
 recent=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -238,6 +241,36 @@ census < /dev/null > "$S/builds.json"
 check "no candidate starts while the cadence is unset" 0 "$B" ""
 grep -q "not started by this workflow" "$S/out" || { echo "FAIL the off state is not reported"; failures=$((failures + 1)); }
 check "a due candidate starts on the cadence" 0 "$B" dispatch GREEN_SOURCE_CANDIDATE_HOURS=4
+
+fresh_builds
+census < /dev/null > "$S/builds.json"
+jq -n '[{total_count: 1, workflow_runs: [{id: 42, status: "in_progress"}]}]' > "$S/promotions.json"
+check "an active promotion defers a new platform build" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+grep -q 'active=1.*42' "$S/out" || { echo "FAIL active promotion identity is not reported"; failures=$((failures + 1)); }
+
+for status in queued requested waiting pending; do
+  fresh_builds
+  census < /dev/null > "$S/builds.json"
+  jq -n --arg status "$status" '[{total_count: 1, workflow_runs: [{id: 42, status: $status}]}]' > "$S/promotions.json"
+  check "a $status promotion defers a new platform build" 0 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+done
+
+fresh_builds
+census < /dev/null > "$S/builds.json"
+jq -n '[{total_count: 1, workflow_runs: [{id: 42, status: "completed"}]}]' > "$S/promotions.json"
+check "a completed promotion does not defer a due build" 0 "$B" dispatch GREEN_SOURCE_CANDIDATE_HOURS=4
+grep -q 'total=1.*active=0' "$S/out" || { echo "FAIL measured promotion census is not reported"; failures=$((failures + 1)); }
+
+fresh_builds
+census < /dev/null > "$S/builds.json"
+jq -n '[{total_count: 2, workflow_runs: [{id: 42, status: "completed"}]}]' > "$S/promotions.json"
+check "an incomplete promotion census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
+check "an unreadable promotion census starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4 PROMOTION_CENSUS_FAIL=1
+
+fresh_builds
+census < /dev/null > "$S/builds.json"
+jq -n '[{total_count: 1, workflow_runs: [{id: 42, status: "mystery"}]}]' > "$S/promotions.json"
+check "an unknown promotion state starts nothing and fails" 1 "$B" "" GREEN_SOURCE_CANDIDATE_HOURS=4
 
 fresh_builds
 build 7 "$A" 2020-01-01T00:00:00Z completed | census > "$S/builds.json"
