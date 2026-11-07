@@ -767,9 +767,17 @@ fn __print_next_steps(__cli_locale: string, stdio: HarnessStdio, name: string, t
   } else {
     // basic | agent | eval | package | connector
     stdio.println(cli_message(__cli_locale, "  harn run main.harn       # run the program", []))
-    stdio.println(
-      cli_message(__cli_locale, "  harn package verify      # run the canonical package gate", []),
-    )
+    if template == "package" || template == "connector" {
+      stdio.println(
+        cli_message(
+          __cli_locale,
+          "  harn package verify      # run the canonical package gate",
+          [],
+        ),
+      )
+    } else {
+      stdio.println("  harn test tests/")
+    }
   }
   stdio.println(cli_message(__cli_locale, "  harn fmt main.harn       # format code", []))
   stdio.println(cli_message(__cli_locale, "  harn lint main.harn      # lint code", []))

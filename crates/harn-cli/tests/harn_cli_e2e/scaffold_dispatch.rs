@@ -240,6 +240,9 @@ fn init_basic_project_runs_and_tests_green() {
         "harn init failed: stderr={}",
         String::from_utf8_lossy(&init.stderr)
     );
+    let advice = String::from_utf8_lossy(&init.stdout);
+    assert!(advice.contains("  harn test tests/"));
+    assert!(!advice.contains("harn package verify"));
 
     let run = run_scaffold(&["run", "main.harn"], root);
     assert!(

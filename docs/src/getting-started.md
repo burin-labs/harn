@@ -1,9 +1,7 @@
 # Getting started
 
-Install Harn, create a project, and run your first program. Harn can run a
-local model if your machine has room for one, mock a model while you write the
-program around it, or run ordinary code with no model at all, so you can get
-started before signing up for a provider.
+Install Harn, run an agent, call a tool, and replay a recorded model response.
+This tutorial uses synthetic responses, so you don't need provider credentials.
 
 ## Install Harn
 
@@ -33,11 +31,9 @@ irm https://harnlang.com/install.ps1 | iex
 
 ### From source
 
-```bash
-git clone https://github.com/burin-labs/harn.git
-cd harn
-make setup
-```
+See [Contributing](https://github.com/burin-labs/harn/blob/main/CONTRIBUTING.md)
+for source builds and development prerequisites. This tutorial uses the
+installed release.
 
 Check the installation:
 
@@ -55,16 +51,18 @@ harn init hello-harn
 cd hello-harn
 ```
 
-For a small first program, replace `main.harn` with:
+Replace `main.harn` with:
 
 ```harn,check
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
 fn main(harness: Harness) {
-  const response = harness.llm.call(
-    "Say hello in one short sentence.",
-    nil,
-    { provider: "mock" }
-  )
-  harness.stdio.println(response.text)
+  const options: AgentSpec = {provider: "mock", max_iterations: 2}
+  harness.stdio.println("Running: Say hello.")
+  const result = agent_loop(harness, "Say hello.", nil, options)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
 }
 ```
 
@@ -74,8 +72,16 @@ Run it:
 harn run main.harn
 ```
 
-The mock provider is deterministic and needs no network access or API key. Use
-it while you learn the language and write tests.
+```text
+Running: Say hello.
+done
+Mock response to 2-word prompt: Say hello.
+```
+
+The loop accepts a task, optional system prompt, and options. `max_iterations`
+bounds model requests; `done` means the loop completed. The mock provider
+supplies deterministic output without a model request. It doesn't measure
+how well a real model follows your instructions.
 
 ## Check your program
 
@@ -90,75 +96,54 @@ harn lint main.harn
 `fmt` applies the formatter. `check` validates syntax and types. `lint` finds
 common problems and style issues.
 
-## Pick a model for your machine
+## Call a tool
 
-Before you choose a provider, let Harn choose one for you. `harn models
-recommend` measures free memory, GPU, and disk, checks which provider
-credentials it can find, and names one model to start with:
+Get the runnable examples without building Harn from source:
 
-```bash
-harn models recommend
+```sh
+git clone --depth 1 https://github.com/burin-labs/harn.git harn-examples
+cd harn-examples/examples/first-hour
+harn run tools.harn --llm-mock tools.jsonl
 ```
 
 ```text
-vertex/claude-sonnet-4-6
-17 GB free, MPS available, cloud creds available -> vertex/claude-sonnet-4-6 (local installable route available: devstral-small-2)
+tool: 2 + 3 = 5
+done
+2 + 3 = 5.
 ```
 
-The first line is the model. The second is the reasoning: free memory, GPU,
-whether a cloud credential was found, and — in parentheses — the other route
-you could take. Your output will differ, because the answer depends on your
-hardware and on which credentials are already in your environment.
+Open `tools.harn`. The `add` tool declares integer inputs and an integer
+result. The fixture requests the tool, Harn calls the handler, and the next
+model response ends the loop. The `tool:` line comes from the handler itself.
+This tool only calculates a sum. File and process effects require the
+corresponding harness capabilities.
 
-With no cloud credentials at all, every recommendation is a local model, so
-this works as a first command even before you have signed up for anything.
+## Record and replay
 
-## Run a local model
+From the same directory:
 
-If the recommendation is a local model, or you want the local route it offered
-as an alternative, install it:
-
-```bash
-harn models install devstral-small-2
+```sh
+harn run record-replay.harn --llm-mock-record responses.jsonl
+harn run record-replay.harn --llm-mock responses.jsonl
 ```
 
-For an Ollama model that pulls the weights. For llama.cpp, MLX, or vLLM it
-prints the exact download and launch steps for your platform instead of
-downloading anything. `harn local list` then shows every local runtime Harn
-knows about and which models each is serving, and `harn local switch <alias>`
-makes one of them the active local model.
+Each command prints:
 
-## Call a hosted provider
-
-To use a cloud provider, set its API key in your shell and test the route:
-
-```bash
-export ANTHROPIC_API_KEY=your-key
-harn models test claude-sonnet-5-5 --provider anthropic
+```text
+Mock response to 2-word prompt: Say hello.
 ```
 
-`harn models test` sends one small prompt and reports timing, tokens, and cost.
-It works for a local model too — pass the alias you installed above. Either way
-it checks the provider path without requiring a Harn program.
+The first command records a synthetic response. The second supplies that
+recording through the model-call interface. It doesn't recreate the
+filesystem or replay tool effects. Keep recordings local until you've checked
+them for sensitive data. Delete `responses.jsonl` to discard this recording.
 
-To use the same provider in code, change the options in the example to:
+## Use a real model
 
-```harn
-{ provider: "anthropic", model: "claude-sonnet-5-5" }
-```
+Follow [Configure a provider](./provider-setup.md) to choose a local or hosted
+model and set its credentials. Replace the example's `provider: "mock"`
+options with that route, and omit `--llm-mock` when you want a real request.
+Keep credentials out of Harn source and version control.
 
-Do not copy API keys into Harn source or commit them. See [Configure a
-provider](./provider-setup.md) for discovery, readiness checks, local models,
-and provider-specific details.
-
-## See bundled examples
-
-Harn includes offline demos that do not need an API key:
-
-```bash
-harn demo --list
-harn demo <scenario>
-```
-
-When you know the kind of program you want to build, use [Common tasks](./common-tasks.md).
-When you need syntax details, use [Language basics](./language-basics.md).
+Continue with [Agent loops](./llm/agent_loop.md) for tools and execution limits,
+or [Language basics](./language-basics.md) for syntax.

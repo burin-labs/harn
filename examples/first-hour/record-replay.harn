@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  const response = harness.llm.call("Say hello.", nil, {provider: "mock"})
+  harness.stdio.println(response.text)
+}
