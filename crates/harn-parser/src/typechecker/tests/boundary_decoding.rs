@@ -33,6 +33,30 @@ fn read(payload: dict, raw: any, bag: dict<string, any>) -> any {
     assert_eq!(count, 3);
 }
 
+#[test]
+fn native_transcript_events_keep_guaranteed_fields_typed() {
+    let source = r#"
+fn read() -> string {
+  const event = transcript_reminder_event({body: "hello"})
+  const block = event?.blocks?.[0]?.text
+  return event.reminder.body + (block ?? "")
+}
+fn passthrough(payload: dict) -> any {
+  const event = transcript_suspension_event(payload)
+  const block = event?.blocks?.[0]?.text
+  return [block, event.suspension?.custom?.value]
+}
+"#;
+    let checked = errors(source);
+    assert!(checked.is_empty(), "{checked:?}");
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 1);
+    let wrong = errors(
+        r#"fn wrong() -> int { return transcript_reminder_event({body: "hello"}).reminder.body }"#,
+    );
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("expected int, found string"), "{wrong:?}");
+}
+
 /// An open row is untyped only for the keys its tail carries.
 #[test]
 fn untyped_optional_chain_splits_an_open_row_by_declared_field() {
