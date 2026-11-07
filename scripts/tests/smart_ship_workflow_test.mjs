@@ -97,6 +97,26 @@ function pullRequestContext({
   };
 }
 
+test("privileged dispatchers refuse fork heads before forwarding secrets", () => {
+  for (const [file, jobName] of [
+    ["merge-override-dispatch.yml", "override"],
+    ["review-dispatch.yml", "dispatch"],
+  ]) {
+    const candidate = load(
+      fs.readFileSync(`${root}/.github/workflows/${file}`, "utf8"),
+    ).jobs[jobName];
+    const context = pullRequestContext({ changedLabel: "force-merge" });
+    context.needs = { eligibility: { outputs: { dispatch: "true" } } };
+    assert.equal(evaluate(candidate.if, context).coerceString(), "true", file);
+    context.github.event.pull_request.head.repo.full_name = "contributor/harn";
+    assert.equal(
+      evaluate(candidate.if, context).coerceString(),
+      "false",
+      `${file} must refuse a fork even with an eligible label or upstream result`,
+    );
+  }
+});
+
 test("the shipped caller admits every same-repository main PR labeled ship", () => {
   assert.equal(admits(pullRequestContext()), true);
   assert.equal(
