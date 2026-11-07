@@ -639,24 +639,64 @@ impl HostCallBridge for TestHostToolBridge {
 
 struct CountingProcessExecBridge {
     calls: Arc<AtomicUsize>,
+    preparations: Arc<AtomicUsize>,
+}
+
+struct CountingPreparedProcess {
+    calls: Arc<AtomicUsize>,
+    invocation: crate::orchestration::CommandInvocation,
+}
+
+impl super::PreparedHostCommand for CountingPreparedProcess {
+    fn invocation(&self) -> &crate::orchestration::CommandInvocation {
+        &self.invocation
+    }
+
+    fn execute(
+        self: Box<Self>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<VmValue, VmError>> + Send>> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::dict([
+                ("status", VmValue::string("completed")),
+                ("exit_code", VmValue::Int(0)),
+                ("success", VmValue::Bool(true)),
+            ]))
+        })
+    }
 }
 
 impl HostCallBridge for CountingProcessExecBridge {
+    fn prepare_command<'a>(
+        &'a self,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+        _trace: &'a super::trace::HostRequestTrace,
+    ) -> super::HostCommandPreparationFuture<'a> {
+        Box::pin(async move {
+            assert_eq!(operation, "exec");
+            let (program, args) = super::process_exec::process_exec_argv(params)?;
+            let invocation = crate::orchestration::CommandInvocation::new(
+                std::iter::once(program).chain(args).collect(),
+                crate::stdlib::process::execution_root_path(),
+            )?;
+            self.preparations.fetch_add(1, Ordering::SeqCst);
+            Ok(super::HostCommandPreparation::Bound(Box::new(
+                CountingPreparedProcess {
+                    calls: self.calls.clone(),
+                    invocation,
+                },
+            )))
+        })
+    }
+
     fn dispatch<'a>(
         &'a self,
-        capability: &'a str,
-        operation: &'a str,
+        _capability: &'a str,
+        _operation: &'a str,
         _params: &'a crate::value::DictMap,
     ) -> HostCallDispatchFuture<'a> {
-        if (capability, operation) != ("process", "exec") {
-            return host_call_ready(Ok(None));
-        }
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        host_call_ready(Ok(Some(VmValue::dict([
-            ("status", VmValue::string("completed".to_string())),
-            ("exit_code", VmValue::Int(0)),
-            ("success", VmValue::Bool(true)),
-        ]))))
+        host_call_ready(Ok(None))
     }
 }
 
@@ -717,8 +757,10 @@ fn process_exec_bridge_is_gated_by_command_policy() {
     run_host_async_test(|| async {
         crate::orchestration::clear_command_policies();
         let calls = Arc::new(AtomicUsize::new(0));
+        let preparations = Arc::new(AtomicUsize::new(0));
         set_host_call_bridge(Arc::new(CountingProcessExecBridge {
             calls: calls.clone(),
+            preparations: preparations.clone(),
         }));
         crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
             tools: vec!["run".to_string()],
@@ -748,7 +790,12 @@ fn process_exec_bridge_is_gated_by_command_policy() {
         assert_eq!(
             calls.load(Ordering::SeqCst),
             0,
-            "blocked command must not reach host bridge"
+            "blocked command must not execute on the host"
+        );
+        assert_eq!(
+            preparations.load(Ordering::SeqCst),
+            1,
+            "policy must assess an actual retained preparation"
         );
         let result = result.as_dict().expect("blocked result dict");
         assert_eq!(result.get("status").unwrap().display(), "blocked");

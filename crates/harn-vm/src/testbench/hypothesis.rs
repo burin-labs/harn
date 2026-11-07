@@ -44,6 +44,15 @@ struct HypothesisScenarioBridge {
 }
 
 impl HostCallBridge for HypothesisScenarioBridge {
+    fn prepare_command<'a>(
+        &'a self,
+        _operation: &'a str,
+        _params: &'a DictMap,
+        _trace: &'a crate::stdlib::host::trace::HostRequestTrace,
+    ) -> crate::stdlib::host::HostCommandPreparationFuture<'a> {
+        Box::pin(async { Ok(crate::stdlib::host::HostCommandPreparation::Unhandled) })
+    }
+
     fn dispatch<'a>(
         &'a self,
         capability: &'a str,
