@@ -1,9 +1,8 @@
-//! Neutral computer-use tool projection and geometry helpers.
+//! Neutral computer-use tool projection.
 //!
 //! harn-vm owns the *semantic* layer of computer use. It projects the single
 //! neutral `computer` function tool onto each provider's native computer-use
-//! surface, scales screenshots per provider, maps model-space coordinates back
-//! to native pixels, and resolves element/mark grounding targets to points.
+//! surface.
 //!
 //! The coordinate-native *execution* nucleus (screenshot capture, pointer /
 //! keyboard input, accessibility tree) lives in `harn-hostlib`'s `computer`
@@ -24,18 +23,7 @@
 
 use serde_json::{json, Value};
 
-use crate::llm::capabilities::{Capabilities, ComputerUseStyle, ScreenshotScaling};
-
-/// Audit topic under which computer-use actions are recorded. Mirrors the
-/// vision OCR audit topic pattern (`crate::stdlib::vision::VISION_OCR_AUDIT_TOPIC`).
-///
-/// Actual audit emission (one record per executed action, with the resolved
-/// native coordinates and the grounding target that produced them) is wired by
-/// the agent loop / host executor; this constant is the single canonical topic
-/// string those emitters key on.
-// Tested pure API awaiting live wiring (audit emission is a follow-up seam).
-#[allow(dead_code)]
-pub(crate) const COMPUTER_USE_AUDIT_TOPIC: &str = "audit.computer_use";
+use crate::llm::capabilities::{Capabilities, ComputerUseStyle};
 
 /// The host-facing neutral tool name every provider projection keys on.
 pub(crate) const COMPUTER_TOOL_NAME: &str = "computer";
@@ -140,10 +128,8 @@ fn native_computer_projection_enabled() -> bool {
 /// space, but three seams are NOT yet wired and must be armed together as one
 /// unit before this is enabled:
 ///
-/// 1. the captured screenshot is NOT scaled to the advertised size (see
-///    `scale_screenshot`);
-/// 2. the model's returned coordinates are NOT mapped back to the real display
-///    (see `map_coord_back`);
+/// 1. the captured screenshot is NOT scaled to the advertised size;
+/// 2. the model's returned coordinates are NOT mapped back to the real display;
 /// 3. the provider's native action vocabulary is NOT lowered to the neutral
 ///    `ComputerAction` the harn `computer` handler executes.
 ///
@@ -198,190 +184,6 @@ fn project_computer_tools_with(
         _ => openai_computer_tool(width, height, environment_for_os()),
     };
     provider_tools.push(native);
-}
-
-/// Fit `(width, height)` within `(max_w, max_h)` preserving aspect ratio,
-/// never upscaling. Zero-sized inputs pass through unchanged.
-#[allow(dead_code)] // used by scale_screenshot (a follow-up live-wiring seam).
-fn fit_within(width: u32, height: u32, max_w: u32, max_h: u32) -> (u32, u32) {
-    if width == 0 || height == 0 {
-        return (width, height);
-    }
-    if width <= max_w && height <= max_h {
-        return (width, height);
-    }
-    let scale = (f64::from(max_w) / f64::from(width)).min(f64::from(max_h) / f64::from(height));
-    let scaled_w = ((f64::from(width) * scale).round() as u32).max(1);
-    let scaled_h = ((f64::from(height) * scale).round() as u32).max(1);
-    (scaled_w, scaled_h)
-}
-
-/// Scale a native screenshot to the model-facing target size for `style`.
-///
-/// - `xga` (Anthropic): fit within 1024x768 preserving aspect ratio, never
-///   upscaling.
-/// - `original` / `none` / unknown / unset (OpenAI et al.): identity.
-//
-// Items 5/6: these geometry + grounding helpers are the tested pure API that
-// the orchestrator wires into the live screenshot/coordinate flow as a
-// follow-up (see the INTEGRATION SEAM notes). `#[allow(dead_code)]` keeps the
-// crate warning-clean until that wiring lands.
-#[allow(dead_code)]
-pub(crate) fn scale_screenshot(
-    width: u32,
-    height: u32,
-    style: Option<ScreenshotScaling>,
-) -> (u32, u32) {
-    match style {
-        Some(ScreenshotScaling::Xga) => {
-            fit_within(width, height, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT)
-        }
-        _ => (width, height),
-    }
-}
-
-/// Map a native coordinate into the model-facing target (scaled) space. Inverse
-/// of [`map_coord_back`]. A zero native dimension passes the axis through.
-#[allow(dead_code)]
-pub(crate) fn map_coord_to_target(
-    native_xy: (i32, i32),
-    native_dims: (u32, u32),
-    target_dims: (u32, u32),
-) -> (i32, i32) {
-    let (nx, ny) = native_xy;
-    let (nw, nh) = native_dims;
-    let (tw, th) = target_dims;
-    let mx = if nw == 0 {
-        nx
-    } else {
-        (f64::from(nx) * f64::from(tw) / f64::from(nw)).round() as i32
-    };
-    let my = if nh == 0 {
-        ny
-    } else {
-        (f64::from(ny) * f64::from(th) / f64::from(nh)).round() as i32
-    };
-    (mx, my)
-}
-
-/// Map a model-space coordinate (expressed in the target/scaled dims the model
-/// saw) back to absolute native pixels for the execution nucleus. A zero target
-/// dimension passes the axis through unchanged.
-///
-/// INTEGRATION SEAM — live flow: the orchestrator should [`scale_screenshot`]
-/// the captured image before sending it, remember the `(target_dims,
-/// native_dims)` pair, and run every model-returned click/point through this
-/// function before lowering to the coordinate-native `hostlib_computer_execute`
-/// action list.
-#[allow(dead_code)]
-pub(crate) fn map_coord_back(
-    model_xy: (i32, i32),
-    target_dims: (u32, u32),
-    native_dims: (u32, u32),
-) -> (i32, i32) {
-    let (mx, my) = model_xy;
-    let (tw, th) = target_dims;
-    let (nw, nh) = native_dims;
-    let nx = if tw == 0 {
-        mx
-    } else {
-        (f64::from(mx) * f64::from(nw) / f64::from(tw)).round() as i32
-    };
-    let ny = if th == 0 {
-        my
-    } else {
-        (f64::from(my) * f64::from(nh) / f64::from(th)).round() as i32
-    };
-    (nx, ny)
-}
-
-/// One row of the accessibility element table used for grounding. Mirrors the
-/// hostlib `UiElement` shape (`reference`, `role`, `name`, bbox) so callers can
-/// build these directly from a `hostlib_computer_ui_tree` result.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) struct GroundingElement {
-    /// Stable reference the model addresses.
-    pub reference: String,
-    /// Accessibility role (e.g. `AXButton`).
-    pub role: String,
-    /// Accessible name / label.
-    pub name: String,
-    /// Bounding-box x in native pixels.
-    pub x: i32,
-    /// Bounding-box y in native pixels.
-    pub y: i32,
-    /// Bounding-box width in native pixels.
-    pub width: i32,
-    /// Bounding-box height in native pixels.
-    pub height: i32,
-}
-
-/// A grounding target a model may address instead of raw coordinates.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum GroundingTarget {
-    /// Address an element by its stable `reference`.
-    Element {
-        /// The element's `reference`.
-        reference: String,
-    },
-    /// Address a set-of-marks id (matched against `reference`, or a 1-based
-    /// index into the element table when the id is numeric).
-    Mark {
-        /// The mark id.
-        id: String,
-    },
-    /// A raw native point (pass-through).
-    Point {
-        /// Absolute x in native pixels.
-        x: i32,
-        /// Absolute y in native pixels.
-        y: i32,
-    },
-}
-
-/// The native center point of an element's bounding box.
-#[allow(dead_code)]
-fn bbox_center(element: &GroundingElement) -> (i32, i32) {
-    (
-        element.x + element.width / 2,
-        element.y + element.height / 2,
-    )
-}
-
-/// Resolve a grounding target to a native `(x, y)` point.
-///
-/// - `Point` returns its coordinates unchanged.
-/// - `Element` returns the bbox center of the element whose `reference`
-///   matches.
-/// - `Mark` returns the bbox center of the element whose `reference` matches
-///   the id, or (when the id is a positive integer) the 1-based index into the
-///   element table.
-///
-/// Returns `None` when an element/mark target does not resolve.
-#[allow(dead_code)]
-pub(crate) fn resolve_grounding(
-    elements: &[GroundingElement],
-    target: &GroundingTarget,
-) -> Option<(i32, i32)> {
-    match target {
-        GroundingTarget::Point { x, y } => Some((*x, *y)),
-        GroundingTarget::Element { reference } => elements
-            .iter()
-            .find(|element| &element.reference == reference)
-            .map(bbox_center),
-        GroundingTarget::Mark { id } => elements
-            .iter()
-            .find(|element| &element.reference == id)
-            .or_else(|| {
-                id.parse::<usize>()
-                    .ok()
-                    .filter(|index| *index >= 1)
-                    .and_then(|index| elements.get(index - 1))
-            })
-            .map(bbox_center),
-    }
 }
 
 #[cfg(test)]
@@ -493,112 +295,5 @@ mod tests {
         project_computer_tools_with(&caps, &mut native, &mut provider, true);
         assert!(native.unwrap().is_empty());
         assert_eq!(provider.len(), 1);
-    }
-
-    #[test]
-    fn xga_scaling_fits_and_original_is_identity() {
-        // 1920x1080 fits within 1024x768 → 1024x576 (letterboxed by width).
-        assert_eq!(
-            scale_screenshot(1920, 1080, Some(ScreenshotScaling::Xga)),
-            (1024, 576)
-        );
-        // Already small: no upscaling.
-        assert_eq!(
-            scale_screenshot(800, 600, Some(ScreenshotScaling::Xga)),
-            (800, 600)
-        );
-        // original / none / unset: identity.
-        assert_eq!(
-            scale_screenshot(1920, 1080, Some(ScreenshotScaling::Original)),
-            (1920, 1080)
-        );
-        assert_eq!(scale_screenshot(1920, 1080, None), (1920, 1080));
-    }
-
-    #[test]
-    fn coordinate_roundtrip_within_one_pixel() {
-        let native_dims = (1920, 1080);
-        let target_dims =
-            scale_screenshot(native_dims.0, native_dims.1, Some(ScreenshotScaling::Xga));
-        for native in [(0, 0), (960, 540), (1919, 1079), (100, 999)] {
-            let model = map_coord_to_target(native, native_dims, target_dims);
-            let back = map_coord_back(model, target_dims, native_dims);
-            assert!(
-                (back.0 - native.0).abs() <= 1 && (back.1 - native.1).abs() <= 1,
-                "native {native:?} -> model {model:?} -> back {back:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn original_scaling_coordinate_identity() {
-        let dims = (1440, 900);
-        let target = scale_screenshot(dims.0, dims.1, Some(ScreenshotScaling::Original));
-        assert_eq!(target, dims);
-        assert_eq!(map_coord_back((123, 456), target, dims), (123, 456));
-    }
-
-    #[test]
-    fn grounding_resolves_element_mark_and_point() {
-        let elements = vec![
-            GroundingElement {
-                reference: "el-a".to_string(),
-                role: "AXButton".to_string(),
-                name: "OK".to_string(),
-                x: 100,
-                y: 200,
-                width: 40,
-                height: 20,
-            },
-            GroundingElement {
-                reference: "el-b".to_string(),
-                role: "AXTextField".to_string(),
-                name: "Search".to_string(),
-                x: 0,
-                y: 0,
-                width: 10,
-                height: 10,
-            },
-        ];
-        // Element by reference → bbox center.
-        assert_eq!(
-            resolve_grounding(
-                &elements,
-                &GroundingTarget::Element {
-                    reference: "el-a".to_string()
-                }
-            ),
-            Some((120, 210))
-        );
-        // Mark by 1-based index → element el-b center.
-        assert_eq!(
-            resolve_grounding(
-                &elements,
-                &GroundingTarget::Mark {
-                    id: "2".to_string()
-                }
-            ),
-            Some((5, 5))
-        );
-        // Point pass-through.
-        assert_eq!(
-            resolve_grounding(&elements, &GroundingTarget::Point { x: 7, y: 9 }),
-            Some((7, 9))
-        );
-        // Unknown element → None.
-        assert_eq!(
-            resolve_grounding(
-                &elements,
-                &GroundingTarget::Element {
-                    reference: "nope".to_string()
-                }
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn audit_topic_is_stable() {
-        assert_eq!(COMPUTER_USE_AUDIT_TOPIC, "audit.computer_use");
     }
 }
