@@ -127,9 +127,18 @@ fn batch_projection_preserves_zero_and_masks_overflow_and_unsupported_metadata()
                 "partial_failure",
                 "discount_percent",
             ] {
+                let nested_value = nested.get(key).expect("nested batch field");
+                let flat_value = fields
+                    .get(format!("batch_{key}").as_str())
+                    .expect("flat batch field");
                 assert_eq!(
-                    nested.get(key),
-                    fields.get(format!("batch_{key}").as_str()),
+                    std::mem::discriminant(nested_value),
+                    std::mem::discriminant(flat_value),
+                    "{key}"
+                );
+                assert_eq!(
+                    crate::llm::helpers::vm_value_to_json(nested_value),
+                    crate::llm::helpers::vm_value_to_json(flat_value),
                     "{key}"
                 );
             }
