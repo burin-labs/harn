@@ -118,3 +118,4 @@ jobs:
             ${{ runner.temp }}/cold-start-evidence.json
             ${{ runner.temp }}/cold-start-measurement.json
           if-no-files-found: error
+          retention-days: 7
