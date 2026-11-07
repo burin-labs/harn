@@ -79,6 +79,9 @@ fn first_param_validation_error_body(
     options: ValidationOptions,
     context: &mut ParamValidationContext,
 ) -> Option<String> {
+    if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
+        return None;
+    }
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
         if let Err(error) = context.traversal.expand_ref() {
             return Some(format!("parameter '{param_name}': {error}"));
@@ -116,9 +119,6 @@ fn first_param_validation_error_body(
         return result;
     }
 
-    if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
-        return None;
-    }
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
             if let Some(error) = first_param_validation_error_inner(
