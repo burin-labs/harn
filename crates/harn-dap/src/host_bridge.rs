@@ -80,15 +80,28 @@ pub type PendingMap = Arc<PendingState>;
 struct PendingCall {
     pending: PendingMap,
     seq: i64,
+    output_seq: Arc<AtomicI64>,
+    stdout: SharedWriter,
 }
 
 impl Drop for PendingCall {
     fn drop(&mut self) {
-        self.pending
+        let abandoned = self
+            .pending
             .map
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .remove(&self.seq);
+            .remove(&self.seq)
+            .is_some();
+        if abandoned {
+            let event = json!({
+                "seq": self.output_seq.fetch_add(1, Ordering::SeqCst),
+                "type": "event",
+                "event": "harnHostCallCancelled",
+                "body": {"request_seq": self.seq},
+            });
+            let _ = write_json_frame(&self.stdout, &event);
+        }
     }
 }
 
@@ -177,6 +190,8 @@ impl DapHostBridge {
         let call = PendingCall {
             pending: self.pending.clone(),
             seq: req_seq,
+            output_seq: self.seq.clone(),
+            stdout: self.stdout.clone(),
         };
         // Notify any waiter watching for new pending entries (e.g. tests
         // that deliver synthetic replies without spinning on a poll loop).
@@ -490,7 +505,7 @@ mod tests {
     #[test]
     fn dropping_a_reverse_request_retires_only_its_own_pending_entry() {
         run_async(|| async {
-            let (bridge, _buf, pending) = rig();
+            let (bridge, buf, pending) = rig();
             let params = harn_vm::value::DictMap::new();
             let mut first = Box::pin(bridge.dispatch("process", "prepare", &params));
             let mut second = Box::pin(bridge.dispatch("workspace", "read_text", &params));
@@ -529,6 +544,22 @@ mod tests {
                 matches!(second.await.unwrap(), Some(VmValue::String(value)) if value == "retained")
             );
             assert!(pending.map.lock().unwrap().is_empty());
+            let frames = parse_lsp_frames(&buf.lock().unwrap());
+            let cancelled = frames
+                .iter()
+                .filter(|frame| frame["event"] == "harnHostCallCancelled")
+                .collect::<Vec<_>>();
+            assert_eq!(
+                cancelled.len(),
+                1,
+                "normal replies must not emit cancellation"
+            );
+            assert_eq!(cancelled[0]["body"]["request_seq"], ids[0]);
+            assert_eq!(
+                cancelled[0]["seq"],
+                ids[1] + 1,
+                "events share the adapter sequence allocator"
+            );
         });
     }
 

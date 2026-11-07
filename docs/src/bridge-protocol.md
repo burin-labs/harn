@@ -82,6 +82,11 @@ a child. Hosts
 must reclaim pending tokens and active children on disconnect and session close;
 a transport failure cannot prove that a remote child terminated.
 
+DAP emits `harnHostCallCancelled` with `{request_seq: integer}` when an unanswered
+reverse request is abandoned or times out. The executor retires the preparation
+identified by that original request sequence. This is a Harn extension event;
+the standard DAP `cancel` request runs in the opposite direction.
+
 The generated [preparation schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-preparation.schema.json)
 and [release schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-release.schema.json)
 come from the runtime's typed response contracts. Request attribution remains
