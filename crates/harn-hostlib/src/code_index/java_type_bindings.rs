@@ -7,6 +7,7 @@ use super::{
     BindingType, JavaBindings,
 };
 use crate::ast::java::type_path;
+use crate::host_call::HostCallContext;
 use tree_sitter::Node;
 
 #[derive(Default)]
@@ -16,31 +17,41 @@ pub(crate) struct JavaTypeCatalog {
 }
 
 impl JavaTypeCatalog {
-    pub fn add(&mut self, bindings: &JavaBindings<'_>, root: Node<'_>) {
-        for node in descendants(root).filter(|node| is_type(*node)) {
-            if let Some(identity) = bindings.type_identity(node) {
-                if !identity.starts_with('#') {
-                    *self.declarations.entry(identity).or_default() += 1;
+    pub fn add(
+        &mut self,
+        bindings: &JavaBindings<'_>,
+        root: Node<'_>,
+        call: Option<&HostCallContext>,
+    ) -> Result<(), String> {
+        for node in descendants(root) {
+            if call.is_some_and(|call| call.interrupted().is_some()) {
+                return Err("Java type catalog was interrupted".into());
+            }
+            if is_type(node) {
+                if let Some(identity) = bindings.type_identity(node) {
+                    if !identity.starts_with('#') {
+                        *self.declarations.entry(identity).or_default() += 1;
+                    }
                 }
             }
-        }
-        for member in descendants(root).filter(|node| {
-            node.kind() == "method_declaration"
+            if node.kind() == "method_declaration"
                 || node.kind() == "variable_declarator"
                     && node
                         .parent()
                         .is_some_and(|parent| parent.kind() == "field_declaration")
-        }) {
-            if let Some(name) = member.child_by_field_name("name") {
-                if let Some(owner) = std::iter::successors(member.parent(), |node| node.parent())
-                    .find(|node| is_type(*node))
-                    .and_then(|owner| bindings.type_identity(owner))
-                {
-                    self.value_members
-                        .insert(format!("{owner}.{}", text(name, bindings.source)));
+            {
+                if let Some(name) = node.child_by_field_name("name") {
+                    if let Some(owner) = std::iter::successors(node.parent(), |node| node.parent())
+                        .find(|node| is_type(*node))
+                        .and_then(|owner| bindings.type_identity(owner))
+                    {
+                        self.value_members
+                            .insert(format!("{owner}.{}", text(name, bindings.source)));
+                    }
                 }
             }
         }
+        Ok(())
     }
 
     pub fn contains(&self, name: &str) -> bool {

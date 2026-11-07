@@ -222,7 +222,7 @@ fn java_same_named_method_is_not_a_constructor() {
                 && node.col == Some(source.rfind("DocumentStore").unwrap() as u32 + 1)
         })
         .expect("the method is indexed");
-    assert!(super::rename_java::prepare_type(state, seed, None)
+    assert!(super::rename_java::prepare_type(state, seed, None, None)
         .unwrap()
         .is_none());
     drop(index);

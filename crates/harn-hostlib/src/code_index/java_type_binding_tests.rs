@@ -9,7 +9,9 @@ fn catalog(sources: &[&str]) -> JavaTypeCatalog {
     for source in sources {
         let tree = parse_tree(source, Language::Java).unwrap();
         assert!(!tree.root_node().has_error(), "{source}");
-        catalog.add(&JavaBindings::new(&tree, source), tree.root_node());
+        catalog
+            .add(&JavaBindings::new(&tree, source), tree.root_node(), None)
+            .unwrap();
     }
     catalog
 }

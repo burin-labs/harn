@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use crate::host_call::{HostCallContext, Phase};
 use tree_sitter::{Node as SyntaxNode, Tree};
 
 use super::super::java_bindings::{JavaBindings, JavaTypeCatalog};
@@ -26,9 +27,14 @@ pub(in crate::code_index) struct JavaTypeRename {
     pub seed: JavaTypeSeed,
     sources: Vec<(String, String)>,
     catalog: JavaTypeCatalog,
+    call: Option<HostCallContext>,
 }
 
-fn read_sources(root: &Path, session_id: Option<&str>) -> Result<Vec<(String, String)>, String> {
+fn read_sources(
+    root: &Path,
+    session_id: Option<&str>,
+    call: Option<&HostCallContext>,
+) -> Result<Vec<(String, String)>, String> {
     super::super::rename_workspace::read_sources(
         root,
         session_id,
@@ -36,7 +42,7 @@ fn read_sources(root: &Path, session_id: Option<&str>) -> Result<Vec<(String, St
         "Java",
         MAX_ENTRIES,
         MAX_SOURCE_BYTES,
-        None,
+        call,
     )
 }
 
@@ -44,7 +50,9 @@ pub(in crate::code_index) fn prepare_type(
     state: &IndexState,
     seed: &Node,
     session_id: Option<&str>,
+    call: Option<&HostCallContext>,
 ) -> Result<Option<JavaTypeRename>, String> {
+    poll(call)?;
     if seed.language != "java" || !matches!(seed.kind, NodeKind::Type | NodeKind::Function) {
         return Ok(None);
     }
@@ -121,7 +129,7 @@ pub(in crate::code_index) fn prepare_type(
         declaration: IdentifierSpan::of(name),
         public_top_level,
     };
-    let sources = read_sources(&state.root, session_id)?;
+    let sources = read_sources(&state.root, session_id, call)?;
     if !sources
         .iter()
         .any(|(path, expected)| path == &seed.path && expected == &source)
@@ -130,13 +138,14 @@ pub(in crate::code_index) fn prepare_type(
     }
     let mut catalog = JavaTypeCatalog::default();
     for (_, source) in &sources {
+        poll(call)?;
         let tree = crate::ast::api::parse_tree(source, crate::ast::Language::Java)
             .map_err(|err| err.to_string())?;
         let bindings = JavaBindings::new(&tree, source);
         if tree.root_node().has_error() || source.contains("\\u") {
             return Err("Java workspace contains unsupported or invalid binding syntax".into());
         }
-        catalog.add(&bindings, tree.root_node());
+        catalog.add(&bindings, tree.root_node(), call)?;
     }
     if !catalog.unique(&seed.qualified_name) {
         return Err(
@@ -148,12 +157,14 @@ pub(in crate::code_index) fn prepare_type(
         seed,
         sources,
         catalog,
+        call: call.cloned(),
     }))
 }
 
 impl JavaTypeRename {
     pub fn unchanged(&self, root: &Path, session_id: Option<&str>) -> bool {
-        read_sources(root, session_id).is_ok_and(|sources| sources == self.sources)
+        read_sources(root, session_id, self.call.as_ref())
+            .is_ok_and(|sources| sources == self.sources)
     }
 
     pub fn members(&self) -> impl Iterator<Item = &String> {
@@ -162,6 +173,7 @@ impl JavaTypeRename {
 
     pub fn cover_scope(&self, in_scope: &[String]) -> Result<(), String> {
         for (path, source) in &self.sources {
+            poll(self.call.as_ref())?;
             if in_scope.contains(path) {
                 continue;
             }
@@ -207,6 +219,7 @@ impl JavaTypeRename {
         targets: Vec<IdentifierSpan>,
         shadows: Vec<ShadowSite>,
     ) -> Result<RenameSites, String> {
+        poll(self.call.as_ref())?;
         if !crate::ast::java::is_type_name(new_name) {
             return Err("the proposed Java name is not a valid type identifier".into());
         }
@@ -225,6 +238,7 @@ impl JavaTypeRename {
             |(owner, _)| format!("{owner}.{new_name}"),
         );
         for span in targets {
+            poll(self.call.as_ref())?;
             let node = occurrence(tree, span)?;
             if bindings.type_occurrence(node, &self.catalog)?.as_deref()
                 == Some(&self.seed.qualified_name)
@@ -244,6 +258,7 @@ impl JavaTypeRename {
             }
         }
         for shadow in shadows {
+            poll(self.call.as_ref())?;
             let point = tree_sitter::Point::new(shadow.row, shadow.col);
             let node = tree
                 .root_node()
@@ -268,6 +283,16 @@ impl JavaTypeRename {
             shadows: conflicts,
         })
     }
+}
+
+fn poll(call: Option<&HostCallContext>) -> Result<(), String> {
+    if let Some(call) = call {
+        if call.interrupted().is_some() {
+            return Err("Java type binding proof was interrupted".into());
+        }
+        call.heartbeat(Phase::Resolving, "checking Java type bindings");
+    }
+    Ok(())
 }
 
 fn occurrence(tree: &Tree, span: IdentifierSpan) -> Result<SyntaxNode<'_>, String> {
@@ -295,6 +320,49 @@ mod tests {
     const SOURCE: &str = "package lab;\npublic class DocumentStore {\n public DocumentStore() {}\n void DocumentStore() {}\n}\n";
 
     #[test]
+    fn caller_interruption_refuses_census_catalog_and_retained_proof_work() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("DocumentStore.java"), SOURCE).unwrap();
+        let state = IndexState::build_from_root(dir.path()).0;
+        let node = state
+            .symbols
+            .iter_nodes()
+            .find(|node| node.name == "DocumentStore" && node.kind == NodeKind::Type)
+            .unwrap();
+        let expired = HostCallContext::new(None).with_budget(std::time::Duration::ZERO);
+        assert!(prepare_type(&state, node, None, Some(&expired))
+            .err()
+            .unwrap()
+            .contains("interrupted"));
+        let mut proof = prepare_type(&state, node, None, None).unwrap().unwrap();
+        assert_eq!(
+            proof.members().count(),
+            1,
+            "the positive must inspect a real source"
+        );
+        let tree = crate::ast::api::parse_tree(SOURCE, crate::ast::Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, SOURCE);
+        let mut catalog = JavaTypeCatalog::default();
+        assert!(catalog
+            .add(&bindings, tree.root_node(), Some(&expired))
+            .is_err());
+        assert!(!catalog.contains("lab.DocumentStore"));
+        proof.call = Some(expired);
+        assert!(!proof.unchanged(dir.path(), None));
+        assert!(proof.cover_scope(&[]).is_err());
+        assert!(proof
+            .sites(
+                "DocumentStore.java",
+                SOURCE,
+                &tree,
+                "Library",
+                Vec::new(),
+                Vec::new()
+            )
+            .is_err());
+    }
+
+    #[test]
     fn prepared_type_and_constructor_select_the_same_declaration_but_not_the_method() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("DocumentStore.java"), SOURCE).unwrap();
@@ -306,7 +374,7 @@ mod tests {
                 .iter_nodes()
                 .find(|node| node.name == "DocumentStore" && node.line == line)
                 .unwrap();
-            let result = prepare_type(&state, node, None).unwrap();
+            let result = prepare_type(&state, node, None, None).unwrap();
             if line == 4 {
                 assert!(
                     result.is_none(),
@@ -345,7 +413,7 @@ mod tests {
             .iter_nodes()
             .find(|node| node.name == "DocumentStore" && node.kind == NodeKind::Type)
             .unwrap();
-        let proof = prepare_type(&state, node, None).unwrap().unwrap();
+        let proof = prepare_type(&state, node, None, None).unwrap().unwrap();
         assert!(proof.members().any(|path| path == "build/Hidden.java"));
         assert!(proof
             .cover_scope(&["DocumentStore.java".to_string()])
