@@ -218,27 +218,6 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "\"agent_monologue_actuation_config()\" when absent; object form enabled defaults true",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
-    "expiry": "2026-09-13",
-    "kind": "boolean option",
-    "layer": "stall handler",
-    "name": "AgentStallConfig.monologue_actuation",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "reader": "agent_monologue_actuation_take_for_turn"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-        "reader": "__agent_stall_config"
-      }
-    ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "3 when absent; object form enabled defaults true",
     "evidence": "Static declaration/read only; downstream headless binding not observed.",
     "expiry": "2026-09-13",

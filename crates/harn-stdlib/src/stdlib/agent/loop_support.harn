@@ -30,10 +30,6 @@ pub import {
   agent_mcp_mount_additional,
 } from "std/agent/mcp"
 pub import {
-  agent_monologue_actuation_observe_completed_dispatch,
-  agent_monologue_actuation_take_for_turn,
-} from "std/agent/monologue_actuation"
-pub import {
   agent_loop_options,
   agent_merge_llm_options,
   agent_refresh_tool_format_for_route,

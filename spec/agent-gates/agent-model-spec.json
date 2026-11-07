@@ -1417,10 +1417,6 @@
         "reader": "__mcp_admit_tools"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "reader": "agent_monologue_actuation_take_for_turn"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
         "reader": "agent_refresh_tool_format_for_route"
       },

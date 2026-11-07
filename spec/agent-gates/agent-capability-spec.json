@@ -146,10 +146,6 @@
         "reader": "__with_mcp_tool_ceiling"
       },
       {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "reader": "agent_monologue_actuation_take_for_turn"
-      },
-      {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
         "reader": "__stance_policy_patch"
       },
