@@ -21,7 +21,7 @@ Follow the installer's PATH instructions, then run `harn --version`.
 
 Save these ten lines as `main.harn`:
 
-```harn,check
+```harn,check title="agent.harn"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 
@@ -74,7 +74,7 @@ the agent can use and what those tools may access.
 This agent reads a project's README and summarizes it. Its only tool reads files;
 the task doesn't require it to edit code or run commands.
 
-```harn,check
+```harn,check title="read-project.harn"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 
