@@ -1,0 +1,11 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline main(harness: Harness) {
+  const captured = agent_capture_events(
+    harness.agent,
+    "typed-capture-negative",
+    fn() { return {nested: {count: 7}} },
+  )
+  const wrong: string = captured.result.nested.count
+  harness.stdio.println(wrong)
+}

@@ -1,0 +1,9 @@
+import { LlmCallerRequest } from "std/llm/caller"
+
+fn wrong(request: LlmCallerRequest) -> int? {
+  return request.opts?.provider
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(wrong({prompt: "typed", opts: {provider: "mock"}}))
+}

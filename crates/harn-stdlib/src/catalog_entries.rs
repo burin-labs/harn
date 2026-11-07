@@ -272,6 +272,7 @@ catalog_entries! {
     "llm/speed" => "stdlib/llm/speed.harn",
     "llm/chat_session" => "stdlib/llm/chat_session.harn",
     "llm/caller" => "stdlib/llm/caller.harn",
+    "llm/caller_types" => "stdlib/llm/caller_types.harn",
     "harness/policy" => "stdlib/harness/policy.harn",
     "llm/budget" => "stdlib/llm/budget.harn",
     "llm/tokenizer" => "stdlib/llm/tokenizer.harn",

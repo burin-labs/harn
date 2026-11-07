@@ -1,0 +1,32 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_emit_event } from "std/agent/state"
+
+type CapturedEvent = {type: string, tool_name: string, ...dict}
+
+pipeline main(harness: Harness) {
+  const session = "typed-capture-" + harness.random.uuid()
+  const bytes = bytes_from_hex("0001ff80")
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() {
+      agent_emit_event(
+        harness.agent,
+        session,
+        "tool_call_update",
+        {
+          tool_call_id: "typed-call",
+          tool_name: "inspect",
+          status: "completed",
+          mutation_status: "unchanged",
+        },
+      )
+      return {nested: {count: 3}, bytes: bytes}
+    },
+  )
+  assert_eq(len(captured.events), 1, "the native capture must collect the actual event")
+  harness.stdio.println(captured.result?.nested?.count == 3)
+  harness.stdio.println(captured.result.bytes == bytes)
+  const event = schema_expect(captured.events[0], schema_of(CapturedEvent))
+  harness.stdio.println(event.type == "tool_call_update" && event.tool_name == "inspect")
+}

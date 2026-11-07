@@ -5,22 +5,10 @@
 // The call plane's front door: composed, policy-complete callers built from
 // the middleware in std/llm/handlers. Caller-plane sugar accumulates here so
 // std/llm/handlers stays a flat toolbox of individual middlewares.
+pub import { LlmCaller, LlmCallerRequest } from "std/llm/caller_types"
 import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
 import { __wrap_llm_result } from "std/llm/safe"
-
-/**
- * One request through a caller stack: the prompt/system pair plus the
- * `llm_call` options dict the bottom of the stack forwards verbatim.
- */
-pub type LlmCallerRequest = {prompt: string, system?: string, opts?: dict}
-
-/**
- * A composable caller: middleware like `with_retry` / `with_cache` wrap one
- * and return another. The result is the `std/llm/safe` status envelope
- * (`{status, value?, error?, ...}`) around the canonical `llm_call` response.
- */
-pub type LlmCaller = fn(LlmCallerRequest) -> dict
 
 /**
  * default_llm_caller returns a closure with the canonical (call) -> result
@@ -85,10 +73,10 @@ pub fn llm_caller(harness: Harness, opts: any = nil) -> LlmCaller {
  * extend (e.g. dispatch on `model_tier` if a future caller wants to
  * publish the context before resolution).
  */
-fn __default_caller_render_context_provider(call: dict) -> string {
+fn __default_caller_render_context_provider(call: LlmCallerRequest) -> string {
   return to_string(call?.opts?.provider ?? "")
 }
 
-fn __default_caller_render_context_model(call: dict) -> string {
+fn __default_caller_render_context_model(call: LlmCallerRequest) -> string {
   return to_string(call?.opts?.model ?? "")
 }

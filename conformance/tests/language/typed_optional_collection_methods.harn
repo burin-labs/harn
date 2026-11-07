@@ -16,11 +16,11 @@ fn nullable(values: list<int> | list<string> | nil) -> list<int | string>? {
 }
 
 fn main(harness: Harness) {
-  assert(names({steps: [{with: {name: "x"}}]}) == "x")
-  assert(names({}) == nil)
-  assert(joined([1, 2]) == [1, 2])
-  assert(joined(["a"]) == ["a"])
-  assert(nullable(nil) == nil)
-  assert(nullable([1]) == [1])
+  assert_eq(names({steps: [{with: {name: "x"}}]}), "x")
+  assert_eq(names({}), nil)
+  assert_eq(joined([1, 2]), [1, 2])
+  assert_eq(joined(["a"]), ["a"])
+  assert_eq(nullable(nil), nil)
+  assert_eq(nullable([1]), [1])
   harness.stdio.println("typed collection branches reached")
 }

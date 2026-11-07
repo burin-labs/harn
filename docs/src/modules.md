@@ -1092,7 +1092,7 @@ The blessed default caller stack (the call plane's front door):
 |---|---|
 | `llm_caller(opts?)` | The blessed default caller stack: `with_retry(default_llm_caller(), opts?.retry ?? {})` with typed reserved-status classification and billed-empty re-dispatch |
 | `default_llm_caller()` | The bottom of every middleware composition: one `harness.llm.call` folded into the canonical caller envelope |
-| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?}` |
+| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?, turn?}`, with typed model-call options and loop provenance |
 | `LlmCaller` (type) | A composable caller: `fn(LlmCallerRequest) -> dict` — middleware wraps one and returns another |
 
 ### std/llm/handlers
@@ -2154,6 +2154,17 @@ Private-span filtering and terminal envelopes for streaming chat UIs:
 | `agent_private_stream_delta(state?, delta?, config?)` | Fold one provider delta and return a safe `visible_delta` |
 | `agent_private_stream_finish(state?, config?)` | Flush the final safe suffix and report withheld/unterminated private state |
 | `agent_stream_call(prompt, system?, options?)` | Wrap `harness.llm.stream_call` with private filtering, callbacks, and terminal status envelopes |
+
+### std/agent/events
+
+| Function or type | Description |
+|---|---|
+| `agent_capture_events(agent, session_id, body)` | Capture events while the callback runs and return `AgentEventCapture<T>` |
+| `AgentEventCapture<T>` | Preserve the callback's result type `T` alongside `events: list<unknown>` |
+
+Capture preserves callback results as runtime values, including bytes. Captured
+events are JSON payloads; validate an event against its consumer's schema before
+requiring event-specific fields.
 
 ### std/agent/progress
 

@@ -1,5 +1,8 @@
 import "std/schema"
 
+/** The callback result is retained as a VM value; event payloads are JSON. */
+pub type AgentEventCapture<T> = {result: T, events: list<unknown>}
+
 fn __agent_event_number_schema() {
   return schema_union([schema_int(), schema_float()])
 }
@@ -364,6 +367,11 @@ pub fn agent_event_capture_value(value: any, apply_defaults: bool = false) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_capture_events(agent: HarnessAgent, session_id: any, body: any) {
-  return agent.capture_events(session_id, body)
+pub fn agent_capture_events<T>(
+  agent: HarnessAgent,
+  session_id: string,
+  body: fn() -> T,
+) -> AgentEventCapture<T> {
+  const captured = agent.capture_events(session_id, body)
+  return {result: captured.result, events: captured.events}
 }
