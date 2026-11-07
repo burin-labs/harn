@@ -62,12 +62,17 @@ A caller is a closure with the canonical shape:
 
 ```harn,ignore
 fn(call) -> LlmCallerResult
-//   call = {prompt: string, system: string|nil, opts: dict,
+//   call = {prompt: unknown, system: unknown, opts: LlmCallOptions,
 //           turn:  {iteration: int, session_id: string, attempt: int}}
 //   LlmCallerResult =
 //     {ok: true,  value: <llm dict>}
 //   | {ok: false, status: string, error?: any, retryable?: bool}
 ```
+
+Import `LlmCallerRequest` and `LlmCaller` from `std/llm/caller` to retain these
+types in a custom callback. Prompt and system payloads remain opaque; narrow
+them before requiring text. The default caller forwards options through the
+canonical `LlmCallOptions` contract.
 
 Reserved statuses:
 
