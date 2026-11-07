@@ -13,6 +13,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 
 | Script | Wired into | Notes |
 | --- | --- | --- |
+| `release_third_party_notices.harn` | `make {gen,check,test}-release-notices` and release packaging | Typed Cargo-about boundary, notice discovery, rendering and source-bound offline verification; archive tests execute the actual Unix workflow step. Cargo-about remains the locked dependency inventory tool. |
 | `check_receipt_struct_duplication.harn` | `make check-receipt-structs` | Workspace `.rs` scan + brace matching. |
 | `publish.harn` | `release_gate.sh` + release workflows | Typed, resumable crates.io dependency-DAG publication; `publish.sh` remains a four-line launcher. |
 | `sync_tree_sitter_keywords.harn` | `make {gen,check}-tree-sitter-keywords` | Lexer↔grammar keyword set sync (`--write`). |

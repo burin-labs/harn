@@ -156,9 +156,7 @@ gen = "gen-release-notices"
 check = "check-release-notices"
 outputs = ["dist/release-notices/"]
 sources = [
-  "scripts/release_third_party_notices.mjs",
-  "package.json",
-  "package-lock.json",
+  "scripts/release_third_party_notices.harn",
   "Cargo.lock",
   "Cargo.toml",
   "crates/",
