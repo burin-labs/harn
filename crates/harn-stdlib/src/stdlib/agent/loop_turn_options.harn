@@ -43,7 +43,6 @@ pub type AgentIterationInfo = {
  * @errors: [agent_loop]
  */
 pub fn __agent_loop_completed_dispatch_stall(args: dict) -> AgentLoopCompletedDispatchStall {
-  const results = __dispatch_results_list(args.dispatch)
   const completed = agent_stall_observe_completed_dispatch(
     args.harness.agent,
     args.session_id,
@@ -55,24 +54,8 @@ pub fn __agent_loop_completed_dispatch_stall(args: dict) -> AgentLoopCompletedDi
     args.turn_opts?.tools,
     args.turn_opts?.policy,
   )
-  const state = completed.state
-    + {
-      monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
-        completed.state.monologue_actuation,
-        args.stall_config.monologue_actuation,
-        args.prior_read_streak,
-        len(results) > 0
-          && len(results) == len(args.tool_calls)
-          && results.all({ result -> __tool_result_ok(result) })
-          && agent_tool_calls_are_read_only(
-            args.tool_calls,
-            args.turn_opts?.tools,
-            args.turn_opts?.policy,
-          ),
-      ),
-    }
   const progressed = __agent_stall_fold_verify_state(
-    state,
+    completed.state,
     args.stall_config,
     {
       dispatch: args.dispatch,

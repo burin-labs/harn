@@ -16,13 +16,16 @@ const targets = [
   ['Linux', 'x86_64', 'x86_64-unknown-linux-gnu'],
 ];
 
-function fixture(target, invalid, existing = false, badChecksum = false, invalidDestination) {
+function fixture(target, invalid, existing = false, badChecksum = false, invalidDestination, options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'harn-installed-legal-'));
   try {
     const [os, arch, triple] = target;
     const paths = Object.fromEntries(['archive', 'shim', 'home', 'tmp'].map(name => [name, join(root, name)]));
     for (const path of Object.values(paths)) mkdirSync(path);
-    const destination = join(root, 'custom install', 'bin');
+    const destination = join(root, options.directoryName ?? 'custom install', 'bin');
+    const { pathEntry = 'missing', installVariable = 'HARN_INSTALL_DIR', noModifyPath = true } = options;
+    if (pathEntry === 'shadowed') writeFileSync(join(paths.shim, 'harn'), '#!/bin/sh\necho old harn\n', { mode: 0o755 });
+    if (pathEntry === 'alias') symlinkSync(join(destination, 'harn'), join(paths.shim, 'harn'));
     const binary = Buffer.from('synthetic binary, never executed\n');
     writeFileSync(join(paths.archive, 'harn'), binary);
     for (const alias of ['harn-dap', 'harn-lsp']) symlinkSync('harn', join(paths.archive, alias));
@@ -90,8 +93,8 @@ esac
     const result = spawnSync('/bin/sh', [installer], {
       encoding: 'utf8', timeout: 15_000,
       env: {
-        PATH: `${paths.shim}:/usr/bin:/bin`, HOME: paths.home, TMPDIR: paths.tmp,
-        HARN_INSTALL_DIR: destination, HARN_VERSION: 'v0.10.999', HARN_NO_MODIFY_PATH: '1',
+        PATH: `${pathEntry === 'installed' ? `${destination}:` : ''}${paths.shim}:/usr/bin:/bin`, HOME: paths.home, TMPDIR: paths.tmp,
+        [installVariable]: destination, HARN_VERSION: 'v0.10.999', HARN_NO_MODIFY_PATH: noModifyPath ? '1' : '0',
         FIXTURE_OS: os, FIXTURE_ARCH: arch, FIXTURE_TARGET: triple,
         FIXTURE_ARCHIVE: archive, FIXTURE_CHECKSUMS: checksums, FIXTURE_REQUESTS: requests,
         FIXTURE_BASE: 'https://github.com/burin-labs/harn/releases/download/v0.10.999',
@@ -125,8 +128,53 @@ esac
       for (const [name, bytes] of legalBytes) assert.deepEqual(readFileSync(join(destination, 'harn-licenses', name)), bytes);
       for (const alias of ['harn-dap', 'harn-lsp']) assert.equal(readlinkSync(join(destination, alias)), 'harn');
       for (const name of legalFiles) assert.equal(existsSync(join(destination, name)), false, 'shared binary directory has no generic legal filenames');
+      if (options.verifyPathExport) {
+        const exportLine = result.stdout.match(/^\s+export PATH=.+$/m)?.[0];
+        assert.ok(exportLine, 'installer must print its PATH command');
+        const script = join(root, 'apply-path.sh');
+        writeFileSync(script, `${exportLine.trim()}\nprintf '%s\\n' "$PATH"\n`);
+        const applied = spawnSync('/bin/sh', [script], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } });
+        assert.equal(applied.status, 0, applied.stderr);
+        assert.equal(applied.stderr, '');
+        assert.equal(applied.stdout, `${destination}:/usr/bin:/bin\n`);
+      }
     }
+    return { ...result, destination };
   } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+for (const installVariable of ['HARN_INSTALL_DIR', 'XDG_BIN_DIR']) {
+  test(`real installer explains a missing PATH entry for ${installVariable}`, () => {
+    const result = fixture(targets[0], undefined, false, false, undefined, { installVariable, noModifyPath: false });
+    assert.ok(result.stdout.includes(`Add ${result.destination} to your PATH:`));
+    assert.ok(result.stdout.includes(`export PATH="${result.destination}:$PATH"`));
+    assert.doesNotMatch(result.stderr, /another version/);
+  });
+}
+test('real installer PATH command preserves shell metacharacters literally', () => {
+  fixture(targets[0], undefined, false, false, undefined, {
+    noModifyPath: false, verifyPathExport: true, directoryName: 'custom "quotes" $dollar `ticks` \\slash',
+  });
+});
+test('real installer reports an executable that shadows the new installation', () => {
+  const result = fixture(targets[0], undefined, false, false, undefined, { pathEntry: 'shadowed', noModifyPath: false });
+  assert.match(result.stderr, /another version may be ahead of it on PATH/);
+  assert.ok(result.stdout.includes(`Add ${result.destination} to your PATH:`));
+});
+for (const pathEntry of ['installed', 'alias']) {
+  test(`real installer does not report its own reachable executable as shadowed: ${pathEntry}`, () => {
+    const result = fixture(targets[0], undefined, false, false, undefined, { pathEntry, noModifyPath: false });
+    assert.doesNotMatch(result.stderr, /another version/);
+    if (pathEntry === 'installed') assert.doesNotMatch(result.stdout, /Add .* to your PATH:/);
+  });
+}
+for (const pathEntry of ['missing', 'shadowed']) {
+  test(`real installer honors suppressed PATH guidance: ${pathEntry}`, () => {
+    const result = fixture(targets[0], undefined, false, false, undefined, { pathEntry });
+    assert.doesNotMatch(result.stdout, /Add .* to your PATH:/);
+    if (pathEntry === 'missing') assert.doesNotMatch(result.stderr, /another version/);
+    else assert.match(result.stderr, /another version may be ahead of it on PATH/);
+  });
 }
 
 for (const target of targets) {

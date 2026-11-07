@@ -1,8 +1,3 @@
-import {
-  agent_monologue_actuation_config,
-  agent_monologue_actuation_initial_state,
-  agent_monologue_actuation_observe,
-} from "std/agent/monologue_actuation"
 import { __agent_stall_gate_input } from "std/agent/stall_action_observation"
 import "std/agent/stall_observation"
 import {
