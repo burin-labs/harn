@@ -92,59 +92,6 @@ fn acknowledge_release(reply: Value, token: &str) -> Result<(), VmError> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preparation_and_release_require_closed_executor_facts() {
-        let bound = json!({"status":"bound", "token":"one", "invocation":{
-            "argv":["python3", "", " spaced argument ", "日本語"], "cwd":"/executor/workspace",
-        }});
-        let Preparation::Bound { invocation, .. } = serde_json::from_value(bound.clone()).unwrap()
-        else {
-            panic!("the positive control must bind an executor");
-        };
-        assert_eq!(
-            invocation.argv(),
-            ["python3", "", " spaced argument ", "日本語"]
-        );
-        let schemas = command_binding_schemas();
-        assert!(jsonschema::validator_for(&schemas[0].1)
-            .unwrap()
-            .is_valid(&bound));
-        for (pointer, value) in [
-            ("/invocation/argv", json!([])),
-            ("/invocation/argv", json!(["python3", 3])),
-            ("/invocation/argv", json!(["python3", "nul\u{0}byte"])),
-            ("/invocation/cwd", json!("relative/workspace")),
-            ("/invocation/cwd", Value::Null),
-            ("/status", json!("unknown")),
-        ] {
-            let mut invalid = bound.clone();
-            *invalid.pointer_mut(pointer).unwrap() = value;
-            assert!(
-                serde_json::from_value::<Preparation>(invalid).is_err(),
-                "{pointer}"
-            );
-        }
-        let released = json!({"status":"released", "token":"one"});
-        assert!(acknowledge_release(released.clone(), "one").is_ok());
-        assert!(jsonschema::validator_for(&schemas[1].1)
-            .unwrap()
-            .is_valid(&released));
-        for invalid in [
-            json!({}),
-            json!({"status":"released"}),
-            json!({"status":"pending", "token":"one"}),
-            json!({"status":"released", "token":"another"}),
-            json!({"status":"released", "token":"one", "still_running":true}),
-        ] {
-            assert!(acknowledge_release(invalid, "one").is_err());
-        }
-    }
-}
-
 pub async fn prepare_remote_command(
     transport: Arc<dyn PreparedCommandTransport>,
     operation: &str,
@@ -249,5 +196,58 @@ impl Drop for PreparedToken {
                 tracing::warn!(%error, "releasing executor-bound command failed");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preparation_and_release_require_closed_executor_facts() {
+        let bound = json!({"status":"bound", "token":"one", "invocation":{
+            "argv":["python3", "", " spaced argument ", "日本語"], "cwd":"/executor/workspace",
+        }});
+        let Preparation::Bound { invocation, .. } = serde_json::from_value(bound.clone()).unwrap()
+        else {
+            panic!("the positive control must bind an executor");
+        };
+        assert_eq!(
+            invocation.argv(),
+            ["python3", "", " spaced argument ", "日本語"]
+        );
+        let schemas = command_binding_schemas();
+        assert!(jsonschema::validator_for(&schemas[0].1)
+            .unwrap()
+            .is_valid(&bound));
+        for (pointer, value) in [
+            ("/invocation/argv", json!([])),
+            ("/invocation/argv", json!(["python3", 3])),
+            ("/invocation/argv", json!(["python3", "nul\u{0}byte"])),
+            ("/invocation/cwd", json!("relative/workspace")),
+            ("/invocation/cwd", Value::Null),
+            ("/status", json!("unknown")),
+        ] {
+            let mut invalid = bound.clone();
+            *invalid.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                serde_json::from_value::<Preparation>(invalid).is_err(),
+                "{pointer}"
+            );
+        }
+        let released = json!({"status":"released", "token":"one"});
+        assert!(acknowledge_release(released.clone(), "one").is_ok());
+        assert!(jsonschema::validator_for(&schemas[1].1)
+            .unwrap()
+            .is_valid(&released));
+        for invalid in [
+            json!({}),
+            json!({"status":"released"}),
+            json!({"status":"pending", "token":"one"}),
+            json!({"status":"released", "token":"another"}),
+            json!({"status":"released", "token":"one", "still_running":true}),
+        ] {
+            assert!(acknowledge_release(invalid, "one").is_err());
+        }
     }
 }
