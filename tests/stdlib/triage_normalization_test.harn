@@ -1,0 +1,98 @@
+import { assert_error_contains } from "std/testing"
+import { triage_normalize } from "std/triage"
+
+struct TriageItem {
+  html_url: string
+  number: int
+  title: string
+}
+
+pipeline test_tolerant_provider_containers_preserve_raw_data() {
+  const item = TriageItem {html_url: "issue", number: 1, title: "typed"}
+  const nested = triage_normalize({provider: "github", payload: {issue: item}})
+  assert_eq([nested.source_url, nested.summary], ["issue", "Issue #1: typed"])
+  const root = triage_normalize({provider: "github", payload: item}, {source_url: "selected"})
+  assert_eq(root.raw_payload, item)
+  assert_eq(root.source_id, "selected")
+  for node in [nil, false, 7, "malformed", [], {}] {
+    const payload = {issue: node, sender: node, repository: node, raw: node}
+    const event = triage_normalize(
+      {provider: "github", provider_payload: payload},
+      {source_url: "selected", summary: "explicit"},
+    )
+    assert_eq(event.raw_payload, payload)
+    assert_eq(event.summary, "explicit")
+    assert_eq(event.source_id, "selected")
+    assert_eq(event.actors, [])
+  }
+  for node in [false, 7] {
+    assert_error_contains(
+      fn() { return triage_normalize(
+        {provider: "github", payload: {issue: node}},
+        {source_url: "selected"},
+      ) },
+      "cannot access property `number`",
+    )
+    assert_error_contains(
+      fn() { return triage_normalize({provider: "github", payload: {issue: node}}) },
+      "source_url is required",
+    )
+  }
+}
+
+pipeline test_provider_field_priority_and_leaf_coercion() {
+  for key in [
+    "issue",
+    "pull_request",
+    "comment",
+    "review",
+    "workflow_run",
+    "check_run",
+    "deployment_status",
+    "commit_status",
+    "repository",
+    "repo",
+    "raw",
+  ] {
+    let single = {}
+    single[key] = {html_url: "item", target_url: "target", id: "ID", node_id: "NODE"}
+    const selected = triage_normalize({provider: "github", payload: single})
+    const url = contains(["deployment_status", "commit_status"], key) ? "target" : "item"
+    assert_eq(selected.source_url, url, "every provider object must reach its checked view")
+    const id = contains(["issue", "pull_request", "comment"], key) ? "NODE" : contains(
+      ["workflow_run", "check_run"],
+      key,
+    ) ? "ID" : url
+    assert_eq(selected.source_id, id)
+  }
+  const payload = {
+    issue: {html_url: "issue", id: 1, number: false, title: 41, user: {login: "author"}},
+    comment: {html_url: "comment", id: 2, user: {login: "reviewer"}},
+    sender: {login: "sender"},
+    repository: {html_url: "repo", full_name: "owner/repo"},
+  }
+  const event = triage_normalize({provider: "github", raw_payload: payload})
+  assert_eq(
+    [event.source_url, event.source_id, event.summary],
+    ["issue", "2", "owner/repo: Issue #false: 41"],
+  )
+  assert_eq(event.actors.map({ actor -> actor.id }).to_list(), ["sender", "author", "reviewer"])
+  assert_eq(event.related_refs[1]?.url, "repo")
+  assert_eq(
+    event.action_intents.map({ intent -> intent.requires_approval }).to_list(),
+    [false, true, true, true],
+  )
+  assert_eq(event.action_intents[2]?.default_duration, "PT4H")
+  assert_error_contains(
+    fn() { return triage_normalize(
+      {
+        provider: "github",
+        payload: {issue: {html_url: "issue"}, sender: {login: 12, html_url: 91}},
+      },
+    ) },
+    "event.actors",
+  )
+  const slack = triage_normalize({provider: "slack", raw: {channel: 42, ts: false, text: 33}})
+  assert_eq([slack.source_id, slack.summary], ["42:false", "Slack 42: 33"])
+  assert_eq(slack.source_url, "slack://channel?id=42&message=false")
+}
