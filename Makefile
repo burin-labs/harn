@@ -1750,10 +1750,10 @@ check-aws-config-vendor:
 test-aws-config-vendor:
 	node --test scripts/tests/aws_config_vendor.test.mjs
 
-HARN_RELEASE_CARGO_REGISTRY ?= $(or $(CARGO_HOME),$(HOME)/.cargo)/registry
+HARN_EXT_RELEASE_CARGO_REGISTRY ?= $(or $(CARGO_HOME),$(HOME)/.cargo)/registry
 
 gen-release-notices:
-	@$(HARN_CMD) run --allow-process-network --read-only-root "$(HARN_RELEASE_CARGO_REGISTRY)/src" --sandbox-write-root "$(HARN_RELEASE_CARGO_REGISTRY)" scripts/release_third_party_notices.harn -- generate dist/release-notices
+	@$(HARN_CMD) run --allow-process-network --read-only-root "$(HARN_EXT_RELEASE_CARGO_REGISTRY)/src" --sandbox-write-root "$(HARN_EXT_RELEASE_CARGO_REGISTRY)" scripts/release_third_party_notices.harn -- generate dist/release-notices
 
 check-release-notices:
 	@$(HARN_CMD) run scripts/release_third_party_notices.harn -- verify dist/release-notices
