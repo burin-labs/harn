@@ -733,17 +733,6 @@ fn test_exception_filters_track_per_kind_selection() {
 }
 
 #[test]
-fn test_invalidated_event_carries_areas_and_thread_id() {
-    let mut dbg = Debugger::new();
-    let evt = dbg.invalidated_event(vec!["variables", "threads"]);
-    assert_eq!(evt.event.as_deref(), Some("invalidated"));
-    let body = evt.body.as_ref().unwrap();
-    let areas = body["areas"].as_array().unwrap();
-    assert_eq!(areas.len(), 2);
-    assert_eq!(body["threadId"], 1); // current_thread_id default
-}
-
-#[test]
 fn test_cancel_handler_responds_success_even_without_match() {
     let mut dbg = Debugger::new();
     // No host bridge, no pending requests — cancel still succeeds so

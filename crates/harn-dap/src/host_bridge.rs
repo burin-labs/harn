@@ -56,7 +56,6 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
 use crate::framing::{write_json_frame, SharedWriter};
-use crate::protocol::DapResponse;
 
 /// Default reverse-request timeout. Generous because the client may need
 /// to do real work (LSP queries, file scans) before responding.
@@ -99,14 +98,6 @@ pub struct DapHostBridge {
     stdout: SharedWriter,
     /// Pending reverse requests, keyed by their outgoing seq.
     pending: PendingMap,
-    /// Set of ops we should *always* forward to the client. When None,
-    /// we forward everything (and let the embedder return `Ok(None)` for
-    /// pass-through). When Some, only listed ops forward — the rest
-    /// fall through to harn-vm's standalone fallbacks. Currently unused
-    /// at the binary level (we forward everything); kept for future
-    /// embedders that wrap us as a library.
-    #[allow(dead_code)]
-    forward_ops: Option<Arc<Vec<String>>>,
 }
 
 impl DapHostBridge {
@@ -115,7 +106,6 @@ impl DapHostBridge {
             seq,
             stdout,
             pending,
-            forward_ops: None,
         }
     }
 
@@ -377,13 +367,6 @@ fn json_to_vm_value(value: Value) -> VmValue {
             VmValue::dict(map)
         }
     }
-}
-
-// Re-export DapResponse to keep main.rs imports tidy when forwarding
-// stdout writes through the same lock used by the bridge.
-#[allow(dead_code)]
-pub fn write_dap_response(stdout: &SharedWriter, response: &DapResponse) -> std::io::Result<()> {
-    write_json_frame(stdout, response)
 }
 
 #[cfg(test)]

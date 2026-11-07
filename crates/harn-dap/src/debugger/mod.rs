@@ -505,30 +505,6 @@ impl Debugger {
         )]
     }
 
-    /// DAP `invalidated` event (#110). Emitted when state the IDE is
-    /// already showing becomes stale — feedback injection mutated a
-    /// running variable, a capability policy swapped mid-run, etc.
-    /// `areas` conventionally contains `variables` / `threads` /
-    /// `stacks` so the client can scope its refetch.
-    ///
-    /// Marked allow(dead_code) because the emission-site hook
-    /// (observing feedback-injection or capability-policy change
-    /// events) lives outside this crate; the helper is published
-    /// so host code composes cleanly without rolling its own event
-    /// JSON.
-    #[allow(dead_code)]
-    pub fn invalidated_event(&mut self, areas: Vec<&str>) -> DapResponse {
-        let seq = self.next_seq();
-        DapResponse::event(
-            seq,
-            "invalidated",
-            Some(json!({
-                "areas": areas,
-                "threadId": self.current_thread_id as i64,
-            })),
-        )
-    }
-
     /// DAP `cancel` request (#108). The client supplies a
     /// `requestId` (a prior request's seq) or `progressId`; we look
     /// up any pending reverse host_call keyed on that seq and signal
