@@ -9,12 +9,14 @@ or reproduce a problem with the [first-hour examples](examples/first-hour/README
 Comment on the issue before starting so another contributor doesn't duplicate
 the work. A small fix doesn't require a design proposal.
 
-For documentation and example changes, install a Harn release, then prepare
-the source checkout without compiling Rust:
+For documentation and example changes, install a Harn release and fork this
+repository on your GitHub account. Replace `YOUR-USERNAME` below with your
+GitHub username, then prepare the checkout without compiling Rust:
 
 ```sh
-git clone https://github.com/burin-labs/harn.git
+git clone https://github.com/YOUR-USERNAME/harn.git
 cd harn
+git switch -c my-first-fix
 make install-hooks
 npm ci
 HARN_BIN="$(command -v harn)" HARN_BIN_NO_BUILD=1 make check-docs-snippets
@@ -26,8 +28,12 @@ that a runtime change works; use the full setup below for Rust and standard
 library changes. The [testing guide](docs/src/dev/testing.md) describes focused
 checks, and CI runs the repository gates.
 
-Open a pull request with what changed, why, the remaining risk, and the
-observable result you verified. The template explains the expected evidence.
+Configure [commit signing](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)
+before committing; the push hook rejects unsigned commits. Push your branch
+to your fork, then open a pull request against `main` with what changed, why,
+the remaining risk, and the observable result you verified. The template
+explains the expected evidence. Workflow runs from outside contributors wait
+for maintainer approval.
 Keep credentials and private data out of reproductions and recordings. Report
 security vulnerabilities through the [security policy](.github/SECURITY.md).
 
@@ -35,11 +41,9 @@ security vulnerabilities through the [security policy](.github/SECURITY.md).
 
 Install Git, Make, a C/C++ compiler, Node.js, and Rust through
 [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` selects the
-Rust version. Then prepare the full development environment:
+Rust version. From your fork checkout, prepare the full development environment:
 
 ```bash
-git clone https://github.com/burin-labs/harn.git
-cd harn
 ./scripts/dev_setup.sh
 ./scripts/harn_bin.sh -- --version
 ```
