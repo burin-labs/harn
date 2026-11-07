@@ -16,12 +16,15 @@ test("every registered CLI renderer preserves localized text, literal arguments 
   const directory = path.join(source, "crates/harn-cli/src/localization");
   const catalogs = Object.fromEntries(fs.readdirSync(directory).filter((name) => name.endsWith(".json"))
     .map((name) => [name.slice(0, -5), JSON.parse(fs.readFileSync(path.join(directory, name)))]));
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "harn-cli-renderers-"));
+  const workspaceTemporary = path.join(source, ".harn", "tmp");
+  fs.mkdirSync(workspaceTemporary, {recursive: true});
+  const temporary = fs.mkdtempSync(path.join(workspaceTemporary, "harn-cli-renderers-"));
   const render = (template, values) => template.replace(/\{\{|\}\}|\{(\d+)\}/g,
     (token, index) => token === "{{" ? "{" : token === "}}" ? "}" : values[Number(index)]);
   let functions = 0;
   let localized = 0;
   let measured = 0;
+  let missingArguments = 0;
   try {
     for (const [relative, surface] of Object.entries(registry.sources)) {
       const namespace = relative.slice("crates/harn-stdlib/src/stdlib/cli/".length, -5);
@@ -30,32 +33,36 @@ test("every registered CLI renderer preserves localized text, literal arguments 
       const foreignValues = Array.from({length: registry.messages[foreign]}, (_, index) => `foreign${index}`);
       const cases = [];
       const refusals = [];
+      const missing = [];
       for (const key of Object.keys(surface.calls).sort()) {
-        const values = Array.from({length: registry.messages[key]}, (_, index) => `slot${index}: {0} %@ "\\\n🍒`);
+        const values = Array.from({length: registry.messages[key]}, (_, index) => `slot${index}: \${not_code} {{0}} {0} %@ "\\\n🍒`);
         for (const locale of [...Object.keys(catalogs).sort(), "unknown-locale-control"]) {
           cases.push({locale, key, values});
         }
         refusals.push({locale: "en", key, values: [...values, "unexpected argument"]});
+        if (values.length) missing.push({locale: "en", key, values: values.slice(0, -1)});
         functions++;
       }
       const program = path.join(temporary, "render.harn");
+      const input = path.join(temporary, "input.json");
+      fs.writeFileSync(input, JSON.stringify({cases, refusals, missing, foreign, foreign_values: foreignValues}));
       fs.writeFileSync(program, `import * as renderer from "std/cli/localization/${namespace}"
 type RenderCase = {locale: string, key: string, values: list<string>}
+type RenderProbe = {cases: list<RenderCase>, refusals: list<RenderCase>, missing: list<RenderCase>, foreign: string, foreign_values: list<string>}
 fn main(harness: Harness) {
-  const cases: list<RenderCase> = ${JSON.stringify(cases)}
-  for item in cases {
+  const probe = json_decode(harness.fs.read_text(${JSON.stringify(input)}), schema_of(RenderProbe))?
+  for item in probe.cases {
     harness.stdio.println(json_stringify(renderer.cli_message(item.locale, item.key, item.values)))
   }
-  const refusals: list<RenderCase> = ${JSON.stringify(refusals)}
-  for item in refusals {
+  for item in probe.refusals + probe.missing {
     const refused = try { renderer.cli_message(item.locale, item.key, item.values); false } catch { true }
-    assert(refused, "extra localization argument must refuse")
+    assert(refused, "incorrect localization argument count must refuse")
   }
   const unknown = try { renderer.cli_message("en", "unregistered-message-control", []); false } catch { true }
   assert(unknown, "unregistered localization message must refuse")
-  const foreign = try { renderer.cli_message("en", ${JSON.stringify(foreign)}, ${JSON.stringify(foreignValues)}); false } catch { true }
+  const foreign = try { renderer.cli_message("en", probe.foreign, probe.foreign_values); false } catch { true }
   assert(foreign, "a message from another namespace must refuse")
-  harness.stdio.println(json_stringify({arity: len(refusals), unknown: true, foreign: true}))
+  harness.stdio.println(json_stringify({arity: len(probe.refusals), missing: len(probe.missing), unknown: true, foreign: true}))
 }
 `);
       const result = spawnSync(process.env.HARN_BIN, ["run", program], {
@@ -64,16 +71,18 @@ fn main(harness: Harness) {
       });
       assert.equal(result.status, 0, `${namespace}: ${result.stderr || result.error}`);
       const actual = result.stdout.trimEnd().split("\n").map((line) => JSON.parse(line));
-      assert.deepEqual(actual.pop(), {arity: refusals.length, unknown: true, foreign: true});
+      assert.deepEqual(actual.pop(), {arity: refusals.length, missing: missing.length, unknown: true, foreign: true});
       assert.deepEqual(actual, cases.map(({locale, key, values}) => render((catalogs[locale] ?? catalogs.en)[key], values)), namespace);
       localized += cases.filter(({key, values}, index) => actual[index] !== render(catalogs.en[key], values)).length;
       measured += actual.length;
+      missingArguments += missing.length;
     }
     assert.deepEqual([...new Set(Object.values(registry.sources).flatMap((surface) => Object.keys(surface.calls)))].sort(), Object.keys(registry.messages).sort());
     assert.ok(functions > 100, "the public renderer census must be nonempty");
     assert.ok(localized > 100, "the probe must reach translations distinct from English");
+    assert.ok(missingArguments > 100, "missing arguments must reach real parameterized messages");
     assert.equal(measured, functions * (Object.keys(catalogs).length + 1));
-    t.diagnostic(`Verified ${functions} renderer paths, ${measured} locale outputs, ${functions} arity refusals, ${Object.keys(registry.sources).length} unknown-message and cross-namespace refusals; ${localized} outputs differ from English`);
+    t.diagnostic(`Verified ${functions} renderer paths, ${measured} locale outputs, ${functions} excess-arity and ${missingArguments} missing-arity refusals, ${Object.keys(registry.sources).length} unknown-message and cross-namespace refusals; ${localized} outputs differ from English`);
   } finally {
     fs.rmSync(temporary, {recursive: true, force: true});
   }
@@ -87,6 +96,7 @@ test("generator rejects every unexpected output and retires only registered gene
     const registry = JSON.parse(fs.readFileSync(path.join(source, "crates/harn-cli/src/localization_scripts.json"), "utf8"));
     const files = ["scripts/generate_cli_localization.mjs", catalog,
       "crates/harn-cli/src/localization_scripts.json", "crates/harn-vm/src/environment_registry_names.txt",
+      "crates/harn-stdlib/src/stdlib/cli/message_template.harn",
       `${output}.harn`, ...Object.keys(registry.sources)];
     for (const relative of files) {
       assert.ok(!relative.includes("..") && !path.isAbsolute(relative));
@@ -111,19 +121,33 @@ test("generator rejects every unexpected output and retires only registered gene
     assert.equal(positive.status, 0, positive.stderr);
     const measured = JSON.parse(positive.stdout);
     assert.ok(measured.sources > 10 && measured.expectedCalls > 100 && measured.generated > measured.sources);
-    const renderers = fs.readdirSync(path.join(root, output), {recursive: true})
+    const parse = (relative) => {
+      const parsed = spawnSync(binary, ["parse", path.join(root, relative), "--json"],
+        {cwd: root, env, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024});
+      assert.equal(parsed.status, 0, parsed.stderr || parsed.error);
+      const result = JSON.parse(parsed.stdout);
+      assert.equal(result.ok, true);
+      return result.data.body;
+    };
+    const templates = fs.readdirSync(path.join(root, output), {recursive: true})
       .filter((name) => name.endsWith(".harn"))
-      .flatMap((name) => {
-        const parsed = spawnSync(binary, ["parse", path.join(root, output, name), "--json"],
-          {cwd: root, env, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024});
-        assert.equal(parsed.status, 0, parsed.stderr || parsed.error);
-        const result = JSON.parse(parsed.stdout);
-        assert.equal(result.ok, true);
-        return result.data.body.filter((node) => node.kind === "FnDecl" && node.fields.name !== "cli_message")
-          .map((node) => { assert.equal(node.fields.is_pub, true); return node.fields.name; });
-      });
-    assert.equal(renderers.length, Object.keys(registry.messages).length, "each canonical message has one renderer");
-    assert.equal(new Set(renderers).size, renderers.length, "renderer ownership cannot repeat across modules");
+      .flatMap((name) => parse(path.join(output, name))
+        .filter((node) => node.kind === "ConstBinding" && node.fields.is_pub)
+        .map((node) => node.fields.pattern.fields));
+    assert.equal(templates.length, Object.keys(registry.messages).length, "each canonical message has one compiled plan");
+    assert.equal(new Set(templates).size, templates.length, "plan ownership cannot repeat across modules");
+    const owner = parse("crates/harn-stdlib/src/stdlib/cli/message_template.harn");
+    assert.deepEqual(owner.filter((node) => node.kind === "FnDecl").map((node) => node.fields.name), ["render_message"]);
+    const messageKeys = Object.keys(registry.messages).sort();
+    for (const [relative, surface] of Object.entries(registry.sources)) {
+      const namespace = relative.slice("crates/harn-stdlib/src/stdlib/cli/".length);
+      const declarations = parse(path.join(output, namespace));
+      const table = declarations.find((node) => node.kind === "ConstBinding" && node.fields.pattern.fields === "MESSAGES");
+      assert.equal(table.fields.value.kind, "DictLiteral");
+      assert.deepEqual(table.fields.value.fields.map(({key, value}) => [key.fields, value.fields]),
+        Object.keys(surface.calls).sort().map((key) => [key, `MESSAGE_${messageKeys.indexOf(key)}`]),
+        "each namespace retains exactly its registered message plans");
+    }
     assert.equal(measured.measuredCalls, measured.expectedCalls);
     assert.equal(measured.pending, 0);
     assert.deepEqual(measured.failed, []);
