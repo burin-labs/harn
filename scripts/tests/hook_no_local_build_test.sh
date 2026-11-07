@@ -7,9 +7,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# The machine's own git config must not decide the control.
+# Git config reads must use only the fixture, including inside this worktree.
 : > "$tmp/empty-gitconfig"
-export GIT_CONFIG_GLOBAL="$tmp/empty-gitconfig"
+export GIT_CONFIG_GLOBAL="$tmp/empty-gitconfig" GIT_CONFIG="$tmp/empty-gitconfig"
 mkdir "$tmp/shim" "$tmp/target"
 for tool in cargo rustc; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/compiler.log"\nexit 99\n' "$tool" "$tmp" > "$tmp/shim/$tool"
@@ -46,9 +46,9 @@ for setting in HARN_HOOKS_NO_LOCAL_BUILD=1; do
   fi
 done
 
-# The git setting reaches the same gate. A throwaway global config keeps the real one untouched.
+# The git setting reaches the same gate through a private config file.
 printf '[harn "hooks"]\n\tnoLocalBuild = true\n' > "$tmp/gitconfig"
-started="$(select_registry_bin GIT_CONFIG_GLOBAL="$tmp/gitconfig" HARN_HOOKS_NO_LOCAL_BUILD=0)"
+started="$(select_registry_bin GIT_CONFIG="$tmp/gitconfig" HARN_HOOKS_NO_LOCAL_BUILD=0)"
 if [[ "$started" -ne 0 ]]; then
   echo "git config harn.hooks.noLocalBuild still started $started compiler invocation(s)" >&2
   exit 1
