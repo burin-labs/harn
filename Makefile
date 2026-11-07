@@ -1751,13 +1751,14 @@ test-aws-config-vendor:
 	node --test scripts/tests/aws_config_vendor.test.mjs
 
 gen-release-notices:
-	node scripts/release_third_party_notices.mjs generate dist/release-notices
+	@$(HARN_CMD) run scripts/release_third_party_notices.harn -- generate dist/release-notices
 
 check-release-notices:
-	node scripts/release_third_party_notices.mjs verify dist/release-notices
+	@$(HARN_CMD) run scripts/release_third_party_notices.harn -- verify dist/release-notices
 
 test-release-notices:
-	node --test scripts/tests/release_third_party_notices.test.mjs scripts/tests/install_sh.test.mjs
+	@$(HARN_CMD) test scripts/tests/release_third_party_notices_test.harn
+	node --test scripts/tests/install_sh.test.mjs
 
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="

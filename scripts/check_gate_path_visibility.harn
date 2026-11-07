@@ -81,7 +81,7 @@ const NEGATED_EXISTS_BASELINE = [
 /**
  * Enumeration calls that are still not refused at zero, per gate file.
  *
- * `fs.glob`, `fs.walk`, `fs.list_dir`, and `find_files` report a denied root, a
+ * `fs.glob`, `fs.walk`, and `find_files` report a denied root, a
  * mis-rooted base, and a genuinely empty tree the same way: an empty list. A
  * gate that loops straight over one of them runs its body zero times and
  * concludes clean, which is the `fs.exists` bug wearing different clothes.
@@ -93,10 +93,10 @@ const NEGATED_EXISTS_BASELINE = [
 const UNREFUSED_ENUMERATION_BASELINE = [
   {path: "scripts/backfill_stdlib_metadata.harn", count: 1},
   {path: "scripts/check_harn_syntax_sensitive_scans.harn", count: 1},
-  {path: "scripts/check_python_boundary.harn", count: 3},
+  {path: "scripts/check_python_boundary.harn", count: 2},
   {path: "scripts/check_rust_prompt_prose.harn", count: 1},
   {path: "scripts/check_site_snippets.harn", count: 1},
-  {path: "scripts/check_test_target_coverage.harn", count: 2},
+  {path: "scripts/check_test_target_coverage.harn", count: 1},
   {path: "scripts/release_metadata.harn", count: 1},
   {path: "scripts/strip_stdlib_metadata.harn", count: 1},
   {path: "scripts/sync_protocol_fixture_runtime_versions.harn", count: 1},
@@ -179,7 +179,8 @@ fn baseline_for(rel: string) -> int {
   return 0
 }
 
-const ENUMERATION_CALLS = ["fs.glob(", "fs.walk(", "fs.list_dir(", "find_files("]
+// list_dir throws on denied or missing directories, so its empty list is measured.
+const ENUMERATION_CALLS = ["fs.glob(", "fs.walk(", "find_files("]
 
 /**
  * True for a line that enumerates paths without a refusal marker above it.
