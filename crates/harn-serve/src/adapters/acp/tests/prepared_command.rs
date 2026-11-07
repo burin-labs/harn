@@ -66,8 +66,12 @@ async fn remote_command(mode: &str) {
                     assert!(prepared.remove(&token).is_some());
                     cancelled_preparation = true;
                 }
-                if let Some(text) = frame["params"]["update"]["content"]["text"].as_str() {
-                    consent_count += text.matches("EXECUTOR_CONSENT_REACHED").count();
+                let update = &frame["params"]["update"];
+                if update["sessionUpdate"] == "progress" && update["_meta"]["harn"]["phase"] == "command_consent" {
+                    assert_eq!(update["_meta"]["harn"]["message"], "EXECUTOR_CONSENT_REACHED");
+                    consent_count += 1;
+                }
+                if let Some(text) = update["content"]["text"].as_str() {
                     completed_marker |= text.contains("BOUND_COMMAND_DONE");
                 }
                 if frame["id"] == 3 && frame.get("method").is_none() {

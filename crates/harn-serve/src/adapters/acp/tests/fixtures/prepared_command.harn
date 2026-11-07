@@ -49,7 +49,7 @@ pipeline default(harness: Harness) {
           assert(!scan.io_coverage.complete, "remote I/O must not look locally measured")
           assert_eq(scan.io_coverage.reason, "executor_filesystem_unavailable")
           assert(contains(ctx.consent.risk_labels, "executor_io_unmeasured"))
-          harness.stdio.println("EXECUTOR_CONSENT_REACHED")
+          harness.stdio.progress("command_consent", "EXECUTOR_CONSENT_REACHED")
           if spec.mode == "deny" {
             return {decision: "invalid-consent"}
           }
