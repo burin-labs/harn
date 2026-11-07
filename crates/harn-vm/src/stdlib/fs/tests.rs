@@ -425,14 +425,10 @@ fn list_dir_distinguishes_empty_missing_and_denied_roots() {
     std::fs::write(outside.path().join("present.txt"), "visible control").unwrap();
     let mut vm = vm();
     let outside_arg = s(&outside.path().to_string_lossy());
-    assert_eq!(
-        call(&mut vm, "list_dir", vec![outside_arg.clone()])
-            .unwrap()
-            .as_list()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert!(matches!(
+        call(&mut vm, "list_dir", vec![outside_arg.clone()]).unwrap(),
+        VmValue::List(items) if items.len() == 1
+    ));
     push_execution_policy(CapabilityPolicy {
         sandbox_profile: SandboxProfile::Worktree,
         workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
@@ -450,7 +446,7 @@ fn list_dir_distinguishes_empty_missing_and_denied_roots() {
     );
     let denied = call(&mut vm, "list_dir", vec![outside_arg]);
     pop_execution_policy();
-    assert!(empty.unwrap().as_list().unwrap().is_empty());
+    assert!(matches!(empty, Ok(VmValue::List(items)) if items.is_empty()));
     assert!(
         missing.is_err(),
         "a missing root cannot become an empty census"
