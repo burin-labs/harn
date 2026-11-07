@@ -56,7 +56,7 @@ fn __option_schema_branches(node: any) -> list<any> {
  * @effects: []
  * @errors: []
  */
-fn __option_declared_keys(node: any) -> list<string> {
+pub fn __agent_option_declared_keys(node: unknown) -> list<string> {
   // Concatenate whole key lists rather than appending one name at a time. The
   // element-wise version was quadratic in the number of declared keys and cost
   // 82ms per `agent_loop_options` call, on a path every sub-agent, worker and
@@ -105,7 +105,7 @@ fn __option_child_schema(node: any, key: string) -> any {
  */
 fn __option_paths(node: any, path: string) -> list<list<string>> {
   let pairs = []
-  for key in __option_declared_keys(node) {
+  for key in __agent_option_declared_keys(node) {
     const child_path = if path == "" {
       key
     } else {
@@ -156,7 +156,7 @@ fn __collect_unread_keys(value: any, node: any, path: string) -> list<string> {
   if type_of(value) != "dict" {
     return []
   }
-  const allowed = __option_declared_keys(node)
+  const allowed = __agent_option_declared_keys(node)
   if len(allowed) == 0 {
     return []
   }

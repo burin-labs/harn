@@ -303,8 +303,15 @@ so callers do not re-implement them: `llm_response_is_empty`,
 
 ### Options dict
 
-`LlmCallOptions` in `std/llm/options` is the checked authoring surface. Annotate
-a binding or use `llm_options({...})`:
+`LlmCallOptions` in `std/llm/options` is the checked authoring surface.
+
+`LlmRequestSettings` contains fields shared by `LlmCallOptions` and the agent
+loop's [`AgentModelSpec`](agent_loop.md). Each complete option type retains its own
+system, tool, output, routing, cache, and budget forms. Their `schema_of` results
+compose fields through `all_of` branches, so field introspection must include
+those branches alongside `properties`.
+
+Annotate a binding or use `llm_options({...})`:
 
 ```harn
 import { LlmCallOptions, llm_options } from "std/llm/options"

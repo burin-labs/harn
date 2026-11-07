@@ -90,27 +90,20 @@ pub type PredictedOutput = {content: string}
 pub type Mirostat = {version: 1 | 2, target_entropy?: float, learning_rate?: float}
 
 /**
- * The public `llm_call` options surface — one spelling per option, no
- * synonyms. The runtime registry (`__llm_call_option_registry()`, backed by
- * `crates/harn-builtin-meta/src/llm_options.rs`) is the single source of
- * truth; this alias mirrors it for `harn check` and is parity-pinned by
- * `typed_options_parity.rs`. Unknown or removed keys are hard runtime errors.
+ * Per-request settings shared by direct calls and agent turns.
+ * Each public option surface declares its differing fields separately.
  */
-pub type LlmCallOptions = {
+pub type LlmRequestSettings = {
   // Routing and model selection.
   provider?: string,
   model?: string,
   model_role?: string,
   model_tier?: string,
-  api_mode?: "chat_completions" | "responses",
   route_policy?: string | dict,
-  fallback_chain?: list<string>,
   routing?: dict,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
-  models?: ModelLadder,
   ladder?: string,
   // Conversation and system prompt.
-  system?: string | list<string | SystemFragment> | SystemReplacement,
   messages?: list,
   session_id?: string,
   call_role?: string,
@@ -149,14 +142,12 @@ pub type LlmCallOptions = {
   prediction?: PredictedOutput,
   verbosity?: "low" | "medium" | "high",
   mirostat?: Mirostat,
-  stop?: list<string>,
   stop_at_tool_call?: bool,
   seed?: int,
   frequency_penalty?: float,
   presence_penalty?: float,
   parallel_tool_calls?: bool,
   // Output contract (wrapper-plane retry knobs alongside).
-  output?: OutputSpec,
   schema_retries?: int,
   schema_retry_nudge?: bool | string,
   retries?: int,
@@ -174,25 +165,19 @@ pub type LlmCallOptions = {
   audio?: bool,
   pdf?: bool,
   video?: bool,
-  // Tools. Structural twin of `std/tools.ToolRegistry` (inline for the same
-  // cross-module option-field resolution reason as AgentSpec.tools).
-  tools?: list | {_type: "tool_registry", tools: list},
+  // Tools.
   provider_tools?: list | dict,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
-  tool_format_override_reason?: string,
   // Caching, budgets, transport.
-  cache?: bool,
   prompt_cache_ttl?: "5m" | "1h",
-  budget?: LlmBudget | float,
   timeout_ms?: int,
   operation_timeout_ms?: int,
   idle_timeout_ms?: int,
   stream?: bool,
   speed?: "standard" | "fast",
   // OpenAI Responses surface (requires api_mode: "responses").
-  store?: any,
   background?: bool,
   truncation?: string,
   compact?: bool,
@@ -202,8 +187,30 @@ pub type LlmCallOptions = {
   provider_options?: dict,
   // Observability and experiments.
   metadata?: dict,
-  reminders?: any,
   structural_experiment?: any,
+}
+
+/**
+ * The public `llm_call` options surface — one spelling per option, no
+ * synonyms. The runtime registry (`__llm_call_option_registry()`, backed by
+ * `crates/harn-builtin-meta/src/llm_options.rs`) is the single source of
+ * truth; this alias mirrors it for `harn check` and is parity-pinned by
+ * `typed_options_parity.rs`. Unknown or removed keys are hard runtime errors.
+ */
+pub type LlmCallOptions = {
+  api_mode?: "chat_completions" | "responses",
+  fallback_chain?: list<string>,
+  models?: ModelLadder,
+  system?: string | list<string | SystemFragment> | SystemReplacement,
+  stop?: list<string>,
+  output?: OutputSpec,
+  tools?: list | {_type: "tool_registry", tools: list},
+  tool_format_override_reason?: string,
+  cache?: bool,
+  budget?: LlmBudget | float,
+  store?: any,
+  reminders?: any,
+  ...LlmRequestSettings,
 }
 
 /**

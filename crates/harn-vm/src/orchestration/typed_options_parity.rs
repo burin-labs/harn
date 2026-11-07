@@ -5,7 +5,7 @@
 //! Design: serialize each Rust struct's `Default` to JSON (serde is the
 //! single source of truth for the accepted wire keys, including renames like
 //! `drop_items` → `drop` and `#[serde(skip)]` closure carriers), extract the
-//! declared keys from the Harn structural alias source, and assert the two
+//! declared keys through the canonical module graph and type checker, and assert the two
 //! sets match in both directions modulo an explicit, commented allowlist.
 //!
 //! When this test fails you either added a field to a Rust policy struct
@@ -13,7 +13,9 @@
 //! key with no runtime backing (either wire it up or move it to the
 //! allowlist with a tracking comment).
 
-use std::{borrow::Cow, collections::BTreeSet};
+use std::{collections::BTreeSet, path::Path};
+
+use harn_parser::{Node, TypeChecker, TypeExpr};
 
 use serde::Serialize;
 
@@ -29,16 +31,11 @@ const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
 const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
 const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
 
-fn normalized_harn_source(source: &str) -> Cow<'_, str> {
-    if source.contains('\r') {
-        Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
-    } else {
-        Cow::Borrowed(source)
-    }
-}
-
 fn crlf_harn_source(source: &str) -> String {
-    normalized_harn_source(source).replace('\n', "\r\n")
+    source
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n")
 }
 
 fn stdlib_source(module: &str) -> &'static str {
@@ -77,118 +74,74 @@ const AGENT_SPEC_PARTS: [&str; 6] = [
 ];
 
 fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
-    let source = normalized_harn_source(source);
-    let declaration = concat!(
-        "pub type AgentSpec = AgentModelSpec \\\n",
-        "  & AgentExecutionSpec \\\n",
-        "  & AgentCapabilitySpec \\\n",
-        "  & AgentLifecycleSpec \\\n",
-        "  & AgentContextSpec \\\n",
-        "  & AgentObservabilitySpec",
-    );
-    assert!(
-        source.contains(declaration),
+    let program = harn_parser::parse_source(source).expect("valid agent option declarations");
+    let declaration = program
+        .iter()
+        .find_map(|node| match &node.node {
+            Node::TypeDecl {
+                name, type_expr, ..
+            } if name == "AgentSpec" => Some(type_expr),
+            _ => None,
+        })
+        .expect("AgentSpec declaration");
+    assert_eq!(
+        declaration,
+        &TypeExpr::Intersection(
+            AGENT_SPEC_PARTS
+                .into_iter()
+                .map(|name| TypeExpr::Named(name.into()))
+                .collect()
+        ),
         "AgentSpec must compose exactly the six named agent contract records"
     );
-    AGENT_SPEC_PARTS
-        .into_iter()
-        .flat_map(|name| harn_alias_keys(&source, name))
-        .collect()
+    harn_alias_keys(source, "AgentSpec")
 }
 
 fn agent_spec_keys() -> BTreeSet<String> {
     agent_spec_keys_from(agent_options_types_harn())
 }
 
-/// Extract the top-level keys declared by `type <name> = ... { ... }` in a
-/// Harn source file. Handles optional-key markers (`key?:`), nested inline
-/// shapes (only depth-1 keys are collected), and intersection prefixes
-/// (`type X = Y & { ... }` — the intersected alias's keys are NOT included;
-/// pass its own name to collect them separately).
-#[expect(
-    clippy::string_slice,
-    reason = "offsets come from find on the same string plus ASCII literal lengths"
-)]
-fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
-    let marker = format!("type {name} =");
-    let start = source
-        .find(&marker)
-        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
-    let after = &source[start + marker.len()..];
-    let brace = after
-        .find('{')
-        .unwrap_or_else(|| panic!("alias `{name}` has no shape body"));
-    let body = &after[brace + 1..];
+fn resolved_harn_alias(source: &str, name: &str) -> TypeExpr {
+    let path = Path::new("<typed-options-parity>.harn");
+    let program = harn_parser::parse_source(source).expect("valid Harn contract source");
+    let graph = harn_modules::build_with_standalone_source(path, source);
+    let imported = graph
+        .imported_type_declarations_for_file(path)
+        .expect("resolved contract imports");
+    TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .resolve_declared_type(&program, name)
+        .unwrap_or_else(|| panic!("missing contract `{name}`"))
+}
 
-    // Walk the shape body character by character so nested inline shapes
-    // (which the formatter may collapse onto one line, e.g.
-    // `cadence?: {every?: int, ...},`) are handled correctly: a key is the
-    // identifier token immediately preceding a `:` at depth 1.
-    let mut keys = BTreeSet::new();
-    let mut depth = 1usize;
-    for raw_line in body.lines() {
-        let line = match raw_line.find("//") {
-            Some(idx) => &raw_line[..idx],
-            None => raw_line,
-        };
-        let mut ident = String::new();
-        for ch in line.chars() {
-            match ch {
-                '{' => {
-                    depth += 1;
-                    ident.clear();
-                }
-                '}' => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        return keys;
-                    }
-                    ident.clear();
-                }
-                ':' => {
-                    let key = ident.trim_end_matches('?');
-                    if depth == 1
-                        && !key.is_empty()
-                        && key
-                            .chars()
-                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    {
-                        keys.insert(key.to_string());
-                    }
-                    ident.clear();
-                }
-                c if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '?' => {
-                    ident.push(c);
-                }
-                c if c.is_whitespace() => {
-                    // Whitespace between an identifier and `:` never occurs in
-                    // formatted stdlib sources; treat it as a separator.
-                    if !ident.is_empty() {
-                        ident.clear();
-                    }
-                    let _ = c;
-                }
-                _ => ident.clear(),
-            }
+fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
+    fn keys(ty: &TypeExpr) -> BTreeSet<String> {
+        match ty {
+            TypeExpr::Shape(fields) => fields.iter().map(|field| field.name.clone()).collect(),
+            TypeExpr::OpenShape {fields, rests} if rests.iter().all(|rest|
+                matches!(rest, TypeExpr::Named(name) if name == "rest" || name == "dict")) =>
+                fields.iter().map(|field| field.name.clone()).collect(),
+            TypeExpr::Intersection(members) => members.iter().flat_map(keys).collect(),
+            other => panic!("expected resolved record, found {other:?}"),
         }
     }
-    panic!("alias `{name}` shape body never closed");
+    let keys = keys(&resolved_harn_alias(source, name));
+    assert!(
+        !keys.is_empty(),
+        "contract `{name}` must declare measured fields"
+    );
+    keys
 }
 
 fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
-    let source = normalized_harn_source(source);
-    let marker = format!("type {name} =");
-    let (_, declaration) = source
-        .split_once(&marker)
-        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
-    declaration
-        .split("\n\n")
-        .next()
-        .expect("union declaration")
-        .split('|')
-        .filter_map(|part| {
-            let value = part.trim().trim_end_matches('\\').trim().trim_matches('"');
-            (!value.is_empty()).then(|| value.to_string())
+    let TypeExpr::Union(members) = resolved_harn_alias(source, name) else {
+        panic!("expected string union `{name}`")
+    };
+    members
+        .into_iter()
+        .map(|member| match member {
+            TypeExpr::LitString(value) => value,
+            other => panic!("expected string member of `{name}`, found {other:?}"),
         })
         .collect()
 }

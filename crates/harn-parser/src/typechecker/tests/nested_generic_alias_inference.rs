@@ -1,5 +1,51 @@
 use super::*;
 
+#[test]
+fn declared_type_projection_shares_imports_spreads_and_recursive_resolution() {
+    let imported = crate::parse_source("pub type Settings = {provider: string}").unwrap();
+    let program = crate::parse_source(
+        "type Request = {name: string, ...Settings}\ntype Recursive = {next?: Recursive}",
+    )
+    .unwrap();
+    let resolve = |name| {
+        TypeChecker::new()
+            .with_imported_type_decls(imported.clone())
+            .resolve_declared_type(&program, name)
+    };
+    let Some(TypeExpr::Shape(fields)) = resolve("Request") else {
+        panic!("resolved request shape")
+    };
+    assert_eq!(fields.len(), 2);
+    assert!(fields.iter().any(
+        |field| field.name == "provider" && field.type_expr == TypeExpr::Named("string".into())
+    ));
+    assert!(
+        resolve("Absent").is_none(),
+        "an absent contract is not an empty shape"
+    );
+    let Some(TypeExpr::Shape(recursive)) = resolve("Recursive") else {
+        panic!("recursive shape")
+    };
+    assert!(matches!(&recursive[0].type_expr, TypeExpr::Named(name) if name == "Recursive"));
+    let shadow =
+        crate::parse_source("type Settings = {local: int}\ntype Request = {...Settings}").unwrap();
+    let Some(TypeExpr::Shape(fields)) = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .resolve_declared_type(&shadow, "Request")
+    else {
+        panic!("local declaration precedence")
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name, "local");
+    let unresolved = crate::parse_source("type Request = {...Missing}").unwrap();
+    let Some(TypeExpr::OpenShape { rests, .. }) =
+        TypeChecker::new().resolve_declared_type(&unresolved, "Request")
+    else {
+        panic!("unresolved row stays unresolved")
+    };
+    assert_eq!(rests, vec![TypeExpr::Named("Missing".into())]);
+}
+
 #[rstest::rstest]
 #[case::list_of_generic_aliases_binds_the_nested_argument(
     r"

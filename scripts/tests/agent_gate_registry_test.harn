@@ -1,3 +1,4 @@
+import { __agent_option_declared_keys } from "std/agent/options_surface"
 import { AgentModelSpec } from "std/agent/options_types"
 import {
   AgentGateBindingScope,
@@ -134,10 +135,10 @@ pipeline test_model_setting_inventory_matches_compiled_top_level_shape(
     )
     inventoried = inventoried + entries.map(fn(entry) { return entry.name })
   }
-  const declared = schema_of(AgentModelSpec).properties.keys().map(
+  const declared = __agent_option_declared_keys(schema_of(AgentModelSpec)).map(
     fn(name) { return "AgentSpec." + name },
   )
-  assert(len(declared) > 0)
+  assert_eq(len(declared), 86, "every compiled model option must reach the inventory check")
   assert(len(inventoried) > 0)
   const uninventoried = declared.filter(fn(name) { return !contains(inventoried, name) })
   assert_eq(uninventoried.sorted(), [])

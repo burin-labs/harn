@@ -1,0 +1,63 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentModelSpec } from "std/agent/options_types"
+import { LlmCallOptions, LlmRequestSettings, llm_options } from "std/llm/options"
+import { get_typed_report } from "std/schema"
+import { assert_error_contains, llm_text, with_llm_script } from "std/testing"
+
+fn main(harness: Harness) {
+  const agent = schema_of(AgentModelSpec)
+  const call = schema_of(LlmCallOptions)
+  const shared = schema_of(LlmRequestSettings)
+  assert_eq(len(keys(shared.properties)), 69, "the shared owner must contain actual fields")
+  for contract in [agent, call, shared] {
+    assert(get_typed_report({provider: "mock", temperature: 0.5}, contract).ok)
+    assert(!get_typed_report({max_tokens: "invalid"}, contract).ok)
+  }
+  for row in [
+    {value: {api_mode: "custom"}, agent: true, call: false},
+    {value: {fallback_chain: "route"}, agent: true, call: false},
+    {value: {stop: "done"}, agent: true, call: false},
+    {value: {cache: {}}, agent: true, call: false},
+    {value: {store: 42}, agent: false, call: true},
+    {value: {budget: {max_total_tokens: "invalid"}}, agent: false, call: true},
+    {value: {system: [17]}, agent: true, call: false},
+    {value: {models: [{model: "mock", when: 17}]}, agent: true, call: false},
+    {value: {tools: {_type: "tool_registry", tools: [], info: 17}}, agent: false, call: true},
+    // The output aliases differ in spelling but retain the same accepted values.
+    {value: {output: "text"}, agent: true, call: true},
+    {value: {output: {}}, agent: true, call: true},
+    {value: {output: 7}, agent: false, call: false},
+  ] {
+    for defaults in [false, true] {
+      assert_eq(get_typed_report(row.value, agent, defaults).ok, row.agent)
+      assert_eq(get_typed_report(row.value, call, defaults).ok, row.call)
+    }
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("direct reached"), llm_text("agent reached")],
+    fn() {
+      const options = llm_options({provider: "mock", temperature: 0.5})
+      assert_eq(harness.llm.call("direct", nil, options).text, "direct reached")
+      assert_eq(
+        agent_loop(harness, "agent", nil, options + {max_iterations: 1}).text,
+        "agent reached",
+      )
+      const unknown = json_parse("{\"provider\":\"mock\",\"definitely_unknown\":true}")
+      assert_error_contains(
+        fn() { return harness.llm.call("must refuse", nil, unknown) },
+        "unknown option `definitely_unknown`",
+      )
+      assert_error_contains(
+        fn() { return agent_loop(harness, "must refuse", nil, unknown) },
+        "no option reads `definitely_unknown`",
+      )
+      assert_eq(
+        len(harness.llm.mock_calls()),
+        2,
+        "both real paths run; unknown keys never dispatch",
+      )
+    },
+  )
+  harness.stdio.println("shared settings preserve both model option surfaces")
+}

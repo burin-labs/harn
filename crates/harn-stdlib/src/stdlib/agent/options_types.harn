@@ -7,8 +7,7 @@ import { AgentStallCheckpoint } from "std/agent/stall_types"
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
-import { LlmBudget, Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
-import { TokenBias } from "std/llm/tokenizer"
+import { LlmBudget, LlmRequestSettings } from "std/llm/options"
 import { EvaluationOutcome, EvaluationPolicy } from "std/predicate"
 
 /** The shared provider budget plus the agent loop's aggregate token limit. */
@@ -289,9 +288,8 @@ pub type JudgeConfig = {
 /**
  * Model and provider fields accepted by `AgentSpec`.
  *
- * The `llm_call` keys are inlined so consumers can import this alias alone and
- * retain structural checking. The parity test pins it as a superset of
- * `LlmCallOptions`.
+ * Shared per-request settings come from `std/llm/options`. Agent-specific
+ * routing, budget, and conversation forms remain declared here.
  *
  * On `agent_loop`, `output` is the terminal-answer contract. Ordinary turns
  * omit it so tool calling stays unconstrained. At finalization the loop parses
@@ -301,14 +299,7 @@ pub type JudgeConfig = {
  * one-shot extraction, use `llm_call_structured`.
  */
 pub type AgentModelSpec = {
-  provider?: string,
-  model?: string,
-  model_role?: string,
-  model_tier?: string,
-  route_policy?: string | dict,
   fallback_chain?: string | list<string>,
-  routing?: dict,
-  equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
   models?: list<string \
     | {
     provider?: string,
@@ -318,75 +309,14 @@ pub type AgentModelSpec = {
     family?: string,
     capabilities?: list,
   }>,
-  ladder?: string,
   api_mode?: string,
-  max_tokens?: int,
-  temperature?: float,
-  top_p?: float,
-  top_k?: int,
   stop?: string | list<string>,
-  seed?: int,
-  frequency_penalty?: float,
-  presence_penalty?: float,
-  logprobs?: Logprobs,
-  logit_bias?: list<TokenBias>,
-  min_p?: float,
-  repetition_penalty?: float,
-  prediction?: PredictedOutput,
-  verbosity?: "low" | "medium" | "high",
-  mirostat?: Mirostat,
-  parallel_tool_calls?: bool,
-  stop_at_tool_call?: bool,
   output?: "text" | "json" | dict,
-  schema_retries?: int,
-  schema_retry_nudge?: bool | string,
-  retries?: int,
-  repair?: bool | dict,
-  schema_recover?: any,
-  reasoning_policy?: string | bool,
-  reasoning_scale?: string,
-  reasoning_task?: string,
-  effort?: string,
-  thinking?: bool | "adaptive" | dict,
-  interleaved_thinking?: bool,
-  anthropic_beta_features?: string | list<string>,
-  vision?: bool,
-  audio?: bool,
-  pdf?: bool,
-  video?: bool,
   tools?: list | ToolRegistry,
-  tool_choice?: string | dict,
-  tool_search?: bool | string | dict,
-  tool_format?: string,
-  provider_tools?: list | dict,
-  provider_options?: dict,
-  max_tool_calls?: int,
-  previous_response_id?: string,
-  // Requested provider retention/training posture. See LlmCallOptions; every
-  // turn's telemetry.data_controls receipt reports what actually happened.
-  data_controls?: "default" | "strictest_available",
-  // A host's route ceiling. Harn checks the resolved route before transport.
-  inference_boundary?: {
-    reach: "local_only" | "hosted_open_weight" | "any_hosted",
-    allow_training_discounts: bool,
-  },
   store?: bool | dict,
-  background?: bool,
-  truncation?: string,
-  compact?: bool,
-  include?: list,
   budget?: float | AgentLlmBudget,
   cache?: bool | dict,
-  prompt_cache_ttl?: "5m" | "1h",
-  speed?: "standard" | "fast",
-  stream?: bool,
-  timeout_ms?: int,
-  operation_timeout_ms?: int,
-  idle_timeout_ms?: int,
-  messages?: list,
   history?: list,
-  prefill?: string,
-  session_id?: string,
   /**
    * The child run's identifier, injected by the host alongside `session_id`
    * when `sub_agent_run` calls the loop. Declared because it arrives in the
@@ -410,14 +340,8 @@ pub type AgentModelSpec = {
   parent_session_id?: string,
   /** Token ceiling for a child run, read by the host's sub-agent budgeting. */
   token_budget?: int,
-  call_role?: string,
-  rate_limit_consumer_id?: string,
-  mock_scope?: string,
-  context_profile?: dict,
-  capabilities?: any,
   system?: string | list | {mode: "replace", content: string},
-  structural_experiment?: any,
-  metadata?: dict,
+  ...LlmRequestSettings,
 }
 
 /**

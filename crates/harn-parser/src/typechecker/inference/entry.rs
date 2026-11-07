@@ -19,9 +19,16 @@ use super::super::{TypeCheckFacts, TypeChecker};
 use super::decls::{CallableBodyContract, CallableDeclarationContext};
 
 impl TypeChecker {
-    pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
-        crate::analysis::record_typecheck_run();
-        self.check_parameter_annotations(program);
+    /// Resolve a module's declared alias with the same imports and declaration
+    /// precedence used by checking. Recursive references retain their names;
+    /// an undeclared root returns `None`.
+    pub fn resolve_declared_type(mut self, program: &[SNode], name: &str) -> Option<TypeExpr> {
+        self.register_module_declarations(program);
+        self.scope.resolve_type(name)?;
+        Some(self.resolve_alias(&TypeExpr::Named(name.into()), &self.scope))
+    }
+
+    fn register_module_declarations(&mut self, program: &[SNode]) {
         // Pre-pass mutations: nobody else holds an `Rc` to `self.scope`
         // yet, so `Rc::make_mut` resolves to a direct `&mut TypeScope`
         // without copying. Once body children start to share the root
@@ -41,6 +48,13 @@ impl TypeChecker {
         for nodes in crate::lexical::module_scope_node_slices(program) {
             Self::register_declarations_into(scope_mut, nodes, DeclOrigin::Local);
         }
+    }
+
+    pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
+        crate::analysis::record_typecheck_run();
+        self.check_parameter_annotations(program);
+        self.register_module_declarations(program);
+        let scope_mut = Rc::make_mut(&mut self.scope);
         // Pre-register every top-level `fn`/`pipeline`/`tool` name so a
         // caller earlier in the file can reference a callable defined
         // later without the strict cross-module check falsely flagging
