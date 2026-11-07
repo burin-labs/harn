@@ -134,7 +134,32 @@ fn joined(values: list<int> | list<string>) -> list<int | string> {
 }
 "#;
     let diagnostics = check_source_with_source(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Code::LintUntypedOptionalChain)
+            .count(),
+        0,
+        "{diagnostics:?}"
+    );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let erased_callback = errors(
+        r#"
+type Step = {name: string}
+type Job = {steps?: list<Step>}
+fn wrong(job: Job) -> list<Step> {
+  return (job.steps ?? []).filter({step ->
+    const wrong: int = step.name
+    return wrong == 0
+  }).to_list()
+}
+"#,
+    );
+    assert_eq!(erased_callback.len(), 1, "{erased_callback:?}");
+    assert!(
+        erased_callback[0].contains("expected int, found string"),
+        "{erased_callback:?}"
+    );
     let wrong = errors(
         r"
 fn wrong(values: list<int> | list<string>) -> list<int> {
@@ -149,6 +174,21 @@ fn wrong(values: list<int> | list<string>) -> list<int> {
         mixed.iter().any(|error| error.contains("method `filter`")),
         "{mixed:?}"
     );
+    let unknown = with_code(
+        r#"
+type Step = {with?: {name?: string}}
+fn unknown(values: list | list<Step>) {
+  const steps = values.filter({step -> step?.with?.name == "x"}).to_list()
+  return steps[0]?.with?.name
+}
+"#,
+        Code::LintUntypedOptionalChain,
+    );
+    assert_eq!(unknown.len(), 2, "{unknown:?}");
+    let mutable = check_source_with_source(
+        r#"fn mutable() { let items = []; items.push(1); items.push("x") }"#,
+    );
+    assert!(mutable.is_empty(), "{mutable:?}");
 }
 
 #[test]

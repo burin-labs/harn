@@ -1,0 +1,17 @@
+type Step = {name: string}
+
+type Job = {steps?: list<Step>}
+
+fn wrong(job: Job) -> list<Step> {
+  return (job.steps ?? []).filter(
+    { step ->
+      const wrong: int = step.name
+      return wrong == 0
+    },
+  )
+    .to_list()
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(wrong({steps: [{name: "reached"}]}))
+}

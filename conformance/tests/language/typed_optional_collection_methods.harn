@@ -15,6 +15,13 @@ fn nullable(values: list<int> | list<string> | nil) -> list<int | string>? {
   return values?.filter({ value -> value != nil })?.to_list()
 }
 
+fn mutable_empty() -> list {
+  let items = []
+  items.push(1)
+  items.push("x")
+  return items
+}
+
 fn main(harness: Harness) {
   assert_eq(names({steps: [{with: {name: "x"}}]}), "x")
   assert_eq(names({}), nil)
@@ -22,5 +29,6 @@ fn main(harness: Harness) {
   assert_eq(joined(["a"]), ["a"])
   assert_eq(nullable(nil), nil)
   assert_eq(nullable([1]), [1])
+  assert_eq(mutable_empty(), [1, "x"])
   harness.stdio.println("typed collection branches reached")
 }
