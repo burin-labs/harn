@@ -27,6 +27,8 @@ struct InstalledOwner {
     native_gh: Executable,
     state_directory: PathBuf,
     account_config: PathBuf,
+    #[serde(rename = "policy_environment")]
+    _policy_environment: std::collections::BTreeMap<String, String>,
 }
 
 /// Validated files belonging to the installed, token-free budget adapter.

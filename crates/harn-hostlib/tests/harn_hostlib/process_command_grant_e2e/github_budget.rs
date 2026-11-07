@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 struct ApprovalRead {
     etag: PathBuf,
+    manifest: PathBuf,
+    change_policy: bool,
     marker: PathBuf,
     native_marker: PathBuf,
     calls: Arc<AtomicUsize>,
@@ -23,6 +25,8 @@ impl HostlibCapability for ApprovalRead {
             .handler
             .clone();
         let etag = self.etag.clone();
+        let manifest = self.manifest.clone();
+        let change_policy = self.change_policy;
         let marker = self.marker.clone();
         let native_marker = self.native_marker.clone();
         let calls = self.calls.clone();
@@ -41,7 +45,15 @@ impl HostlibCapability for ApprovalRead {
                         !native_marker.exists(),
                         "approval precedes the native child"
                     );
-                    std::fs::write(&etag, "\"changed\"").unwrap();
+                    if change_policy {
+                        let mut owner: serde_json::Value =
+                            serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+                        owner["policy_environment"] =
+                            serde_json::json!({"GH_BUDGET_RESERVE": "4500"});
+                        std::fs::write(&manifest, serde_json::to_vec(&owner).unwrap()).unwrap();
+                    } else {
+                        std::fs::write(&etag, "\"changed\"").unwrap();
+                    }
                 } else {
                     assert!(
                         !native_marker.exists(),
@@ -99,6 +111,7 @@ fn enroll(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let native = native_directory.join("gh");
     let owner = serde_json::json!({
         "schema": "github.budget-owner.v1",
+        "policy_environment": {},
         "wrapper": record(&directory.join("gh")),
         "implementation": record(&directory.join("implementation.py")),
         "adapter": record(&directory.join("adapter.py")),
@@ -117,6 +130,15 @@ fn enroll(fixture: &Fixture) -> (PathBuf, PathBuf) {
 
 #[test]
 fn native_budget_consent_retains_argv_and_cwd_and_refuses_a_changed_etag() {
+    assert_retained_consent(false);
+}
+
+#[test]
+fn native_budget_consent_refuses_a_changed_installed_policy() {
+    assert_retained_consent(true);
+}
+
+fn assert_retained_consent(change_policy: bool) {
     let _env = super::super::process_tools_e2e::lock_env();
     let fixture = Fixture::new();
     let _session = in_session();
@@ -128,6 +150,11 @@ fn native_budget_consent_retains_argv_and_cwd_and_refuses_a_changed_etag() {
         .with(harn_hostlib::tools::ToolsCapability)
         .with(ApprovalRead {
             etag: state.join("etag"),
+            manifest: fixture
+                .user
+                .path()
+                .join("bin/.harn-github-budget-owner.json"),
+            change_policy,
             marker: marker.clone(),
             native_marker: fixture.workspace("native-argv"),
             calls: calls.clone(),
@@ -136,7 +163,9 @@ fn native_budget_consent_retains_argv_and_cwd_and_refuses_a_changed_etag() {
     let chunk = harn_vm::compile_source(source).unwrap();
     let config = serde_json::json!({
         "cwd": fixture.workspace.path(), "native": native,
-        "approval": marker, "changed_etag": "\"changed\"",
+        "approval": marker,
+        "changed_etag": if change_policy { "\"initial\"" } else { "\"changed\"" },
+        "change_policy": change_policy,
     });
     let provider = Arc::new(
         harn_vm::secrets::MemorySecretProvider::new(SECRET_ACCOUNT).with_secret(
@@ -174,7 +203,14 @@ fn native_budget_consent_retains_argv_and_cwd_and_refuses_a_changed_etag() {
     );
     assert_eq!(
         std::fs::read_to_string(fixture.workspace("native-argv")).unwrap(),
-        "api\nrepos/example/repo/commits/pinned\n--include\n--header\nIf-None-Match: \"changed\"\n"
+        format!(
+            "api\nrepos/example/repo/commits/pinned\n--include\n--header\nIf-None-Match: {}\n",
+            if change_policy {
+                "\"initial\""
+            } else {
+                "\"changed\""
+            }
+        )
     );
     assert!(vm.output().contains("fresh child reached"));
     assert!(!vm.output().contains(PROBE));

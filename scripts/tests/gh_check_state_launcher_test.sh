@@ -61,7 +61,7 @@ cat > "$implementation" <<'PY'
 import os
 from pathlib import Path
 import sys
-assert sys.argv[1:] == ["--budget-refresh-account-index"]
+assert sys.argv[1:] == ["--install-owner"]
 assert "GH_TOKEN" not in os.environ and "GITHUB_TOKEN" not in os.environ
 assert os.environ["GH_DEBUG"] == ""
 assert os.environ["GH_BUDGET_PRINT_REAL"] == ""
@@ -90,7 +90,7 @@ for pair in "wrapper:$tmp_root/bin/gh" "implementation:$implementation" "adapter
     '$records + {($role):{path:$path,sha256:$sha256}}')"
 done
 jq -nc --argjson records "$records" --arg state "$state" --arg account "$tmp_root/accounts/hosts.yml" \
-  '$records + {schema:"github.budget-owner.v1",state_directory:$state,account_config:$account}' > "$owner"
+  '$records + {schema:"github.budget-owner.v1",state_directory:$state,account_config:$account,policy_environment:{}}' > "$owner"
 cp "$owner" "$tmp_root/valid-owner.json"
 for expected in 0 1 2 3 64; do
   export FAKE_STATUS="$expected"

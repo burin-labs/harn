@@ -432,11 +432,15 @@ failures preserve whether a request ran, did not run, or could not be measured.
 Final response headers do not establish how many redirects or retries the
 native CLI performed; the ledger must retain that uncertainty.
 
-The owner's installer maintains enrollment and its credential fingerprint
-index. Refresh the index through that trusted owner before a confined launch.
-`scripts/gh_check_state.sh` validates enrollment and refreshes the index without
-inheriting token variables. Changed digests require reinstalling the owner. Missing or
-unusable enrollment never falls back to an ambient wrapper.
+The trusted host validates enrollment and invokes the enrolled adapter's
+`--install-owner` preflight before preparing a confined invocation. It clears
+token variables and binds the enrolled native program, state and account paths.
+This refreshes the credential fingerprint index and captures host tightening
+settings in the manifest's `policy_environment` map. Policy parsing belongs to
+the ledger owner. Direct callers need the same preflight;
+`scripts/gh_check_state.sh` performs it before starting Harn. Changed executable
+digests require reinstalling the owner. Missing or unusable enrollment never
+falls back to an ambient wrapper.
 
 A read that would otherwise receive the grant is refused when it names an
 output filter, `--jq`/`-q` or `--template`/`-t` in any spelling (`--jq=...`,

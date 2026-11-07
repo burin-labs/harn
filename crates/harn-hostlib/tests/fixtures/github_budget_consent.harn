@@ -1,4 +1,10 @@
-type BudgetConsentFixture = {cwd: string, native: string, approval: string, changed_etag: string}
+type BudgetConsentFixture = {
+  cwd: string,
+  native: string,
+  approval: string,
+  changed_etag: string,
+  change_policy: bool,
+}
 
 fn main(harness: Harness) {
   const fixture = schema_expect(json_parse(argv[0]), schema_of(BudgetConsentFixture))
@@ -38,11 +44,23 @@ fn main(harness: Harness) {
   defer {
     harness.runtime.command_policy_pop()
   }
-  const refused = harness.tools.run_command(
-    {argv: ["gh", "api", "repos/example/repo/commits/pinned"], cwd: fixture.cwd},
-  )
-  assert_eq(refused.exit_code, 77)
-  assert(refused.pid == nil, "changed consent plan must not start a native child")
+  const refused = try {
+    Ok(
+      harness.tools.run_command(
+        {argv: ["gh", "api", "repos/example/repo/commits/pinned"], cwd: fixture.cwd},
+      ),
+    )
+  } catch (error) {
+    Err(error)
+  }
+  if fixture.change_policy {
+    assert(is_err(refused), "changed enrollment must invalidate the retained command authority")
+    assert(to_string(unwrap_err(refused)).contains("authority changed"))
+  } else {
+    const outcome = unwrap(refused)
+    assert_eq(outcome.exit_code, 77)
+    assert(outcome.pid == nil, "changed consent plan must not start a native child")
+  }
   const fresh = harness.tools.run_command(
     {argv: ["gh", "api", "repos/example/repo/commits/pinned"], cwd: fixture.cwd},
   )

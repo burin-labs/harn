@@ -39,8 +39,9 @@ if [[ "$(head -c 2 "$gh_program")" == '#!' ]]; then
   owner="$(dirname "$gh_program")/.harn-github-budget-owner.json"
   if [[ ! -f "$owner" ]] || ! jq -e --arg executable "$gh_program" '
       type == "object" and
-      (keys == ["account_config", "adapter", "implementation", "interpreter", "native_gh", "schema", "state_directory", "wrapper"]) and
+      (keys == ["account_config", "adapter", "implementation", "interpreter", "native_gh", "policy_environment", "schema", "state_directory", "wrapper"]) and
       .schema == "github.budget-owner.v1" and .wrapper.path == $executable and
+      (.policy_environment | type == "object" and all(.[]; type == "string")) and
       ([.account_config, .state_directory] | all(type == "string" and startswith("/") and (explode | all(. >= 32)))) and
       ([.wrapper, .implementation, .adapter, .interpreter, .native_gh] | all(
         type == "object" and keys == ["path", "sha256"] and
@@ -61,15 +62,17 @@ if [[ "$(head -c 2 "$gh_program")" == '#!' ]]; then
   done
   interpreter="$(jq -r '.interpreter.path' "$owner")"
   implementation="$(jq -r '.implementation.path' "$owner")"
+  adapter="$(jq -r '.adapter.path' "$owner")"
   gh_auth_program="$(jq -r '.native_gh.path' "$owner")"
   account_config="$(jq -r '.account_config' "$owner")"
   if [[ "$(dirname "$implementation")" != "$(dirname "$gh_program")" \
+    || "$(dirname "$adapter")" != "$(dirname "$gh_program")" \
     || "$(basename "$account_config")" != hosts.yml ]] \
     || ! env -u GH_TOKEN -u GITHUB_TOKEN GH_DEBUG= GH_BUDGET_PRINT_REAL= \
       GH_BUDGET_REAL_GH="$gh_auth_program" \
       GH_BUDGET_STATE_DIR="$(jq -r '.state_directory' "$owner")" \
       GH_CONFIG_DIR="$(dirname "$account_config")" \
-      "$interpreter" -I "$implementation" --budget-refresh-account-index; then
+      "$interpreter" -I "$adapter" --install-owner >/dev/null; then
     echo "gh_check_state: enrolled account refresh failed; no check census was measured" >&2
     exit 3
   fi
