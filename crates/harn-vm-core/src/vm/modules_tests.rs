@@ -35,7 +35,8 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
          pub type Nested = {answer: X}\n\
          pub type Generic<T> = {answer: R<T>}\n\
          pub type Good = Box<int>\n\
-         pub fn answer() -> int { return 1 }\n",
+         pub fn answer() -> int { return 1 }\n\
+         pub fn accept_opaque(_value: X) -> int { return 2 }\n",
     )
     .unwrap();
     let mut vm = super::super::test_runtime::new_vm();
@@ -68,6 +69,17 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
         .await
         .unwrap();
     assert!(matches!(value, VmValue::Int(1)));
+    let opaque = VmValue::enum_variant("Result", "Ok", vec![VmValue::Int(7)]);
+    let value = vm
+        .call_module_export(
+            wrapper.to_str().unwrap(),
+            "accept_opaque",
+            "test",
+            &[opaque],
+        )
+        .await
+        .expect("a type-only imported alias needs no unavailable schema factory");
+    assert!(matches!(value, VmValue::Int(2)));
 }
 
 fn cache_test_guard() -> MutexGuard<'static, ()> {

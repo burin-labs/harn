@@ -10,7 +10,15 @@ type GenericRequest = ImportedEnvelope<ImportedFields>
 
 type GenericOpenRequest = ImportedEnvelope<dict>
 
-fn accepts_request(value: Request) -> bool {
+fn accepts_request(_value: Request) -> bool {
+  return true
+}
+
+fn accepts_generic(_value: GenericRequest) -> bool {
+  return true
+}
+
+fn accepts_open(_value: GenericOpenRequest) -> bool {
   return true
 }
 
@@ -19,6 +27,10 @@ fn main(harness: Harness) {
   const good = {label: "reached", max_tokens: 8, nested: {name: "actual"}}
   assert(get_typed_report(good, contract).ok)
   assert(accepts_request(good))
+  assert(accepts_request(good + {max_tokens: nil}))
+  assert(accepts_generic(good))
+  assert(accepts_generic(good + {max_tokens: nil}))
+  assert(accepts_open({label: "open", extension: {anything: true}}))
   harness.stdio.println("imported spread positive reached")
   for defaults in [false, true] {
     assert(
@@ -35,6 +47,17 @@ fn main(harness: Harness) {
     ) },
     "max_tokens",
   )
+  for row in [
+    {json: "{\"label\":\"missing nested\"}", field: "nested"},
+    {
+      json: "{\"label\":\"bad\",\"max_tokens\":\"invalid\",\"nested\":{\"name\":\"ok\"}}",
+      field: "max_tokens",
+    },
+    {json: "{\"label\":\"bad\",\"nested\":{\"name\":7}}", field: "name"},
+  ] {
+    assert_error_contains(fn() { return accepts_generic(json_parse(row.json)) }, row.field)
+  }
+  assert_error_contains(fn() { return accepts_open(json_parse("{\"extension\":true}")) }, "label")
   const exported = schema_json(contract)
   assert(exported.allOf != nil, "imported fields must survive JSON Schema export")
   assert(get_typed_report(good, exported).ok)

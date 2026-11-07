@@ -1,5 +1,6 @@
 import { agent_loop } from "std/agent/loop"
 import { AgentModelSpec } from "std/agent/options_types"
+import { LlmResponse } from "std/llm/envelope"
 import { LlmCallOptions, LlmRequestSettings, llm_options } from "std/llm/options"
 import { get_typed_report } from "std/schema"
 import { assert_error_contains, llm_text, with_llm_script } from "std/testing"
@@ -38,7 +39,8 @@ fn main(harness: Harness) {
     [llm_text("direct reached"), llm_text("agent reached")],
     fn() {
       const options = llm_options({provider: "mock", temperature: 0.5})
-      assert_eq(harness.llm.call("direct", nil, options).text, "direct reached")
+      const direct = schema_expect(harness.llm.call("direct", nil, options), schema_of(LlmResponse))
+      assert_eq(direct.text, "direct reached")
       assert_eq(
         agent_loop(harness, "agent", nil, options + {max_iterations: 1}).text,
         "agent reached",

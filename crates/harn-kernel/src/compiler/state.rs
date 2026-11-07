@@ -673,11 +673,10 @@ impl Compiler {
     }
 
     /// Emit body-local type checks that call-site validation cannot cover.
-    /// Ordinary supplied arguments are validated by precomputed
-    /// [`crate::chunk::ParamSlot`] guards before the frame is entered. The
-    /// bytecode preamble still checks interface parameters, because interface
-    /// satisfaction depends on compiler-collected method metadata, and checks
-    /// defaulted schema parameters only when the caller omitted that argument.
+    /// Static supplied arguments use precomputed [`crate::chunk::ParamSlot`]
+    /// guards. Lexical schemas retain imported and composed record constraints;
+    /// interfaces require compiler-collected method metadata. Static defaults
+    /// are checked only when the caller omitted the argument.
     pub(super) fn emit_type_checks(&mut self, params: &[TypedParam]) {
         for (param_index, param) in params.iter().enumerate() {
             if let Some(type_expr) = &param.type_expr {
@@ -705,6 +704,15 @@ impl Compiler {
                     }
                 }
 
+                if let Some(fragment) = self.parameter_schema_fragment(&check_type) {
+                    let unavailable = self.emit_schema_binding_probe(&fragment);
+                    self.emit_schema_assert_call(param, &fragment);
+                    if let Some(skip) = unavailable {
+                        self.chunk.patch_jump(skip);
+                    }
+                    continue;
+                }
+
                 if param.default_value.is_some() {
                     if let Some(schema) = Self::type_expr_to_schema_value(&check_type) {
                         self.emit_default_param_schema_check(param_index, param, &schema);
@@ -728,20 +736,27 @@ impl Compiler {
         self.chunk.emit(Op::GreaterEqual, self.line);
         let supplied_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
         self.chunk.emit(Op::Pop, self.line);
-        self.emit_schema_assert_call(param, schema);
+        self.emit_schema_assert_call(
+            param,
+            &super::schema_types::SchemaFragment::Value(schema.clone()),
+        );
         let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
         self.chunk.patch_jump(supplied_jump);
         self.chunk.emit(Op::Pop, self.line);
         self.chunk.patch_jump(end_jump);
     }
 
-    fn emit_schema_assert_call(&mut self, param: &TypedParam, schema: &VmValue) {
+    fn emit_schema_assert_call(
+        &mut self,
+        param: &TypedParam,
+        schema: &super::schema_types::SchemaFragment,
+    ) {
         let fn_idx = self.string_constant("__assert_schema");
         self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
         self.emit_get_binding(&param.name);
         let name_idx = self.string_constant(&param.name);
         self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-        self.emit_vm_value_literal(schema);
+        self.emit_schema_fragment(schema);
         self.chunk.emit_u8(Op::Call, 3, self.line);
         self.chunk.emit(Op::Pop, self.line);
     }

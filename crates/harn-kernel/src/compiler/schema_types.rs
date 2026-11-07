@@ -309,6 +309,37 @@ impl Compiler {
             .map(SchemaFragment::bounded)
     }
 
+    pub(super) fn parameter_schema_fragment(&self, ty: &TypeExpr) -> Option<SchemaFragment> {
+        if Self::type_expr_to_schema_value(&self.expand_alias(ty)).is_some() {
+            return None;
+        }
+        self.schema_fragment_for_type(ty, &mut Vec::new())
+            .map(SchemaFragment::bounded)
+    }
+
+    /// Match the module initializer's required-binding condition. Only plain
+    /// lookups are caught; schema construction and validation follow outside.
+    pub(super) fn emit_schema_binding_probe(&mut self, schema: &SchemaFragment) -> Option<usize> {
+        let bindings = schema.required_bindings();
+        if bindings.is_empty() {
+            return None;
+        }
+        let missing = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let any_error = self.string_constant("");
+        self.emit_type_name_extra(any_error);
+        for name in bindings {
+            self.emit_get_binding(&name);
+            self.chunk.emit(Op::Pop, self.line);
+        }
+        self.chunk.emit(Op::PopHandler, self.line);
+        let available = self.chunk.emit_jump(Op::Jump, self.line);
+        self.chunk.patch_jump(missing);
+        self.chunk.emit(Op::Pop, self.line);
+        let skip = self.chunk.emit_jump(Op::Jump, self.line);
+        self.chunk.patch_jump(available);
+        Some(skip)
+    }
+
     fn unbounded_schema_fragment_for_alias(&self, name: &str) -> Option<SchemaFragment> {
         let alias = self.type_aliases.get(name)?;
         if !alias.type_params.is_empty() {
