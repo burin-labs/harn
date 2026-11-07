@@ -71,6 +71,7 @@ pub(super) fn observe_terminal_unproductive_completion(
         retryable: false,
         failover_eligible: true,
         attempt_count: Some(attempt_count),
+        retained_response: true,
     });
     dump_resolved_dispatch(
         iteration.unwrap_or(0),

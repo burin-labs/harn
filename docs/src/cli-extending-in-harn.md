@@ -35,6 +35,14 @@ embedded `.harn` implementation. Keep Rust only for clap parsing and
 host data collection that scripts cannot perform yet, then test the
 new output contract directly.
 
+Register translated script messages in `crates/harn-cli/src/localization_scripts.json`
+and the existing CLI locale catalogs, then run `make gen-cli-localization`.
+The generator validates numbered slots and emits typed literal and argument plans.
+`std/cli/message_template` renders these plans; command namespaces retain their
+registered message sets. Argument text is copied unchanged, including `${...}`
+and `{{...}}` sequences. Verify all message paths with `make check-cli-localization`
+using a CLI rebuilt from the changed stdlib.
+
 ## Walkthrough — port a fictional `harn greet <name>`
 
 End-to-end port of a brand-new subcommand. Total diff is about 80 lines

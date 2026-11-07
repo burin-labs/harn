@@ -721,6 +721,7 @@ pub(super) struct ProviderCallErrorObservation<'a> {
     pub(super) retryable: bool,
     pub(super) failover_eligible: bool,
     pub(super) attempt_count: Option<usize>,
+    pub(super) retained_response: bool,
 }
 
 pub(super) fn append_provider_call_error_observability(
@@ -741,6 +742,7 @@ pub(super) fn append_provider_call_error_observability(
         retryable,
         failover_eligible,
         attempt_count,
+        retained_response,
     } = observation;
     let mut fields = serde_json::Map::from_iter([
         ("iteration".to_string(), serde_json::json!(iteration)),
@@ -772,6 +774,9 @@ pub(super) fn append_provider_call_error_observability(
         // without yielding a trustworthy ledger. Preserve that uncertainty
         // explicitly instead of presenting a free retry.
         crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
+    }
+    if retained_response {
+        fields.insert("retained_response".to_string(), serde_json::json!(true));
     }
     if let Some(stage) = opts
         .call_stage
@@ -864,6 +869,7 @@ mod stream_failure_observability_tests {
                 retryable,
                 failover_eligible: false,
                 attempt_count: None,
+                retained_response: false,
             });
             pop_llm_transcript_dir();
             let receipt: serde_json::Value = serde_json::from_str(
@@ -910,6 +916,7 @@ mod stream_failure_observability_tests {
             retryable: true,
             failover_eligible: false,
             attempt_count: None,
+            retained_response: false,
         });
         pop_llm_transcript_dir();
 
@@ -958,6 +965,7 @@ mod stream_failure_observability_tests {
             retryable: false,
             failover_eligible: false,
             attempt_count: None,
+            retained_response: false,
         });
         pop_llm_transcript_dir();
 

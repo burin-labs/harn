@@ -100,6 +100,19 @@ fn typed_admission_refusal_measures_zero_before_provider_dispatch() {
         assert_eq!(denial["unpriced_calls"], 0);
         assert_eq!(denial["usage_unknown_calls"], 0);
         assert_eq!(denial["cost_usd"], 0.0);
+        let events = transcript_census_tests::read_events(denied_transcript.path());
+        let census = transcript_census_tests::census(&events).await;
+        assert_eq!(census["prepared_request_count"], 1);
+        assert_eq!(census["provider_request_count"], 0);
+        assert_eq!(census["measurement_state"], "measured");
+        assert_eq!(census["terminal_complete"], true);
+        let unmeasured: Vec<_> = events
+            .into_iter()
+            .filter(|event| event["type"] != "provider_call_measurement")
+            .collect();
+        let control = transcript_census_tests::census(&unmeasured).await;
+        assert!(control["provider_request_count"].is_null());
+        assert_eq!(control["measurement_state"], "incomplete");
     });
     crate::llm::admission::swap_scope(previous_admission);
 }

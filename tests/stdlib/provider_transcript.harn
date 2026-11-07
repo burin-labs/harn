@@ -1,0 +1,207 @@
+import {
+  ProviderCallCensus,
+  provider_call_census,
+  provider_response_content_shape,
+  provider_transcript_normalize,
+  transcript_records,
+} from "../../crates/harn-stdlib/src/stdlib/agent/provider_transcript"
+
+fn census(records: list, present: bool = true) -> ProviderCallCensus {
+  return provider_call_census(provider_transcript_normalize(records), present)
+}
+
+fn attempt(call_id: string, dispatches: int = 1) -> list {
+  return [
+    {type: "provider_call_request", call_id: call_id},
+    {type: "provider_call_measurement", call_id: call_id, provider_dispatch_count: dispatches},
+  ]
+}
+
+pipeline test_missing_is_not_measured_zero() {
+  const missing = census([], false)
+  assert(missing.measurement_state == "unmeasured")
+  assert(missing.provider_request_count == nil && !missing.terminal_complete)
+  const empty = census([])
+  assert(empty.measurement_state == "measured")
+  assert(empty.provider_request_count == 0 && empty.terminal_complete)
+}
+
+pipeline test_prepared_requests_cannot_invent_dispatches() {
+  const denied = census(attempt("denied", 0) + [{type: "provider_call_error", call_id: "denied"}])
+  assert(denied.prepared_request_count == 1)
+  assert(denied.provider_request_count == 0 && denied.terminal_complete)
+  const legacy = census(
+    [
+      {type: "request", call_id: "legacy"},
+      {type: "response", call_id: "legacy", provider_call_count: 9},
+    ],
+  )
+  assert(legacy.provider_request_count == nil && legacy.measurement_state == "incomplete")
+  assert(legacy.unmeasured_call_ids == ["legacy"])
+  const configured = census(
+    [
+      {
+        type: "provider_call_request",
+        call_id: "thinking",
+        thinking: {type: "enabled", budget_tokens: 1024},
+      },
+      {type: "provider_call_measurement", call_id: "thinking", provider_dispatch_count: 1},
+      {type: "provider_call_response", call_id: "thinking", thinking: "reasoning text"},
+    ],
+  )
+  assert(configured.provider_request_count == 1 && configured.terminal_complete)
+}
+
+pipeline test_complete_physical_attempts_do_not_sum_aggregate_usage() {
+  const records = attempt("first") + [{type: "provider_call_error", call_id: "first"}]
+    + attempt("second", 2)
+    + [{type: "provider_call_response", call_id: "second", provider_call_count: 10, text: "ok"}]
+  const result = census(records)
+  assert(result.measurement_state == "measured" && result.terminal_complete)
+  assert(result.prepared_request_count == 2 && result.provider_request_count == 3)
+  assert(result.provider_response_count == 1 && result.provider_error_count == 1)
+}
+
+pipeline test_pending_is_visible_and_unmeasured_until_transport_settles() {
+  const pending = census([{type: "provider_call_request", call_id: "pending"}])
+  assert(pending.pending_call_ids == ["pending"])
+  assert(pending.unmeasured_call_ids == ["pending"])
+  assert(pending.provider_request_count == nil && !pending.terminal_complete)
+  const settled = census(attempt("pending"))
+  assert(settled.provider_request_count == 1 && !settled.terminal_complete)
+}
+
+pipeline test_unknown_provider_rows_and_missing_ids_cannot_be_measured_empty() {
+  const future = census([{type: "provider_call_future"}])
+  assert(future.invalid_record_count == 1 && future.provider_request_count == nil)
+  const missing_id = census([{type: "response"}])
+  assert(missing_id.provider_response_count == 1 && missing_id.orphan_outcome_count == 1)
+  assert(missing_id.provider_request_count == nil)
+  const identities = census(attempt(" id ") + [{type: "response", call_id: "id"}])
+  assert(identities.orphan_outcome_count == 1 && identities.pending_call_ids == [" id "])
+  assert(identities.provider_request_count == nil)
+}
+
+pipeline test_orphans_and_duplicates_refuse_exact_count() {
+  const cases = [
+    [{type: "provider_call_response", call_id: "orphan"}],
+    [{type: "provider_call_measurement", call_id: "orphan", provider_dispatch_count: 1}],
+    attempt("duplicate") + [{type: "provider_call_request", call_id: "duplicate"}],
+    attempt("duplicate")
+      + [{type: "provider_call_measurement", call_id: "duplicate", provider_dispatch_count: 1}],
+    attempt("duplicate")
+      + [
+        {type: "provider_call_response", call_id: "duplicate"},
+        {type: "provider_call_response", call_id: "duplicate"},
+      ],
+    attempt("duplicate")
+      + [
+        {type: "provider_call_response", call_id: "duplicate"},
+        {type: "provider_call_error", call_id: "duplicate"},
+      ],
+    attempt("negative", -1),
+    [{type: "provider_call_request", call_id: ""}],
+    [nil],
+  ]
+  for records in cases {
+    const result = census(records)
+    assert(result.measurement_state == "incomplete")
+    assert(result.provider_request_count == nil && !result.terminal_complete)
+  }
+  assert(census(cases[0]).orphan_outcome_count == 1)
+  assert(census(cases[1]).orphan_measurement_call_ids == ["orphan"])
+  assert(census(cases[2]).duplicate_request_call_ids == ["duplicate"])
+  assert(census(cases[3]).duplicate_measurement_call_ids == ["duplicate"])
+  assert(census(cases[4]).duplicate_terminal_call_ids == ["duplicate"])
+}
+
+pipeline test_retained_unusable_response_is_one_terminal_with_its_error() {
+  const pair = attempt("retained")
+    + [
+      {type: "provider_call_response", call_id: "retained", text: "", output_tokens: 42},
+      {type: "provider_call_error", call_id: "retained", retained_response: true},
+    ]
+  const result = census(pair)
+  assert(result.provider_request_count == 1 && result.terminal_complete)
+  assert(result.provider_response_count == 1 && result.provider_error_count == 1)
+  assert(result.duplicate_terminal_call_ids == [])
+  const malformed = census(
+    attempt("missing")
+      + [{type: "provider_call_error", call_id: "missing", retained_response: true}],
+  )
+  assert(malformed.measurement_state == "incomplete" && malformed.provider_request_count == nil)
+}
+
+pipeline test_content_normalizes_native_calls_reasoning_and_explicit_aliases() {
+  const native = provider_response_content_shape(
+    {type: "response", text: "", tool_calls: [{name: "read", arguments: {path: "x"}, id: "tool"}]},
+  )
+  assert(native.parsed_tool_call_count == 1 && !native.empty_completion)
+  assert(native.parsed_tool_calls[0].name == "read")
+  const reasoning = provider_response_content_shape(
+    {
+      type: "response",
+      thinking: " a ",
+      reasoning: "a",
+      reasoning_content: "b",
+      message: {reasoning: "c"},
+    },
+  )
+  assert(reasoning.reasoning_text == "a\nb\nc" && reasoning.reasoning_only_completion)
+  const alias = provider_response_content_shape(
+    {
+      type: "response",
+      parsed_tool_calls_ref: "tool_calls",
+      tool_calls: [{tool_name: "write", tool_call_id: "t"}],
+    },
+  )
+  assert(alias.parsed_tool_calls[0].name == "write" && alias.parsed_tool_calls[0].id == "t")
+  const empty = provider_response_content_shape(
+    {type: "response", parsed_tool_calls: [], tool_calls: [{name: "must_not_fallback"}]},
+  )
+  assert(empty.empty_completion)
+  const invalid = provider_transcript_normalize(
+    [{type: "response", call_id: "bad", parsed_tool_calls_ref: "missing"}],
+  )
+  assert(invalid[0].kind == "invalid")
+  const conflicting = provider_transcript_normalize(
+    [
+      {
+        type: "response",
+        call_id: "bad",
+        parsed_tool_calls: [],
+        parsed_tool_calls_ref: "tool_calls",
+        tool_calls: [],
+      },
+    ],
+  )
+  assert(conflicting[0].kind == "invalid")
+}
+
+pipeline test_timestamps_validate_once_and_file_reader_preserves_rows(harness: Harness) {
+  const rows = provider_transcript_normalize(
+    [
+      {type: "response", timestamp: "1700000000.5"},
+      {type: "response", timestamp: 1700000000500},
+      {type: "response", timestamp: "2023-11-14T22:13:20.500Z"},
+    ],
+  )
+  for row in rows {
+    assert(row.timestamp_ms == 1700000000500.0)
+  }
+  const directory = harness.fs.mkdtemp_in_workspace("provider-transcript")
+  const path = "${directory}/transcript.jsonl"
+  const records = attempt("file") + [{type: "response", call_id: "file", text: "served"}]
+  harness.fs.write_text(
+    path,
+    join(records.map({ record -> json_stringify(record) }).to_list(), "\n"),
+  )
+  const read = transcript_records(harness.fs, path)
+  assert(len(read) == 3 && read[2].content?.emitted_text == "served")
+  assert(provider_call_census(read, true).provider_request_count == 1)
+  harness.fs.write_text(path, "invalid json")
+  const bad = try {
+    transcript_records(harness.fs, path)
+  }
+  assert(!is_ok(bad))
+}
