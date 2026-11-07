@@ -147,7 +147,7 @@ fn transcript_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "transcript_reminder_event(reminder: dict) -> dict",
+    sig = "transcript_reminder_event(reminder: dict) -> @TRANSCRIPT_REMINDER_EVENT",
     category = "transcript"
 )]
 fn transcript_reminder_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -159,7 +159,7 @@ fn transcript_reminder_event_impl(args: &[VmValue], _out: &mut String) -> Result
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "transcript_suspension_event(suspension: dict) -> dict",
+    sig = "transcript_suspension_event(suspension: dict) -> @TRANSCRIPT_SUSPENSION_EVENT",
     category = "transcript"
 )]
 fn transcript_suspension_event_impl(
@@ -174,7 +174,7 @@ fn transcript_suspension_event_impl(
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "transcript_resumption_event(resumption: dict) -> dict",
+    sig = "transcript_resumption_event(resumption: dict) -> @TRANSCRIPT_RESUMPTION_EVENT",
     category = "transcript"
 )]
 fn transcript_resumption_event_impl(
@@ -189,7 +189,7 @@ fn transcript_resumption_event_impl(
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "transcript_drain_decision_event(drain: dict) -> dict",
+    sig = "transcript_drain_decision_event(drain: dict) -> @TRANSCRIPT_DRAIN_DECISION_EVENT",
     category = "transcript"
 )]
 fn transcript_drain_decision_event_impl(
