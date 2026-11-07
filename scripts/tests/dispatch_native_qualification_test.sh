@@ -52,7 +52,8 @@ run "$(jq '.[0].status="completed"|.[0].conclusion="success"' <<< "$live")"
 if [[ $status != 0 ]] || ! grep -q '^workflow run' "$tmp/gh.log"; then fail "a successful title without an authenticated receipt was reused"; fi
 
 # Exercise admission before a candidate can execute on a trusted runner.
-mkdir -p "$tmp/repo/scripts/ci" "$tmp/runner"
+mkdir -p "$tmp/repo/scripts/ci" "$tmp/repo/scripts/lib" "$tmp/runner"
+cp "$root/scripts/lib/sha256.sh" "$tmp/repo/scripts/lib/"
 cp "$root/scripts/ci/native_qualification_probe.sh" "$root/scripts/ci/native_qualification_receipt.sh" "$tmp/repo/scripts/ci/"
 cp "$root/scripts/ci/hostlib_macos_stress.sh" "$root/scripts/ci/nextest_inventory.harn" \
   "$root/scripts/ci/summarize_nextest_receipt.harn" "$tmp/repo/scripts/ci/"
@@ -72,6 +73,7 @@ admit() {
   (cd "$tmp/repo" && env GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF="$1" GITHUB_SHA="$2" SOURCE_SHA="$3" GITHUB_ENV="$tmp/job-env" RUNNER_TEMP="$tmp/runner" bash "$root/scripts/ci/native_qualification_source.sh")
 }
 admit refs/heads/main "$policy" "$candidate"
+cmp "$root/scripts/lib/sha256.sh" "$tmp/runner/native-qualification-tools/sha256.sh" || fail 'reviewed hash owner was not retained'
 [[ $(cat "$tmp/runner/native-qualification-tools/admitted-source") == "$candidate" ]] || fail 'admitted source was not recorded'
 [[ $(cat "$tmp/job-env") == "HARN_BUILD_REVISION=$candidate" ]] || fail 'compiled CLI identity was not bound to admitted source'
 
