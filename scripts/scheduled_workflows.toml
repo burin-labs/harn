@@ -185,7 +185,7 @@ name = "Smart Ship"
 claim = "Every approved, green pull request labeled ship is looked at even when its completion wake never fires"
 crons = ["19,49 * * * *"]
 cadence_reason = "Every 30 minutes bounds the cost of a missed wake to minutes, and each look only reads the pull request through the API since repair is off."
-job_ids = ["availability", "ship"]
+job_ids = ["ship"]
 health_failures = 3
 
 [[workflow]]
