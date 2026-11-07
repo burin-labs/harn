@@ -108,7 +108,8 @@ else
   build_evidence=
   build_options=()
   if [[ "${GITHUB_ACTIONS:-}" == true && "${GITHUB_WORKSPACE:-}" == "$(pwd -P)" && -n "${RUNNER_TEMP:-}" \
-      && "$group" == rest && "$partition" =~ ^count:[12]/4$ ]]; then
+      && ( ( "$group" == rest && "$partition" =~ ^count:[12]/4$ ) \
+        || "$group" == vm-unit || "$group" == vm-integration ) ]]; then
     build_evidence="$RUNNER_TEMP/workspace-build-evidence"
     mkdir "$build_evidence"
     [[ -z "${GITHUB_OUTPUT:-}" ]] || echo 'workspace-build-evidence=true' >> "$GITHUB_OUTPUT"
