@@ -814,18 +814,19 @@ pub enum AgentEvent {
         strategy: String,
         mode: String,
     },
-    /// A transcript compaction completed. Carries the one canonical
-    /// [`CompactionReceipt`] (harn#4995) — the same receipt embedded verbatim in
-    /// the transcript `compaction` event, forwarded through ACP, and projected
-    /// into `RunObservabilityRecord.compaction_events`. `receipt.receipt_id` is
-    /// the stable identity shared across all four surfaces, so hosts never
-    /// synthesize their own.
+    /// An admitted compaction's progress or unsuccessful terminal outcome.
     CompactionUpdated {
         session_id: String,
         compaction_id: String,
         status: CompactionStatus,
         error: Option<String>,
     },
+    /// A transcript compaction completed. Carries the one canonical
+    /// [`CompactionReceipt`] (harn#4995) — the same receipt embedded verbatim in
+    /// the transcript `compaction` event, forwarded through ACP, and projected
+    /// into `RunObservabilityRecord.compaction_events`. `receipt.receipt_id` is
+    /// the stable identity shared across all four surfaces, so hosts never
+    /// synthesize their own.
     TranscriptCompacted {
         session_id: String,
         receipt: crate::orchestration::CompactionReceipt,

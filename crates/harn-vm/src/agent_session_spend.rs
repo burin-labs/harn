@@ -144,7 +144,9 @@ impl SessionLlmCostCursor {
         }
         let mut cost = next.cost.clone();
         // A budget charge without its supporting records cannot prove an exact price.
-        if meta.usage_cost_usd_micros as f64 > cost.known_cost_usd * MICROS_PER_USD + 0.5 {
+        if meta.usage_cost_usd_micros as f64
+            > cost.cost_usd.unwrap_or(cost.known_cost_usd) * MICROS_PER_USD + 0.5
+        {
             cost.cost_usd = None;
         }
         *self = next;
@@ -418,6 +420,27 @@ mod tests {
                 .await
                 .unwrap(),
             1.25
+        );
+    }
+
+    #[tokio::test]
+    async fn an_explicit_total_remains_distinct_from_its_recorded_subtotal() {
+        let store = store_with_session("explicit").await;
+        let mut call = llm_call(0.5);
+        call.payload["transcript_event"]["metadata"]["known_cost_usd"] = serde_json::json!(0.25);
+        call.payload["transcript_event"]["metadata"]["unpriced_calls"] = serde_json::json!(0);
+        store.append("explicit", call).await.unwrap();
+        record_session_llm_spend_usd_in_store(&store, "explicit", 0.5)
+            .await
+            .unwrap();
+        assert_eq!(
+            load_session_llm_cost_from_store(&store, "explicit")
+                .await
+                .unwrap(),
+            SessionLlmCost {
+                known_cost_usd: 0.25,
+                cost_usd: Some(0.5)
+            }
         );
     }
 }

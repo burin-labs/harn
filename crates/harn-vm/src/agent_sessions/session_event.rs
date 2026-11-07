@@ -508,7 +508,7 @@ impl KnownMetadata {
             .max(i64::from(known.is_none()));
         RecordedCallCost {
             known_cost_usd: known.unwrap_or(0.0),
-            cost_usd: known.filter(|_| unpriced_calls == 0),
+            cost_usd: total.filter(|_| unpriced_calls == 0),
             unpriced_calls,
             usage_unknown_calls: integer(&self.usage_unknown_calls)
                 .filter(|count| *count >= 0)
