@@ -10,6 +10,16 @@ const source = fs.realpathSync(path.resolve(path.dirname(fileURLToPath(import.me
 const output = "crates/harn-stdlib/src/stdlib/cli/localization";
 const catalog = "crates/harn-stdlib/src/catalog_entries.rs";
 
+test("compiled CLI message plans reject invalid argument slots", () => {
+  assert.ok(process.env.HARN_BIN, "owning Make target supplies the actual CLI");
+  const result = spawnSync(process.env.HARN_BIN, ["run", "scripts/tests/fixtures/cli_message_template.harn"], {
+    cwd: source, env: {...process.env, HARN_LLM_CALLS_DISABLED: "1"},
+    encoding: "utf8", timeout: 120_000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error);
+  assert.equal(result.stdout.trim(), "compiled message slot bounds reached and refused");
+});
+
 test("every registered CLI renderer preserves localized text, literal arguments and refusals", (t) => {
   assert.ok(process.env.HARN_BIN, "owning Make target supplies the actual CLI");
   const registry = JSON.parse(fs.readFileSync(path.join(source, "crates/harn-cli/src/localization_scripts.json")));
@@ -84,7 +94,7 @@ fn main(harness: Harness) {
     assert.equal(measured, functions * (Object.keys(catalogs).length + 1));
     t.diagnostic(`Verified ${functions} renderer paths, ${measured} locale outputs, ${functions} excess-arity and ${missingArguments} missing-arity refusals, ${Object.keys(registry.sources).length} unknown-message and cross-namespace refusals; ${localized} outputs differ from English`);
   } finally {
-    fs.rmSync(temporary, {recursive: true, force: true});
+    fs.rmSync(temporary, {recursive: true});
   }
 });
 
@@ -187,6 +197,6 @@ test("generator rejects every unexpected output and retires only registered gene
     assert.equal(clean.status, 0, clean.stderr);
     assert.equal(JSON.parse(clean.stdout).measuredCalls, measured.expectedCalls);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true });
   }
 });

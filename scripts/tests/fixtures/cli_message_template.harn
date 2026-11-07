@@ -1,0 +1,30 @@
+import {
+  MessageTemplate,
+  render_message,
+} from "../../../crates/harn-stdlib/src/stdlib/cli/message_template.harn"
+
+fn main(harness: Harness) {
+  const valid: MessageTemplate = {
+    arity: 1,
+    fallback: ["value:", 0],
+    translations: {de: [0, ":Wert"]},
+  }
+  assert(render_message(valid, "en", [""]) == "value:", "an empty argument is valid")
+  assert(
+    render_message(valid, "de", ["literal"]) == "literal:Wert",
+    "the selected translation must render",
+  )
+  for slot in [-1, 1] {
+    const malformed: MessageTemplate = {arity: 1, fallback: [slot], translations: {de: [slot]}}
+    for locale in ["en", "de", "unknown-locale"] {
+      const refused = try {
+        render_message(malformed, locale, ["literal"])
+        false
+      } catch {
+        true
+      }
+      assert(refused, "an out-of-range compiled argument slot must refuse")
+    }
+  }
+  harness.stdio.println("compiled message slot bounds reached and refused")
+}
