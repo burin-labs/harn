@@ -34,7 +34,7 @@ async fn remote_command(mode: &str) {
         let source = vm_root.path().join("prepared.harn");
         std::fs::write(&source, include_str!("fixtures/prepared_command.harn")).unwrap();
         let config = AcpServerConfig::for_pipeline(source.to_string_lossy().into_owned());
-        let (tx, mut rx, server, session) = start_acp_channel_session_with_config(
+        let (tx, mut rx, server, session) = start_acp_code_session_with_config(
             config, serde_json::json!(vm_root.path()),
         ).await;
         let python = if cfg!(windows) { "python" } else { "python3" };

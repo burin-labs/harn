@@ -157,12 +157,12 @@ pub(crate) fn prepare(
     let cwd = harn_vm::orchestration::prepare_local_command_cwd(
         optional_string(NAME, &params, "cwd")?.as_deref(),
     )
-    .map_err(sandbox_scope_error_to_hostlib)?;
+    .map_err(|error| command_parameter_error(error, "cwd"))?;
     let invocation = harn_vm::orchestration::CommandInvocation::new(
         std::iter::once(program).chain(args).collect(),
         cwd,
     )
-    .map_err(sandbox_scope_error_to_hostlib)?;
+    .map_err(|error| command_parameter_error(error, "argv"))?;
     invocation.bind_directory(&mut params);
     let retained_params = std::sync::Arc::new(params.clone());
     let retained_invocation = invocation.clone();
@@ -478,6 +478,23 @@ fn sandbox_scope_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
             builtin: NAME,
             message: other.to_string(),
         },
+    }
+}
+
+fn command_parameter_error(error: harn_vm::VmError, param: &'static str) -> HostlibError {
+    if matches!(
+        &error,
+        harn_vm::VmError::CategorizedError {
+            category: harn_vm::value::ErrorCategory::ToolRejected,
+            ..
+        }
+    ) {
+        return sandbox_scope_error_to_hostlib(error);
+    }
+    HostlibError::InvalidParameter {
+        builtin: NAME,
+        param,
+        message: error.to_string(),
     }
 }
 
