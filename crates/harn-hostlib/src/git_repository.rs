@@ -15,7 +15,9 @@ pub fn path_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
     {
         return Err("Git tracked-path queries require a worktree-relative path".to_string());
     }
-    if !may_be_git_worktree(root) {
+    let root = std::fs::canonicalize(root)
+        .map_err(|error| format!("cannot resolve Git worktree {}: {error}", root.display()))?;
+    if !may_be_git_worktree(&root) {
         return Ok(false);
     }
     let mut command = harn_vm::process_sandbox::session_std_command("git")
@@ -23,7 +25,7 @@ pub fn path_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
     strip_ambient_git_env(&mut command);
     let output = command
         .args(["--literal-pathspecs", "-C"])
-        .arg(root)
+        .arg(&root)
         .args([
             "-c",
             "core.fsmonitor=false",
