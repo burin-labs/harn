@@ -245,16 +245,11 @@ pub(crate) async fn resolve_input_required_result(
             }
         }
     }
-    let input_requests: rmcp::model::InputRequests =
-        serde_json::from_value(input_requests_value)
-            .map_err(|error| VmError::Runtime(format!("invalid MCP inputRequests: {error}")))?;
+    let input_requests = super::protocol::normalize_input_requests(input_requests_value)?;
     let fixtures = client.capability_fixtures().await;
     let mut responses = rmcp::model::InputResponses::new();
-    for (key, input_request) in input_requests {
+    for (key, mut request) in input_requests {
         let requested_schema_property_order = requested_schema_property_orders.remove(&key);
-        let mut request = serde_json::to_value(input_request).map_err(|error| {
-            VmError::Runtime(format!("invalid MCP input request {key:?}: {error}"))
-        })?;
         let object = request.as_object_mut().ok_or_else(|| {
             VmError::Runtime(format!("MCP input request {key:?} is not an object"))
         })?;
