@@ -606,7 +606,7 @@ mod tests {
                 command.invocation().argv(),
                 ["python3", "", " spaced argument "]
             );
-            let replies = thread::spawn(move || {
+            let replies = harn_parser::runtime_stack::spawn(move || {
                 for value in [
                     json!({"exit_code":0}),
                     json!({"status":"released", "token":"bound-one"}),

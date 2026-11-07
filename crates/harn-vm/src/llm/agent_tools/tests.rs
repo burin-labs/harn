@@ -16,7 +16,35 @@ mod replay;
 
 struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
 
+impl CapabilityBridge {
+    fn record(
+        &self,
+        capability: &str,
+        operation: &str,
+        params: &crate::value::DictMap,
+        phase: &str,
+    ) {
+        self.0.lock().unwrap().push(serde_json::json!({
+            "name": format!("{capability}.{operation}"),
+            "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
+            "phase": phase,
+        }));
+    }
+}
+
 impl crate::HostCallBridge for CapabilityBridge {
+    fn prepare_command<'a>(
+        &'a self,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+        _trace: &'a crate::stdlib::host::trace::HostRequestTrace,
+    ) -> crate::stdlib::host::HostCommandPreparationFuture<'a> {
+        Box::pin(async move {
+            self.record("process", operation, params, "prepare");
+            Ok(crate::stdlib::host::HostCommandPreparation::Unhandled)
+        })
+    }
+
     fn dispatch<'a>(
         &'a self,
         capability: &'a str,
@@ -24,10 +52,7 @@ impl crate::HostCallBridge for CapabilityBridge {
         params: &'a crate::value::DictMap,
     ) -> crate::HostCallDispatchFuture<'a> {
         Box::pin(async move {
-            self.0.lock().unwrap().push(serde_json::json!({
-                "name": format!("{capability}.{operation}"),
-                "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
-            }));
+            self.record(capability, operation, params, "dispatch");
             Ok(((capability, operation) == ("session_inputs", "request"))
                 .then(|| VmValue::string("input requested")))
         })
@@ -686,14 +711,77 @@ async fn host_bridge_dispatches_the_declared_capability() {
             "{binding}: {result}"
         );
     }
-    assert_eq!(calls.lock().unwrap().len(), 5);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 5);
+    for (call, binding) in calls[1..].iter().zip([
+        "interaction.ask",
+        "workspace.project_root",
+        "process.exec",
+        "process.spawn",
+    ]) {
+        assert_eq!(call["name"], binding);
+        assert_eq!(
+            call["phase"],
+            if binding.starts_with("process.") {
+                "prepare"
+            } else {
+                "dispatch"
+            }
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn declared_process_capability_keeps_command_policy() {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    struct CountingBridge(Arc<AtomicUsize>);
+    struct CountingBridge {
+        calls: Arc<AtomicUsize>,
+        preparations: Arc<AtomicUsize>,
+    }
+    struct BoundProcess {
+        calls: Arc<AtomicUsize>,
+        invocation: crate::orchestration::CommandInvocation,
+    }
+    impl crate::stdlib::host::PreparedHostCommand for BoundProcess {
+        fn invocation(&self) -> &crate::orchestration::CommandInvocation {
+            &self.invocation
+        }
+        fn execute(
+            self: Box<Self>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<VmValue, VmError>> + Send>>
+        {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(crate::json_to_vm_value(&serde_json::json!({
+                    "exit_code": 0, "status": "completed", "stdout": "allowed", "stderr": ""
+                })))
+            })
+        }
+    }
     impl crate::HostCallBridge for CountingBridge {
+        fn prepare_command<'a>(
+            &'a self,
+            operation: &'a str,
+            params: &'a crate::value::DictMap,
+            _trace: &'a crate::stdlib::host::trace::HostRequestTrace,
+        ) -> crate::stdlib::host::HostCommandPreparationFuture<'a> {
+            Box::pin(async move {
+                assert_eq!(operation, "exec");
+                let shell = crate::shells::resolve_invocation_from_vm_params(params)
+                    .map_err(VmError::Runtime)?;
+                let invocation = crate::orchestration::CommandInvocation::new(
+                    std::iter::once(shell.program).chain(shell.args).collect(),
+                    crate::stdlib::process::execution_root_path(),
+                )?;
+                self.preparations.fetch_add(1, Ordering::SeqCst);
+                Ok(crate::stdlib::host::HostCommandPreparation::Bound(
+                    Box::new(BoundProcess {
+                        calls: self.calls.clone(),
+                        invocation,
+                    }),
+                ))
+            })
+        }
         fn dispatch<'a>(
             &'a self,
             _capability: &'a str,
@@ -701,16 +789,19 @@ async fn declared_process_capability_keeps_command_policy() {
             _params: &'a crate::value::DictMap,
         ) -> crate::HostCallDispatchFuture<'a> {
             Box::pin(async move {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(crate::json_to_vm_value(&serde_json::json!({
-                    "exit_code": 0, "status": "completed", "stdout": "allowed", "stderr": ""
-                }))))
+                Err(VmError::Runtime(
+                    "process execution must consume its retained preparation".into(),
+                ))
             })
         }
     }
     crate::orchestration::clear_command_policies();
     let calls = Arc::new(AtomicUsize::new(0));
-    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge(Arc::clone(&calls))));
+    let preparations = Arc::new(AtomicUsize::new(0));
+    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge {
+        calls: Arc::clone(&calls),
+        preparations: Arc::clone(&preparations),
+    }));
     crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
         tools: vec!["run".to_string()],
         default_shell_mode: "shell".to_string(),
@@ -741,6 +832,7 @@ async fn declared_process_capability_keeps_command_policy() {
         "denied command reached the host"
     );
     assert_eq!(outcome.result.unwrap()["status"], "blocked");
+    assert_eq!(preparations.load(Ordering::SeqCst), 1);
     let allowed = dispatch_bound_tool(
         "read_via_host",
         &serde_json::json!({"mode":"shell", "command":"printf allowed"}),
@@ -754,6 +846,7 @@ async fn declared_process_capability_keeps_command_policy() {
         "an allowed command reached the same adapter"
     );
     assert_eq!(allowed.result.unwrap()["stdout"], "allowed");
+    assert_eq!(preparations.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test(flavor = "current_thread")]
