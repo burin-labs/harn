@@ -3,11 +3,13 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-/// Check whether a worktree-relative path is in Git's index.
+/// Check whether a worktree-relative path or case alias is in Git's index.
 ///
 /// A directory outside Git returns false. Unreadable repository metadata,
 /// unavailable Git, and failed queries return errors rather than absence.
-pub fn path_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
+/// Case aliases are included on every platform so a secret-file guard also
+/// protects worktrees on case-insensitive filesystems.
+pub fn path_or_case_alias_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
     if path.as_os_str().is_empty()
         || path
             .components()
@@ -23,8 +25,10 @@ pub fn path_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
     let mut command = harn_vm::process_sandbox::session_std_command("git")
         .map_err(|error| format!("cannot prepare Git tracked-path query: {error}"))?;
     strip_ambient_git_env(&mut command);
+    let mut pathspec = std::ffi::OsString::from(":(literal,icase)");
+    pathspec.push(path);
     let output = command
-        .args(["--literal-pathspecs", "-C"])
+        .arg("-C")
         .arg(&root)
         .args([
             "-c",
@@ -34,7 +38,7 @@ pub fn path_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
             "-z",
             "--",
         ])
-        .arg(path)
+        .arg(pathspec)
         .output()
         .map_err(|error| format!("cannot query Git's index: {error}"))?;
     if !output.status.success() {

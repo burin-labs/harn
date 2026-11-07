@@ -114,18 +114,22 @@ fn quickstart_protects_existing_env_and_preserves_authored_ignore_rules() {
 
 #[test]
 fn quickstart_refuses_tracked_env_and_unreadable_repository_before_writing() {
-    let root = tempfile::tempdir().unwrap();
-    assert!(git(root.path(), &["init", "--quiet"]).status.success());
-    let authored = b"PROJECT_VALUE=preserve\n";
-    fs::write(root.path().join(".env"), authored).unwrap();
-    assert!(git(root.path(), &["add", ".env"]).status.success());
-    let output = quickstart(root.path());
-    assert!(!output.status.success(), "{}", output_text(&output));
-    assert!(output_text(&output).contains("Git already tracks it"));
-    assert_eq!(fs::read(root.path().join(".env")).unwrap(), authored);
-    assert!(!root.path().join(".gitignore").exists());
-    assert!(!root.path().join("harn.toml").exists());
-    assert!(!root.path().join("home/config/harn/providers.toml").exists());
+    for tracked_name in [".env", ".ENV"] {
+        let root = tempfile::tempdir().unwrap();
+        assert!(git(root.path(), &["init", "--quiet"]).status.success());
+        let authored = b"PROJECT_VALUE=preserve\n";
+        fs::write(root.path().join(tracked_name), authored).unwrap();
+        let env_existed = root.path().join(".env").exists();
+        assert!(git(root.path(), &["add", tracked_name]).status.success());
+        let output = quickstart(root.path());
+        assert!(!output.status.success(), "{}", output_text(&output));
+        assert!(output_text(&output).contains("Git already tracks"));
+        assert_eq!(fs::read(root.path().join(tracked_name)).unwrap(), authored);
+        assert_eq!(root.path().join(".env").exists(), env_existed);
+        assert!(!root.path().join(".gitignore").exists());
+        assert!(!root.path().join("harn.toml").exists());
+        assert!(!root.path().join("home/config/harn/providers.toml").exists());
+    }
 
     let broken = tempfile::tempdir().unwrap();
     fs::write(broken.path().join(".git"), "gitdir: missing-worktree\n").unwrap();

@@ -17,9 +17,9 @@ pub(super) fn prepare(
     path: &Path,
     selection: &ProviderSelection,
 ) -> Result<EnvironmentPlan, String> {
-    if harn_hostlib::git_repository::path_is_tracked(root, Path::new(".env"))? {
+    if harn_hostlib::git_repository::path_or_case_alias_is_tracked(root, Path::new(".env"))? {
         return Err(
-            "quickstart refuses to write .env because Git already tracks it; remove it from the index or choose an untracked project directory, then retry".to_string(),
+            "quickstart refuses to write .env because Git already tracks this filename or a case alias; remove it from the index or choose an untracked project directory, then retry".to_string(),
         );
     }
     let existing = read_regular_file(path)?;
