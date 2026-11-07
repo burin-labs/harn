@@ -31,8 +31,14 @@ impl TypeChecker {
                 TypeExpr::Named(name) if is_gradual_type_name(name) => {
                     self.check_removed_method_on_unknown_receiver(object, method, args, span);
                 }
-                TypeExpr::Union(_) => {
-                    self.check_removed_method_on_unknown_receiver(object, method, args, span);
+                TypeExpr::Union(members) => {
+                    for member in members {
+                        if !matches!(member, TypeExpr::Named(name) if name == "nil") {
+                            self.check_builtin_method_call(
+                                object, method, args, scope, span, member,
+                            );
+                        }
+                    }
                 }
                 _ => {}
             }
