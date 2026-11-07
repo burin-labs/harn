@@ -21,7 +21,10 @@ with_retry() {
   done
 }
 
-with_retry npm install --global --no-audit --no-fund \
+prefix="${RUNNER_TEMP:?RUNNER_TEMP is required}/harn-language-servers"
+mkdir -p "$prefix"
+with_retry npm install --global --prefix "$prefix" --no-audit --no-fund \
   typescript@5.9.3 typescript-language-server@6.0.2 pyright@1.1.414
+echo "$prefix/bin" >> "$GITHUB_PATH"
 GOTOOLCHAIN=auto with_retry go install golang.org/x/tools/gopls@v0.24.0
 echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"

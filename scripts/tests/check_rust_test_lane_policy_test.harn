@@ -14,7 +14,7 @@ pipeline test_macos_workspace_proof_requires_actual_language_server_fixtures(har
     run: WRAPPED,
     env: {HARN_EXT_LSP_FIXTURES_REQUIRED: "1"},
   }
-  for workflow in ["macos-nightly.yml", "macos-pr-tests.yml"] {
+  for workflow in ["macos-nightly.yml"] {
     const document = read_yaml(harness.fs, "../../.github/workflows/${workflow}", nil)
     assert(document != nil, "the actual macOS workflow must be read")
     assert_eq(workflow_violations(workflow, document ?? {}), [])

@@ -160,10 +160,10 @@ fn authentication_boundary_errors(steps: list, env: dict) -> list<string> {
 fn bump_capacity_errors(inputs: dict, job: dict) -> list<string> {
   let errors: list<string> = []
   if inputs.get("runs-on")?.type != "string"
-    || inputs.get("runs-on")?.default != "harn-ci-big"
+    || inputs.get("runs-on")?.default != "ubuntu-24.04"
     || job.get("runs-on") != "$" + "{{ inputs.runs-on }}" {
     errors = errors
-      + ["consumer bump capacity must be caller-selectable with a large Linux default"]
+      + ["consumer bump capacity must be caller-selectable with a standard hosted Linux default"]
   }
   const job_minutes = to_int(job.get("timeout-minutes")) ?? 0
   const orchestration = job?.steps?.find({ step -> step?.name == "Run bump orchestration" })
@@ -358,7 +358,7 @@ pipeline test_bump_workflow_rejects_expiring_token_or_permission_drift(harness: 
   }
 }
 
-pipeline test_bump_workflow_refuses_starved_or_unbounded_capacity(harness: Harness) {
+pipeline test_bump_workflow_refuses_fixed_or_unbounded_capacity(harness: Harness) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const text = harness.fs.read_text(path)
   const workflow = read_yaml(harness.fs, path)
@@ -394,9 +394,24 @@ pipeline test_bump_workflow_refuses_starved_or_unbounded_capacity(harness: Harne
     const changed = workflow + {jobs: workflow.jobs + {bump: job + mutation}}
     assert(
       len(bump_workflow_errors(changed, text)) > 0,
-      "the shipped check must reject unbounded or undersized routing",
+      "the shipped check must reject unbounded execution or bypassed caller routing",
     )
   }
+  const inputs = workflow.on.workflow_call.inputs
+  const changed = workflow
+    + {
+      on: workflow.on
+        + {
+          workflow_call: workflow.on.workflow_call
+            + {inputs: inputs + {"runs-on": inputs.get("runs-on") + {default: "harn-ci-big"}}},
+        },
+    }
+  assert(
+    bump_workflow_errors(changed, text).contains(
+      "consumer bump capacity must be caller-selectable with a standard hosted Linux default",
+    ),
+    "the shipped check must reject restoring the self-hosted default",
+  )
 }
 
 pipeline test_bump_workflow_keeps_conventional_app_names_from_caller_commands(harness: Harness) {

@@ -59,7 +59,7 @@ decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels
 # with `"type": "evaluation"`, and `/v1/chat/completions` refuses it with
 # `ModelTypeMismatchError`.
 [[provider.vercel_ai_gateway]]
-model_match = "typesafe-ai/jev*"
+model_match = ["typesafe-ai/jev*", "vercel/typesafe-ai/jev*"]
 extends = true
 decision_protocol = "vercel_evaluate"
 decision_upstream_provider = "typesafe-ai"

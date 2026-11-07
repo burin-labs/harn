@@ -462,9 +462,9 @@ pub(super) fn normalize_generation_stream(
 
 /// Reject caller-selected controls that the final route cannot represent.
 pub fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
-    if let Some(model) = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
-        .and_then(|id| crate::llm_config::model_catalog_entry(&id))
-    {
+    let model = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
+        .and_then(|id| crate::llm_config::model_catalog_entry(&id));
+    if let Some(model) = model {
         if !model.supports_operation(crate::llm_config::ModelOperation::TextGeneration) {
             return Err(crate::llm::call::invalid_request_error(
                 format!(
@@ -475,6 +475,18 @@ pub fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), Vm
                 &opts.model,
             ));
         }
+    } else if crate::llm::capabilities::lookup(&opts.provider, &opts.model)
+        .decision_protocol
+        .is_some_and(|protocol| protocol.is_native())
+    {
+        return Err(crate::llm::call::invalid_request_error(
+            format!(
+                "native decision route is not declared in the model catalog: {}",
+                opts.model
+            ),
+            &opts.provider,
+            &opts.model,
+        ));
     }
     validate_token_bias_route(&opts.logit_bias, &opts.provider, &opts.model).map_err(|detail| {
         crate::llm::call::invalid_request_error(

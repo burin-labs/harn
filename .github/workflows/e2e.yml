@@ -106,7 +106,7 @@ jobs:
     needs: [changes]
     # Namespace confinement needs a scoped AppArmor grant; shared owned
     # runners cannot safely grant this authority to arbitrary PR code.
-    runs-on: ubuntu-8core
+    runs-on: ubuntu-24.04
     # Read `!= 'false'` rather than `== 'true'`. A detector that failed, or
     # was skipped, leaves this empty, and treating an unread decision as "do
     # not run" is exactly the silence this workflow is being fixed for. The

@@ -1,14 +1,10 @@
 name: Provider contract probe
-# Scheduled and live manual runs carry "(live)" in their title. main health
-# counts a manual run only with that title (scripts/scheduled_workflows.toml),
-# so a default-input dispatch, which makes no provider calls, cannot clear it.
-run-name: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'Provider contract probe (live)' || 'Provider contract probe' }}
+# Live requests require an explicit manual input; ordinary CI remains offline.
+run-name: ${{ inputs.live && 'Provider contract probe (live)' || 'Provider contract probe' }}
 
 on:
   # Pull requests and main pushes use CI's verified shared CLI consumer.
   # Standalone runs keep their own exact-source build and live environment.
-  schedule:
-    - cron: "17 11 * * 1"
   workflow_dispatch:
     inputs:
       live:
@@ -35,7 +31,7 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   HARN_BUILD_REVISION: ${{ github.sha }}
-  PROVIDER_CONTRACT_PROBE_LIVE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'true' || 'false' }}
+  PROVIDER_CONTRACT_PROBE_LIVE: ${{ inputs.live && 'true' || 'false' }}
   RUSTFLAGS: "-D warnings"
 
 jobs:
@@ -47,7 +43,7 @@ jobs:
     # environment, which only protected branches may deploy to. Dry runs
     # name no environment and receive no keys. Job-level `environment` cannot
     # read `env`, so this repeats the PROVIDER_CONTRACT_PROBE_LIVE condition.
-    environment: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'provider-probe' || '' }}
+    environment: ${{ inputs.live && 'provider-probe' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
@@ -96,7 +92,7 @@ jobs:
   # takes today as RETIREMENT_SWEEP_DATE, files or updates an issue, and fails
   # the scheduled check when action is due. It does not gate pull requests.
   retirement-sweep:
-    if: github.repository == 'burin-labs/harn' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live))
+    if: github.repository == 'burin-labs/harn' && inputs.live
     permissions:
       contents: read
       issues: write

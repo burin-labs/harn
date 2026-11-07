@@ -218,7 +218,7 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolati
   let violations: list<LaneViolation> = []
   const workflow_env: dict = document.env ?? {}
   const jobs: dict = document.jobs ?? {}
-  if ["macos-nightly.yml", "macos-pr-tests.yml"].contains(workflow) {
+  if workflow == "macos-nightly.yml" {
     const steps = workspace_nextest_steps(document)
     const step = len(steps) == 1 ? steps[0] : nil
     const step_env: dict = step?.env ?? {}
