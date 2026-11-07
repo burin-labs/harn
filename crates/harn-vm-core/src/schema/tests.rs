@@ -700,10 +700,10 @@ fn nullable_constraints_agree_across_validation_parameter_and_export() {
                 "{exported}: {value:?}"
             );
             let report = schema_report_value(&value, &schema, false);
-            assert_eq!(
+            assert!(matches!(
                 report.as_dict().unwrap().get("ok"),
-                Some(&VmValue::Bool(expected))
-            );
+                Some(VmValue::Bool(actual)) if *actual == expected
+            ));
             assert_eq!(
                 schema_assert_param(&value, "executor", &schema).is_ok(),
                 expected
