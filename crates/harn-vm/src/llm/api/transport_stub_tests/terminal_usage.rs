@@ -338,7 +338,7 @@ message_wire_format = "openai"
             request_count.load(std::sync::atomic::Ordering::SeqCst),
             "public reader must reconcile with actual HTTP requests"
         );
-        assert_eq!(census["provider_request_count"], trace[0].usage.provider_call_count);
+        assert_eq!(census["provider_request_count"].as_i64(), trace[0].usage.provider_call_count);
         assert_eq!(census["provider_response_count"], 2);
         assert_eq!(census["provider_error_count"], 2);
         assert_eq!(census["duplicate_terminal_call_ids"], serde_json::json!([]));
