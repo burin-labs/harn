@@ -1,6 +1,9 @@
 pub(crate) use harn_clock::test_support::current_thread_runtime;
 
 #[cfg(test)]
+pub(crate) mod host_command_fixture;
+
+#[cfg(test)]
 pub(crate) fn vm_with_stdlib() -> crate::vm::Vm {
     let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
