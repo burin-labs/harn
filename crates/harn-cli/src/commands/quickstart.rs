@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -9,18 +8,6 @@ use crate::commands::hardware::{self, GpuKind};
 use crate::commands::local_readiness;
 
 const QUICKSTART_ALIAS: &str = "quickstart";
-const PREFERRED_PROVIDERS: &[&str] = &[
-    "ollama",
-    "anthropic",
-    "openai",
-    "openrouter",
-    "gemini",
-    "together",
-    "huggingface",
-    "local",
-    "mlx",
-];
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProviderChoice {
     name: String,
@@ -133,24 +120,22 @@ async fn probe_ollama(model: Option<&str>) -> OllamaProbe {
 }
 
 fn provider_choices(model: Option<&str>, ollama: &OllamaProbe) -> Vec<ProviderChoice> {
-    let mut names: BTreeSet<String> = PREFERRED_PROVIDERS
-        .iter()
-        .filter(|name| harn_vm::llm_config::provider_config(name).is_some())
-        .map(|name| (*name).to_string())
-        .collect();
-    for name in harn_vm::llm_config::provider_names() {
-        names.insert(name);
-    }
-
-    let mut choices: Vec<_> = names
+    let automatic = harn_vm::llm_config::automatic_default_candidates();
+    let featured = harn_vm::llm_config::featured_provider_names();
+    let mut choices: Vec<_> = harn_vm::llm_config::provider_names()
         .into_iter()
         .filter_map(|name| provider_choice(&name, model, ollama))
         .collect();
     choices.sort_by_key(|choice| {
-        PREFERRED_PROVIDERS
+        let automatic_rank = automatic
+            .iter()
+            .position(|route| route.provider == choice.name)
+            .unwrap_or(automatic.len());
+        let featured_rank = featured
             .iter()
             .position(|name| *name == choice.name)
-            .unwrap_or(PREFERRED_PROVIDERS.len())
+            .unwrap_or(featured.len());
+        (automatic_rank, featured_rank)
     });
     choices
 }
@@ -179,6 +164,12 @@ fn default_model_for_choice(
 ) -> Option<String> {
     if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
         return Some(model.trim().to_string());
+    }
+    if let Some(route) = harn_vm::llm_config::automatic_default_candidates()
+        .into_iter()
+        .find(|route| route.provider == provider)
+    {
+        return Some(route.model_id);
     }
     if provider == "ollama" {
         if let Some(model) = recommended_ollama_selector(&ollama.available_models) {
@@ -347,7 +338,7 @@ fn selection_from_choice(choice: &ProviderChoice, api_key: Option<String>) -> Pr
 
 /// Provider quickstart picks when the user names none: a keyed provider whose
 /// credential is present, then reachable Ollama, then a configured local
-/// endpoint, then Anthropic. Callers decide what an empty preference means.
+/// endpoint, then the first catalog automatic route.
 fn preferred_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> Option<usize> {
     choices
         .iter()
@@ -364,7 +355,15 @@ fn preferred_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> O
                 .filter(|value| !value.trim().is_empty())
                 .and_then(|_| choices.iter().position(|choice| choice.name == "local"))
         })
-        .or_else(|| choices.iter().position(|choice| choice.name == "anthropic"))
+        .or_else(|| {
+            harn_vm::llm_config::automatic_default_candidates()
+                .iter()
+                .find_map(|route| {
+                    choices
+                        .iter()
+                        .position(|choice| choice.name == route.provider)
+                })
+        })
 }
 
 fn read_line(prompt_label: &str) -> Result<String, String> {

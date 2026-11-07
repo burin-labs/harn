@@ -143,16 +143,8 @@ fn preferred_provider_order(preferred_provider: Option<&str>) -> Vec<String> {
     if let Some(model) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
         push_unique(&mut providers, llm_config::infer_provider(&model));
     }
-    for provider in [
-        "local",
-        "ollama",
-        "openrouter",
-        "together",
-        "huggingface",
-        "openai",
-        "anthropic",
-    ] {
-        push_unique(&mut providers, provider);
+    for route in llm_config::automatic_default_candidates() {
+        push_unique(&mut providers, route.provider);
     }
     providers
 }
@@ -320,20 +312,7 @@ pub fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> String {
     if let Some(m) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
         return infer_provider_from_model_selector(&m, true);
     }
-    // Default to anthropic, but fall back to keyless providers when its
-    // key is missing - avoids noisy errors when a sub-pipeline (e.g.
-    // enrichment) didn't inherit the provider env.
-    let default = llm_config::default_provider();
-    if crate::llm::provider_auth_status(&default).available {
-        return default;
-    }
-    for fallback in ["ollama", "local"] {
-        if crate::llm::provider_auth_status(fallback).available {
-            return fallback.to_string();
-        }
-    }
-    // Let resolve_api_key surface its descriptive error.
-    default
+    llm_config::default_provider()
 }
 
 pub fn vm_resolve_model(
@@ -408,6 +387,18 @@ pub fn vm_resolve_model_selector(
     if provider == "local" {
         if let Some(raw) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
             return Ok(ModelSelector::Other(raw));
+        }
+    }
+    let explicit_provider = options
+        .as_ref()
+        .and_then(|o| o.get("provider"))
+        .is_some_and(|value| !value.display().eq_ignore_ascii_case("auto"))
+        || crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER").is_some();
+    if !explicit_provider {
+        if let Some(route) =
+            llm_config::automatic_default_route().filter(|route| route.provider == provider)
+        {
+            return Ok(ModelSelector::Other(route.model_id));
         }
     }
     llm_config::default_model_for_provider(provider).map(ModelSelector::Other)

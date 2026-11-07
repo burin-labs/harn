@@ -3,7 +3,34 @@
 This guide helps you connect Harn to a model provider. It covers the checks
 you can run before you put a provider in a program.
 
-## 1. Check the local installation
+## 1. Create starter configuration
+
+Run setup in your project:
+
+```bash
+harn quickstart
+source .env
+```
+
+The command inspects credential paths and local Ollama models, lets you choose
+a provider and model, and writes starter defaults to `harn.toml`, `.env`, and
+your user `providers.toml`. Existing credentials and configured defaults stay
+intact. Provider discovery and configuration writes happen in this explicit
+setup command.
+
+For a terminal without prompts, name the provider:
+
+```bash
+harn quickstart --non-interactive --provider openai
+```
+
+When a call specifies no provider or model, Harn selects the first route in the
+catalog's `automatic_defaults` whose provider has a credential. Explicit call
+options, session selections, and configured defaults take precedence. If no
+automatic credential is available, the call reports setup guidance; configure
+a local server with quickstart to use it as your default.
+
+## 2. Check the local installation
 
 Run the doctor command first:
 
@@ -15,7 +42,7 @@ harn doctor --check-providers
 The first command reports the local Harn setup. The second also checks the
 configured provider paths. It does not print secret values.
 
-## 2. Find a provider and model
+## 3. Find a provider and model
 
 List the models that Harn knows about:
 
@@ -35,7 +62,7 @@ The catalog is the source of truth for current aliases and capabilities. Do
 not copy an old model name from an example when the catalog gives you a newer
 one.
 
-## 3. Set the provider credential
+## 4. Set the provider credential
 
 Each provider reads its key from an environment variable. Set the one for the
 provider you picked:
@@ -85,7 +112,7 @@ harn doctor --check-providers
 That command reports which providers have a working credential path. It never
 prints a secret value.
 
-## 4. Test the connection
+## 5. Test the connection
 
 Use the model test command for a small smoke test:
 
@@ -96,7 +123,7 @@ harn models test claude-sonnet-5 --provider anthropic
 The command sends a test request. It can use provider credits. Use a model
 that is available to your account.
 
-## 5. Use the provider in a program
+## 6. Use the provider in a program
 
 Keep the provider and model in the call options:
 

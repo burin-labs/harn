@@ -40,10 +40,7 @@ fn resolve_model_info_guards_bad_native_pin_on_unreliable_route() {
 }
 
 #[test]
-fn auto_select_prefers_local_provider_without_cloud_credentials() {
-    // A catalog whose only provider is local and auth-free resolves to it
-    // regardless of ambient cloud API keys: no preferred/credentialed cloud
-    // provider is present, so the local fallback wins deterministically.
+fn automatic_selection_does_not_assume_a_keyless_endpoint_is_running() {
     let config = parse_config_toml(
             "[providers.ollama]\nbase_url = \"http://localhost:11434\"\nchat_endpoint = \"/v1/chat/completions\"\nchat_api_adapter = \"ollama_openai_compat\"\n",
         )
@@ -53,7 +50,9 @@ fn auto_select_prefers_local_provider_without_cloud_credentials() {
         config.providers["ollama"].chat_api_adapter,
         Some(ChatApiAdapter::OllamaOpenAiCompat)
     );
-    assert_eq!(auto_select_provider(&config), "ollama");
+    let route = automatic_route_with_config(&config);
+    assert_ne!(route.provider, "ollama");
+    assert_eq!(route.provider, packaged_automatic_provider());
 }
 
 #[test]
@@ -64,9 +63,20 @@ fn chat_api_adapter_rejects_unknown_variant() {
 }
 
 #[test]
-fn auto_select_falls_back_to_documented_default_when_empty() {
+fn automatic_selection_uses_the_packaged_catalog_when_an_overlay_has_no_routes() {
     let config = parse_config_toml("").expect("config parses");
-    assert_eq!(auto_select_provider(&config), FALLBACK_PROVIDER);
+    assert_eq!(
+        automatic_route_with_config(&config).provider,
+        packaged_automatic_provider()
+    );
+}
+
+fn packaged_automatic_provider() -> String {
+    harn_provider_catalog::automatic_defaults(
+        &harn_provider_catalog::config::packaged_config().provider_defaults,
+    )[0]
+    .provider
+    .clone()
 }
 
 #[test]

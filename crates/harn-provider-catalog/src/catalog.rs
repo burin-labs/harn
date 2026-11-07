@@ -146,7 +146,7 @@ pub(crate) fn project(
 }
 
 /// Providers declaring an automatic route, ordered by their `automatic_order`.
-fn automatic_defaults(
+pub fn automatic_defaults(
     defaults: &BTreeMap<String, llm_config::ProviderDefaultModels>,
 ) -> Vec<CatalogAutomaticDefault> {
     let mut ranked: Vec<_> = defaults

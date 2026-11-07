@@ -3,6 +3,20 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[test]
+fn automatic_default_requires_a_catalog_route() {
+    let mut config = default_config();
+    config.default_provider = Some("auto".to_string());
+    assert!(provider_route_default_issues(&config).is_empty());
+    for defaults in config.provider_defaults.values_mut() {
+        defaults.automatic = None;
+        defaults.automatic_order = None;
+    }
+    assert!(provider_route_default_issues(&config)
+        .iter()
+        .any(|issue| issue == "default_provider auto requires an automatic catalog route"));
+}
+
+#[test]
 fn catalog_gate_rejects_a_deprecated_provider_default() {
     let mut config = default_config();
     let (provider, model_id) = config

@@ -157,27 +157,6 @@ async fn dispatch(subcommand: Command, explain: bool) {
         Command::Run(args) => {
             let _operator_approval_guard = args.install_operator_approval_grant();
             let sandbox_options = commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
-            if !args.explain_cost && sandbox_options.environment.bootstrap_permitted() {
-                match (args.eval.as_deref(), args.file.as_deref()) {
-                    (Some(code), None) => {
-                        provider_bootstrap::maybe_seed_ollama_for_inline(
-                            code,
-                            args.yes,
-                            args.llm_mock.is_some(),
-                        )
-                        .await;
-                    }
-                    (None, Some(file)) => {
-                        provider_bootstrap::maybe_seed_ollama_for_run_file(
-                            Path::new(file),
-                            args.yes,
-                            args.llm_mock.is_some(),
-                        )
-                        .await;
-                    }
-                    _ => {}
-                }
-            }
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {

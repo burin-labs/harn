@@ -43,7 +43,6 @@ mod localization;
 mod net;
 pub mod package;
 mod path_policy;
-mod provider_bootstrap;
 mod provider_info;
 mod run_records;
 mod runtime;
