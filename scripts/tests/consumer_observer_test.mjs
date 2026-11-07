@@ -13,6 +13,7 @@ import {
   createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
   readRetry,
 } from '../lib/consumer-observer.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 
 const context = {
   schema: 'harn.consumer_observer.v2',
@@ -408,20 +409,9 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     const parentFile = path.join(scratch, 'parent.json');
     const childFile = path.join(scratch, 'child.json');
     const censusFile = path.join(scratch, 'census.json');
-    const declarationFile = path.join(scratch, 'consumer-observer.json');
-    const archiveFile = path.join(scratch, 'declaration.zip');
-    fs.writeFileSync(declarationFile, JSON.stringify(context));
-    const zipped = spawnSync('zip', ['-j', archiveFile, declarationFile], {
-      env: { PATH: process.env.PATH, LC_ALL: 'C' }, encoding: 'utf8',
-    });
-    assert.equal(zipped.status, 0, zipped.stderr);
-    const archiveBytes = fs.readFileSync(archiveFile);
-    const census = { total_count: 1, artifacts: [{
-      id: 11, name: observerDeclarationName(context), expired: false,
-      workflow_run: { id: 42, head_sha: context.parent_head_sha },
-      size_in_bytes: archiveBytes.length,
-      digest: `sha256:${createHash('sha256').update(archiveBytes).digest('hex')}`,
-    }] };
+    const {archive:archiveFile,metadata}=archiveJson(scratch,'consumer-observer.json',context,
+      {id:11,name:observerDeclarationName(context),workflow_run:{id:42,head_sha:context.parent_head_sha}});
+    const census = {total_count:1,artifacts:[metadata]};
     fs.writeFileSync(censusFile, JSON.stringify(census));
     fs.writeFileSync(eventFile, JSON.stringify(event));
     fs.writeFileSync(preload, `import fs from 'node:fs';

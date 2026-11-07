@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {observerDeadlineName,observerDeadlineStep,observerWindowSteps} from '../lib/consumer-observer-window.mjs';
 import {admitChild, createTerminalReceipt, qualifyOwnedChild, observerDeclarationName, observerDeclarationStep, observerPublicationWitness, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
+import {archiveFile, archiveJson} from './fixtures/artifact_archive.mjs';
 
 test('the terminal entrypoint records only an authenticated reached product decision', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-terminal-'));
@@ -31,15 +32,9 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const name = `consumer-observer-${context.dispatch_nonce}`;
     const archives = [];
     for (const [index,filename,value] of [[0,'consumer-observer.json',context],[1,`${name}.json`,ownership]]) {
-      const file = path.join(scratch,filename);
-      const archive = path.join(scratch,`archive-${index}.zip`);
-      fs.writeFileSync(file,JSON.stringify(value));
-      const zipped = spawnSync('zip',['-j',archive,file],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-      assert.equal(zipped.status,0,zipped.stderr);
-      const bytes = fs.readFileSync(archive);
-      archives.push({archive,metadata:{id:501+index,name:index===0?observerDeclarationName(context):name,
-        expired:false,size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-        workflow_run:{id:index===0?42:73,head_sha:index===0?parent.head_sha:child.head_sha}}});
+      archives.push(archiveJson(scratch,filename,value,{id:501+index,
+        name:index===0?observerDeclarationName(context):name,
+        workflow_run:{id:index===0?42:73,head_sha:index===0?parent.head_sha:child.head_sha}}));
     }
     const fixture = path.join(scratch,'fixture.json');
     const preload = path.join(scratch,'fetch.mjs');
@@ -121,13 +116,8 @@ test('the terminal entrypoint records only an authenticated reached product deci
 
     // Observe the receipt actually produced above, rather than a fabricated
     // green counter. The consumer must subsequently complete successfully.
-    const archive=path.join(scratch,'archive-2.zip');
-    const zipped=spawnSync('zip',['-j',archive,recorded.receipt],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-    assert.equal(zipped.status,0,zipped.stderr);
-    const bytes=fs.readFileSync(archive);
-    archives.push({archive,metadata:{id:503,name:observerTerminalName(context),expired:false,
-      size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-      workflow_run:{id:73,head_sha:child.head_sha}}});
+    archives.push(archiveFile(recorded.receipt,{id:503,name:observerTerminalName(context),
+      workflow_run:{id:73,head_sha:child.head_sha}}));
     const observerPreload=path.join(scratch,'observe-fetch.mjs');
     const lastRead=path.join(scratch,'last-read.json');
     fs.writeFileSync(observerPreload,`import fs from 'node:fs';
@@ -221,16 +211,9 @@ test('the terminal entrypoint records only an authenticated reached product deci
       assert.equal(unmeasured.run.status,1);
       assert.deepEqual(unmeasured.fields,{});
     }
-    const foreignDecision=path.join(scratch,`${name}.json`);
-    const foreignArchive=path.join(scratch,'foreign-product.zip');
-    fs.writeFileSync(foreignDecision,JSON.stringify({...receipt,product:{...product,source_revision:'d'.repeat(40)}}));
-    const foreignZip=spawnSync('zip',['-j',foreignArchive,foreignDecision],
-      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-    assert.equal(foreignZip.status,0,foreignZip.stderr);
-    const foreignBytes=fs.readFileSync(foreignArchive);
-    const foreignReading=observe({archives:[...archives.slice(0,2),{archive:foreignArchive,metadata:{
-      ...archives[2].metadata,size_in_bytes:foreignBytes.length,
-      digest:`sha256:${createHash('sha256').update(foreignBytes).digest('hex')}`}}]});
+    const foreignArchive=archiveJson(scratch,`${name}.json`,
+      {...receipt,product:{...product,source_revision:'d'.repeat(40)}},archives[2].metadata);
+    const foreignReading=observe({archives:[...archives.slice(0,2),foreignArchive]});
     assert.equal(foreignReading.run.status,0,foreignReading.run.stderr);
     assert.equal(foreignReading.fields.observation_outcome,'refused');
     assert.equal(foreignReading.fields.verdict,undefined);
@@ -239,14 +222,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const failedFields=Object.fromEntries(failedProducer.output.trim().split('\n').map(line=>{
       const split=line.indexOf('=');return [line.slice(0,split),line.slice(split+1)];
     }));
-    const failedArchive=path.join(scratch,'failed-product.zip');
-    const failedZip=spawnSync('zip',['-j',failedArchive,failedFields.receipt],
-      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-    assert.equal(failedZip.status,0,failedZip.stderr);
-    const failedBytes=fs.readFileSync(failedArchive);
-    const failedArchives=[...archives.slice(0,2),{archive:failedArchive,metadata:{
-      ...archives[2].metadata,size_in_bytes:failedBytes.length,
-      digest:`sha256:${createHash('sha256').update(failedBytes).digest('hex')}`}}];
+    const failedArchives=[...archives.slice(0,2),archiveFile(failedFields.receipt,archives[2].metadata)];
     const reachedFailure=observe({archives:failedArchives,child:{...completed,conclusion:'failure'}});
     assert.equal(reachedFailure.run.status,0,reachedFailure.run.stderr);
     assert.equal(reachedFailure.fields.verdict,'fail');
@@ -417,13 +393,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
       assert.equal(refused.run.status,1,'promotion admission cannot bind a pending or failed audit');
       assert.equal(refused.text,'');
     }
-    const bindArchive=(file,slot)=>{
-      const archive=path.join(scratch,`bound-${slot}.zip`);
-      const zipped=spawnSync('zip',['-j',archive,file],{encoding:'utf8'});assert.equal(zipped.status,0,zipped.stderr);
-      const bytes=fs.readFileSync(archive);
-      return {archive,metadata:{...archives[slot].metadata,size_in_bytes:bytes.length,
-        digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}};
-    };
+    const bindArchive=(file,slot)=>archiveFile(file,archives[slot].metadata);
     const boundArchives=[archives[0],bindArchive(boundFile,1),archives[2]];
     const boundTerminal=execute({parent:repairInputs.parent,archives:boundArchives});
     assert.equal(boundTerminal.run.status,0,boundTerminal.run.stderr);
@@ -471,15 +441,8 @@ test('the terminal entrypoint records only an authenticated reached product deci
     }
     // Recover only through the deadline receipt emitted by the actual waiter
     // above and the actual terminal product receipt emitted by this producer.
-    const deadlineArchive=path.join(scratch,'archive-3.zip');
-    const deadlineZip=spawnSync('zip',['-j',deadlineArchive,deadline.fields.deadline_file],
-      {env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-    assert.equal(deadlineZip.status,0,deadlineZip.stderr);
-    const deadlineBytes=fs.readFileSync(deadlineArchive);
-    const recoveryArchives=[...archives,{archive:deadlineArchive,metadata:{id:504,
-      name:observerDeadlineName(context),expired:false,size_in_bytes:deadlineBytes.length,
-      digest:`sha256:${createHash('sha256').update(deadlineBytes).digest('hex')}`,
-      workflow_run:{id:42,head_sha:parent.head_sha}}}];
+    const recoveryArchives=[...archives,archiveFile(deadline.fields.deadline_file,{id:504,
+      name:observerDeadlineName(context),workflow_run:{id:42,head_sha:parent.head_sha}})];
     const timestamp=seconds=>new Date(seconds*1000).toISOString();
     const step=(name,number,start,end,conclusion)=>({name,number,status:'completed',conclusion,
       started_at:timestamp(start),completed_at:timestamp(end)});
@@ -532,14 +495,9 @@ test('the terminal entrypoint records only an authenticated reached product deci
       const changedArchives=[...recoveryArchives];
       for(const [slot,value] of [[1,replacementOwned],[2,replacementTerminal]]){
         const json=path.join(scratch,`replacement-${index}-${slot}`,`${name}.json`);
-        fs.mkdirSync(path.dirname(json));fs.writeFileSync(json,JSON.stringify(value));
-        const zip=path.join(scratch,`replacement-${index}-${slot}.zip`);
-        const zipped=spawnSync('zip',['-j',zip,json],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-        assert.equal(zipped.status,0,zipped.stderr);
-        const bytes=fs.readFileSync(zip);
-        changedArchives[slot]={archive:zip,metadata:{...recoveryArchives[slot].metadata,
-          size_in_bytes:bytes.length,digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-          workflow_run:{id:replacement.id,head_sha:replacement.head_sha}}};
+        fs.mkdirSync(path.dirname(json));
+        changedArchives[slot]=archiveJson(path.dirname(json),path.basename(json),value,
+          {...recoveryArchives[slot].metadata,workflow_run:{id:replacement.id,head_sha:replacement.head_sha}});
       }
       const change={archives:changedArchives,child:replacement,runs:[replacement],source:replacement.head_sha,
         childJobs:[{...laterJob,run_id:replacement.id,run_attempt:replacement.run_attempt,head_sha:replacement.head_sha}]};
