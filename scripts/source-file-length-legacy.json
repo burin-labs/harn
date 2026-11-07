@@ -3,7 +3,6 @@
   "legacy_path_identities": {},
   "legacy_oversized_paths": [
     "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
-    "crates/harn-parser/src/typechecker/inference/expressions.rs",
     "crates/harn-vm/src/channels/mod.rs",
     "crates/harn-vm/src/connectors/mod.rs",
     "crates/harn-vm/src/llm/agent_host_primitives.rs",
