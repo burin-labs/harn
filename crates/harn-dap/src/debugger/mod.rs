@@ -161,20 +161,7 @@ impl Debugger {
 
     fn handle_threads(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let seq = self.next_seq();
-        // Top-level threads (synthetic `main` + any ACP-session
-        // threads). These have no parentId; status/suspend defaults stay
-        // unset because their state model is "running iff the VM is
-        // stepping" — not the per-worker suspend ladder.
-        let mut threads: Vec<serde_json::Value> = self
-            .threads
-            .iter()
-            .map(|(id, name)| {
-                json!({
-                    "id": *id as i64,
-                    "name": name,
-                })
-            })
-            .collect();
+        let mut threads = vec![json!({"id": 1, "name": "main"})];
         // Subagent threads (issue #1868). The tracker keeps lineage,
         // status, and the most-recent suspend reason; we surface all
         // three so IDEs that understand the Harn extensions can render
