@@ -118,6 +118,40 @@ fn element_generics_bind_from_receiver_and_callbacks() {
 }
 
 #[test]
+fn union_receivers_preserve_joined_element_types() {
+    let source = r#"
+type Step = {with?: {name?: string}}
+type Job = {steps?: list<Step>}
+fn names(job: Job) -> string? {
+  const steps = (job.steps ?? []).filter({step -> step?.with?.name == "x"}).to_list()
+  return steps[0]?.with?.name
+}
+fn nullable(values: list<int> | list<string> | nil) -> list<int | string>? {
+  return values?.filter({value -> value != nil})?.to_list()
+}
+fn joined(values: list<int> | list<string>) -> list<int | string> {
+  return values.filter({value -> value != nil}).to_list()
+}
+"#;
+    let diagnostics = check_source_with_source(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let wrong = errors(
+        r"
+fn wrong(values: list<int> | list<string>) -> list<int> {
+  return values.filter({value -> value != nil}).to_list()
+}
+",
+    );
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("list<int | string>"), "{wrong:?}");
+    let mixed = errors("fn mixed(values: list<int> | string) { values.filter({value -> true}) }");
+    assert!(
+        mixed.iter().any(|error| error.contains("method `filter`")),
+        "{mixed:?}"
+    );
+}
+
+#[test]
 fn removed_spelling_is_an_error_with_a_rename_repair() {
     let source = r#"fn f() {
   const s: string = "Hi"
