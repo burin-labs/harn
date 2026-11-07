@@ -71,6 +71,19 @@
       "required": ["name", "new_name"],
       "additionalProperties": false
     },
+    "file_moves": {
+      "type": "array",
+      "description": "Public Java type source files moved with their reference edits, or planned for a dry run. Present only on applied results that require a move; a caller-owned staged session defers disk effects until commit.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        },
+        "required": ["from", "to"],
+        "additionalProperties": false
+      }
+    },
     "touched_files": {
       "type": "array",
       "description": "One entry per rewritten file. Empty on non-`applied` results.",

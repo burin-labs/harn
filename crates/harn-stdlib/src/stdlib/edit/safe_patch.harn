@@ -604,12 +604,14 @@ pub fn edit_safe_text_patch(fs: HarnessFs, random: HarnessRandom, params: dict?)
  * `"syntax_tree"` to pin one. Either way the edit is rejected with
  * `result: "conflict"` if `new_name` already exists as an identifier in
  * any rewritten file. Languages: Rust, TypeScript/TSX, JavaScript/JSX,
- * Python, Swift, Go.
+ * Python, Swift, Go, Java.
+ * Java type renames also move matching public-type filenames, reported in
+ * `file_moves`. Constructors select their declaring type. Unknown bindings
+ * refuse before writes; type renames require `auto` or `syntax_tree`.
  *
- * Pass `session_id` to route writes through staged-fs (#1722) so all
- * touched files succeed or none do — the host still buffers every plan
- * in memory and only persists after pre-flight validation passes, so
- * the same all-or-nothing guarantee applies even without a session.
+ * Pass `session_id` to stage edits until `harness.fs.commit_staged`.
+ * Pre-flight validation precedes writes. Inspect commit failures before
+ * reporting success; multiple filesystem changes are not one atomic operation.
  *
  * `dry_run` returns the planned per-file edits without writing.
  * `validate` (default true) re-parses every rewritten file and aborts
@@ -643,6 +645,7 @@ pub fn edit_rename_symbol(code_index: HarnessCodeIndex, params: dict?) {
     scope: payload?.scope ?? req?.scope,
     symbol: payload?.symbol,
     touched_files: payload?.touched_files ?? [],
+    file_moves: payload?.file_moves ?? [],
     conflicts: payload?.conflicts ?? [],
     match_count: payload?.match_count ?? 0,
     failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],

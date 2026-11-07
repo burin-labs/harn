@@ -95,7 +95,7 @@ const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById
 const KNOWN_PAGE: &str = "package lab; final class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }";
 
 #[test]
-fn java_type_rename_refuses_unproven_references_before_writing() {
+fn java_type_rename_proves_scope_and_moves_public_sources_with_references() {
     for scope in ["file", "workspace"] {
         for dry_run in [false, true] {
             for replacement in [false, true] {
@@ -125,13 +125,42 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
                         ("new_name", vm_string("DocumentLibrary"))
                     });
                     let result = super::rename::run(&ws.index, &[dict(&request)]).unwrap();
-                    assert_eq!(
-                        s(field(&result, "result")),
-                        "unsupported_language",
-                        "{result:?}"
-                    );
-                    assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
-                    ws.assert_unchanged();
+                    let expected = if replacement {
+                        "invalid_identifier"
+                    } else if backend == "language_server" {
+                        "backend_unavailable"
+                    } else if scope == "file" {
+                        "ambiguous_symbol"
+                    } else {
+                        "applied"
+                    };
+                    assert_eq!(s(field(&result, "result")), expected, "{result:?}");
+                    if expected == "applied" {
+                        assert!(n(field(&result, "match_count")) >= 2, "{result:?}");
+                        let VmValue::List(moves) = field(&result, "file_moves") else {
+                            panic!("file moves must be a list: {result:?}")
+                        };
+                        assert_eq!(moves.len(), 1);
+                        assert_eq!(s(field(&moves[0], "from")), "lab/DocumentStore.java");
+                        assert_eq!(s(field(&moves[0], "to")), "lab/DocumentLibrary.java");
+                    } else {
+                        assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
+                    }
+                    if expected != "applied" || dry_run {
+                        ws.assert_unchanged();
+                        assert!(!ws.dir.path().join("lab/DocumentLibrary.java").exists());
+                    } else {
+                        assert!(!ws.dir.path().join("lab/DocumentStore.java").exists());
+                        assert_eq!(
+                            ws.read("lab/DocumentLibrary.java"),
+                            DOCUMENTS.replace("DocumentStore", "DocumentLibrary")
+                        );
+                        assert_eq!(
+                            ws.read("lab/KnownPage.java"),
+                            KNOWN_PAGE.replace("DocumentStore", "DocumentLibrary")
+                        );
+                        assert_eq!(ws.read("lab/AuditStore.java"), AUDIT);
+                    }
                 }
             }
         }
@@ -163,7 +192,108 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
 }
 
 #[test]
-fn java_constructor_seed_refuses_type_rename_before_writing() {
+fn java_type_file_moves_refuse_collisions_and_commit_staged_references_as_one_group() {
+    let request = |session_id: Option<&str>, dry_run| {
+        dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("DocumentStore")),
+                    ("path", vm_string("lab/DocumentStore.java")),
+                ]),
+            ),
+            ("new_name", vm_string("DocumentLibrary")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("syntax_tree")),
+            ("dry_run", VmValue::Bool(dry_run)),
+            ("session_id", session_id.map_or(VmValue::Nil, vm_string)),
+        ])
+    };
+    for dry_run in [false, true] {
+        let ws = Workspace::new(&[
+            ("lab/DocumentStore.java", DOCUMENTS),
+            ("lab/KnownPage.java", KNOWN_PAGE),
+        ]);
+        let destination = ws.dir.path().join("lab/DocumentLibrary.java");
+        fs::create_dir(&destination).unwrap();
+        let failure = super::rename::run(&ws.index, &[request(None, dry_run)]).unwrap_err();
+        assert!(
+            failure.to_string().contains("DocumentLibrary.java"),
+            "{failure}"
+        );
+        ws.assert_unchanged();
+        assert!(destination.is_dir());
+    }
+    let ws = Workspace::new(&[
+        ("lab/DocumentStore.java", DOCUMENTS),
+        ("lab/KnownPage.java", KNOWN_PAGE),
+    ]);
+    let root = ws.dir.path().canonicalize().unwrap();
+    let session = format!("java-type-{}", root.file_name().unwrap().to_string_lossy());
+    crate::fs::set_mode(&session, crate::fs::FsMode::Staged, Some(&root)).unwrap();
+    let result = super::rename::run(&ws.index, &[request(Some(&session), false)]).unwrap();
+    assert!(b(field(&result, "applied")), "{result:?}");
+    ws.assert_unchanged();
+    let destination = root.join("lab/DocumentLibrary.java");
+    assert!(!destination.exists());
+    assert_eq!(
+        crate::fs::read(&destination, Some(&session))
+            .unwrap()
+            .unwrap(),
+        DOCUMENTS
+            .replace("DocumentStore", "DocumentLibrary")
+            .as_bytes()
+    );
+    assert!(
+        crate::fs::read(&root.join("lab/DocumentStore.java"), Some(&session))
+            .unwrap()
+            .is_err()
+    );
+    let pending = crate::fs::staged_status(&session).unwrap();
+    assert_eq!(
+        pending.pending_writes.len(),
+        3,
+        "move source, destination and reference"
+    );
+    let partial = [pending.pending_writes[0].path.clone()];
+    for result in [
+        crate::fs::commit_staged(&session, &partial).map(|_| ()),
+        crate::fs::discard_staged(&session, &partial).map(|_| ()),
+    ] {
+        assert!(
+            result.is_err(),
+            "a filtered operation must not split the rename group"
+        );
+        ws.assert_unchanged();
+        assert_eq!(
+            crate::fs::staged_status(&session)
+                .unwrap()
+                .pending_writes
+                .len(),
+            3
+        );
+    }
+    let committed = crate::fs::commit_staged(&session, &[]).unwrap();
+    assert!(committed.failed_paths_with_reasons.is_empty());
+    assert_eq!(committed.committed_paths.len(), 3);
+    assert!(!root.join("lab/DocumentStore.java").exists());
+    assert_eq!(
+        ws.read("lab/DocumentLibrary.java"),
+        DOCUMENTS.replace("DocumentStore", "DocumentLibrary")
+    );
+    assert_eq!(
+        ws.read("lab/KnownPage.java"),
+        KNOWN_PAGE.replace("DocumentStore", "DocumentLibrary")
+    );
+    assert!(crate::fs::staged_status(&session)
+        .unwrap()
+        .pending_writes
+        .is_empty());
+    crate::fs::remove_session_state(&session, Some(&root)).unwrap();
+}
+
+#[test]
+fn java_constructor_seeds_rename_their_declaring_types() {
     let caller =
         "package lab; final class KnownPage { DocumentStore store = new DocumentStore(); }";
     for (path, source, name, line) in [
@@ -194,13 +324,23 @@ fn java_constructor_seed_refuses_type_rename_before_writing() {
                     ])],
                 )
                 .unwrap();
-                assert_eq!(
-                    s(field(&result, "result")),
-                    "unsupported_language",
-                    "{result:?}"
-                );
-                assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
-                ws.assert_unchanged();
+                if backend == "language_server" {
+                    assert_eq!(s(field(&result, "result")), "backend_unavailable", "{result:?}");
+                    ws.assert_unchanged();
+                } else {
+                    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+                    assert!(n(field(&result, "match_count")) >= 2, "{result:?}");
+                    if dry_run {
+                        ws.assert_unchanged();
+                    } else {
+                        let after_path = if name == "DocumentStore" { "lab/DocumentLibrary.java" } else { path };
+                        assert_eq!(ws.read(after_path), source.replace(name, "DocumentLibrary"));
+                        assert_eq!(ws.read("lab/KnownPage.java"), caller.replace(name, "DocumentLibrary"));
+                        if after_path != path {
+                            assert!(!ws.dir.path().join(path).exists());
+                        }
+                    }
+                }
             }
         }
     }

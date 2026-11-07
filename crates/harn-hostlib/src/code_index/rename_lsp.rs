@@ -466,6 +466,7 @@ pub(super) fn rename(
             &plans,
             request.session_id,
             None,
+            None,
         )? {
             Ok(failed) => failed,
             Err(stopped) => return Ok(Answer::Response(stopped)),

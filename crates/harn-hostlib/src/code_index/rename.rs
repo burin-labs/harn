@@ -188,10 +188,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         symbol_line,
         symbol_kind,
         scope,
+        dry_run,
         backend: BackendReport::default(),
         stale: Vec::new(),
         proof,
         preserved: None,
+        file_move: None,
         graph: &state.symbols,
     };
 
@@ -216,62 +218,54 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         .expect("resolve_seed returned a node id present in the graph");
     let seed_path = seed_node.path.to_string();
 
-    if is_rename && !is_identifier_token(&new_name) {
+    let java_type = match super::rename_java::prepare_type(
+        state,
+        seed_node,
+        session_id.as_deref(),
+        Some(&call),
+    ) {
+        Ok(prepared) => prepared,
+        Err(detail) => return Ok(binding_failure_response(&env, &call, &detail)),
+    };
+    if java_type.is_some() && (!is_rename || !crate::ast::java::is_type_name(&new_name)) {
+        return Ok(invalid_identifier_response(
+            &env,
+            "Java type renames require a valid type identifier",
+        ));
+    }
+    if is_rename && java_type.is_none() && !is_identifier_token(&new_name) {
         return Ok(invalid_identifier_response(
             &env,
             "must start with a letter or underscore and consist of identifier characters",
         ));
     }
-    // Constructors are type-renaming seeds, not independent method renames.
-    let java_constructor = if seed_node.language == "java"
-        && seed_node.kind == NodeKind::Function
-        && state.symbols.nodes_named(&seed_node.name).iter().any(|id| {
-            state
-                .symbols
-                .node(*id)
-                .is_some_and(|node| node.kind == NodeKind::Type && node.path == seed_node.path)
-        }) {
-        if seed_node.col.is_none() {
-            return Ok(emit_response(
-                &env,
-                "unsupported_language",
-                ResponseExtras {
-                    details: "Java type and constructor renames are not supported: the declaration position is unavailable; no files changed".into(),
-                    fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
-                    ..Default::default()
-                },
-            ));
-        }
-        let source = read_source(BUILTIN, &state.root, &seed_path, session_id.as_deref())?;
-        let tree = match ast_api::parse_tree(&source, Language::Java) {
-            Ok(tree) => tree,
-            Err(err) => {
-                return Ok(syntax_error_response(
-                    &env,
-                    format!("`{seed_path}` failed to parse: {err}"),
-                ))
-            }
-        };
-        if tree.root_node().has_error() {
-            return Ok(syntax_error_response(
-                &env,
-                format!("`{seed_path}` does not parse before the edit"),
-            ));
-        }
-        super::rename_java::is_constructor(&tree, &source, seed_node)
-    } else {
-        false
-    };
-    if seed_node.language == "java" && (seed_node.kind == NodeKind::Type || java_constructor) {
+    if java_type.is_some() && backend == BackendChoice::LanguageServer {
         return Ok(emit_response(
             &env,
-            "unsupported_language",
+            "backend_unavailable",
             ResponseExtras {
-                details: "Java type and constructor renames are not supported: references and public-type file moves cannot yet be proven; no files changed".into(),
-                fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
+                details: "Java type renames require the syntax-tree binding and file-move proof; select syntax_tree or auto".into(),
                 ..Default::default()
             },
         ));
+    }
+    if let Some(proof) = &java_type {
+        if proof.seed.public_top_level {
+            let source = Path::new(&proof.seed.path);
+            if source.file_name().and_then(|name| name.to_str())
+                != Some(format!("{}.java", proof.seed.simple_name).as_str())
+            {
+                return Ok(ambiguous_response_with_details(
+                    &env,
+                    "the public Java type does not match its source filename",
+                ));
+            }
+            let destination = source.with_file_name(format!("{new_name}.java"));
+            env.file_move = Some((
+                proof.seed.path.clone(),
+                destination.to_string_lossy().into_owned(),
+            ));
+        }
     }
 
     let mut in_scope_files = files_in_scope(
@@ -284,10 +278,19 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     if in_scope_files.is_empty() {
         return Ok(no_match_response(&env));
     }
+    if let Some(proof) = &java_type {
+        if scope == Scope::Workspace {
+            in_scope_files.extend(proof.members().cloned());
+            in_scope_files.sort();
+            in_scope_files.dedup();
+        } else if let Err(detail) = proof.cover_scope(&in_scope_files) {
+            return Ok(binding_failure_response(&env, &call, &detail));
+        }
+    }
 
     // Replace mode rewrites arbitrary text, which a language server's rename
     // cannot express, so it always uses the syntax-tree engine.
-    if is_rename && backend != BackendChoice::SyntaxTree {
+    if is_rename && java_type.is_none() && backend != BackendChoice::SyntaxTree {
         let request = language_server::Request {
             state,
             seed: seed_node,
@@ -399,13 +402,15 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
 
-    let java_method = seed_node.language == "java"
+    let java_method = java_type.is_none()
+        && seed_node.language == "java"
         && seed_node.kind == NodeKind::Function
         && seed_node.owner_type.is_some();
     // A body-local seed is invisible outside its scope: no other file can
     // reference it, and the binding proof leaves other same-named bindings in
     // its file alone.
-    let local_seed = !java_method
+    let local_seed = java_type.is_none()
+        && !java_method
         && go_proof.is_none()
         && is_local_seed(state, seed_node, &seed_path, session_id.as_deref())?;
     if local_seed {
@@ -416,7 +421,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     // definitions and their unrelated uses.
     let competing =
         competing_declarations(&state.symbols, seed_node_id, &symbol_name, &in_scope_files);
-    if !java_method && !local_seed && !competing.is_empty() {
+    if java_type.is_none() && !java_method && !local_seed && !competing.is_empty() {
         return Ok(ambiguous_response_with_details(
             &env,
             "rename aborted without writes: the scope contains separate declarations with this name. Pinning the seed does not disambiguate their references; use a binding-aware LSP rename or narrow the scope.",
@@ -487,6 +492,24 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             &mut local_shadows,
         );
 
+        if let Some(proof) = &java_type {
+            if language == Language::Java {
+                match proof.sites(path, &source, &tree, &new_name, targets, local_shadows) {
+                    Ok(sites) => {
+                        targets = sites.targets;
+                        local_shadows = sites.shadows;
+                    }
+                    Err(detail) => return Ok(binding_failure_response(&env, &call, &detail)),
+                }
+            } else if !targets.is_empty() {
+                return Ok(unsupported_language_response(
+                    &env,
+                    path,
+                    Some(language.name()),
+                ));
+            }
+        }
+
         if java_method && language == Language::Java {
             match super::rename_java::sites(
                 state,
@@ -544,7 +567,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         }
 
-        if !java_method {
+        if java_type.is_none() && !java_method {
             match super::rename_binding::check(
                 super::rename_binding::Seed {
                     state,
@@ -599,7 +622,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     }
 
     // Pre-flight done. With `dry_run` we stop here without persisting.
-    let failed = if dry_run {
+    let failed = if dry_run && java_type.is_none() {
         Vec::new()
     } else {
         match commit(
@@ -609,6 +632,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             &plans,
             session_id.as_deref(),
             go_proof.as_ref(),
+            java_type.as_ref(),
         )? {
             Ok(failed) => failed,
             Err(stopped) => return Ok(stopped),
@@ -654,12 +678,14 @@ struct ResponseEnv<'a> {
     symbol_line: Option<u32>,
     symbol_kind: Option<NodeKind>,
     scope: Scope,
+    dry_run: bool,
     /// Which engine produced the result; reported on every response.
     backend: BackendReport,
     /// Mentions an applied rename left as they were, reported in `warnings`.
     stale: Vec<String>,
     proof: bool,
     preserved: Option<Vec<crate::edit_proof::PreservedSite>>,
+    file_move: Option<(String, String)>,
     graph: &'a SymbolGraph,
 }
 
@@ -749,8 +775,18 @@ fn commit(
     plans: &[FilePlan],
     session_id: Option<&str>,
     go_proof: Option<&super::rename_go::PackageProof>,
+    java_proof: Option<&super::rename_java::JavaTypeRename>,
 ) -> Result<Result<Vec<(String, String)>, VmValue>, HostlibError> {
     let committed = call.commit(BUILTIN, |writes| {
+        if java_proof.is_some_and(|proof| !proof.unchanged(root, session_id)) {
+            if let Some(interrupt) = call.interrupted() {
+                return Ok(Err(interrupted_response(env, interrupt, false)));
+            }
+            return Ok(Err(ambiguous_response_with_details(
+                env,
+                "the Java workspace changed after the binding proof; run the rename again",
+            )));
+        }
         if go_proof.is_some_and(|proof| !proof.unchanged(root, session_id)) {
             return Ok(Err(emit_response(
                 env,
@@ -764,6 +800,22 @@ fn commit(
         let changed =
             super::refactor_core::changed_since_planned(BUILTIN, root, plans, session_id);
         if changed.is_empty() {
+            if java_proof.is_some() {
+                use crate::fs::mutation_batch::{apply_mutation_batch, ExpectedFile, Mutation};
+                let mutations = plans.iter().map(|plan| {
+                    let expected = ExpectedFile::from_bytes(plan.source.as_bytes());
+                    let bytes = plan.patched.as_bytes().to_vec();
+                    match &env.file_move {
+                        Some((from, to)) if from == &plan.path => Mutation::Move {
+                            from: from.into(), to: to.into(), expected_source: expected, bytes,
+                        },
+                        _ => Mutation::Write {path: (&plan.path).into(), expected, bytes},
+                    }
+                }).collect::<Vec<_>>();
+                apply_mutation_batch(BUILTIN, root, session_id, &mutations, env.dry_run, writes)
+                    .map_err(|error| error.into_hostlib(BUILTIN))?;
+                return Ok(Ok(Vec::new()));
+            }
             return write_plans(BUILTIN, root, plans, session_id, writes).map(Ok);
         }
         Ok(Err(emit_response(
@@ -887,6 +939,15 @@ fn applied_response(
             details: details.to_string(),
             warnings: env.stale.iter().map(str_value).collect(),
             proof,
+            extra: env.file_move.as_ref().map_or_else(Vec::new, |(from, to)| {
+                vec![(
+                    "file_moves",
+                    VmValue::list(vec![build_dict([
+                        ("from", str_value(from)),
+                        ("to", str_value(to)),
+                    ])]),
+                )]
+            }),
             ..Default::default()
         },
     )
@@ -932,6 +993,17 @@ fn ambiguous_response_with_details(env: &ResponseEnv<'_>, details: &str) -> VmVa
         AmbiguityReason::UnresolvedReferenceBinding,
         details,
     )
+}
+
+fn binding_failure_response(
+    env: &ResponseEnv<'_>,
+    call: &HostCallContext,
+    detail: &str,
+) -> VmValue {
+    match call.interrupted() {
+        Some(interrupt) => interrupted_response(env, interrupt, false),
+        None => ambiguous_response_with_details(env, detail),
+    }
 }
 
 fn ambiguous_response_with_reason(

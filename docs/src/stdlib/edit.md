@@ -823,7 +823,7 @@ The enclosing `applied` and `dry_run` fields describe whether files were written
 or only planned. A staged filesystem session can defer persistence until commit.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
-Python, Swift, Go, and Java methods. Other languages return `result ==
+Python, Swift, Go, and Java. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 
 The host must prove that every occurrence belongs to the selected declaration
@@ -841,9 +841,16 @@ stay unchanged. Unknown receivers, inferred types, patterns, inheritance,
 interface contracts, method references, and overloads can require a language
 server and return `ambiguous_symbol` before any write. A definition selector
 chooses the method; it does not prove these unresolved caller bindings.
-Java rename also requires a final declaring type or a private method, and
+Java method rename also requires a final declaring type or a private method, and
 refuses new names that may change an Object method contract.
-Java type and constructor renames return `unsupported_language` without writing.
+Java type renames resolve explicit imports, same-package declarations, nested
+types, constructors and type parameters. A constructor selector renames its
+declaring type. Unknown inherited members, wildcard-only bindings and unsupported
+syntax return `ambiguous_symbol` before any write. Type renames use `syntax_tree`
+or `auto`; explicitly selecting `language_server` returns `backend_unavailable`.
+A public top-level type must match its filename. Its rename moves that file and
+reports the source and destination in `file_moves`; comments, strings and
+unrelated namesakes stay unchanged. `replacement_text` cannot rename a Java type.
 Ambiguous results include declaration metadata in `warnings`: `symbol`,
 `qualified_name`, `path`, `line`, `col`, and `kind`. In every language
 `symbol` equals `qualified_name`, such as `First.load`, so it can be passed
@@ -866,13 +873,13 @@ column means the declaration name position is unavailable.
 | `"invalid_identifier"` | `new_name` is empty or shaped wrong for any in-scope language. |
 | `"syntax_error"` | a rewritten file failed re-parse with `validate=true`. |
 
-### Atomicity
+### Persistence
 
-When `session_id` is supplied AND the session is in `staged` mode,
-every touched file lands in the overlay; one `harness.fs.commit_staged`
-call flips them atomically. Without a session, the host still buffers
-the full plan in memory and only writes after pre-flight validation
-passes, so a clean run is all-or-nothing modulo mid-call disk failures.
+When `session_id` names a session in `staged` mode, edits enter the overlay
+until `harness.fs.commit_staged`. Inspect the commit's `committed_paths` and
+`failed_paths_with_reasons` before reporting success. Without a staged session,
+the host writes after validating the full plan. Native filesystem observers
+can see intermediate changes across files.
 
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"

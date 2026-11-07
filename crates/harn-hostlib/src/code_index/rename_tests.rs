@@ -689,23 +689,25 @@ fn go_rename_commit_refuses_a_package_change_and_writes_when_unchanged() {
         symbol_line: None,
         symbol_kind: Some(NodeKind::Type),
         scope: Scope::Workspace,
+        dry_run: false,
         backend: BackendReport::default(),
         stale: Vec::new(),
         proof: false,
         preserved: None,
+        file_move: None,
         graph: &state.symbols,
     };
     let added = root.join("other.go");
     fs::write(&added, "package lab\ntype DocumentLibrary struct{}\n").unwrap();
     let call = HostCallContext::current();
     let plans = vec![plan];
-    let result = commit(&env, &call, &root, &plans, None, Some(&proof))
+    let result = commit(&env, &call, &root, &plans, None, Some(&proof), None)
         .unwrap()
         .unwrap_err();
     assert_eq!(s(field(&result, "result")), "refused");
     assert_eq!(fs::read_to_string(&seed_path).unwrap(), declaration);
     fs::remove_file(&added).unwrap();
-    let failed = commit(&env, &call, &root, &plans, None, Some(&proof))
+    let failed = commit(&env, &call, &root, &plans, None, Some(&proof), None)
         .unwrap()
         .unwrap();
     assert!(failed.is_empty());
