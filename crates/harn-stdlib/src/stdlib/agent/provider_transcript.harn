@@ -1,0 +1,360 @@
+import { read_jsonl } from "std/jsonl"
+import { ProviderResponseToolProjection, provider_response_tool_calls } from "./artifacts"
+
+pub type ProviderTranscriptToolCall = {name: string?, arguments: unknown, id: string?}
+
+pub type ProviderResponseContentShape = {
+  emitted_text: string,
+  emitted_text_chars: int,
+  reasoning_text: string,
+  reasoning_text_chars: int,
+  parsed_tool_calls: list<ProviderTranscriptToolCall>,
+  parsed_tool_call_count: int,
+  actionless_completion: bool,
+  reasoning_only_completion: bool,
+  empty_completion: bool,
+}
+
+pub type ProviderTranscriptRecord = {
+  kind: "request" | "response" | "error" | "measurement" | "other" | "invalid",
+  call_id: string,
+  timestamp_ms: float?,
+  provider_dispatch_count: int?,
+  retained_response: bool,
+  content: ProviderResponseContentShape?,
+  raw: unknown,
+}
+
+pub type ProviderCallMeasurementState = "measured" | "incomplete" | "unmeasured"
+
+pub type ProviderCallCensus = {
+  transcript_present: bool,
+  measurement_state: ProviderCallMeasurementState,
+  prepared_request_count: int,
+  provider_request_count: int?,
+  provider_response_count: int,
+  provider_error_count: int,
+  orphan_outcome_count: int,
+  orphan_measurement_call_ids: list<string>,
+  invalid_record_count: int,
+  terminal_complete: bool,
+  pending_call_ids: list<string>,
+  unmeasured_call_ids: list<string>,
+  duplicate_terminal_call_ids: list<string>,
+  duplicate_request_call_ids: list<string>,
+  duplicate_measurement_call_ids: list<string>,
+}
+
+type WireToolCall = {
+  name?: string?,
+  tool_name?: string?,
+  arguments?: unknown,
+  id?: string?,
+  tool_call_id?: string?,
+}
+
+type WireToolCalls = list<WireToolCall>
+
+type RecordHeader = {type: string}
+
+type TimestampValue = string | int | float
+
+type WireProviderRecord = ProviderResponseToolProjection \
+  & {
+  type: string,
+  call_id?: string?,
+  timestamp?: TimestampValue?,
+  provider_dispatch_count?: int?,
+  retained_response?: bool,
+  text?: string?,
+  thinking?: string?,
+  reasoning?: string?,
+  reasoning_content?: string?,
+  message?: {reasoning?: string?}?,
+}
+
+fn __timestamp_ms(value: TimestampValue?) -> float? {
+  if value == nil {
+    return nil
+  }
+  const numeric = to_float(value)
+  if numeric != nil {
+    return numeric > 10000000000.0 ? numeric : numeric * 1000.0
+  }
+  const parsed = try {
+    date_parse(to_string(value))
+  }
+  return is_ok(parsed) ? (to_float(unwrap(parsed)) ?? 0.0) * 1000.0 : nil
+}
+
+fn __content(record: WireProviderRecord) -> ProviderResponseContentShape {
+  const calls: WireToolCalls = schema_expect(
+    provider_response_tool_calls(record),
+    schema_of(WireToolCalls),
+  )
+  let normalized: list<ProviderTranscriptToolCall> = []
+  for call in calls {
+    normalized.push(
+      {
+        name: call.name ?? call.tool_name,
+        arguments: call.arguments,
+        id: call.id ?? call.tool_call_id,
+      },
+    )
+  }
+  let reasoning: list<string> = []
+  for block in [
+    record.thinking,
+    record.reasoning,
+    record.reasoning_content,
+    record.message?.reasoning,
+  ] {
+    if block != nil && trim(block) != "" && !reasoning.contains(trim(block)) {
+      reasoning.push(trim(block))
+    }
+  }
+  const text = record.text ?? ""
+  const reasoning_text = join(reasoning, "\n")
+  const actionless = trim(text) == "" && len(normalized) == 0
+  return {
+    emitted_text: text,
+    emitted_text_chars: len(text),
+    reasoning_text: reasoning_text,
+    reasoning_text_chars: len(reasoning_text),
+    parsed_tool_calls: normalized,
+    parsed_tool_call_count: len(normalized),
+    actionless_completion: actionless,
+    reasoning_only_completion: actionless && reasoning_text != "",
+    empty_completion: actionless,
+  }
+}
+
+/**
+ * Validate provider rows once; malformed rows remain visible census failures.
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_transcript_normalize(records: list) -> list<ProviderTranscriptRecord> {
+  let normalized: list<ProviderTranscriptRecord> = []
+  for raw in records {
+    let row: ProviderTranscriptRecord = {
+      kind: "invalid",
+      call_id: "",
+      timestamp_ms: nil,
+      provider_dispatch_count: nil,
+      retained_response: false,
+      content: nil,
+      raw: raw,
+    }
+    match schema_parse(raw, schema_of(RecordHeader)) {
+      Err(_) -> {
+      }
+      Ok(header) -> {
+        const kind = match header.type {
+          "provider_call_request" | "request" -> { "request" }
+          "provider_call_response" | "response" -> { "response" }
+          "provider_call_error" -> { "error" }
+          "provider_call_measurement" -> { "measurement" }
+          _ -> { starts_with(header.type, "provider_call_") ? "invalid" : "other" }
+        }
+        if kind == "other" {
+          row = row + {kind: "other"}
+        } else {
+          match schema_parse(raw, schema_of(WireProviderRecord)) {
+            Err(_) -> {
+            }
+            Ok(record) -> {
+              const content = try {
+                kind == "response" ? __content(record) : nil
+              }
+              if is_ok(content) {
+                row = row
+                  + {
+                    kind: kind,
+                    call_id: record.call_id ?? "",
+                    timestamp_ms: __timestamp_ms(record.timestamp),
+                    provider_dispatch_count: record.provider_dispatch_count,
+                    retained_response: record.retained_response ?? false,
+                    content: unwrap(content),
+                  }
+              }
+            }
+          }
+        }
+      }
+    }
+    normalized.push(row)
+  }
+  return normalized
+}
+
+/**
+ * Read JSONL with strict syntax checking and normalize provider fields.
+ * @effects: [fs.read]
+ * @errors: [FsFailure, JsonlRecordFailure]
+ */
+pub fn transcript_records(fs: HarnessFs, path: string) -> list<ProviderTranscriptRecord> {
+  return provider_transcript_normalize(read_jsonl(fs, path, {strict: true}))
+}
+
+/**
+ * Normalize one response, including native calls with an empty text channel.
+ * @effects: []
+ * @errors: [SchemaValidationError]
+ */
+pub fn provider_response_content_shape(record: unknown) -> ProviderResponseContentShape {
+  return __content(schema_expect(record, schema_of(WireProviderRecord)))
+}
+
+type CallRows = {
+  requests: int,
+  responses: int,
+  errors: int,
+  measurements: int,
+  dispatches: int?,
+  retained_response: bool,
+}
+
+fn __terminal_state(call: CallRows) -> "complete" | "pending" | "duplicate" | "incomplete" {
+  const total = call.responses + call.errors
+  if total == 0 {
+    return "pending"
+  }
+  const retained_pair = call.responses == 1 && call.errors == 1 && call.retained_response
+  if total > 1 && !retained_pair {
+    return "duplicate"
+  }
+  return call.retained_response && !retained_pair ? "incomplete" : "complete"
+}
+
+fn __valid_identity(record: ProviderTranscriptRecord) -> bool {
+  return record.kind != "invalid" && trim(record.call_id) != ""
+}
+
+type CallIndex = {
+  calls: dict<string, CallRows>,
+  requests: int,
+  responses: int,
+  errors: int,
+  invalid: int,
+  orphans: int,
+}
+
+fn __index(records: list<ProviderTranscriptRecord>) -> CallIndex {
+  let index: CallIndex = {calls: {}, requests: 0, responses: 0, errors: 0, invalid: 0, orphans: 0}
+  for record in records {
+    if record.kind == "other" {
+      continue
+    }
+    index.requests += record.kind == "request" ? 1 : 0
+    index.responses += record.kind == "response" ? 1 : 0
+    index.errors += record.kind == "error" ? 1 : 0
+    if !__valid_identity(record) {
+      index.invalid += 1
+      index.orphans += ["response", "error"].contains(record.kind) ? 1 : 0
+      continue
+    }
+    let call = index.calls[record.call_id]
+      ?? {
+        requests: 0,
+        responses: 0,
+        errors: 0,
+        measurements: 0,
+        dispatches: nil,
+        retained_response: false,
+      }
+    match record.kind {
+      "request" -> { call.requests += 1 }
+      "response" -> { call.responses += 1 }
+      "error" -> {
+        call.errors += 1
+        call.retained_response = call.retained_response || record.retained_response
+      }
+      "measurement" -> {
+        call.measurements += 1
+        call.dispatches = record.provider_dispatch_count
+      }
+      _ -> {
+      }
+    }
+    index.calls[record.call_id] = call
+  }
+  return index
+}
+
+/**
+ * Fold physical measurements by their prepared request identity. Old transcripts
+ * without these measurements remain incomplete: terminal usage may aggregate
+ * earlier retries and cannot replace the observed per-attempt dispatch count.
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_call_census(
+  records: list<ProviderTranscriptRecord>,
+  transcript_present: bool,
+) -> ProviderCallCensus {
+  const index = __index(transcript_present ? records : [])
+  let result: ProviderCallCensus = {
+    transcript_present: transcript_present,
+    measurement_state: transcript_present ? "measured" : "unmeasured",
+    prepared_request_count: index.requests,
+    provider_request_count: transcript_present ? 0 : nil,
+    provider_response_count: index.responses,
+    provider_error_count: index.errors,
+    orphan_outcome_count: index.orphans,
+    orphan_measurement_call_ids: [],
+    invalid_record_count: index.invalid,
+    terminal_complete: transcript_present,
+    pending_call_ids: [],
+    unmeasured_call_ids: [],
+    duplicate_terminal_call_ids: [],
+    duplicate_request_call_ids: [],
+    duplicate_measurement_call_ids: [],
+  }
+  if !transcript_present {
+    return result
+  }
+  let measured = result.invalid_record_count == 0
+  let dispatches = 0
+  for call_id in keys(index.calls).sorted() {
+    const call = index.calls[call_id]
+    if call == nil {
+      throw "provider transcript call index changed during census"
+    }
+    if call.requests == 0 {
+      result.orphan_outcome_count += call.responses + call.errors
+      if call.measurements > 0 {
+        result.orphan_measurement_call_ids.push(call_id)
+      }
+      measured = false
+      continue
+    }
+    if call.requests > 1 {
+      result.duplicate_request_call_ids.push(call_id)
+      measured = false
+    }
+    if call.measurements > 1 {
+      result.duplicate_measurement_call_ids.push(call_id)
+      measured = false
+    }
+    if call.measurements != 1 || call.dispatches == nil || call.dispatches < 0 {
+      result.unmeasured_call_ids.push(call_id)
+      measured = false
+    } else {
+      dispatches += call.dispatches
+    }
+    const terminal = __terminal_state(call)
+    if terminal == "pending" {
+      result.pending_call_ids.push(call_id)
+    } else if terminal == "duplicate" {
+      result.duplicate_terminal_call_ids.push(call_id)
+      measured = false
+    } else if terminal == "incomplete" {
+      measured = false
+    }
+  }
+  result.measurement_state = measured ? "measured" : "incomplete"
+  result.provider_request_count = measured ? dispatches : nil
+  result.terminal_complete = measured && len(result.pending_call_ids) == 0
+  return result
+}

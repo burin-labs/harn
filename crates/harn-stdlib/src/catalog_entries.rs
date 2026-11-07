@@ -317,6 +317,7 @@ catalog_entries! {
     "agent/events" => "stdlib/agent/events.harn",
     "agent/feedback" => "stdlib/agent/feedback.harn",
     "agent/transcript" => "stdlib/agent/transcript.harn",
+    "agent/provider_transcript" => "stdlib/agent/provider_transcript.harn",
     "agent/artifacts" => "stdlib/agent/artifacts.harn",
     "agent/primitives" => "stdlib/agent/primitives.harn",
     "agent/progress" => "stdlib/agent/progress.harn",

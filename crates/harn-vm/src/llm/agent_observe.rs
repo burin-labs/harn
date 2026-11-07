@@ -806,6 +806,12 @@ pub(crate) async fn observed_llm_call(
         physical_attempts = physical_attempts.saturating_add(
             usize::try_from(observed_attempt.dispatches.observed()).unwrap_or(usize::MAX),
         );
+        append_llm_transcript_entry(&serde_json::json!({
+            "type": "provider_call_measurement",
+            "call_id": call_id,
+            "timestamp": chrono_now(),
+            "provider_dispatch_count": observed_attempt.dispatches.observed(),
+        }));
 
         // Release the governor slot reserved above and drive AIMD + the circuit
         // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
@@ -844,6 +850,14 @@ pub(crate) async fn observed_llm_call(
                     )
                 {
                     let retry_usage = result.usage();
+                    dump_llm_response(
+                        iteration.unwrap_or(0),
+                        &call_id,
+                        &result,
+                        duration_ms,
+                        opts.applied_structural_experiment.as_ref(),
+                        opts.call_stage.as_deref(),
+                    );
                     // The discarded attempt keeps its own measured ledger,
                     // including its typed unpriced reason. Rewriting it to a
                     // known zero would assert it cost nothing, which nobody
@@ -1175,6 +1189,8 @@ pub(crate) async fn observed_llm_call(
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
+                    retained_response: super::api::ProviderResponseEnvelope::from_error(&error)
+                        .is_some(),
                 });
                 if let Some(b) = bridge {
                     b.send_call_end(
@@ -1427,3 +1443,5 @@ mod retry_tests;
 mod served_lineage_chain_tests;
 #[cfg(test)]
 mod streaming_detector_tests;
+#[cfg(test)]
+pub(crate) mod transcript_census_tests;
