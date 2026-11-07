@@ -7,7 +7,7 @@
 //! The coordinate-native *execution* nucleus (screenshot capture, pointer /
 //! keyboard input, accessibility tree) lives in `harn-hostlib`'s `computer`
 //! module and is reached through the `hostlib_computer_*` builtins. Nothing in
-//! this module touches the OS — it is pure projection and geometry so it stays
+//! this module touches the OS — it is pure projection so it stays
 //! deterministic and unit-testable.
 //!
 //! ## De-overfitting
@@ -175,7 +175,7 @@ fn project_computer_tools_with(
     }
     tools.retain(|tool| !is_computer_function_tool(tool));
 
-    // See the INTEGRATION SEAM note above: default to XGA until real dims flow.
+    // Native projection advertises XGA until capture dimensions are retained.
     let (width, height) = (DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     let native = match style {
         ComputerUseStyle::NativeAnthropic => anthropic_computer_tool(width, height),
