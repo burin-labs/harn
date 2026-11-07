@@ -98,6 +98,9 @@ git -C "$work" checkout --quiet bad
 accept_push good:refs/heads/accepted
 [[ $(git --git-dir="$remote" rev-parse refs/heads/accepted) == "$good" ]]
 [[ $(cat "$SIGNATURE_READS") == "$good" ]]
+accept_push good:refs/heads/accepted
+[[ ! -s "$SIGNATURE_READS" ]]
+grep -Fq 'no ref updates; nothing to validate' "$tmp/out"
 
 # Without allowed signers, Git reports an SSH-signed commit as `N`. The
 # signature header still distinguishes it from a genuinely unsigned commit.
@@ -174,6 +177,11 @@ unset BREAK_ENUMERATION
 
 # Direct hook input checks preserve malformed/unresolvable failures instead
 # of silently interpreting a failed Git read as a measured zero.
+if (cd "$work"; . ./.githooks/lib.sh;
+    hook_write_push_commits "$tmp/missing-census" "$tmp/missing-updates" "$remote") > "$tmp/out" 2>&1; then
+  echo 'missing census input accepted as a no-op' >&2; exit 1
+fi
+grep -Fq 'ref updates are unavailable' "$tmp/out"
 hook_input() {
   (cd "$work"; printf '%s\n' "$1" | ./.githooks/pre-push origin "$remote") > "$tmp/out" 2>&1
 }

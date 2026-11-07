@@ -67,9 +67,7 @@ pub fn native_qualification_observation(
   configuration: dict,
   policy: NativeQualificationPolicy,
 ) -> NativeQualificationObservation {
-  const steps = (document?.jobs?.nextest?.steps ?? []).filter(
-    { step -> step?.name == "Run workspace nextest" },
-  )
+  const steps = workspace_nextest_steps(document)
   const step = len(steps) == 1 ? steps[0] : nil
   return {
     step_count: len(steps),
@@ -80,6 +78,13 @@ pub fn native_qualification_observation(
     )
       .report(configuration?.profile?.[policy.profile]).ok,
   }
+}
+
+fn workspace_nextest_steps(document: dict) -> list<dict> {
+  const jobs: dict = document.jobs ?? {}
+  const nextest: dict = jobs.nextest ?? {}
+  const steps: list<dict> = nextest.steps ?? []
+  return steps.filter({ step -> step.name == "Run workspace nextest" }).to_list()
 }
 
 pub fn native_qualification_violations(
@@ -211,8 +216,30 @@ pub fn step_violations(
 
 pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolation> {
   let violations: list<LaneViolation> = []
-  const workflow_env = document?.env ?? {}
-  const jobs = document?.jobs ?? {}
+  const workflow_env: dict = document.env ?? {}
+  const jobs: dict = document.jobs ?? {}
+  if workflow == "macos-nightly.yml" {
+    const steps = workspace_nextest_steps(document)
+    const step = len(steps) == 1 ? steps[0] : nil
+    const step_env: dict = step?.env ?? {}
+    const nextest: dict = jobs.nextest ?? {}
+    const job_env: dict = nextest.env ?? {}
+    const required = step_env.HARN_EXT_LSP_FIXTURES_REQUIRED
+      ?? job_env.HARN_EXT_LSP_FIXTURES_REQUIRED
+      ?? workflow_env.HARN_EXT_LSP_FIXTURES_REQUIRED
+    if len(steps) != 1 || required != "1" || step?.["if"] != nil
+      || step?.["continue-on-error"] != nil {
+      violations = [
+        {
+          workflow: workflow,
+          job: "nextest",
+          command: to_string(step?.run ?? ""),
+          reason:
+            "MACOS_LSP_FIXTURES_UNMEASURED: expected unconditional required language-server fixtures",
+        },
+      ]
+    }
+  }
   for job in jobs.keys().sorted() {
     const job_env = jobs[job]?.env ?? {}
     let e2e_consumers = 0

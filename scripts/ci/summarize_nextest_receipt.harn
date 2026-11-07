@@ -1,7 +1,7 @@
 import { parse, parser } from "std/cli/argparse"
 import { SelectedInventory, selected_inventory } from "./nextest_inventory"
 
-type Receipt = {
+pub type Receipt = {
   reason: string,
   selected: int,
   run: int,
@@ -11,12 +11,35 @@ type Receipt = {
   missing: list<string>,
 }
 
+pub type ReceiptResult = {
+  receipt: Receipt,
+  status: int,
+  threads: int,
+  stress_count: int?,
+  format: string,
+}
+
 type NextestEvent = {type?: string, event?: string, name?: string}
 
-fn finished_receipt(inventory: SelectedInventory, events: string, runner_status: int) -> Receipt {
+fn finished_receipt(
+  inventory: SelectedInventory,
+  events: string,
+  runner_status: int,
+  stress_count: int?,
+) -> Receipt {
   let selected: dict<string, bool> = {}
   for name in inventory.selected {
-    selected[name] = true
+    if stress_count == nil {
+      selected[name] = true
+    } else {
+      const identity = name.split("$")
+      if len(identity) != 2 {
+        throw "inventory test identity has no unique binary separator: ${name}"
+      }
+      for iteration in range(0, unwrap(stress_count)) {
+        selected["${identity[0]}@stress-${iteration}$${identity[1]}"] = true
+      }
+    }
   }
   let finished: dict<string, string> = {}
   let line_number = 0
@@ -47,7 +70,7 @@ fn finished_receipt(inventory: SelectedInventory, events: string, runner_status:
       passed += 1
     }
   }
-  const missing = inventory.selected.filter({ name -> finished[name] == nil }).sorted()
+  const missing = selected.keys().filter({ name -> finished[name] == nil }).sorted()
   const failed = len(finished) - passed
   const reason = if len(missing) > 0 {
     "tests-not-run"
@@ -60,7 +83,7 @@ fn finished_receipt(inventory: SelectedInventory, events: string, runner_status:
   }
   return {
     reason: reason,
-    selected: len(inventory.selected),
+    selected: len(selected),
     run: len(finished),
     passed: passed,
     skipped: inventory.skipped,
@@ -78,6 +101,8 @@ fn main(harness: Harness) {
         {kind: "flag", name: "events", long: "--events", required: true},
         {kind: "flag", name: "runner_status", long: "--runner-status", required: true},
         {kind: "flag", name: "threads", long: "--threads", required: true},
+        {kind: "flag", name: "stress_count", long: "--stress-count"},
+        {kind: "flag", name: "format", long: "--format"},
       ],
     },
   )
@@ -91,9 +116,27 @@ fn main(harness: Harness) {
     }
     const status = unwrap(to_int(status_text))
     const threads = unwrap(to_int(threads_text))
+    const stress_text = options.stress_count
+    const stress_count = if stress_text == nil {
+      nil
+    } else {
+      if regex_match(r"^[1-9][0-9]*$", to_string(stress_text)) == nil {
+        throw "stress count is invalid"
+      }
+      unwrap(to_int(to_string(stress_text)))
+    }
+    const format = options.format ?? "human"
+    if !["human", "json"].contains(format) {
+      throw "receipt format is invalid"
+    }
     const inventory = selected_inventory(json_parse(harness.fs.read_text(options.inventory)))
-    const receipt = finished_receipt(inventory, harness.fs.read_text(options.events), status)
-    {receipt: receipt, status: status, threads: threads}
+    const receipt = finished_receipt(
+      inventory,
+      harness.fs.read_text(options.events),
+      status,
+      stress_count,
+    )
+    {receipt: receipt, status: status, threads: threads, stress_count: stress_count, format: format}
   }
   if is_err(outcome) {
     harness.stdio.eprintln(
@@ -101,16 +144,20 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(2)
   }
-  const result = unwrap(outcome)
+  const result = schema_expect<ReceiptResult>(unwrap(outcome), schema_of(ReceiptResult))
   const receipt = result.receipt
-  harness.stdio.println(
-    [
-      "thread_parity_receipt reason=${receipt.reason} threads=${result.threads} selected=${receipt.selected}",
-      "run=${receipt.run} passed=${receipt.passed} skipped=${receipt.skipped}",
-      "not_run=${len(receipt.missing)} failed=${receipt.failed} runner_status=${result.status}",
-    ]
-      .join(" "),
-  )
+  if result.format == "json" {
+    harness.stdio.println(json_stringify(result))
+  } else {
+    harness.stdio.println(
+      [
+        "thread_parity_receipt reason=${receipt.reason} threads=${result.threads} selected=${receipt.selected}",
+        "run=${receipt.run} passed=${receipt.passed} skipped=${receipt.skipped}",
+        "not_run=${len(receipt.missing)} failed=${receipt.failed} runner_status=${result.status}",
+      ]
+        .join(" "),
+    )
+  }
   for name in receipt.missing {
     harness.stdio.eprintln("thread_parity_missing_test ${name}")
   }

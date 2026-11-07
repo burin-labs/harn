@@ -58,7 +58,19 @@ Release and audit gates that call `make test` must have nextest installed
 what "the tests pass" means (#6145).
 
 Set `HARN_EXT_LSP_FIXTURES_REQUIRED=1` to make missing language-server fixtures
-fail rather than skip. CI sets this flag for both workspace runner modes.
+fail rather than skip. Linux and macOS workspace lanes install the pinned
+language servers and set this flag. The Rust Analyzer readiness fixture must
+apply a real rename and report that server before dependent cases can proceed.
+
+For macOS hostlib load qualification, dispatch the existing **macOS workspace
+tests** workflow from `main` with a reviewed `source_sha` and `hostlib_stress: true`.
+The ordinary workspace qualification runs first. Nextest then repeats the full
+hostlib selection 20 times at 32 test threads, with zero retries and the default
+deadline profile. The `macos-hostlib-stress` artifact retains the selected test
+inventory, every iteration's terminal events, test executable hashes and the
+complete-count summary. Missing named cases, unfinished iterations and duplicate
+terminal events fail qualification. A clean cohort qualifies that measured source
+and runner workload; it does not establish stability under every possible load.
 
 ## Share repeated test steps
 
