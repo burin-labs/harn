@@ -466,7 +466,9 @@ pub type ProviderCallResponseEvent = ProviderResponseToolProjection \
  * @effects: []
  * @errors: [validation]
  */
-pub fn provider_response_tool_calls(event: ProviderResponseToolProjection) -> list<unknown> {
+pub fn provider_response_tool_calls(
+  event: ProviderResponseToolProjection | ProviderCallResponseEvent,
+) -> list<unknown> {
   const inline = event.parsed_tool_calls
   const reference = event.parsed_tool_calls_ref
   const native = event.tool_calls
