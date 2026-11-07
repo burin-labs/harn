@@ -1,6 +1,7 @@
 // Trigger: a declared response requirement lacks supporting observations.
 // Effect: the live stop decision remains incomplete and names the pending row.
 // Negative: a supported read-only answer completes without invented tool calls.
+import { AgentGoalOutcome, AgentGoalRequirementSummary, AgentResult } from "std/agent/contracts"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
@@ -21,13 +22,24 @@ const ANSWER_EVIDENCE = {
   representative_artifact_ids: [],
 }
 
-fn check_goal_outcome(result: dict, expected: string) {
+fn check_goal_outcome(result: AgentResult, expected: string) -> AgentGoalOutcome {
   const goal = result.goal_outcome
-  assert(goal != nil, "A loop result must report its assessed goal outcome")
+  if goal == nil {
+    throw "A loop result must report its assessed goal outcome"
+  }
   assert_eq(goal.kind, expected)
   const terminal = transcript_events_by_kind(result.transcript, "agent_run_terminal")
   assert_eq(len(terminal), 1, "Exactly one terminal record must preserve the outcome")
   assert_eq(terminal[0].metadata.goal_outcome, goal)
+  return goal
+}
+
+fn required_requirements(goal: AgentGoalOutcome) -> AgentGoalRequirementSummary {
+  const requirements = goal.requirements
+  if requirements == nil {
+    throw "A declared requirement roster must have an assessed summary"
+  }
+  return requirements
 }
 
 fn check_goal_checkpoint(agent: HarnessAgent, captured: dict, store_root: string) {
@@ -74,9 +86,9 @@ fn check_late_finalization_failure(agent: HarnessAgent, assessment: dict) {
     },
   )
   assert_eq(result.error.category, "no_llm_call")
-  check_goal_outcome(result, "unknown")
-  assert_eq(result.goal_outcome.reason, "completion_not_accepted")
-  assert_eq(result.goal_outcome.requirements.met_count, 1)
+  const goal = check_goal_outcome(result, "unknown")
+  assert_eq(goal.reason, "completion_not_accepted")
+  assert_eq(required_requirements(goal).met_count, 1)
 }
 
 fn check_requirement_case(
@@ -146,10 +158,10 @@ fn check_requirement_case(
         assert_eq(len(harness.llm.mock_calls()), 2, "The later model judge must run")
       }
       assert_eq(captured.result.status == "done", expected_pending == 0)
-      check_goal_outcome(captured.result, expected_goal)
+      const goal = check_goal_outcome(captured.result, expected_goal)
       check_goal_checkpoint(harness.agent, captured, store_root)
-      assert_eq(captured.result.goal_outcome.requirements.required_count, 1)
-      assert_eq(captured.result.goal_outcome.requirements.pending_count, expected_pending)
+      assert_eq(required_requirements(goal).required_count, 1)
+      assert_eq(required_requirements(goal).pending_count, expected_pending)
       const receipts = captured.events.filter(
         fn(event) { return event.type == "typed_checkpoint"
           && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1" },
@@ -246,10 +258,13 @@ fn check_three_adjudicators(harness: Harness, delivery_met: bool) {
       )
       assert_eq(len(harness.llm.mock_calls()), 3, "Both model adjudicators must run")
       assert_eq(captured.result.status == "done", delivery_met)
-      check_goal_outcome(captured.result, delivery_met ? "achieved" : "partially_achieved")
+      const goal = check_goal_outcome(
+        captured.result,
+        delivery_met ? "achieved" : "partially_achieved",
+      )
       check_goal_checkpoint(harness.agent, captured, store_root)
-      assert_eq(captured.result.goal_outcome.requirements.met_count, delivery_met ? 3 : 2)
-      assert_eq(captured.result.goal_outcome.requirements.unmet_count, delivery_met ? 0 : 1)
+      assert_eq(required_requirements(goal).met_count, delivery_met ? 3 : 2)
+      assert_eq(required_requirements(goal).unmet_count, delivery_met ? 0 : 1)
       const receipts = captured.events.filter(
         fn(event) { return event.type == "typed_checkpoint"
           && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1" },
@@ -310,9 +325,9 @@ fn check_unassessed_scheduled_judge(harness: Harness) {
       )
       assert_eq(len(harness.llm.mock_calls()), 1, "The scheduled judge must not be due yet")
       assert(captured.result.status != "done", "A scheduled but unassessed requirement is pending")
-      check_goal_outcome(captured.result, "unknown")
+      const goal = check_goal_outcome(captured.result, "unknown")
       check_goal_checkpoint(harness.agent, captured, store_root)
-      assert_eq(captured.result.goal_outcome.reason, "requirements_unassessed")
+      assert_eq(goal.reason, "requirements_unassessed")
       const receipts = captured.events.filter(
         fn(event) { return event.type == "typed_checkpoint"
           && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1" },

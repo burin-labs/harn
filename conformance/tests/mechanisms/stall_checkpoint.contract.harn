@@ -1,11 +1,19 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { AgentStallCheckpoint } from "std/agent/stall_types"
 import { llm_text, with_llm_script } from "std/testing"
 import { workflow_execute } from "std/workflow/execute"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn call(name: string, id: string) {
   return {tool_calls: [{id: id, name: name, arguments: {}}]}
+}
+
+fn required_checkpoint(checkpoint: AgentStallCheckpoint?) -> AgentStallCheckpoint {
+  if checkpoint == nil {
+    throw "An enabled detector must return its session checkpoint"
+  }
+  return checkpoint
 }
 
 fn stage(harness: Harness, options: dict, script: list) {
@@ -75,7 +83,7 @@ pipeline default(harness: Harness) {
   }
   const first = stage(harness, options, [call("edit", "e"), call("verify", "v")])
   require calls == ["edit", "verify"], "first stage must actually execute edit and verification"
-  const checkpoint = first.stall_checkpoint
+  const checkpoint = required_checkpoint(first.stall_checkpoint)
   require checkpoint.dispatch_position == checkpoint.consumed_dispatch_position + 1,
     "final dispatch must remain pending at handoff"
   const latest = agent_stall_checkpoint_state(harness.agent, checkpoint)
@@ -86,7 +94,10 @@ pipeline default(harness: Harness) {
     options + {stall_checkpoint: checkpoint},
     [llm_text("Done. ##DONE##")],
   )
-  const committed = agent_stall_checkpoint_state(harness.agent, second.stall_checkpoint)
+  const committed = agent_stall_checkpoint_state(
+    harness.agent,
+    required_checkpoint(second.stall_checkpoint),
+  )
   require committed.write_epoch == 1 && committed.verified_write_epoch == 1,
     "handoff must consume evidence exactly once"
   require calls == ["edit", "verify"], "reporting must not repeat the edit"
@@ -105,7 +116,10 @@ pipeline default(harness: Harness) {
   require calls == ["edit", "verify"], "invalid checkpoint cannot reach tool dispatch"
   const one_turn = options + {session_id: "repair-" + harness.random.uuid(), max_iterations: 1}
   const failing = stage(harness, one_turn, [call("fail", "f1")])
-  const diagnosed = agent_stall_checkpoint_state(harness.agent, failing.stall_checkpoint)
+  const diagnosed = agent_stall_checkpoint_state(
+    harness.agent,
+    required_checkpoint(failing.stall_checkpoint),
+  )
   require diagnosed.last_diagnostic_class == "fail",
     "failed verifier must establish current failure"
   const read = stage(
@@ -113,7 +127,8 @@ pipeline default(harness: Harness) {
     one_turn + {stall_checkpoint: failing.stall_checkpoint},
     [call("look", "l1")],
   )
-  require agent_stall_checkpoint_state(harness.agent, read.stall_checkpoint).last_diagnostic_class
+  require agent_stall_checkpoint_state(harness.agent, required_checkpoint(read.stall_checkpoint))
+    .last_diagnostic_class
     == "fail",
     "successful read must not clear failed verification"
   const before_deferred = len(calls)
@@ -124,7 +139,10 @@ pipeline default(harness: Harness) {
   )
   require len(calls) == before_deferred + 1 && calls[len(calls) - 1] == "edit",
     "canonical phase boundary must execute mutation and defer verification"
-  const pending_repair = agent_stall_checkpoint_state(harness.agent, deferred.stall_checkpoint)
+  const pending_repair = agent_stall_checkpoint_state(
+    harness.agent,
+    required_checkpoint(deferred.stall_checkpoint),
+  )
   require pending_repair.last_diagnostic_class == "fail" && pending_repair.reverify_owed,
     "deferred verification cannot clear the failure or the reverify obligation"
   const repaired = stage(
@@ -134,8 +152,10 @@ pipeline default(harness: Harness) {
   )
   require calls[len(calls) - 2] == "fail" && calls[len(calls) - 1] == "verify",
     "both ordered verifications must execute"
-  require agent_stall_checkpoint_state(harness.agent, repaired.stall_checkpoint)
-    .last_diagnostic_class
+  require agent_stall_checkpoint_state(
+    harness.agent,
+    required_checkpoint(repaired.stall_checkpoint),
+  ).last_diagnostic_class
     == "pass",
     "last executed verification must clear the earlier failure"
   const before_stop = len(calls)
@@ -213,8 +233,9 @@ pipeline default(harness: Harness) {
   require calls.slice(before_workflow, len(calls)) == ["edit", "look", "verify", "look"],
     "workflow must execute the declared tools in stage order: ${json_stringify(calls.slice(before_workflow, len(calls)))}"
   const workflow_checkpoint = workflow.stall_checkpoints[workflow_session]
-  require workflow_checkpoint != nil,
-    "workflow must return A's checkpoint under its declared session identity"
+  if workflow_checkpoint == nil {
+    throw "workflow must return A's checkpoint under its declared session identity"
+  }
   const workflow_state = agent_stall_checkpoint_state(harness.agent, workflow_checkpoint)
   require workflow_state.write_epoch == 1 && workflow_state.verified_write_epoch == 1,
     "workflow must preserve A's edit across B before A's final verification"
@@ -225,8 +246,10 @@ pipeline default(harness: Harness) {
     "unnamed stage must own a fresh session checkpoint"
   for id in keys(workflow.stall_checkpoints) {
     if id != workflow_session {
-      require agent_stall_checkpoint_state(harness.agent, workflow.stall_checkpoints[id])
-        .write_epoch
+      require agent_stall_checkpoint_state(
+        harness.agent,
+        required_checkpoint(workflow.stall_checkpoints[id]),
+      ).write_epoch
         == 0,
         "unrelated sessions must not inherit A's edit"
     }
@@ -240,7 +263,7 @@ pipeline default(harness: Harness) {
   )
   const chained_state = agent_stall_checkpoint_state(
     harness.agent,
-    chained.stall_checkpoints[workflow_session],
+    required_checkpoint(chained.stall_checkpoints[workflow_session]),
   )
   require chained_state.write_epoch == 1 && chained_state.verified_write_epoch == 1,
     "explicitly chained workflow must retain verified evidence without double-counting"

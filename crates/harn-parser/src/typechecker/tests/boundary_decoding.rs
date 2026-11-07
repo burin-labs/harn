@@ -79,14 +79,14 @@ fn untyped_optional_chain_splits_an_open_row_by_declared_field() {
 
 #[test]
 fn open_record_reads_preserve_declared_fields_and_typed_tails() {
-    let source = r#"
+    let source = r"
 type Event = {name: string, metadata?: {source: string}, ...dict}
 fn known(event: Event) -> string { return event.name }
 fn optional(event: Event?) -> string? { return event?.metadata?.source }
 fn map_tail(event: {tag: string, ...dict<string, {name: string}>}) -> string {
   return event.extension.name
 }
-"#;
+";
     let diagnostics = check_source_with_source(source);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let wrong = errors(

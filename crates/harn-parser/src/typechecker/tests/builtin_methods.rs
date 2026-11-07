@@ -144,7 +144,7 @@ fn joined(values: list<int> | list<string>) -> list<int | string> {
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let erased_callback = errors(
-        r#"
+        r"
 type Step = {name: string}
 type Job = {steps?: list<Step>}
 fn wrong(job: Job) -> list<Step> {
@@ -153,7 +153,7 @@ fn wrong(job: Job) -> list<Step> {
     return wrong == 0
   }).to_list()
 }
-"#,
+",
     );
     assert_eq!(erased_callback.len(), 1, "{erased_callback:?}");
     assert!(
