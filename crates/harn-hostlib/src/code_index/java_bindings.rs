@@ -33,6 +33,10 @@ enum BindingType<T> {
     Known(T),
 }
 
+fn is_field_declaration(node: Node<'_>) -> bool {
+    matches!(node.kind(), "field_declaration" | "constant_declaration")
+}
+
 impl<T> BindingType<T> {
     fn from_optional(value: Option<T>) -> Self {
         value.map_or(Self::Unknown, Self::Known)
@@ -325,19 +329,25 @@ impl<'a> JavaBindings<'a> {
                     return BindingType::Absent;
                 };
                 for field in direct_members(body) {
-                    if field.kind() == "field_declaration" {
-                        let ty = self.declared_type(field, name);
+                    if is_field_declaration(field) {
+                        let ty = self.declared_type(field, name, None);
                         if !matches!(ty, BindingType::Absent) {
-                            return ty.and_then(|ty| self.resolve_type(ty, at));
+                            return ty.and_then(|ty| self.resolve_type(ty, ty));
                         }
+                    } else if field.kind() == "enum_constant"
+                        && field
+                            .child_by_field_name("name")
+                            .is_some_and(|id| text(id, self.source) == name)
+                    {
+                        return BindingType::from_optional(self.declaration_owner(field));
                     }
                 }
-                // Captured outer-instance and inherited fields need a semantic resolver.
-                return if has_supertypes(scope) {
-                    BindingType::Unknown
-                } else {
-                    BindingType::Absent
-                };
+                if has_supertypes(scope) {
+                    return BindingType::Unknown;
+                }
+                if fields_only {
+                    return BindingType::Absent;
+                }
             }
             if !fields_only {
                 if is_local_scope(scope) {
@@ -347,7 +357,7 @@ impl<'a> JavaBindings<'a> {
                             break;
                         }
                         if child.kind() == "local_variable_declaration" {
-                            let ty = self.declared_type(child, name);
+                            let ty = self.declared_type(child, name, Some(at.start_byte()));
                             if !matches!(ty, BindingType::Absent) {
                                 if matches!(
                                     scope.kind(),
@@ -360,7 +370,7 @@ impl<'a> JavaBindings<'a> {
                         }
                     }
                     if let Some(ty) = locals.last() {
-                        return ty.and_then(|ty| self.resolve_type(ty, at));
+                        return ty.and_then(|ty| self.resolve_type(ty, ty));
                     }
                 }
                 if let Some(parameters) = scope.child_by_field_name("parameters") {
@@ -382,7 +392,7 @@ impl<'a> JavaBindings<'a> {
                             return BindingType::from_optional(
                                 parameter
                                     .child_by_field_name("type")
-                                    .and_then(|ty| self.resolve_type(ty, at)),
+                                    .and_then(|ty| self.resolve_type(ty, ty)),
                             );
                         }
                     }
@@ -406,13 +416,19 @@ impl<'a> JavaBindings<'a> {
         BindingType::Absent
     }
 
-    fn declared_type<'n>(&self, declaration: Node<'n>, name: &str) -> BindingType<Node<'n>> {
+    fn declared_type<'n>(
+        &self,
+        declaration: Node<'n>,
+        name: &str,
+        before: Option<usize>,
+    ) -> BindingType<Node<'n>> {
         children(declaration)
             .find(|child| {
                 child.kind() == "variable_declarator"
-                    && child
-                        .child_by_field_name("name")
-                        .is_some_and(|id| text(id, self.source) == name)
+                    && child.child_by_field_name("name").is_some_and(|id| {
+                        text(id, self.source) == name
+                            && before.is_none_or(|before| id.start_byte() < before)
+                    })
             })
             .map_or(BindingType::Absent, |variable| {
                 if children(variable).any(|child| child.kind() == "dimensions") {

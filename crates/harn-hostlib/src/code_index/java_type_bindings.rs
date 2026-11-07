@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    children, descendants, has_supertypes, is_local_scope, is_type, local_declarations, text,
-    BindingType, JavaBindings,
+    children, descendants, has_supertypes, is_field_declaration, is_local_scope, is_type,
+    local_declarations, text, BindingType, JavaBindings,
 };
 use crate::ast::java::type_path;
 use crate::host_call::HostCallContext;
@@ -34,11 +34,9 @@ impl JavaTypeCatalog {
                     }
                 }
             }
-            if node.kind() == "method_declaration"
+            if matches!(node.kind(), "method_declaration" | "enum_constant")
                 || node.kind() == "variable_declarator"
-                    && node
-                        .parent()
-                        .is_some_and(|parent| parent.kind() == "field_declaration")
+                    && node.parent().is_some_and(is_field_declaration)
             {
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Some(owner) = std::iter::successors(node.parent(), |node| node.parent())
@@ -60,6 +58,27 @@ impl JavaTypeCatalog {
 
     pub fn unique(&self, name: &str) -> bool {
         self.declarations.get(name) == Some(&1)
+    }
+
+    fn checked_identity(
+        &self,
+        identity: String,
+        require_declaration: bool,
+    ) -> Result<String, String> {
+        if require_declaration && !self.unique(&identity) {
+            return Err("the qualified Java type requires a proven workspace declaration or compiler resolution".into());
+        }
+        let mut qualifier = identity.as_str();
+        while let Some((prefix, _)) = qualifier.rsplit_once('.') {
+            if self.contains(prefix) && !self.unique(&identity) {
+                return Err("the qualified Java member type is not uniquely declared by its workspace owner".into());
+            }
+            qualifier = prefix;
+        }
+        if self.contains(&identity) && !self.unique(&identity) {
+            return Err("duplicate Java type declarations are ambiguous".into());
+        }
+        Ok(identity)
     }
 }
 
@@ -291,7 +310,7 @@ impl JavaBindings<'_> {
                         "the Java static import binds both a type and a value member".into(),
                     );
                 }
-                return Ok(Some(identity));
+                return catalog.checked_identity(identity, true).map(Some);
             }
             if !matches!(scope.kind(), "identifier" | "scoped_identifier") {
                 break;
@@ -372,6 +391,32 @@ impl JavaBindings<'_> {
     }
 
     fn lookup_type_name(
+        &self,
+        parts: &[String],
+        at: Node<'_>,
+        catalog: &JavaTypeCatalog,
+        prospective: Option<&str>,
+    ) -> Result<String, String> {
+        let identity = self.lookup_type_name_in_scope(parts, at, catalog, prospective)?;
+        if prospective == Some(identity.as_str()) && !catalog.contains(&identity) {
+            return Ok(identity);
+        }
+        if parts.len() > 1 && identity.starts_with('#') {
+            return Err(
+                "qualified Java local or parameter member types require compiler resolution".into(),
+            );
+        }
+        let qualified = parts.len() > 1
+            || self.imports.iter().any(|import| {
+                !import.wildcard
+                    && parts
+                        .first()
+                        .is_some_and(|first| import.short_name() == first)
+            });
+        catalog.checked_identity(identity, qualified)
+    }
+
+    fn lookup_type_name_in_scope(
         &self,
         parts: &[String],
         at: Node<'_>,

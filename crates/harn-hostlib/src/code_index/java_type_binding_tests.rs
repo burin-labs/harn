@@ -29,6 +29,10 @@ fn type_namespace_preserves_imports_nested_types_parameters_and_namesakes() {
         ("package lab; class Page { void use() { class DocumentStore {} DocumentStore local; } }", 0),
         ("package lab; class Page { int use(DocumentStore value) { int DocumentStore = 1; return DocumentStore; } }", 1),
         ("package lab; class Page { int use() { return DocumentStore.size(); } }", 1),
+        ("package lab; class Holder { int size() { return 42; } } class Outer { Holder DocumentStore = new Holder(); class Inner { int use() { return DocumentStore.size(); } } }", 0),
+        ("package lab; class Holder { int size() { return 42; } } record Row(Holder DocumentStore) { int use() { return DocumentStore.size(); } }", 0),
+        ("package lab; enum Choice { DocumentStore; int size() { return 43; } int use() { return DocumentStore.size(); } }", 0),
+        ("package lab; class Holder { int size() { return 42; } } interface Page { Holder DocumentStore = new Holder(); default int use() { return DocumentStore.size(); } }", 0),
     ] {
         let catalog = catalog(&[TARGET, OTHER, source]);
         let tree = parse_tree(source, Language::Java).unwrap();
@@ -71,6 +75,91 @@ fn nested_type_and_constructor_identity_share_one_declared_owner() {
         1,
         "the same-named method is not a constructor"
     );
+    let reference = descendants(tree.root_node())
+        .filter(|node| node.kind() == "type_identifier" && text(*node, source) == "DocumentStore")
+        .last()
+        .unwrap();
+    assert!(!bindings
+        .type_name_capture(reference, "DocumentLibrary", &catalog)
+        .unwrap());
+}
+
+#[test]
+fn qualified_member_types_require_a_proven_declaring_owner() {
+    let base =
+        "package lab; class Base { static class DocumentStore {} } class Sub extends Base {}";
+    for (source, expected) in [
+        ("package lab; class Page { Base.DocumentStore field; }", Some("lab.Base.DocumentStore")),
+        ("package lab; class Page { Sub.DocumentStore field; }", None),
+        ("package app; import lab.Sub.DocumentStore; class Page { DocumentStore field; }", None),
+        ("package app; class Page { ext.Sub.DocumentStore field; }", None),
+        ("package app; import ext.Sub.DocumentStore; class Page { DocumentStore field; }", None),
+        ("package lab; class Page { void use() { class Local extends Base {} Local.DocumentStore field; } }", None),
+    ] {
+        let catalog = catalog(&[base, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let occurrences = descendants(tree.root_node()).filter(|node| {
+            matches!(node.kind(), "identifier" | "type_identifier") && text(*node, source) == "DocumentStore"
+        }).collect::<Vec<_>>();
+        assert!(!occurrences.is_empty());
+        for node in occurrences {
+            let actual = bindings.type_occurrence(node, &catalog);
+            if let Some(expected) = expected {
+                assert_eq!(actual.unwrap().as_deref(), Some(expected), "{source}");
+            } else {
+                assert!(actual.is_err(), "an inherited member must refuse: {source}: {actual:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn later_local_declarators_do_not_shadow_an_earlier_initializer() {
+    let source = "package lab; class DocumentStore { static Holder make() { return new Holder(); } } class Holder {} class Page { void use() { Holder first = DocumentStore.make(), DocumentStore = new Holder(); DocumentStore.toString(); } }";
+    let catalog = catalog(&[source]);
+    let tree = parse_tree(source, Language::Java).unwrap();
+    let bindings = JavaBindings::new(&tree, source);
+    let mut receiver_nodes = descendants(tree.root_node())
+        .filter(|node| {
+            node.kind() == "identifier"
+                && text(*node, source) == "DocumentStore"
+                && node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "method_invocation")
+        })
+        .collect::<Vec<_>>();
+    receiver_nodes.sort_by_key(|node| node.start_byte());
+    let receivers = receiver_nodes
+        .into_iter()
+        .map(|node| bindings.type_occurrence(node, &catalog).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(receivers, [Some("lab.DocumentStore".into()), None]);
+}
+
+#[test]
+fn implicit_static_fields_compete_with_nested_types_in_single_imports() {
+    for owner in [
+        "package lab; interface Owner { int DocumentStore = 1; class DocumentStore {} }",
+        "package lab; enum Owner { DocumentStore; static class DocumentStore {} }",
+    ] {
+        let source = "package app; import static lab.Owner.DocumentStore; class Page { Object value = DocumentStore; }";
+        let catalog = catalog(&[owner, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let import = descendants(tree.root_node())
+            .find(|node| {
+                node.kind() == "identifier"
+                    && text(*node, source) == "DocumentStore"
+                    && std::iter::successors(node.parent(), |node| node.parent())
+                        .any(|node| node.kind() == "import_declaration")
+            })
+            .unwrap();
+        assert!(
+            bindings.type_occurrence(import, &catalog).is_err(),
+            "{owner}"
+        );
+    }
 }
 
 #[test]
