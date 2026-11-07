@@ -169,14 +169,23 @@ preferred_tool_format = "native"
         let frame = client.recv();
         match frame["method"].as_str() {
             Some("host/capabilities") => {
-                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{}}));
+                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],
+                    "result":{"process":["exec", "prepare", "execute_prepared", "release_prepared"]}}));
             }
-            Some("host/call") => {
-                assert_eq!(frame["params"]["name"], "process.exec");
+            Some("host/call") if frame["params"]["name"] == "process.prepare" => {
+                assert_eq!(frame["params"]["args"]["operation"], "exec");
                 assert_eq!(
-                    frame["params"]["args"]["argv"],
+                    frame["params"]["args"]["request"]["argv"],
                     json!(["pending-host-command"])
                 );
+                client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{
+                    "status":"bound", "token":"pending-command",
+                    "invocation":{"argv":["pending-host-command"],"cwd":temp.path()}
+                }}));
+            }
+            Some("host/call") => {
+                assert_eq!(frame["params"]["name"], "process.execute_prepared");
+                assert_eq!(frame["params"]["args"]["token"], "pending-command");
                 break;
             }
             _ => assert_ne!(
@@ -186,11 +195,24 @@ preferred_tool_format = "native"
         }
     }
     client.send(&json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":session}}));
+    let mut released = false;
     loop {
         let frame = client.recv();
+        if frame["method"] == "host/call" {
+            assert_eq!(frame["params"]["name"], "process.release_prepared");
+            assert_eq!(frame["params"]["args"]["token"], "pending-command");
+            client.send(&json!({"jsonrpc":"2.0","id":frame["id"],"result":{
+                "status":"released", "token":"pending-command"
+            }}));
+            released = true;
+        }
         if frame["id"] == 3 {
             assert!(frame["error"].is_null(), "{frame}");
             assert_eq!(frame["result"]["stopReason"], "cancelled");
+            assert!(
+                released,
+                "executor cleanup must precede terminal cancellation"
+            );
             break;
         }
     }
@@ -736,7 +758,9 @@ require_declared_operations_served = {fail_closed}
     let mut client = spawn_acp(&temp, "agent.harn");
     let (_, init) = send_request(
         &mut client,
-        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "clientCapabilities":{"_meta":{"harn":{"sessionUpdateExtensions":["log"]}}}
+        }}),
     );
     assert!(init["error"].is_null());
     let (_, created) = send_request(
@@ -1234,6 +1258,14 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     write_fixture(&temp);
 
     let mut client = spawn_acp(&temp, "acp_fixture.harn");
+
+    let (_, initialized) = send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+            "clientCapabilities":{"_meta":{"harn":{"sessionUpdateExtensions":["session_truncated"]}}}
+        }}),
+    );
+    assert!(initialized["error"].is_null(), "{initialized}");
 
     let (_, created) = send_request(
         &mut client,
