@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 import {githubArchiveProducer,observerDeclarationName,observerDispatchActor,observerRunName,qualifyArchiveProducer} from '../lib/consumer-observer.mjs';
 
 const targets=JSON.parse(execFileSync('bash',[fileURLToPath(new URL('../lib/candidate_archive_contract.sh',import.meta.url)),'--targets-json'],{encoding:'utf8'}));
@@ -165,12 +165,10 @@ test('historical source admission reads the exact manifest bytes under its main 
     const historicalJobs=jobs.map(job=>({...job,head_sha:policy}));
     const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository:'burin-labs/harn',
       sourceCommit:source,runId:'42',runAttempt:'1',artifacts:[]};
-    fs.writeFileSync(path.join(scratch,'candidate-manifest.json'),JSON.stringify(manifest));
-    execFileSync('zip',['-j',path.join(scratch,'manifest.zip'),path.join(scratch,'candidate-manifest.json')]);
-    const bytes=fs.readFileSync(path.join(scratch,'manifest.zip'));
+    const archived=archiveJson(scratch,'candidate-manifest.json',manifest,{});
+    const bytes=fs.readFileSync(archived.archive);
     const historicalArtifacts=artifacts.map(item=>({...item,workflow_run:{id:42,head_sha:policy},
-      ...(item.name===`candidate-manifest-${source}`?{size_in_bytes:bytes.length,
-        digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`}:{})}));
+      ...(item.name===`candidate-manifest-${source}`?archived.metadata:{})}));
     historicalArtifacts.unshift({...historicalArtifacts.at(-2),id:999,created_at:'2026-11-02T09:00:01Z',
       digest:`sha256:${'e'.repeat(64)}`});
     const read=async(url)=>{
@@ -206,13 +204,8 @@ test('actual admission permits a pending audit only for its own live candidate',
     const child={id:73,run_attempt:1,head_sha:'c'.repeat(40),head_repository:{full_name:'acme/widget-host'},
       path:'.github/workflows/rehearsal.yml',head_branch:'main',event:'workflow_dispatch',status:'in_progress',
       actor:{login:observerDispatchActor,type:'Bot'},display_title:observerRunName(context)};
-    const declaration=path.join(scratch,'consumer-observer.json'),archive=path.join(scratch,'declaration.zip');
-    fs.writeFileSync(declaration,JSON.stringify(context));
-    const zipped=spawnSync('zip',['-j',archive,declaration],{encoding:'utf8'});
-    assert.equal(zipped.status,0,zipped.stderr);
-    const bytes=fs.readFileSync(archive);
-    const declarationArtifact={id:500,name:observerDeclarationName(context),expired:false,size_in_bytes:bytes.length,
-      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:42,head_sha:source}};
+    const {archive,metadata:declarationArtifact}=archiveJson(scratch,'consumer-observer.json',context,
+      {id:500,name:observerDeclarationName(context),workflow_run:{id:42,head_sha:source}});
     const fixture=path.join(scratch,'fixture.json'),preload=path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
       const data=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));

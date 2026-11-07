@@ -13,6 +13,7 @@ import {
   createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
   readRetry,
 } from '../lib/consumer-observer.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 
 const context = {
   schema: 'harn.consumer_observer.v2',
@@ -176,7 +177,7 @@ test('a refused census read carries status and rate limit, retries one exhausted
   const { reason, line } = observerRefusal(error, 'job_timing_unmeasured');
   assert.equal(reason, 'observer_census_read_refused');
   assert.equal(line, 'CONSUMER_OBSERVER reason=observer_census_read_refused status=403 '
-    + 'ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=4102444800 ratelimit_resource=core');
+    + 'ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=4102444800 ratelimit_resource=core attempts=1');
   assert.ok(!/widget-host|acme|73/.test(line), 'the public line never names the consumer repository or run');
   const forged = Object.assign(new Error('x'), { diagnostic: { status: 'acme/widget-host', ratelimit_resource: 'a b' } });
   assert.equal(observerRefusal(forged, 'fallback_reason').line, 'CONSUMER_OBSERVER reason=fallback_reason');
@@ -226,7 +227,7 @@ test('a run read retries a rate limit, a server error or a dropped connection, a
       const error = await denied.result.then(() => assert.fail('a denial must reject'), failure => failure);
       assert.equal(denied.seen.length, 1, `a ${status} denial is not retried`);
       assert.equal(observerRefusal(error, 'fallback').line,
-        `CONSUMER_OBSERVER reason=run_read_refused status=${status} ratelimit_remaining=4000`);
+        `CONSUMER_OBSERVER reason=run_read_refused status=${status} ratelimit_remaining=4000 attempts=1`);
     }
     const exhausted = read([refused(503), refused(503), refused(503), refused(503), refused(503)]);
     await assert.rejects(exhausted.result, /run_read_refused/);
@@ -408,20 +409,9 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     const parentFile = path.join(scratch, 'parent.json');
     const childFile = path.join(scratch, 'child.json');
     const censusFile = path.join(scratch, 'census.json');
-    const declarationFile = path.join(scratch, 'consumer-observer.json');
-    const archiveFile = path.join(scratch, 'declaration.zip');
-    fs.writeFileSync(declarationFile, JSON.stringify(context));
-    const zipped = spawnSync('zip', ['-j', archiveFile, declarationFile], {
-      env: { PATH: process.env.PATH, LC_ALL: 'C' }, encoding: 'utf8',
-    });
-    assert.equal(zipped.status, 0, zipped.stderr);
-    const archiveBytes = fs.readFileSync(archiveFile);
-    const census = { total_count: 1, artifacts: [{
-      id: 11, name: observerDeclarationName(context), expired: false,
-      workflow_run: { id: 42, head_sha: context.parent_head_sha },
-      size_in_bytes: archiveBytes.length,
-      digest: `sha256:${createHash('sha256').update(archiveBytes).digest('hex')}`,
-    }] };
+    const {archive:archiveFile,metadata}=archiveJson(scratch,'consumer-observer.json',context,
+      {id:11,name:observerDeclarationName(context),workflow_run:{id:42,head_sha:context.parent_head_sha}});
+    const census = {total_count:1,artifacts:[metadata]};
     fs.writeFileSync(censusFile, JSON.stringify(census));
     fs.writeFileSync(eventFile, JSON.stringify(event));
     fs.writeFileSync(preload, `import fs from 'node:fs';
