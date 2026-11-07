@@ -185,14 +185,20 @@
     "agentNotifications": [
       "session/message",
       "session/update",
-      "terminal/output"
+      "terminal/output",
+      "elicitation/complete",
+      "$/cancel_request"
     ],
     "clientMethods": [
       "fs/read_text_file",
       "fs/write_text_file",
       "terminal/create",
+      "terminal/output",
+      "terminal/release",
+      "terminal/wait_for_exit",
       "terminal/kill",
-      "session/request_permission"
+      "session/request_permission",
+      "elicitation/create"
     ],
     "contentBlockTypes": [
       "text",
@@ -1059,6 +1065,24 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/orchestration/records/view.rs"
+    },
+    {
+      "artifact": "schemas/command-preparation.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::stdlib::host",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/stdlib/host/prepared_command/remote.rs"
+    },
+    {
+      "artifact": "schemas/command-release.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::stdlib::host",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/stdlib/host/prepared_command/remote.rs"
     },
     {
       "artifact": "schemas/inference-admission-request.schema.json",

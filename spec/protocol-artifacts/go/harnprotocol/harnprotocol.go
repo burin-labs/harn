@@ -75,8 +75,12 @@ var ACPClientMethods = []ACPClientMethod{
 	"fs/read_text_file",
 	"fs/write_text_file",
 	"terminal/create",
+	"terminal/output",
+	"terminal/release",
+	"terminal/wait_for_exit",
 	"terminal/kill",
 	"session/request_permission",
+	"elicitation/create",
 }
 
 // ACPAgentNotification is the named string type for the ACPAgentNotifications wire vocabulary.
@@ -87,6 +91,8 @@ var ACPAgentNotifications = []ACPAgentNotification{
 	"session/message",
 	"session/update",
 	"terminal/output",
+	"elicitation/complete",
+	"$/cancel_request",
 }
 
 // ACPSessionUpdate is the named string type for the ACPSessionUpdates wire vocabulary.

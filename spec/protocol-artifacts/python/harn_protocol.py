@@ -277,13 +277,19 @@ ACP_CLIENT_METHODS: tuple = (
     "fs/read_text_file",
     "fs/write_text_file",
     "terminal/create",
+    "terminal/output",
+    "terminal/release",
+    "terminal/wait_for_exit",
     "terminal/kill",
     "session/request_permission",
+    "elicitation/create",
 )
 ACP_AGENT_NOTIFICATIONS: tuple = (
     "session/message",
     "session/update",
     "terminal/output",
+    "elicitation/complete",
+    "$/cancel_request",
 )
 ACP_SESSION_UPDATES: tuple = (
     "user_message",
@@ -662,14 +668,20 @@ class ACPClientMethod(str, Enum):
     FS_READ_TEXT_FILE = "fs/read_text_file"
     FS_WRITE_TEXT_FILE = "fs/write_text_file"
     TERMINAL_CREATE = "terminal/create"
+    TERMINAL_OUTPUT = "terminal/output"
+    TERMINAL_RELEASE = "terminal/release"
+    TERMINAL_WAIT_FOR_EXIT = "terminal/wait_for_exit"
     TERMINAL_KILL = "terminal/kill"
     SESSION_REQUEST_PERMISSION = "session/request_permission"
+    ELICITATION_CREATE = "elicitation/create"
 
 
 class ACPAgentNotification(str, Enum):
     SESSION_MESSAGE = "session/message"
     SESSION_UPDATE = "session/update"
     TERMINAL_OUTPUT = "terminal/output"
+    ELICITATION_COMPLETE = "elicitation/complete"
+    CANCEL_REQUEST = "$/cancel_request"
 
 
 class ACPSessionUpdate(str, Enum):
