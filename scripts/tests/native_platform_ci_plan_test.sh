@@ -112,6 +112,11 @@ assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir
 write_paths vm_runtime_tests_dir crates/harn-vm/src/vm_tests/tests_runtime/process_sandbox.rs
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_tests_dir"
 
+write_paths vm_runtime_integration crates/harn-vm/tests/native_vm/vm_tests/tests_runtime/builtin_dispatch.rs
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_integration"
+write_paths vm_runtime_shared_harness crates/harn-vm/tests/support/native_vm.rs
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_shared_harness"
+
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 write_paths linked_package_manifest crates/harn-package/src/package/manifest.rs
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/linked_package_manifest"

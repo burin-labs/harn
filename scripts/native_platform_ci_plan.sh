@@ -210,6 +210,9 @@ path_matches_platform() {
   if [[ "$path" =~ ^crates/(harn-package/src/package/manifest(\.rs|/.*)|harn-vm/src/connectors/manifest/.*)$ ]]; then
     return 0
   fi
+  if [[ "$path" =~ ^crates/harn-vm/tests/(native_vm/.*|support/native_vm\.rs)$ ]]; then
+    return 0
+  fi
   [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-modules/src/package_execution(/.*|\.rs)|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm_tests/tests_runtime(/.*|\.rs))|crates/harn-vm/tests/harn_vm/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/harn_hostlib/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|commands/dump_protocol_artifacts/.*|package/manifest\.rs)|spec/protocol-artifacts/HarnProtocol\.swift|\.github/workflows/macos-nightly\.yml)$ ]]
 }
 

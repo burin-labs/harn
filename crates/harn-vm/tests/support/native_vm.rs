@@ -2,8 +2,7 @@
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
-use crate::vm::*;
-use crate::{Chunk, InlineCacheEntry, VmError, VmValue};
+use crate::{Chunk, InlineCacheEntry, Vm, VmError, VmValue};
 use harn_clock::test_support::run_local;
 use harn_lexer::Lexer;
 use harn_parser::Parser;
