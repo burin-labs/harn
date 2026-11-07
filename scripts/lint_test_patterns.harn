@@ -27,6 +27,8 @@
 import { scan_glob } from "./path_visibility.harn"
 import { is_mechanically_checked_source_projection } from "./source_projections.harn"
 
+type HarnessClockFixture = {mode: string, clock_at_unix_ms?: int}
+
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // Proves a writer stays blocked on the workspace write lease while a rename
   // commits. Blocked progress is only observable over time; a slow host can
@@ -206,6 +208,11 @@ const CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.h
 // growing it.
 const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/_common.harn",
+  // The child blocks in a cancellable wait after reporting readiness; the
+  // parent sends SIGTERM and polls for exit instead of waiting out its timer.
+  "conformance/tests/stdlib/signal_process_sigterm.harn",
+  // Bounded condition probes observe real child-process readiness and death.
+  "conformance/tests/mechanisms/stop_kills_what_the_worker_started.contract.harn",
   "conformance/tests/agents/daemon_stdlib_wrappers.harn",
   "conformance/tests/agents/worker_retriggerable.harn",
   "conformance/tests/agents/workflow_messages.harn",
@@ -1079,15 +1086,14 @@ pub fn random_fixed_port_pattern() -> string {
 }
 
 /**
- * `sleep(<digit>` / `time.sleep(<digit>` at the start of a line or after
- * a non-identifier character — the ERE
- * `(^|[^_a-zA-Z])(sleep|time\.sleep)\([0-9]` from the bash lint.
+ * `sleep(<digit>` / `time.sleep(<digit>` / `harness.clock.sleep_ms(<digit>` after
+ * a non-identifier character.
  */
 pub fn literal_sleep_pattern() -> string {
   // `\n` excluded from the negated class: the whole-file scan would
   // otherwise anchor a match on the previous line's trailing newline and
   // misattribute the line number (grep tests each line standalone).
-  return r"(^|[^_a-zA-Z\n])(sleep|time\.sleep)\([0-9]"
+  return r"(^|[^_a-zA-Z\n])(sleep|time\.sleep|harness\.clock\.sleep_ms)\([0-9]"
 }
 
 /** Direct host wall-clock reads forbidden in runtime code (#1439). */
@@ -1467,11 +1473,20 @@ pipeline main(harness: Harness, task: unknown) {
     }
     // Files that install a clock mock are exempt because `sleep(...)` and
     // `harness.clock.sleep_ms(...)` advance the mock instead of suspending the runtime.
-    if has_mock_time(f.text) {
+    const fixture_path = f.rel.replace(".harn", ".harness.json")
+    let fixture_mocked = false
+    if harness.fs.exists(fixture_path) {
+      const fixture = json_decode(
+        harness.fs.read_text(fixture_path),
+        schema_of(HarnessClockFixture),
+      )?
+      fixture_mocked = fixture.mode == "mock" && fixture.clock_at_unix_ms != nil
+    }
+    if has_mock_time(f.text) || fixture_mocked {
       continue
     }
     for hit in find_hits(f.text, literal_sleep_pattern()) {
-      harness.stdio.println("  ${hit.line_no}:${hit.text}")
+      harness.stdio.println("  ${f.rel}:${hit.line_no}:${hit.text}")
       harness.stdio.println(
         "    hint: Wrap timing-sensitive logic in harness.testing.clock_set(...)/harness.testing.clock_reset(),",
       )

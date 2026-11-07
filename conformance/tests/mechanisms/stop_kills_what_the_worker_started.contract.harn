@@ -191,10 +191,12 @@ fn job_tools(
   tools = tool_define(
     tools,
     "keep_working",
-    "Do a little work and return.",
+    "Wait for the worker to be stopped.",
     {
       handler: { _args ->
-        harness.clock.sleep_ms(300)
+        while !is_cancelled() {
+          harness.runtime.yield_now()
+        }
         return "still working"
       },
       parameters: {},

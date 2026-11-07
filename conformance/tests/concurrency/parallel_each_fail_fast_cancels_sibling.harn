@@ -3,6 +3,7 @@ pipeline test(harness: Harness, task: unknown) {
   // branch cancels in-flight siblings and queued branches never start.
   const survived = harness.runtime.atomic(0)
   const sibling_started = harness.runtime.atomic(0)
+  const blocked = harness.runtime.channel("blocked-sibling", 1)
   try {
     parallel each ["fail", "slow"] { item ->
       if item == "fail" {
@@ -13,15 +14,14 @@ pipeline test(harness: Harness, task: unknown) {
       }
       harness.runtime.atomic_set(sibling_started, 1)
       // The handshake makes this an in-flight sibling before the error. The
-      // wait is a cancellation point; run-to-completion would reach the flag.
-      harness.clock.sleep_ms(5000)
+      // receive is a cancellation point with no sender that could release it.
+      harness.runtime.receive(blocked)
       harness.runtime.atomic_set(survived, 1)
       item
     }
   } catch (e) {
     harness.stdio.log("caught: " + e)
   }
-  // `parallel each` drains cancelled siblings before returning; if the old
-  // run-to-completion behavior regresses, the sibling sets this flag.
+  // An uncancelled sibling would keep `parallel each` blocked on its receive.
   harness.stdio.println(harness.runtime.atomic_get(survived))
 }
