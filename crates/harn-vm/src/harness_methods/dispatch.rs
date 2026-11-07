@@ -73,7 +73,7 @@ async fn call_harness_method_taped(
 
 /// Effects a capability method declares: its manifest contract, or its host
 /// capability group's.
-fn capability_method_effects(
+pub(crate) fn capability_method_effects(
     capability: harn_builtin_meta::CapabilityId,
     method: &str,
 ) -> Option<&'static [harn_builtin_meta::EffectSpec]> {

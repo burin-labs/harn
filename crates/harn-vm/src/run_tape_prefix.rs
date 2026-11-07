@@ -166,33 +166,19 @@ fn session_entry(owner: Owner<'_>) -> bool {
     matches!(owner, Some((CapabilityId::Agent, method)) if SESSION_ENTRY_METHODS.contains(&method))
 }
 
-/// Code-index methods whose state lives in this process's index and in the
-/// snapshot it writes under the indexed root. A branch restores the recorded
-/// workspace at its recorded path, so running them again rebuilds the index
-/// the recording queried, and the index reads that run live in the prefix see
-/// it. Skipping them instead would leave those reads on an empty index.
-/// Absent on purpose: the refactors, which rewrite workspace files.
-pub(super) const WORKSPACE_INDEX_METHODS: &[&str] = &[
-    "add_readonly_roots",
-    "agent_heartbeat",
-    "agent_register",
-    "agent_unregister",
-    "branch_overlay",
-    "lock_release",
-    "lock_try",
-    "rebuild",
-    "reindex_file",
-    "version_record",
-];
-
+// CodeIndex owns process-local index state; source rewrites declare Fs effects.
 fn workspace_index(owner: Owner<'_>) -> bool {
-    matches!(owner, Some((CapabilityId::CodeIndex, method)) if WORKSPACE_INDEX_METHODS.contains(&method))
+    matches!(owner, Some((CapabilityId::CodeIndex, _)))
 }
 
 /// The root a prefix `code_index.rebuild` would index, when it lies outside
 /// the restored workspace. Its snapshot lands under that root, which the
 /// branch did not restore, so the rebuild is refused.
-fn index_root_outside_workspace(owner: Owner<'_>, args: &[VmValue]) -> Option<PathBuf> {
+fn index_root_outside_workspace(
+    owner: Owner<'_>,
+    args: &[VmValue],
+    workspace: &Path,
+) -> Option<PathBuf> {
     if owner != Some((CapabilityId::CodeIndex, "rebuild")) {
         return None;
     }
@@ -201,11 +187,53 @@ fn index_root_outside_workspace(owner: Owner<'_>, args: &[VmValue]) -> Option<Pa
         .map(crate::llm::helpers::vm_value_to_json)
         .and_then(|args| args.get("root")?.as_str().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())?;
-    let branch = super::current_branch()?;
-    let workspace = branch.state().workspace_root.clone();
     let canonical =
         |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    (!canonical(&root).starts_with(canonical(&workspace))).then_some(root)
+    (!canonical(&root).starts_with(canonical(workspace))).then_some(root)
+}
+
+pub(super) enum PrefixPlan {
+    Run,
+    Read,
+    Command,
+    Refuse(String),
+}
+
+pub(super) fn plan_call(
+    owner: Owner<'_>,
+    effects: Option<&[EffectSpec]>,
+    args: &[VmValue],
+    workspace: &Path,
+) -> PrefixPlan {
+    if runs_a_process(owner) {
+        return PrefixPlan::Command;
+    }
+    if let Some(root) = index_root_outside_workspace(owner, args, workspace) {
+        return PrefixPlan::Refuse(format!(
+            "it indexes `{}`, outside the restored workspace",
+            root.display()
+        ));
+    }
+    if matches!(
+        owner,
+        Some((CapabilityId::HostLease, "acquire" | "release"))
+    ) {
+        return PrefixPlan::Refuse(
+            "host leases are machine-global; acquire and release them outside the replayed prefix"
+                .into(),
+        );
+    }
+    let Some(effects) = effects else {
+        return PrefixPlan::Refuse("it declares no effect contract".into());
+    };
+    match verdict(owner, effects) {
+        Verdict::Run => PrefixPlan::Run,
+        Verdict::Serve => PrefixPlan::Read,
+        Verdict::Refuse(effect) => PrefixPlan::Refuse(format!(
+            "its {:?} {:?} effect is not on the tape",
+            effect.kind, effect.access
+        )),
+    }
 }
 
 /// State that lives only in this process's VM, so rebuilding it during the
@@ -290,33 +318,11 @@ fn serve_read_in_prefix(
     effects: Option<&[EffectSpec]>,
     args: &[VmValue],
 ) -> Option<Result<VmValue, VmError>> {
-    if runs_a_process(owner) {
-        return None;
-    }
-    if let Some(root) = index_root_outside_workspace(owner, args) {
-        let reason = format!(
-            "it indexes `{}`, outside the restored workspace",
-            root.display()
-        );
-        return refuse_in_prefix(name, &reason).err().map(Err);
-    }
-    let Some(effects) = effects else {
-        return refuse_in_prefix(name, "it declares no effect contract")
-            .err()
-            .map(Err);
-    };
-    match verdict(owner, effects) {
-        Verdict::Run => None,
-        Verdict::Refuse(effect) => refuse_in_prefix(
-            name,
-            &format!(
-                "its {:?} {:?} effect is not on the tape",
-                effect.kind, effect.access
-            ),
-        )
-        .err()
-        .map(Err),
-        Verdict::Serve => {
+    let workspace = super::current_branch()?.state().workspace_root.clone();
+    match plan_call(owner, effects, args, &workspace) {
+        PrefixPlan::Run | PrefixPlan::Command => None,
+        PrefixPlan::Refuse(reason) => refuse_in_prefix(name, &reason).err().map(Err),
+        PrefixPlan::Read => {
             // The branch went live between the flag and the lookup: run it.
             let mut went_live = false;
             let served =

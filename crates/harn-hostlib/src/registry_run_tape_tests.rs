@@ -8,6 +8,9 @@ use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
 use std::path::Path;
 use std::sync::Arc;
 
+#[path = "registry_index_replay_tests.rs"]
+mod index_replay;
+
 #[test]
 fn owner_death_guardian_fixture() {
     if crate::process::owner_death::guardian_requested() {
