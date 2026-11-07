@@ -257,6 +257,9 @@ read. A changed attempt or terminal run reauthenticates artifact custody before
 returning timing. Product decisions and cancellation ownership always use their
 original authenticated readers.
 
+Each successful timing probe emits `CONSUMER_CANARY timing_reads` with its
+`custody_read` state and actual request attempts by credential role.
+
 The declaration owner records `started_at` immediately before qualifying the
 live parent and uploading its immutable declaration. The budget therefore
 includes declaration qualification and upload, but excludes earlier candidate

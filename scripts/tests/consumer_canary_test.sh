@@ -249,7 +249,7 @@ grep -qx "verdict=pass" "$scratch/gho"
 grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 grep -q -- '--ref main ' "$scratch/dispatched"
 grep -q -- '-f target=v1.2.3 ' "$scratch/dispatched"
-! grep -q -- 'release_producer_run_' "$scratch/dispatched"
+grep -q -- 'release_producer_run_' "$scratch/dispatched" && exit 1
 
 # A GitHub API refusal is classified by its HTTP status and rate-limit headers.
 # A rate limit or a server error is retried within bounds and then measures; a
@@ -351,8 +351,8 @@ grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
 pin=cccccccccccccccccccccccccccccccccccccccc
 CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb CANARY_CONSUMER_REVISION=$pin canary
 grep -q -- "-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -f consumer_revision=$pin" "$scratch/dispatched"
-! grep -q -- 'release_producer_run_' "$scratch/dispatched"
-! grep -q -- 'harn_cli_artifact' "$scratch/dispatched"
+grep -q -- 'release_producer_run_' "$scratch/dispatched" && exit 1
+grep -q -- 'harn_cli_artifact' "$scratch/dispatched" && exit 1
 # A pull request check never rehearses whatever the consumer's branch holds.
 rm -f "$scratch/dispatched"
 CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -523,7 +523,7 @@ range_canary 1.2.4 '' ordinary || {
   exit 1
 }
 grep -q -- '--ref main ' "$scratch/dispatched"
-! grep -q 'pairing range=' "$scratch/out"
+grep -q 'pairing range=' "$scratch/out" && exit 1
 # An empty pull request body also falls back to this commit, not release history.
 CANARY_PULL_REQUEST_CLI_RUN=123 \
   CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -534,7 +534,7 @@ CANARY_PULL_REQUEST_CLI_RUN=123 \
   exit 1
 }
 grep -q -- '--ref main ' "$scratch/dispatched"
-! grep -q 'pairing range=' "$scratch/out"
+grep -q 'pairing range=' "$scratch/out" && exit 1
 # A development source still reads only its own commit.
 fixture_release ''
 git -C "$history" reset -q --hard HEAD~1
@@ -757,6 +757,9 @@ observe() {
 echo 'in_progress none' > "$scratch/run"
 observe fixture-fresh
 grep -q 'pending run=42' "$scratch/out"
+sed -n 's/^CONSUMER_CANARY timing_reads=//p' "$scratch/out" > "$scratch/timing-reads.jsonl"
+jq -se 'length == 1 and .[0].custody_read == "fresh"
+  and .[0].read_attempts.repository > 0 and .[0].read_attempts.app > 0' "$scratch/timing-reads.jsonl" >/dev/null
 [[ ! -s "$scratch/gho" ]]
 
 # Four refused status reads retain the original child, back off, and reach its

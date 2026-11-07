@@ -632,6 +632,7 @@ canary_observe() {
       if [[ "$reason" != none ]]; then
         canary_fail "$reason" "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
       fi
+      canary_say "CONSUMER_CANARY timing_reads=$(jq -c '{custody_read,read_attempts}' <<< "$timing")"
       if [[ "$status" == completed ]] && ! jq -e '.owned == 1' <<< "$timing" >/dev/null; then
         canary_fail job_timing_custody_unmeasured "run=$run_id verdict=unmeasured"
       fi
