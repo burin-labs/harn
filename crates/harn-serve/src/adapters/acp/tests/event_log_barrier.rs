@@ -13,7 +13,7 @@ fn cancelled_prompt_retains_persistence_failure_metadata() {
     let error =
         harn_vm::agent_events::AgentEventSinkError::new("event_log", "injected append failure");
 
-    let result = super::super::prompt::cancelled_prompt_result(Some(&error));
+    let result = super::super::prompt::cancelled_prompt_result(&Default::default(), Some(&error));
 
     assert_eq!(result["stopReason"], "cancelled");
     assert!(result["_meta"]["harn"]["persistenceError"]

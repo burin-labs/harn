@@ -270,7 +270,7 @@ impl AcpServer {
             let bound = tokio::select! {
                 biased;
                 () = cancellation.wait_cancelled() => {
-                    self.turn_ended(id, &session_id, reply, cancelled_prompt_result(None));
+                    self.turn_ended(id, &session_id, reply, cancelled_prompt_result(&cancellation, None));
                     return;
                 }
                 result = binding => result.unwrap_or_else(|_| {
@@ -638,7 +638,7 @@ impl AcpServer {
                 id,
                 &session_id,
                 reply,
-                cancelled_prompt_result(error.as_ref()),
+                cancelled_prompt_result(&cancellation, error.as_ref()),
             );
             return;
         }
@@ -735,7 +735,7 @@ impl AcpServer {
                         id,
                         &session_id,
                         reply,
-                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                        cancelled_prompt_result(&cancellation, sink_flush_error.as_ref()),
                     );
                     return;
                 }
@@ -798,7 +798,7 @@ impl AcpServer {
                         id,
                         &session_id,
                         reply,
-                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                        cancelled_prompt_result(&cancellation, sink_flush_error.as_ref()),
                     );
                     return;
                 }
@@ -826,11 +826,16 @@ impl AcpServer {
 /// loop does not seal `cancelled` itself: the adapter observes the cancel one
 /// layer up, which is why the outcome is constructed here.
 pub(super) fn cancelled_prompt_result(
+    cancellation: &PromptCancellation,
     persistence_error: Option<&harn_vm::agent_events::AgentEventSinkError>,
 ) -> serde_json::Value {
     let terminal = harn_vm::agent_events::AgentTerminalOutcome::new(
         harn_vm::agent_events::AgentTerminalKind::UserCancelled,
-        "session/cancel",
+        cancellation
+            .method
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_str(),
     );
     let mut result = serde_json::json!({
         "stopReason": "cancelled",

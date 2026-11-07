@@ -549,8 +549,25 @@ pub(super) enum SessionBudget {
 }
 
 #[derive(Default)]
+pub(super) enum PromptCancelMethod {
+    #[default]
+    Session,
+    Request,
+}
+
+impl PromptCancelMethod {
+    pub(super) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Session => "session/cancel",
+            Self::Request => ACP_METHOD_CANCEL_REQUEST,
+        }
+    }
+}
+
+#[derive(Default)]
 pub(super) struct PromptCancellation {
     request_id: Option<serde_json::Value>,
+    pub(super) method: std::sync::Mutex<PromptCancelMethod>,
     pub(super) cancelled: Arc<AtomicBool>,
     pub(super) notify: Arc<Notify>,
 }

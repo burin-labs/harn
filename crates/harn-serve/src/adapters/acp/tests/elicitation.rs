@@ -218,6 +218,7 @@ async fn real_mcp_inputs_use_only_negotiated_elicitation_and_complete_known_urls
             assert!(!calls.is_empty(), "the actual MCP input producer must run");
             if action == "stop" {
                 assert_eq!(terminal["result"]["stopReason"], "cancelled", "{terminal}");
+                assert_eq!(terminal["result"]["_meta"]["harn"]["terminal"]["reason"], "$/cancel_request");
                 assert_eq!(elicited, 1);
                 assert!(cancellation_seen, "Stop must reach the remote elicitation owner");
                 assert_eq!(calls.len(), 1, "a cancelled request must not retry on its late answer");

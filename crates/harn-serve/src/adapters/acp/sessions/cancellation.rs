@@ -67,7 +67,7 @@ impl SessionCancellation {
                 return false;
             };
             if prompt.request_id.as_ref() == Some(id) {
-                prompt.cancel();
+                prompt.cancel_from(super::PromptCancelMethod::Request);
             }
             true
         });
@@ -113,6 +113,8 @@ mod tests {
         assert!(session.cancel());
         assert!(second.cancelled.load(Ordering::SeqCst));
         assert!(later.cancelled.load(Ordering::SeqCst));
+        assert_eq!(first.method.lock().unwrap().as_str(), "$/cancel_request");
+        assert_eq!(second.method.lock().unwrap().as_str(), "session/cancel");
     }
 
     #[test]
