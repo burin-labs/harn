@@ -20,7 +20,7 @@ use crate::commands::orchestrator::errors::OrchestratorError;
 mod client_requests;
 pub(super) mod persisted_sessions;
 
-use client_requests::role_may_send_method;
+use client_requests::{role_may_send_method, AcpClientRequest};
 
 pub(super) const ACP_PATH: &str = "/acp";
 const ACP_TOPIC_PREFIX: &str = "acp.session";
@@ -79,11 +79,6 @@ struct AcpClient {
     connection_id: String,
     role: AcpAttachRole,
     socket_tx: mpsc::UnboundedSender<String>,
-}
-
-struct AcpClientRequest {
-    client_id: String,
-    delivery: bool,
 }
 
 struct AcpAttachOptions {
@@ -798,27 +793,7 @@ impl AcpWorker {
             });
         }
 
-        if let Some(id_key) = jsonrpc_id_key(&value) {
-            if value.get("method").is_some() {
-                let mut pending = self
-                    .pending_client_requests
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                if pending.contains_key(&id_key) {
-                    return Err(AcpClientRequestError::DuplicateRequestId);
-                }
-                pending.insert(
-                    id_key,
-                    AcpClientRequest {
-                        client_id: client_id.to_string(),
-                        delivery: value["method"] == "session/prompt"
-                            && value
-                                .pointer("/params/delivery")
-                                .is_some_and(|value| !value.is_null()),
-                    },
-                );
-            }
-        }
+        self.register_client_request(client_id, &value)?;
 
         self.request_tx
             .lock()

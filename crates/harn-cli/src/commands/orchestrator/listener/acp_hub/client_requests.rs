@@ -2,7 +2,41 @@
 
 use super::*;
 
+pub(super) struct AcpClientRequest {
+    pub(super) client_id: String,
+    pub(super) delivery: bool,
+}
+
 impl AcpWorker {
+    pub(super) fn register_client_request(
+        &self,
+        client_id: &str,
+        value: &JsonValue,
+    ) -> Result<(), AcpClientRequestError> {
+        if let Some(id_key) = jsonrpc_id_key(value) {
+            if value.get("method").is_some() {
+                let mut pending = self
+                    .pending_client_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if pending.contains_key(&id_key) {
+                    return Err(AcpClientRequestError::DuplicateRequestId);
+                }
+                pending.insert(
+                    id_key,
+                    AcpClientRequest {
+                        client_id: client_id.to_string(),
+                        delivery: value["method"] == "session/prompt"
+                            && value
+                                .pointer("/params/delivery")
+                                .is_some_and(|value| !value.is_null()),
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Withdraw queued delivery prompts when their client leaves. Ordinary
     /// turns remain live in the retained worker for reconnection and replay.
     pub(super) fn withdraw_client_requests(&self, client_id: &str) {
