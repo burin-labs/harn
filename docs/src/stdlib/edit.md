@@ -1116,14 +1116,22 @@ The capability matrix (`Language::edit_capabilities`) and the
 
 Built on the primitives above, these compound, language-aware refactorings
 (issue [#2520](https://github.com/burin-labs/harn/issues/2520)) resolve
-structure with tree-sitter, preview via `dry_run`, and commit atomically
+structure with tree-sitter, preview via `dry_run`, and commit
 through the staged-fs overlay. They share one result shape — `{ok, applied,
 result, operation, language, dry_run, touched_files, unified_diff, summary,
 conflicts, errors, warnings, provenance}` — where `result` is one of `applied
 | no_op | conflict | unsupported | invalid_params`. Pass `dry_run: true` for a
 diff-only preview and `session_id` to stage into a caller-owned session;
-otherwise each call opens its own transient session and commits atomically.
+otherwise each call opens its own transient session and reports its commit result.
 All require the `tools:deterministic` capability.
+
+A commit failure returns `result: "conflict"`, `ok: false` and `applied: false`.
+Its `recovery.session_id` identifies the retained staged session. When
+`recovery.measured` is true, `committed_paths` and `failed_paths_with_reasons`
+retain the host's report; otherwise `recovery.reason` describes the unavailable
+or invalid report. An inconsistent typed report remains in `recovery.reported`.
+Unmeasured summary counts are `nil`, and a partial commit's
+`touched_files` contains its reported committed paths.
 
 | Function | Key params | Languages |
 |---|---|---|

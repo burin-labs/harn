@@ -50,7 +50,7 @@ pub import {
  * list of typed ops into staged-fs writes (#1722): a `dry_run` previews
  * the change as a per-file unified diff against a throw-away overlay and
  * touches no bytes, while an apply stages all ops into one session and
- * commits them atomically (or discards on the first conflict). Callers
+ * reports commit failures with the pending session's recovery metadata. Callers
  * that already own a staged session pass `session_id`; the driver then
  * stages into it and leaves the commit to the caller.
  *

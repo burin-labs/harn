@@ -5,7 +5,7 @@ top of the AST-precise edit primitives ([`edit_apply_node`](../stdlib/edit.md),
 `edit_insert_at_anchor`, `edit_safe_text_patch`, `edit_dry_run`). They are the
 "burin-like" edits an agent loop should reach for instead of regenerating files
 or hand-patching call sites: each one resolves structure with tree-sitter,
-previews as a unified diff, and commits atomically through the staged-fs overlay
+previews as a unified diff, and commits through the staged-fs overlay
 ([#1722](https://github.com/burin-labs/harn/issues/1722)).
 
 | Function | What it does |
@@ -43,8 +43,8 @@ Three knobs are common to all of them:
   per-file `unified_diff` without writing a byte. Always preview first.
 - **`session_id`** — stage into a caller-owned staged-fs session (the caller
   commits). Omit it and the refactoring opens its own transient session and
-  commits atomically — all files flip together, or none do on the first
-  conflict.
+  commits its staged writes. A failed commit returns `conflict` and the
+  [recovery session](../stdlib/edit.md#structured-refactorings).
 - **Capability matrix** — when a language lacks the structure a refactoring
   needs, the call returns `result: "unsupported"` with a reason instead of
   guessing. These all require the `tools:deterministic` capability.

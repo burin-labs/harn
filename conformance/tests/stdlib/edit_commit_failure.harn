@@ -1,0 +1,100 @@
+import { edit_extract_variable } from "std/edit"
+import { with_capability_fixtures, with_temp_dir } from "std/testing"
+
+const SOURCE =
+  "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
+
+fn extract(harness: Harness, root: string, path: string) -> dict {
+  return edit_extract_variable(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
+      path: path,
+      root: root,
+      new_name: "first",
+      range: {start_line: 1, start_col: 17, end_line: 1, end_col: 27},
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    fn(root: string) {
+      const path = "${root}/source.rs"
+      harness.fs.write_text(path, SOURCE)
+      const positive = extract(harness, root, path)
+      require positive.ok && positive.applied, "The positive extraction must apply"
+      require contains(harness.fs.read_text(path), "let first = compute(2);"),
+        "The positive extraction must actually commit its declaration"
+      for mode in ["refused", "empty", "malformed", "thrown", "duplicate", "foreign", "omitted"] {
+        harness.fs.write_text(path, SOURCE)
+        const fixture = if mode == "thrown" {
+          {capability: "fs", method: "commit_staged", error: "commit transport refused"}
+        } else {
+          {
+            capability: "fs",
+            method: "commit_staged",
+            result: if contains(["refused", "duplicate", "foreign", "omitted"], mode) {
+              {
+                committed_paths: if mode == "duplicate" {
+                  [path]
+                } else if mode == "foreign" {
+                  ["${root}/foreign.rs"]
+                } else {
+                  []
+                },
+                failed_paths_with_reasons: [{path: path, reason: "commit refused"}],
+              }
+            } else if mode == "empty" {
+              {committed_paths: [], failed_paths_with_reasons: []}
+            } else {
+              {unexpected: true}
+            },
+          }
+        }
+        const fixtures = [fixture]
+          + if mode == "omitted" {
+            [
+              {
+                capability: "fs",
+                method: "staged_status",
+                result: {pending_writes: [{path: path}, {path: "${root}/unreported.rs"}]},
+              },
+            ]
+          } else {
+            []
+          }
+        const result = with_capability_fixtures(
+          harness.testing,
+          fixtures,
+          fn() { return extract(harness, root, path) },
+        )
+        require result.result == "conflict" && !result.ok && !result.applied,
+          "A ${mode} commit must not report success"
+        require len(result.conflicts) > 0 && result.conflicts[0].code == "commit_failed",
+          "A ${mode} commit must retain its cause"
+        require result.recovery.measured == (mode == "refused"),
+          "Unobservable commit facts must remain unmeasured"
+        if contains(["duplicate", "foreign", "omitted"], mode) {
+          require result.recovery.reported.failed_paths_with_reasons[0].path == path,
+            "An inconsistent typed report must remain available for recovery"
+        }
+        require result.summary.files_touched
+          == if mode == "refused" {
+            0
+          } else {
+            nil
+          },
+          "An unmeasured commit must not claim zero changed files"
+        require harness.fs.read_text(path) == SOURCE, "The ${mode} refusal must fire"
+        const session_id = result.recovery.session_id
+        const pending = harness.fs.staged_status({session_id: session_id})
+        require len(pending.pending_writes) == 1, "Recovery must retain the staged write"
+        harness.fs.discard_staged({session_id: session_id})
+        harness.stdio.println("${mode}: conflict, original retained, recovery available")
+      }
+    },
+  )
+}

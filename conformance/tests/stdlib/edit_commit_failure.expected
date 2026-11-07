@@ -1,0 +1,7 @@
+refused: conflict, original retained, recovery available
+empty: conflict, original retained, recovery available
+malformed: conflict, original retained, recovery available
+thrown: conflict, original retained, recovery available
+duplicate: conflict, original retained, recovery available
+foreign: conflict, original retained, recovery available
+omitted: conflict, original retained, recovery available
