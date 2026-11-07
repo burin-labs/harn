@@ -122,10 +122,19 @@ impl JavaBindings<'_> {
         {
             return Ok(true);
         }
-        let binding = self.resolve_type_name(&[new_name.to_string()], node, catalog)?;
-        Ok(binding.starts_with('#')
-            || catalog.contains(&binding)
-            || !binding.starts_with("java.lang."))
+        let old_identity = self
+            .type_occurrence(node, catalog)?
+            .ok_or("the Java capture check has no type binding")?;
+        let expected = old_identity.rsplit_once('.').map_or_else(
+            || new_name.to_string(),
+            |(owner, _)| format!("{owner}.{new_name}"),
+        );
+        if catalog.contains(&expected) {
+            return Ok(true);
+        }
+        let binding =
+            self.lookup_type_name(&[new_name.to_string()], node, catalog, Some(&expected))?;
+        Ok(binding != expected)
     }
 
     pub fn type_shadow_conflicts(
@@ -359,6 +368,16 @@ impl JavaBindings<'_> {
         at: Node<'_>,
         catalog: &JavaTypeCatalog,
     ) -> Result<String, String> {
+        self.lookup_type_name(parts, at, catalog, None)
+    }
+
+    fn lookup_type_name(
+        &self,
+        parts: &[String],
+        at: Node<'_>,
+        catalog: &JavaTypeCatalog,
+        prospective: Option<&str>,
+    ) -> Result<String, String> {
         let first = parts.first().ok_or("the Java type name is empty")?;
         let suffix = if parts.len() > 1 {
             format!(".{}", parts[1..].join("."))
@@ -466,19 +485,11 @@ impl JavaBindings<'_> {
         if parts.len() > 1 {
             return Ok(parts.join("."));
         }
-        let wildcards = self
-            .imports
-            .iter()
-            .filter(|import| import.wildcard)
-            .collect::<Vec<_>>();
-        if wildcards.len() > 1 {
-            return Err("competing Java wildcard imports require compiler resolution".into());
+        if let Some(identity) = prospective {
+            return Ok(identity.to_string());
         }
-        if let Some(import) = wildcards.first() {
-            if import.is_static && !catalog.contains(&format!("{}.{first}", import.path)) {
-                return Err("the Java static wildcard import has unresolved type bindings".into());
-            }
-            return Ok(format!("{}.{first}", import.path));
+        if self.imports.iter().any(|import| import.wildcard) {
+            return Err("Java on-demand imports may compete with implicit java.lang types; compiler resolution is required".into());
         }
         // An absent same-package declaration cannot be the selected workspace
         // type. Keep the implicit Java namespace distinct from it.

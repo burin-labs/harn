@@ -94,6 +94,43 @@ fn a_nearer_local_type_shadows_an_outer_type_parameter() {
 }
 
 #[test]
+fn wildcard_imports_do_not_invent_certainty_against_implicit_java_lang() {
+    let target = "package lab; public class String {}";
+    let ambiguous = "package app; import lab.*; class Use { String value; }";
+    let inventory = catalog(&[target, ambiguous]);
+    let tree = parse_tree(ambiguous, Language::Java).unwrap();
+    let bindings = JavaBindings::new(&tree, ambiguous);
+    let reference = descendants(tree.root_node())
+        .find(|node| node.kind() == "type_identifier" && text(*node, ambiguous) == "String")
+        .unwrap();
+    assert!(bindings.type_occurrence(reference, &inventory).is_err());
+    for source in [
+        "package app; import lab.String; import java.util.*; class Use { String value; }",
+        "package lab; import java.util.*; class Use { String value; }",
+    ] {
+        let inventory = catalog(&[target, source]);
+        let tree = parse_tree(source, Language::Java).unwrap();
+        let bindings = JavaBindings::new(&tree, source);
+        let reference = descendants(tree.root_node())
+            .find(|node| node.kind() == "type_identifier" && text(*node, source) == "String")
+            .unwrap();
+        assert_eq!(
+            bindings
+                .type_occurrence(reference, &inventory)
+                .unwrap()
+                .as_deref(),
+            Some("lab.String")
+        );
+        assert!(
+            !bindings
+                .type_name_capture(reference, "Text", &inventory)
+                .unwrap(),
+            "the explicit/same-package rename remains provable: {source}"
+        );
+    }
+}
+
+#[test]
 fn ambiguous_type_imports_inheritance_and_patterns_refuse_real_occurrences() {
     for source in [
         "package app; import lab.*; import other.*; class Page { DocumentStore field; }",
