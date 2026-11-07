@@ -10,6 +10,7 @@ use crate::builtin_methods::{self as methods, MethodDescriptor, MethodReceiver};
 use crate::builtin_signatures::TyExt;
 
 use super::super::scope::{InferredType, TypeScope};
+use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
 impl TypeChecker {
@@ -22,6 +23,27 @@ impl TypeChecker {
         let element = |t: &TypeExpr| BTreeMap::from([("T".to_string(), t.clone())]);
         let unbound = BTreeMap::new;
         Some(match ty {
+            TypeExpr::Union(members) => {
+                let receivers: Vec<_> = members
+                    .iter()
+                    .map(Self::builtin_method_receiver)
+                    .collect::<Option<_>>()?;
+                let (kind, first) = receivers.first()?;
+                if receivers.iter().any(|(other, _)| other != kind) {
+                    return None;
+                }
+                let bindings = first
+                    .keys()
+                    .filter_map(|name| {
+                        let values = receivers
+                            .iter()
+                            .map(|(_, bindings)| bindings.get(name).cloned())
+                            .collect::<Option<Vec<_>>>()?;
+                        Some((name.clone(), simplify_union(values)))
+                    })
+                    .collect();
+                (*kind, bindings)
+            }
             TypeExpr::List(t) => (MethodReceiver::List, element(t)),
             TypeExpr::Tuple(items) => (
                 MethodReceiver::List,
@@ -70,20 +92,15 @@ impl TypeChecker {
                 if let [only] = non_nil.as_slice() {
                     return Self::builtin_method_receiver_type(only, method);
                 }
-                // `list<never> | list<string>` (an `if` choosing `[]` or a
-                // literal) is still a list: use the kind every member shares.
-                let kinds: Vec<Option<MethodReceiver>> = non_nil
+                // Keep receiver generics when branches share a method kind:
+                // `list<never> | list<T>` still supplies T to its callbacks.
+                let receivers: Vec<_> = non_nil
                     .iter()
-                    .map(|member| {
-                        Self::builtin_method_receiver_type(member, method)
-                            .and_then(|ty| Self::builtin_method_receiver(&ty).map(|(kind, _)| kind))
-                    })
-                    .collect();
-                let first = (*kinds.first()?)?;
-                if kinds.iter().all(|kind| *kind == Some(first)) {
-                    return Some(TypeExpr::Named(first.type_name().into()));
-                }
-                return None;
+                    .map(|member| Self::builtin_method_receiver_type(member, method))
+                    .collect::<Option<_>>()?;
+                let receiver = simplify_union(receivers);
+                Self::builtin_method_receiver(&receiver)?;
+                return Some(receiver);
             }
             TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => {
                 if fields.iter().any(|field| field.name == method) {
