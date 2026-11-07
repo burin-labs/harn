@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
 import { createObserverContext, observerRunName, observerDeclarationName, observerPublicationWitness, qualifyObserverPublisher, githubParentDeclarations, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
+import {archiveFile, archiveJson} from './fixtures/artifact_archive.mjs';
 
 test('manual cleanup rejects feature refs and checks out trusted code before credentials', () => {
   const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8'));
@@ -180,13 +181,8 @@ test('declaration preparation reaches a closed public file only for a measured l
     assert.equal(declared.parent_run_id, '42');
     assert.equal(declared.started_at,1000,'the original issuer starts before declaration qualification and upload');
     assert.equal(Object.keys(declared).length, 8, 'public custody carries no private consumer identity');
-    const archive = path.join(scratch,'declaration.zip');
-    const zipped = spawnSync('zip',['-j',archive,fields.file],{encoding:'utf8'});
-    assert.equal(zipped.status,0,zipped.stderr);
-    const bytes = fs.readFileSync(archive);
-    const artifact = {id:501,name:fields.name,expired:false,size_in_bytes:bytes.length,
-      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-      workflow_run:{id:42,head_sha:parent.head_sha}};
+    const {archive,metadata:artifact}=archiveFile(fields.file,
+      {id:501,name:fields.name,workflow_run:{id:42,head_sha:parent.head_sha}});
     const witnessConfig = path.join(scratch,'witness.json');
     const witnessPreload = path.join(scratch,'witness-fetch.mjs');
     fs.writeFileSync(witnessPreload,`import fs from 'node:fs';
@@ -250,16 +246,9 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const archives = [];
     for (const [index, filename, value] of [[0, 'consumer-observer.json', context],
       [1, `consumer-observer-${context.dispatch_nonce}.json`, receipt]]) {
-      const json = path.join(scratch, filename);
-      const archive = path.join(scratch, `archive-${index}.zip`);
-      fs.writeFileSync(json, JSON.stringify(value));
-      const zipped = spawnSync('zip', ['-j', archive, json], { env: { PATH: process.env.PATH, LC_ALL: 'C' }, encoding: 'utf8' });
-      assert.equal(zipped.status, 0, zipped.stderr);
-      const bytes = fs.readFileSync(archive);
-      archives.push({ archive, metadata: { id: 501 + index,
+      archives.push(archiveJson(scratch,filename,value,{id:501+index,
         name: index === 0 ? observerDeclarationName(context) : `consumer-observer-${context.dispatch_nonce}`,
-        expired: false, size_in_bytes: bytes.length, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-        workflow_run: { id: index === 0 ? 42 : 73, head_sha: index === 0 ? parent.head_sha : child.head_sha } } });
+        workflow_run:{id:index===0?42:73,head_sha:index===0?parent.head_sha:child.head_sha}}));
     }
     const config = path.join(scratch, 'fixture.json');
     const eventFile = path.join(scratch, 'event.json');

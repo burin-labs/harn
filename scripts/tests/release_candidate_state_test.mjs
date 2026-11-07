@@ -7,6 +7,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {activePromotions,successfulCandidate,ghRead} from '../lib/release-candidate-state.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 import {admitChild,archiveProducerBinding,qualifyArchiveProducer,observerRunName,
   observerDeclarationName,observerDeclarationStep,observerPublicationWitness,
   observerDispatchActor} from '../lib/consumer-observer.mjs';
@@ -48,12 +49,9 @@ function fixture(changes={}){
   const metadata=(id,name,runId,sha,value)=>{
     const filename=id===500?'consumer-observer.json':id===502?'candidate-manifest.json':
       `consumer-observer-${context.dispatch_nonce}.json`;
-    const input=path.join(scratch,filename),zip=path.join(scratch,`${id}.zip`);
-    fs.writeFileSync(input,JSON.stringify(value));
-    execFileSync('zip',['-j',zip,input]);
-    const bytes=fs.readFileSync(zip);
-    return {bytes,artifact:{id,name,created_at:'2026-11-02T10:00:01Z',expired:false,size_in_bytes:bytes.length,
-      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:runId,head_sha:sha}}};
+    const archived=archiveJson(scratch,filename,value,
+      {id,name,created_at:'2026-11-02T10:00:01Z',workflow_run:{id:runId,head_sha:sha}});
+    return {bytes:fs.readFileSync(archived.archive),artifact:archived.metadata};
   };
   const manifest=metadata(502,`candidate-manifest-${source}`,42,source,
     {schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,runId:'42',runAttempt:'1'});
@@ -226,12 +224,10 @@ test('actual source reuse measures run and artifact page two and refuses either 
       runId:'42',runAttempt:'1',artifacts:['a','b'].map(target=>({kind:'archive',target,
         artifact:`harn-${target}`,sha256:'d'.repeat(64)}))};
     manifest.artifacts.push({kind:'notes',artifact:'harn-release-files',sha256:'e'.repeat(64)});
-    const manifestPath=path.join(scratch,'candidate-manifest.json'),archive=path.join(scratch,'manifest.zip');
-    fs.writeFileSync(manifestPath,JSON.stringify(manifest));
-    execFileSync('zip',['-j',archive,manifestPath]);
-    const bytes=fs.readFileSync(archive),entry=available.find(item=>item.name===`candidate-manifest-${source}`);
-    entry.size_in_bytes=bytes.length;
-    entry.digest=`sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const entry=available.find(item=>item.name===`candidate-manifest-${source}`);
+    const {archive,metadata:measured}=archiveJson(scratch,'candidate-manifest.json',manifest,entry);
+    const bytes=fs.readFileSync(archive);
+    Object.assign(entry,measured);
     fs.writeFileSync(record,JSON.stringify({runs,available,partial:false}));
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
