@@ -84,7 +84,7 @@ fn workspace_nextest_steps(document: dict) -> list<dict> {
   const jobs: dict = document.jobs ?? {}
   const nextest: dict = jobs.nextest ?? {}
   const steps: list<dict> = nextest.steps ?? []
-  return steps.filter({ step -> step.name == "Run workspace nextest" })
+  return steps.filter({ step -> step.name == "Run workspace nextest" }).to_list()
 }
 
 pub fn native_qualification_violations(
