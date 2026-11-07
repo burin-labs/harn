@@ -74,8 +74,8 @@ async fn detach_withdraws_only_the_clients_delivery_requests() {
     let (worker, mut request_rx, _owner_rx, _controller_rx, _observer_rx) = test_worker();
     for (client_id, id, delivery) in [
         ("owner", 10, JsonValue::Null),
-        ("owner", 11, json!({"mode": "queue"})),
-        ("controller", 12, json!({"mode": "steer"})),
+        ("owner", 11, json!("queue")),
+        ("controller", 12, json!("steer")),
     ] {
         worker
             .send_client_request(
