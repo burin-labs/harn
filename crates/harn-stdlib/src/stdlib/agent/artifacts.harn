@@ -426,10 +426,7 @@ pub type ProviderCallErrorEvent = {
   schema_version?: int,
 }
 
-// GUARANTEED deterministic facts.
-// OPTIONAL deterministic facts.
-// MODEL-authored text; not deterministic.
-// UNSTABLE provider-specific telemetry.
+/** Provider response facts and model-authored text, with optional telemetry. */
 pub type ProviderCallResponseEvent = ProviderResponseToolProjection \
   & {
   type: "provider_call_response",

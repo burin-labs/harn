@@ -200,7 +200,7 @@ pub fn transcript_records(fs: HarnessFs, path: string) -> list<ProviderTranscrip
 /**
  * Normalize one response, including native calls with an empty text channel.
  * @effects: []
- * @errors: [SchemaValidationError]
+ * @errors: [validation]
  */
 pub fn provider_response_content_shape(record: unknown) -> ProviderResponseContentShape {
   return __content(schema_expect(record, schema_of(WireProviderRecord)))
