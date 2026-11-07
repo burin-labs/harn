@@ -672,6 +672,51 @@ fn union_defaults_come_from_the_matching_same_shape_branch() {
 }
 
 #[test]
+fn nullable_constraints_agree_across_validation_parameter_and_export() {
+    for constraints in [
+        serde_json::json!({"type": "string", "enum": ["harn", "host_bridge"]}),
+        serde_json::json!({"const": "harn"}),
+        serde_json::json!({"union": [{"const": "harn"}, {"const": "host_bridge"}]}),
+        serde_json::json!({"all_of": [{"type": "string"}, {"enum": ["harn", "host_bridge"]}]}),
+        serde_json::json!({
+            "$ref": "#/definitions/Executor",
+            "definitions": {"Executor": {"enum": ["harn", "host_bridge"]}}
+        }),
+    ] {
+        let mut constraints = constraints.as_object().unwrap().clone();
+        constraints.insert("nullable".into(), serde_json::Value::Bool(true));
+        let schema = super::json_to_vm_value(&serde_json::Value::Object(constraints));
+        let exported = schema_to_json_schema_value(&schema).unwrap();
+        let exported = vm_value_to_serde_json(&exported);
+        let validator = jsonschema::draft202012::new(&exported).unwrap();
+        for (value, expected) in [
+            (s("harn"), true),
+            (VmValue::Nil, true),
+            (s("foreign"), false),
+        ] {
+            assert_eq!(
+                schema_is_value(&value, &schema).unwrap(),
+                expected,
+                "{exported}: {value:?}"
+            );
+            let report = schema_report_value(&value, &schema, false);
+            assert_eq!(
+                report.as_dict().unwrap().get("ok"),
+                Some(&VmValue::Bool(expected))
+            );
+            assert_eq!(
+                schema_assert_param(&value, "executor", &schema).is_ok(),
+                expected
+            );
+            assert_eq!(
+                validator.is_valid(&vm_value_to_serde_json(&value)),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
 fn enum_constraints_apply_to_collection_values() {
     let list_schema = make_vm_dict(vec![(
         "enum",

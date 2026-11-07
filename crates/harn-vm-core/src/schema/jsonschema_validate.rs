@@ -399,6 +399,9 @@ fn validate_harn_types_inner(
     ref_stack: &mut Vec<String>,
     errors: &mut Vec<ValidationIssue>,
 ) {
+    if matches!(value, VmValue::Nil) && super::schema_bool(schema, "nullable") {
+        return;
+    }
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
         if let Err(error) = traversal.expand_ref() {
             errors.push(ValidationIssue::schema(path, error));
@@ -427,9 +430,6 @@ fn validate_harn_types_inner(
         ref_stack.push(resolved_pointer);
         validate_harn_types(value, &resolved, root, path, traversal, ref_stack, errors);
         ref_stack.pop();
-        return;
-    }
-    if matches!(value, VmValue::Nil) && super::schema_bool(schema, "nullable") {
         return;
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
