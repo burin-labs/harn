@@ -82,6 +82,14 @@ async fn run_interruptible(
     handler: SyncHandler,
     request: VmValue,
 ) -> Result<VmValue, VmError> {
+    run_interruptible_work(ctx, builtin, move || handler(&[request])).await
+}
+
+async fn run_interruptible_work<T: Send + 'static>(
+    ctx: &harn_vm::AsyncBuiltinCtx,
+    builtin: &'static str,
+    work: impl FnOnce() -> Result<T, HostlibError> + Send + 'static,
+) -> Result<T, VmError> {
     let mut sources = ctx.interrupt_sources();
     let parent_cancel = sources.cancel.clone();
     let cancelled = sources
@@ -117,7 +125,7 @@ async fn run_interruptible(
             harn_vm::agent_sessions::enter_current_tool_call(call.tool_call_id.clone())
         });
         let _call = call.enter();
-        handler(&[request]).map_err(VmError::from)
+        work().map_err(VmError::from)
     })
     .await
     .map_err(|error| {
@@ -425,12 +433,15 @@ impl HostlibRegistry {
                                 params,
                                 caller,
                                 harn_vm::orchestration::CommandDispatchOrigin::ArbitraryProcess,
-                                |params| async move {
+                                |params| {
+                                  let ctx = ctx.clone();
+                                  async move {
                                     let validated = crate::schemas::validate_request_args(
                                         ambient_name, module, method, &[VmValue::dict(params)],
                                     ).map_err(VmError::from)?;
-                                    prepare(validated.as_dict().expect("validated command dict").clone())
-                                        .map_err(VmError::from)
+                                    let params = validated.as_dict().expect("validated command dict").clone();
+                                    run_interruptible_work(&ctx, ambient_name, move || prepare(params)).await
+                                  }
                                 },
                             )
                             .await?

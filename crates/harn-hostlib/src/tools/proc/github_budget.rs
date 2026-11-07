@@ -21,6 +21,11 @@ const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(10);
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 
+fn completion_deadline(execution: Option<Instant>, now: Instant) -> Instant {
+    let bounded = now + FINALIZE_TIMEOUT;
+    execution.map_or(bounded, |deadline| deadline.min(bounded))
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Nullable<T> {
@@ -307,9 +312,7 @@ impl BudgetPlan {
         stderr: &[u8],
         cancelled: bool,
     ) -> Result<BudgetOutput, HostlibError> {
-        // Accounting is local and performs no HTTP. Give it a bounded cleanup
-        // phase after the native request deadline, including a timed-out child.
-        rpc.deadline = Some(Instant::now() + FINALIZE_TIMEOUT);
+        rpc.deadline = Some(completion_deadline(rpc.deadline, Instant::now()));
         rpc.finalizing = true;
         let base64 = base64::engine::general_purpose::STANDARD;
         rpc.send(&serde_json::json!({
@@ -413,7 +416,8 @@ impl Drop for HelperPolicy {
 
 pub(super) struct Rpc {
     handle: Box<dyn ProcessHandle>,
-    input: Option<Box<dyn Write + Send>>,
+    writes: Option<mpsc::SyncSender<Vec<u8>>>,
+    write_results: mpsc::Receiver<Result<(), &'static str>>,
     replies: mpsc::Receiver<Result<Reply, &'static str>>,
     deadline: Option<Instant>,
     phase: Phase,
@@ -508,6 +512,21 @@ impl Rpc {
         let stdout = handle.take_stdout();
         let stderr = handle.take_stderr();
         let (sender, replies) = mpsc::sync_channel(1);
+        let (writes, pending_writes) = mpsc::sync_channel::<Vec<u8>>(1);
+        let (written, write_results) = mpsc::sync_channel(1);
+        harn_parser::runtime_stack::spawn(move || {
+            let Some(mut input) = input else { return };
+            while let Ok(bytes) = pending_writes.recv() {
+                let result = input
+                    .write_all(&bytes)
+                    .and_then(|()| input.flush())
+                    .map_err(|_| "the budget helper input became unavailable");
+                let failed = result.is_err();
+                if written.send(result).is_err() || failed {
+                    break;
+                }
+            }
+        });
         harn_parser::runtime_stack::spawn(move || {
             let Some(stdout) = stdout else { return };
             let mut reader = BufReader::new(stdout);
@@ -536,7 +555,8 @@ impl Rpc {
         });
         Ok(Self {
             handle,
-            input,
+            writes: Some(writes),
+            write_results,
             replies,
             deadline,
             phase: Phase::BeforeRequest,
@@ -567,19 +587,25 @@ impl Rpc {
                 "the budget message exceeds its bounded transport",
             ));
         }
-        let Some(input) = self.input.as_mut() else {
+        let Some(writes) = self.writes.as_ref() else {
             return Err(self.failure("helper_exchange", "the budget helper has no input"));
         };
-        let result = input.write_all(&bytes).and_then(|()| input.flush());
-        result.map_err(|_| {
+        writes.try_send(bytes).map_err(|_| {
             self.failure(
                 "helper_exchange",
-                "the budget helper input became unavailable",
+                "the budget helper cannot accept an input message",
             )
-        })
+        })?;
+        self.wait_for(&self.write_results)?
+            .map_err(|detail| self.failure("helper_exchange", detail))
     }
 
     fn receive(&mut self) -> Result<Reply, HostlibError> {
+        self.wait_for(&self.replies)?
+            .map_err(|detail| self.failure("helper_exchange", detail))
+    }
+
+    fn wait_for<T>(&self, receiver: &mpsc::Receiver<T>) -> Result<T, HostlibError> {
         loop {
             if !self.finalizing
                 && (harn_vm::op_interrupt::requested()
@@ -607,15 +633,13 @@ impl Rpc {
                 .map(|deadline| deadline.saturating_duration_since(Instant::now()))
                 .unwrap_or(Duration::from_millis(20))
                 .min(Duration::from_millis(20));
-            match self.replies.recv_timeout(wait) {
-                Ok(reply) => {
-                    return reply.map_err(|detail| self.failure("helper_exchange", detail))
-                }
+            match receiver.recv_timeout(wait) {
+                Ok(reply) => return Ok(reply),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(self.failure(
                         "helper_exchange",
-                        "the budget helper exited without a complete reply",
+                        "the budget helper exchange ended without acknowledgement",
                     ))
                 }
             }
@@ -713,7 +737,7 @@ impl Rpc {
     }
 
     fn retire(&mut self) -> Result<(), HostlibError> {
-        self.input.take();
+        self.writes.take();
         let remaining = self
             .deadline
             .map(|deadline| deadline.saturating_duration_since(Instant::now()));
@@ -736,7 +760,7 @@ impl Rpc {
 
 impl Drop for Rpc {
     fn drop(&mut self) {
-        self.input.take();
+        self.writes.take();
         if !self.retired {
             let _ = self.handle.killer().kill();
             let _ = self
@@ -749,6 +773,19 @@ impl Drop for Rpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accounting_never_extends_the_absolute_execution_deadline() {
+        let origin = Instant::now();
+        let execution = origin + Duration::from_secs(1);
+        let almost_finished = execution - Duration::from_millis(1);
+        assert_eq!(
+            completion_deadline(Some(execution), almost_finished),
+            execution
+        );
+        assert_eq!(completion_deadline(Some(origin), execution), origin);
+        assert_eq!(completion_deadline(None, origin), origin + FINALIZE_TIMEOUT);
+    }
 
     #[test]
     fn budget_reply_requires_explicit_nullable_plan_and_closed_versioned_fields() {

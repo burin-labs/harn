@@ -26,6 +26,11 @@ assert request['schema'] == 'gh-budget.native-read.v1'
 assert request['argv'] == ['api', 'repos/example/repo/commits/pinned']
 etag = (state / 'etag').read_text()
 if request['phase'] == 'prepare':
+    if (state / 'stall-prepare').exists():
+        with (state / 'ready').open('w') as stream:
+            stream.write(str(os.getpid()))
+        sys.stdin.buffer.readline()
+        raise AssertionError('stalled preparation must be cancelled before another message')
     reply(decision='prepared', if_none_match=etag)
 else:
     assert request['phase'] == 'begin'
@@ -35,6 +40,12 @@ else:
         reply(decision='run', if_none_match=etag)
         started = json.loads(sys.stdin.buffer.readline())
         assert started['phase'] == 'started' and started['request_id'] == request['request_id']
+        if (state / 'stall-write').exists():
+            with (state / 'ready').open('w') as stream:
+                stream.write(str(os.getpid()))
+            with (state / 'release').open('rb') as stream:
+                stream.read()
+            raise AssertionError('stopped reader must be reaped by the completion deadline')
         finished = json.loads(sys.stdin.buffer.readline())
         assert finished['phase'] == 'finish' and finished['request_id'] == request['request_id']
         raw = base64.b64decode(finished['stdout'], validate=True)

@@ -280,3 +280,146 @@ fn native_budget_refuses_unsupported_commands_and_options_before_a_child() {
         );
     }
 }
+
+#[test]
+fn cancelling_a_ready_budget_preparation_reaps_the_helper_without_a_native_request() {
+    assert_preparation_cleanup(false);
+}
+
+#[test]
+fn dropping_a_ready_budget_preparation_reaps_the_helper_without_a_native_request() {
+    assert_preparation_cleanup(true);
+}
+
+fn assert_preparation_cleanup(drop_execution: bool) {
+    use std::io::Read as _;
+    use std::sync::atomic::AtomicBool;
+    let _env = super::super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let _session = in_session();
+    let (native, state) = enroll(&fixture);
+    std::fs::write(state.join("stall-prepare"), "ready").unwrap();
+    let ready = state.join("ready");
+    let name = std::ffi::CString::new(ready.as_os_str().as_encoded_bytes()).unwrap();
+    // The helper's real FIFO write acknowledges preparation without polling.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let (sender, acknowledged) = tokio::sync::oneshot::channel();
+    let reader = std::thread::spawn(move || {
+        let mut pid = String::new();
+        std::fs::File::open(ready)
+            .unwrap()
+            .read_to_string(&mut pid)
+            .unwrap();
+        sender.send(pid.parse::<i32>().unwrap()).unwrap();
+    });
+    let mut registry = HostlibRegistry::new().with(harn_hostlib::tools::ToolsCapability);
+    let chunk =
+        harn_vm::compile_source(include_str!("../../fixtures/github_budget_consent.harn")).unwrap();
+    let config = serde_json::json!({
+        "cwd": fixture.workspace.path(), "native": native,
+        "approval": fixture.workspace("unreached-approval"),
+        "changed_etag": "\"changed\"", "change_policy": false,
+    });
+    let mut vm = harn_vm::new_vm();
+    harn_runtime::register_vm_stdlib(&mut vm);
+    registry.register_into_vm(&mut vm);
+    vm.set_harness(harn_vm::Harness::real());
+    vm.set_global(
+        "argv",
+        VmValue::list(vec![VmValue::string(config.to_string())]),
+    );
+    let cancel = Arc::new(AtomicBool::new(false));
+    vm.install_cancel_token(cancel.clone());
+    let provider = Arc::new(
+        harn_vm::secrets::MemorySecretProvider::new(SECRET_ACCOUNT).with_secret(
+            harn_vm::secrets::SecretId::new(SECRET_ACCOUNT, SECRET_KEY),
+            PROBE,
+        ),
+    );
+    let policy = harn_vm::orchestration::CapabilityPolicy {
+        workspace_roots: vec![fixture.workspace.path().display().to_string()],
+        sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
+        ..Default::default()
+    };
+    harn_clock::test_support::current_thread_runtime().block_on(
+        harn_clock::test_support::with_local_tasks(async {
+            let mut execution = Box::pin(harn_vm::secrets::with_active_secret_provider(
+                Some(provider), harn_vm::orchestration::scope_execution_policy(policy, vm.execute(&chunk)),
+            ));
+            let pid = tokio::select! {
+                biased;
+                result = &mut execution => panic!("preparation finished before cancellation: {result:?}"),
+                pid = acknowledged => pid.expect("real helper preparation must acknowledge readiness"),
+            };
+            assert!(!fixture.workspace("native-argv").exists());
+            if drop_execution {
+                drop(execution);
+            } else {
+                cancel.store(true, Ordering::SeqCst);
+                let error = execution.await.expect_err("ready preparation must answer cancellation");
+                assert!(error.to_string().contains("cancel"), "{error}");
+            }
+            assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "preparation helper survived cleanup");
+            assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+            assert!(!fixture.workspace("native-argv").exists());
+        }),
+    );
+    reader.join().unwrap();
+}
+
+#[test]
+fn stopped_budget_reader_obeys_the_post_request_deadline_and_is_reaped() {
+    use std::io::Read as _;
+    let _env = super::super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let _session = in_session();
+    let (_, state) = enroll(&fixture);
+    std::fs::write(state.join("stall-write"), "ready").unwrap();
+    for file in ["ready", "release"] {
+        let path = state.join(file);
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    }
+    let ready = state.join("ready");
+    let reader = std::thread::spawn(move || {
+        let mut pid = String::new();
+        std::fs::File::open(ready)
+            .unwrap()
+            .read_to_string(&mut pid)
+            .unwrap();
+        pid.parse::<i32>().unwrap()
+    });
+    write_executable(
+        &fixture.user.path().join("native/gh.sh"),
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > native-argv\n\
+         printf 'HTTP/1.1 200 OK\\r\\n\\r\\n'\nhead -c 16777216 /dev/zero\n",
+    );
+    let mut request = fixture.request(fixture.workspace.path());
+    request.put(
+        "argv",
+        vlist_str(&["gh", "api", "repos/example/repo/commits/pinned"]),
+    );
+    let error = run(request)
+        .err()
+        .expect("a stopped reader must refuse completion");
+    let pid = reader.join().unwrap();
+    assert!(
+        error.contains("command deadline elapsed during budget accounting"),
+        "{error}"
+    );
+    assert!(error.contains("after_request"), "{error}");
+    assert!(error.contains("request_executed: true"), "{error}");
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "stopped reader survived cleanup"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.workspace("native-argv")).unwrap(),
+        "api\nrepos/example/repo/commits/pinned\n--include\n--header\nIf-None-Match: \"initial\"\n"
+    );
+}
