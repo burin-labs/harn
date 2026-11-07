@@ -2,6 +2,8 @@ import "./host_bound_rust_test_filter.harn"
 import { package_audit_overlap_errors } from "./package_audit_overlap.harn"
 import "./policy_core.harn"
 
+const trim = ci_text
+
 /** The workflow that owns the main-scoped Rust cache write. */
 const CACHE_REFRESH_WORKFLOW = "rust-cache-refresh.yml"
 
@@ -412,8 +414,7 @@ fn rust_lint_lane_errors(workflow: CiWorkflow?) -> list<string> {
   if len(matching_steps(job, RUST_CACHE_ACTION)) > 0 {
     errors = errors + ["ci.yml:${job_name} must not restore a build cache Clippy cannot reuse"]
   }
-  const kinds = (job?.strategy?.matrix?.include ?? []).map({ entry -> trim(entry?.kind ?? "") })
-    .to_list()
+  const kinds = matrix_include_rows(job).map({ entry -> trim(entry?.kind ?? "") }).to_list()
   if kinds != RUST_LINT_LEGS || job?.strategy?.["fail-fast"] != false {
     errors = errors
       + [
@@ -695,7 +696,7 @@ pub fn rust_cache_refresh_prerequisite_errors(workflow: CiWorkflow?) -> list<str
     errors = errors
       + ["Cache refresh cannot treat a failed qualification lifecycle as a successful prerequisite"]
   }
-  if cli?.strategy?.matrix?.include?.map({ row -> row?.cache_key }).to_list() != ["harn-ci-cli"] {
+  if matrix_include_rows(cli).map({ row -> row?.cache_key }).to_list() != ["harn-ci-cli"] {
     errors = errors + ["Cache refresh prerequisite must qualify only the shared CLI family"]
   }
   return errors
@@ -1099,7 +1100,7 @@ fn parallel_rust_proof_errors(workflow: CiWorkflow?) -> list<string> {
   }
   const partitions = workflow?.jobs?.["rust-test-partitions"]
   const test_step = step_by_name(partitions?.steps ?? [], "Run Rust workspace tests")
-  const rows = partitions?.strategy?.matrix?.include ?? []
+  const rows = matrix_include_rows(partitions)
   const shares = rows.map({ row -> to_string(row?.partition ?? "") }).to_list().sorted()
   if shares
     != [

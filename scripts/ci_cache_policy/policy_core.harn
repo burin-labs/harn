@@ -12,10 +12,14 @@ pub import {
   CiReleaseRunnerPolicy,
   CiStep,
   CiWorkflow,
+  ci_text,
   job_needs,
+  matrix_include_rows,
   workflow_events,
   workflow_inputs,
 } from "./workflow_model.harn"
+
+const trim = ci_text
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
@@ -1461,7 +1465,9 @@ pub fn cache_budget_reporter_errors(workflows: dict<string, CiWorkflow>) -> list
         "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
       ]
   }
-  const tolerant_reporters = reporters.filter({ step -> step["continue-on-error"] ?? false })
+  const tolerant_reporters = reporters.filter(
+    { step -> (step["continue-on-error"] ?? false) != false },
+  )
     .to_list()
   if len(tolerant_reporters) > 0 {
     errors = errors
