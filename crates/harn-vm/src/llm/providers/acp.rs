@@ -12,14 +12,11 @@ use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
 use super::common::vm_err;
 
-pub(crate) struct AcpProvider {
-    provider: String,
-}
+pub(crate) struct AcpProvider;
 
 #[derive(Clone, Debug)]
 struct AcpProviderRuntime {
@@ -45,12 +42,6 @@ struct PromptCollector {
 }
 
 impl AcpProvider {
-    pub(crate) fn new(provider: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-        }
-    }
-
     pub(crate) fn is_configured_acp(provider: &str) -> bool {
         crate::llm_config::provider_uses_acp(provider)
     }
@@ -62,26 +53,6 @@ impl AcpProvider {
     ) -> Result<LlmResult, VmError> {
         let runtime = AcpProviderRuntime::from_request(request)?;
         run_acp_provider_process(runtime, request, delta_tx).await
-    }
-}
-
-impl LlmProvider for AcpProvider {
-    fn name(&self) -> &str {
-        &self.provider
-    }
-
-    fn requires_model(&self) -> bool {
-        false
-    }
-}
-
-impl LlmProviderChat for AcpProvider {
-    fn chat<'a>(
-        &'a self,
-        request: &'a LlmRequestPayload,
-        delta_tx: Option<DeltaSender>,
-    ) -> crate::llm::provider::ProviderChatFuture<'a> {
-        Box::pin(self.chat_impl(request, delta_tx))
     }
 }
 

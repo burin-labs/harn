@@ -3,10 +3,8 @@
 
 use crate::llm::api::{DialectContract, LlmErrorKind, LlmErrorReason};
 use crate::llm::capabilities::WireDialect;
-use crate::llm::provider::LlmProvider;
-use crate::llm::providers::openai_compat::{
-    gpt_generation, gpt_model_supports_tool_search, OpenAiCompatibleProvider,
-};
+use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
+use crate::llm::providers::openai_compat::{gpt_generation, gpt_model_supports_tool_search};
 
 #[test]
 fn tool_search_supported_for_gpt_5_4_and_up() {
@@ -55,15 +53,13 @@ fn gpt_generation_ignores_date_suffix_as_minor() {
 
 #[test]
 fn native_tool_search_variants_lists_hosted_first() {
-    let provider = OpenAiCompatibleProvider::new("openai".to_string());
-    let variants = provider.native_tool_search_variants("gpt-5.4-preview");
+    let variants = provider_tool_search_variants("openai", "gpt-5.4-preview");
     assert_eq!(variants, vec!["hosted".to_string(), "client".to_string()]);
 }
 
 #[test]
 fn native_tool_search_variants_empty_for_old_model() {
-    let provider = OpenAiCompatibleProvider::new("openai".to_string());
-    assert!(provider.native_tool_search_variants("gpt-4o").is_empty());
+    assert!(provider_tool_search_variants("openai", "gpt-4o").is_empty());
 }
 
 #[test]
@@ -93,7 +89,6 @@ fn classifies_openai_rate_limit_as_transient_rate_limit() {
 
 #[test]
 fn supports_defer_loading_matches_tool_search_gate() {
-    let provider = OpenAiCompatibleProvider::new("openai".to_string());
-    assert!(provider.supports_defer_loading("gpt-5.4"));
-    assert!(!provider.supports_defer_loading("gpt-4o"));
+    assert!(provider_supports_defer_loading("openai", "gpt-5.4"));
+    assert!(!provider_supports_defer_loading("openai", "gpt-4o"));
 }

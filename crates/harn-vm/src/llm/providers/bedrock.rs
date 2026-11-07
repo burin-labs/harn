@@ -18,7 +18,7 @@ use chrono::Utc;
 
 use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
 };
@@ -266,12 +266,6 @@ fn strip_anthropic_sampling_params(body: &mut serde_json::Value, request: &LlmRe
         &request.thinking,
         request.provider_contract_probe,
     );
-}
-
-impl LlmProvider for BedrockProvider {
-    fn name(&self) -> &'static str {
-        "bedrock"
-    }
 }
 
 impl LlmProviderChat for BedrockProvider {

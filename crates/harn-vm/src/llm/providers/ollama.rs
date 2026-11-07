@@ -4,22 +4,12 @@ use crate::llm::api::{
     elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult,
     ProviderTelemetry,
 };
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::value::{VmError, VmValue};
 use std::time::Instant;
 
 /// Zero-cost unit struct for the Ollama provider.
 pub(crate) struct OllamaProvider;
-
-impl LlmProvider for OllamaProvider {
-    fn name(&self) -> &'static str {
-        "ollama"
-    }
-
-    fn is_local(&self) -> bool {
-        true
-    }
-}
 
 impl LlmProviderChat for OllamaProvider {
     fn chat<'a>(

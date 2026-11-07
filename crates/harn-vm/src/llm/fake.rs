@@ -49,7 +49,6 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{ErrorCategory, VmError};
 
 /// One step of a fake LLM script.
@@ -320,26 +319,6 @@ fn fake_error_to_vm_error(err: &FakeLlmError) -> VmError {
 
 /// Zero-cost unit struct registered as the `"fake"` provider.
 pub(crate) struct FakeLlmProvider;
-
-impl LlmProvider for FakeLlmProvider {
-    fn name(&self) -> &'static str {
-        "fake"
-    }
-
-    fn requires_model(&self) -> bool {
-        false
-    }
-}
-
-impl LlmProviderChat for FakeLlmProvider {
-    fn chat<'a>(
-        &'a self,
-        request: &'a LlmRequestPayload,
-        delta_tx: Option<DeltaSender>,
-    ) -> crate::llm::provider::ProviderChatFuture<'a> {
-        Box::pin(self.chat_impl(request, delta_tx))
-    }
-}
 
 impl FakeLlmProvider {
     /// Whether the request should route through the fake provider.

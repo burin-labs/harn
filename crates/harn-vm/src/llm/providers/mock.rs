@@ -2,25 +2,11 @@
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::mock::mock_llm_response;
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::value::VmError;
 
 /// Zero-cost unit struct for the mock provider.
 pub(crate) struct MockProvider;
-
-impl LlmProvider for MockProvider {
-    fn name(&self) -> &'static str {
-        "mock"
-    }
-
-    fn is_mock(&self) -> bool {
-        true
-    }
-
-    fn requires_model(&self) -> bool {
-        false
-    }
-}
 
 impl LlmProviderChat for MockProvider {
     fn chat<'a>(

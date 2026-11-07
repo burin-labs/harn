@@ -11,7 +11,7 @@ mod streaming;
 mod tests;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::value::VmError;
 pub(crate) use harn_provider_catalog::capabilities::gpt_generation;
 
@@ -40,17 +40,9 @@ pub(crate) fn gpt_model_supports_tool_search(model: &str) -> bool {
 /// OpenAI-compatible provider parameterized by name. A single struct handles
 /// all OpenAI-style backends — the provider name is used to resolve config
 /// (base URL, auth, etc.) from `llm_config`.
-pub(crate) struct OpenAiCompatibleProvider {
-    provider_name: String,
-}
+pub(crate) struct OpenAiCompatibleProvider;
 
 impl OpenAiCompatibleProvider {
-    pub(crate) fn new(name: String) -> Self {
-        Self {
-            provider_name: name,
-        }
-    }
-
     fn transform_request_with_caps(
         body: &mut serde_json::Value,
         caps: &crate::llm::capabilities::Capabilities,
@@ -69,28 +61,6 @@ impl OpenAiCompatibleProvider {
             }
         }
     }
-}
-
-impl LlmProvider for OpenAiCompatibleProvider {
-    fn name(&self) -> &str {
-        &self.provider_name
-    }
-
-    /// Apply provider-specific request body transformations.
-    fn transform_request(&self, body: &mut serde_json::Value) {
-        let model = body
-            .get("model")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let caps = crate::llm::managed_supply::capabilities_for(&self.provider_name, model);
-        Self::transform_request_with_caps(body, &caps);
-    }
-
-    // `supports_defer_loading` and `native_tool_search_variants` are
-    // served by the default trait impl, which reads `capabilities.toml`.
-    // The `gpt_model_supports_tool_search` helper below is retained for
-    // shape detection in `helpers/options.rs::classify_native_shape`
-    // (deciding Anthropic- vs OpenAI-wire shape for the mock provider).
 }
 
 impl LlmProviderChat for OpenAiCompatibleProvider {

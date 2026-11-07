@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::value::VmError;
 pub(crate) use harn_provider_catalog::capabilities::claude_generation;
 use harn_provider_catalog::capabilities::is_claude_model_id;
@@ -612,24 +612,6 @@ fn warn_adaptive_thinking_rewrite(model: &str) {
 
 /// Zero-cost unit struct for the Anthropic provider.
 pub(crate) struct AnthropicProvider;
-
-impl LlmProvider for AnthropicProvider {
-    fn name(&self) -> &'static str {
-        "anthropic"
-    }
-
-    fn supports_thinking(&self, model: &str) -> bool {
-        !crate::llm::capabilities::lookup(self.name(), model)
-            .thinking_modes
-            .is_empty()
-    }
-
-    // `supports_defer_loading` and `native_tool_search_variants` are
-    // served by the default trait impl, which reads the data-driven
-    // capability matrix in `capabilities.toml`. The old model-gate
-    // logic (Claude 4.0+ for Opus/Sonnet, 4.5+ for Haiku) is now one
-    // row per family in that file.
-}
 
 impl LlmProviderChat for AnthropicProvider {
     fn chat<'a>(

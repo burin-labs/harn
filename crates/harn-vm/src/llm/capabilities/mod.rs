@@ -11,8 +11,7 @@
 //! - merging user overrides on top;
 //! - matching a `(provider, model)` pair against the rule list with
 //!   glob + semver semantics;
-//! - exposing a stable `Capabilities` struct that the `LlmProvider`
-//!   trait delegates to as the single source of truth.
+//! - exposing the route's `Capabilities` to transport and tool admission.
 //!
 //! Provider adapters still supply generation parsers for `version_min`, but
 //! feature gates live in this data table instead of adapter-specific boolean

@@ -20,7 +20,7 @@ use crate::llm::api::{
     DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult, OutputFormat,
     ProviderTelemetry, RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::llm::providers::common::{
     apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
     output_text_block, reasoning_block, tool_call_block,
@@ -32,12 +32,6 @@ use crate::value::{VmError, VmValue};
 use generate_content_stream::{generate_content_url, read_generate_content_stream};
 
 pub(crate) struct GeminiProvider;
-
-impl LlmProvider for GeminiProvider {
-    fn name(&self) -> &'static str {
-        "gemini"
-    }
-}
 
 impl LlmProviderChat for GeminiProvider {
     fn chat<'a>(

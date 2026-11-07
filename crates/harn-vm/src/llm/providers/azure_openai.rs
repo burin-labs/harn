@@ -5,7 +5,7 @@
 //! Microsoft Entra bearer tokens.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
@@ -150,12 +150,6 @@ impl AzureOpenAiProvider {
         let result = dialect.parse_response(&json, request, tools_offered)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
-    }
-}
-
-impl LlmProvider for AzureOpenAiProvider {
-    fn name(&self) -> &'static str {
-        "azure_openai"
     }
 }
 

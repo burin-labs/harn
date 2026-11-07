@@ -745,24 +745,29 @@ fn tool_search_unsupported_for_non_claude() {
 
 #[test]
 fn native_tool_search_variants_lists_bm25_first() {
-    let provider = AnthropicProvider;
-    let variants = provider.native_tool_search_variants("claude-opus-4-7");
+    let variants =
+        crate::llm::provider::provider_tool_search_variants("anthropic", "claude-opus-4-7");
     assert_eq!(variants, vec!["bm25".to_string(), "regex".to_string()]);
 }
 
 #[test]
 fn native_tool_search_variants_empty_for_old_model() {
-    let provider = AnthropicProvider;
-    assert!(provider
-        .native_tool_search_variants("claude-opus-3-5")
-        .is_empty());
+    assert!(
+        crate::llm::provider::provider_tool_search_variants("anthropic", "claude-opus-3-5")
+            .is_empty()
+    );
 }
 
 #[test]
 fn supports_defer_loading_matches_tool_search_gate() {
-    let provider = AnthropicProvider;
-    assert!(provider.supports_defer_loading("claude-opus-4-7"));
-    assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    assert!(crate::llm::provider::provider_supports_defer_loading(
+        "anthropic",
+        "claude-opus-4-7"
+    ));
+    assert!(!crate::llm::provider::provider_supports_defer_loading(
+        "anthropic",
+        "claude-opus-3-5"
+    ));
 }
 
 #[test]

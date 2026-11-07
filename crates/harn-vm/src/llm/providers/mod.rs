@@ -1,7 +1,7 @@
 //! Built-in LLM provider implementations.
 //!
-//! Each provider implements the `LlmProvider` + `LlmProviderOps` traits from
-//! `super::provider`. The three main families are:
+//! Providers share the boxed `LlmProviderChat` interface; request and response
+//! behavior follows the route's dialect and capability contracts.
 //!
 //! - **Anthropic** — Claude models via the Anthropic Messages API
 //! - **OpenAI-compatible** — OpenAI, OpenRouter, Together, Groq, DeepSeek,

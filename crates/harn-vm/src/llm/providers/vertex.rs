@@ -6,7 +6,7 @@
 //! `generateContent` JSON.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
-use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::provider::LlmProviderChat;
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
@@ -207,12 +207,6 @@ pub(crate) async fn resolve_vertex_token(api_key: &str, tenant: &str) -> Result<
     {
         Some(token) => Ok(token),
         None => VertexProvider::bearer_token(api_key).await,
-    }
-}
-
-impl LlmProvider for VertexProvider {
-    fn name(&self) -> &'static str {
-        "vertex"
     }
 }
 

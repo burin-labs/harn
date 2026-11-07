@@ -3,7 +3,6 @@
 
 use super::fixtures::base_request_payload;
 use crate::llm::api::{LogprobsConfig, ThinkingConfig, TokenBias, Verbosity};
-use crate::llm::provider::LlmProvider;
 use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
 
@@ -131,7 +130,7 @@ fn build_request_body_uses_wire_model_for_catalog_key() {
 }
 
 #[test]
-fn transform_request_preserves_chat_template_kwargs_when_capability_allows() {
+fn build_request_body_preserves_chat_template_kwargs_when_capability_allows() {
     crate::llm::capabilities::set_user_overrides_toml(
         r#"
 [[provider.openrouter]]
@@ -141,17 +140,12 @@ thinking_modes = ["enabled"]
 "#,
     )
     .expect("capability override");
-    let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
     let mut payload = base_request_payload();
     payload.model = "custom-qwen".to_string();
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
-    assert!(body.get("chat_template_kwargs").is_some());
-
-    provider.transform_request(&mut body);
-
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body.get("chat_template_kwargs").is_some());
     crate::llm::capabilities::clear_user_overrides();
 }
@@ -168,7 +162,6 @@ thinking_modes = ["enabled"]
 "#,
     )
     .expect("capability override");
-    let provider = OpenAiCompatibleProvider::new("baseten".to_string());
     let mut payload = base_request_payload();
     payload.provider = "baseten".to_string();
     payload.model = "zai-org/GLM-5.2".to_string();
@@ -181,7 +174,10 @@ thinking_modes = ["enabled"]
     assert!(body.get("chat_template_kwargs").is_none());
     body["chat_template_kwargs"] = json!({"enable_thinking": false});
 
-    provider.transform_request(&mut body);
+    OpenAiCompatibleProvider::transform_request_with_caps(
+        &mut body,
+        &crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model),
+    );
 
     assert!(body.get("chat_template_args").is_some());
     assert!(body.get("chat_template_kwargs").is_none());
@@ -190,14 +186,16 @@ thinking_modes = ["enabled"]
 
 #[test]
 fn transform_request_strips_chat_template_kwargs_when_capability_denies() {
-    let provider = OpenAiCompatibleProvider::new("acme".to_string());
     let mut body = json!({
         "model": "custom-qwen",
         "chat_template_kwargs": {"enable_thinking": true},
         "chat_template_args": {"enable_thinking": true},
     });
 
-    provider.transform_request(&mut body);
+    OpenAiCompatibleProvider::transform_request_with_caps(
+        &mut body,
+        &crate::llm::managed_supply::capabilities_for("acme", "custom-qwen"),
+    );
 
     assert!(body.get("chat_template_kwargs").is_none());
     assert!(body.get("chat_template_args").is_none());

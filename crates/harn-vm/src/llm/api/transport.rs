@@ -244,7 +244,7 @@ async fn vm_call_llm_api_inner(
     }
 
     if crate::llm::providers::AcpProvider::is_configured_acp(provider) {
-        return crate::llm::providers::AcpProvider::new(provider.clone())
+        return crate::llm::providers::AcpProvider
             .chat_impl(opts, delta_tx)
             .await;
     }
@@ -316,7 +316,7 @@ async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    use crate::llm::provider::{LlmProvider, LlmProviderChat};
+    use crate::llm::provider::LlmProviderChat;
 
     // Construct providers inline to avoid RefCell-across-await conflicts on
     // the registry. Their boxed chat interface keeps concrete provider futures
@@ -324,7 +324,7 @@ async fn dispatch_to_registered_provider(
     let provider = &opts.provider;
 
     let mock = crate::llm::providers::MockProvider;
-    if mock.is_mock() && provider == mock.name() {
+    if provider == "mock" {
         return mock.chat(opts, delta_tx).await;
     }
 
@@ -370,7 +370,7 @@ async fn dispatch_to_registered_provider(
                 .await
         }
         StreamProtocol::OpenAiSse => {
-            crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
+            crate::llm::providers::OpenAiCompatibleProvider
                 .chat(opts, delta_tx)
                 .await
         }
