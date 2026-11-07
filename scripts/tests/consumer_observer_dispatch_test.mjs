@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {observerDeclarationName} from '../lib/consumer-observer.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 
 test('the actual dispatch entrypoint requires issued custody and a fresh live parent, and exports no child identity',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-observer-dispatch-'));
@@ -16,13 +16,8 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
       source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab',started_at:1000};
     const parent={id:42,run_attempt:2,head_sha:context.parent_head_sha,
       head_repository:{full_name:context.parent_repository},path:'.github/workflows/consumer-canary.yml',status:'in_progress'};
-    const declaration=path.join(scratch,'consumer-observer.json'),archive=path.join(scratch,'declaration.zip');
-    fs.writeFileSync(declaration,JSON.stringify(context));
-    const zipped=spawnSync('zip',['-j',archive,declaration],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-    assert.equal(zipped.status,0,zipped.stderr);
-    const bytes=fs.readFileSync(archive);
-    const metadata={id:501,name:observerDeclarationName(context),expired:false,size_in_bytes:bytes.length,
-      digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,workflow_run:{id:42,head_sha:parent.head_sha}};
+    const {archive,metadata}=archiveJson(scratch,'consumer-observer.json',context,
+      {id:501,name:observerDeclarationName(context),workflow_run:{id:42,head_sha:parent.head_sha}});
     const fixture=path.join(scratch,'fixture.json'),calls=path.join(scratch,'calls.jsonl'),preload=path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
       const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));

@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {consumerDeadlineReceipt,legacyConsumerObservationPolicy as consumerObservationPolicy,qualifyConsumerDeadline,observerDeadlineStep,
   observerDeadlineFilename,observerDeadlineName,observerWindowSteps,waitLegacyConsumerWindow as waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
 import {observerDeclarationName,observerDeclarationStep,observerPublicationWitness} from '../lib/consumer-observer.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 
 test('the actual deadline reader authenticates real archives and original producer steps before recovery evidence',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-observer-deadline-reader-'));
@@ -56,16 +56,9 @@ test('the actual deadline reader authenticates real archives and original produc
       const deadline=change.receipt??consumerDeadlineReceipt(issued,8200,reading);
       const directory=path.join(scratch,String(sequence++));fs.mkdirSync(directory);
       const artifacts=[[observerDeclarationName(issued),'consumer-observer.json',issued],
-        [observerDeadlineName(issued),observerDeadlineFilename,deadline]].map(([name,filename,value],index)=>{
-        const file=path.join(directory,filename),archive=path.join(directory,`${index}.zip`);
-        fs.writeFileSync(file,JSON.stringify(value));
-        const zip=spawnSync('zip',['-j',archive,file],{env:{PATH:process.env.PATH,LC_ALL:'C'},encoding:'utf8'});
-        assert.equal(zip.status,0,zip.stderr);
-        const bytes=fs.readFileSync(archive);
-        return {archive,metadata:{id:501+index,name,expired:false,size_in_bytes:bytes.length,
-          digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-          workflow_run:{id:42,head_sha:context.parent_head_sha}}};
-      });
+        [observerDeadlineName(issued),observerDeadlineFilename,deadline]].map(([name,filename,value],index)=>
+          archiveJson(directory,filename,value,{id:501+index,name,
+            workflow_run:{id:42,head_sha:context.parent_head_sha}}));
       if(change.missing)artifacts.pop();
       if(change.duplicate)artifacts.push(artifacts[1]);
       if(change.foreign)artifacts[1].metadata.workflow_run.id=43;

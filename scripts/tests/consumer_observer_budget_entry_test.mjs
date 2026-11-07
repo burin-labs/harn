@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {admitChild, observerDeclarationName, observerRunName, observerDispatchActor}
   from '../lib/consumer-observer.mjs';
+import {archiveJson} from './fixtures/artifact_archive.mjs';
 
 test('the actual budget entrypoint authenticates archives and exact job timing before extending observation', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-budget-entry-'));
@@ -31,16 +31,8 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
       {inputs: {observer: JSON.stringify(context), source_revision: context.source_revision}}, context);
     const archives = [[observerDeclarationName(context), 'consumer-observer.json', context, parent],
       [`consumer-observer-${context.dispatch_nonce}`, `consumer-observer-${context.dispatch_nonce}.json`, ownership, child]]
-      .map(([name, filename, value, run], index) => {
-        const file = path.join(scratch, filename), archive = path.join(scratch, `${index}.zip`);
-        fs.writeFileSync(file, JSON.stringify(value));
-        const zip = spawnSync('zip', ['-j', archive, file], {encoding: 'utf8'});
-        assert.equal(zip.status, 0, zip.stderr);
-        const bytes = fs.readFileSync(archive);
-        return {archive, metadata: {id: 501 + index, name, expired: false,
-          size_in_bytes: bytes.length, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-          workflow_run: {id: run.id, head_sha: run.head_sha}}};
-      });
+      .map(([name, filename, value, run], index) => archiveJson(scratch,filename,value,
+        {id:501+index,name,workflow_run:{id:run.id,head_sha:run.head_sha}}));
     const job = {id: 47, run_id: 73, run_attempt: 1, head_sha: child.head_sha,
       created_at: iso(74), started_at: iso(1842), completed_at: null,
       status: 'in_progress', conclusion: null, runner_id: 15, runner_name: 'owned-worker',
