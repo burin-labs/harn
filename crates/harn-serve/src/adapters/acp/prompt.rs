@@ -270,7 +270,7 @@ impl AcpServer {
             let bound = tokio::select! {
                 biased;
                 () = cancellation.wait_cancelled() => {
-                    self.turn_ended(id, &session_id, reply, cancelled_prompt_result(None));
+                    self.turn_ended(id, &session_id, reply, cancelled_prompt_result(&cancellation, None));
                     return;
                 }
                 result = binding => result.unwrap_or_else(|_| {
@@ -546,7 +546,8 @@ impl AcpServer {
                     self.concurrent_controls.pending_prompts.clone(),
                     self.output.clone(),
                 ),
-            ),
+            )
+            .with_elicitations(self.elicitations.clone()),
         ));
         let bridge = Arc::new(AcpBridge {
             client_capabilities: self
@@ -556,28 +557,25 @@ impl AcpServer {
                 .clone(),
             session_id: session_id.clone(),
             output: output.clone(),
-            pending: self.pending.clone(),
-            next_id_counter: AtomicU64::new(self.next_id.fetch_add(1000, Ordering::SeqCst)),
+            outbound: self.outbound.clone(),
+            elicitations: self.elicitations.clone(),
             cancellation: cancellation.clone(),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
             host_responder,
         });
-        let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-                bridge.pending.clone(),
-                Arc::new(move |line| {
-                    output.write_line(line);
-                    Ok(())
-                }),
-                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-                harn_vm::bridge::HostBridgeControlState::new(
-                    cancellation.cancelled.clone(),
-                    cancellation.notify.clone(),
-                    inject_state,
-                    tool_call_cancellations,
-                ),
+        let host_bridge = Arc::new(harn_vm::bridge::HostBridge::from_outbound_requests(
+            self.outbound.clone(),
+            Arc::new(move |line| {
+                output.write_line(line);
+                Ok(())
+            }),
+            harn_vm::bridge::HostBridgeControlState::new(
+                cancellation.cancelled.clone(),
+                cancellation.notify.clone(),
+                inject_state,
+                tool_call_cancellations,
             ),
-        );
+        ));
         host_bridge.set_session_id(&bridge.session_id);
         host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
         #[cfg(feature = "hostlib")]
@@ -640,7 +638,7 @@ impl AcpServer {
                 id,
                 &session_id,
                 reply,
-                cancelled_prompt_result(error.as_ref()),
+                cancelled_prompt_result(&cancellation, error.as_ref()),
             );
             return;
         }
@@ -737,7 +735,7 @@ impl AcpServer {
                         id,
                         &session_id,
                         reply,
-                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                        cancelled_prompt_result(&cancellation, sink_flush_error.as_ref()),
                     );
                     return;
                 }
@@ -800,7 +798,7 @@ impl AcpServer {
                         id,
                         &session_id,
                         reply,
-                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                        cancelled_prompt_result(&cancellation, sink_flush_error.as_ref()),
                     );
                     return;
                 }
@@ -828,11 +826,16 @@ impl AcpServer {
 /// loop does not seal `cancelled` itself: the adapter observes the cancel one
 /// layer up, which is why the outcome is constructed here.
 pub(super) fn cancelled_prompt_result(
+    cancellation: &PromptCancellation,
     persistence_error: Option<&harn_vm::agent_events::AgentEventSinkError>,
 ) -> serde_json::Value {
     let terminal = harn_vm::agent_events::AgentTerminalOutcome::new(
         harn_vm::agent_events::AgentTerminalKind::UserCancelled,
-        "session/cancel",
+        cancellation
+            .method
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_str(),
     );
     let mut result = serde_json::json!({
         "stopReason": "cancelled",

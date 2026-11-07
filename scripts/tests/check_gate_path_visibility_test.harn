@@ -68,7 +68,7 @@ pipeline test_enumeration_detector_finds_the_unrefused_scan(harness: Harness, ta
   assert(is_raw_enumeration_line("  for path in fs.glob(pattern) {", ""))
   assert(is_raw_enumeration_line("  for g in harness.fs.glob(\"crates/**/*.rs\") {", ""))
   assert(is_raw_enumeration_line("  const entries = fs.walk(root)", ""))
-  assert(is_raw_enumeration_line("  for name in fs.list_dir(dir) {", ""))
+  assert(!is_raw_enumeration_line("  for name in fs.list_dir(dir) {", ""))
   assert(is_raw_enumeration_line("  for p in find_files(fs, root, \"**/*.rs\") {", ""))
 }
 

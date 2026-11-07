@@ -22,8 +22,8 @@ fn test_bridge(
             .clone(),
         session_id: "turn-cache-session".to_string(),
         output: AcpOutput::Channel(tx),
-        pending: server.pending.clone(),
-        next_id_counter: AtomicU64::new(1),
+        outbound: server.outbound.clone(),
+        elicitations: server.elicitations.clone(),
         cancellation: SessionCancellation::default().prepare_prompt(),
         assistant_state: Mutex::new(VisibleTextState::default()),
         host_responder: None,
@@ -34,6 +34,7 @@ fn install_acp_host_bridge(bridge: Arc<AcpBridge>) {
     set_host_call_bridge(Arc::new(super::super::builtins::AcpHostCallBridge::new(
         bridge,
         VmValue::List(Arc::new(Vec::new())),
+        VmValue::Nil,
     )));
 }
 

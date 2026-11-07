@@ -19,10 +19,9 @@ use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::infer_binary_op_type;
 use super::super::format::format_type;
-use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
+use super::super::scope::{builtin_return_type, InferredType, TypeScope};
 use super::super::union::{
-    intersect_types, narrow_to_single, reference_path_key, reference_path_key_for_subscript,
-    remove_from_union, simplify_union, subtract_type, without_nil,
+    reference_path_key, reference_path_key_for_subscript, simplify_union, without_nil,
 };
 use super::super::{is_gradual_type_name, TypeChecker};
 
@@ -494,8 +493,17 @@ impl TypeChecker {
                     return self.infer_pipe_type(left, right, scope);
                 }
                 let lt = self.infer_type(left, scope);
-                let rt = self.infer_type(right, scope);
+                let mut rt = self.infer_type(right, scope);
                 if matches!(op, BinaryOperator::NilCoalesce) {
+                    // An empty fallback contributes no elements. Its usual
+                    // gradual type supports mutable empty bindings, but would
+                    // erase a typed collection on the other coalesce branch.
+                    rt = match &right.node {
+                        Node::ListLiteral(items) if items.is_empty() => {
+                            Some(TypeExpr::List(Box::new(TypeExpr::Never)))
+                        }
+                        _ => rt,
+                    };
                     // `??` strips the nil arm from its left operand, but the
                     // structural `without_nil`/`contains_nil` helpers can't see
                     // through a named alias — so `type T = {..}?; x: T; x ?? d`
@@ -816,43 +824,6 @@ impl TypeChecker {
         natural
     }
 
-    /// Re-apply a [`PathNarrowing`] directive to a reference path's natural
-    /// type. The directives reuse the same type algebra that variable
-    /// narrowing uses (`narrow_to_single`/`remove_from_union` for `type_of`,
-    /// `intersect_types`/`subtract_type` for schema checks), treating a
-    /// non-union type as a one-member union. A top type (`unknown`/`any`)
-    /// narrows straight to the tested kind on `Keep`, mirroring variable
-    /// `unknown` narrowing. When a directive matches nothing (a statically
-    /// dead branch) the natural type is returned unchanged rather than
-    /// over-narrowing.
-    fn apply_path_narrowing(natural: InferredType, narrowing: &PathNarrowing) -> InferredType {
-        let ty = natural?;
-        match narrowing {
-            PathNarrowing::Keep(tag) => {
-                if matches!(&ty, TypeExpr::Named(n) if is_gradual_type_name(n)) {
-                    return Some(TypeExpr::Named(tag.clone()));
-                }
-                let members = Self::as_union_members(&ty);
-                narrow_to_single(&members, tag).or(Some(ty))
-            }
-            PathNarrowing::Remove(tag) => {
-                let members = Self::as_union_members(&ty);
-                remove_from_union(&members, tag).or(Some(ty))
-            }
-            PathNarrowing::Intersect(schema) => intersect_types(&ty, schema).or(Some(ty)),
-            PathNarrowing::Subtract(schema) => subtract_type(&ty, schema).or(Some(ty)),
-            // Invalidated by a base reassignment: natural type unchanged.
-            PathNarrowing::Cleared => Some(ty),
-        }
-    }
-
-    fn as_union_members(ty: &TypeExpr) -> Vec<TypeExpr> {
-        match ty {
-            TypeExpr::Union(members) => members.clone(),
-            other => vec![other.clone()],
-        }
-    }
-
     pub(super) fn infer_property_type_from_type(
         &self,
         ty: &TypeExpr,
@@ -916,6 +887,16 @@ impl TypeChecker {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
             TypeExpr::Shape(fields) => Self::shape_property_type(fields, property, optional),
+            TypeExpr::OpenShape { fields, rests } => {
+                if fields.iter().any(|field| field.name == property) {
+                    return Self::shape_property_type(fields, property, optional);
+                }
+                let inferred = rests
+                    .iter()
+                    .map(|rest| self.infer_property_type_from_type(rest, property, scope, optional))
+                    .collect::<Option<Vec<_>>>()?;
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
+            }
             TypeExpr::List(inner) => {
                 Self::list_property_type(Some(inner.as_ref()), property, optional)
             }

@@ -199,10 +199,10 @@ fn branch_head(gh: Gh, repo: string, branch: string) -> string? {
   if len(matches) > 1 {
     throw "multiple exact refs returned for " + branch
   }
-  if len(matches) == 0 {
+  const found = matches[0]
+  if found == nil {
     return nil
   }
-  const found: NamedGitRef = matches[0]
   return found.object.sha
 }
 

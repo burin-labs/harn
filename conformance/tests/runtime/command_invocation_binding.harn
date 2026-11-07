@@ -1,0 +1,169 @@
+import "../_common"
+
+type ChildEvidence = {cwd: string, args: list<string>}
+
+pipeline default(harness: Harness) {
+  const owner = harness.env.get("HARN_EXT_COMMAND_INVOCATION_OWNER")
+  assert(owner == nil || owner == "sandboxed-owner")
+  if owner == nil {
+    // Conformance intentionally skips OS process confinement; use the normal CLI.
+    const repo = trim(harness.process.exec("git", "rev-parse", "--show-toplevel").stdout)
+    const binary = resolve_harn_bin(harness, repo)
+    const child = harness.process.run(
+      {
+        program: binary,
+        args: ["run", path_join(repo, "conformance/tests/runtime/command_invocation_binding.harn")],
+        env: {HARN_EXT_COMMAND_INVOCATION_OWNER: "sandboxed-owner"},
+      },
+    )
+    assert_eq(child.exit_code, 0, child.stderr)
+    return nil
+  }
+  const root = harness.fs.mkdtemp_in_workspace("command-invocation-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const nested = path_join(root, "nested")
+  harness.fs.mkdir(nested)
+  const python = if harness.system.platform().os == "windows" {
+    "python"
+  } else {
+    "python3"
+  }
+  const payload = ["", " spaced argument ", "quotes'\"", "literal$HOME", "a\\b", "日本語"]
+  const source =
+    "import os,sys,json; data={'cwd':os.getcwd(),'args':sys.argv[1:]}; json.dump(data,open('binding-child.json','w')); print(json.dumps(data))"
+  const child_argv = [python, "-c", source] + payload
+  let cases = [
+    {name: "inherited", cwd: nil, expected: root, rewrite: false, deny: false},
+    {name: "explicit", cwd: nested, expected: nested, rewrite: false, deny: false},
+    {
+      name: "relative",
+      cwd: path_relative_to(nested, harness.fs.cwd()),
+      expected: nested,
+      rewrite: false,
+      deny: false,
+    },
+    {name: "rewritten", cwd: root, expected: nested, rewrite: true, deny: false},
+    {name: "malformed-consent", cwd: nested, expected: nested, rewrite: false, deny: true},
+  ]
+  if harness.system.platform().os != "windows" {
+    const alias = path_join(root, "alias")
+    const linked = harness.process.run(
+      {
+        program: python,
+        args: ["-c", "import os,sys; os.symlink(sys.argv[1],sys.argv[2])", nested, alias],
+      },
+    )
+    assert_eq(linked.exit_code, 0, "real symlink setup must succeed")
+    cases = cases + [{name: "symlink", cwd: alias, expected: nested, rewrite: false, deny: false}]
+  }
+  harness.runtime.with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [root]},
+    { ->
+      for runner in ["native", "hostlib"] {
+        for row in cases {
+          const marker = path_join(row.expected, "binding-child.json")
+          if harness.fs.exists(marker) {
+            harness.fs.delete(marker)
+          }
+          const asks = harness.runtime.atomic(0)
+          harness.runtime.command_policy_push(
+            command_policy(
+              {
+                // Force approval independently of the process ceiling and syntax.
+                workspace_roots: [path_join(root, "approval-only-root")],
+                require_approval: ["outside_workspace"],
+                pre: { _ctx ->
+                  if row.rewrite {
+                    return {rewrite: {cwd: nested}}
+                  }
+                  return nil
+                },
+                consent: { _ctx ->
+                  harness.runtime.atomic_add(asks, 1)
+                  if row.deny {
+                    return {decision: "not-a-valid-consent"}
+                  }
+                  return true
+                },
+              },
+            ),
+          )
+          const result = if runner == "native" {
+            harness.process.run(
+              {program: python, args: child_argv[1:len(child_argv)], cwd: row.cwd},
+            )
+          } else {
+            harness.tools.run_command({argv: child_argv, cwd: row.cwd})
+          }
+          harness.runtime.command_policy_pop()
+          const count = harness.runtime.atomic_get(asks)
+          assert_eq(
+            count,
+            if row.rewrite {
+              2
+            } else {
+              1
+            },
+            "every assessed invocation needs its own consent",
+          )
+          if row.deny {
+            assert_eq(result.status, "consent_denied")
+            assert(!harness.fs.exists(marker), "malformed consent must not launch a child")
+          } else {
+            assert_eq(result.exit_code, 0, "the real child must run")
+            assert(harness.fs.exists(marker), "the real child must write its marker")
+            const actual = schema_expect(
+              json_parse(harness.fs.read_text(marker)),
+              schema_of(ChildEvidence),
+            )
+            assert_eq(path_normalize(actual.cwd), path_normalize(row.expected))
+            assert_eq(actual.args, payload, "literal argument bytes survive execution")
+            const consent = result.command_policy.context
+            assert_eq(path_normalize(consent.active_cwd), path_normalize(actual.cwd))
+            assert_eq(path_normalize(consent.request.cwd), path_normalize(actual.cwd))
+            assert_eq(path_normalize(consent.invocation.cwd), path_normalize(actual.cwd))
+            assert_eq(consent.invocation.argv, child_argv, "consent sees the exact launched argv")
+          }
+        }
+        if harness.system.platform().os != "windows" {
+          const marker = path_join(nested, "shell-stage.txt")
+          if harness.fs.exists(marker) {
+            harness.fs.delete(marker)
+          }
+          const shell_argv = ["sh", "-c", "cd nested && pwd > shell-stage.txt"]
+          harness.runtime.command_policy_push(
+            command_policy(
+              {
+                workspace_roots: [path_join(root, "approval-only-root")],
+                require_approval: ["outside_workspace"],
+                consent: { _ctx -> return true },
+              },
+            ),
+          )
+          const result = if runner == "native" {
+            harness.process.run({program: "sh", args: shell_argv[1:len(shell_argv)], cwd: root})
+          } else {
+            harness.tools.run_command({argv: shell_argv, cwd: root})
+          }
+          harness.runtime.command_policy_pop()
+          assert_eq(result.exit_code, 0)
+          assert_eq(path_normalize(trim(harness.fs.read_text(marker))), path_normalize(nested))
+          const consent = result.command_policy.context
+          assert_eq(
+            path_normalize(consent.invocation.cwd),
+            path_normalize(root),
+            "the shell launch directory differs from its later stage directory",
+          )
+          assert_eq(consent.invocation.argv, shell_argv)
+          const scan = command_risk_scan(consent)
+          assert(len(scan.execution_stages) >= 2, "the real shell stages must be parsed")
+          for stage in scan.execution_stages {
+            assert(stage.cwd == nil, "the scanner must not invent a directory for a shell stage")
+          }
+        }
+      }
+    },
+  )
+}

@@ -37,6 +37,13 @@ pub const TAPE_FILE_NAME: &str = "run.tape";
 mod summary;
 pub use summary::{summarize_run_tape, RecordedModelCall, RecordedToolCall, RunTapeSummary};
 
+#[path = "run_tape_preflight.rs"]
+mod preflight;
+pub use preflight::{
+    preflight_prefix_calls, PrefixEffectAction, PrefixEffectCall, PrefixEffectDecision,
+    PrefixEffectPreflight,
+};
+
 /// How much of a run the tape keeps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

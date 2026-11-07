@@ -57,8 +57,12 @@ export const ACP_CLIENT_METHODS = [
   "fs/read_text_file",
   "fs/write_text_file",
   "terminal/create",
+  "terminal/output",
+  "terminal/release",
+  "terminal/wait_for_exit",
   "terminal/kill",
   "session/request_permission",
+  "elicitation/create",
 ] as const
 export type ACPClientMethod = (typeof ACP_CLIENT_METHODS)[number]
 
@@ -66,6 +70,8 @@ export const ACP_AGENT_NOTIFICATIONS = [
   "session/message",
   "session/update",
   "terminal/output",
+  "elicitation/complete",
+  "$/cancel_request",
 ] as const
 export type ACPAgentNotification = (typeof ACP_AGENT_NOTIFICATIONS)[number]
 

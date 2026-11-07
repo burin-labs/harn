@@ -13,11 +13,10 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/canon.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/command_capture.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
-# count   12  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/goal.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
-# count    8  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
+# count    3  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
@@ -176,18 +175,6 @@ crates/harn-stdlib/src/stdlib/agent/command_capture.harn::command_capture_plan_r
 crates/harn-stdlib/src/stdlib/agent/command_capture.harn::command_capture_rewrite
 crates/harn-stdlib/src/stdlib/agent/daemon.harn::agent_daemon_snapshot
 crates/harn-stdlib/src/stdlib/agent/daemon.harn::agent_daemon_step
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_capture_events
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_capture_report
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_capture_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_capture_value
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_report
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_event_value
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_feedback_injected_event_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_tool_audit_event_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_tool_call_receipt_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_tool_lifecycle_event_schema
-crates/harn-stdlib/src/stdlib/agent/events.harn::agent_typed_checkpoint_event_schema
 crates/harn-stdlib/src/stdlib/agent/fact.harn::invalidate_facts
 crates/harn-stdlib/src/stdlib/agent/fact.harn::store_fact
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal

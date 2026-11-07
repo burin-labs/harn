@@ -81,6 +81,14 @@ impl AcpOutput {
             {
                 return;
             }
+            if frame["method"] == "elicitation/complete"
+                && !capabilities
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .supports_elicitation("url")
+            {
+                return;
+            }
             self.write_line(line);
         })
     }
@@ -209,8 +217,8 @@ pub(super) struct AcpBridge {
     pub(super) client_capabilities: client_capabilities::ClientCapabilities,
     pub(super) session_id: String,
     pub(super) output: AcpOutput,
-    pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
-    pub(super) next_id_counter: AtomicU64,
+    pub(super) outbound: Arc<harn_vm::bridge::OutboundRequests>,
+    pub(super) elicitations: Arc<super::elicitation::UrlElicitations>,
     pub(super) cancellation: Arc<PromptCancellation>,
     pub(super) assistant_state: std::sync::Mutex<VisibleTextState>,
     /// When set, answers host requests in-process instead of the client.
@@ -355,65 +363,49 @@ impl AcpBridge {
                 .answer_in_process(responder, method, params, abort_on_cancel)
                 .await;
         }
-        if !self.client_capabilities.supports_method(method) {
+        if !self.client_capabilities.supports_request(method, &params) {
             return Err(harn_vm::VmError::Runtime(format!(
                 "ACP client did not advertise support for {method}"
             )));
         }
 
-        let id = self.next_id_counter.fetch_add(1, Ordering::SeqCst);
-
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().await;
-            pending.insert(id, tx);
-        }
-
-        if let Ok(line) = serde_json::to_string(&request) {
-            self.write_line(&line);
-        }
-
-        let timeout_wait = harn_vm::bridge::wait_for_bridge_call_timeout(
-            method,
-            &request["params"],
-            host_call_timeout(method),
-        );
-        tokio::pin!(timeout_wait);
-        let wait_cancelled = self.cancellation.wait_cancelled();
-        tokio::pin!(wait_cancelled);
-
-        tokio::select! {
-            result = rx => {
-                let msg = result
-                    .map_err(|_| harn_vm::VmError::Runtime("Client closed connection".into()))?;
-                if let Some(error) = msg.get("error") {
-                    let message = error["message"].as_str().unwrap_or("Unknown client error");
-                    Err(harn_vm::VmError::Runtime(format!(
-                        "Client error: {message}"
-                    )))
-                } else {
-                    Ok(msg["result"].clone())
-                }
-            }
-            _ = &mut wait_cancelled, if abort_on_cancel => {
-                let mut pending = self.pending.lock().await;
-                pending.remove(&id);
-                Err(harn_vm::VmError::Runtime("Cancelled".into()))
-            }
-            timeout = &mut timeout_wait => {
-                let mut pending = self.pending.lock().await;
-                pending.remove(&id);
-                Err(harn_vm::VmError::Runtime(format!(
-                    "Client did not respond to '{method}' within {timeout:?}"
-                )))
-            }
+        let output = self.output.clone();
+        let msg = self
+            .outbound
+            .call(
+                Arc::new(move |line| {
+                    output.write_line(line);
+                    Ok(())
+                }),
+                method,
+                params,
+                abort_on_cancel
+                    .then_some((&*self.cancellation.cancelled, &*self.cancellation.notify)),
+                host_call_timeout(method),
+                true,
+            )
+            .await
+            .map_err(|error| {
+                harn_vm::VmError::Runtime(match error {
+                    harn_vm::bridge::RequestError::Cancelled => "Cancelled".into(),
+                    harn_vm::bridge::RequestError::Closed
+                    | harn_vm::bridge::RequestError::Disconnected => {
+                        "Client closed connection".into()
+                    }
+                    harn_vm::bridge::RequestError::Timeout(timeout) => {
+                        format!("Client did not respond to '{method}' within {timeout:?}")
+                    }
+                    harn_vm::bridge::RequestError::Encoding(error)
+                    | harn_vm::bridge::RequestError::Transport(error) => error,
+                })
+            })?;
+        if let Some(error) = msg.get("error") {
+            let message = error["message"].as_str().unwrap_or("Unknown client error");
+            Err(harn_vm::VmError::Runtime(format!(
+                "Client error: {message}"
+            )))
+        } else {
+            Ok(msg["result"].clone())
         }
     }
 

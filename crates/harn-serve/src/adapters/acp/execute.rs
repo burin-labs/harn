@@ -689,7 +689,7 @@ require_declared_operations_served = true
     /// avoids needing a real subprocess or timing race.
     #[tokio::test(flavor = "current_thread")]
     async fn execute_chunk_installs_host_bridge_cancel_token_on_the_vm() {
-        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::atomic::Ordering;
         use tokio::sync::Mutex as TokioMutex;
 
         let cwd = tempfile::tempdir().expect("cwd");
@@ -709,8 +709,8 @@ require_declared_operations_served = true
             client_capabilities: Default::default(),
             session_id: "cancel-token-test".to_string(),
             output: super::super::AcpOutput::Channel(tx),
-            pending: Arc::new(TokioMutex::new(std::collections::HashMap::new())),
-            next_id_counter: AtomicU64::new(1),
+            outbound: Arc::default(),
+            elicitations: Arc::default(),
             cancellation: cancellation.clone(),
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),
@@ -768,7 +768,6 @@ require_declared_operations_served = true
 
     #[tokio::test(flavor = "current_thread")]
     async fn execute_chunk_projects_lazy_module_preparation_progress() {
-        use std::sync::atomic::AtomicU64;
         use tokio::sync::Mutex as TokioMutex;
 
         harn_stdlib::install().expect("the host installs its catalog before compiling a chunk");
@@ -822,8 +821,11 @@ require_declared_operations_served = true
             session_id: "module-progress-test".to_string(),
             output: super::super::AcpOutput::Channel(tx)
                 .observed_by(super::super::module_progress::ModuleProgressGate::default()),
-            pending: client_pending,
-            next_id_counter: AtomicU64::new(1),
+            outbound: Arc::new(harn_vm::bridge::OutboundRequests::from_parts(
+                client_pending,
+                1,
+            )),
+            elicitations: Arc::default(),
             cancellation: cancellation.clone(),
             assistant_state: std::sync::Mutex::new(
                 harn_vm::visible_text::VisibleTextState::default(),

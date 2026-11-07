@@ -363,6 +363,28 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             direction,
             params,
         } => {
+            if !sink.replayed
+                && direction == "notification"
+                && method == "notifications/elicitation/complete"
+            {
+                if let Some(source) = params
+                    .get("params")
+                    .unwrap_or(params)
+                    .get("elicitationId")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    if let Some(id) = sink
+                        .elicitations
+                        .as_ref()
+                        .and_then(|registry| registry.complete(session_id, server, source))
+                    {
+                        sink.write_jsonrpc_notification(
+                            "elicitation/complete",
+                            serde_json::json!({"elicitationId": id}),
+                        );
+                    }
+                }
+            }
             sink.emit_agent_event(
                 session_id,
                 &payloads::McpNotification {

@@ -1,0 +1,35 @@
+import {
+  get_typed_report,
+  schema_enum,
+  schema_json,
+  schema_nullable,
+  schema_openapi,
+} from "std/schema"
+
+fn main(harness: Harness) {
+  const schemas = [
+    schema_enum(["harn", "host_bridge"]),
+    {const: "harn"},
+    {union: [{const: "harn"}, {const: "host_bridge"}]},
+    {all_of: [{type: "string"}, {enum: ["harn", "host_bridge"]}]},
+    {"$ref": "#/definitions/Executor", definitions: {Executor: {enum: ["harn", "host_bridge"]}}},
+  ]
+  for original in schemas {
+    const schema = schema_nullable(original)
+    assert(get_typed_report("harn", schema).ok, "real member must reach validation")
+    assert(!get_typed_report("foreign", schema).ok, "nullable must preserve member constraints")
+    assert(
+      get_typed_report(nil, schema).ok,
+      "nullable must accept nil independently of constraints",
+    )
+    const exported = schema_json(schema)
+    assert(get_typed_report("harn", exported).ok, "export must preserve the real member")
+    assert(!get_typed_report("foreign", exported).ok, "export must refuse a foreign member")
+    assert(get_typed_report(nil, exported).ok, "export must preserve nullability")
+  }
+  const openapi = schema_openapi(schema_nullable(schema_enum(["harn", "host_bridge"])))
+  assert_eq(openapi.nullable, true)
+  assert_eq(openapi.enum, ["harn", "host_bridge"])
+  assert(openapi.anyOf == nil, "OpenAPI retains its distinct nullable representation")
+  harness.stdio.println("nullable constraints ok")
+}

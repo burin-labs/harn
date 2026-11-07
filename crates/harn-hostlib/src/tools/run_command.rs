@@ -122,11 +122,75 @@ pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
 }
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let prepared = prepare(require_dict_arg(NAME, args)?.as_ref().clone())?;
+    (prepared.handler)(&[])
+}
+
+pub(crate) fn prepare(
+    mut params: harn_vm::value::DictMap,
+) -> Result<crate::registry::PreparedCommand, HostlibError> {
+    let _profile_guard = optional_string(NAME, &params, "sandbox_profile")?
+        .as_deref()
+        .map(harn_vm::process_sandbox::push_sandbox_profile_override)
+        .transpose()
+        .map_err(sandbox_profile_error_to_hostlib)?;
+    let _scope_guard =
+        harn_vm::process_sandbox::push_process_sandbox_scope(parse_sandbox_scope(&params)?)
+            .map_err(sandbox_scope_error_to_hostlib)?;
+    if matches!(
+        optional_string(NAME, &params, "mode")?.as_deref(),
+        Some("shell" | "auto")
+    ) {
+        let shell = harn_vm::shells::resolve_shell_from_vm_params(&params).map_err(|message| {
+            HostlibError::InvalidParameter {
+                builtin: NAME,
+                param: "shell",
+                message,
+            }
+        })?;
+        params.put(
+            "shell",
+            harn_vm::shells::shell_descriptor_to_vm_value(&shell),
+        );
+    }
+    let (program, args) = parse_command(&params)?;
+    let requested_cwd = optional_string(NAME, &params, "cwd")?;
+    let cwd = harn_vm::orchestration::prepare_local_command_cwd(requested_cwd.as_deref())
+        .map_err(|error| command_parameter_error(error, "cwd"))?;
+    let invocation = harn_vm::orchestration::CommandInvocation::new(
+        std::iter::once(program).chain(args).collect(),
+        cwd,
+    )
+    .map_err(|error| command_parameter_error(error, "argv"))?;
+    let requested_cwd = requested_cwd.map(|_| to_agent_path(invocation.cwd()));
+    invocation.bind_directory(&mut params);
+    let retained_params = std::sync::Arc::new(params.clone());
+    let retained_invocation = invocation.clone();
+    Ok(crate::registry::PreparedCommand {
+        params,
+        invocation,
+        handler: std::sync::Arc::new(move |_| {
+            let mut result = handle_bound(retained_params.clone(), &retained_invocation);
+            if let Err(HostlibError::ProcessSpawn {
+                requested_cwd: reported,
+                ..
+            }) = &mut result
+            {
+                *reported = requested_cwd.clone();
+            }
+            result
+        }),
+    })
+}
+
+fn handle_bound(
+    map: std::sync::Arc<harn_vm::value::DictMap>,
+    invocation: &harn_vm::orchestration::CommandInvocation,
+) -> Result<VmValue, HostlibError> {
     let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
-    let map = require_dict_arg(NAME, args)?;
-    let (program, args_tail) = parse_command(&map)?;
-    let cwd_raw = optional_string(NAME, &map, "cwd")?;
-    let cwd = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
+    let program = invocation.argv()[0].clone();
+    let args_tail = invocation.argv()[1..].to_vec();
+    let cwd = Some(invocation.cwd().to_path_buf());
     let mut env = optional_string_map(NAME, &map, "env")?.unwrap_or_default();
     let input_bindings = optional_string_map(NAME, &map, "input_env")?.unwrap_or_default();
     let env_remove = optional_string_list(NAME, &map, "env_remove")?.unwrap_or_default();
@@ -422,6 +486,23 @@ fn sandbox_scope_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
             builtin: NAME,
             message: other.to_string(),
         },
+    }
+}
+
+fn command_parameter_error(error: harn_vm::VmError, param: &'static str) -> HostlibError {
+    if matches!(
+        &error,
+        harn_vm::VmError::CategorizedError {
+            category: harn_vm::value::ErrorCategory::ToolRejected,
+            ..
+        }
+    ) {
+        return sandbox_scope_error_to_hostlib(error);
+    }
+    HostlibError::InvalidParameter {
+        builtin: NAME,
+        param,
+        message: error.to_string(),
     }
 }
 

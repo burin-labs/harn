@@ -1,0 +1,26 @@
+{
+  "$defs": {
+    "Released": {
+      "enum": [
+        "released"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "$ref": "#/$defs/Released"
+    },
+    "token": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "token"
+  ],
+  "title": "CommandRelease",
+  "type": "object"
+}

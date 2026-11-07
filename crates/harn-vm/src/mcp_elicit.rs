@@ -150,11 +150,18 @@ pub(crate) async fn dispatch_inbound_elicitation(
         .and_then(|value| value.as_str())
         .unwrap_or("")
         .to_string();
-    let mode = params
-        .get("mode")
-        .and_then(JsonValue::as_str)
-        .unwrap_or("form")
-        .to_string();
+    let mode = match params.get("mode") {
+        None => "form",
+        Some(JsonValue::String(mode)) => mode,
+        Some(_) => {
+            return crate::jsonrpc::error_response(
+                id,
+                -32602,
+                "MCP elicitation mode must be a string",
+            )
+        }
+    }
+    .to_string();
     let requested_schema = params
         .get("requestedSchema")
         .cloned()

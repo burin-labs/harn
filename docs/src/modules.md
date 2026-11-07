@@ -1092,7 +1092,7 @@ The blessed default caller stack (the call plane's front door):
 |---|---|
 | `llm_caller(opts?)` | The blessed default caller stack: `with_retry(default_llm_caller(), opts?.retry ?? {})` with typed reserved-status classification and billed-empty re-dispatch |
 | `default_llm_caller()` | The bottom of every middleware composition: one `harness.llm.call` folded into the canonical caller envelope |
-| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?}` |
+| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?, turn?}`, with typed model-call options and loop provenance |
 | `LlmCaller` (type) | A composable caller: `fn(LlmCallerRequest) -> dict` — middleware wraps one and returns another |
 
 ### std/llm/handlers
@@ -2182,6 +2182,28 @@ Private-span filtering and terminal envelopes for streaming chat UIs:
 | `agent_private_stream_delta(state?, delta?, config?)` | Fold one provider delta and return a safe `visible_delta` |
 | `agent_private_stream_finish(state?, config?)` | Flush the final safe suffix and report withheld/unterminated private state |
 | `agent_stream_call(prompt, system?, options?)` | Wrap `harness.llm.stream_call` with private filtering, callbacks, and terminal status envelopes |
+
+### std/agent/events
+
+| Function or type | Description |
+|---|---|
+| `agent_capture_events(agent, session_id, body)` | Capture events while the callback runs and return `AgentEventCapture<T>` |
+| `AgentEventCapture<T>` | Preserve the callback's result type `T` alongside `events: list<unknown>` |
+| `agent_event_report(value, schema?, apply_defaults?)` | Validate an event and return `SchemaReport<T>` from its schema |
+| `agent_event_value(value, schema?, apply_defaults?)` | Validate an event and return the schema's value type `T`, throwing on failure |
+| `agent_event_capture_value(value, apply_defaults?)` | Validate an envelope and return `AgentValidatedEventCapture` |
+| `agent_tool_lifecycle_event_schema()` | Describe `AgentToolLifecycleEvent`, with distinct pending and update variants |
+| `agent_tool_call_receipt_schema()` | Describe the closed `AgentToolCallReceipt` contract and its digest and numeric limits |
+| `agent_tool_audit_event_schema()` | Describe `AgentToolAuditEvent`, including its optional typed receipt |
+| `agent_tool_batch_disposition_receipt_schema()` | Describe the closed `AgentToolBatchDispositionReceipt` contract |
+| `agent_tool_batch_disposition_event_schema()` | Describe `AgentToolBatchDispositionEvent` with its typed receipt |
+| `agent_typed_checkpoint_event_schema()` | Describe `AgentTypedCheckpointEvent` and its checkpoint fields |
+| `agent_feedback_injected_event_schema()` | Describe `AgentFeedbackInjectedEvent` |
+| `agent_next_tool_claim_receipt_schema()` | Describe the closed `AgentNextToolClaimReceipt` contract |
+
+Capture preserves callback results as runtime values, including bytes. Captured
+events are JSON payloads; validate an event against its consumer's schema before
+requiring event-specific fields.
 
 ### std/agent/progress
 

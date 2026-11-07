@@ -17,12 +17,7 @@ impl AcpServer {
             return;
         }
         if msg.get("method").is_none() && msg.get("id").is_some() {
-            if let Some(id) = msg["id"].as_u64() {
-                let mut pending = self.pending.lock().await;
-                if let Some(sender) = pending.remove(&id) {
-                    let _ = sender.send(msg);
-                }
-            }
+            self.outbound.complete(msg).await;
             return;
         }
 

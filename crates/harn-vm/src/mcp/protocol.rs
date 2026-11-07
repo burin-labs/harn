@@ -1,5 +1,53 @@
 use super::*;
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(tag = "mode")]
+enum StableUrlInput {
+    #[serde(rename = "url")]
+    Url { message: String, url: String },
+}
+
+pub(crate) fn normalize_input_requests(
+    value: serde_json::Value,
+) -> Result<BTreeMap<String, serde_json::Value>, VmError> {
+    let invalid = |error| VmError::Runtime(format!("invalid MCP inputRequests: {error}"));
+    let mut remaining = value;
+    let mut urls = BTreeMap::new();
+    if let Some(requests) = remaining.as_object_mut() {
+        let keys: Vec<_> = requests
+            .iter()
+            .filter(|(_, request)| {
+                request["method"] == crate::mcp_elicit::ELICITATION_METHOD
+                    && request["params"]["mode"] == "url"
+                    && request["params"].get("elicitationId").is_none()
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            // rmcp 3.1's URL payload requires a legacy ID. Keep stable URL
+            // absence intact while retaining the SDK's request/meta framing.
+            let request: rmcp::model::Request<
+                rmcp::model::ElicitationCreateRequestMethod,
+                StableUrlInput,
+            > = serde_json::from_value(requests.remove(&key).expect("selected input request"))
+                .map_err(invalid)?;
+            urls.insert(key, serde_json::to_value(request).map_err(invalid)?);
+        }
+    }
+    let requests: rmcp::model::InputRequests =
+        serde_json::from_value(remaining).map_err(invalid)?;
+    let mut normalized = requests
+        .into_iter()
+        .map(|(key, request)| {
+            serde_json::to_value(request)
+                .map(|request| (key, request))
+                .map_err(invalid)
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    normalized.extend(urls);
+    Ok(normalized)
+}
+
 pub(crate) const REQUESTED_SCHEMA_PROPERTY_ORDER: &str = "requestedSchemaPropertyOrder";
 
 fn elicitation_property_order(params: &rmcp::model::ElicitRequestParams) -> Option<&[String]> {
@@ -332,6 +380,36 @@ pub(crate) fn extract_content_text(result: &serde_json::Value) -> String {
 #[cfg(test)]
 mod input_order_tests {
     use super::*;
+
+    #[test]
+    fn stable_url_input_preserves_absent_identity_and_sdk_metadata_validation() {
+        let stable = serde_json::json!({"method":"elicitation/create","params":{
+            "mode":"url","message":"Authorize","url":"https://example.com/auth",
+            "_meta":{"progressToken":"opaque","source":"peer"}
+        }});
+        let mut legacy = stable.clone();
+        legacy["params"]["elicitationId"] = serde_json::json!("legacy-id");
+        assert!(
+            serde_json::from_value::<rmcp::model::InputRequests>(
+                serde_json::json!({"stable":stable})
+            )
+            .is_err(),
+            "the pinned SDK cannot represent absent legacy URL identity"
+        );
+        let normalized =
+            normalize_input_requests(serde_json::json!({"stable":stable,"legacy":legacy})).unwrap();
+        assert!(normalized["stable"]["params"]
+            .get("elicitationId")
+            .is_none());
+        assert_eq!(normalized["stable"]["params"]["_meta"]["source"], "peer");
+        assert_eq!(normalized["legacy"]["params"]["elicitationId"], "legacy-id");
+        let mut malformed = stable.clone();
+        malformed["params"]["url"] = serde_json::json!(42);
+        assert!(normalize_input_requests(serde_json::json!({"malformed":malformed})).is_err());
+        malformed = stable;
+        malformed["params"]["_meta"] = serde_json::json!([]);
+        assert!(normalize_input_requests(serde_json::json!({"malformed":malformed})).is_err());
+    }
 
     #[test]
     fn raw_elicitation_order_becomes_explicit_before_generic_json_sorting() {

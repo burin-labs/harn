@@ -356,7 +356,7 @@ impl VmRuntime for NativeExecutionState {
 /// and recording so a recorded read is found again by key. No manifest
 /// contract at all (a host bridge builtin, say) means unknown effects, which
 /// a prefix refuses.
-fn builtin_tape_contract(
+pub(crate) fn builtin_tape_contract(
     name: &str,
     recorded: Option<&'static [harn_builtin_meta::EffectSpec]>,
 ) -> (

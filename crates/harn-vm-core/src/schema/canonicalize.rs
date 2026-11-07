@@ -688,14 +688,34 @@ fn canonical_to_json_schema_with(
         if schema_bool(schema_dict, "nullable") {
             if openapi_style {
                 out.insert("nullable".to_string(), serde_json::Value::Bool(true));
-            } else if let Some(existing) = out.remove("type") {
-                out.insert(
-                    "type".to_string(),
-                    serde_json::Value::Array(vec![
-                        existing,
-                        serde_json::Value::String("null".into()),
-                    ]),
-                );
+            } else {
+                if let Some(existing) = out.remove("type") {
+                    out.insert(
+                        "type".to_string(),
+                        serde_json::Value::Array(vec![
+                            existing,
+                            serde_json::Value::String("null".into()),
+                        ]),
+                    );
+                }
+                // Unlike type-specific constraints, these keywords can reject
+                // null independently of `type`. Keep root definitions and
+                // properties anchored while widening their conjunction.
+                let mut constraints = serde_json::Map::new();
+                for key in ["$ref", "enum", "const", "allOf", "anyOf"] {
+                    if let Some(value) = out.remove(key) {
+                        constraints.insert(key.to_string(), value);
+                    }
+                }
+                if !constraints.is_empty() {
+                    out.insert(
+                        "anyOf".to_string(),
+                        serde_json::json!([
+                            {"type": "null"},
+                            serde_json::Value::Object(constraints),
+                        ]),
+                    );
+                }
             }
         }
 

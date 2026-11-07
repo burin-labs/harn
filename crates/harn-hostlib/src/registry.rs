@@ -5,7 +5,7 @@
 //! be wired into a real [`harn_vm::Vm`] (production path) or introspected
 //! by tests to assert the exposed surface without touching the VM.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +28,24 @@ fn capability_binding(
 /// [`harn_vm::Vm::register_builtin`]; we keep it `Send + Sync` so capability
 /// instances can be shared across threads if an embedder ever wants that.
 pub type SyncHandler = Arc<dyn Fn(&[VmValue]) -> Result<VmValue, HostlibError> + Send + Sync>;
+
+pub(crate) struct PreparedCommand {
+    pub(crate) params: harn_vm::value::DictMap,
+    pub(crate) invocation: harn_vm::orchestration::CommandInvocation,
+    pub(crate) handler: SyncHandler,
+}
+
+impl harn_vm::orchestration::CommandPolicyParameters for PreparedCommand {
+    fn parameters(&self) -> &harn_vm::value::DictMap {
+        &self.params
+    }
+
+    fn invocation(&self) -> Option<serde_json::Value> {
+        Some(self.invocation.audit())
+    }
+}
+
+type CommandPreparer = fn(harn_vm::value::DictMap) -> Result<PreparedCommand, HostlibError>;
 /// Async hostlib handler used by event-driven operations.
 pub type AsyncHandler = Arc<
     dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, HostlibError>> + Send>>
@@ -154,7 +172,7 @@ impl std::fmt::Debug for RegisteredBuiltin {
 pub struct BuiltinRegistry {
     builtins: Vec<RegisteredBuiltin>,
     async_builtins: Vec<RegisteredAsyncBuiltin>,
-    command_policy_builtins: BTreeSet<&'static str>,
+    command_policy_builtins: BTreeMap<&'static str, CommandPreparer>,
     interruptible_builtins: BTreeSet<&'static str>,
 }
 
@@ -236,9 +254,10 @@ impl BuiltinRegistry {
         name: &'static str,
         method: &'static str,
         runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+        prepare: CommandPreparer,
     ) {
         self.register_fn(module, name, method, runner);
-        self.command_policy_builtins.insert(name);
+        self.command_policy_builtins.insert(name, prepare);
     }
 
     pub(crate) fn register_async_fn<F, Fut>(
@@ -270,8 +289,8 @@ impl BuiltinRegistry {
         self.register(builtin);
     }
 
-    fn uses_command_policy(&self, name: &str) -> bool {
-        self.command_policy_builtins.contains(name)
+    fn command_preparer(&self, name: &str) -> Option<CommandPreparer> {
+        self.command_policy_builtins.get(name).copied()
     }
 
     fn is_interruptible(&self, name: &str) -> bool {
@@ -367,16 +386,14 @@ impl HostlibRegistry {
                 "Hostlib schema-backed operation registered at runtime.",
             );
             let handler = builtin.handler.clone();
-            if self.builtins.uses_command_policy(builtin.name) {
+            if let Some(prepare) = self.builtins.command_preparer(builtin.name) {
                 let ambient_name = builtin.name;
                 let policy_handler = Arc::new({
-                    let handler = handler.clone();
                     move |ctx: harn_vm::AsyncBuiltinCtx,
                           args: Vec<VmValue>|
                           -> Pin<
                         Box<dyn Future<Output = Result<VmValue, VmError>> + Send>,
                     > {
-                        let handler = handler.clone();
                         let background = args
                             .first()
                             .and_then(VmValue::as_dict)
@@ -403,10 +420,18 @@ impl HostlibRegistry {
                                 "method": method,
                                 "session_id": harn_vm::current_agent_session_id(),
                             });
-                            match harn_vm::orchestration::run_command_policy_preflight_with_ctx(
+                            match harn_vm::orchestration::run_prepared_command_policy_preflight(
                                 Some(&ctx),
                                 params,
                                 caller,
+                                harn_vm::orchestration::CommandDispatchOrigin::ArbitraryProcess,
+                                |params| async move {
+                                    let validated = crate::schemas::validate_request_args(
+                                        ambient_name, module, method, &[VmValue::dict(params)],
+                                    ).map_err(VmError::from)?;
+                                    prepare(validated.as_dict().expect("validated command dict").clone())
+                                        .map_err(VmError::from)
+                                },
                             )
                             .await?
                             {
@@ -432,22 +457,12 @@ impl HostlibRegistry {
                                     context,
                                     decisions,
                                 } => {
-                                    // Hooks may rewrite command fields. Revalidate
-                                    // the rewritten request at the owning schema
-                                    // boundary before the hostlib parser sees it.
-                                    let rewritten = VmValue::dict(params.clone());
-                                    let validated = crate::schemas::validate_request_args(
-                                        ambient_name,
-                                        module,
-                                        method,
-                                        &[rewritten],
-                                    )
-                                    .map_err(VmError::from)?;
+                                    let PreparedCommand { params, handler, .. } = params;
                                     let result = run_interruptible(
                                         &ctx,
                                         ambient_name,
-                                        handler.clone(),
-                                        validated,
+                                        handler,
+                                        VmValue::dict(params.clone()),
                                     )
                                     .await?;
                                     if crate::tools::run_command_request_is_background(&params) {

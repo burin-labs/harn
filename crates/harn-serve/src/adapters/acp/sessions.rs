@@ -200,6 +200,17 @@ pub(super) struct ConcurrentSessionControls {
 }
 
 impl ConcurrentSessionControls {
+    pub(super) fn cancel_request(&self, request_id: &serde_json::Value) {
+        for control in self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+        {
+            control.cancellation.cancel_request(request_id);
+        }
+    }
+
     pub(super) fn new(authenticated: bool, auth_required_data: serde_json::Value) -> Self {
         Self {
             sessions: Arc::default(),
@@ -538,7 +549,25 @@ pub(super) enum SessionBudget {
 }
 
 #[derive(Default)]
+pub(super) enum PromptCancelMethod {
+    #[default]
+    Session,
+    Request,
+}
+
+impl PromptCancelMethod {
+    pub(super) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Session => "session/cancel",
+            Self::Request => ACP_METHOD_CANCEL_REQUEST,
+        }
+    }
+}
+
+#[derive(Default)]
 pub(super) struct PromptCancellation {
+    request_id: Option<serde_json::Value>,
+    pub(super) method: std::sync::Mutex<PromptCancelMethod>,
     pub(super) cancelled: Arc<AtomicBool>,
     pub(super) notify: Arc<Notify>,
 }
@@ -929,7 +958,9 @@ pub(super) fn prepare_session_request(
         return PreparedSessionRequest::Unprepared;
     };
     match msg.get("method").and_then(|value| value.as_str()) {
-        Some("session/prompt") => PreparedSessionRequest::Prompt(cancellation.prepare_prompt()),
+        Some("session/prompt") => {
+            PreparedSessionRequest::Prompt(cancellation.prepare_request(msg.get("id").cloned()))
+        }
         Some("session/close" | "session/stop") => PreparedSessionRequest::Close {
             _admission: cancellation.prepare_close(),
         },

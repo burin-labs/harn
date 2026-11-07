@@ -619,7 +619,7 @@ lint-harn-trees:
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures crates/harn-serve/src/adapters/acp/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata crates/harn-hostlib/src/fixtures; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:
@@ -655,7 +655,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo crates/harn-vm/src/llm/rate_limit/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata crates/harn-hostlib/src/fixtures crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures crates/harn-serve/src/adapters/acp/tests/fixtures
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
@@ -898,6 +898,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	fi
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/touched_test_repeats_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	$(MAKE) test-sccache-rustc-wrapper
 	$(MAKE) test-cargo-wrapper-refresh-native
@@ -1750,14 +1751,17 @@ check-aws-config-vendor:
 test-aws-config-vendor:
 	node --test scripts/tests/aws_config_vendor.test.mjs
 
+HARN_EXT_RELEASE_CARGO_REGISTRY ?= $(or $(CARGO_HOME),$(HOME)/.cargo)/registry
+
 gen-release-notices:
-	node scripts/release_third_party_notices.mjs generate dist/release-notices
+	@$(HARN_CMD) run --allow-process-network --read-only-root "$(HARN_EXT_RELEASE_CARGO_REGISTRY)/src" --sandbox-write-root "$(HARN_EXT_RELEASE_CARGO_REGISTRY)" scripts/release_third_party_notices.harn -- generate dist/release-notices
 
 check-release-notices:
-	node scripts/release_third_party_notices.mjs verify dist/release-notices
+	@$(HARN_CMD) run scripts/release_third_party_notices.harn -- verify dist/release-notices
 
 test-release-notices:
-	node --test scripts/tests/release_third_party_notices.test.mjs scripts/tests/install_sh.test.mjs
+	@$(HARN_CMD) test scripts/tests/release_third_party_notices_test.harn
+	node --test scripts/tests/install_sh.test.mjs
 
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="

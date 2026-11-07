@@ -365,7 +365,7 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
       jobs: {
         ...workflow_for(workflows(harness.fs), "ci.yml").jobs,
         "macos-lint": {
-          ...workflow_for(workflows(harness.fs), "ci.yml").jobs["macos-lint"],
+          ...workflow_job(workflow_for(workflows(harness.fs), "ci.yml"), "macos-lint"),
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "mozilla-actions/sccache-action@exact-pin"},
@@ -424,27 +424,32 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
   harness: Harness,
   task: unknown,
 ) {
-  const invalid = {
-    ...workflows(harness.fs),
-    "build-release-binaries.yml": {
-      jobs: {
-        build: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build,
-        cache_budget: {
-          permissions: {actions: "read", contents: "read"},
-          steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true}],
+  for flag in [true, "$" + "{{ inputs.advisory }}", 7, {malformed: true}, false, nil] {
+    const invalid = {
+      ...workflows(harness.fs),
+      "build-release-binaries.yml": {
+        jobs: {
+          build: workflow_for(workflows(harness.fs), "build-release-binaries.yml").jobs.build,
+          cache_budget: {
+            permissions: {actions: "read", contents: "read"},
+            steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": flag}],
+          },
         },
       },
-    },
+    }
+    const errors = ci_cache_policy_errors(
+      policy(harness.fs),
+      action(harness.fs),
+      node_action(harness.fs),
+      invalid,
+    )
+    assert_eq(
+      errors.contains(
+        "build-release-binaries.yml:cache_budget must fail when cache telemetry fails",
+      ),
+      flag != nil && flag != false,
+    )
   }
-  const errors = ci_cache_policy_errors(
-    policy(harness.fs),
-    action(harness.fs),
-    node_action(harness.fs),
-    invalid,
-  )
-  assert(
-    errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
-  )
 }
 
 pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(

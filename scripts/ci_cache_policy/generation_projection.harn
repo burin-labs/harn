@@ -1,9 +1,18 @@
-import { matching_steps, step_by_name, step_uses } from "./policy_core.harn"
+import { CiAction, matching_steps, step_by_name, step_uses } from "./policy_core.harn"
+
+pub type CiCachePin = {
+  schema?: string,
+  commit?: string,
+  bundle_git_blob?: string,
+  bundle_sha256?: string,
+  bundle_size?: int,
+  ...dict,
+}
 
 pub fn rust_cache_generation_projection_errors(
-  action: dict,
-  companion: dict,
-  pin: dict,
+  action: CiAction?,
+  companion: CiAction?,
+  pin: CiCachePin,
 ) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const generators = matching_steps(action?.runs ?? {}, "./.github/actions/rust-cache-generation")

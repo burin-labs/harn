@@ -2184,16 +2184,24 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
 pub const ACP_CLIENT_METHOD_FS_READ_TEXT_FILE: &str = "fs/read_text_file";
 pub const ACP_CLIENT_METHOD_FS_WRITE_TEXT_FILE: &str = "fs/write_text_file";
 pub const ACP_CLIENT_METHOD_TERMINAL_CREATE: &str = "terminal/create";
+pub const ACP_CLIENT_METHOD_TERMINAL_OUTPUT: &str = "terminal/output";
+pub const ACP_CLIENT_METHOD_TERMINAL_RELEASE: &str = "terminal/release";
+pub const ACP_CLIENT_METHOD_TERMINAL_WAIT_FOR_EXIT: &str = "terminal/wait_for_exit";
 pub const ACP_CLIENT_METHOD_TERMINAL_KILL: &str = "terminal/kill";
 pub const ACP_CLIENT_METHOD_SESSION_REQUEST_PERMISSION: &str = "session/request_permission";
+pub const ACP_CLIENT_METHOD_ELICITATION_CREATE: &str = "elicitation/create";
 
 /// ACP client methods the agent calls back into the host for.
 pub const ACP_CLIENT_METHODS: &[&str] = &[
     "fs/read_text_file",
     "fs/write_text_file",
     "terminal/create",
+    "terminal/output",
+    "terminal/release",
+    "terminal/wait_for_exit",
     "terminal/kill",
     "session/request_permission",
+    "elicitation/create",
 ];
 
 pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_QUERY: &str =
@@ -2216,10 +2224,17 @@ pub const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
 pub const ACP_AGENT_NOTIFICATION_SESSION_MESSAGE: &str = "session/message";
 pub const ACP_AGENT_NOTIFICATION_SESSION_UPDATE: &str = "session/update";
 pub const ACP_AGENT_NOTIFICATION_TERMINAL_OUTPUT: &str = "terminal/output";
+pub const ACP_AGENT_NOTIFICATION_ELICITATION_COMPLETE: &str = "elicitation/complete";
+pub const ACP_AGENT_NOTIFICATION_CANCEL_REQUEST: &str = "$/cancel_request";
 
 /// ACP notifications the agent emits to the host.
-pub const ACP_AGENT_NOTIFICATIONS: &[&str] =
-    &["session/message", "session/update", "terminal/output"];
+pub const ACP_AGENT_NOTIFICATIONS: &[&str] = &[
+    "session/message",
+    "session/update",
+    "terminal/output",
+    "elicitation/complete",
+    "$/cancel_request",
+];
 
 pub const ACP_SESSION_UPDATE_USER_MESSAGE: &str = "user_message";
 pub const ACP_SESSION_UPDATE_USER_MESSAGE_CHUNK: &str = "user_message_chunk";

@@ -1398,15 +1398,23 @@ public enum HarnACPClientMethod: String, Codable, Sendable, CaseIterable {
     case fsReadTextFile = "fs/read_text_file"
     case fsWriteTextFile = "fs/write_text_file"
     case terminalCreate = "terminal/create"
+    case terminalOutput = "terminal/output"
+    case terminalRelease = "terminal/release"
+    case terminalWaitForExit = "terminal/wait_for_exit"
     case terminalKill = "terminal/kill"
     case sessionRequestPermission = "session/request_permission"
+    case elicitationCreate = "elicitation/create"
 
     public static let allCases: [Self] = [
         "fs/read_text_file",
         "fs/write_text_file",
         "terminal/create",
+        "terminal/output",
+        "terminal/release",
+        "terminal/wait_for_exit",
         "terminal/kill",
         "session/request_permission",
+        "elicitation/create",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -1414,11 +1422,15 @@ public enum HarnACPAgentNotification: String, Codable, Sendable, CaseIterable {
     case sessionMessage = "session/message"
     case sessionUpdate = "session/update"
     case terminalOutput = "terminal/output"
+    case elicitationComplete = "elicitation/complete"
+    case cancelRequest = "$/cancel_request"
 
     public static let allCases: [Self] = [
         "session/message",
         "session/update",
         "terminal/output",
+        "elicitation/complete",
+        "$/cancel_request",
     ].map { Self(rawValue: $0)! }
 }
 

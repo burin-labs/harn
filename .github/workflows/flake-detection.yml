@@ -126,121 +126,17 @@ jobs:
         run: cargo test --locked --no-run --workspace
 
       - name: Budget-aware flake rerun
+        id: repeatability
         if: steps.touched.outputs.has_tests == 'true'
         env:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
-          # Same 16 MiB stack contract as scripts/ci/run_rust_test_lane.sh.
-          # Set here rather than wrapping the call because the rerun loop
-          # invokes nextest once per iteration, and the wrapper's resource
-          # report would repeat with it.
           RUST_MIN_STACK: "16777216"
-        run: |
-          # `--workspace` is required: without it, `cargo nextest run`
-          # only discovers tests in the cwd's package, so `-E
-          # "package(harn-vm)"` (or any other package() filter) matches
-          # nothing at workspace root and reports "0 tests across 0
-          # binaries". `binary(...)` filters happened to work because
-          # they scan built artifacts in target/debug/deps directly, but
-          # package() filters need cargo metadata.
-          #
-          # This loop is deadline-driven, not fixed-count. High merge velocity
-          # can map the 24h diff onto package() filters covering much of the
-          # workspace, and hosted runners are slower than the previous class,
-          # so a fixed 50x loop can overrun `timeout-minutes` — which cancels
-          # the job (reported "cancelled", not "failed") and yields ZERO flake
-          # signal while looking non-red. Instead we run up to CEILING
-          # iterations, stop early once the remaining budget cannot fit
-          # another (conservatively estimated from the slowest observed
-          # iteration), and always emit an honest verdict.
-          set -uo pipefail
+        run: scripts/ci/run_touched_test_repeats.sh
 
-          ceiling="$FLAKE_ITERATIONS_CEILING"
-          floor="$FLAKE_ITERATIONS_FLOOR"
-          budget_secs=$(( FLAKE_JOB_BUDGET_MINUTES * 60 ))
-          deadline=$(( FLAKE_JOB_START_EPOCH + budget_secs ))
-
-          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
-          {
-            echo "## Touched-test repeatability"
-            echo ""
-            echo "- Filter: \`${NEXTEST_FILTER}\`"
-            echo "- Budget: ${FLAKE_JOB_BUDGET_MINUTES} min wall-clock from job start"
-            echo "- Iteration target: ${floor} (floor) / ${ceiling} (ceiling)"
-          } >> "$summary"
-
-          completed=0
-          max_iter_secs=0
-
-          while :; do
-            now=$(date +%s)
-            remaining=$(( deadline - now ))
-
-            # Budget gate. Skipped for the first iteration (no measurement yet);
-            # a single iteration always fits since the build already succeeded.
-            if (( completed > 0 )); then
-              est=$max_iter_secs
-              if (( est < 1 )); then est=1; fi
-
-              if (( completed < floor )); then
-                # Still below the floor: fail loudly the moment it is provable
-                # the remaining budget cannot cover the rest of the floor.
-                needed=$(( (floor - completed) * est ))
-                if (( remaining < needed )); then
-                  echo "::error::Touched-test repeatability cannot reach its ${floor}-iteration floor within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (completed ${completed}; slowest iteration ${est}s; ${remaining}s left). The touched-test surface is too large for this budget — shard the nextest filter or raise FLAKE_JOB_BUDGET_MINUTES (and timeout-minutes) for this run."
-                  {
-                    echo "- Iterations completed: ${completed}/${ceiling}"
-                    echo "- Slowest iteration: ${max_iter_secs}s"
-                    echo "- Result: FAILED — floor of ${floor} unreachable within budget."
-                  } >> "$summary"
-                  exit 1
-                fi
-              else
-                # Floor met: keep pursuing the ceiling only while a full
-                # iteration still fits. Otherwise stop with degraded coverage.
-                if (( remaining < est )); then
-                  echo "::warning::Touched-test repeatability stopped at ${completed}/${ceiling} iterations to stay within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (slowest iteration ${est}s; ${remaining}s left). Coverage is degraded but above the ${floor}-iteration floor; consider sharding the touched-test surface or raising the budget."
-                  break
-                fi
-              fi
-            fi
-
-            if (( completed >= ceiling )); then
-              break
-            fi
-
-            iter=$(( completed + 1 ))
-            printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
-            start=$(date +%s)
-            if ! cargo-nextest nextest run --locked \
-              --workspace \
-              --profile flake-detection \
-              --test-threads 8 \
-              -E "$NEXTEST_FILTER"; then
-              echo "::error::Flake detected on iteration $iter"
-              {
-                echo "- Iterations completed: ${completed}/${ceiling}"
-                echo "- Result: FAILED — flake detected on iteration ${iter}."
-              } >> "$summary"
-              exit 1
-            fi
-            end=$(date +%s)
-            dur=$(( end - start ))
-            completed=$(( completed + 1 ))
-            if (( dur > max_iter_secs )); then
-              max_iter_secs=$dur
-            fi
-            printf -- 'Iteration %d completed in %ds\n' "$iter" "$dur"
-          done
-
-          {
-            echo "- Iterations completed: ${completed}/${ceiling}"
-            echo "- Slowest iteration: ${max_iter_secs}s"
-          } >> "$summary"
-
-          if (( completed >= ceiling )); then
-            echo "Touched-test repeatability completed all ${ceiling} iterations with no flake."
-            echo "- Result: PASSED — ${completed}/${ceiling} iterations, no flake detected." >> "$summary"
-          else
-            echo "Touched-test repeatability passed with degraded coverage: ${completed}/${ceiling} iterations within budget."
-            echo "- Result: PASSED (degraded) — ${completed}/${ceiling} iterations within budget; floor of ${floor} met." >> "$summary"
-          fi
+      - name: Preserve selected-test inventory
+        if: always() && steps.repeatability.outputs.inventory != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: touched-test-inventory
+          path: ${{ steps.repeatability.outputs.inventory }}
+          if-no-files-found: error

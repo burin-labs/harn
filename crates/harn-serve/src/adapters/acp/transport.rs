@@ -592,7 +592,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 /// once, and passes everything else to the dispatcher in arrival order.
 struct RouterLane {
     replay_inputs: Option<Arc<super::replay_inputs::InputRecorder>>,
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    outbound: Arc<harn_vm::bridge::OutboundRequests>,
     cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     controls: ConcurrentSessionControls,
     output: AcpOutput,
@@ -602,7 +602,7 @@ impl RouterLane {
     fn new(server: &AcpServer) -> Self {
         Self {
             replay_inputs: server.replay_inputs.clone(),
-            pending: server.pending.clone(),
+            outbound: server.outbound.clone(),
             cancellations: server.session_cancellations.clone(),
             controls: server.concurrent_controls.clone(),
             output: server.output.clone(),
@@ -615,11 +615,7 @@ impl RouterLane {
         }
         let (controls, output) = (&self.controls, &self.output);
         if msg.get("method").is_none() && msg.get("id").is_some() {
-            if let Some(id) = msg["id"].as_u64() {
-                if let Some(sender) = self.pending.lock().await.remove(&id) {
-                    let _ = sender.send(msg);
-                }
-            }
+            self.outbound.complete(msg).await;
             return None;
         }
         if controls.preempt_cancel_request(&msg, output).await
@@ -658,7 +654,7 @@ impl RouterLane {
     /// The client is gone: no host callback will be answered, and no pending
     /// delivery prompt may still be inserted.
     async fn close(&self) {
-        self.pending.lock().await.clear();
+        self.outbound.close().await;
         self.controls.drop_pending_prompts().await;
     }
 }

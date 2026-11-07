@@ -55,18 +55,53 @@ fn emit_response_text(args: &[harn_vm::VmValue]) -> String {
 pub(super) struct AcpHostCallBridge {
     bridge: Arc<AcpBridge>,
     prompt_content: harn_vm::VmValue,
+    host_manifest: harn_vm::VmValue,
 }
 
 impl AcpHostCallBridge {
-    pub(super) fn new(bridge: Arc<AcpBridge>, prompt_content: harn_vm::VmValue) -> Self {
+    pub(super) fn new(
+        bridge: Arc<AcpBridge>,
+        prompt_content: harn_vm::VmValue,
+        host_manifest: harn_vm::VmValue,
+    ) -> Self {
         Self {
             bridge,
             prompt_content,
+            host_manifest,
         }
     }
 }
 
 impl HostCallBridge for AcpHostCallBridge {
+    fn prepare_command<'a>(
+        &'a self,
+        operation: &'a str,
+        params: &'a harn_vm::value::DictMap,
+        trace: &'a harn_vm::stdlib::host::trace::HostRequestTrace,
+    ) -> harn_vm::stdlib::host::HostCommandPreparationFuture<'a> {
+        Box::pin(async move {
+            use harn_vm::stdlib::host::HostCommandPreparation;
+            if !manifest_has_operation(&self.host_manifest, "process", operation) {
+                return Ok(HostCommandPreparation::Unhandled);
+            }
+            if !["prepare", "execute_prepared", "release_prepared"]
+                .iter()
+                .all(|op| manifest_has_operation(&self.host_manifest, "process", op))
+            {
+                return Ok(HostCommandPreparation::Unsupported);
+            }
+            harn_vm::stdlib::host::prepare_remote_command(
+                Arc::new(super::prepared_process::CommandTransport(
+                    self.bridge.clone(),
+                )),
+                operation,
+                params,
+                trace,
+            )
+            .await
+        })
+    }
+
     fn dispatch<'a>(
         &'a self,
         capability: &'a str,
@@ -96,6 +131,13 @@ impl HostCallBridge for AcpHostCallBridge {
             let name = format!("{capability}.{operation}");
             let args = harn_vm::VmValue::dict(params.clone());
             let args_json = harn_vm::llm::vm_value_to_json(&args);
+            if capability == "mcp"
+                && operation == "elicit"
+                && self.bridge.client_capabilities.elicitation.is_some()
+            {
+                let result = self.bridge.elicit(args_json).await?;
+                return Ok(Some(harn_vm::bridge::json_result_to_vm_value(&result)));
+            }
             let result = self
                 .bridge
                 .call_client(
@@ -204,6 +246,7 @@ pub(super) async fn register_acp_builtins(
     harn_vm::set_host_call_bridge(Arc::new(AcpHostCallBridge::new(
         bridge.clone(),
         prompt_content,
+        host_capability_manifest.clone(),
     )));
 
     let host_capabilities_cache = host_capability_manifest.clone();

@@ -1994,6 +1994,22 @@ tracked by the enclosing Git worktree. New files, untracked files, and dynamic
 shell paths remain outside this never-approvable floor. They still receive the
 normal write-intent classification, so policy can deny them or require consent.
 Blocked commands return `status: "blocked"` without starting a child process.
+
+Consent and audit context include `invocation.argv` and `invocation.cwd` from
+the executor's retained preparation. `active_cwd` and `request.cwd` use that
+same canonical launch directory, including sandbox-selected inheritance.
+Rewrites prepare and assess a new invocation before requesting fresh consent.
+The native and host-library runners consume these retained values.
+
+Command scans report `execution_syntax_complete` separately from
+`io_coverage.complete`. Shell stages have a nullable `cwd`; `null` means the
+scanner hasn't established that stage's directory. A remote executor's
+filesystem isn't available to the VM scanner, so its I/O coverage remains
+unmeasured. With a command policy installed, `executor_io_unmeasured` requires
+consent even when syntax is resolved. Inspection-only preflight has no bound
+`invocation`. See
+[Prepared process execution](bridge-protocol.md#prepared-process-execution)
+for the host migration contract.
 Pushes that delete a remote ref (`--delete`, `--prune`, or a `:ref` refspec)
 are not on the floor. They carry the `git_force_push` risk label along with
 force-pushes, so policy can deny them or require consent.
@@ -3582,10 +3598,10 @@ and offline analysis.
 | `transcript_add_asset(transcript, asset)` | transcript, asset | transcript | Register a durable asset reference on a transcript |
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
-| `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)). Reminder injection and clearing live in [Transcript helpers](#transcript-helpers) above. |
-| `transcript_suspension_event(suspension)` | suspension: dict | event dict | Build a normalized `suspension` lifecycle event |
-| `transcript_resumption_event(resumption)` | resumption: dict | event dict | Build a normalized `resumption` lifecycle event |
-| `transcript_drain_decision_event(drain)` | drain: dict | event dict | Build a normalized `drain_decision` lifecycle event |
+| `transcript_reminder_event(reminder)` | reminder: dict | typed event record | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)). Reminder injection and clearing live in [Transcript helpers](#transcript-helpers) above. |
+| `transcript_suspension_event(suspension)` | suspension: dict | typed event record | Build a `suspension` lifecycle envelope retaining the supplied JSON payload |
+| `transcript_resumption_event(resumption)` | resumption: dict | typed event record | Build a `resumption` lifecycle envelope retaining the supplied JSON payload |
+| `transcript_drain_decision_event(drain)` | drain: dict | typed event record | Build a `drain_decision` lifecycle envelope retaining the supplied JSON payload |
 | `transcript_stats(transcript)` | transcript | dict | Count messages, tool calls, and visible events on a transcript |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
@@ -3597,6 +3613,12 @@ and offline analysis.
 | `harness.agent.transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |
+
+The four lifecycle event builders return `id`, `kind`, `role`, `visibility`,
+`text`, and typed text `blocks`. The reminder builder also returns a normalized
+`reminder` record mirrored in `metadata`. The other builders retain arbitrary
+JSON in their lifecycle slot and `metadata`; decode that payload with
+`schema_parse(value, schema_of(T))` before requiring lifecycle-specific fields.
 
 Transcript messages may now carry structured block content instead of plain
 text. Use `add_user(...)`, `add_assistant(...)`, or `add_message(...)` with a

@@ -5,6 +5,7 @@ use request::*;
 
 pub(super) const EXECUTION_SEMANTICS_UNRESOLVED_LABEL: &str = "execution_semantics_unresolved";
 pub(super) const SHELL_DIALECT_UNKNOWN_LABEL: &str = "shell_dialect_unknown";
+pub(super) const EXECUTOR_IO_UNMEASURED_LABEL: &str = "executor_io_unmeasured";
 
 pub(super) fn scan_command_risk_scan_json(
     ctx: &JsonValue,
@@ -14,12 +15,17 @@ pub(super) fn scan_command_risk_scan_json(
     let lower = command_text.to_ascii_lowercase();
     let (command_analysis, execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    let filesystem_local = ctx
+        .get("executor_filesystem_local")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(true);
+    let execution_syntax_complete = !command_analysis.unresolved;
     let shell_io_complete =
-        !command_analysis.io_unresolved && execution_semantics["unresolved_reason"].is_null();
+        !command_analysis.io_unresolved && execution_syntax_complete && filesystem_local;
     let execution_stages = command_analysis
         .stages
         .iter()
-        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.dynamic }))
+        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.dynamic, "cwd": JsonValue::Null }))
         .collect::<Vec<_>>();
     let shell_redirects = command_analysis
         .redirects
@@ -124,6 +130,10 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert(EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string());
         rationale.push("execution syntax, dialect, or dynamic dispatch left semantics unresolved");
     }
+    if !filesystem_local {
+        labels.insert(EXECUTOR_IO_UNMEASURED_LABEL.to_string());
+        rationale.push("the executor filesystem is unavailable to the runtime scanner");
+    }
     if execution_semantics["unresolved_reason"].as_str() == Some(SHELL_DIALECT_UNKNOWN_LABEL) {
         labels.insert(SHELL_DIALECT_UNKNOWN_LABEL.to_string());
         rationale.push("the requested shell dialect is not supported by the command analyzer");
@@ -199,6 +209,14 @@ pub(super) fn scan_command_risk_scan_json(
         "execution_semantics": execution_semantics,
         "execution_stages": execution_stages,
         "shell_io_complete": shell_io_complete,
+        "execution_syntax_complete": execution_syntax_complete,
+        "io_coverage": {
+            "complete": shell_io_complete,
+            "reason": if !filesystem_local { Some("executor_filesystem_unavailable") }
+                else if !execution_syntax_complete { Some("execution_syntax_unresolved") }
+                else if command_analysis.io_unresolved { Some("dynamic_or_unresolved_io") }
+                else { None },
+        },
         "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
         "shell_source_groups": shell_source_groups,
@@ -382,6 +400,21 @@ fn security_command_analysis_with_metadata(
     JsonValue,
     Option<crate::shells::ShellDialect>,
 ) {
+    if let Some(invocation) = ctx.get("invocation").filter(|value| !value.is_null()) {
+        if let Ok(invocation) =
+            serde_json::from_value::<crate::orchestration::CommandInvocation>(invocation.clone())
+        {
+            let analysis = super::catastrophic::analyze_argv(invocation.argv());
+            let unresolved = analysis
+                .unresolved
+                .then_some("dynamic_or_invalid_execution_syntax");
+            return (
+                analysis,
+                execution_semantics_json("argv", None, "executor", None, unresolved),
+                crate::shells::shell_dialect_for_id(&invocation.argv()[0]),
+            );
+        }
+    }
     match request_mode(ctx) {
         Some("argv") => match request_argv(ctx) {
             Ok(Some(argv)) => {

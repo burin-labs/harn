@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "CommandInvocation": {
+      "additionalProperties": false,
+      "description": "Launch facts supplied by the executor, not inferred from a display string.\nA remote directory is validated by that executor, never by the VM host.",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "argv",
+        "cwd"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "invocation": {
+          "$ref": "#/$defs/CommandInvocation"
+        },
+        "status": {
+          "const": "bound",
+          "type": "string"
+        },
+        "token": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "token",
+        "invocation"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "unhandled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "unsupported",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Preparation"
+}

@@ -385,8 +385,8 @@ impl TypeChecker {
     /// Check a record's explicit fields against an actual record's known
     /// fields (the shared core of shape / open-shape subtyping). Each expected
     /// field must be present-and-compatible, be optional, or — when missing —
-    /// be covered by a gradual actual tail. An explicit `nil` satisfies an
-    /// optional field (matching the closed-shape rule).
+    /// be covered by a gradual actual tail. Optional fields accept their
+    /// declared type or `nil`, including a union of both.
     fn shape_fields_satisfied(
         &self,
         expected_fields: &[ShapeField],
@@ -401,8 +401,12 @@ impl TypeChecker {
                     if af.optional && !ef.optional {
                         return false;
                     }
-                    if ef.optional && matches!(&af.type_expr, TypeExpr::Named(n) if n == "nil") {
-                        return true;
+                    if ef.optional {
+                        let expected = TypeExpr::Union(vec![
+                            ef.type_expr.clone(),
+                            TypeExpr::Named("nil".into()),
+                        ]);
+                        return self.types_compatible(&expected, &af.type_expr, scope);
                     }
                     self.types_compatible(&ef.type_expr, &af.type_expr, scope)
                 }

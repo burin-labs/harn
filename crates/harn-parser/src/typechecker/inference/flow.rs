@@ -18,6 +18,7 @@ use super::super::union::{
 use super::super::TypeChecker;
 
 mod mutations;
+mod paths;
 
 /// Flatten a match-arm pattern into its leaf alternatives. For an
 /// `OrPattern(a, b, c)` this yields `[a, b, c]`; for any other pattern

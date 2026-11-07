@@ -1,0 +1,376 @@
+import { read_yaml_typed } from "std/fs"
+import { with_fs, with_temp_dir } from "std/testing"
+import {
+  NoticeInventory,
+  NoticePackage,
+  configuration,
+  normalize_inventory,
+  render,
+  source_fingerprint,
+  verify,
+} from "../release_third_party_notices"
+
+const PACKAGE = {
+  name: "component",
+  version: "1.2.3",
+  source: "registry+https://github.com/rust-lang/crates.io-index",
+  notices: [{name: "NOTICE", text: "Retain this attribution."}],
+}
+
+const INVENTORY = {
+  crates: [{package: PACKAGE, license: "MPL-2.0"}],
+  licenses: [{id: "MPL-2.0", text: "Full component license text.", used_by: [{crate: PACKAGE}]}],
+}
+
+fn only_package(inventory: NoticeInventory) -> NoticePackage {
+  assert_eq(len(inventory.crates), 1)
+  const entry = inventory.crates[0]
+  if entry == nil {
+    throw "The notice fixture must retain its package"
+  }
+  return entry.package
+}
+
+pipeline test_render_material(harness: Harness) {
+  const text = render(INVENTORY)
+  assert(contains(text, "Full component license text."))
+  assert(contains(text, "Retain this attribution."))
+  assert(contains(text, "https://crates.io/api/v1/crates/component/1.2.3/download"))
+  assert(contains(text, "MPL-2.0 source availability"))
+  assert(
+    is_err(
+      try {
+        render({crates: [], licenses: []})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {crates: INVENTORY.crates + INVENTORY.crates})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {licenses: []})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {licenses: [{id: "MIT", text: "", used_by: [{crate: PACKAGE}]}]})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {licenses: [{id: "MIT", text: "Full", used_by: []}]})
+      },
+    ),
+  )
+  const unknown = PACKAGE + {name: "unknown"}
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {licenses: [{id: "MIT", text: "Full", used_by: [{crate: unknown}]}]})
+      },
+    ),
+  )
+  const uncovered = PACKAGE + {name: "uncovered"}
+  assert(
+    is_err(
+      try {
+        render(INVENTORY + {crates: INVENTORY.crates + [{package: uncovered, license: "MIT"}]})
+      },
+    ),
+  )
+  for pkg in [
+    PACKAGE + {source: "git+https://example.invalid/source"},
+    PACKAGE + {notices: [{name: "NOTICE", text: ""}]},
+  ] {
+    assert(
+      is_err(
+        try {
+          render(INVENTORY + {crates: [{package: pkg, license: "MPL-2.0"}]})
+        },
+      ),
+    )
+  }
+  const workspace = PACKAGE + {source: nil}
+  assert(
+    contains(
+      render(INVENTORY + {crates: [{package: workspace, license: "MPL-2.0"}]}),
+      "Source: packaged workspace component",
+    ),
+  )
+  assert(
+    !contains(
+      render(INVENTORY + {crates: [{package: workspace + {notices: []}, license: "MPL-2.0"}]}),
+      "Source: packaged workspace component",
+    ),
+  )
+}
+
+pipeline test_discover_notices(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      assert_eq(harness.fs.list_dir(dir), [])
+      assert(
+        is_err(
+          try {
+            harness.fs.list_dir(path_join(dir, "missing"))
+          },
+        ),
+      )
+      harness.fs.mkdir(path_join(dir, "empty"))
+      const pkg = PACKAGE + {manifest_path: path_join(dir, "Cargo.toml")}
+      const inventory = normalize_inventory(
+        harness.fs,
+        INVENTORY + {crates: [{package: pkg, license: "MPL-2.0"}]},
+      )
+      assert_eq(only_package(inventory).notices, [])
+    },
+  )
+  with_fs(
+    harness.fs,
+    {
+      NOTICE: "Top-level attribution",
+      "nested/NOTICES.md": "Nested attribution",
+      LICENSE: "ignored",
+    },
+    { dir ->
+      const pkg = PACKAGE + {manifest_path: path_join(dir, "Cargo.toml")}
+      const inventory = normalize_inventory(
+        harness.fs,
+        INVENTORY + {crates: [{package: pkg, license: "MPL-2.0"}]},
+      )
+      assert(len(only_package(inventory).notices) == 2)
+      assert(!contains(json_stringify(inventory), "manifest_path"))
+      assert(!contains(json_stringify(inventory), dir))
+      assert(contains(render(inventory), "Nested attribution"))
+      harness.fs.write_text(path_join(dir, "NOTICE"), "")
+      assert(
+        is_err(
+          try {
+            normalize_inventory(
+              harness.fs,
+              INVENTORY + {crates: [{package: pkg, license: "MPL-2.0"}]},
+            )
+          },
+        ),
+      )
+    },
+  )
+  const pkg = PACKAGE
+    + {
+      name: "harn-provider-catalog",
+      manifest_path: path_join(harness.fs.cwd(), "../../crates/harn-provider-catalog/Cargo.toml"),
+    }
+  const inventory = normalize_inventory(
+    harness.fs,
+    INVENTORY
+      + {
+        crates: [{package: pkg, license: "MIT"}],
+        licenses: [{id: "MIT", text: "Full MIT text", used_by: [{crate: pkg}]}],
+      },
+  )
+  const notice = only_package(inventory).notices.find(
+    { notice -> notice.name == "NOTICE.models-dev" },
+  )
+  assert(notice != nil)
+  assert(contains(notice.text, "Copyright (c) 2025 models.dev"))
+  assert(contains(notice.text, "THE SOFTWARE IS PROVIDED \"AS IS\""))
+  assert(contains(render(inventory), notice.text))
+}
+
+pipeline test_policy_owners(harness: Harness) {
+  with_fs(
+    harness.fs,
+    {
+      ".github/release-runner-policy.json": {targets: [{target: "release-target"}]},
+      "deny.toml":
+        "# allow = [\"Forbidden\"]\n[licenses]\nallow = [\n\"MIT\", # \"Forbidden\"\n]\n",
+    },
+    { dir ->
+      const config = configuration(harness.fs, dir)
+      assert(contains(config, "accepted = [\"MIT\"]"))
+      assert(!contains(config, "Forbidden"))
+      for body in ["licenses = { allow = [\"MIT\"] }\n", "[\"licenses\"]\n\"allow\" = ['MIT']\n"] {
+        harness.fs.write_text(path_join(dir, "deny.toml"), body)
+        assert(configuration(harness.fs, dir) == config)
+      }
+      for body in [
+        "[licenses]\n# allow = [\"MIT\"]\n",
+        "[licenses]\nallow = \"MIT\"\n",
+        "[licenses]\nallow = []\n",
+        "[licenses]\nallow = [\"MIT\", \"MIT\"]\n",
+      ] {
+        harness.fs.write_text(path_join(dir, "deny.toml"), body)
+        assert(
+          is_err(
+            try {
+              configuration(harness.fs, dir)
+            },
+          ),
+        )
+      }
+    },
+  )
+  const config = configuration(harness.fs, path_join(harness.fs.cwd(), "../.."))
+  assert(contains(config, "x86_64-pc-windows-msvc"))
+  assert(contains(config, "aarch64-apple-darwin"))
+}
+
+pipeline test_offline_verification(harness: Harness) {
+  with_fs(
+    harness.fs,
+    {
+      "Cargo.toml": "[workspace]\nmembers = [\"component\"]\n",
+      "component/Cargo.toml": "[package]\nname = \"component\"\n",
+      "Cargo.lock": "locked",
+      "deny.toml": "policy",
+      ".github/release-runner-policy.json": "targets",
+      "scripts/release_third_party_notices.harn": "source",
+      "LICENSE-MIT": "MIT text",
+      "LICENSE-APACHE": "Apache text",
+    },
+    { dir ->
+      const output = path_join(dir, "out")
+      const retained = {
+        schemaVersion: 1,
+        sourceFingerprint: source_fingerprint(harness.fs, dir),
+        about: INVENTORY,
+      }
+      harness.fs.write_text(
+        path_join(output, "release-license-inventory.json"),
+        json_stringify(retained),
+      )
+      harness.fs.write_text(path_join(output, "THIRD-PARTY-NOTICES.txt"), render(INVENTORY))
+      for file in ["LICENSE-MIT", "LICENSE-APACHE"] {
+        harness.fs.write_text(path_join(output, file), harness.fs.read_text(path_join(dir, file)))
+      }
+      assert(verify(harness.fs, output, dir) == 1)
+      for body in ["tampered nonempty material", ""] {
+        harness.fs.write_text(path_join(output, "THIRD-PARTY-NOTICES.txt"), body)
+        assert(
+          is_err(
+            try {
+              verify(harness.fs, output, dir)
+            },
+          ),
+        )
+      }
+      harness.fs.write_text(path_join(output, "THIRD-PARTY-NOTICES.txt"), render(INVENTORY))
+      harness.fs.write_text(path_join(dir, "Cargo.lock"), "changed dependencies")
+      assert(
+        is_err(
+          try {
+            verify(harness.fs, output, dir)
+          },
+        ),
+      )
+      harness.fs.write_text(path_join(dir, "Cargo.lock"), "locked")
+      for change in ["add", "edit", "remove"] {
+        const notice = path_join(dir, "component/NOTICE.harn")
+        if change != "add" {
+          harness.fs.write_text(notice, "Original attribution")
+        }
+        const fingerprint = source_fingerprint(harness.fs, dir)
+        harness.fs.write_text(
+          path_join(output, "release-license-inventory.json"),
+          json_stringify(retained + {sourceFingerprint: fingerprint}),
+        )
+        assert(verify(harness.fs, output, dir) == 1)
+        if change == "remove" {
+          harness.fs.delete(notice)
+        } else {
+          harness.fs.write_text(notice, "Changed attribution")
+        }
+        assert(
+          is_err(
+            try {
+              verify(harness.fs, output, dir)
+            },
+          ),
+        )
+        if harness.fs.exists(notice) {
+          harness.fs.delete(notice)
+        }
+      }
+      harness.fs.delete(path_join(output, "release-license-inventory.json"))
+      assert(
+        is_err(
+          try {
+            verify(harness.fs, output, dir)
+          },
+        ),
+      )
+    },
+  )
+}
+
+type PackagingWorkflow = {jobs: {build: {steps: list<{name?: string, run?: string}>}}}
+
+pipeline test_actual_unix_packaging(harness: Harness) {
+  const repository = path_join(harness.fs.cwd(), "../..")
+  const workflow = read_yaml_typed(
+    harness.fs,
+    path_join(repository, ".github/workflows/build-release-binaries.yml"),
+    schema_of(PackagingWorkflow),
+  )
+  const step = workflow.jobs.build.steps.find({ step -> step.name == "Package (unix)" })
+  assert(step != nil)
+  const script = step.run
+  assert(script != nil && contains(script, "XZ_OPT"))
+  for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+    with_temp_dir(
+      harness.fs,
+      { dir ->
+        const entry = path_join(dir, "package.sh")
+        harness.fs.write_text(entry, script)
+        harness.fs.write_text(path_join(dir, "target/${target}/dist/harn"), "binary fixture")
+        harness.fs.write_text(
+          path_join(dir, "target/${target}/dist/harn-container-probe"),
+          "probe fixture",
+        )
+        const files = ["LICENSE-MIT", "LICENSE-APACHE", "THIRD-PARTY-NOTICES.txt"]
+        for file in files {
+          harness.fs.write_text(
+            path_join(dir, "dist/release-notices/${file}"),
+            "${file} full fixture text\n",
+          )
+        }
+        const request = {
+          program: "bash",
+          args: [entry],
+          cwd: dir,
+          env: {HARN_RELEASE_TARGET: target, GITHUB_STEP_SUMMARY: path_join(dir, "summary")},
+        }
+        const result = harness.process.run(request)
+        assert_eq(result.exit_code, 0, result.stderr)
+        const archive = path_join(dir, "dist/harn-${target}.tar.xz")
+        for file in files {
+          const member = harness.process.run({program: "tar", args: ["-xOf", archive, file]})
+          assert_eq(member.exit_code, 0, member.stderr)
+          assert_eq(member.stdout, "${file} full fixture text\n")
+        }
+        for file in ["harn", "harn-lsp", "harn-dap"] {
+          const path = path_join(dir, "dist/${file}")
+          if harness.fs.exists(path) {
+            harness.fs.delete(path)
+          }
+        }
+        const notices = path_join(dir, "dist/release-notices/THIRD-PARTY-NOTICES.txt")
+        harness.fs.write_text(notices, "")
+        assert(harness.process.run(request).exit_code != 0)
+        harness.fs.delete(notices)
+        assert(harness.process.run(request).exit_code != 0)
+      },
+    )
+  }
+}

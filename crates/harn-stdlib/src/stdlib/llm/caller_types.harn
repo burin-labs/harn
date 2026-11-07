@@ -1,0 +1,14 @@
+import { LlmCallOptions } from "std/llm/options"
+
+pub type LlmCallerTurn = {iteration: int, session_id: string, attempt: int}
+
+/** One request through a caller stack, including its loop provenance. */
+pub type LlmCallerRequest = {
+  prompt: unknown,
+  system?: unknown,
+  opts?: LlmCallOptions,
+  turn?: LlmCallerTurn,
+}
+
+/** A caller returns the safe-call status envelope around the model response. */
+pub type LlmCaller = fn(LlmCallerRequest) -> dict

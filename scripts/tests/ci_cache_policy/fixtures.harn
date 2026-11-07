@@ -1,8 +1,25 @@
 import { read_json_typed, read_yaml_typed } from "std/fs"
 import { CiCachePolicy, ReleaseWarmCachePathPolicy } from "../../check_ci_cache_policy.harn"
 import { E2E_WORKFLOW_CONCURRENCY_GROUP } from "../../ci_cache_policy/policy_core.harn"
+import { CiJob, CiStep, CiWorkflow } from "../../ci_cache_policy/workflow_model.harn"
 
-type PolicyWorkflow = {jobs: dict<string, dict>, env?: dict, on?: dict, concurrency?: dict}
+type PolicyWorkflow = CiWorkflow & {jobs: dict<string, CiJob>}
+
+pub fn workflow_job(workflow: CiWorkflow, name: string) -> CiJob {
+  const job = workflow.jobs?.[name]
+  if job == nil {
+    throw "Fixture workflow must contain job ${name}"
+  }
+  return job
+}
+
+pub fn workflow_job_steps(workflow: CiWorkflow, name: string) -> list<CiStep> {
+  const steps = workflow_job(workflow, name).steps
+  if steps == nil {
+    throw "Fixture workflow job ${name} must contain steps"
+  }
+  return steps
+}
 
 fn read_workflow(fs: HarnessFs, name: string) -> PolicyWorkflow {
   return read_yaml_typed(

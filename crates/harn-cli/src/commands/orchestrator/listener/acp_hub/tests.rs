@@ -70,6 +70,57 @@ fn test_worker() -> TestWorkerChannels {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn detach_withdraws_only_the_clients_delivery_requests() {
+    let (worker, mut request_rx, _owner_rx, _controller_rx, _observer_rx) = test_worker();
+    for (client_id, id, delivery) in [
+        ("owner", 10, JsonValue::Null),
+        ("owner", 11, json!("queue")),
+        ("controller", 12, json!("steer")),
+    ] {
+        worker
+            .send_client_request(
+                client_id,
+                if client_id == "owner" {
+                    AcpAttachRole::HostOwner
+                } else {
+                    AcpAttachRole::Controller
+                },
+                json!({
+                    "jsonrpc": "2.0", "id": id, "method": "session/prompt",
+                    "params": {"sessionId": "session-1", "delivery": delivery},
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            request_rx.try_recv().expect("accepted client request")["id"],
+            id
+        );
+    }
+    let cancel = json!({"params": {"requestId": 10}});
+    assert!(worker.owns_client_request("owner", &cancel));
+    assert!(!worker.owns_client_request("controller", &cancel));
+    assert_eq!(
+        worker.detach("owner-conn"),
+        Some(("owner".into(), AcpAttachRole::HostOwner))
+    );
+    assert_eq!(
+        request_rx.try_recv().expect("delivery withdrawal"),
+        json!({
+            "jsonrpc": "2.0", "method": "$/cancel_request", "params": {"requestId": 11},
+        })
+    );
+    assert!(
+        matches!(request_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+        "disconnect must retain the normal turn and another client's delivery"
+    );
+    assert!(
+        worker.owns_client_request("owner", &cancel),
+        "a retained normal request remains explicitly cancellable by its owner"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_hub_arbitrates_permission_responses() {
     let (worker, mut request_rx, mut owner_rx, mut controller_rx, mut observer_rx) = test_worker();
     worker

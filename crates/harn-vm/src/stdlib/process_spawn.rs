@@ -398,12 +398,20 @@ async fn spawn(
     params: &crate::value::DictMap,
     owner_cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<VmValue, VmError> {
+    let prepared = build_sandboxed_command(params, "process.spawn")?;
+    spawn_prepared(params, prepared, owner_cancel_token).await
+}
+
+pub(crate) async fn spawn_prepared(
+    params: &crate::value::DictMap,
+    prepared: crate::stdlib::host::PreparedProcessCommand,
+    owner_cancel_token: Option<Arc<AtomicBool>>,
+) -> Result<VmValue, VmError> {
     let timeout_ms = optional_i64(params, "timeout")
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
 
-    let prepared = build_sandboxed_command(params, "process.spawn")?;
     let witness = prepared.witness;
     let mut cmd = prepared.command;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);

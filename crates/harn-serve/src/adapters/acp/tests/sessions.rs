@@ -1038,8 +1038,8 @@ async fn acp_bridge_routes_session_request_permission_response() {
             .clone(),
         session_id: "session-1".to_string(),
         output: AcpOutput::Channel(tx),
-        pending: server.pending.clone(),
-        next_id_counter: AtomicU64::new(77),
+        outbound: server.outbound.clone(),
+        elicitations: server.elicitations.clone(),
         cancellation: SessionCancellation::default().prepare_prompt(),
         assistant_state: Mutex::new(VisibleTextState::default()),
         host_responder: None,
@@ -1060,22 +1060,28 @@ async fn acp_bridge_routes_session_request_permission_response() {
         message = recv_json(&mut rx) => message,
         result = &mut call => panic!("permission call completed before host response: {result:?}"),
     };
-    assert_eq!(outgoing["id"], 77);
+    let request_id = outgoing["id"].as_u64().expect("allocated request identity");
     assert_eq!(outgoing["method"], "session/request_permission");
 
     let response = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 77,
+        "id": request_id,
         "result": {"outcome": {"outcome": "selected", "optionId": "allow"}},
     });
-    crate::protocol_fixture_tests::assert_fixture_documents_match(
-        "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
-        vec![outgoing, response.clone()],
-    );
+    let mut expected = fixture["documents"].as_array().unwrap().clone();
+    for document in &mut expected {
+        document["id"] = serde_json::json!(request_id);
+    }
+    assert_eq!(vec![outgoing, response.clone()], expected);
 
     let mut server = server;
+    let mut foreign_response = response.clone();
+    foreign_response["id"] = serde_json::json!(request_id + 1);
+    server.handle_incoming_message(foreign_response).await;
+    assert_eq!(server.outbound.pending_count().await, 1);
     server.handle_incoming_message(response).await;
     let result = call.await.expect("permission response");
+    assert_eq!(server.outbound.pending_count().await, 0);
     assert_eq!(result["outcome"]["outcome"], "selected");
     assert_eq!(result["outcome"]["optionId"], "allow");
 }

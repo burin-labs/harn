@@ -29,7 +29,7 @@ const CONVERSION = "gap_contradicts_done_survived_reask_over_passing_verifier"
 
 const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
 
-fn __completion_receipts(events: unknown) {
+fn __completion_receipts(events: list<unknown>) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -42,7 +42,7 @@ fn __completion_receipts(events: unknown) {
 }
 
 /** Count conversions by `converted_from` ONLY. */
-fn __conversion_count(events: unknown) -> int {
+fn __conversion_count(events: list<unknown>) -> int {
   let count = 0
   for receipt in __completion_receipts(events) {
     if receipt?.converted_from == CONVERSION {
@@ -53,7 +53,7 @@ fn __conversion_count(events: unknown) -> int {
 }
 
 /** Count the re-asks by their own receipt, never by a judge-call arithmetic. */
-fn __reask_count(events: unknown) -> int {
+fn __reask_count(events: list<unknown>) -> int {
   return len(
     events.filter(
       { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == RETRY_SCHEMA },
@@ -123,7 +123,7 @@ fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
             + opts_extra,
         ) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }
@@ -452,7 +452,7 @@ pipeline test_contradiction_conversion_needs_a_declared_oracle(harness: Harness,
 // -------------------------------------------------------------------------------------------------
 
 /** Every `verify_completion` feedback string the loop actually injected. */
-fn __verify_feedback(events: unknown) -> list<string> {
+fn __verify_feedback(events: list<unknown>) -> list<string> {
   return events.filter(
     { event -> event.type == "feedback_injected" && event?.kind == "verify_completion" },
   )
@@ -461,7 +461,7 @@ fn __verify_feedback(events: unknown) -> list<string> {
 }
 
 /** Every canonical judge decision, in order. */
-fn __judge_decisions(events: unknown) {
+fn __judge_decisions(events: list<unknown>) {
   return events.filter({ event -> event.type == "judge_decision" }).to_list()
 }
 

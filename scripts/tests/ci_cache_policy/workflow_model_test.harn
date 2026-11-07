@@ -1,0 +1,79 @@
+import { read_yaml_typed } from "std/fs"
+import { assert_error_contains } from "std/testing"
+import {
+  CiAction,
+  CiWorkflow,
+  ci_text,
+  job_needs,
+  matrix_include_rows,
+} from "../../ci_cache_policy/workflow_model.harn"
+
+pipeline test_current_workflow_decodes_once(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../../.github/workflows/ci.yml")
+  const workflow = read_yaml_typed(harness.fs, path, schema_of(CiWorkflow))
+  const jobs = workflow.jobs ?? {}
+  assert(len(jobs) > 10, "the canonical workflow must be reached")
+  const producer = jobs["rust-cli"]
+  assert(producer != nil, "the canonical producer must exist")
+  assert(len(producer.steps ?? []) > 0, "decoded producer steps must be retained")
+}
+
+pipeline test_workflow_decode_preserves_unowned_fields_and_expression_branches() {
+  const source = {
+    on: {push: nil, schedule: [{cron: "0 * * * *"}]},
+    jobs: {
+      build: {
+        steps: [{uses: "example/action", with: {enabled: true, count: 2}}],
+        strategy: {matrix: {include: "$" + "{{ fromJSON(inputs.matrix) }}"}},
+        extra: {retained: true},
+      },
+    },
+    extra: {retained: true},
+  }
+  assert(unwrap(schema_parse(source, schema_of(CiWorkflow))) == source)
+  assert(is_ok(schema_parse({on: "push", jobs: {}}, schema_of(CiWorkflow))))
+  assert(is_ok(schema_parse({on: ["push", "pull_request"], jobs: {}}, schema_of(CiWorkflow))))
+}
+
+pipeline test_workflow_decode_rejects_wrong_owned_shapes() {
+  for source in [
+    {jobs: "not jobs"},
+    {jobs: {build: {steps: "not steps"}}},
+    {jobs: {build: {steps: [{with: {value: {unexpected: "object"}}}]}}},
+    {jobs: {build: {strategy: {matrix: {include: [nil]}}}}},
+    {jobs: {build: {strategy: {matrix: {include: [{kind: {unexpected: "object"}}]}}}}},
+  ] {
+    assert(is_err(schema_parse(source, schema_of(CiWorkflow))), "wrong owned shapes must refuse")
+  }
+  assert(is_err(schema_parse({runs: {steps: "not steps"}}, schema_of(CiAction))))
+}
+
+pipeline test_job_needs_preserves_names_and_missing_jobs() {
+  assert(job_needs(nil) == [])
+  assert(job_needs({}) == [])
+  assert(job_needs({needs: " build "}) == [" build "])
+  assert(job_needs({needs: ["first", "second"]}) == ["first", "second"])
+}
+
+pipeline test_yaml_scalar_text_preserves_native_scalar_spellings() {
+  for value in [nil, "  text  ", "", true, false, 0, -2, 0.5] {
+    assert_eq(ci_text(value), trim(to_string(value ?? "")))
+  }
+  assert_eq(ci_text(false), "false")
+  assert_eq(ci_text(0), "0")
+}
+
+pipeline test_static_matrix_rows_preserve_rows_and_refuse_dynamic_expressions() {
+  const rows = [{kind: "first", enabled: true}, {kind: "second", count: 2}]
+  assert_eq(matrix_include_rows({strategy: {matrix: {include: rows}}}), rows)
+  assert_eq(matrix_include_rows(nil), [])
+  assert_eq(matrix_include_rows({}), [])
+  assert_error_contains(
+    fn() { return matrix_include_rows({strategy: {matrix: "$" + "{{ fromJSON(inputs.matrix) }}"}}) },
+    "requires a static include matrix",
+  )
+  assert_error_contains(
+    fn() { return matrix_include_rows({strategy: {matrix: {include: "$" + "{{ inputs.rows }}"}}}) },
+    "requires static include rows",
+  )
+}

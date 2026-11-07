@@ -102,6 +102,26 @@ where
 }
 
 impl ClientCapabilities {
+    pub(super) fn supports_request(&self, method: &str, params: &serde_json::Value) -> bool {
+        if method == "elicitation/create" {
+            return params
+                .get("mode")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|mode| self.supports_elicitation(mode));
+        }
+        self.supports_method(method)
+    }
+
+    pub(super) fn supports_elicitation(&self, mode: &str) -> bool {
+        self.elicitation
+            .as_ref()
+            .is_some_and(|capabilities| match mode {
+                "form" => capabilities.form.is_some(),
+                "url" => capabilities.url.is_some(),
+                _ => false,
+            })
+    }
+
     pub(super) fn supports_session_update(&self, kind: &str) -> bool {
         super::schema::is_standard_session_update(kind)
             || self.meta.harn.session_update_extensions.contains(kind)

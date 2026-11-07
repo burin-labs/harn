@@ -310,7 +310,11 @@ pipeline test_malformed_gap_rows_are_dropped_not_fatal(harness: Harness, task: u
     },
   )
   assert(len(decoded.gaps) == 1, "only the whole row survives, got " + to_string(len(decoded.gaps)))
-  assert(decoded.gaps[0].criterion == "kept", "and it is the right one")
+  const gap = decoded.gaps[0]
+  if gap == nil {
+    throw "The validated gap must remain present"
+  }
+  assert(gap.criterion == "kept", "and it is the right one")
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -328,7 +332,7 @@ pipeline test_malformed_gap_rows_are_dropped_not_fatal(harness: Harness, task: u
 
 const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
 
-fn __retries(events: unknown, reason: string) -> int {
+fn __retries(events: list<unknown>, reason: string) -> int {
   return len(
     events.filter(
       { event ->
@@ -380,7 +384,7 @@ fn __run_judge(harness: Harness, label: string, script: list) {
         session,
         fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
-      return {events: captured.events, result: captured.result}
+      return pick(captured, ["events", "result"])
     },
   )
 }

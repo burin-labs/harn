@@ -431,7 +431,7 @@ async fn bridge_call_cannot_register_after_disconnect_clear() {
         _ = tokio::task::yield_now() => {}
     }
 
-    bridge.disconnected.store(true, Ordering::SeqCst);
+    bridge.outbound.disconnected.store(true, Ordering::SeqCst);
     drop(guard);
 
     let result = call.await;

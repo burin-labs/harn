@@ -11,6 +11,12 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 mod bridge;
 pub(crate) mod fixtured_operations;
 mod operation_registry;
+mod prepared_command;
+pub use prepared_command::{
+    command_binding_schemas, prepare_remote_command, CommandTransportFuture,
+    HostCommandPreparation, HostCommandPreparationFuture, PreparedCommandTransport,
+    PreparedHostCommand,
+};
 pub mod process_admission;
 pub mod process_dispatch;
 mod process_exec;
@@ -27,8 +33,8 @@ pub use bridge::{
 
 use process_dispatch::dispatch_process_exec_with_policy;
 pub use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
-pub(crate) use process_exec::build_sandboxed_command;
 use process_exec::dispatch_process_spawn_with_policy;
+pub(crate) use process_exec::{build_sandboxed_command, PreparedProcessCommand};
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every

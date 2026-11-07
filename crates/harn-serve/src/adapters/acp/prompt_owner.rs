@@ -115,7 +115,18 @@ impl PromptCancellation {
     }
 
     pub(super) fn cancel(&self) -> bool {
+        self.cancel_from(super::sessions::PromptCancelMethod::Session)
+    }
+
+    pub(super) fn cancel_from(&self, method: super::sessions::PromptCancelMethod) -> bool {
+        let mut observed = self
+            .method
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let newly_cancelled = !self.cancelled.swap(true, Ordering::SeqCst);
+        if newly_cancelled {
+            *observed = method;
+        }
         self.notify.notify_waiters();
         newly_cancelled
     }

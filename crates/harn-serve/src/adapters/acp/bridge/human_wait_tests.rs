@@ -10,8 +10,8 @@ fn bridge() -> (AcpBridge, tokio::sync::mpsc::UnboundedReceiver<String>) {
             client_capabilities: Default::default(),
             session_id: "human-wait-session".into(),
             output: AcpOutput::Channel(tx),
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id_counter: AtomicU64::new(1),
+            outbound: Arc::default(),
+            elicitations: Arc::default(),
             cancellation: SessionCancellation::default().prepare_prompt(),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
             host_responder: None,
@@ -54,17 +54,13 @@ async fn human_calls_remain_pending_then_deliver_the_actual_answer() {
             result = &mut call => panic!("human response expired: {result:?}"),
             _ = tokio::task::yield_now() => {}
         }
-        assert_eq!(bridge.pending.lock().await.len(), 1);
+        assert_eq!(bridge.outbound.pending_count().await, 1);
         bridge
-            .pending
-            .lock()
-            .await
-            .remove(&request["id"].as_u64().unwrap())
-            .unwrap()
-            .send(serde_json::json!({"result": "Proceed"}))
-            .unwrap();
+            .outbound
+            .complete(serde_json::json!({"id":request["id"],"result": "Proceed"}))
+            .await;
         assert_eq!(call.await.unwrap(), serde_json::json!("Proceed"));
-        assert!(bridge.pending.lock().await.is_empty());
+        assert_eq!(bridge.outbound.pending_count().await, 0);
     }
 }
 
@@ -84,7 +80,7 @@ async fn ordinary_host_calls_still_expire() {
         .unwrap_err()
         .to_string()
         .contains("did not respond"));
-    assert!(bridge.pending.lock().await.is_empty());
+    assert_eq!(bridge.outbound.pending_count().await, 0);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -104,12 +100,13 @@ async fn stop_settles_a_human_call_after_the_deadline_window() {
     bridge.cancellation.cancelled.store(true, Ordering::SeqCst);
     bridge.cancellation.notify.notify_waiters();
     assert!(call.await.unwrap_err().to_string().contains("Cancelled"));
-    assert!(bridge.pending.lock().await.is_empty());
+    assert_eq!(bridge.outbound.pending_count().await, 0);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn disconnect_settles_a_human_call_after_the_deadline_window() {
-    let (bridge, mut rx) = bridge();
+    let (mut bridge, mut rx) = bridge();
+    bridge.client_capabilities.terminal = true;
     let call = bridge.call_client(
         "host/call",
         serde_json::json!({"name": "interaction.ask", "args": {}}),
@@ -121,12 +118,80 @@ async fn disconnect_settles_a_human_call_after_the_deadline_window() {
         result = &mut call => panic!("human response expired before disconnect: {result:?}"),
         _ = tokio::task::yield_now() => {}
     }
-    bridge.pending.lock().await.clear();
+    bridge.outbound.close().await;
     assert!(call
         .await
         .unwrap_err()
         .to_string()
         .contains("Client closed connection"));
+    let after_disconnect = bridge
+        .call_client_for_cleanup(
+            "terminal/release",
+            serde_json::json!({"terminalId":"closed"}),
+        )
+        .await;
+    assert!(after_disconnect
+        .unwrap_err()
+        .to_string()
+        .contains("Client closed connection"));
+    assert_eq!(bridge.outbound.pending_count().await, 0);
+    assert!(
+        rx.try_recv().is_err(),
+        "cleanup cannot register a request after disconnect"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dropped_calls_cancel_the_exact_remote_request_and_retire_only_their_waiter() {
+    let (bridge, mut rx) = bridge();
+    let mut first =
+        Box::pin(bridge.call_client("host/call", serde_json::json!({"name":"interaction.ask"})));
+    let first_request = transmitted(&mut rx, first.as_mut()).await;
+    let output = bridge.output.clone();
+    let host = harn_vm::bridge::HostBridge::from_outbound_requests(
+        bridge.outbound.clone(),
+        Arc::new(move |line| {
+            output.write_line(line);
+            Ok(())
+        }),
+        harn_vm::bridge::HostBridgeControlState::new(
+            bridge.cancellation.cancelled.clone(),
+            bridge.cancellation.notify.clone(),
+            Default::default(),
+            Arc::new(harn_vm::tool_call_cancellations::CancellationRegistry::default()),
+        ),
+    );
+    let second = host.call(
+        "host/call",
+        serde_json::json!({"name":"project.metadata_get"}),
+    );
+    tokio::pin!(second);
+    let second_request = transmitted(&mut rx, second.as_mut()).await;
+    assert_ne!(first_request["id"], second_request["id"]);
+    assert_eq!(bridge.outbound.pending_count().await, 2);
+    drop(first);
+    let cancel: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(cancel["method"], ACP_METHOD_CANCEL_REQUEST);
+    assert_eq!(cancel["params"]["requestId"], first_request["id"]);
+    bridge
+        .outbound
+        .complete(serde_json::json!({"id":first_request["id"],"result":"late answer"}))
+        .await;
+    assert_eq!(
+        bridge.outbound.pending_count().await,
+        1,
+        "a late response has no waiter"
+    );
+    bridge
+        .outbound
+        .complete(serde_json::json!({"id":second_request["id"],"result":"second answer"}))
+        .await;
+    assert_eq!(second.await.unwrap(), serde_json::json!("second answer"));
+    assert_eq!(bridge.outbound.pending_count().await, 0);
+    assert!(
+        rx.try_recv().is_err(),
+        "answered calls must not emit cancellation"
+    );
 }
 
 struct HeldHost {

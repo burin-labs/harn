@@ -51,12 +51,14 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use harn_vm::json_to_vm_value;
+use harn_vm::llm::vm_value_to_json;
 use harn_vm::{HostCallBridge, HostCallDispatchFuture, VmError, VmValue};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
 use crate::framing::{write_json_frame, SharedWriter};
-use crate::protocol::DapResponse;
+use crate::protocol::{DapResponse, HostCallCancelled};
 
 /// Default reverse-request timeout. Generous because the client may need
 /// to do real work (LSP queries, file scans) before responding.
@@ -74,6 +76,34 @@ pub struct PendingState {
 
 /// Shared map from outgoing reverse-request seq → response channel.
 pub type PendingMap = Arc<PendingState>;
+
+struct PendingCall {
+    pending: PendingMap,
+    seq: i64,
+    output_seq: Arc<AtomicI64>,
+    stdout: SharedWriter,
+}
+
+impl Drop for PendingCall {
+    fn drop(&mut self) {
+        let abandoned = self
+            .pending
+            .map
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.seq)
+            .is_some();
+        if abandoned {
+            let event = json!({
+                "seq": self.output_seq.fetch_add(1, Ordering::SeqCst),
+                "type": "event",
+                "event": "harnHostCallCancelled",
+                "body": HostCallCancelled { request_seq: self.seq },
+            });
+            let _ = write_json_frame(&self.stdout, &event);
+        }
+    }
+}
 
 /// Create an empty pending map.
 pub fn pending_map_new() -> PendingMap {
@@ -146,7 +176,7 @@ impl DapHostBridge {
         capability: &str,
         operation: &str,
         params_json: Value,
-    ) -> Result<oneshot::Receiver<DapHostCallReply>, VmError> {
+    ) -> Result<(PendingCall, oneshot::Receiver<DapHostCallReply>), VmError> {
         let req_seq = self.next_seq();
         let (tx, rx) = oneshot::channel();
         {
@@ -157,6 +187,12 @@ impl DapHostBridge {
                 .map_err(|_| VmError::Runtime("DapHostBridge pending map poisoned".into()))?;
             guard.insert(req_seq, tx);
         }
+        let call = PendingCall {
+            pending: self.pending.clone(),
+            seq: req_seq,
+            output_seq: self.seq.clone(),
+            stdout: self.stdout.clone(),
+        };
         // Notify any waiter watching for new pending entries (e.g. tests
         // that deliver synthetic replies without spinning on a poll loop).
         self.pending.inserted.notify_all();
@@ -174,7 +210,7 @@ impl DapHostBridge {
         write_json_frame(&self.stdout, &frame)
             .map_err(|e| VmError::Runtime(format!("DAP write: {e}")))?;
 
-        Ok(rx)
+        Ok((call, rx))
     }
 
     async fn await_reply(
@@ -199,6 +235,23 @@ impl DapHostBridge {
 }
 
 impl HostCallBridge for DapHostBridge {
+    fn prepare_command<'a>(
+        &'a self,
+        operation: &'a str,
+        params: &'a harn_vm::value::DictMap,
+        trace: &'a harn_vm::stdlib::host::trace::HostRequestTrace,
+    ) -> harn_vm::stdlib::host::HostCommandPreparationFuture<'a> {
+        Box::pin(async move {
+            harn_vm::stdlib::host::prepare_remote_command(
+                Arc::new(self.clone()),
+                operation,
+                params,
+                trace,
+            )
+            .await
+        })
+    }
+
     fn dispatch<'a>(
         &'a self,
         capability: &'a str,
@@ -209,8 +262,8 @@ impl HostCallBridge for DapHostBridge {
             let start = std::time::Instant::now();
             self.emit_output("host_call", &format!("→ {capability}.{operation}"));
 
-            let params_json = vm_dict_to_json(params);
-            let rx = self.send_reverse_request(capability, operation, params_json)?;
+            let params_json = vm_value_to_json(&VmValue::dict(params.clone()));
+            let (_call, rx) = self.send_reverse_request(capability, operation, params_json)?;
             let reply = self.await_reply(rx, capability, operation).await?;
             let elapsed_ms = start.elapsed().as_millis();
             if !reply.success {
@@ -238,13 +291,35 @@ impl HostCallBridge for DapHostBridge {
             // returning {}).
             let value = match reply.body {
                 Some(Value::Object(mut map)) => match map.remove("value") {
-                    Some(v) => json_to_vm_value(v),
-                    None => json_to_vm_value(Value::Object(map)),
+                    Some(v) => json_to_vm_value(&v),
+                    None => json_to_vm_value(&Value::Object(map)),
                 },
-                Some(other) => json_to_vm_value(other),
+                Some(other) => json_to_vm_value(&other),
                 None => VmValue::Nil,
             };
             Ok(Some(value))
+        })
+    }
+}
+
+impl harn_vm::stdlib::host::PreparedCommandTransport for DapHostBridge {
+    fn call<'a>(
+        &'a self,
+        operation: &'a str,
+        args: Value,
+        _trace: &'a harn_vm::stdlib::host::trace::HostRequestTrace,
+        _cleanup: bool,
+    ) -> harn_vm::stdlib::host::CommandTransportFuture<'a> {
+        Box::pin(async move {
+            let params = json_to_vm_value(&args);
+            let params = params.as_dict().ok_or_else(|| {
+                VmError::Runtime("prepared process request must be an object".into())
+            })?;
+            let result = self
+                .dispatch("process", operation, params)
+                .await?
+                .ok_or_else(|| VmError::Runtime("DAP host cannot bind command execution".into()))?;
+            Ok(vm_value_to_json(&result))
         })
     }
 }
@@ -312,70 +387,6 @@ pub fn deliver_reply(pending: &PendingMap, request_seq: i64, reply: DapHostCallR
     };
     if let Some(tx) = tx {
         let _ = tx.send(reply);
-    }
-}
-
-// ── VmValue ↔ JSON conversion ─────────────────────────────────────────
-//
-// Local impls to avoid depending on harn-vm's internal `vm_value_to_json`
-// (private to the LLM module). This is a small, stable surface that's
-// straightforward to keep in sync with `VmValue`.
-
-fn vm_dict_to_json(params: &harn_vm::value::DictMap) -> Value {
-    let mut map = serde_json::Map::with_capacity(params.len());
-    for (k, v) in params.iter() {
-        map.insert(k.to_string(), vm_value_to_json(v));
-    }
-    Value::Object(map)
-}
-
-fn vm_value_to_json(value: &VmValue) -> Value {
-    match value {
-        VmValue::Nil => Value::Null,
-        VmValue::Bool(b) => Value::Bool(*b),
-        VmValue::Int(i) => Value::Number((*i).into()),
-        VmValue::Float(f) => serde_json::Number::from_f64(*f)
-            .map(Value::Number)
-            .unwrap_or(Value::Null),
-        VmValue::String(s) => Value::String(s.to_string()),
-        VmValue::List(items) => Value::Array(items.iter().map(vm_value_to_json).collect()),
-        VmValue::Dict(map) => {
-            let mut obj = serde_json::Map::with_capacity(map.len());
-            for (k, v) in map.iter() {
-                obj.insert(k.to_string(), vm_value_to_json(v));
-            }
-            Value::Object(obj)
-        }
-        // Anything else (closures, tasks, error values) we represent as
-        // their display string. These are not normal host_call params.
-        other => Value::String(other.display()),
-    }
-}
-
-fn json_to_vm_value(value: Value) -> VmValue {
-    match value {
-        Value::Null => VmValue::Nil,
-        Value::Bool(b) => VmValue::Bool(b),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                VmValue::Int(i)
-            } else if let Some(f) = n.as_f64() {
-                VmValue::Float(f)
-            } else {
-                VmValue::Nil
-            }
-        }
-        Value::String(s) => VmValue::String(arcstr::ArcStr::from(s)),
-        Value::Array(arr) => VmValue::List(std::sync::Arc::new(
-            arr.into_iter().map(json_to_vm_value).collect(),
-        )),
-        Value::Object(obj) => {
-            let map: harn_vm::value::DictMap = obj
-                .into_iter()
-                .map(|(k, v)| (k, json_to_vm_value(v)))
-                .collect();
-            VmValue::dict(map)
-        }
     }
 }
 
@@ -492,6 +503,151 @@ mod tests {
     }
 
     #[test]
+    fn dropping_a_reverse_request_retires_only_its_own_pending_entry() {
+        run_async(|| async {
+            let (bridge, buf, pending) = rig();
+            let params = harn_vm::value::DictMap::new();
+            let mut first = Box::pin(bridge.dispatch("process", "prepare", &params));
+            let mut second = Box::pin(bridge.dispatch("workspace", "read_text", &params));
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(std::future::Future::poll(first.as_mut(), &mut context).is_pending());
+            assert!(std::future::Future::poll(second.as_mut(), &mut context).is_pending());
+            let ids = pending
+                .map
+                .lock()
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(ids.len(), 2, "both actual requests must be registered");
+            drop(first);
+            assert_eq!(
+                pending
+                    .map
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                vec![ids[1]]
+            );
+            deliver_reply(
+                &pending,
+                ids[1],
+                DapHostCallReply {
+                    success: true,
+                    body: Some(json!({"value":"retained"})),
+                    message: None,
+                },
+            );
+            assert!(
+                matches!(second.await.unwrap(), Some(VmValue::String(value)) if value == "retained")
+            );
+            assert!(pending.map.lock().unwrap().is_empty());
+            let frames = parse_lsp_frames(&buf.lock().unwrap());
+            let cancelled = frames
+                .iter()
+                .filter(|frame| frame["event"] == "harnHostCallCancelled")
+                .collect::<Vec<_>>();
+            assert_eq!(
+                cancelled.len(),
+                1,
+                "normal replies must not emit cancellation"
+            );
+            assert_eq!(cancelled[0]["body"]["request_seq"], ids[0]);
+            assert_eq!(
+                serde_json::from_value::<HostCallCancelled>(cancelled[0]["body"].clone()).unwrap(),
+                HostCallCancelled {
+                    request_seq: ids[0]
+                }
+            );
+            for malformed in [
+                json!({}),
+                json!({"request_seq":"1"}),
+                json!({"request_seq":ids[0], "token":"unknown"}),
+            ] {
+                assert!(serde_json::from_value::<HostCallCancelled>(malformed).is_err());
+            }
+            assert_eq!(
+                cancelled[0]["seq"],
+                ids[1] + 1,
+                "events share the adapter sequence allocator"
+            );
+        });
+    }
+
+    #[test]
+    fn prepared_commands_use_the_shared_token_protocol_over_reverse_requests() {
+        run_async(|| async {
+            let (bridge, buf, pending) = rig();
+            let helper = spawn_replier(
+                pending.clone(),
+                DapHostCallReply {
+                    success: true,
+                    body: Some(
+                        json!({"value":{"status":"bound", "token":"bound-one", "invocation":{
+                            "argv":["python3", "", " spaced argument "], "cwd":"/executor/workspace",
+                        }}}),
+                    ),
+                    message: None,
+                },
+            );
+            let params = harn_vm::value::DictMap::new();
+            let trace = harn_vm::stdlib::host::trace::HostRequestTrace::new(None, &params);
+            let prepared = bridge
+                .prepare_command("exec", &params, &trace)
+                .await
+                .unwrap();
+            helper.join().unwrap();
+            let harn_vm::stdlib::host::HostCommandPreparation::Bound(command) = prepared else {
+                panic!("the client must bind the command");
+            };
+            assert_eq!(
+                command.invocation().argv(),
+                ["python3", "", " spaced argument "]
+            );
+            let replies = harn_parser::runtime_stack::spawn(move || {
+                for value in [
+                    json!({"exit_code":0}),
+                    json!({"status":"released", "token":"bound-one"}),
+                ] {
+                    let seq = await_pending_seq(&pending);
+                    deliver_reply(
+                        &pending,
+                        seq,
+                        DapHostCallReply {
+                            success: true,
+                            body: Some(json!({"value":value})),
+                            message: None,
+                        },
+                    );
+                }
+            });
+            let result = command.execute().await.unwrap();
+            assert!(matches!(
+                result.as_dict().unwrap().get("exit_code"),
+                Some(VmValue::Int(0))
+            ));
+            replies.join().unwrap();
+            let bytes = buf.lock().unwrap().clone();
+            let requests = parse_lsp_frames(&bytes)
+                .into_iter()
+                .filter(|frame| frame["command"] == "harnHostCall")
+                .collect::<Vec<_>>();
+            assert_eq!(requests.len(), 3);
+            assert_eq!(requests[0]["arguments"]["operation"], "prepare");
+            assert_eq!(requests[0]["arguments"]["params"]["operation"], "exec");
+            for (request, operation) in requests[1..]
+                .iter()
+                .zip(["execute_prepared", "release_prepared"])
+            {
+                assert_eq!(request["arguments"]["operation"], operation);
+                assert_eq!(request["arguments"]["params"], json!({"token":"bound-one"}));
+            }
+        });
+    }
+
+    #[test]
     fn dispatch_emits_reverse_request_and_unwraps_value_body() {
         run_async(|| async {
             let (bridge, buf, pending) = rig();
@@ -506,6 +662,7 @@ mod tests {
 
             let mut params = harn_vm::value::DictMap::new();
             params.insert("path".into(), VmValue::String(arcstr::ArcStr::from("foo")));
+            params.insert("binary".into(), VmValue::Bytes(Arc::new(vec![0, 255])));
             let result = bridge
                 .dispatch("workspace", "read_text", &params)
                 .await
@@ -523,6 +680,10 @@ mod tests {
             assert_eq!(frame["arguments"]["capability"], "workspace");
             assert_eq!(frame["arguments"]["operation"], "read_text");
             assert_eq!(frame["arguments"]["params"]["path"], "foo");
+            assert_eq!(
+                frame["arguments"]["params"]["binary"],
+                json!({"$bytes_b64":"AP8="})
+            );
         });
     }
 

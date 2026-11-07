@@ -57,7 +57,30 @@ impl SessionCancellation {
     /// The queued request owns its scope until dispatch, then execution owns
     /// it. A new prompt can follow cancel, but cannot pass a pending close.
     pub(in super::super) fn prepare_prompt(&self) -> Arc<PromptCancellation> {
-        let prompt = Arc::new(PromptCancellation::default());
+        self.prepare_request(None)
+    }
+
+    pub(in super::super) fn cancel_request(&self, id: &serde_json::Value) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.prompts.retain(|prompt| {
+            let Some(prompt) = prompt.upgrade() else {
+                return false;
+            };
+            if prompt.request_id.as_ref() == Some(id) {
+                prompt.cancel_from(super::PromptCancelMethod::Request);
+            }
+            true
+        });
+    }
+
+    pub(in super::super) fn prepare_request(
+        &self,
+        request_id: Option<serde_json::Value>,
+    ) -> Arc<PromptCancellation> {
+        let prompt = Arc::new(PromptCancellation {
+            request_id,
+            ..Default::default()
+        });
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.closing.strong_count() > 0 {
             prompt.cancel();
@@ -73,6 +96,26 @@ impl SessionCancellation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_cancel_cannot_reach_another_admission_or_session_lifetime() {
+        let session = SessionCancellation::default();
+        let first = session.prepare_request(Some(serde_json::json!("first")));
+        let second = session.prepare_request(Some(serde_json::json!(2)));
+        session.cancel_request(&serde_json::json!("2"));
+        assert!(!first.cancelled.load(Ordering::SeqCst));
+        assert!(!second.cancelled.load(Ordering::SeqCst));
+        session.cancel_request(&serde_json::json!("first"));
+        assert!(first.cancelled.load(Ordering::SeqCst));
+        assert!(!second.cancelled.load(Ordering::SeqCst));
+        let later = session.prepare_request(Some(serde_json::json!(3)));
+        assert!(!later.cancelled.load(Ordering::SeqCst));
+        assert!(session.cancel());
+        assert!(second.cancelled.load(Ordering::SeqCst));
+        assert!(later.cancelled.load(Ordering::SeqCst));
+        assert_eq!(first.method.lock().unwrap().as_str(), "$/cancel_request");
+        assert_eq!(second.method.lock().unwrap().as_str(), "session/cancel");
+    }
 
     #[test]
     fn every_pending_close_must_drop_before_prompt_admission_resumes() {

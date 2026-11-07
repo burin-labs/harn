@@ -1,7 +1,15 @@
-import { RUST_CACHE_ACTION, step_by_name, step_index_by_name } from "./policy_core.harn"
+import {
+  CiWorkflow,
+  RUST_CACHE_ACTION,
+  ci_text,
+  step_by_name,
+  step_index_by_name,
+} from "./policy_core.harn"
+
+const trim = ci_text
 
 /** Package setup overlaps CLI compilation, then consumes its exact-source archive. */
-pub fn package_audit_overlap_errors(workflow: dict) -> list<string> {
+pub fn package_audit_overlap_errors(workflow: CiWorkflow?) -> list<string> {
   const job = workflow?.jobs?.["package-audit"]
   const steps = job?.steps ?? []
   const wait = step_by_name(steps, "Wait for shared Harn binary")

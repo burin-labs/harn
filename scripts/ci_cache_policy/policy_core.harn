@@ -6,6 +6,20 @@ import {
   schema_string,
   schema_validator,
 } from "std/schema"
+pub import {
+  CiAction,
+  CiJob,
+  CiReleaseRunnerPolicy,
+  CiStep,
+  CiWorkflow,
+  ci_text,
+  job_needs,
+  matrix_include_rows,
+  workflow_events,
+  workflow_inputs,
+} from "./workflow_model.harn"
+
+const trim = ci_text
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
@@ -804,7 +818,7 @@ pub fn release_warm_cache_path_matches(policy: ReleaseWarmCachePathPolicy, path:
  * `fetch-depth: 0` removes the race by removing `.git/shallow`, which is why
  * this is a guard and not a retry.
  */
-pub fn release_setup_checkout_errors(steps: list) -> list<string> {
+pub fn release_setup_checkout_errors(steps: list<CiStep>) -> list<string> {
   const checkouts = steps.filter({ step -> step_uses(step).starts_with(CHECKOUT_ACTION_PREFIX) })
     .to_list()
   if len(checkouts) != 1 {
@@ -840,7 +854,7 @@ pub fn release_path_filter_action_is_pinned(uses: string) -> bool {
  */
 pub fn release_warm_cache_path_policy_errors(
   policy: ReleaseWarmCachePathPolicy,
-  workflow: dict,
+  workflow: CiWorkflow?,
 ) -> list<string> {
   let errors: list<string> = []
   for required in REQUIRED_RELEASE_BUILD_INPUTS {
@@ -904,7 +918,7 @@ pub fn release_warm_cache_path_policy_errors(
  * Let only real warm builds supersede real warm builds. Setup-only branch
  * pushes must never enter the preemptible per-target lanes.
  */
-pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
+pub fn release_warm_cache_concurrency_errors(workflow: CiWorkflow?) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != RELEASE_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
@@ -935,7 +949,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   return errors
 }
 
-pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
+pub fn release_aot_runner_errors(workflow: CiWorkflow?) -> list<string> {
   let errors: list<string> = []
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
   if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
@@ -955,7 +969,7 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
 }
 
 /** Keep budget enforcement live after partial failures, but never prune from a superseded warm. */
-pub fn release_warm_cache_prune_errors(workflow: dict) -> list<string> {
+pub fn release_warm_cache_prune_errors(workflow: CiWorkflow?) -> list<string> {
   if trim(workflow?.jobs?.cache_budget?.if ?? "") != RELEASE_CACHE_BUDGET_IF {
     return [
       "${RELEASE_BINARY_WORKFLOW}:cache_budget must skip cancelled warms and enforce every other completed warm",
@@ -1039,7 +1053,7 @@ pub fn workflow_name(path: string) -> string {
   return basename(path)
 }
 
-pub fn step_uses(step: dict) -> string {
+pub fn step_uses(step: CiStep?) -> string {
   return trim(step?.uses ?? "")
 }
 
@@ -1053,7 +1067,7 @@ pub fn step_uses(step: dict) -> string {
  * something nobody checked can silently stop writing while the gate keeps
  * reporting a writer.
  */
-pub fn save_requested(step: dict) -> bool {
+pub fn save_requested(step: CiStep?) -> bool {
   const value = step?.with?.save
   if value == nil {
     return false
@@ -1104,7 +1118,7 @@ pub fn remote_sccache_errors(value: any, path: string = "") -> list<string> {
   return errors
 }
 
-pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
+pub fn cache_target_input_errors(action: CiAction?, step: CiStep?) -> list<string> {
   const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
   const expected_cache_directories = "$"
     + "{{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '${WORKSPACE_SOURCE_RECORD_DIR}' || '') }}"
@@ -1131,7 +1145,7 @@ pub fn native_source_projection_errors(script: string) -> list<string> {
   return []
 }
 
-fn workspace_cache_generation_errors(action: dict, steps: list) -> list<string> {
+fn workspace_cache_generation_errors(action: CiAction?, steps: list<CiStep>) -> list<string> {
   let errors: list<string> = []
   const broad_restore = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
@@ -1238,7 +1252,7 @@ fn workspace_cache_generation_errors(action: dict, steps: list) -> list<string> 
   return errors
 }
 
-pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
+pub fn cache_action_errors(policy: CiCachePolicy, action: CiAction?) -> list<string> {
   let errors: list<string> = []
   const steps = action?.runs?.steps ?? []
   const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
@@ -1324,7 +1338,7 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
   return errors
 }
 
-pub fn node_cache_action_errors(action: dict) -> list<string> {
+pub fn node_cache_action_errors(action: CiAction?) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const setup =
     steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_NODE_PREFIX) }).to_list()
@@ -1362,7 +1376,7 @@ pub fn node_cache_action_errors(action: dict) -> list<string> {
 }
 
 /** Keep immutable setup archives reusable without copying them onto every ephemeral ref. */
-pub fn setup_harn_cache_action_errors(action: dict) -> list<string> {
+pub fn setup_harn_cache_action_errors(action: CiAction?) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const restores = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
@@ -1412,7 +1426,7 @@ pub fn setup_harn_cache_action_errors(action: dict) -> list<string> {
 pub fn ephemeral_cache_writer_error(
   workflow: string,
   job: string,
-  step: dict,
+  step: CiStep?,
   policy: CiCachePolicy,
 ) -> string? {
   const uses = step_uses(step)
@@ -1432,7 +1446,7 @@ pub fn ephemeral_cache_writer_error(
   return nil
 }
 
-pub fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
+pub fn cache_budget_reporter_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const job = workflows[CACHE_BUDGET_WORKFLOW]?.jobs?.[CACHE_BUDGET_JOB]
   if job == nil {
     return ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must define the cache-budget reporter"]
@@ -1451,7 +1465,9 @@ pub fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
         "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
       ]
   }
-  const tolerant_reporters = reporters.filter({ step -> step?.["continue-on-error"] ?? false })
+  const tolerant_reporters = reporters.filter(
+    { step -> (step["continue-on-error"] ?? false) != false },
+  )
     .to_list()
   if len(tolerant_reporters) > 0 {
     errors = errors
@@ -1476,7 +1492,7 @@ pub fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
   return errors
 }
 
-pub fn release_cache_retention_errors(workflows: dict) -> list<string> {
+pub fn release_cache_retention_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const job = workflows[RELEASE_CACHE_WORKFLOW]?.jobs?.[RELEASE_CACHE_JOB]
   if job == nil {
     return ["${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must define the release cache writer"]
@@ -1526,7 +1542,7 @@ pub fn release_cache_retention_errors(workflows: dict) -> list<string> {
   return errors
 }
 
-pub fn step_by_name(steps: list, name: string) {
+pub fn step_by_name(steps: list<CiStep>, name: string) -> CiStep? {
   const matches = steps.filter({ step -> trim(step?.name ?? "") == name }).to_list()
   if len(matches) == 0 {
     return nil
@@ -1534,7 +1550,7 @@ pub fn step_by_name(steps: list, name: string) {
   return matches[0]
 }
 
-pub fn step_index_by_name(steps: list, name: string) -> int {
+pub fn step_index_by_name(steps: list<CiStep>, name: string) -> int {
   for {index, value: step} in steps.enumerate() {
     if trim(step?.name ?? "") == name {
       return index
@@ -1543,19 +1559,19 @@ pub fn step_index_by_name(steps: list, name: string) -> int {
   return -1
 }
 
-pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
+pub fn cli_cold_start_budget_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const workflow = workflows[CLI_COLD_START_WORKFLOW]
   if workflow == nil {
     return ["${CLI_COLD_START_WORKFLOW} must define the advisory CLI cold-start budget"]
   }
   let errors: list<string> = []
-  if workflow?.["on"]?.pull_request != nil {
+  if workflow_events(workflow).pull_request != nil {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW} must not run release-build cold-start benchmarks on pull_request",
       ]
   }
-  if len(workflow?.["on"]?.schedule ?? []) == 0 {
+  if len(workflow_events(workflow).schedule ?? []) == 0 {
     errors = errors + ["${CLI_COLD_START_WORKFLOW} must keep a scheduled main-branch advisory run"]
   }
   const job = workflow?.jobs?.[CLI_COLD_START_JOB]
@@ -1567,7 +1583,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
     errors = errors
       + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs"]
   }
-  if job?.["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
+  if job["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
@@ -1579,7 +1595,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
       ]
-  } else if build_step?.["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
+  } else if build_step["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",
@@ -1588,11 +1604,11 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   return errors
 }
 
-pub fn matching_steps(job: dict, uses: string) -> list {
+pub fn matching_steps(job: CiJob?, uses: string) -> list<CiStep> {
   return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
 }
 
-pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
+pub fn effective_job_env(workflow: CiWorkflow?, job: CiJob?, key: string) -> string {
   const value = job?.env?.[key] ?? workflow?.env?.[key]
   if value == nil {
     return "<unset>"
@@ -1602,9 +1618,9 @@ pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
 
 /** Explicit workflow variables hashed by the pinned Rust cache action. */
 fn rust_cache_environment(
-  workflow: dict,
-  job: dict,
-  step: dict,
+  workflow: CiWorkflow?,
+  job: CiJob?,
+  step: CiStep?,
   matrix: dict = {},
 ) -> dict<string, string> {
   const declared = {...workflow?.env ?? {}, ...job?.env ?? {}, ...step?.env ?? {}}
@@ -1628,7 +1644,7 @@ fn rust_cache_environment(
 }
 
 /** Match the three merge-gate build graphs to their cache writers. */
-pub fn linux_cache_environment_errors(workflows: dict) -> list<string> {
+pub fn linux_cache_environment_errors(workflows: dict<string, CiWorkflow>) -> list<string> {
   const refresh = workflows["rust-cache-refresh.yml"] ?? {}
   let writers: dict<string, dict<string, string>> = {}
   for job in (refresh?.jobs ?? {}).values() {
@@ -1677,8 +1693,8 @@ pub fn linux_cache_environment_errors(workflows: dict) -> list<string> {
 }
 
 pub fn cache_key_inputs(
-  workflow: dict,
-  job: dict,
+  workflow: CiWorkflow?,
+  job: CiJob?,
   ignored_step_ids: list<string> = [],
 ) -> list<string> {
   let inputs = NATIVE_CACHE_INPUTS.map(
@@ -1724,7 +1740,7 @@ pub fn cache_key_inputs(
  * `workspace-tests-${WORKSPACE_CACHE_GENERATION}` restores nothing at all,
  * which looks exactly like a cold repository and reports success either way.
  */
-pub fn cache_family(step: dict) -> string {
+pub fn cache_family(step: CiStep?) -> string {
   const shared = trim(to_string(step?.with?.["shared-key"] ?? ""))
   const source = trim(to_string(step?.with?.["source-key"] ?? ""))
   const crates = lowercase(trim(to_string(step?.with?.["cache-workspace-crates"] ?? "false")))
@@ -1740,7 +1756,7 @@ pub fn cache_family(step: dict) -> string {
 }
 
 /** Expand a matrix-bound cache family into the families the job really writes. */
-pub fn cache_families_for_step(job_definition: dict, step: dict) -> list<string> {
+pub fn cache_families_for_step(job_definition: CiJob?, step: CiStep?) -> list<string> {
   const family = cache_family(step)
   if !contains(family, "matrix.cache_key") {
     return [family]
@@ -1764,7 +1780,10 @@ pub fn cache_families_for_step(job_definition: dict, step: dict) -> list<string>
  * the answer is a comparison rather than a measurement, and the remedy is to
  * name a maintained family or to drop a step that cannot help.
  */
-pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+pub fn rust_cache_reader_errors(
+  policy: CiCachePolicy,
+  workflows: dict<string, CiWorkflow>,
+) -> list<string> {
   let written_families: list<string> = []
   let reader_sites: list<string> = []
   for workflow in workflows.keys().sorted() {
@@ -1809,8 +1828,8 @@ pub fn rust_cache_reader_errors(policy: CiCachePolicy, workflows: dict) -> list<
 pub fn workspace_reuse_writer_errors(
   workflow: string,
   job: string,
-  job_doc: dict,
-  cache_step: dict,
+  job_doc: CiJob?,
+  cache_step: CiStep?,
 ) -> list<string> {
   if lowercase(trim(to_string(cache_step?.with?.["cache-workspace-crates"] ?? "false"))) != "true" {
     return []
@@ -1833,9 +1852,9 @@ pub fn workspace_reuse_writer_errors(
 
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
-  action: dict,
-  node_action: dict,
-  workflows: dict,
+  action: CiAction?,
+  node_action: CiAction?,
+  workflows: dict<string, CiWorkflow>,
 ) -> list<string> {
   let errors = cache_action_errors(policy, action)
     + node_cache_action_errors(node_action)
@@ -1923,7 +1942,7 @@ pub fn ci_cache_policy_errors(
  * exactly like a branch reporting green.
  */
 fn per_commit_concurrency_errors(
-  workflow: dict,
+  workflow: CiWorkflow?,
   name: string,
   group: string,
   cancel: string,
@@ -1945,7 +1964,7 @@ fn per_commit_concurrency_errors(
 }
 
 /** Keep one current pull-request proof and an executed result per main head. */
-pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
+pub fn ci_workflow_concurrency_errors(workflow: CiWorkflow?) -> list<string> {
   return per_commit_concurrency_errors(
     workflow,
     "ci.yml",
@@ -1955,7 +1974,7 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
 }
 
 /** Same contract for the slow E2E suite, whose main pushes are its only proof. */
-pub fn e2e_workflow_concurrency_errors(workflow: dict) -> list<string> {
+pub fn e2e_workflow_concurrency_errors(workflow: CiWorkflow?) -> list<string> {
   return per_commit_concurrency_errors(
     workflow,
     "e2e.yml",
@@ -2030,8 +2049,8 @@ fn linux_runner_label(label: string) -> bool {
  * use in practice.
  */
 fn runner_selector_expressions(
-  workflow: dict,
-  job: dict,
+  workflow: CiWorkflow?,
+  job: CiJob?,
   selector: unknown,
   depth: int = 0,
 ) -> list<string> {
@@ -2063,10 +2082,10 @@ fn runner_selector_expressions(
 }
 
 /** Every runner label a selector can resolve to through its owning job. */
-fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<string> {
+fn runner_selector_labels(workflow: CiWorkflow?, job: CiJob?, selector: unknown) -> list<string> {
   let texts = runner_selector_expressions(workflow, job, selector)
   for input_kind in ["workflow_dispatch", "workflow_call"] {
-    for {key: name, value: input} in (workflow["on"]?.[input_kind]?.inputs ?? {}) {
+    for {key: name, value: input} in workflow_inputs(workflow, input_kind) {
       if texts.any({ text -> contains(text, "inputs.${name}") }) {
         texts = texts + [to_string(input?.default ?? "")]
         for option in input?.options ?? [] {
@@ -2085,14 +2104,14 @@ fn runner_selector_labels(workflow: dict, job: dict, selector: unknown) -> list<
 }
 
 /** Every Linux runner label a job can resolve to from its `runs-on`. */
-fn job_runner_labels(workflow: dict, job: dict) -> list<string> {
-  return runner_selector_labels(workflow, job, job["runs-on"])
+fn job_runner_labels(workflow: CiWorkflow?, job: CiJob?) -> list<string> {
+  return runner_selector_labels(workflow, job, job?.["runs-on"])
 }
 
 /** `workflow_call` inputs that select a runner anywhere in the reusable workflow. */
-fn workflow_call_runner_inputs(workflow: dict) -> list<string> {
+fn workflow_call_runner_inputs(workflow: CiWorkflow?) -> list<string> {
   let names: list<string> = []
-  for name in (workflow["on"]?.workflow_call?.inputs ?? {}).keys() {
+  for name in workflow_inputs(workflow, "workflow_call").keys() {
     for job in (workflow?.jobs ?? {}).values() {
       if runner_selector_expressions(workflow, job, job?.["runs-on"]).any(
         { text -> contains(text, "inputs.${name}") },
@@ -2114,7 +2133,7 @@ fn landlock_incapable_label(label: string) -> bool {
  * runner for every mode, and the CLI AOT generator's. The release build jobs
  * read these through `fromJSON` matrices, so the workflow scan cannot see them.
  */
-pub fn release_runner_policy_landlock_errors(policy: dict) -> list<string> {
+pub fn release_runner_policy_landlock_errors(policy: CiReleaseRunnerPolicy) -> list<string> {
   let errors: list<string> = []
   for target in policy?.targets ?? [] {
     for {key: mode, value: runner} in (target?.runners ?? {}) {
@@ -2138,7 +2157,10 @@ pub fn release_runner_policy_landlock_errors(policy: dict) -> list<string> {
 }
 
 /** Every workflow and the release runner policy, in one contract. */
-pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) -> list<string> {
+pub fn linux_confinement_errors(
+  workflows: dict<string, CiWorkflow>,
+  release_runner_policy: CiReleaseRunnerPolicy,
+) -> list<string> {
   let errors: list<string> = []
   for name in workflows.keys().sorted() {
     errors = errors + landlock_incapable_runner_errors(name, workflows[name] ?? {})
@@ -2146,7 +2168,10 @@ pub fn linux_confinement_errors(workflows: dict, release_runner_policy: dict) ->
   return errors + release_runner_policy_landlock_errors(release_runner_policy)
 }
 
-fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bool {
+fn paid_public_runner_selector(
+  token: string,
+  release_runner_policy: CiReleaseRunnerPolicy,
+) -> bool {
   const label = lowercase(token)
   const registered = release_runner_policy?.runner_registry?.[token]
   return contains(label, "blacksmith")
@@ -2157,7 +2182,7 @@ fn paid_public_runner_selector(token: string, release_runner_policy: dict) -> bo
       && (registered?.usd_per_minute != nil || registered?.provider != "github"))
 }
 
-fn active_release_runner_errors(release_runner_policy: dict) -> list<string> {
+fn active_release_runner_errors(release_runner_policy: CiReleaseRunnerPolicy) -> list<string> {
   let errors: list<string> = []
   for target in release_runner_policy?.targets ?? [] {
     for {key: mode, value: runner} in (target?.runners ?? {}) {
@@ -2188,8 +2213,8 @@ pub const PAID_CAPACITY_ROUTE_INPUTS = [
 
 /** Paid public capacity is reserved for the isolated namespace E2E suite. */
 pub fn public_repository_runner_errors(
-  workflows: dict,
-  release_runner_policy: dict,
+  workflows: dict<string, CiWorkflow>,
+  release_runner_policy: CiReleaseRunnerPolicy,
 ) -> list<string> {
   let errors: list<string> = []
   for workflow_name in workflows.keys().sorted() {
@@ -2212,7 +2237,7 @@ pub fn public_repository_runner_errors(
         const callee = workflows[callee_name]
         for input in workflow_call_runner_inputs(callee ?? {}) {
           const supplied = job?.with?.[input]
-            ?? callee?.["on"]?.workflow_call?.inputs?.[input]?.default
+            ?? workflow_inputs(callee, "workflow_call")[input]?.default
           for label in runner_selector_labels(workflow, job, supplied) {
             if paid_public_runner_selector(label, release_runner_policy) {
               errors = errors
@@ -2241,7 +2266,10 @@ pub fn public_repository_runner_errors(
 }
 
 /** No Linux job may resolve to a runner that cannot confine a Harn child. */
-pub fn landlock_incapable_runner_errors(workflow_name: string, workflow: dict) -> list<string> {
+pub fn landlock_incapable_runner_errors(
+  workflow_name: string,
+  workflow: CiWorkflow?,
+) -> list<string> {
   let errors: list<string> = []
   for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     for label in job_runner_labels(workflow, job) {
@@ -2302,7 +2330,7 @@ fn status_requirement_text(command: string, result_var: string) -> string {
  * `binary-size-signal`, a main-only lane, is gated on `rust_paths`. ci-status
  * requires repository policies wherever the change selects Rust proof.
  */
-fn proven_push_main_only_errors(jobs: dict) -> list<string> {
+fn proven_push_main_only_errors(jobs: dict<string, CiJob>) -> list<string> {
   let errors: list<string> = []
   // The main-only lanes outlive the heavy-lane skip on a proven push, and use
   // the merge group's CLI when they do. Both halves are needed: the right
@@ -2342,7 +2370,7 @@ fn proven_push_main_only_errors(jobs: dict) -> list<string> {
 }
 
 /** Keep integration ratchets and publication tails off pull-request runners. */
-pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
+pub fn minimal_pr_capacity_errors(ci: CiWorkflow?, publish: CiWorkflow?) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
   // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
@@ -2449,7 +2477,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
       errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]
     }
   }
-  const publish_on = publish["on"] ?? {}
+  const publish_on = workflow_events(publish)
   const push = publish_on?.push ?? {}
   if len(push?.branches ?? []) != 0 {
     errors = errors + ["publish-release.yml must not trigger on branch pushes"]
@@ -2464,7 +2492,7 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
 }
 
 /** Keep namespace proof on an isolated runner with its own scoped grant. */
-pub fn e2e_hosted_runner_errors(e2e: dict) -> list<string> {
+pub fn e2e_hosted_runner_errors(e2e: CiWorkflow?) -> list<string> {
   if e2e?.jobs?.e2e?.["runs-on"] != E2E_HOSTED_RUNNER {
     return ["e2e.yml:e2e must run on ${E2E_HOSTED_RUNNER} for namespace confinement"]
   }
@@ -2491,7 +2519,7 @@ const CONSUMER_CANARY_CANCEL = "$"
 const CONSUMER_CANARY_SOURCE = "$" + "{{ needs.decide.outputs.source_revision }}"
 
 /** The public exception publishes only the closed parent declaration. */
-fn consumer_declaration_safe(action: dict?) -> bool {
+fn consumer_declaration_safe(action: CiAction?) -> bool {
   const steps = action?.runs?.steps ?? []
   return action?.name == "Publish consumer observer declaration"
     && action?.runs?.using == "composite"
@@ -2529,7 +2557,7 @@ type ConsumerObserverDescriptor = {
   receipt: string,
 }
 
-fn consumer_observer_descriptor_safe(step: dict) -> bool {
+fn consumer_observer_descriptor_safe(step: CiStep?) -> bool {
   const dollar = "$"
   const descriptors = [
     {
@@ -2577,16 +2605,16 @@ fn consumer_observer_descriptor_safe(step: dict) -> bool {
     )
 }
 
-fn consumer_declaration_step_safe(step: dict, declaration: dict?) -> bool {
+fn consumer_declaration_step_safe(step: CiStep?, declaration: CiAction?) -> bool {
   return consumer_declaration_safe(declaration)
     && step?.name == declaration?.name
     && step?.id == "observer"
     && step?.if == "inputs.rehearsal_promotion_run_id == ''"
     && step?.with == {"source-revision": CONSUMER_CANARY_SOURCE, token: "$" + "{{ github.token }}"}
-    && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
+    && !keys(step ?? {}).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
 }
 
-fn consumer_action_allowed(step: dict) -> bool {
+fn consumer_action_allowed(step: CiStep?) -> bool {
   const uses = step_uses(step)
   return uses == "" || CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) })
     || consumer_observer_descriptor_safe(step)
@@ -2594,9 +2622,9 @@ fn consumer_action_allowed(step: dict) -> bool {
 
 /** Fresh dispatch must retain its declared custody and bounded supersession. */
 fn consumer_dispatch_custody_errors(
-  workflow: dict,
-  job: dict,
-  step: dict,
+  workflow: CiWorkflow?,
+  job: CiJob?,
+  step: CiStep?,
   custody_before_dispatch: bool,
 ) -> list<string> {
   let errors: list<string> = []
@@ -2627,10 +2655,10 @@ fn consumer_dispatch_custody_errors(
  * inputs and environment, and masks only secrets.
  */
 pub fn consumer_canary_errors(
-  workflow: dict,
-  observer: dict? = nil,
-  node: dict? = nil,
-  declaration: dict? = nil,
+  workflow: CiWorkflow?,
+  observer: CiAction? = nil,
+  node: CiAction? = nil,
+  declaration: CiAction? = nil,
 ) -> list<string> {
   const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {

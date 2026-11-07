@@ -1,9 +1,14 @@
 import {
+  CiAction,
   CiCachePolicy,
+  CiJob,
+  CiStep,
+  CiWorkflow,
   UPSTREAM_CACHE_RESTORE_PREFIX,
   UPSTREAM_CACHE_SAVE_PREFIX,
   UPSTREAM_GENERIC_CACHE_PREFIX,
   step_uses,
+  workflow_events,
 } from "./policy_core.harn"
 
 /**
@@ -34,13 +39,13 @@ const MAIN_ONLY = "github.ref == 'refs/heads/main'"
 
 const AWAY_FROM_MAIN = "github.ref != 'refs/heads/main'"
 
-fn steps_with_prefix(action: dict, prefix: string) -> list {
+fn steps_with_prefix(action: CiAction?, prefix: string) -> list<CiStep> {
   return (action?.runs?.steps ?? []).filter({ step -> step_uses(step).starts_with(prefix) })
     .to_list()
 }
 
-fn non_fatal(step: dict) -> bool {
-  return lowercase(trim(to_string(step["continue-on-error"] ?? "false"))) == "true"
+fn non_fatal(step: CiStep?) -> bool {
+  return lowercase(trim(to_string(step?.["continue-on-error"] ?? "false"))) == "true"
 }
 
 /**
@@ -48,7 +53,10 @@ fn non_fatal(step: dict) -> bool {
  * key, restore only away from main, save only on main, and prune after the
  * save so exactly one generation per family survives.
  */
-pub fn harn_check_cache_action_errors(restore_action: dict, save_action: dict) -> list<string> {
+pub fn harn_check_cache_action_errors(
+  restore_action: CiAction?,
+  save_action: CiAction?,
+) -> list<string> {
   guard restore_action != nil && save_action != nil else {
     return [
       "${HARN_CHECK_CACHE_ACTION_PATH} and ${HARN_CHECK_CACHE_SAVE_ACTION_PATH} must both exist",
@@ -127,7 +135,7 @@ pub fn harn_check_cache_action_errors(restore_action: dict, save_action: dict) -
 }
 
 /** The families a step names, expanding `${{ matrix.<field> }}` over the job's include rows. */
-fn check_cache_families(job: dict, step: dict) -> list<string> {
+fn check_cache_families(job: CiJob?, step: CiStep?) -> list<string> {
   const family = trim(to_string(step?.with?.family ?? ""))
   const matrix_field = regex_captures(r"^\$\{\{ matrix\.([A-Za-z0-9_]+) \}\}$", family)
   if len(matrix_field) != 1 {
@@ -140,7 +148,7 @@ fn check_cache_families(job: dict, step: dict) -> list<string> {
   const field = matrix_field[0].groups[0]
   let families: list<string> = []
   for entry in job?.strategy?.matrix?.include ?? [] {
-    const value = trim(to_string(entry?.[field] ?? ""))
+    const value = trim(to_string(entry[field] ?? ""))
     if value != "" {
       families = families + [value]
     }
@@ -163,15 +171,15 @@ fn writer_site(workflow: string, job: string, family: string) -> string {
  * no `needs` or `if` through which another job's routing could skip it.
  */
 fn writer_routing_errors(
-  workflow_doc: dict,
+  workflow_doc: CiWorkflow?,
   workflow: string,
   job: string,
-  definition: dict,
+  definition: CiJob?,
 ) -> list<string> {
-  const triggers = workflow_doc["on"] ?? {}
+  const triggers = workflow_events(workflow_doc)
   const push_branches = (triggers?.push?.branches ?? []).map({ branch -> trim(to_string(branch)) })
     .to_list()
-  const crons = (triggers?.schedule ?? []).filter({ row -> trim(to_string(row?.cron ?? "")) != "" })
+  const crons = (triggers?.schedule ?? []).filter({ row -> trim(to_string(row.cron ?? "")) != "" })
     .to_list()
   if push_branches.contains("main") && len(crons) > 0
     && !contains(to_string(triggers.keys()), "merge_group")
@@ -190,7 +198,10 @@ fn writer_routing_errors(
  * restore is what points HARN_CACHE_DIR at the saved paths), may prune, and
  * never lets a failed save fail its gate.
  */
-pub fn harn_check_cache_writer_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+pub fn harn_check_cache_writer_errors(
+  policy: CiCachePolicy,
+  workflows: dict<string, CiWorkflow>,
+) -> list<string> {
   const registered = policy.harn_check_cache_writers.map(
     { writer -> writer_site(writer.workflow, writer.job, writer.family) },
   )

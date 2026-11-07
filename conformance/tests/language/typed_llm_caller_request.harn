@@ -1,0 +1,21 @@
+import { LlmCaller } from "std/llm/caller"
+
+pipeline main(harness: Harness) {
+  const caller: LlmCaller = { request ->
+    {
+      provider: request.opts?.provider,
+      model: request.opts?.model,
+      iteration: request.turn?.iteration,
+    }
+  }
+  const response = caller(
+    {
+      prompt: "typed request",
+      opts: {provider: "mock", model: "typed-model"},
+      turn: {session_id: "typed-session", iteration: 2, attempt: 1},
+    },
+  )
+  harness.stdio.println(response.provider == "mock")
+  harness.stdio.println(response.model == "typed-model")
+  harness.stdio.println(response.iteration == 2)
+}

@@ -12,6 +12,7 @@ pub(super) struct AcpAgentEventSink {
     replayed: bool,
     hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
     receipts: Option<super::delivery::PromptReceipts>,
+    elicitations: Option<std::sync::Arc<super::elicitation::UrlElicitations>>,
 }
 
 impl AcpAgentEventSink {
@@ -21,6 +22,7 @@ impl AcpAgentEventSink {
             replayed: false,
             hitl_log: None,
             receipts: None,
+            elicitations: None,
         }
     }
 
@@ -34,6 +36,7 @@ impl AcpAgentEventSink {
             replayed: false,
             hitl_log: Some(hitl_log),
             receipts: Some(receipts),
+            elicitations: None,
         }
     }
 
@@ -43,7 +46,16 @@ impl AcpAgentEventSink {
             replayed: true,
             hitl_log: None,
             receipts: None,
+            elicitations: None,
         }
+    }
+
+    pub(super) fn with_elicitations(
+        mut self,
+        elicitations: std::sync::Arc<super::elicitation::UrlElicitations>,
+    ) -> Self {
+        self.elicitations = Some(elicitations);
+        self
     }
 
     fn write_notification(&self, params: serde_json::Value) {

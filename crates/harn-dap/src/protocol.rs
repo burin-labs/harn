@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Body of the adapter-to-client `harnHostCallCancelled` extension event.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostCallCancelled {
+    pub request_seq: i64,
+}
+
 /// Incoming DAP message. Carries the union of request (`type: "request"`)
 /// and response (`type: "response"`) shapes — incoming responses are how
 /// the client replies to *reverse requests* the adapter sent (DAP's

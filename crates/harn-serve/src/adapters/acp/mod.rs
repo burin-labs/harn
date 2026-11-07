@@ -23,6 +23,7 @@ mod confinement;
 mod core;
 mod delivery;
 mod dispatch;
+mod elicitation;
 mod event_projection;
 mod events;
 mod execute;
@@ -36,6 +37,7 @@ mod live_clients;
 mod modes;
 mod module_progress;
 mod plan_documents;
+mod prepared_process;
 mod prompt;
 mod prompt_owner;
 pub mod replay_inputs;
@@ -71,8 +73,9 @@ use live_clients::{
 use schema::configured_llm_route_for_capabilities;
 use schema::{acp_agent_capabilities, normalize_acp_prompt, retarget_prompt_text};
 pub use schema::{
-    ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    ACP_AGENT_NOTIFICATIONS, ACP_CLIENT_METHODS, ACP_SCHEMA_COMPATIBILITY,
+    ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
     HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
     HARN_STAGED_WRITES_PENDING_FIELDS, HARN_STAGED_WRITE_FIELDS,
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
@@ -119,7 +122,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
@@ -131,7 +134,7 @@ use harn_vm::agent_events::{
 use harn_vm::visible_text::VisibleTextState;
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio::sync::{mpsc, Notify};
 
 use crate::{
     AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthenticatedPrincipal,
@@ -1101,10 +1104,8 @@ pub struct AcpServer {
     /// Live timeline subscriptions created by Harn-specific ACP extension
     /// methods. Each task fans event-log appends into notifications.
     timeline_subscriptions: HashMap<String, TimelineSubscription>,
-    /// Monotonically increasing JSON-RPC request ID for outgoing requests.
-    next_id: AtomicU64,
-    /// Pending outgoing request waiters, keyed by JSON-RPC id.
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    outbound: Arc<harn_vm::bridge::OutboundRequests>,
+    elicitations: Arc<elicitation::UrlElicitations>,
     /// Cancel flags are shared with the transport reader so
     /// `session/cancel` can interrupt a blocked `session/prompt` turn.
     session_cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,

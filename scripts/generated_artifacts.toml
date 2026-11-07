@@ -156,9 +156,7 @@ gen = "gen-release-notices"
 check = "check-release-notices"
 outputs = ["dist/release-notices/"]
 sources = [
-  "scripts/release_third_party_notices.mjs",
-  "package.json",
-  "package-lock.json",
+  "scripts/release_third_party_notices.harn",
   "Cargo.lock",
   "Cargo.toml",
   "crates/",
@@ -462,6 +460,7 @@ sources = [
   "crates/harn-serve/openapi.yaml",
   "conformance/protocols/schemas/acp-session-update.schema.json",
   "conformance/protocols/schemas/a2a-1.0.1.schema.json",
+  "crates/harn-serve/src/adapters/acp/schema.rs",
   "crates/harn-serve/src/adapters/a2a/wire.rs",
   "crates/harn-cli/src/commands/",
   "crates/harn-session-store/src/boundary.rs",

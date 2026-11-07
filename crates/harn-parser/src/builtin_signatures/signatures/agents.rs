@@ -1,6 +1,9 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
-use super::shapes::{SESSION_SNAPSHOT, TRANSCRIPT};
+use super::shapes::{
+    SESSION_SNAPSHOT, TRANSCRIPT, TRANSCRIPT_DRAIN_DECISION_EVENT, TRANSCRIPT_REMINDER_EVENT,
+    TRANSCRIPT_RESUMPTION_EVENT, TRANSCRIPT_SUSPENSION_EVENT,
+};
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DECIMAL, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
     TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
@@ -319,22 +322,22 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "transcript_reminder_event",
         &[Param::new("reminder", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT_REMINDER_EVENT,
     ),
     BuiltinSignature::simple(
         "transcript_suspension_event",
         &[Param::new("suspension", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT_SUSPENSION_EVENT,
     ),
     BuiltinSignature::simple(
         "transcript_resumption_event",
         &[Param::new("resumption", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT_RESUMPTION_EVENT,
     ),
     BuiltinSignature::simple(
         "transcript_drain_decision_event",
         &[Param::new("drain", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT_DRAIN_DECISION_EVENT,
     ),
     // Lifecycle replay determinism (#1861) — record / verify / replay
     // suspension, resumption,

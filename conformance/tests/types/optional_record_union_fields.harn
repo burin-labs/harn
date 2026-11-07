@@ -1,0 +1,21 @@
+type Closed = {name?: string}
+
+type Open = {name?: string, ...rest}
+
+fn closed(name: string?) -> Closed {
+  return {name: name}
+}
+
+fn open(name: string?) -> Open {
+  return {name: name}
+}
+
+pipeline test(harness: Harness) {
+  for name in [nil, "present"] {
+    assert_eq(closed(name).name, name)
+    assert_eq(open(name).name, name)
+    assert(schema_report(closed(name), schema_of(Closed)).ok)
+    assert(schema_report(open(name), schema_of(Open)).ok)
+  }
+  harness.stdio.println("optional record unions ok")
+}

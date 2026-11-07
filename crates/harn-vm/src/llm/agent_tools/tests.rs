@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+use crate::test_support::host_command_fixture::{CapabilityBridge, CountingBridge};
 use crate::value::VmDictExt;
 
 use std::sync::atomic::AtomicBool;
@@ -13,26 +14,6 @@ use tokio::sync::Mutex;
 
 #[path = "replay_tests.rs"]
 mod replay;
-
-struct CapabilityBridge(Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
-
-impl crate::HostCallBridge for CapabilityBridge {
-    fn dispatch<'a>(
-        &'a self,
-        capability: &'a str,
-        operation: &'a str,
-        params: &'a crate::value::DictMap,
-    ) -> crate::HostCallDispatchFuture<'a> {
-        Box::pin(async move {
-            self.0.lock().unwrap().push(serde_json::json!({
-                "name": format!("{capability}.{operation}"),
-                "args": crate::llm::vm_value_to_json(&VmValue::dict(params.clone())),
-            }));
-            Ok(((capability, operation) == ("session_inputs", "request"))
-                .then(|| VmValue::string("input requested")))
-        })
-    }
-}
 
 async fn dispatch_bound_tool(
     name: &str,
@@ -686,31 +667,36 @@ async fn host_bridge_dispatches_the_declared_capability() {
             "{binding}: {result}"
         );
     }
-    assert_eq!(calls.lock().unwrap().len(), 5);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 5);
+    for (call, binding) in calls[1..].iter().zip([
+        "interaction.ask",
+        "workspace.project_root",
+        "process.exec",
+        "process.spawn",
+    ]) {
+        assert_eq!(call["name"], binding);
+        assert_eq!(
+            call["phase"],
+            if binding.starts_with("process.") {
+                "prepare"
+            } else {
+                "dispatch"
+            }
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn declared_process_capability_keeps_command_policy() {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    struct CountingBridge(Arc<AtomicUsize>);
-    impl crate::HostCallBridge for CountingBridge {
-        fn dispatch<'a>(
-            &'a self,
-            _capability: &'a str,
-            _operation: &'a str,
-            _params: &'a crate::value::DictMap,
-        ) -> crate::HostCallDispatchFuture<'a> {
-            Box::pin(async move {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(crate::json_to_vm_value(&serde_json::json!({
-                    "exit_code": 0, "status": "completed", "stdout": "allowed", "stderr": ""
-                }))))
-            })
-        }
-    }
     crate::orchestration::clear_command_policies();
     let calls = Arc::new(AtomicUsize::new(0));
-    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge(Arc::clone(&calls))));
+    let preparations = Arc::new(AtomicUsize::new(0));
+    let _guard = crate::install_host_call_bridge(Arc::new(CountingBridge {
+        calls: Arc::clone(&calls),
+        preparations: Arc::clone(&preparations),
+    }));
     crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
         tools: vec!["run".to_string()],
         default_shell_mode: "shell".to_string(),
@@ -741,6 +727,7 @@ async fn declared_process_capability_keeps_command_policy() {
         "denied command reached the host"
     );
     assert_eq!(outcome.result.unwrap()["status"], "blocked");
+    assert_eq!(preparations.load(Ordering::SeqCst), 1);
     let allowed = dispatch_bound_tool(
         "read_via_host",
         &serde_json::json!({"mode":"shell", "command":"printf allowed"}),
@@ -754,6 +741,7 @@ async fn declared_process_capability_keeps_command_policy() {
         "an allowed command reached the same adapter"
     );
     assert_eq!(allowed.result.unwrap()["stdout"], "allowed");
+    assert_eq!(preparations.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test(flavor = "current_thread")]

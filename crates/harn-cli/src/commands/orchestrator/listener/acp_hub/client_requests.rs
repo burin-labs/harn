@@ -2,16 +2,50 @@
 
 use super::*;
 
+pub(super) struct AcpClientRequest {
+    pub(super) client_id: String,
+    pub(super) delivery: bool,
+}
+
 impl AcpWorker {
-    /// A prompt still waiting for delivery must not land for a client that
-    /// left; the agent ignores the withdrawal for any other request.
+    pub(super) fn register_client_request(
+        &self,
+        client_id: &str,
+        value: &JsonValue,
+    ) -> Result<(), AcpClientRequestError> {
+        if let Some(id_key) = jsonrpc_id_key(value) {
+            if value.get("method").is_some() {
+                let mut pending = self
+                    .pending_client_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if pending.contains_key(&id_key) {
+                    return Err(AcpClientRequestError::DuplicateRequestId);
+                }
+                pending.insert(
+                    id_key,
+                    AcpClientRequest {
+                        client_id: client_id.to_string(),
+                        delivery: value["method"] == "session/prompt"
+                            && value
+                                .pointer("/params/delivery")
+                                .is_some_and(|value| !value.is_null()),
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Withdraw queued delivery prompts when their client leaves. Ordinary
+    /// turns remain live in the retained worker for reconnection and replay.
     pub(super) fn withdraw_client_requests(&self, client_id: &str) {
         let request_ids: Vec<String> = self
             .pending_client_requests
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter(|(_, owner)| owner.as_str() == client_id)
+            .filter(|(_, request)| request.client_id == client_id && request.delivery)
             .map(|(request_id, _)| request_id.clone())
             .collect();
         let sender = self
@@ -47,7 +81,7 @@ impl AcpWorker {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(&request_id)
-            .is_some_and(|owner| owner == client_id)
+            .is_some_and(|request| request.client_id == client_id)
     }
 }
 

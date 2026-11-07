@@ -212,6 +212,7 @@ impl AcpServer {
     }
 
     pub(super) fn release_session_resources(&mut self, session_id: &str) {
+        self.elicitations.close_session(session_id);
         let Some(closed) = self.sessions.remove(session_id) else {
             return;
         };

@@ -118,6 +118,80 @@ fn element_generics_bind_from_receiver_and_callbacks() {
 }
 
 #[test]
+fn union_receivers_preserve_joined_element_types() {
+    let source = r#"
+type Step = {with?: {name?: string}}
+type Job = {steps?: list<Step>}
+fn names(job: Job) -> string? {
+  const steps = (job.steps ?? []).filter({step -> step.with?.name == "x"}).to_list()
+  return steps[0]?.with?.name
+}
+fn nullable(values: list<int> | list<string> | nil) -> list<int | string>? {
+  return values?.filter({value -> value != nil})?.to_list()
+}
+fn joined(values: list<int> | list<string>) -> list<int | string> {
+  return values.filter({value -> value != nil}).to_list()
+}
+"#;
+    let diagnostics = check_source_with_source(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Code::LintUntypedOptionalChain)
+            .count(),
+        0,
+        "{diagnostics:?}"
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let erased_callback = errors(
+        r"
+type Step = {name: string}
+type Job = {steps?: list<Step>}
+fn wrong(job: Job) -> list<Step> {
+  return (job.steps ?? []).filter({step ->
+    const wrong: int = step.name
+    return wrong == 0
+  }).to_list()
+}
+",
+    );
+    assert_eq!(erased_callback.len(), 1, "{erased_callback:?}");
+    assert!(
+        erased_callback[0].contains("expected int, found string"),
+        "{erased_callback:?}"
+    );
+    let wrong = errors(
+        r"
+fn wrong(values: list<int> | list<string>) -> list<int> {
+  return values.filter({value -> value != nil}).to_list()
+}
+",
+    );
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("list<int | string>"), "{wrong:?}");
+    let mixed = errors("fn mixed(values: list<int> | string) { values.filter({value -> true}) }");
+    assert!(
+        mixed.iter().any(|error| error.contains("method `filter`")),
+        "{mixed:?}"
+    );
+    let unknown = with_code(
+        r#"
+type Step = {with?: {name?: string}}
+fn unknown(values: list | list<Step>) {
+  const steps = values.filter({step -> step?.with?.name == "x"}).to_list()
+  return steps[0]?.with?.name
+}
+"#,
+        Code::LintUntypedOptionalChain,
+    );
+    assert_eq!(unknown.len(), 2, "{unknown:?}");
+    let mutable = check_source_with_source(
+        r#"fn mutable() { let items = []; items.push(1); items.push("x") }"#,
+    );
+    assert!(mutable.is_empty(), "{mutable:?}");
+}
+
+#[test]
 fn removed_spelling_is_an_error_with_a_rename_repair() {
     let source = r#"fn f() {
   const s: string = "Hi"

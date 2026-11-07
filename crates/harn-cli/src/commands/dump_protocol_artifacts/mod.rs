@@ -286,6 +286,15 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
             serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
         ));
     }
+    for (name, schema) in harn_vm::stdlib::host::command_binding_schemas() {
+        artifacts.push(Artifact::new(
+            format!(
+                "schemas/{}.schema.json",
+                records::snake_ident(name).replace('_', "-")
+            ),
+            serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
+        ));
+    }
     for schema in SCHEMA_COPIES {
         artifacts.push(Artifact::new(
             schema.artifact,

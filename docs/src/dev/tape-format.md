@@ -58,7 +58,7 @@ optional — tapes that never spilled a payload have no sidecar.
 
 ## Record kinds
 
-The current schema (`version = 6`) emits the kinds below. Unknown
+The current schema (`version = 8`) emits the kinds below. Unknown
 record kinds in newer tapes deserialize as `unknown` so older
 fidelity checkers still produce a structured report.
 
@@ -208,6 +208,27 @@ redirect state into its isolated workspace.
 `llm_call.request_digest` covers the whole model request rather than its former
 narrower shape. A v1 digest cannot be compared with a v2 digest as evidence of
 request identity.
+
+## Branch prefix effects
+
+Code-index maintenance and coordination rebuild the capability's own state
+inside the restored workspace. A rebuild outside that workspace is refused.
+Source refactors (`rename_symbol`, `move_symbol`, `extract_function` and
+`change_signature`) declare filesystem mutations and remain refused in a
+replayed prefix. Machine-global host leases must be acquired and released
+outside the prefix; a refusal names that recovery.
+
+Embedders can call `harn_vm::run_tape::preflight_prefix_calls(workspace, calls)`
+with an ordered list of `PrefixEffectCall` invocations. The result reports
+`supplied_calls`, `refused_calls` and one decision per supplied invocation.
+Each decision names its capability, method, action and refusal reason.
+Actions are `run`, `recorded_read`, `recorded_command` and `refused`.
+The planner uses the executor's effect policy and doesn't execute the calls.
+
+This preflight covers the supplied inventory. It doesn't discover calls in a
+program, validate their arguments, or prove that recorded read and command
+payloads exist. An empty inventory reports zero supplied calls; it doesn't
+certify a program as replayable.
 
 ## Fidelity oracle
 
