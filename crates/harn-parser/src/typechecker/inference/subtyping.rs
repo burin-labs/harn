@@ -335,8 +335,16 @@ impl TypeChecker {
     /// the first structural body while still following ordinary forwarding
     /// aliases (`Handle -> Binding -> {shape}`) to their meaningful root.
     fn unfold_alias_root(&self, ty: &TypeExpr, scope: &TypeScope) -> TypeExpr {
+        self.unfold_alias_root_with_seen(ty, scope, &mut HashSet::new())
+    }
+
+    fn unfold_alias_root_with_seen(
+        &self,
+        ty: &TypeExpr,
+        scope: &TypeScope,
+        visited: &mut HashSet<String>,
+    ) -> TypeExpr {
         let mut current = ty.clone();
-        let mut visited = HashSet::new();
         loop {
             current = match &current {
                 TypeExpr::Named(name) if name == "number" => {
@@ -376,6 +384,18 @@ impl TypeChecker {
                         })
                         .collect();
                     instantiate_alias_by_variance(&info.body, &info.type_params, &args)
+                }
+                TypeExpr::OpenShape { fields, rests } => {
+                    // A concrete row contributes checked fields just like an
+                    // explicit record member. Keep field bodies shallow so
+                    // recursive value types still use the subtype cycle guard.
+                    let rests = rests
+                        .iter()
+                        .map(|rest| {
+                            self.unfold_alias_root_with_seen(rest, scope, &mut visited.clone())
+                        })
+                        .collect();
+                    return super::super::binary_ops::fold_open_shape(fields.clone(), rests);
                 }
                 _ => return current,
             };

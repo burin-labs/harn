@@ -2,6 +2,51 @@ use super::*;
 use crate::TypeExpr;
 
 #[test]
+fn concrete_record_tails_constrain_assignments_and_preserve_free_rows() {
+    let header = r"
+type Settings = {provider?: string, required: int}
+type Model = {system?: string, ...Settings}
+type Agent = Model & {max_iterations?: int}
+type Envelope<R> = {label: string, ...R}
+type Open = {provider?: string, ...dict}
+type ExtendedOpen = {...Open}
+type Recursive = {name: string, next?: Recursive}
+type Wrapped = {...Recursive}
+type RecursiveRow = {name: string, ...RecursiveRow}
+fn preserve<R>(value: {name: string, ...R}) -> {name: string, ...R} { return value }
+";
+    let valid = r#"
+pipeline main(task) {
+  const absent: Agent = {required: 1}
+  const explicit_nil: Agent = {required: 1, provider: nil}
+  const provider: Agent = {required: 1, provider: "mock"}
+  const generic: Envelope<Settings> = {label: "ok", required: 1}
+  const free: Envelope<dict> = {label: "ok", extension: {anything: true}}
+  const open: ExtendedOpen = {provider: "mock", extension: {anything: true}}
+  const recursive: Wrapped = {name: "root", next: {name: "child"}}
+  const recursive_row: RecursiveRow = {name: "root"}
+}
+"#;
+    assert!(errors(&format!("{header}{valid}")).is_empty());
+    for binding in [
+        "const wrong: Agent = {required: 1, provider: 7}",
+        "const missing: Agent = {provider: \"mock\"}",
+        "const wrong: Envelope<Settings> = {label: \"ok\", required: 1, provider: 7}",
+        "const missing: Envelope<Settings> = {label: \"ok\"}",
+        "const missing: Envelope<dict> = {extension: true}",
+        "const wrong: ExtendedOpen = {provider: 7}",
+        "const wrong: Wrapped = {name: \"root\", next: {name: 7}}",
+        "const wrong: RecursiveRow = {name: 7}",
+    ] {
+        let source = format!("{header}\npipeline main(task) {{ {binding} }}");
+        assert!(
+            !errors(&source).is_empty(),
+            "record tail must refuse {binding}"
+        );
+    }
+}
+
+#[test]
 fn declared_type_projection_shares_imports_spreads_and_recursive_resolution() {
     let imported = crate::parse_source("pub type Settings = {provider: string}").unwrap();
     let program = crate::parse_source(

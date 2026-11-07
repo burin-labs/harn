@@ -26,7 +26,21 @@ fn file_backed_compile_cache_resolves_agent_spec_and_rejects_invalid_options() {
         .compile_pipeline_cached(source, Some(&path), Some("main"))
         .unwrap();
     assert!(cached);
+    for optional_provider in [
+        source.replace("provider: \"mock\",", ""),
+        source.replace("provider: \"mock\"", "provider: nil"),
+    ] {
+        assert_ne!(
+            optional_provider, source,
+            "the provider control must change the fixture"
+        );
+        let (_, cached) = server
+            .compile_pipeline_cached(&optional_provider, Some(&path), Some("main"))
+            .unwrap();
+        assert!(!cached, "a changed provider form must be checked again");
+    }
     let invalid = source.replace("provider: \"mock\"", "provider: 7");
+    assert_ne!(invalid, source, "the invalid provider must reach checking");
     assert!(server
         .compile_pipeline_cached(&invalid, Some(&path), Some("main"))
         .unwrap_err()
