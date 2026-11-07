@@ -17,7 +17,7 @@ pub import {
   provider_response_content_shape,
   provider_transcript_normalize,
   transcript_records,
-} from "./provider_transcript"
+} from "std/agent/provider_transcript"
 
 const TRANSCRIPT_ROW_SCHEMA = "harn.agent.transcript.row.v1"
 

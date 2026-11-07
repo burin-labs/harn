@@ -1,5 +1,5 @@
 import { read_jsonl } from "std/jsonl"
-import { ProviderResponseToolProjection, provider_response_tool_calls } from "./artifacts"
+import { ProviderResponseToolProjection, provider_response_tool_calls } from "std/agent/artifacts"
 
 pub type ProviderTranscriptToolCall = {name: string?, arguments: unknown, id: string?}
 
