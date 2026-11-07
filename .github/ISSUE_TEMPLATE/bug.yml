@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible problem with Harn.
+title: "[CLI] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, follow the security policy instead of posting exploit details here.
+        Remove credentials, private repository names, and personal data from your reproduction.
+  - type: input
+    id: version
+    attributes:
+      label: Harn version
+      description: Paste the output of harn --version.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and CPU
+      placeholder: "For example: Linux x86_64, macOS arm64, Windows x86_64"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Smallest reproduction
+      description: Include the commands, Harn source, and synthetic fixture needed to reproduce it.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Actual behavior
+      description: Include the error code and relevant output, with secrets removed.
+    validations:
+      required: true

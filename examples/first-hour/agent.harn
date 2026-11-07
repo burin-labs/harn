@@ -1,0 +1,10 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn main(harness: Harness) {
+  const options: AgentSpec = {provider: "mock", max_iterations: 2}
+  harness.stdio.println("Running: Say hello.")
+  const result = agent_loop(harness, "Say hello.", nil, options)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
+}

@@ -1,20 +1,50 @@
 # Harn
 
 Harn is a programming language and runtime for building AI agents.
-
-You define the task, prompts, tools, and rules. Harn runs the conversation between
-the model and your tools, enforces permissions, and saves the history of the work.
-It handles differences between model providers so your application can use the
-same agent code with local or hosted models.
-
-Use Harn when your application needs an agent to take several steps: investigate
-a failed job, review a change, or play a game. For example,
-[20eq](https://github.com/burin-labs/20eq) is a 20 Questions game written in Harn,
-and [Burin Code](https://burincode.com) uses Harn in its coding workbench.
+You write prompts, typed tools, and execution limits; Harn runs the agent loop,
+enforces permissions, and records what happened.
 
 > Harn is pre-1.0. The language, standard library, and CLI can change between
 > releases. See the [release notes](https://github.com/burin-labs/harn/releases)
 > and [changelog](CHANGELOG.md) before upgrading.
+
+## Install and run
+
+Install the release binary on macOS or Linux:
+
+```sh
+curl -fsSL https://harnlang.com/install.sh | sh
+```
+
+Follow the installer's PATH instructions, then run `harn --version`.
+[Getting started](docs/src/getting-started.md) also covers Windows and source builds.
+
+Save these ten lines as `main.harn`:
+
+```harn,check
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn main(harness: Harness) {
+  const options: AgentSpec = {provider: "mock", max_iterations: 2}
+  harness.stdio.println("Running: Say hello.")
+  const result = agent_loop(harness, "Say hello.", nil, options)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
+}
+```
+
+Run `harn run main.harn`:
+
+```text
+Running: Say hello.
+done
+Mock response to 2-word prompt: Say hello.
+```
+
+This uses synthetic model output and needs no API key.
+The [three offline examples](examples/first-hour/README.md) teach the loop,
+tool calls, and recording and replaying model responses.
 
 ## Where Harn fits
 
@@ -88,17 +118,9 @@ Handlers returning dictionaries must declare an outcome with
 `agent_tool_handler_result(text, data, outcome)` or a nominal outcome struct.
 See [tool results](docs/src/llm/tools.md#pattern) for the contract.
 
-## Try Harn
+## Offline demos
 
-Install the release binary on macOS or Linux:
-
-```bash
-curl -fsSL https://harnlang.com/install.sh | sh
-```
-
-The installer verifies release checksums and installs the tools for your platform.
-See [getting started](docs/src/getting-started.md) for Windows, source builds, and
-your first project. For a pinned version in automation, use the
+For a pinned version in automation, use the
 [bootstrap guide](docs/src/dev/bootstrap-harn.md).
 
 You can try the bundled demos without an API key:
