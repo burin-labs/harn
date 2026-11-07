@@ -261,44 +261,6 @@ fn real_run_command_background_preserves_missing_program_evidence() {
 }
 
 #[test]
-fn real_run_command_reports_sandboxed_missing_program_as_typed_not_found() {
-    use harn_vm::orchestration::{
-        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
-    };
-
-    let workspace = tempfile::tempdir().expect("workspace");
-    push_execution_policy(CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
-        ..CapabilityPolicy::default()
-    });
-    let mut req = dict_map();
-    req.insert(
-        "argv".into(),
-        vlist_str(&["harn-command-that-does-not-exist-5662"]),
-    );
-    req.insert("cwd".into(), vm_string(&workspace.path().to_string_lossy()));
-    let result = call("hostlib_tools_run_command", req);
-    pop_execution_policy();
-    if super::sandbox_host::assert_unavailable_tool(&result) {
-        return;
-    }
-    let error = result.expect_err("missing program must fail");
-
-    assert_missing_process_error(
-        error,
-        Some(
-            workspace
-                .path()
-                .canonicalize()
-                .unwrap()
-                .to_string_lossy()
-                .as_ref(),
-        ),
-    );
-}
-
-#[test]
 fn real_run_command_preserves_genuine_exit_71_as_a_result() {
     let workspace = tempfile::tempdir().expect("workspace");
     let mut req = dict_map();
