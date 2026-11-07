@@ -53,6 +53,10 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
       globalThis.fetch=async(url,options={})=>{
         if(options.method&&options.method!=='GET')throw new Error('unexpected-mutation');
         const e=new URL(url),p=e.pathname;
+        const role=p.startsWith('/repos/burin-labs/harn/')?'fixture-parent':'fixture-read';
+        if(options.headers?.Authorization!=='Bearer '+role)throw new Error('incorrect-token-role');
+        fs.appendFileSync(f.calls,JSON.stringify({path:p,parent:role==='fixture-parent'})+String.fromCharCode(10));
+        if(f.parentDenied&&role==='fixture-parent')return {ok:false,status:403,json:async()=>({message:'Forbidden'})};
         if(p.endsWith('/42/attempts/2'))return {ok:true,json:async()=>++parentReads>1&&f.finalParent?f.finalParent:f.parent};
         if(p.endsWith('/73'))return {ok:true,json:async()=>f.finalChild??f.child};
         if(p.endsWith('/runs'))return {ok:true,json:async()=>({total_count:1,workflow_runs:[f.child]})};
@@ -66,13 +70,17 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
         throw new Error('unknown-api');
       };`);
     const execute = (changes = {}, env = {}) => {
-      fs.writeFileSync(fixture, JSON.stringify({parent, child, archives, job, now: origin + 7200, ...changes}));
-      return spawnSync(process.execPath, [fileURLToPath(new URL('../ci/consumer-observer-budget.mjs', import.meta.url))],
+      const calls=path.join(scratch,'calls.jsonl');
+      fs.writeFileSync(calls,'');
+      fs.writeFileSync(fixture, JSON.stringify({parent, child, archives, job, calls, now: origin + 7200, ...changes}));
+      const result=spawnSync(process.execPath, [fileURLToPath(new URL('../ci/consumer-observer-budget.mjs', import.meta.url))],
         {encoding: 'utf8', env: {PATH: process.env.PATH, NODE_OPTIONS: `--import=${preload}`,
-          GH_TOKEN: 'fixture-read', GITHUB_REPOSITORY: context.parent_repository,
+          GH_TOKEN: 'fixture-read', GITHUB_TOKEN: 'fixture-parent', GITHUB_REPOSITORY: context.parent_repository,
           GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: parent.head_sha,
           OBSERVER_CONTEXT: JSON.stringify(context), CANARY_REPOSITORY: expected.repository,
           CANARY_WORKFLOW: 'rehearsal.yml', CANARY_RUN_ID: '73', ...env}});
+      result.reads=fs.readFileSync(calls,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+      return result;
     };
     const positive = execute();
     assert.equal(positive.status, 0, positive.stderr);
@@ -90,7 +98,8 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
     assert.equal(cancelled.status, 0, cancelled.stderr);
     assert.deepEqual(JSON.parse(cancelled.stdout), {discovered: 1, owned: 1, reason: null,
       observed_jobs: 1, queued_jobs: 0, executing_jobs: 0, queue_seconds: 2640,
-      execution_seconds: 0, wall_seconds: 2775});
+      execution_seconds: 0, wall_seconds: 2775, child_status:'completed', child_conclusion:'cancelled',
+      custody_read:'fresh',read_attempts:{repository:4,app:6}});
     for (const completed_at of [null, 'bad-date', iso(73), iso(2776)]) {
       const unknownEnd = execute({job: {...cancelledJob, completed_at}, now: origin + 2775});
       assert.equal(unknownEnd.status, 1);
@@ -112,6 +121,64 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
     assert.equal(unknown.owned, 0);
     assert.equal(unknown.observed_jobs, null);
     assert.equal(unknown.reason, 'queue_deadline');
+    for (const env of [{GITHUB_TOKEN:''},{GH_TOKEN:''}]) {
+      const refused=execute({},env);
+      assert.equal(refused.status,1);
+      assert.equal(refused.reads.length,0,'missing roles must refuse before any read');
+    }
+    const denied=execute({parentDenied:true});
+    assert.equal(denied.status,1);
+    assert.equal(denied.reads.length,1);
+    assert(denied.reads.every(read=>read.parent),'a refused local read never falls back to App authority');
+
+    const cache=path.join(scratch,'checkpoint.json.timing');
+    const cacheEnv={CANARY_CHECKPOINT_FILE:path.join(scratch,'checkpoint.json'),CANARY_TIMING_CACHE_KEY:'1'.repeat(64)};
+    const first=execute({},cacheEnv);
+    assert.equal(first.status,0,first.stderr);
+    assert.equal(JSON.parse(first.stdout).owned,1);
+    assert.equal(first.reads.filter(read=>!read.parent).length,6);
+    const qualified=JSON.parse(fs.readFileSync(cache,'utf8'));
+    assert.equal(fs.statSync(cache).mode&0o777,0o600);
+    assert(!fs.readFileSync(cache,'utf8').includes(cacheEnv.CANARY_TIMING_CACHE_KEY));
+    for(let poll=0;poll<12;poll++){
+      const next=execute({},cacheEnv);
+      assert.equal(next.status,0,next.stderr);
+      assert.equal(JSON.parse(next.stdout).observed_jobs,1);
+      assert.equal(JSON.parse(next.stdout).custody_read,'retained');
+      assert.deepEqual(JSON.parse(next.stdout).read_attempts,{repository:2,app:2});
+      assert.equal(next.reads.filter(read=>!read.parent).length,2,'pending polls read the live complete jobs and child');
+      assert.equal(next.reads.filter(read=>read.parent).length,2,'both parent observations use repository authority');
+      assert(!next.reads.some(read=>/artifacts|\/runs$/.test(read.path)));
+    }
+    const staleJobs=execute({job:{...job,run_attempt:2}},cacheEnv);
+    assert.equal(staleJobs.status,1,'retained custody cannot turn stale job evidence into a verdict');
+    assert.equal(staleJobs.stdout,'');
+    const rerun=execute({finalChild:{...child,run_attempt:2}},cacheEnv);
+    assert.equal(rerun.status,1,'a fresh rerun cannot inherit the prior attempt receipt');
+    assert.equal(rerun.stdout,'');
+    assert(rerun.reads.some(read=>read.path.endsWith('/zip')),'a changed attempt reauthenticates original custody');
+    assert(!fs.existsSync(cache),'the prior attempt cache is retired before fresh qualification');
+    assert.equal(execute({},cacheEnv).status,0);
+    const terminal=execute({child:{...child,status:'completed',conclusion:'success'},
+      job:{...job,status:'completed',conclusion:'success',completed_at:iso(7210)},now:origin+7220},cacheEnv);
+    assert.equal(terminal.status,0,terminal.stderr);
+    assert(terminal.reads.some(read=>read.path.endsWith('/zip')),'terminal timing reauthenticates the actual archives');
+    assert(!fs.existsSync(cache),'terminal refresh retires pending proof');
+
+    fs.writeFileSync(cache,JSON.stringify({...qualified,mac:'0'.repeat(64)}),{mode:0o600});
+    const forged=execute({missing:0},cacheEnv);
+    assert.equal(forged.status,1,'a valid-shaped forged preseed must still require the original declaration');
+    assert.equal(forged.stdout,'');
+    assert(forged.reads.some(read=>read.parent&&read.path.endsWith('/artifacts')));
+    fs.writeFileSync(cache,JSON.stringify(qualified));
+    const renewed=execute({}, {...cacheEnv,CANARY_TIMING_CACHE_KEY:'2'.repeat(64)});
+    assert.equal(renewed.status,0,renewed.stderr);
+    assert.equal(renewed.reads.filter(read=>!read.parent).length,6,'a new invocation reauthenticates before retaining proof');
+    fs.chmodSync(cache,0o666);
+    const writable=execute({},cacheEnv);
+    assert.equal(writable.status,1);
+    assert.equal(writable.stdout,'');
+    assert.equal(writable.reads.filter(read=>!read.parent).length,0);
   } finally {
     fs.rmSync(scratch, {recursive: true});
   }

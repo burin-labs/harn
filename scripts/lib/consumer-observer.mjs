@@ -64,7 +64,14 @@ function refuse(reason, diagnostic) {
 const diagnosticFields = {
   status: /^[1-5][0-9]{2}$/, ratelimit_remaining: /^[0-9]{1,9}$/, ratelimit_limit: /^[0-9]{1,9}$/,
   ratelimit_reset: /^[0-9]{1,12}$/, ratelimit_resource: /^[a-z_]{1,32}$/,
+  attempts: /^[1-9][0-9]{0,5}$/, read_role: /^(repository|app)$/,
 };
+
+function publicReadDiagnostic(error) {
+  return Object.fromEntries(Object.entries(diagnosticFields)
+    .filter(([name, shape]) => shape.test(String(error?.diagnostic?.[name] ?? '')))
+    .map(([name]) => [name,error.diagnostic[name]]));
+}
 
 /** The one public failure line. The reason is a closed token; the diagnostic carries only
  * HTTP status and rate-limit fields, never an endpoint, repository, run id or message prose.
@@ -72,10 +79,14 @@ const diagnosticFields = {
  * @returns {{reason:string, line:string}} */
 export function observerRefusal(error, fallback) {
   const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error?.message)?.[1] ?? fallback;
-  const fields = Object.entries(diagnosticFields)
-    .filter(([name, shape]) => shape.test(String(error?.diagnostic?.[name] ?? '')))
-    .map(([name]) => `${name}=${error.diagnostic[name]}`);
+  const fields = Object.entries(publicReadDiagnostic(error)).map(([name,value]) => `${name}=${value}`);
   return {reason, line: ['CONSUMER_OBSERVER', `reason=${reason}`, ...fields].join(' ')};
+}
+
+export function observerReadRefusal(error, fallback) {
+  return {schema:'harn.consumer_observer.read_refusal.v1',reason:observerRefusal(error,fallback).reason,
+    retryable:observerReadRetryable(error),retry_after_seconds:error?.diagnostic?.retry_after_seconds ?? 0,
+    ...publicReadDiagnostic(error)};
 }
 
 function cleanupReadFailed(error) {
@@ -457,6 +468,7 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
 /** Bounds for retrying one refused read. Tests may shorten the backoff. */
 export const readRetry = { attempts: 4, backoffMs: 5_000, limitMs: 300_000 };
 const retryableReadResponses = new WeakMap();
+const readResponseFacts = new WeakMap();
 
 export function observerReadRetryable(error) {
   return error?.diagnostic?.retryable === true
@@ -499,19 +511,50 @@ async function readRetryMs(response, attempt) {
 /** The one GET path to the GitHub API. A rate limit, a server error or a
  * dropped connection is retried within readRetry's bounds; the last response
  * is returned for the caller to qualify, and a last dropped connection throws. */
+/** Read roles are declared before any request; refusals never switch credentials. */
+const observerReadCounts = new WeakMap();
+export function observerReadCredentials(parentToken, consumerToken, parent, consumer) {
+  if (![parentToken, consumerToken].every(value => typeof value === 'string' && value.length > 0)
+    || ![parent, consumer].every(value => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value))) {
+    refuse('read_authority_or_identity_missing');
+  }
+  const credentials = Object.freeze({parentToken, consumerToken, parent, consumer});
+  observerReadCounts.set(credentials, {repository:0, app:0});
+  return credentials;
+}
+
+export function observerReadMetrics(credentials) {
+  const counts = observerReadCounts.get(credentials);
+  return counts ? {...counts} : null;
+}
+
+function readCredential(credentials, url) {
+  if (typeof credentials === 'string') return {credential:credentials, role:null};
+  const endpoint = new URL(url);
+  const repository = endpoint.pathname.match(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/)?.[1];
+  if (endpoint.origin !== 'https://api.github.com' || !repository) refuse('read_authority_or_identity_missing');
+  if (repository === credentials.parent) return {credential:credentials.parentToken, role:'repository'};
+  if (repository === credentials.consumer) return {credential:credentials.consumerToken, role:'app'};
+  refuse('read_authority_or_identity_missing');
+}
+
 async function githubRead(token, url, fetchRecord) {
+  const {credential, role} = readCredential(token, url);
   for (let attempt = 1; ; attempt += 1) {
     let response = null;
     try {
+      const counts = observerReadCounts.get(token);
+      if (counts) counts[role]++;
       response = await fetchRecord(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        headers: { Authorization: `Bearer ${credential}`, Accept: 'application/vnd.github+json' },
         signal: AbortSignal.timeout(30_000),
       });
+      if (response) readResponseFacts.set(response,{attempts:attempt,read_role:role});
     } catch { /* Transport exceptions can contain private endpoints. */ }
     if (response?.ok) return response;
     const wait = await readRetryMs(response, attempt);
     if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
-      if (response === null) refuse('github_read_unavailable');
+      if (response === null) refuse('github_read_unavailable',{attempts:attempt,read_role:role,retryable:true});
       if (wait !== undefined) retryableReadResponses.set(response, Math.ceil(wait / 1000));
       return response;
     }
@@ -521,7 +564,7 @@ async function githubRead(token, url, fetchRecord) {
 
 function refusalDiagnostic(response) {
   const fields = {status: response.status, retryable: retryableReadResponses.has(response),
-    retry_after_seconds: retryableReadResponses.get(response)};
+    retry_after_seconds: retryableReadResponses.get(response),...readResponseFacts.get(response)};
   for (const name of ['remaining', 'limit', 'reset', 'resource']) {
     const value = rateLimitHeader(response, name);
     if (value !== undefined) fields[`ratelimit_${name}`] = value;
@@ -1048,31 +1091,62 @@ async function readOwnedChild(token, observer, parent, expected, candidate, decl
  * original declaration, nonce and child receipt own every renewed reading. */
 export async function observeConsumerTiming(token, context, expected,
   now = () => Math.floor(Date.now() / 1000),
-  fetchRecord = fetch, extract = artifactJsonFromZip) {
+  fetchRecord = fetch, extract = artifactJsonFromZip, cache = null) {
   const observer = observerContext(context);
   const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
     fetchRecord, observer.parent_run_attempt);
   admitObserver(observer, parent);
-  const declaration = await githubDeclaration(token, observer, fetchRecord, extract);
-  const runs = await githubChildCensus(token, expected.repository, expected.workflow,
-    parent.created_at, fetchRecord);
-  const matching = runs.filter(run => run.display_title === observerRunName(observer));
-  if (matching.length === 0) return unmeasuredConsumerTiming(observer.started_at, now(), 0);
-  if (matching.length !== 1 || String(matching[0].id) !== expected.runId) {
-    refuse('job_timing_custody_unmeasured');
+  const retained = cache?.read();
+  let declaration, owned;
+  if (retained) {
+    declaration = observerContext(retained.declaration);
+    if (JSON.stringify(declaration) !== JSON.stringify(observer)
+      || retained.receipt?.child?.run_id !== expected.runId
+      || !Number.isSafeInteger(retained.receipt.child.run_attempt)
+      || retained.receipt.child.run_attempt < 1) refuse('timing_cache_invalid');
+    owned = {receipt:retained.receipt, child:{run_attempt:retained.receipt.child.run_attempt}};
+  } else {
+    declaration = await githubDeclaration(token, observer, fetchRecord, extract);
+    const runs = await githubChildCensus(token, expected.repository, expected.workflow,
+      parent.created_at, fetchRecord);
+    const matching = runs.filter(run => run.display_title === observerRunName(observer));
+    if (matching.length !== 1 || String(matching[0].id) !== expected.runId) {
+      if (matching.length > 0) refuse('job_timing_custody_unmeasured');
+      const child = await githubRecord(token, expected.repository, expected.runId, fetchRecord);
+      return {...unmeasuredConsumerTiming(observer.started_at, now(), 0), ...timingChildState(child)};
+    }
+    owned = await readOwnedChild(token, observer, parent, expected, matching[0],
+      declaration, fetchRecord, extract);
+    if (!owned) {
+      const child = await githubRecord(token, expected.repository, expected.runId, fetchRecord);
+      return {...unmeasuredConsumerTiming(observer.started_at, now(), 1), ...timingChildState(child)};
+    }
   }
-  const owned = await readOwnedChild(token, observer, parent, expected, matching[0],
-    declaration, fetchRecord, extract);
-  if (!owned) return unmeasuredConsumerTiming(observer.started_at, now(), 1);
   const jobs = await githubRunJobs(token, expected.repository, expected.runId,
     owned.child.run_attempt, fetchRecord);
   const finalChild = await githubRecord(token, expected.repository, expected.runId, fetchRecord);
+  // Retention is for pending observation only. A terminal verdict must refresh
+  // discovery, archive identity, and custody through the full owning path.
+  if (retained && (finalChild.status === 'completed' || finalChild.run_attempt !== owned.child.run_attempt)) {
+    cache.clear();
+    return observeConsumerTiming(token, context, expected, now, fetchRecord, extract, cache);
+  }
   qualifyOwnedChild(owned.receipt, observer, parent, finalChild, expected, declaration);
   const finalParent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
     fetchRecord, observer.parent_run_attempt);
   admitObserver(observer, finalParent);
+  const timing = assessConsumerObservation(observer.started_at, finalChild, jobs, now());
+  if (!retained && finalChild.status !== 'completed') cache?.write({declaration, receipt:owned.receipt});
   return {discovered: 1, owned: 1,
-    ...assessConsumerObservation(observer.started_at, finalChild, jobs, now())};
+    ...timing, ...timingChildState(finalChild), custody_read:retained ? 'retained' : 'fresh'};
+}
+
+function timingChildState(child) {
+  if (!observerRunIsLive(child.status)
+    && !(child.status === 'completed' && observerConclusionIsKnown(child.conclusion))) {
+    refuse('consumer_state_unreported');
+  }
+  return {child_status:child.status, child_conclusion:child.conclusion ?? null};
 }
 
 /** Read a reached private decision without exporting its child identity.

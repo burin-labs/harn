@@ -242,6 +242,20 @@ Canary verdict observation and historical release recovery retain their
 existing authenticated evidence. Fresh custody doesn't require a consumer
 product receipt that the consumer hasn't adopted.
 
+Timing polls read the parent repository with its workflow `GITHUB_TOKEN` and
+the consumer repository with the scoped App token. A refused local read never
+falls back to the App. The timing reader reports actual HTTP attempts by role;
+an unavailable count remains unmeasured.
+
+Within one observation window, the waiter retains the authenticated declaration
+and child receipt in a private file. An invocation-only key authenticates that
+file and is never written into the checkpoint or workflow outputs. A new window
+authenticates the original artifacts again. Each pending poll still reads the
+complete current job census and current child run, requiring two App reads for
+a single jobs page. A changed attempt or terminal run reauthenticates artifact
+custody before returning timing. Product decisions and cancellation ownership
+always use their original authenticated readers.
+
 The declaration owner records `started_at` immediately before qualifying the
 live parent and uploading its immutable declaration. The budget therefore
 includes declaration qualification and upload, but excludes earlier candidate

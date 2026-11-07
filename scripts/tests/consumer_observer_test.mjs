@@ -176,7 +176,7 @@ test('a refused census read carries status and rate limit, retries one exhausted
   const { reason, line } = observerRefusal(error, 'job_timing_unmeasured');
   assert.equal(reason, 'observer_census_read_refused');
   assert.equal(line, 'CONSUMER_OBSERVER reason=observer_census_read_refused status=403 '
-    + 'ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=4102444800 ratelimit_resource=core');
+    + 'ratelimit_remaining=0 ratelimit_limit=5000 ratelimit_reset=4102444800 ratelimit_resource=core attempts=1');
   assert.ok(!/widget-host|acme|73/.test(line), 'the public line never names the consumer repository or run');
   const forged = Object.assign(new Error('x'), { diagnostic: { status: 'acme/widget-host', ratelimit_resource: 'a b' } });
   assert.equal(observerRefusal(forged, 'fallback_reason').line, 'CONSUMER_OBSERVER reason=fallback_reason');
@@ -226,7 +226,7 @@ test('a run read retries a rate limit, a server error or a dropped connection, a
       const error = await denied.result.then(() => assert.fail('a denial must reject'), failure => failure);
       assert.equal(denied.seen.length, 1, `a ${status} denial is not retried`);
       assert.equal(observerRefusal(error, 'fallback').line,
-        `CONSUMER_OBSERVER reason=run_read_refused status=${status} ratelimit_remaining=4000`);
+        `CONSUMER_OBSERVER reason=run_read_refused status=${status} ratelimit_remaining=4000 attempts=1`);
     }
     const exhausted = read([refused(503), refused(503), refused(503), refused(503), refused(503)]);
     await assert.rejects(exhausted.result, /run_read_refused/);

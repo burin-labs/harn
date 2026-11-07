@@ -114,6 +114,16 @@ canary_header() {
 #   <reason>           any other status, under the caller's own reason.
 #
 # Locals are prefixed because the result is assigned through dynamic scope.
+canary_read_class() {
+  case "$1" in
+    ""|none|5??) printf 'api_unavailable false\n' ;;
+    429) printf 'api_rate_limited false\n' ;;
+    403) if [[ "$2" == true ]]; then printf 'api_rate_limited false\n'; else printf 'api_access_denied true\n'; fi ;;
+    401|404) printf 'api_access_denied true\n' ;;
+    *) printf '%s true\n' "$3" ;;
+  esac
+}
+
 canary_api() {
   CANARY_API_FAILURE_CLASS=
   CANARY_API_FAILURE_DETAIL=
@@ -130,7 +140,7 @@ canary_api() {
   shift 3
   local _attempts=${CANARY_API_ATTEMPTS:-4} _backoff=${CANARY_API_BACKOFF_SECONDS:-5}
   local _cap=${CANARY_API_WAIT_LIMIT_SECONDS:-300} _attempt=1 _final
-  local _response _headers _body _status _class _wait _remaining _retry_after _reset _message _detail
+  local _response _headers _body _status _class _wait _remaining _retry_after _reset _message _detail _limited
   while true; do
     _response=$(gh api --include "$@" 2> /dev/null) || true
     _headers=$(awk '{ sub(/\r$/, "") } /^$/ { exit } { print }' <<< "$_response")
@@ -145,20 +155,9 @@ canary_api() {
     _reset=$(canary_header x-ratelimit-reset "$_headers")
     _message=$(jq -r '.message // empty' <<< "$_body" 2> /dev/null || true)
     _wait=$((_backoff * (1 << (_attempt - 1))))
-    _final=false
-    case "$_status" in
-      ""|5??) _class=api_unavailable ;;
-      429) _class=api_rate_limited ;;
-      403)
-        if [[ "$_remaining" == 0 || -n "$_retry_after" || "$_message" == *"rate limit"* ]]; then
-          _class=api_rate_limited
-        else
-          _class=api_access_denied _final=true
-        fi
-        ;;
-      401|404) _class=api_access_denied _final=true ;;
-      *) _class=$_reason _final=true ;;
-    esac
+    _limited=false
+    if [[ "$_remaining" == 0 || -n "$_retry_after" || "$_message" == *"rate limit"* ]]; then _limited=true; fi
+    read -r _class _final <<< "$(canary_read_class "$_status" "$_limited" "$_reason")"
     if [[ "$_class" == api_rate_limited ]]; then
       if [[ "$_retry_after" =~ ^[0-9]+$ ]]; then
         _wait=$_retry_after
@@ -487,7 +486,7 @@ canary_dispatch() {
 # renew the same scoped App authority and carry the original run and clock.
 canary_observe() {
   local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RUN_ID:-} started=${CANARY_STARTED_AT:-}
-  local policy poll_limit deadline_limit window_limit budget_version=1 budget_reader
+  local policy poll_limit deadline_limit window_limit budget_version=1 budget_reader timing_cache_key=
   budget_reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-budget.mjs"
   if [[ -n "${OBSERVER_CONTEXT:-}" ]]; then
     policy=$(node "$budget_reader" --policy) || canary_fail observation_budget_contract_invalid
@@ -526,6 +525,7 @@ canary_observe() {
   canary_observation_checkpoint pending none observe_same_run
 
   local status conclusion now record timing reason read_error retry_count=0 retry_wait remaining advice
+  local read_status read_retryable read_final read_token read_attempts read_remaining read_detail
   while true; do
     CANARY_TIMING_RECEIPT=
     now=$(date +%s)
@@ -540,13 +540,11 @@ canary_observe() {
     advice=0
     if (( CANARY_READ_NOT_BEFORE > now )); then
       read_error=api_backoff_pending
+    elif [[ "$budget_version" == 2 ]]; then
+      : # The timing owner returns the same fresh child state it qualifies.
     elif canary_api --optional --detail "run=$run_id verdict=unmeasured" record consumer_read_refused \
       secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/actions/runs/$run_id" --jq '"\(.status) \(.conclusion // "none")"'; then
       read -r status conclusion <<< "$record"
-      case "$status" in
-        completed|queued|in_progress|waiting|pending|requested) ;;
-        *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
-      esac
     else
       case "$CANARY_API_FAILURE_CLASS" in
         api_unavailable|api_rate_limited) read_error=$CANARY_API_FAILURE_CLASS; advice=$CANARY_API_RETRY_WAIT_SECONDS ;;
@@ -554,10 +552,31 @@ canary_observe() {
       esac
     fi
     if [[ -z "$read_error" && "$budget_version" == 2 ]]; then
-      if timing=$(CANARY_REPOSITORY="$repo" CANARY_RUN_ID="$run_id" node "$budget_reader"); then
+      if [[ -z "$timing_cache_key" && -n "${CANARY_CHECKPOINT_FILE:-}" ]]; then
+        # Invocation-only authority stays out of files, outputs and shell traces.
+        set +x
+        timing_cache_key=$(node "$budget_reader" --cache-key) || canary_fail timing_cache_invalid
+      fi
+      if timing=$(CANARY_REPOSITORY="$repo" CANARY_RUN_ID="$run_id" CANARY_TIMING_CACHE_KEY="$timing_cache_key" node "$budget_reader"); then
         :
-      elif jq -e '.schema == "harn.consumer_observer.read_refusal.v1" and .retryable == true' <<< "$timing" >/dev/null; then
-        read_error=$(jq -er .reason <<< "$timing")
+      elif jq -e '.schema == "harn.consumer_observer.read_refusal.v1" and (.retryable | type) == "boolean"' <<< "$timing" >/dev/null; then
+        reason=$(jq -er .reason <<< "$timing")
+        read_status=$(jq -r '.status // "none"' <<< "$timing")
+        read_retryable=$(jq -r .retryable <<< "$timing")
+        if [[ "$read_status" == none ]]; then
+          read_error=$reason read_final=false
+        else
+          read -r read_error read_final <<< "$(canary_read_class "$read_status" "$read_retryable" "$reason")"
+        fi
+        if [[ "$read_final" == true ]]; then
+          read_token=${CANARY_TOKEN_LABEL:-GH_TOKEN}
+          if [[ "$(jq -r '.read_role // ""' <<< "$timing")" == repository ]]; then read_token=github-token; fi
+          read_attempts=$(jq -r '.attempts // "unmeasured"' <<< "$timing")
+          read_remaining=$(jq -r '.ratelimit_remaining // empty' <<< "$timing")
+          read_detail="read=consumer_read_refused status=$read_status token=$read_token repository=secret:CONSUMER_CANARY_REPOSITORY attempts=$read_attempts"
+          [[ -z "$read_remaining" ]] || read_detail+=" ratelimit_remaining=$read_remaining"
+          canary_fail "$read_error" "$read_detail run=$run_id verdict=unmeasured"
+        fi
         advice=$(jq -er '.retry_after_seconds | select(type == "number" and . >= 0 and floor == .)' <<< "$timing") \
           || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
       else
@@ -592,6 +611,16 @@ canary_observe() {
     fi
     retry_count=0
     CANARY_READ_NOT_BEFORE=0
+    if [[ "$budget_version" == 2 ]]; then
+      record=$(jq -er '[.child_status, (.child_conclusion // "none")] | select(all(type == "string")) | @tsv' <<< "$timing") \
+        || canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured"
+      read -r status conclusion <<< "$record"
+    fi
+    case "$status" in
+      completed|queued|in_progress|waiting|pending|requested) ;;
+      *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
+    esac
+    now=$(date +%s)
     if [[ "$budget_version" == 2 ]]; then
       CANARY_TIMING_RECEIPT=$timing
       canary_observation_checkpoint pending none observe_same_run

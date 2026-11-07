@@ -18,7 +18,7 @@ cat > "$scratch/parent-fetch.mjs" <<'JS'
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
@@ -51,7 +51,8 @@ if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
 if(process.argv[1]?.endsWith('/consumer-observer-failure.mjs')){
   globalThis.fetch=async()=>({ok:true,json:async()=>({total_count:1,workflow_runs:[{id:99,run_attempt:1,status:'queued'}]})});
 }
-if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.includes('--policy')){
+if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')
+  &&!process.argv.includes('--policy')&&!process.argv.includes('--cache-key')){
   const {admitChild,observerDeclarationName,observerRunName,observerDispatchActor,readRetry}=await import(
     pathToFileURL(process.env.CANARY_TEST_ROOT+'/scripts/lib/consumer-observer.mjs'));
   readRetry.backoffMs=0;
@@ -100,7 +101,18 @@ if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.inc
     if(options.method&&options.method!=='GET')throw new Error('unexpected-budget-write');
     const p=new URL(url).pathname;
     if(p.endsWith('/'+parent.id+'/attempts/'+parent.run_attempt))return {ok:true,json:async()=>parent};
-    if(p.endsWith('/'+child.id))return {ok:true,json:async()=>child};
+    if(p.endsWith('/'+child.id)){
+      const response=spawnSync('gh',['api','--include','repos/acme/widget-host/actions/runs/'+child.id],
+        {encoding:'utf8',env:process.env});
+      const [head,...body]=response.stdout.split(/\r?\n\r?\n/);
+      const status=Number(head.match(/^HTTP\/[\d.]+ (\d{3})/)?.[1]);
+      const headers=Object.fromEntries(head.split(/\r?\n/).slice(1).filter(Boolean).map(line=>{
+        const colon=line.indexOf(':');return [line.slice(0,colon),line.slice(colon+1).trim()];
+      }));
+      if(status!==200)return new Response(body.join('\n\n'),{status,headers});
+      const [state,conclusion]=body.join('\n\n').trim().split(/\s+/);
+      return {ok:true,json:async()=>({...child,status:state,conclusion})};
+    }
     if(p.endsWith('/runs'))return {ok:true,json:async()=>({total_count:1,workflow_runs:[child]})};
     if(p.endsWith('/jobs'))return {ok:true,json:async()=>({total_count:1,jobs:[job]})};
     if(p.endsWith('/artifacts')){
@@ -113,7 +125,7 @@ if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.inc
 }
 JS
 export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root"
-export GH_TOKEN=fixture-consumer PARENT_READ_TOKEN=fixture-parent
+export GH_TOKEN=fixture-consumer PARENT_READ_TOKEN=fixture-parent GITHUB_TOKEN=fixture-parent
 export GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=900 GITHUB_RUN_ATTEMPT=1
 export GITHUB_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # A pull_request CI run would otherwise name its own head as the fixture parent's.
@@ -988,8 +1000,9 @@ assert.equal(cleanupToken.if, "always() && steps.observer.outputs.context != ''"
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
 assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });
-assert.equal(mint.with.repositories.trim(), 'harn\n${{ inputs.repository }}');
+assert.equal(mint.with.repositories.trim(), '${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
+assert.equal(observe.env.GITHUB_TOKEN, '${{ github.token }}');
 assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');
 assert.equal(observe.env.CANARY_RUN_ID, '${{ inputs.run-id }}');
 assert.equal(observe.env.CANARY_WINDOW_SECONDS, String(policy.window_seconds));

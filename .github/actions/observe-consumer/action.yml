@@ -55,7 +55,6 @@ runs:
         private-key: ${{ inputs.private-key }}
         owner: ${{ inputs.owner }}
         repositories: |
-          harn
           ${{ inputs.repository }}
         permission-actions: read
         permission-pull-requests: read
@@ -64,6 +63,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        GITHUB_TOKEN: ${{ github.token }}
         CANARY_TOKEN_LABEL: observe-consumer-read-app-token
         CANARY_OWNER: ${{ inputs.owner }}
         CANARY_NAME: ${{ inputs.repository }}
