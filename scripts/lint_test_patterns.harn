@@ -236,6 +236,8 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Quickstart's file permissions, Git index, and ignore rules require the actual CLI and Git boundary.
+  "crates/harn-cli/tests/harn_cli_e2e/quickstart_env.rs",
   // Signal handling and terminal ordering require the real CLI and its started children.
   "crates/harn-cli/tests/harn_cli_e2e/managed_command_interrupt.rs",
   // Portal readiness and bind failure must be observed through real process streams and a live listener.
