@@ -1,0 +1,4 @@
+{"schemaVersion":1,"strictScopes":true}
+{"id":"missing-argument","scope":"agent.main","consume":"once","match":"*","tool_calls":[{"name":"add","arguments":{"a":2}}]}
+{"id":"correct-after-error","scope":"agent.main","consume":"once","match":"*missing required parameter(s): b*","tool_calls":[{"name":"add","arguments":{"a":2,"b":3}}]}
+{"id":"finish-after-sum","scope":"agent.main","consume":"once","match":"*5*","text":"2 + 3 = 5."}

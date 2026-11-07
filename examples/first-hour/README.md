@@ -1,4 +1,4 @@
-# Three offline examples
+# First-hour examples
 
 Run these examples with an installed Harn release. They use synthetic model
 responses, need no credentials, and make no model requests.
@@ -54,3 +54,26 @@ second reads it through the same model-call interface. This fixture replays
 model responses; it doesn't snapshot the filesystem or replay tool effects.
 Recorded responses can include supplied prompts and tool arguments. Inspect
 them before sharing. Delete `responses.jsonl` to discard this local recording.
+
+## Recover from a rejected tool call
+
+```sh
+harn run tool-recovery.harn --llm-mock tool-recovery.jsonl
+```
+
+```text
+tool: 2 + 3 = 5
+done
+rejected calls: 1
+successful calls: 1
+2 + 3 = 5.
+```
+
+The first fixture entry omits the required `b` argument. Harn rejects the call
+before entering the handler and sends the error back to the model. The second
+entry matches that error and supplies both arguments; the handler runs once.
+The final entry completes the loop within its three-iteration bound. The
+program checks that one call was rejected and one succeeded.
+
+This synthetic fixture demonstrates error feedback and recovery through the
+existing loop. It doesn't measure whether a real model will correct its call.

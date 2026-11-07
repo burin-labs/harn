@@ -98,7 +98,7 @@ name = "Install channels smoke"
 claim = "Public installation channels still install a runnable Harn CLI"
 crons = ["23 11 * * 1"]
 cadence_reason = "Weekly is sufficient for external installers that change independently of source merges."
-job_ids = ["cargo-install", "install-sh"]
+job_ids = ["cargo-install", "release-installer"]
 health_failures = 2
 
 [[workflow]]

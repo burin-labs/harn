@@ -1,23 +1,30 @@
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstalledDir
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $installer = Join-Path $PSScriptRoot '../../install.ps1'
 $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("harn-installer-proof-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
-$env:HARN_INSTALL_DIR = Join-Path $fixtureRoot 'installed'
-$env:HARN_NO_MODIFY_PATH = '1'
-$env:HARN_NO_VERIFY = '0'
 try {
-    & $installer
-    $installed = $env:HARN_INSTALL_DIR
-    Remove-Item Env:HARN_INSTALL_DIR, Env:HARN_NO_MODIFY_PATH, Env:HARN_NO_VERIFY
-    $versionJson = & (Join-Path $installed 'harn.exe') version --json
+    $reference = (Resolve-Path -LiteralPath $InstalledDir).Path
+    $versionJson = & (Join-Path $reference 'harn.exe') version --json
     if ($LASTEXITCODE -ne 0 -or -not ($versionJson | ConvertFrom-Json).ok) {
         throw 'The installed CLI did not execute its version command'
     }
+    $installed = Join-Path $fixtureRoot 'installed'
+    New-Item -ItemType Directory -Path (Join-Path $installed 'harn-licenses') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $reference 'harn.exe') -Destination (Join-Path $installed 'harn.exe')
+    $legalHashes = @{}
     foreach ($name in @('LICENSE-MIT', 'LICENSE-APACHE', 'THIRD-PARTY-NOTICES.txt')) {
-        $file = Get-Item -LiteralPath (Join-Path $installed "harn-licenses/$name")
+        $file = Get-Item -LiteralPath (Join-Path $reference "harn-licenses/$name")
         if ($file.Length -eq 0) { throw "Installed license is empty: $name" }
+        $target = Join-Path $installed "harn-licenses/$name"
+        Copy-Item -LiteralPath $file.FullName -Destination $target
+        $legalHashes[$name] = (Get-FileHash -LiteralPath $target).Hash
     }
     $before = (Get-FileHash -LiteralPath (Join-Path $installed 'harn.exe')).Hash
 
@@ -43,6 +50,11 @@ try {
     if (-not $refused) { throw 'The installer accepted a checksummed archive without licenses' }
     if ((Get-FileHash -LiteralPath (Join-Path $installed 'harn.exe')).Hash -ne $before) {
         throw 'The rejected archive changed the installed CLI'
+    }
+    foreach ($name in $legalHashes.Keys) {
+        if ((Get-FileHash -LiteralPath (Join-Path $installed "harn-licenses/$name")).Hash -ne $legalHashes[$name]) {
+            throw "The rejected archive changed the installed license: $name"
+        }
     }
     Write-Host 'Published Windows CLI executed; licenses retained; incomplete archive refused without replacing the CLI.'
 }

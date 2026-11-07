@@ -1,9 +1,9 @@
 name: Install channels smoke
 
-# Weekly smoke of the *user-facing install channels* against the latest
+# Smoke the *user-facing install channels* against the latest
 # published release:
 #   * `cargo install harn-cli` (crates.io)
-#   * the `install.sh` GitHub-release download path
+#   * the macOS/Linux and Windows release installers
 #
 # `release-smoke.yml` validates the exact release bytes in the release
 # candidate's own build run, but never re-installs afterwards, so it cannot see
@@ -12,11 +12,19 @@ name: Install channels smoke
 # regressing against a live release. This job re-walks both install paths
 # from scratch on a schedule and then runs the cross-platform smoke driver
 # against whatever got installed (pinned to the matching release tag via
-# scripts/smoke_installed_binary.sh).
+# scripts/smoke_installed_binary.sh). First-hour examples use the current source.
 #
-# Cold `cargo install` builds are slow, so this runs weekly rather than
-# daily and is deliberately kept off the PR critical path.
+# Cold `cargo install` builds stay weekly/manual. Installer and example changes
+# also exercise the published binary on pull requests.
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/install-smoke.yml'
+      - 'install.sh'
+      - 'install.ps1'
+      - 'examples/first-hour/**'
+      - 'scripts/smoke_first_hour.mjs'
+      - 'scripts/tests/windows-installer.ps1'
   schedule:
     - cron: '23 11 * * 1' # Mondays
   workflow_dispatch:
@@ -25,13 +33,17 @@ on:
         description: 'Optional release tag to install, e.g. v0.8.65. Empty installs the latest published release.'
         required: false
         type: string
+      release_only:
+        description: 'Skip cold source builds and test only the release installers.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
   group: install-smoke-${{ inputs.version || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -41,6 +53,7 @@ env:
 jobs:
   cargo-install:
     name: cargo install harn-cli (${{ matrix.platform }})
+    if: github.event_name != 'pull_request' && !inputs.release_only
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     strategy:
@@ -75,8 +88,8 @@ jobs:
         shell: bash
         run: HARN_BINARY="$HOME/.cargo/bin/harn" ./scripts/smoke_installed_binary.sh
 
-  install-sh:
-    name: install.sh (${{ matrix.platform }})
+  release-installer:
+    name: Release installer (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -85,10 +98,18 @@ jobs:
         include:
           - platform: linux
             runner: ubuntu-24.04
+            binary: harn
           - platform: macos
             runner: macos-latest
+            binary: harn
+          - platform: windows
+            runner: windows-latest
+            binary: harn.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
 
       # Run the repo's own install.sh (identical to the bytes served at
       # harnlang.com/install.sh) so the GitHub-release download, SHA256
@@ -96,6 +117,7 @@ jobs:
       # release. Install to a scratch dir and skip PATH edits — the smoke
       # references the binary by absolute path.
       - name: Run install.sh
+        if: runner.os != 'Windows'
         shell: bash
         env:
           VERSION_INPUT: ${{ inputs.version }}
@@ -107,7 +129,32 @@ jobs:
           sh ./install.sh
           "$HARN_INSTALL_DIR/harn" --version
 
+      - name: Run install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          HARN_INSTALL_DIR: ${{ runner.temp }}/harn-install
+          HARN_NO_MODIFY_PATH: "1"
+        run: |
+          $env:HARN_VERSION = $env:VERSION_INPUT
+          ./install.ps1
+          & "$env:HARN_INSTALL_DIR/harn.exe" --version
+
+      - name: Smoke the first-hour examples with the installed release
+        env:
+          HARN_BINARY: ${{ runner.temp }}/harn-install/${{ matrix.binary }}
+        run: node scripts/smoke_first_hour.mjs
+
+      - name: Reject an incomplete Windows archive without replacing installed files
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          HARN_INSTALL_DIR: ${{ runner.temp }}/harn-install
+        run: ./scripts/tests/windows-installer.ps1 -InstalledDir $env:HARN_INSTALL_DIR
+
       - name: Smoke the installed binary
+        if: runner.os != 'Windows'
         shell: bash
         env:
           HARN_BINARY: ${{ runner.temp }}/harn-install/harn

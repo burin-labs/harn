@@ -21,6 +21,7 @@ on:
       - Build release binaries
       - CI
       - CLI end-to-end behavior
+      - Install channels smoke
       - Lean embedding surface
       - macOS workspace tests
       - Portable kernel browser Wasm
@@ -30,7 +31,6 @@ on:
       - SDK codegen
       - Secret exposure report
       - Supply chain
-      - Windows installer
       - Windows workspace tests
     types: [completed]
   schedule:
