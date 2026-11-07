@@ -14,6 +14,15 @@ use super::tool::{
 };
 use super::worker::{FsWatchEvent, SubagentTerminalStatus, WorkerEvent};
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionStatus {
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
 /// The dependency/effect phase assigned to one model-proposed tool call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -814,7 +823,7 @@ pub enum AgentEvent {
     CompactionUpdated {
         session_id: String,
         compaction_id: String,
-        status: crate::orchestration::CompactionStatus,
+        status: CompactionStatus,
         error: Option<String>,
     },
     TranscriptCompacted {

@@ -1,17 +1,8 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use crate::agent_events::AgentEvent;
+use crate::agent_events::{AgentEvent, CompactionStatus};
 use crate::value::{ErrorCategory, VmError};
-
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CompactionStatus {
-    InProgress,
-    Completed,
-    Failed,
-    Cancelled,
-}
 
 struct ActivityState {
     id: Option<String>,
