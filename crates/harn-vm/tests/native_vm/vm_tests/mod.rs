@@ -2,7 +2,6 @@ use crate::*;
 
 mod compiler_native_contracts;
 mod depth_regression_tests;
-mod modules_native;
 mod modules_tool_registry;
 mod stdlib_cache;
 mod tests_debug;

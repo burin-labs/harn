@@ -5,4 +5,5 @@ mod task_cleanup;
 mod timed_execution;
 
 mod baseline_native;
+mod modules_native;
 mod tests_runtime;
