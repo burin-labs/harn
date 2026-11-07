@@ -86,6 +86,10 @@ DAP emits `harnHostCallCancelled` with `{request_seq: integer}` when an unanswer
 reverse request is abandoned or times out. The executor retires the preparation
 identified by that original request sequence. This is a Harn extension event;
 the standard DAP `cancel` request runs in the opposite direction.
+The DAP crate's serializable `HostCallCancelled` record owns this body, alongside
+the existing DAP request and response records. DAP extension events have no
+generated schema export; their framing and body contracts are checked in the
+adapter's wire tests.
 
 The generated [preparation schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-preparation.schema.json)
 and [release schema](https://github.com/burin-labs/harn/blob/main/spec/protocol-artifacts/schemas/command-release.schema.json)

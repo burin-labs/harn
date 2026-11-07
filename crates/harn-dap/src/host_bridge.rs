@@ -58,7 +58,7 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
 use crate::framing::{write_json_frame, SharedWriter};
-use crate::protocol::DapResponse;
+use crate::protocol::{DapResponse, HostCallCancelled};
 
 /// Default reverse-request timeout. Generous because the client may need
 /// to do real work (LSP queries, file scans) before responding.
@@ -98,7 +98,7 @@ impl Drop for PendingCall {
                 "seq": self.output_seq.fetch_add(1, Ordering::SeqCst),
                 "type": "event",
                 "event": "harnHostCallCancelled",
-                "body": {"request_seq": self.seq},
+                "body": HostCallCancelled { request_seq: self.seq },
             });
             let _ = write_json_frame(&self.stdout, &event);
         }
@@ -555,6 +555,19 @@ mod tests {
                 "normal replies must not emit cancellation"
             );
             assert_eq!(cancelled[0]["body"]["request_seq"], ids[0]);
+            assert_eq!(
+                serde_json::from_value::<HostCallCancelled>(cancelled[0]["body"].clone()).unwrap(),
+                HostCallCancelled {
+                    request_seq: ids[0]
+                }
+            );
+            for malformed in [
+                json!({}),
+                json!({"request_seq":"1"}),
+                json!({"request_seq":ids[0], "token":"unknown"}),
+            ] {
+                assert!(serde_json::from_value::<HostCallCancelled>(malformed).is_err());
+            }
             assert_eq!(
                 cancelled[0]["seq"],
                 ids[1] + 1,
