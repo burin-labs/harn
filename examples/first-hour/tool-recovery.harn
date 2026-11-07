@@ -1,0 +1,20 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn main(harness: Harness) {
+  tool add(a: int, b: int) -> int {
+    description "Add two integers"
+    const sum = a + b
+    harness.stdio.println("tool: ${a} + ${b} = ${sum}")
+    return sum
+  }
+  const options: AgentSpec = {provider: "mock", tools: add, max_iterations: 3}
+  const result = agent_loop(harness, "Use add to calculate 2 + 3.", nil, options)
+  require result.status == "done", "the loop must complete"
+  require result.tools.rejected == ["add"] && result.tools.successful == ["add"],
+    "one rejected call must be followed by one successful call"
+  harness.stdio.println(result.status)
+  harness.stdio.println("rejected calls: ${len(result.tools.rejected)}")
+  harness.stdio.println("successful calls: ${len(result.tools.successful)}")
+  harness.stdio.println(result.visible_text)
+}
