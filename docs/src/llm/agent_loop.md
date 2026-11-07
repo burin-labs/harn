@@ -92,9 +92,7 @@ top-level keys before `v0.8`).
 | `initiator` | string | Present for `status: "suspended"`; one of `"self"`, `"parent"`, `"operator"`, or `"triggered"` |
 | `conditions` | dict or nil | Present for `status: "suspended"`; optional resume trigger conditions |
 | `iterations_completed` | int | Present for `status: "suspended"`; completed LLM turns before the checkpoint yielded |
-| `repeated_tool_calls` | int | Present when `stall_diagnostics` is enabled. Counts adjacent repeated tool calls with identical name and arguments after the first call in each streak |
-| `stall_warnings` | list | Present when `stall_diagnostics` is enabled. Diagnostic warning records emitted when a repeat streak reaches the configured threshold |
-| `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
+| `repair_checkpoint` | dict | Session-bound verification evidence for a subsequent loop or workflow stage. See [Agent verification](../stdlib/agent-verification.md). |
 | `completion_judge` | dict | Present when `verify_completion_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session judge call/veto counts, the resolved cap (`nil` when disabled), and whether the cap was hit. Lets a harness report judge churn without transcript mining |
 | `turn_end_condition` | dict | Present when `turn_end_condition` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session turn-end-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `turn_end_condition.cadence.max_invocations`, which only gates when the judge is due |
 
@@ -406,7 +404,8 @@ Same as `harness.llm.call`, plus additional options:
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `require_successful_tools` | `list<string\|list<string>>` | nil | Mark a cleanly completed loop `status = "failed"` unless every required tool succeeds at least once. A nested list is an OR group, e.g. `["run_command", ["read_command_output", "read_command_output_tail"]]`. Keeps action stages honest when attempted effects were rejected, errored, or skipped |
 | `require_artifacts` | `list<string>` | nil | Paths the run must leave behind. A declared path that does not exist when the run reaches its own end seals `terminal.kind = "completion_unverified"` with `abandonment.cause = "declared_artifact_missing"`, deterministically and with no model call. Existence only: contents are not read. `AgentResult.declared_artifacts` reports the audit on every run that declared one, satisfied runs included, and classifies a path via `harness.fs.status` so a capability policy's `scope_denied` lands under `unverifiable` rather than convicting the run as it would under `harness.fs.exists` |
-| `stall_diagnostics` | bool/dict | nil | Detect repeated tool calls and byte-identical observations, including an advisory when the same `(tool, arguments, result)` recurs across interleaved calls. Changing polling results use distinct counters. `true` enables conservative defaults (`threshold: 3`, one feedback nudge, argument digests only). Dict options include `enabled`, `threshold`, `inject_feedback`, `max_feedback`, `exempt_tools`/`allow_repeated_tools`, `include_arguments`, `repeat_parse_rejection` (default `2`, the consecutive fully rejected tool turns before bounded content-repair recovery engages), and repair knobs either flat or under `repair_diagnostics` |
+| `repair_diagnostics` | dict | nil | Explicit verification controls: `post_edit_reverify` (default `true`), `reserved_terminal_verify` (default `false`), `reserved_terminal_verify_iterations` (default `2`), and `zero_write_terminal_verify` (default `false`). See [Agent verification](../stdlib/agent-verification.md). |
+| `repair_checkpoint` | dict | nil | Verification evidence returned by a previous loop with the same session identity. |
 | `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
@@ -452,29 +451,6 @@ quote `done_sentinel_rendered` when `done_sentinel` is present. Invalid
 `agent_loop`; capability policy can also reject a format the selected model
 cannot use.
 
-### Environment-unchanged futility
-
-`stall_diagnostics` observes the loop's transcript, but some callers have a
-stronger signal: the relevant environment before and after an action. The
-`std/agent/stall` facade provides a typed, pure contract for that boundary:
-
-- `agent_observation_fingerprint(surfaces)` fingerprints caller-named
-  observable surfaces and excludes unavailable observations.
-- `agent_action_identity(name, arguments)` identifies an exact repeated
-  action without parsing rendered tool output.
-- `agent_futility_verdict(before, after, action, previous_action?)` returns
-  `changed`, `unchanged`, or `unobservable`, with the compared surfaces and
-  evidence. Missing or only partially comparable surfaces are `unobservable`,
-  never `unchanged`; an observed difference remains `changed`.
-- `agent_futility_decide(verdict, repeat_count?, threshold?, policy?)` applies
-  caller policy. The default reformulates a repeated unchanged action at the
-  threshold and escalates an unobservable environment; a policy hook may
-  choose `retry`, `reformulate`, `escalate`, or `stop`.
-
-The stdlib owns fingerprint comparison and verdict semantics. The caller owns
-which environment surfaces matter, retry thresholds, recovery mechanics, and
-user-facing wording.
-
 ### Effect-phased tool batches
 
 The shared dispatcher classifies local calls from tool annotations into
@@ -501,23 +477,6 @@ A failed structurally declared mutation whose structured mutation status is not
 `applied` blocks re-proposed verification and terminal phases until the model
 observes or corrects the state. Provider-executed tools retain their
 provider-native batch contract.
-
-### Recurring diagnostic signal
-
-Hosts with their own repair loop can import
-`agent_unheeded_recurring_diagnostic` from `std/agent/stall`. Fold each
-authoritative verification attempt with the previous returned `state`. On the
-second consecutive unchanged diagnostic set, `signal` is an
-`UnheededRecurringDiagnostic` containing a location-invariant signature,
-catalog-derived category, streak, attempt range, path, and authoritative
-message. A falling diagnostic count, changed identity, clean result, or
-advisory diagnostic resets or suppresses the signal.
-
-Language knowledge remains data. Supply `DiagnosticCategories` with exact
-`codes` and ordered case-insensitive `patterns`; each maps to `syntax`,
-`resolution`, `type`, `semantic`, or `unknown`. Harn contains no
-language-specific classifier branches. The host persists the returned state
-and owns feature arming and category-specific remedy wording.
 
 `agent_loop` forwards `thinking`, `effort`, `interleaved_thinking`, and
 `anthropic_beta_features` to every model turn. When neither `thinking` nor
@@ -741,8 +700,6 @@ State snapshot fields:
 | `completion.vetoed` | True when `verify_completion` / `verify_completion_judge` / `turn_end_condition` vetoed |
 | `completion.verdict` / `completion.feedback` | Judge verdict and feedback string when present |
 | `progress.changed` | True if this turn made tool calls, produced new successful tool names, or wrote visible text |
-| `progress.no_net_advance` | True when verify-bearing activity repeats a failing outcome without advancing it |
-| `progress.no_information_gain` | True when every completed, explicitly read-only observation this turn exactly repeats a prior `(tool, arguments, result)` signature |
 | `progress.turns_since_progressing` | Turns elapsed since the last turn that had a non-vetoed activity signal; `0` means this turn did |
 | `progress.summary` | Human-readable progress hint (`"executed N tool call(s)"`, `"completion gate vetoed"`, etc.) |
 
@@ -762,27 +719,14 @@ the cap edge:
 - the latest verify/turn-end judge vetoed completion,
 - `require_successful_tools` is unsatisfied, or
 - some turn within the last `progress_window` turns (default `extend_by`) had an
-  activity signal that was not vetoed by a measured repeated verification
-  outcome or an all-repeated read-only observation set.
+  activity signal.
 
 The window exists because the budget boundary lands on whatever turn it lands
 on. A run that had been editing and then spent its last turns reading files back
 to repair a failed check would be stopped at its initial cap by a
 boundary-turn-only rule, even though the repair was in flight. The definition of
 a progressing turn is unchanged; only how far back the rule looks for one
-changed. A window in which no turn progresses still stops the loop, so a
-sustained thrash buys at most one extension before the counter passes the window,
-and `max` remains the outer bound in every case.
-
-The read-only veto is structural: tool annotations must classify every call as
-read-only, every result must succeed, and every exact result must already have
-been seen for the same tool and arguments. A changed polling result, a mixed
-turn with one novel observation, a failed result, a mutation, or missing tool
-annotations retains normal extension eligibility.
-
-This budget classification remains active when `stall_diagnostics` warning and
-feedback emission is disabled. That switch controls operator-facing diagnosis;
-it does not turn repeated observations back into progress.
+changed. `max` remains the outer bound in every case.
 
 All decisions are recorded:
 
@@ -828,7 +772,7 @@ Every preset kind layers three things under your explicit input:
 1. **Behavior template** — profile, iteration budget, turn policy, reasoning
    defaults (and, for captains, the opt-in middleware layers below).
 2. **Fill-nil pack rows** — per-kind defaults for `timeout_ms`, `budget`
-   (session-cumulative `total_budget_usd`), model routes, `stall_diagnostics`,
+   (session-cumulative `total_budget_usd`), model routes, `repair_diagnostics`,
    and `iteration_budget`. Built-in presets name catalog-owned
    `[model_ladders.*]` rows, so model IDs change in catalog data without
    editing preset policy. Pack rows fill **only** absent keys at one
@@ -918,16 +862,16 @@ const local_audit = agent_loop(
 
 Preset roles, defaults summarized:
 
-| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `stall_diagnostics` | `done_sentinel` / `turn_end_condition` |
+| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `repair_diagnostics` | `done_sentinel` / `turn_end_condition` |
 |---|---|---|---|---:|---|---|---|
-| `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | enabled, threshold 3 | both `nil` (natural completion) |
-| `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | enabled, threshold 3 | both `nil` |
+| `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | `post_edit_reverify: true` | both `nil` (natural completion) |
+| `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | `post_edit_reverify: true` | both `nil` |
 | `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | unset | both `nil`, `tool_choice: "none"` |
 | `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `turn_end_condition: true` |
-| `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
-| `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
-| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `tool_middleware.with_rate_limit(harness.runtime, {max_calls: 50})` |
-| `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | enabled, threshold 3 | both `nil`; opt-in `with_dry_run` shadow runs |
+| `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | `post_edit_reverify: true` | both `nil`; default consent denies writes |
+| `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | `post_edit_reverify: true` | both `nil` |
+| `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | `post_edit_reverify: true` | both `nil`; default `tool_middleware.with_rate_limit(harness.runtime, {max_calls: 50})` |
+| `release_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 40, extend_by: 4}` | `post_edit_reverify: true` | both `nil`; opt-in `with_dry_run` shadow runs |
 
 ### Captain presets
 

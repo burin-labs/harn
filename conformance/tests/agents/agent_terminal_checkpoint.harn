@@ -124,7 +124,7 @@ pipeline default(harness: Harness) {
     harness.llm,
     [failing_call("fail-1"), failing_call("fail-2"), failing_call("fail-3")],
     { ->
-      const session = "terminal-thrash-" + harness.random.uuid()
+      const session = "terminal-budget-" + harness.random.uuid()
       const captured = agent_capture_events(
         harness.agent,
         session,
@@ -138,22 +138,15 @@ pipeline default(harness: Harness) {
             tools: failing_tools(),
             tool_format: "native",
             loop_until_done: true,
-            max_iterations: 5,
+            max_iterations: 3,
             final_wrapup: false,
-            stall_diagnostics: {
-              enabled: true,
-              repeat_same_error: 2,
-              hard_stop_after_trips: 1,
-              inject_feedback: true,
-              max_feedback: 1,
-            },
           },
         ) },
       )
       const checkpoint = terminal_checkpoint(captured.events)
-      harness.stdio.println("thrash=" + checkpoint.terminal.kind)
-      harness.stdio.println("thrash_reason=" + checkpoint.terminal.reason)
-      harness.stdio.println("thrash_run_status=" + checkpoint.terminal.run_record_status)
+      harness.stdio.println("budget=" + checkpoint.terminal.kind)
+      harness.stdio.println("budget_reason=" + checkpoint.terminal.reason)
+      harness.stdio.println("budget_run_status=" + checkpoint.terminal.run_record_status)
     },
   )
 }

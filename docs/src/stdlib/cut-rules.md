@@ -72,6 +72,4 @@ vocabulary. `cut` becomes `abort`, `pace_check` becomes `warn`, and both
 Use `pace_cut_rule_check_max_injections()` and
 `pace_cut_rule_extend_max()` when another policy needs the default limits.
 
-The caller owns the clock, stored counters, feedback, and loop actuation. See
-[Host-supplied facts](./fact-intake-seams.md#pace_cut_rule_decision-a-smart-timeout)
-for the boundary between those facts and this decision.
+The caller owns the clock, stored counters, feedback, and loop actuation.

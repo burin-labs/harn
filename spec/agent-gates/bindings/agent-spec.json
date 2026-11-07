@@ -691,10 +691,6 @@
         "name": "opts"
       },
       {
-        "function": "__agent_turn_end_judge_stall_cadence",
-        "name": "opts"
-      },
-      {
         "function": "__apply_post_turn_options",
         "name": "opts"
       },
@@ -1010,10 +1006,6 @@
         "name": "turn_llm_opts"
       },
       {
-        "function": "agent_stall_turn_end_judge_due",
-        "name": "opts"
-      },
-      {
         "function": "__sync_tool_search_state",
         "name": "opts"
       },
@@ -1042,20 +1034,12 @@
         "name": "opts"
       },
       {
-        "function": "__stall_judge_opts",
-        "name": "turn_opts"
-      },
-      {
-        "function": "__agent_stall_verification_dispatch",
+        "function": "agent_repair_verification_dispatch",
         "name": "opts"
       },
       {
         "function": "agent_session_record_usage",
         "name": "opts"
-      },
-      {
-        "function": "__agent_loop_apply_stall_judge_veto",
-        "name": "turn_llm_opts"
       },
       {
         "function": "agent_dispatch_tool_call",
@@ -1283,7 +1267,7 @@
     ],
     "containers": [
       "iteration_budget",
-      "stall_diagnostics",
+      "repair_diagnostics",
       "judge",
       "turn_policy",
       "compaction",

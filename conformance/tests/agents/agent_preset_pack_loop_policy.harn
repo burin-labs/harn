@@ -1,4 +1,4 @@
-// Pack allowlist includes `stall_diagnostics` and `iteration_budget` (#7059).
+// Packs and callers share one verification policy and iteration budget.
 // A registered preset carrying both keys resolves them through `agent_preset`
 // (not a hand-built spec). Caller options still override. An unknown pack
 // key still rejects. A pack that omits the keys still inherits kind-family
@@ -12,17 +12,21 @@ pipeline test(harness: Harness) {
     "loop_tuned",
     {
       pack: {
-        stall_diagnostics: {enabled: true, threshold: 2, inject_feedback: false, max_feedback: 0},
+        repair_diagnostics: {post_edit_reverify: false, reserved_terminal_verify: true},
         iteration_budget: {mode: "adaptive", initial: 4, max: 12, extend_by: 2},
       },
     },
   )
   const resolved = agent_preset(harness, "loop_tuned")
-  assert_eq(resolved.stall_diagnostics.threshold, 2, "pack stall threshold reaches the spec")
   assert_eq(
-    resolved.stall_diagnostics.inject_feedback,
+    resolved.repair_diagnostics.post_edit_reverify,
     false,
-    "pack stall inject_feedback reaches the spec",
+    "pack verification reaches the spec",
+  )
+  assert_eq(
+    resolved.repair_diagnostics.reserved_terminal_verify,
+    true,
+    "pack terminal verification reaches the spec",
   )
   assert_eq(
     resolved.iteration_budget.mode,
@@ -40,11 +44,15 @@ pipeline test(harness: Harness) {
     harness,
     "loop_tuned",
     {
-      stall_diagnostics: {enabled: false},
+      repair_diagnostics: {post_edit_reverify: true},
       iteration_budget: {mode: "fixed", initial: 3, max: 3, extend_by: 0},
     },
   )
-  assert_eq(overridden.stall_diagnostics.enabled, false, "caller stall_diagnostics wins over pack")
+  assert_eq(
+    overridden.repair_diagnostics.post_edit_reverify,
+    true,
+    "caller verification wins over pack",
+  )
   assert_eq(
     overridden.iteration_budget.mode,
     "fixed",
@@ -54,9 +62,9 @@ pipeline test(harness: Harness) {
   agent_preset_register("loop_plain", {pack: {timeout_ms: 1000}})
   const plain = agent_preset(harness, "loop_plain")
   assert_eq(
-    plain.stall_diagnostics.threshold,
-    3,
-    "omitting stall_diagnostics keeps the generic tool-using default",
+    plain.repair_diagnostics.post_edit_reverify,
+    true,
+    "omitting repair_diagnostics keeps the tool-using verification default",
   )
   assert_eq(
     plain.iteration_budget.max,

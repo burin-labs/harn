@@ -174,10 +174,9 @@
 - [Run-record observability outputs](./observability/run-record-outputs.md)
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
-- [Agent detectors](./stdlib/detectors.md)
+- [Agent verification](./stdlib/agent-verification.md)
 - [Pace cut rules](./stdlib/cut-rules.md)
 - [Completion judge](./stdlib/agent-judge.md)
-- [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)
 - [Edit stdlib](./stdlib/edit.md)
@@ -358,7 +357,6 @@
   - [Runner configuration](./dev/agent-gates/runner.md)
   - [Stop decision configuration](./dev/agent-gates/stop-decision.md)
   - [Stall handler configuration](./dev/agent-gates/stall-handler.md)
-- [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 
 ## Protocol contributions
 

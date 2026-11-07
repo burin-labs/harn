@@ -1,6 +1,6 @@
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
-import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_repair_checkpoint_state } from "std/agent/repair"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_tool_call, with_llm_script } from "std/testing"
 import { verification_gate_input } from "std/verification"
@@ -58,7 +58,6 @@ pipeline test_agent_loop_preserves_failed_verification_until_command_passes(harn
     tools: tools,
     tool_format: "native",
     max_iterations: 2,
-    stall_diagnostics: true,
   }
   for status in ["failed", "completed", "pending", "running", "unknown"] {
     const result = with_llm_script(
@@ -69,10 +68,10 @@ pipeline test_agent_loop_preserves_failed_verification_until_command_passes(harn
       ],
       { -> agent_loop(harness, "Verify", nil, options) },
     )
-    const dispatch = result.stall_checkpoint.verification_dispatch[0]
+    const dispatch = result.repair_checkpoint.verification_dispatch[0]
     assert(dispatch.ok == true && dispatch.arguments.status == status, "second dispatch reached")
     assert_eq(dispatch.data, command_fact(status), "handler produced the requested command outcome")
-    const state = agent_stall_checkpoint_state(harness.agent, result.stall_checkpoint)
+    const state = agent_repair_checkpoint_state(harness.agent, result.repair_checkpoint)
     assert_eq(state.last_diagnostic_class, status == "completed" ? "pass" : "fail", status)
   }
 }

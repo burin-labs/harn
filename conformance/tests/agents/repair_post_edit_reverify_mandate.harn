@@ -10,9 +10,8 @@ import { repair_test_tools } from "../../fixtures/agents/repair_tools"
  * resolved. The verify routes through the EXISTING `verify_completion`
  * entrypoint.
  *
- * Positive: repair_aware true OR false => after the fail->edit sequence the
- * mandate fires `verify_completion` with stop_reason "post_edit_reverify"
- * (observed via the veto feedback injected into the next LLM turn).
+ * After fail->edit, the mandate invokes `verify_completion` with stop_reason
+ * "post_edit_reverify". The callback records that invocation.
  * Negative control: post_edit_reverify:false => no forced verify, the marker
  * feedback never appears.
  */
@@ -20,7 +19,7 @@ fn repair_tools() {
   return repair_test_tools("test failed: assertion X", true, "read")
 }
 
-fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) {
+fn run_scenario(harness: Harness, post_edit_reverify: bool) {
   const probes = harness.runtime.shared_cell(
     {scope: "task_group", key: "post-edit-reverify-" + harness.random.uuid(), initial: 0},
   )
@@ -56,12 +55,7 @@ fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) 
             }
             return nil
           },
-          stall_diagnostics: {
-            enabled: true,
-            repair_aware: repair_aware,
-            post_edit_reverify: post_edit_reverify,
-            stuck_same_diagnostic_after: 3,
-          },
+          repair_diagnostics: {post_edit_reverify: post_edit_reverify},
         },
       )
       return harness.runtime.shared_snapshot(probes).value == 1
@@ -121,12 +115,7 @@ fn run_cap_scenario(harness: Harness, verify_completion: any) {
             session_id: session,
             done_sentinel: "##DONE##",
             verify_completion: verify_completion,
-            stall_diagnostics: {
-              enabled: true,
-              repair_aware: false,
-              post_edit_reverify: true,
-              stuck_same_diagnostic_after: 3,
-            },
+            repair_diagnostics: {post_edit_reverify: true},
           },
         ) },
       )
@@ -135,12 +124,9 @@ fn run_cap_scenario(harness: Harness, verify_completion: any) {
 }
 
 pipeline default(harness: Harness) {
-  // Positive: the mandate fires after fail->edit with repair nudges enabled.
-  harness.stdio.println(run_scenario(harness, true, true))
-  // Positive: the same mandate fires with repair nudges disabled.
-  harness.stdio.println(run_scenario(harness, false, true))
+  harness.stdio.println(run_scenario(harness, true))
   // Negative control: callers may explicitly disable post-edit reverify.
-  harness.stdio.println(run_scenario(harness, false, false))
+  harness.stdio.println(run_scenario(harness, false))
   // Green post-edit verification can close a last-iteration edit without
   // requiring one more model turn just to say "done".
   const cap_confirmed = run_cap_scenario(harness, confirm_post_edit_reverify)

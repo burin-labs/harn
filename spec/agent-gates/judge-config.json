@@ -10,7 +10,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "__agent_turn_end_judge_stall_cadence"
+        "reader": "__turn_end_judge_cadence"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -53,10 +53,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
         "reader": "__turn_end_judge_every_due"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "agent_stall_turn_end_judge_due"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -133,10 +129,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
         "reader": "__turn_end_judge_past_warmup"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "agent_stall_turn_end_judge_due"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -301,10 +293,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
         "reader": "__turn_end_judge_under_cap"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "agent_stall_turn_end_judge_due"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

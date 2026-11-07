@@ -1,7 +1,7 @@
 // Run: harn test tests/agent/call_budget_reserve_test.harn
 //
 // Unit coverage for #7619's typed seams: the remaining-call measurement and the
-// single owner of the calls reserved for verification, recovery, and terminal
+// single owner of the calls reserved for verification and terminal
 // reporting. No agent_loop, no mock LLM, no inference.
 import { agent_loop_call_reserve, agent_loop_remaining_calls } from "std/agent/control"
 
@@ -20,7 +20,7 @@ pipeline test_remaining_calls_separates_measured_zero_from_unavailable(
 }
 
 /**
- * One owner names the calls a run intends to keep for verification, recovery,
+ * One owner names the calls a run intends to keep for verification
  * and terminal reporting.
  *
  * This asserts the arithmetic only. It does NOT assert that any call is
@@ -31,11 +31,10 @@ pipeline test_remaining_calls_separates_measured_zero_from_unavailable(
 pipeline test_call_reserve_has_one_owner(harness: Harness, task: unknown) {
   const reserve = agent_loop_call_reserve({})
   assert(reserve.verification >= 0)
-  assert(reserve.recovery >= 0)
   assert(reserve.terminal_report >= 0)
   assert_eq(
     reserve.total,
-    reserve.verification + reserve.recovery + reserve.terminal_report,
+    reserve.verification + reserve.terminal_report,
     "the total must be the sum its owner computed, not a separately maintained number",
   )
   assert(reserve.total > 0, "something must be reserved or the reserve is decorative")

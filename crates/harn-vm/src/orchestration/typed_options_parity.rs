@@ -323,9 +323,8 @@ fn model_policy_spec_matches_model_policy() {
         &serde_default_keys::<ModelPolicy>(),
         // Both keys are real ModelPolicy fields but absent from the serialized
         // default: `post_turn_callback` carries a closure and is
-        // `#[serde(skip)]`; an unset `stall_diagnostics` is omitted so adding
-        // the opt-in policy does not change existing workflow graph digests.
-        &["post_turn_callback", "stall_diagnostics"],
+        // `#[serde(skip)]`; unset verification controls are omitted.
+        &["post_turn_callback", "repair_diagnostics"],
         &[],
     );
 }
@@ -584,7 +583,7 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
     for key in [
         "loop_until_done",
         "iteration_budget",
-        "stall_diagnostics",
+        "repair_diagnostics",
         "turn_end_condition",
         // Caller-managed history seeding (#4030) is agent_loop-only; it must
         // never migrate onto LlmCallOptions.

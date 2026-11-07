@@ -107,13 +107,6 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(
         done_sentinel: "##DONE##",
         turn_end_condition: nil,
         max_iterations: 5,
-        stall_diagnostics: {
-          enabled: true,
-          repeat_parse_rejection: 2,
-          inject_feedback: true,
-          max_feedback: 1,
-          hard_stop_after_trips: 3,
-        },
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -129,7 +122,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(
               == "repeated_parse_rejection"
         },
       )
-      assert_eq(len(warnings), 1)
+      assert_eq(len(warnings), 0)
     },
   )
 }

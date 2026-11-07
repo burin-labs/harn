@@ -733,7 +733,7 @@ check-binary-size-policy:
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/check_binary_size_test.harn
 	@echo "    Release binary-size policy OK."
 
-# Agent-loop Harn unit tests (stall detector, loop control, judge verdict,
+# Agent-loop Harn unit tests (verification, loop control, judge verdict,
 # transcript helpers). These live outside `conformance/` so they are NOT walked
 # by `make conformance`; this target wires them into CI so they cannot rot.
 test-agent-scripts:

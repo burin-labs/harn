@@ -166,21 +166,11 @@ pipeline main(harness: Harness, task: unknown) {
           turn_end_condition: false,
           final_wrapup: false,
           iteration_budget: {mode: "fixed", initial: 8, max: 8},
-          stall_diagnostics: {
-            enabled: true,
-            repeat_success: 2,
-            no_progress_messages: 2,
-            hard_stop_after_trips: 2,
-            inject_feedback: false,
-          },
         },
       )
     },
   )
   const terminals = transcript_events_by_kind(captured.result.transcript, "agent_run_terminal")
-  const thrash = captured.events.filter(
-    { event -> event?.reason == "thrash_hard_stop" || event?.checkpoint?.receipt_kind == "thrash_hard_stop_recovery" },
-  )
   const holds = captured.events.filter(
     { event -> event.type == "typed_checkpoint" && event?.checkpoint?.kind == "command_hold" },
   )
@@ -190,7 +180,6 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(harness.runtime.shared_get(dispatches))
   harness.stdio.log(harness.runtime.shared_get(replays))
   harness.stdio.log(len(terminals))
-  harness.stdio.log(len(thrash))
   harness.stdio.log(len(holds))
 }
 "###,
@@ -216,11 +205,7 @@ pipeline main(harness: Harness, task: unknown) {
         "terminal completion emits once; lines: {lines:?}"
     );
     assert_eq!(
-        lines[6], "0",
-        "terminal replay must not trigger thrash; lines: {lines:?}"
-    );
-    assert_eq!(
-        lines[7], "1",
+        lines[6], "1",
         "the command hold must fire exactly once; lines: {lines:?}"
     );
 }

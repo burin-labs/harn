@@ -12,7 +12,7 @@
       {"function": "__turn_end_judge_past_warmup", "name": "cadence"},
       {"function": "__turn_end_judge_under_cap", "name": "cadence"}
     ],
-    "normalizers": ["__turn_end_judge_cadence", "__agent_turn_end_judge_stall_cadence"],
+    "normalizers": ["__turn_end_judge_cadence"],
     "containers": []
   }
 }

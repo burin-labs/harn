@@ -535,7 +535,7 @@ When `current_hashes` is `nil`, the reducer preserves the diagnostic's existing
 gate status instead of calling the freshness classifier with an empty hash map.
 Callers that have a current file-hash snapshot should pass it; callers that
 already classified a diagnostic can embed `classification` on the diagnostic.
-`std/agent/stall` uses this reducer for its current-failure model, so stale or
+`std/agent/repair` uses this reducer for its current-failure model, so stale or
 unbound diagnostics remain advisory and do not increment no-progress streaks.
 
 This is the DRY seam for stale-diagnostic enforcement: a red diagnostic bound

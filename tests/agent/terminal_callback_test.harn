@@ -175,7 +175,6 @@ fn terminal_spec(session: string) -> AgentSpec {
     done_sentinel: "##DONE##",
     max_iterations: 4,
     final_wrapup: false,
-    stall_diagnostics: {enabled: false},
   }
 }
 
@@ -497,9 +496,7 @@ pipeline test_reserved_verification_still_reaches_terminal_notification(harness:
                 assert_eq(harness.fs.read_text(source), "fixed")
                 return nil
               },
-              stall_diagnostics: {
-                enabled: true,
-                repair_aware: true,
+              repair_diagnostics: {
                 post_edit_reverify: true,
                 reserved_terminal_verify: true,
                 reserved_terminal_verify_iterations: 1,

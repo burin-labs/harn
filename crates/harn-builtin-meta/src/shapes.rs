@@ -37,7 +37,6 @@ pub use transcript::{
 };
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
-const TY_BOOL_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_DICT, TY_NIL]);
 const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 const TY_INT_OR_FLOAT_OR_DICT: Ty = Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT]);
 const TY_LIST_OR_STRING: Ty = Ty::Union(&[TY_LIST, TY_STRING]);
@@ -412,7 +411,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("require_action_or_yield", TY_BOOL),
     ShapeFieldDescriptor::optional("tool_examples", TY_STRING),
     ShapeFieldDescriptor::optional("shared_types", TY_STRING),
-    ShapeFieldDescriptor::optional("stall_diagnostics", TY_BOOL_OR_DICT_OR_NIL),
+    ShapeFieldDescriptor::optional("repair_diagnostics", TY_DICT_OR_NIL),
     ShapeFieldDescriptor::optional("permissions", TY_ANY),
     ShapeFieldDescriptor::optional("approval_policy", TY_ANY),
     ShapeFieldDescriptor::optional("command_policy", TY_ANY),

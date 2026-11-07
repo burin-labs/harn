@@ -1,0 +1,48 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_preset } from "std/agent/presets"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  let dispatched = 0
+  const tools = tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect the source",
+    {
+      parameters: {},
+      annotations: {kind: "read"},
+      handler: { _ ->
+        dispatched += 1
+        return "unchanged source"
+      },
+    },
+  )
+  const script = range(0, 8).map(
+    { n -> {text: "", tool_calls: [{id: "read-${n}", name: "inspect", arguments: {}}]} },
+  )
+    .to_list()
+    + [llm_text("Finished. ##DONE##")]
+  const options = agent_preset(
+    harness,
+    "repair",
+    {
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 12,
+      done_sentinel: "##DONE##",
+      final_wrapup: false,
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    script,
+    { -> agent_loop(harness, "Inspect the source eight times, then finish.", nil, options) },
+  )
+  const warnings = transcript_events_by_kind(result.transcript, "agent_loop_stall_warning")
+  require dispatched == 8,
+    "requested=8 dispatched=${dispatched} stop=${result.stop_reason} warnings=${len(warnings)}"
+  require result.status == "done", "the model must reach its declared completion"
+  require len(warnings) == 0, "repetition must not inject detector advice"
+  harness.stdio.println("eight requested inspections dispatched; model completion reached")
+}

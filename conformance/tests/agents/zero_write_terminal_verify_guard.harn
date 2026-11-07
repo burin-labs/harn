@@ -126,9 +126,7 @@ fn run_scenario(
               }
               nil
             },
-            stall_diagnostics: {
-              enabled: true,
-              repair_aware: true,
+            repair_diagnostics: {
               post_edit_reverify: true,
               zero_write_terminal_verify: zero_write_on,
               reserved_terminal_verify_iterations: reserve_iterations,

@@ -100,7 +100,7 @@ fn run_live_case(
               }
               return "Continue until the policy bound."
             },
-            stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true},
+            repair_diagnostics: {post_edit_reverify: true},
           }
             + {
               verify_completion: fixture_verify_completion(

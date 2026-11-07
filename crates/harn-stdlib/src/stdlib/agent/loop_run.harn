@@ -28,11 +28,11 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 import { __agent_loop_turn_setup } from "std/agent/loop_turn_setup"
 import {
-  __agent_stall_resume_edit_history,
-  __agent_stall_validate_checkpoint,
-  __agent_stall_verification_dispatch,
-  agent_stall_initial_checkpoint,
-} from "std/agent/stall_checkpoint"
+  agent_repair_checkpoint_state,
+  agent_repair_initial_checkpoint,
+  agent_repair_validate_checkpoint,
+  agent_repair_verification_dispatch,
+} from "std/agent/repair"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
@@ -87,19 +87,14 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let suspend_result = nil
     let abandonment = nil
     let declared_artifacts = nil
-    let stall_checkpoint = opts?.stall_checkpoint
-      ?? agent_stall_initial_checkpoint(session.session_id)
+    let stall_checkpoint = opts?.repair_checkpoint
+      ?? agent_repair_initial_checkpoint(session.session_id)
     if stall_checkpoint.session_id != session.session_id {
-      throw "agent_loop: stall checkpoint belongs to a different session"
+      throw "agent_loop: repair checkpoint belongs to a different session"
     }
-    __agent_stall_validate_checkpoint(stall_checkpoint)
-    let stall_state = __agent_stall_resume_edit_history(stall_checkpoint.state)
-    let stall_enabled_seen = false
+    agent_repair_validate_checkpoint(stall_checkpoint)
+    let stall_state = stall_checkpoint.state
     let stall_prev_dispatch = stall_checkpoint.dispatch
-    let stall_hard_stop_rescues = 0
-    // Evidence revision the last recovery acted on. Repeating `proceed` on the
-    // identical revision is the same evidence seen twice, not new information.
-    let stall_recovery_evidence_revision = ""
     const max_verify_attempts = opts?.max_verify_attempts ?? 20
     const budget = opts.iteration_budget
     iteration_budget = budget
@@ -111,12 +106,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let last_tool_count = 0
     const loop_start_ms = __agent_loop_clock_now_ms(harness.clock)
     opts = __agent_loop_apply_deadline(opts, budget, loop_start_ms)
-    const __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
+    const __reserve_cfg = agent_repair_config(opts?.repair_diagnostics)
     let terminal_write_unverified = false
     let terminal_assessment: CompletionDirectiveReceipt? = nil
     let made_source_write = false
-    // One owner of the three terminal grant allowances (verification, recovery,
-    // terminal reporting) and of how many of each this run has left.
+    // One owner tracks terminal verification and reporting grants.
     let call_budget = __agent_loop_call_budget_new(opts, __reserve_cfg)
     // Session-scoped ownership of long-running handles keeps polling out of the
     // model loop. Normalize thresholds and wording once here (harn#4456);
@@ -329,395 +323,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           }
           continue
         }
-        const stall_judge_due = agent_stall_turn_end_judge_due(
-          turn_opts,
-          turn_end_judge_invocations,
-          iteration_index + 1,
-        )
-        const stall_prev_turn_made_edit = stall_checkpoint.dispatch_made_edit
-        // Raw emission, not sanitized visible text. Verdict JSON suffixes
-        // strip to a shared prefix and would collide distinct turns.
-        const stall_observation = agent_stall_observe_tool_calls(
-          harness.agent,
-          session.session_id,
-          tool_calls,
-          iteration_index + 1,
-          turn_opts?.stall_diagnostics,
-          stall_state,
-          stall_judge_due,
-          stall_prev_dispatch,
-          raw_text,
-          had_full_parse_rejection,
-          stall_prev_turn_made_edit,
-          llm_result?.stop_reason ?? "",
-          {
-            dispatch: stall_prev_dispatch,
-            iteration: iteration_index + 1,
-            session_id: session.session_id,
-          },
-          stall_checkpoint.consumed_dispatch_position == stall_checkpoint.dispatch_position,
-          stall_checkpoint.verification_dispatch,
-          false,
-        )
-        stall_state = stall_observation.state
+        stall_state = agent_repair_checkpoint_state(harness.agent, stall_checkpoint)
         stall_checkpoint = stall_checkpoint
           + {state: stall_state, consumed_dispatch_position: stall_checkpoint.dispatch_position}
-        stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
-        if agent_stall_verified_write_satisfied(turn_opts?.stall_diagnostics, stall_state) {
+        if stall_state.last_diagnostic_class == "pass"
+          && stall_state.verified_write_epoch >= stall_state.write_epoch
+          && !stall_state.reverify_owed {
           terminal_write_unverified = false
-        }
-        const stall_warning = stall_observation.warning
-        if stall_judge_due && stall_warning != nil {
-          const stall_verify_opts = __stall_judge_opts(
-            turn_opts,
-            verify_completion_judge_invocations,
-            turn_end_judge_invocations,
-          )
-            + {_feedback_history: feedback_history}
-          const stall_verdict = agent_evaluate_completion(
-            harness,
-            session,
-            stall_verify_opts,
-            "stalled",
-            visible_text,
-            iteration_index + 1,
-            raw_text,
-          )
-          terminal_assessment = stall_verdict?.receipt
-          turn_end_judge_invocations += __turn_end_judge_hit(stall_verdict)
-          verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
-          feedback_history = stall_verdict?.feedback_history ?? feedback_history
-          if __completion_directive_stops(stall_verdict) {
-            __close_stall_calls(
-              harness.agent,
-              session.session_id,
-              tool_calls,
-              __completion_stop_call_note(stall_verdict),
-            )
-            final_status = __completion_stop_status(stall_verdict)
-            stop_reason = __completion_stop_reason(stall_verdict)
-            break
-          } else if stall_verdict.action == "continue" {
-            turn_end_judge_vetoes += __turn_end_judge_hit(stall_verdict)
-            verify_completion_judge_vetoes += __completion_judge_hit(stall_verdict)
-            stall_state = __agent_loop_apply_stall_judge_veto(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              tool_calls,
-              stall_verdict,
-              stall_observation,
-              stall_warning,
-              stall_state,
-              llm_result,
-              visible_text,
-              turn_llm_opts,
-              iteration_index + 1,
-              loop_start_ms,
-            )
-            continue
-          } else {
-            __close_stall_calls(
-              harness.agent,
-              session.session_id,
-              tool_calls,
-              "accepted completion",
-            )
-            const stall_totals = agent_session_record_usage(
-              harness.agent,
-              session.session_id,
-              llm_result,
-              turn_llm_opts,
-              iteration_index + 1,
-            )
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "iteration_end",
-              {
-                iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
-                  harness.agent,
-                  harness.clock,
-                  session.session_id,
-                  llm_result,
-                  len(tool_calls),
-                  visible_text,
-                  stall_totals,
-                  loop_start_ms,
-                ),
-              },
-            )
-            const stall_exhaustion = __agent_loop_budget_exhaustion(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              budget,
-              iteration,
-              stall_totals,
-              loop_start_ms,
-              current_max,
-            )
-            if stall_exhaustion.exhausted {
-              __agent_loop_emit_budget_exhausted(
-                harness.agent,
-                session.session_id,
-                stall_exhaustion,
-              )
-              budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(
-                budget_decisions,
-                iteration,
-                current_max,
-                stall_exhaustion.kind,
-              )
-              final_status = "budget_exhausted"
-              stop_reason = stall_exhaustion.kind
-              break
-            }
-            const stalled_done_checkpoint = agent_stage(
-              harness.agent,
-              session.session_id,
-              "iteration_end",
-              {iteration: iteration_index + 1, mock_queue: harness.llm.mock_snapshot()},
-            )
-            if stalled_done_checkpoint.delivered > 0 {
-              continue
-            }
-            final_status = "done"
-            stop_reason = "stalled_turn_end_judge"
-            break
-          }
-        }
-        if stall_observation.hard_stop {
-          if __agent_loop_thrash_recovery_allowed(
-            stall_warning,
-            tool_calls,
-            stall_hard_stop_rescues,
-            stall_recovery_evidence_revision,
-            call_budget.reserve.recovery,
-          ) {
-            call_budget = __agent_loop_record_grant(call_budget, "recovery")
-            stall_hard_stop_rescues = stall_hard_stop_rescues + 1
-            stall_recovery_evidence_revision = __agent_loop_recovery_evidence_revision(
-              stall_warning,
-            )
-            const old_limit = current_max
-            current_max = max(current_max, iteration + 1)
-            if len(tool_calls) > 0 {
-              agent_session_record_undispatched_tool_results(
-                harness.agent,
-                session.session_id,
-                tool_calls,
-                "skipped",
-                "not dispatched: repeated identical tool call entered bounded thrash recovery",
-              )
-            }
-            __inject_feedback_with_tool_repair(
-              harness.agent,
-              session.session_id,
-              __agent_loop_thrash_recovery_key(stall_warning),
-              __agent_loop_thrash_recovery_feedback(stall_warning, visible_text),
-            )
-            const thrash_totals = agent_session_record_usage(
-              harness.agent,
-              session.session_id,
-              llm_result,
-              turn_llm_opts,
-              iteration_index + 1,
-            )
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "iteration_end",
-              {
-                iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
-                  harness.agent,
-                  harness.clock,
-                  session.session_id,
-                  llm_result,
-                  len(tool_calls),
-                  visible_text,
-                  thrash_totals,
-                  loop_start_ms,
-                )
-                  + {
-                    dispatch_skipped: true,
-                    skip_reason: __agent_loop_thrash_recovery_skip_reason(stall_warning),
-                  },
-              },
-            )
-            const recovery_reason = __agent_loop_thrash_recovery_reason(stall_warning)
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "loop_control_decision",
-              {
-                iteration: iteration_index + 1,
-                action: "thrash_rescue",
-                old_limit: old_limit,
-                new_limit: current_max,
-                reason: recovery_reason,
-                status: "recovering",
-              },
-            )
-            __agent_loop_emit_thrash_recovery_checkpoint(
-              harness.agent,
-              session.session_id,
-              iteration_index + 1,
-              tool_calls,
-              stall_warning,
-              old_limit,
-              current_max,
-              "fired",
-              "thrash_rescue",
-              recovery_reason,
-              nil,
-              stall_hard_stop_rescues,
-              "",
-            )
-            continue
-          }
-          // The governor is about to seal a terminal. `postturn.harn` declares
-          // `__arbitrate_stalled_toolless_turn` THE arbitration point for a turn
-          // carrying prose and no tool call — but this branch leaves the loop
-          // before `agent_compute_post_turn` ever runs, so for exactly that turn
-          // shape the contract was owed an arbitration it never got. A read-only
-          // task answers in prose; composing the answer is indistinguishable
-          // from a monologue stall by signature alone, so the run that is
-          // finishing and the run that is looping both end here.
-          //
-          // Arbitrate once, at the moment of the stop. This can only convert a
-          // terminal, never extend the run: a decline leaves the hard stop
-          // exactly as it was, so a genuinely looping run still terminates. The
-          // cadence-driven arbitration above cannot collide with this one —
-          // every path out of it continues or breaks, so a turn that reaches
-          // here was never arbitrated. A cadence rations how often a judge runs
-          // during a run; this is the end of the run, so it asks anyway. The
-          // invocation caps still apply, and they are the budget that matters.
-          //
-          // Only a turn that actually said something is worth arbitrating, and
-          // only when this run declared someone to arbitrate it. Silence has no
-          // answer to adjudicate, and an undeclared adjudicator would answer
-          // `accept` out of an empty plan — silence read as approval.
-          const stall_arbitration_opts = __stall_judge_opts(
-            turn_opts,
-            verify_completion_judge_invocations,
-            turn_end_judge_invocations,
-          )
-            + {_feedback_history: feedback_history}
-          if trim(visible_text) != ""
-            && agent_completion_adjudicator_declared(stall_arbitration_opts, "stalled") {
-            const governor_verdict = agent_evaluate_completion(
-              harness,
-              session,
-              stall_arbitration_opts,
-              "stalled",
-              visible_text,
-              iteration_index + 1,
-            )
-            terminal_assessment = governor_verdict?.receipt
-            turn_end_judge_invocations += __turn_end_judge_hit(governor_verdict)
-            verify_completion_judge_invocations += __completion_judge_hit(governor_verdict)
-            feedback_history = governor_verdict?.feedback_history ?? feedback_history
-            // A judge that hit its invocation cap is marked capped without ever
-            // being asked, so a plan alone is not proof that anyone answered.
-            // Only an adjudicator that actually ran may convert a stop into a
-            // completion; a cap instead reports the completion as unverified,
-            // which is what it is.
-            if governor_verdict.action == "accept"
-              && __completion_directive_adjudicated(governor_verdict) {
-              __close_stall_calls(
-                harness.agent,
-                session.session_id,
-                tool_calls,
-                "accepted completion",
-              )
-              const arbitrated_totals = agent_session_record_usage(
-                harness.agent,
-                session.session_id,
-                llm_result,
-                turn_llm_opts,
-                iteration_index + 1,
-              )
-              agent_emit_event(
-                harness.agent,
-                session.session_id,
-                "iteration_end",
-                {
-                  iteration: iteration_index + 1,
-                  iteration_info: __agent_loop_iteration_info(
-                    harness.agent,
-                    harness.clock,
-                    session.session_id,
-                    llm_result,
-                    len(tool_calls),
-                    visible_text,
-                    arbitrated_totals,
-                    loop_start_ms,
-                  ),
-                },
-              )
-              final_status = "done"
-              stop_reason = "stalled_turn_end_judge"
-              break
-            } else if __completion_directive_stops(governor_verdict) {
-              __close_stall_calls(
-                harness.agent,
-                session.session_id,
-                tool_calls,
-                __completion_stop_call_note(governor_verdict),
-              )
-              final_status = __completion_stop_status(governor_verdict)
-              stop_reason = __completion_stop_reason(governor_verdict)
-              break
-            }
-          }
-          const recovery_bound_fired = __agent_loop_recovery_bound_fired(
-            stall_warning,
-            stall_hard_stop_rescues,
-            stall_recovery_evidence_revision,
-            call_budget.reserve.recovery,
-          )
-          const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(
-            stall_warning,
-            tool_calls,
-            stall_hard_stop_rescues,
-            stall_recovery_evidence_revision,
-            call_budget.reserve.recovery,
-          )
-          __agent_loop_emit_thrash_recovery_checkpoint(
-            harness.agent,
-            session.session_id,
-            iteration_index + 1,
-            tool_calls,
-            stall_warning,
-            current_max,
-            current_max,
-            "skipped",
-            "stop",
-            recovery_skip_outcome,
-            recovery_skip_outcome,
-            stall_hard_stop_rescues,
-            recovery_bound_fired,
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "loop_control_decision",
-            {
-              iteration: iteration_index + 1,
-              action: "stop",
-              old_limit: current_max,
-              new_limit: current_max,
-              reason: "thrash_hard_stop",
-              status: "stuck",
-            },
-          )
-          final_status = "stuck"
-          stop_reason = "thrash_hard_stop"
-          break
         }
         if turn_opts?.step_judge != nil {
           const remaining_iterations = current_max - iteration_index
@@ -727,7 +339,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             llm_result,
             turn_opts,
             iteration_index + 1,
-            stall_warning,
+            nil,
             step_judge_attempts,
             remaining_iterations,
             step_judge_unavailable_count,
@@ -871,19 +483,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         )
         const dispatch = dispatched.dispatch
         const actuation_dispatch_results = __dispatch_results_list(dispatch)
-        const completed_observation = __agent_loop_completed_dispatch_stall(
-          {
-            harness: harness,
-            session_id: session.session_id,
-            tool_calls: tool_calls,
-            dispatch: dispatch,
-            iteration: iteration_index + 1,
-            stall_config: stall_observation.config,
-            stall_state: stall_state,
-            turn_opts: turn_opts,
-          },
-        )
-        stall_state = completed_observation.state
         stall_checkpoint = stall_checkpoint
           + {
             state: stall_state,
@@ -895,7 +494,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
                 0
               },
             dispatch_made_edit: __turn_made_edit(dispatch, opts?.tools),
-            verification_dispatch: __agent_stall_verification_dispatch(dispatch, turn_opts),
+            verification_dispatch: agent_repair_verification_dispatch(dispatch, turn_opts),
           }
         // Register long-running handles (`status=="running"` with a `handle_id`).
         // Awaited rows gate the next no-tool-call boundary into a hold; the
@@ -1004,12 +603,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           {
             budget: budget,
             bridge_step_delivered: bridge_step_delivered,
-            completed_no_information_gain: completed_observation.no_information_gain,
-            stall_checkpoint: if stall_enabled_seen {
-              stall_checkpoint
-            } else {
-              nil
-            },
+            repair_checkpoint: stall_checkpoint,
             consecutive_failure_count: consecutive_failure_count,
             dispatch: dispatch,
             dispatched_turn_opts: dispatched.turn_opts,
@@ -1157,12 +751,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       extensions_used: extensions_used,
       last_tool_count: last_tool_count,
       stall_state: stall_state,
-      stall_checkpoint: if stall_enabled_seen {
-        stall_checkpoint + {state: stall_state}
-      } else {
-        nil
-      },
-      stall_enabled_seen: stall_enabled_seen,
+      repair_checkpoint: stall_checkpoint + {state: stall_state},
       verify_completion_judge_invocations: verify_completion_judge_invocations,
       verify_completion_judge_vetoes: verify_completion_judge_vetoes,
       turn_end_judge_invocations: turn_end_judge_invocations,

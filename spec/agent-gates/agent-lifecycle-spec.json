@@ -244,11 +244,11 @@
   },
   {
     "default": "fresh checkpoint for the current session",
-    "evidence": "loop_run.__agent_loop_run calls agent_stall_initial_checkpoint when no checkpoint is supplied and rejects another session identity. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "loop_run.__agent_loop_run initializes verification evidence when absent and rejects another session identity; repair_checkpoint.contract exercises stage handoffs and invalid checkpoints.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
-    "name": "AgentSpec.stall_checkpoint",
+    "name": "AgentSpec.repair_checkpoint",
     "reachability": "unknown",
     "readers": [
       {
@@ -260,12 +260,12 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "disabled; enabling an object inherits AgentStallConfig defaults",
-    "evidence": "stall_config.__agent_stall_config returns __agent_stall_default_config for nil, whose enabled field is false. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "post-edit reverify true; terminal verification false",
+    "evidence": "agent_repair_config owns the four explicit verification defaults; loop and workflow callers pass the same repair_diagnostics shape.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
-    "name": "AgentSpec.stall_diagnostics",
+    "name": "AgentSpec.repair_diagnostics",
     "reachability": "unknown",
     "readers": [
       {

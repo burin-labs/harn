@@ -320,8 +320,8 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
-    "expression": "agent_stall_repair_config(opts?.stall_diagnostics)",
-    "owner": "agent_stall_repair_config",
+    "expression": "agent_repair_config(opts?.repair_diagnostics)",
+    "owner": "agent_repair_config",
     "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
   },
   {
@@ -635,20 +635,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__agent_loop_apply_stall_judge_veto(\n              harness.agent,\n              harness.clock,\n              session.session_id,\n              tool_calls,\n              stall_verdict,\n              stall_observation,\n              stall_warning,\n              stall_state,\n              llm_result,\n              visible_text,\n              turn_llm_opts,\n              iteration_index + 1,\n              loop_start_ms,\n            )",
-    "owner": "__agent_loop_apply_stall_judge_veto",
-    "evidence": "Consumer __agent_loop_apply_stall_judge_veto.turn_llm_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__agent_loop_apply_stall_judge_veto",
-        "parameter": "turn_llm_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "__agent_loop_call_budget_new(opts, __reserve_cfg)",
     "owner": "__agent_loop_call_budget_new",
     "evidence": "Consumer __agent_loop_call_budget_new.opts in crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -748,13 +734,13 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__agent_stall_verification_dispatch(dispatch, turn_opts)",
-    "owner": "__agent_stall_verification_dispatch",
-    "evidence": "Consumer __agent_stall_verification_dispatch.opts in crates/harn-stdlib/src/stdlib/agent/stall_checkpoint.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "expression": "agent_repair_verification_dispatch(dispatch, turn_opts)",
+    "owner": "agent_repair_verification_dispatch",
+    "evidence": "Consumer agent_repair_verification_dispatch.opts in crates/harn-stdlib/src/stdlib/agent/repair.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
       {
         "scope": "AgentSpec",
-        "function": "__agent_stall_verification_dispatch",
+        "function": "agent_repair_verification_dispatch",
         "parameter": "opts"
       }
     ]
@@ -769,20 +755,6 @@
       {
         "scope": "AgentSpec",
         "function": "__dispatch_tool_calls",
-        "parameter": "turn_opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__stall_judge_opts(\n            turn_opts,\n            verify_completion_judge_invocations,\n            turn_end_judge_invocations,\n          )",
-    "owner": "__stall_judge_opts",
-    "evidence": "Consumer __stall_judge_opts.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__stall_judge_opts",
         "parameter": "turn_opts"
       }
     ]
@@ -874,20 +846,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_session_record_usage(\n                harness.agent,\n                session.session_id,\n                llm_result,\n                turn_llm_opts,\n                iteration_index + 1,\n              )",
-    "owner": "agent_session_record_usage",
-    "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_session_record_usage",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "agent_session_record_usage(\n              harness.agent,\n              session.session_id,\n              llm_result,\n              turn_llm_opts,\n              iteration_index + 1,\n            )",
     "owner": "agent_session_record_usage",
     "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -902,21 +860,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_stall_turn_end_judge_due(\n          turn_opts,\n          turn_end_judge_invocations,\n          iteration_index + 1,\n        )",
-    "owner": "agent_stall_turn_end_judge_due",
-    "evidence": "Consumer agent_stall_turn_end_judge_due.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_stall_turn_end_judge_due",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            stall_warning,\n            step_judge_attempts,\n            remaining_iterations,\n            step_judge_unavailable_count,\n          )",
+    "expression": "agent_step_judge(\n            harness,\n            session,\n            llm_result,\n            turn_opts,\n            iteration_index + 1,\n            nil,\n            step_judge_attempts,\n            remaining_iterations,\n            step_judge_unavailable_count,\n          )",
     "owner": "agent_step_judge",
     "evidence": "Consumer agent_step_judge.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -1105,20 +1049,6 @@
       {
         "scope": "AgentSpec",
         "function": "agent_reminder_providers_fire",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
-    "expression": "agent_session_record_usage(agent, session_id, llm_result, turn_llm_opts, iteration)",
-    "owner": "agent_session_record_usage",
-    "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "agent_session_record_usage",
         "parameter": "opts"
       }
     ]

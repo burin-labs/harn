@@ -96,9 +96,9 @@ pub struct ModelPolicy {
     pub tool_format: Option<String>,
     /// Treatment of text tool calls emitted during a native-tool stage.
     pub native_tool_fallback: NativeToolFallbackPolicy,
-    /// Validated by std/agent/stall_config; absent values inherit agent_loop.
+    /// Normalized by std/agent/repair; absent values inherit agent_loop.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub stall_diagnostics: Option<serde_json::Value>,
+    pub repair_diagnostics: Option<serde_json::Value>,
 }
 
 /// Excludes runtime callback identity from policy equality.

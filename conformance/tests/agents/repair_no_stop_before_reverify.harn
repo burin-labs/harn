@@ -51,12 +51,7 @@ pipeline default(harness: Harness) {
             session_id: session,
             done_sentinel: "##DONE##",
             verify_completion: verify_once_then_confirm,
-            stall_diagnostics: {
-              enabled: true,
-              repair_aware: false,
-              post_edit_reverify: true,
-              stuck_same_diagnostic_after: 3,
-            },
+            repair_diagnostics: {post_edit_reverify: true},
           },
         ) },
       )

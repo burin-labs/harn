@@ -2757,7 +2757,7 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_checkpoint.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/repair.harn",
     "expression": "__judge_tool_descriptor(opts, __tool_result_name(result))",
     "owner": "__judge_tool_descriptor",
     "evidence": "Consumer __judge_tool_descriptor.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
@@ -2940,20 +2940,6 @@
       {
         "scope": "AgentSpec",
         "function": "__tool_surface_current_names",
-        "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-    "expression": "__agent_turn_end_judge_stall_cadence(opts)",
-    "owner": "__agent_turn_end_judge_stall_cadence",
-    "evidence": "Consumer __agent_turn_end_judge_stall_cadence.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
-      {
-        "scope": "AgentSpec",
-        "function": "__agent_turn_end_judge_stall_cadence",
         "parameter": "opts"
       }
     ]

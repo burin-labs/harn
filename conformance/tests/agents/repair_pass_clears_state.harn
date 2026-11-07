@@ -69,7 +69,6 @@ pipeline default(harness: Harness) {
             max_iterations: 6,
             session_id: session,
             done_sentinel: "##DONE##",
-            stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2},
           },
         ) },
       )

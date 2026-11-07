@@ -1,6 +1,6 @@
 import { CompletionPrecheckConfig } from "std/agent/completion_precheck"
 import { GoalSpec } from "std/agent/goal_contract"
-import { AgentStallCheckpoint } from "std/agent/stall_types"
+import { AgentRepairCheckpoint } from "std/agent/repair_types"
 // Canonical declarations for the typed agent-loop option surface.
 // `std/agent/options` is the public facade and re-exports these aliases.
 // Rust twins for the workflow-facing policies live in
@@ -144,80 +144,12 @@ pub type TurnPolicy = {
   max_prose_chars?: int,
 }
 
-/**
- * Nested repair-diagnostics config accepted under `stall_diagnostics`.
- * Callers may also pass these fields flat on `stall_diagnostics`; flat fields
- * win when both forms are present.
- */
+/** Explicit post-edit and terminal verification controls. */
 pub type RepairDiagnostics = {
-  repair_aware?: bool,
-  stuck_same_diagnostic_after?: int,
   post_edit_reverify?: bool,
-  no_net_progress_extend_guard?: bool,
-  no_net_progress_extend_after?: int,
-  no_net_progress_hard_cap_after?: int,
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
-}
-
-/**
- * Caller-facing `stall_diagnostics:` config. Normalized into the internal
- * `AgentStallConfig` shape by `std/agent/stall`.
- *
- * Rust twin: none — stall diagnostics are implemented entirely in the
- * stdlib (`std/agent/stall`); `AgentStallConfig` there is the normalized
- * counterpart of this input shape.
- */
-pub type StallDiagnostics = {
-  enabled?: bool,
-  threshold?: int,
-  inject_feedback?: bool,
-  max_feedback?: int,
-  exempt_tools?: list<string>,
-  allow_repeated_tools?: list<string>,
-  include_arguments?: bool,
-  repeat_same_observation?: int,
-  repeat_same_error?: int,
-  no_progress_messages?: int,
-  ping_pong_cycles?: int,
-  repeat_context_window_error?: int,
-  repeat_parse_rejection?: int,
-  hard_stop_after_trips?: int,
-  repair_diagnostics?: RepairDiagnostics,
-  repair_aware?: bool,
-  stuck_same_diagnostic_after?: int,
-  post_edit_reverify?: bool,
-  no_net_progress_extend_guard?: bool,
-  no_net_progress_extend_after?: int,
-  no_net_progress_hard_cap_after?: int,
-  reserved_terminal_verify?: bool,
-  reserved_terminal_verify_iterations?: int,
-  zero_write_terminal_verify?: bool,
-  /** Turns a newly seen failure is given before it counts toward a stall. */
-  fresh_failure_grace?: int,
-  /** Repeats of an identical successful call before it counts toward a stall. */
-  repeat_success?: int,
-  /** Treat a shrinking failure set as progress and restore the nudge budget. */
-  shrinking_failure_set_resets_budget?: bool,
-  /**
-   * Report a repeated observation as advice rather than counting it toward a
-   * stall. Read at `std/agent/stall_config`.
-   */
-  observation_recurrence_advisory?: bool,
-  /** Report revisits to agent-produced file content without escalating a stall. */
-  edit_oscillation?: bool,
-  /**
-   * Callback the stall decision keys on to learn whether the verifier moved.
-   * The whole verifier-progress arm is inert without it. Read at
-   * `std/agent/stall_verification`.
-   */
-  progress_signal?: any,
-  /**
-   * Turns the verifier may fail to advance before that counts as no progress.
-   * Read at `std/agent/stall_verification`.
-   */
-  no_verifier_progress_limit?: int,
 }
 
 /**
@@ -531,8 +463,7 @@ pub type AgentCapabilitySpec = {
 
 /** Persistence, suspension, compaction, and daemon extensions. */
 pub type AgentLifecycleSpec = {
-  stall_checkpoint?: AgentStallCheckpoint,
-  stall_diagnostics?: bool | StallDiagnostics,
+  repair_checkpoint?: AgentRepairCheckpoint,
   daemon?: bool,
   persist_path?: string,
   resume_path?: string,
@@ -652,12 +583,6 @@ pub type AgentPresetOptions = AgentSpec \
  * A preset's default compaction-pin policy. `agent_preset` copies it into
  * the options it returns, so it arrives at `agent_loop_options` as an
  * ordinary caller key.
- */
-/**
- * Discovery mirror of the repair knobs inside `stall_diagnostics`, written
- * by `agent_preset` so a consumer can find them without reading that nested
- * dict. Read by whoever inspects a preset's options, not by the loop, which
- * takes its values from `stall_diagnostics.repair_diagnostics`.
  */
 /**
  * Consumed by `sub_agent_run` in the host before the loop sees it, and

@@ -33,11 +33,8 @@ fn agent_prefill_message(content: &str) -> VmValue {
 /// of the session. Neither is safe as a blanket default, which is why it is
 /// passed rather than inferred: a directive about the turn that just ended
 /// (a malformed call, a stale verdict) asserts a resolved condition forever if
-/// it persists, while guidance served under a re-injection cap such as
-/// `stall_diagnostics.max_feedback` is the model's only copy and goes missing
-/// mid-repair if it expires. The kind string cannot decide this — callers pick
-/// it dynamically, and several call sites are routers forwarding kinds they do
-/// not own.
+/// it persists. Callers choose kinds dynamically, and routers forward kinds
+/// they do not own. The caller therefore supplies the lifetime.
 pub(crate) fn inject_agent_feedback(
     session_id: &str,
     kind: &str,

@@ -38,7 +38,7 @@ import {
 // `pin_policy` carries a preset's default compaction-pin policy (see
 // std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
 // into `opts.pin_policy` for pin-aware harnesses.
-// `iteration_budget` and `stall_diagnostics` are the same fill-nil shape the
+// `iteration_budget` and `repair_diagnostics` are the same fill-nil shape the
 // validator and `agent_loop` already accept; they belong on the named row so a
 // registered preset can ship loop policy instead of forcing every call site
 // to restate it. Pack rows sit under caller input and above generic
@@ -52,7 +52,7 @@ const __PRESET_PACK_KEYS = [
   "models",
   "pin_policy",
   "provider",
-  "stall_diagnostics",
+  "repair_diagnostics",
   "timeout_ms",
 ]
 
@@ -226,7 +226,7 @@ fn __preset_registry() {
  * middleware layers), and `pack` supplies fill-nil option defaults
  * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `models`,
  * `pin_policy`,
- * `iteration_budget`, `stall_diagnostics`) that fill ONLY nil/absent keys.
+ * `iteration_budget`, `repair_diagnostics`) that fill ONLY nil/absent keys.
  * The spec shape is validated; an invalid family or unknown pack key throws.
  * Returns the normalized kind string.
  *
@@ -421,32 +421,8 @@ fn __tool_using_defaults(kind: string) {
     turn_end_condition: nil,
     native_tool_fallback: "allow_once",
     max_nudges: max_nudges,
-    // The repair knobs ride inside `stall_diagnostics` (where
-    // `__agent_stall_config` parses them) and default OFF; `repair_aware:false`
-    // makes every repair field inert until a harness opts into the behavior.
-    stall_diagnostics: {
-      enabled: true,
-      threshold: 3,
-      inject_feedback: true,
-      max_feedback: 1,
-      repair_aware: false,
-      stuck_same_diagnostic_after: 3,
-      post_edit_reverify: true,
-      no_net_progress_extend_guard: false,
-      no_net_progress_extend_after: 3,
-      no_net_progress_hard_cap_after: 16,
-    },
-    // Discovery surface (#repair-diagnostics). Mirrors the repair knobs above
-    // so consumers can find and opt into the
-    // evidence-aware repair loop without spelunking `stall_diagnostics`.
-    // Subsumes the legacy futile-retry guard.
     repair_diagnostics: {
-      repair_aware: false,
-      stuck_same_diagnostic_after: 3,
       post_edit_reverify: true,
-      no_net_progress_extend_guard: false,
-      no_net_progress_extend_after: 3,
-      no_net_progress_hard_cap_after: 16,
       reserved_terminal_verify: false,
       reserved_terminal_verify_iterations: 2,
       zero_write_terminal_verify: false,
@@ -795,7 +771,7 @@ fn __apply_preset_pack(opts: any, kind: any) {
  * spread it into `agent_loop(harness, ...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
  * timeout, cost budget, model ladder,
- * pin policy, iteration_budget, stall_diagnostics) into
+ * pin policy, iteration_budget, repair_diagnostics) into
  * nil/absent keys, and runs the shared
  * agent-loop default transport retry normalizer (opt out with `retry: false`
  * or `llm_retry: nil`). Captain presets additionally compose:
@@ -823,7 +799,7 @@ pub fn agent_preset(harness: Harness, kind: string, options: any = nil) {
   let opts = __dict_or_empty(options)
   const caller_supplied_llm_caller = __has_key(opts, "llm_caller")
   // Pack sits under caller input and above kind-family defaults, so a
-  // registered stall block or iteration budget is not swallowed by the
+  // registered verification policy or iteration budget is not swallowed by the
   // generic tool-using template.
   opts = __apply_preset_pack(opts, resolved_kind)
   opts = __apply_kind_defaults(resolved_kind, opts)

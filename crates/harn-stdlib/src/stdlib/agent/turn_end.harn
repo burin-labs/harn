@@ -170,57 +170,6 @@ pub fn agent_turn_end_judge_cap(judge_cfg: TurnEndConditionConfig) -> int? {
 }
 
 /**
- * __agent_turn_end_judge_stall_cadence.
- *
- * The stall-gated cadence for this run, or nil when the condition is not
- * gated on `when: "stalled"`.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: __agent_turn_end_judge_stall_cadence(opts)
- */
-pub fn __agent_turn_end_judge_stall_cadence(opts: dict) -> dict? {
-  const judge = opts?.turn_end_condition
-  if type_of(judge) != "dict" {
-    return nil
-  }
-  const cadence = judge?.cadence
-  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
-    return nil
-  }
-  return cadence
-}
-
-/**
- * agent_stall_turn_end_judge_due decides whether the stall turn-end judge is due.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_stall_turn_end_judge_due(opts, 0, 3)
- */
-pub fn agent_stall_turn_end_judge_due(opts: dict, invocations: int, turn_number: int) -> bool {
-  const cadence = __agent_turn_end_judge_stall_cadence(opts)
-  if cadence == nil {
-    return false
-  }
-  const max_invocations = cadence?.max_invocations
-  if max_invocations != nil && invocations >= max_invocations {
-    return false
-  }
-  const min_iterations = cadence?.min_iterations_before_first
-  if min_iterations != nil && turn_number <= min_iterations {
-    return false
-  }
-  const every = cadence?.every
-  if every != nil && turn_number % every != 0 {
-    return false
-  }
-  return true
-}
-
-/**
  * __turn_end_judge_hit.
  *
  * One if this completion receipt records a turn-end judge invocation, else

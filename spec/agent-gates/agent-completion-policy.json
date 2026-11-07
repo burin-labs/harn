@@ -292,10 +292,6 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-        "reader": "__agent_turn_end_judge_stall_cadence"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
         "reader": "__turn_end_condition_config"
       }
     ],

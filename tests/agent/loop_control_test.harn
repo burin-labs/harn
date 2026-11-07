@@ -47,43 +47,6 @@ fn _state(
   }
 }
 
-/**
- * Like `_state` but also sets `progress.no_net_advance` — the outcome-aware
- * thrash signal the loop sets when the same failing diagnostic recurs past
- * threshold. When true it must veto the "progress within window" extension.
- */
-fn _state_with_advance(
-  progress_changed: bool,
-  no_net_advance: bool,
-  remaining: int,
-  vetoed: bool,
-  required_ok: bool,
-) {
-  return {
-    iteration: 10,
-    budget: {remaining: remaining},
-    turn: {tool_call_count: 3},
-    session: {required_tools_satisfied: required_ok},
-    completion: {vetoed: vetoed},
-    progress: {changed: progress_changed, no_net_advance: no_net_advance},
-  }
-}
-
-/**
- * Like `_state` but carries the completed-dispatch evidence that every
- * successful read-only observation this turn was already seen byte-for-byte.
- */
-fn _state_with_information_gain(progress_changed: bool, no_information_gain: bool, remaining: int) {
-  return {
-    iteration: 10,
-    budget: {remaining: remaining},
-    turn: {tool_call_count: 1},
-    session: {required_tools_satisfied: true},
-    completion: {vetoed: false},
-    progress: {changed: progress_changed, no_information_gain: no_information_gain},
-  }
-}
-
 pipeline test_text_only_progress_extends(harness: Harness, task: unknown) {
   // Visible-text progress, ZERO tool calls this turn, at the boundary → extend.
   // This is the bug the rule table fixed.
@@ -127,92 +90,25 @@ pipeline test_required_tools_missing_extends(harness: Harness, task: unknown) {
   assert_eq(cmd.reason, "required tools missing")
 }
 
-pipeline test_thrash_no_net_advance_does_not_extend(harness: Harness, task: unknown) {
-  // Activity present (progress.changed true, 3 tool calls) but the verification
-  // OUTCOME is not advancing (no_net_advance set by the loop because the same
-  // failing diagnostic recurred past threshold). At the boundary this must NOT
-  // extend — the thrash stops buying itself budget. This is the runaway-budget
-  // root fix: pre-fix this state extended 24->32->...->72.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, false, true))
-  assert_eq(cmd.action, "none")
-}
-
-pipeline test_real_progress_still_extends_with_advance_field(harness: Harness, task: unknown) {
-  // A genuinely-advancing run (changed true, no_net_advance FALSE — error count
-  // draining / signature changing) still reads as progress and keeps its budget.
-  const cmd = agent_loop_control_invoke(
-    {},
-    BUDGET,
-    _state_with_advance(true, false, 0, false, true),
-  )
-  assert_eq(cmd.action, "extend")
-  assert_eq(cmd.reason, "progress within window")
-}
-
-pipeline test_repeated_observation_without_information_gain_does_not_extend(
-  harness: Harness,
-  task: unknown,
-) {
-  // A successful tool call is activity, but an exact read-only observation
-  // recurrence carries no new information and must not buy more runway.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_information_gain(true, true, 0))
-  assert_eq(cmd.action, "none")
-}
-
-pipeline test_novel_observation_still_extends(harness: Harness, task: unknown) {
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_information_gain(true, false, 0))
-  assert_eq(cmd.action, "extend")
-  assert_eq(cmd.reason, "progress within window")
-}
-
-pipeline test_no_net_advance_yields_to_completion_veto(harness: Harness, task: unknown) {
-  // The thrash override only suppresses the PROGRESS rule. A vetoed completion
-  // gate is ordered ahead of progress and still extends even on a thrash turn,
-  // so completion-driven repair is never starved by the budget guard.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, true, true))
-  assert_eq(cmd.action, "extend")
-  assert_eq(cmd.reason, "completion gate vetoed")
-}
-
-pipeline test_no_net_advance_yields_to_required_tools(harness: Harness, task: unknown) {
-  // Likewise, required-tools-missing is ordered ahead of progress and still
-  // extends on a thrash turn.
-  const cmd = agent_loop_control_invoke(
-    {},
-    BUDGET,
-    _state_with_advance(true, true, 0, false, false),
-  )
-  assert_eq(cmd.action, "extend")
-  assert_eq(cmd.reason, "required tools missing")
-}
-
 /**
  * Like `_state` but carries the extension-window counter: turns elapsed since
  * the last turn that satisfied the progress predicate. Zero means this turn
  * did; the loop sets it in `agent_loop_snapshot_state`.
  */
-fn _state_with_window(no_information_gain: bool, turns_since_progressing: int) {
+fn _state_with_window(turns_since_progressing: int) {
   return {
     iteration: 10,
     budget: {remaining: 0},
-    turn: {tool_call_count: 1},
+    turn: {tool_call_count: 0},
     session: {required_tools_satisfied: true},
     completion: {vetoed: false},
-    progress: {
-      changed: true,
-      no_information_gain: no_information_gain,
-      turns_since_progressing: turns_since_progressing,
-    },
+    progress: {changed: false, turns_since_progressing: turns_since_progressing},
   }
 }
 
 pipeline test_progress_inside_window_extends(harness: Harness, task: unknown) {
-  // The boundary turn itself is a repeated read (no information gain), but a
-  // progressing turn sits two turns back, inside the window of 4. This is the
-  // defect: a run that had been editing and then spent its last turns reading
-  // files back to repair was stopped at exactly its initial cap because the
-  // boundary landed on one suppressed turn.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(true, 2))
+  // A quiet boundary turn must retain activity measured inside the window.
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(2))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "progress within window")
 }
@@ -221,13 +117,13 @@ pipeline test_progress_outside_window_does_not_extend(harness: Harness, task: un
   // Matched control for the case above: same state, but the last progressing
   // turn is now 4 turns back, at the window edge. A window in which no turn
   // progressed still stops the loop, so a thrash cannot buy runway forever.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(true, 4))
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(4))
   assert_eq(cmd.action, "none")
 }
 
 pipeline test_window_edge_is_exclusive(harness: Harness, task: unknown) {
   // The last turn still inside a window of 4 is three turns back.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(true, 3))
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_window(3))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "progress within window")
 }
@@ -236,6 +132,6 @@ pipeline test_unadvanced_window_counter_does_not_extend(harness: Harness, task: 
   // Absence must not read as success. A non-progressing turn whose counter was
   // never advanced (field missing, so it reads 0 — nominally "this turn
   // progressed") must fall back to the boundary-turn answer and NOT extend.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_information_gain(true, true, 0))
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state(false, 0, 0, false, true))
   assert_eq(cmd.action, "none")
 }

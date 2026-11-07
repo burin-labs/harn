@@ -56,7 +56,6 @@ pipeline default(harness: Harness) {
             max_iterations: 5,
             session_id: session,
             policy: {tools: ["read_only"]},
-            stall_diagnostics: {enabled: true, inject_feedback: false},
           },
         ) },
       )

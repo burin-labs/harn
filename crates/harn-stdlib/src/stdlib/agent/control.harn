@@ -74,23 +74,8 @@ pub fn agent_loop_remaining_calls(current_limit: int?, iteration: int?) -> int? 
 }
 
 /**
- * The calls a run INTENDS to preserve for verification, recovery, and terminal
- * reporting once the model's working budget is spent.
- *
- * NOT A WITHHOLDING MECHANISM TODAY. This is arithmetic: it computes a number
- * that is measured and warned about, and nothing draws from it. The three
- * spenders each enforce their own independent policy — verification decrements
- * `terminal_verify_reserve_remaining` from `stall_config`, recovery is bounded
- * by `__agent_loop_max_consecutive_recoveries`, and terminal reporting is gated
- * by `final_wrapup`. Changing this total therefore moves the projection and its
- * warning without reserving a single call. Making one shared policy actually
- * drive those spenders is tracked separately; until then, read every value here
- * as intent, not as a guarantee.
- *
- * What it does own is the arithmetic. `total` is computed here rather than
- * passed in, so no caller can maintain a second number that drifts from its
- * parts, and the recovery input comes from the bound's owner rather than a
- * literal.
+ * Compute the terminal verification and reporting allowances. The loop's
+ * call-budget owner tracks spending; this function owns their total.
  *
  * @effects: []
  * @errors: []
@@ -98,13 +83,11 @@ pub fn agent_loop_remaining_calls(current_limit: int?, iteration: int?) -> int? 
  */
 pub fn agent_loop_call_reserve(reserve_inputs: dict?) -> dict {
   const verification = to_int(reserve_inputs?.verification ?? 1) ?? 1
-  const recovery = to_int(reserve_inputs?.recovery ?? 1) ?? 1
   const terminal_report = to_int(reserve_inputs?.terminal_report ?? 1) ?? 1
   return {
     verification: verification,
-    recovery: recovery,
     terminal_report: terminal_report,
-    total: verification + recovery + terminal_report,
+    total: verification + terminal_report,
   }
 }
 
@@ -149,8 +132,6 @@ fn __agent_loop_state(args: dict) -> AgentLoopState {
     progress: {
       changed: args.progress_changed,
       summary: args.progress_summary,
-      no_net_advance: args.progress_no_net_advance ?? false,
-      no_information_gain: args.progress_no_information_gain ?? false,
       turns_since_progressing: args.progress_turns_since_progressing ?? 0,
     },
   }
@@ -167,33 +148,10 @@ fn __agent_loop_state(args: dict) -> AgentLoopState {
  * productive multi-file refactor off mid-work (a methodical model editing across
  * ~6 files stopped at its initial cap because one interleaved planning turn was
  * treated as "no progress"). Degenerate narration that never acts is bounded
- * independently by the iteration max and the stall detector.
- *
- * Structural outcome evidence can veto activity credit. `progress.changed` is
- * an ACTIVITY signal — it fires merely because the model issued tool calls —
- * which makes a thrashing run
- * (lots of edits/verifies, the SAME compile/test failure recurring turn after
- * turn, no error draining toward a green build) read as "progressing" every
- * turn and lets the loop extend its own budget without bound (observed
- * 24->32->...->72 on a run that should have been cut). `no_net_advance` is set
- * ONLY on the verify-bearing failing path when the verification OUTCOME is not
- * advancing (the same failure signature has recurred past a threshold, i.e. the
- * stall detector's same-diagnostic streak). It is the runtime-side twin of the
- * source policy's
- * no-net-progress ripcord. Crucially it is OUTCOME-AWARE, not a second activity
- * notion: a productive edit changes the error signature (streak resets => still
- * progress) or a test passes (failure model clears => still progress), and
- * read-only / explore turns with no failing verification never set it.
- * `progress.no_information_gain` covers that disjoint path: it is set only
- * when every completed, explicitly read-only observation in the turn is an
- * exact `(tool, args, result)` recurrence. A changed or mixed novel result
- * leaves it false. These typed outcome facts meet here so extension policy has
- * one definition of progress.
+ * independently by the iteration maximum.
  */
 fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
   return state.progress.changed
-    && !(state.progress?.no_net_advance ?? false)
-    && !(state.progress?.no_information_gain ?? false)
 }
 
 /**
@@ -239,22 +197,8 @@ fn __agent_loop_progress_window(budget: AgentLoopBudget) -> int {
 /**
  * Did the agent progress anywhere inside the recent window?
  *
- * Deciding extension from the boundary turn ALONE reads one sample of a noisy
- * signal: a run that had made nine edits and one failed verification, then
- * spent its last turns reading files back to repair, was stopped at exactly its
- * initial cap because that one boundary turn was suppressed by
- * `no_information_gain`. The repair was in flight and the evidence for it was
- * three turns old.
- *
- * The window does not weaken the thrash bound that
- * `no_net_advance`/`no_information_gain` exist to enforce. A run that fails the
- * predicate on EVERY turn drives the counter monotonically upward, so each
- * granted extension moves the next boundary `extend_by` turns further into a
- * counter that has grown by the same amount. At the default window
- * (`progress_window == extend_by`) that means a sustained thrash buys at most
- * one extension and then stops; a deliberately wider window buys proportionally
- * more, never unbounded. `budget.max` remains the outer bound in every case
- * (`__agent_apply_extension` clamps to it).
+ * A quiet boundary turn can use recent measured activity. Every extension is
+ * still capped by `budget.max` in `__agent_apply_extension`.
  */
 fn __agent_loop_progressed_within_window(state: AgentLoopState, budget: AgentLoopBudget) -> bool {
   if agent_loop_is_progressing(state) {
@@ -410,19 +354,9 @@ fn __agent_progress_summary_text(
   completion_vetoed: bool,
   tool_count: int,
   visible_text: string,
-  no_net_advance: bool,
-  no_information_gain: bool,
 ) -> string {
   if completion_vetoed {
     return "completion gate vetoed"
-  }
-  // Activity present but the verification outcome is not advancing (same failure
-  // recurring): name the thrash so the recorded loop decision is auditable.
-  if no_net_advance {
-    return "tool activity without net verification progress"
-  }
-  if no_information_gain {
-    return "repeated read-only observations returned no new information"
   }
   if tool_count > 0 {
     return "executed " + to_string(tool_count) + " tool call(s)"
@@ -463,20 +397,10 @@ pub fn agent_loop_snapshot_state(args: dict) -> AgentLoopState {
   const turn_successful = args.turn_successful
   const progress_changed = tool_count > 0 || len(turn_successful) > 0
     || trim(visible_text) != ""
-  // Outcome-aware override: the caller (the loop) passes `progress_no_net_advance`
-  // when this turn is on the verify-bearing failing path AND the verification
-  // outcome is not advancing (same-diagnostic streak past threshold). It only
-  // suppresses the extension when there WAS activity to begin with — a thrash —
-  // never when there is genuinely no activity (that case is already "no progress").
-  const no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
-  const no_information_gain = progress_changed
-    && (args.progress_no_information_gain ?? false)
   const progress_summary = __agent_progress_summary_text(
     completion_vetoed,
     tool_count,
     visible_text,
-    no_net_advance,
-    no_information_gain,
   )
   const previous_turns_since_progressing = args.progress_turns_since_progressing ?? 0
   const base = __agent_loop_state(
@@ -504,8 +428,6 @@ pub fn agent_loop_snapshot_state(args: dict) -> AgentLoopState {
       completion_verdict: completion_verdict,
       completion_feedback: completion_feedback,
       progress_changed: progress_changed,
-      progress_no_net_advance: no_net_advance,
-      progress_no_information_gain: no_information_gain,
       progress_summary: progress_summary,
       progress_turns_since_progressing: previous_turns_since_progressing,
     },

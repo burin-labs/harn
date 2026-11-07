@@ -128,8 +128,7 @@ const run = agent_loop(harness, task, opts?.system, opts)
 ```
 
 Every one of those lines is opt-in. The `max_iterations` and `token_budget`
-ceilings bound spend. Detectors catch loops and stalls
-([`std/agent/stall`](../stdlib/detectors.md)). The `verify_completion` callback
+ceilings bound spend. The `verify_completion` callback
 plus an optional bounded judge ([completion judge](../stdlib/agent-judge.md))
 is a deterministic veto, so "done" is a fact you
 control, not a mood the model is in.
@@ -166,24 +165,10 @@ retry. You own what happens inside a try:
 }
 ```
 
-**Host-fed facts.** The stall detector owns the *mechanism*: when to warn, when
-to cut a run for spinning in place. But only the host can see whether the test
-runner actually moved. So the host feeds that fact in through a callback. The
-loop supplies the payload; you return the one number that matters:
-
-```harn,ignore
-// "Writes are not progress." Return the
-// turn's best verify-state — say, the
-// count of passing tests. nil means "no verification evidence this turn."
-const opts = {...base, stall_diagnostics: {
-  progress_signal: { payload -> host_passing_test_count() },
-}}
-```
-
-Now "the agent edited a file" and "the build got closer to green" are two
-different facts, and the loop stops mistaking motion for progress. Those
-callbacks (progress, delivered-fix-not-landing, and pace cut rules) are covered in
-[Host-supplied facts](../stdlib/fact-intake-seams.md). Wrap the whole thing in
+**Host verification.** The host can run an independent check through
+`verify_completion` and supply declared tool verification results.
+[Agent verification](../stdlib/agent-verification.md) defines those contracts.
+Wrap the attempt in
 [`workflow_stages`](../workflow-runtime.md#building-linear-stage-graphs) for the
 verify stage, retry threading, replay, and audit, and you have the full machine.
 
@@ -229,5 +214,4 @@ with more composed onto it.
   placement contract in reference form.
 - [Workflow runtime](../workflow-runtime.md) — the executor closure and retry
   policy in full.
-- [Host-supplied facts](../stdlib/fact-intake-seams.md) — the callbacks that let
-  your host feed the loop what it can see.
+- [Agent verification](../stdlib/agent-verification.md) describes declared checks.

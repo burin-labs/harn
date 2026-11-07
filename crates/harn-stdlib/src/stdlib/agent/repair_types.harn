@@ -1,0 +1,32 @@
+/** Declared verification evidence for the current workspace revision. */
+pub type AgentRepairState = {
+  last_diagnostic_class: string,
+  last_diagnostic_signature: string,
+  last_diagnostic_snippet: string,
+  last_diagnostic_delta_current: dict,
+  write_epoch: int,
+  reverify_owed: bool,
+  verified_write_epoch: int,
+}
+
+/** Verification state plus at most one completed, unconsumed dispatch. */
+pub type AgentRepairCheckpoint = {
+  session_id: string,
+  state: AgentRepairState,
+  dispatch: list?,
+  dispatch_position: int,
+  consumed_dispatch_position: int,
+  dispatch_made_edit: bool,
+  verification_dispatch: list,
+}
+
+/** Normalized verification controls. */
+pub type AgentRepairConfig = {
+  post_edit_reverify: bool,
+  reserved_terminal_verify: bool,
+  reserved_terminal_verify_iterations: int,
+  zero_write_terminal_verify: bool,
+}
+
+/** The last declared verification failure, carried into terminal evidence. */
+pub type AgentRepairFailure = {class: "fail", signature: string, snippet: string}

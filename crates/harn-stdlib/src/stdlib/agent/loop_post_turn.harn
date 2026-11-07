@@ -18,7 +18,6 @@ import { agent_feedback_emit } from "std/agent/feedback"
 import { CompletionDirectiveReceipt, agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
-import { __agent_loop_verified_completion } from "std/agent/loop_terminal"
 import {
   AGENT_LOOP_REJECTED_TURN_MARKER,
   __agent_loop_pop_rejected_assistant_turn,
@@ -39,16 +38,12 @@ import {
 } from "std/agent/loop_turn_options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_tool_call_paradigm } from "std/agent/preflight"
+import { agent_repair_config } from "std/agent/repair"
+import { AgentRepairState } from "std/agent/repair_types"
 import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-import { AgentStallState } from "std/agent/stall_types"
-import {
-  agent_stall_no_net_progress,
-  agent_stall_repair_config,
-  agent_stall_repeated_verified_pass,
-} from "std/agent/stall_verification"
 import { agent_stance_post_turn } from "std/agent/stance"
 import {
   agent_emit_event,
@@ -81,8 +76,7 @@ pub type AgentLoopCommandHoldResult = {
 pub type AgentLoopPostTurnContext = {
   budget: AgentLoopBudget,
   bridge_step_delivered: int,
-  completed_no_information_gain: bool,
-  stall_checkpoint: dict?,
+  repair_checkpoint: dict?,
   consecutive_failure_count: int,
   dispatch: AgentToolDispatch,
   dispatched_turn_opts: dict,
@@ -117,7 +111,7 @@ pub type AgentLoopPostTurnState = {
   last_tool_count: int,
   made_source_write: bool,
   opts: dict,
-  stall_state: AgentStallState,
+  stall_state: AgentRepairState,
   stop_reason: string?,
   terminal_assessment: CompletionDirectiveReceipt?,
   terminal_write_unverified: bool,
@@ -292,11 +286,6 @@ pub fn agent_loop_post_turn_transition(
   )
   // Outcome facts as of this callback; the later snapshot re-reads them after
   // the callback may have settled a reverify.
-  const callback_no_net_progress = agent_stall_no_net_progress(
-    context.turn_opts?.stall_diagnostics,
-    next.stall_state,
-  )
-    || agent_stall_repeated_verified_pass(context.turn_opts?.stall_diagnostics, next.stall_state)
   const cadence_loop_state = agent_loop_snapshot_state(
     {
       iteration: context.iteration,
@@ -313,8 +302,6 @@ pub fn agent_loop_post_turn_transition(
       missing_required_tools: missing_required_for_loop,
       completion_proposed: false,
       verdict: nil,
-      progress_no_net_advance: callback_no_net_progress,
-      progress_no_information_gain: context.completed_no_information_gain,
       progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
@@ -330,7 +317,7 @@ pub fn agent_loop_post_turn_transition(
   let post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
     + {
       _session_successful_tools: context.successful_tools_seen,
-      _stall_checkpoint: context.stall_checkpoint,
+      _repair_checkpoint: context.repair_checkpoint,
       _session_rejected_tools: context.rejected_tools_seen,
       _consecutive_text_only: next.consecutive_text_only,
       _turn_end_judge_invocations: next.turn_end_judge_invocations,
@@ -356,38 +343,13 @@ pub fn agent_loop_post_turn_transition(
     },
   )
   const adjudication_opts = context.turn_opts + {_completion_signal: outcome.completion_signal}
-  const verified_completion = if outcome.kind == "continue"
-    && context.bridge_step_delivered == 0
-    && len(turn_rejected) == 0
-    && trim(context.visible_text) == ""
-    && len(missing_required_for_loop) == 0 {
-    __agent_loop_verified_completion(
-      context.turn_opts?.stall_diagnostics,
-      next.stall_state,
-      context.dispatch,
-      context.tool_calls,
-      context.turn_opts,
-      agent_session_messages(harness.agent, session.session_id),
-    )
-  } else {
-    nil
-  }
-  if verified_completion != nil {
-    outcome = outcome
-      + {
-        kind: "break",
-        needs_verify: true,
-        stop_reason: verified_completion.stop_reason,
-        turn_end_judge_due: true,
-      }
-  }
   let updated_opts = __apply_post_turn_options(next.opts, outcome)
   if contains(turn_successful, "load_skill") {
     updated_opts = __agent_reopen_tool_surface(harness.agent, session, updated_opts)
   }
   updated_opts = agent_stance_post_turn(harness.agent, harness.runtime, session, updated_opts)
   next = next + {opts: updated_opts}
-  const repair_cfg = agent_stall_repair_config(context.turn_opts?.stall_diagnostics)
+  const repair_cfg = agent_repair_config(context.turn_opts?.repair_diagnostics)
   const reverify_mandated = __agent_loop_post_edit_reverify_mandated(
     repair_cfg,
     context.turn_opts,
@@ -483,7 +445,7 @@ pub fn agent_loop_post_turn_transition(
         context.llm_result.text,
         context.iteration_index,
         context.raw_text,
-        verified_completion?.verification,
+        nil,
       )
       verdict_record = verdict
       next = next
@@ -653,11 +615,6 @@ pub fn agent_loop_post_turn_transition(
       )
     }
   }
-  const loop_no_net_progress = agent_stall_no_net_progress(
-    context.turn_opts?.stall_diagnostics,
-    next.stall_state,
-  )
-    || agent_stall_repeated_verified_pass(context.turn_opts?.stall_diagnostics, next.stall_state)
   const loop_state = agent_loop_snapshot_state(
     {
       iteration: context.iteration,
@@ -674,8 +631,6 @@ pub fn agent_loop_post_turn_transition(
       missing_required_tools: missing_required_for_loop,
       completion_proposed: outcome.kind == "break",
       verdict: verdict_record,
-      progress_no_net_advance: loop_no_net_progress,
-      progress_no_information_gain: context.completed_no_information_gain,
       progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(

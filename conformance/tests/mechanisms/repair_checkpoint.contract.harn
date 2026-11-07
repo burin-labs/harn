@@ -1,0 +1,264 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_repair_checkpoint_state } from "std/agent/repair"
+import { AgentRepairCheckpoint } from "std/agent/repair_types"
+import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
+import { contract_effect } from "./lib/mechanism_contract"
+
+fn call(name: string, id: string) {
+  return {tool_calls: [{id: id, name: name, arguments: {}}]}
+}
+
+fn required_checkpoint(checkpoint: AgentRepairCheckpoint?) -> AgentRepairCheckpoint {
+  if checkpoint == nil {
+    throw "Verification must return its session checkpoint"
+  }
+  return checkpoint
+}
+
+fn stage(harness: Harness, options: dict, script: list) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { -> agent_loop(harness, "Continue the task", nil, options) },
+  )
+}
+
+fn scripted_node(node: dict, name: string) {
+  return node
+    + {
+      model_policy: node.model_policy
+        + {
+          llm_caller: { _request ->
+            return {ok: true, value: call(name, name) + {text: "", provider: "mock", model: "mock"}}
+          },
+        },
+    }
+}
+
+pipeline default(harness: Harness) {
+  let calls = []
+  let tools = tool_registry()
+  for descriptor in [
+    {name: "edit", kind: "edit"},
+    {name: "verify", kind: "verify"},
+    {name: "fail", kind: "verify"},
+    {name: "look", kind: "read"},
+  ] {
+    const name = descriptor.name
+    tools = tool_define(
+      tools,
+      name,
+      name,
+      {
+        handler: { _args ->
+          calls = calls + [name]
+          if name == "fail" {
+            throw "AssertionError: expected 5 got 4"
+          }
+          return "ok"
+        },
+        parameters: {},
+        annotations: {
+          kind: descriptor.kind,
+          completion_evidence_role: if descriptor.kind == "verify" {
+            "verification"
+          } else {
+            nil
+          },
+        },
+      },
+    )
+  }
+  const session = "checkpoint-" + harness.random.uuid()
+  const options = {
+    session_id: session,
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 2,
+    repair_diagnostics: {post_edit_reverify: false},
+  }
+  const first = stage(harness, options, [call("edit", "e"), call("verify", "v")])
+  require calls == ["edit", "verify"], "first stage must actually execute edit and verification"
+  const checkpoint = required_checkpoint(first.repair_checkpoint)
+  require checkpoint.dispatch_position == checkpoint.consumed_dispatch_position + 1,
+    "final dispatch must remain pending at handoff"
+  const latest = agent_repair_checkpoint_state(harness.agent, checkpoint)
+  require latest.write_epoch == 1 && latest.verified_write_epoch == 1,
+    "final verification must cover the edit before another model turn"
+  const second = stage(
+    harness,
+    options + {repair_checkpoint: checkpoint},
+    [llm_text("Done. ##DONE##")],
+  )
+  const committed = agent_repair_checkpoint_state(
+    harness.agent,
+    required_checkpoint(second.repair_checkpoint),
+  )
+  require committed.write_epoch == 1 && committed.verified_write_epoch == 1,
+    "handoff must consume evidence exactly once"
+  require calls == ["edit", "verify"], "reporting must not repeat the edit"
+  for invalid in [
+    checkpoint + {consumed_dispatch_position: checkpoint.dispatch_position + 1},
+    checkpoint + {dispatch_position: checkpoint.consumed_dispatch_position + 2},
+    checkpoint + {dispatch: nil},
+    checkpoint + {session_id: "different-session"},
+  ] {
+    const rejected = try {
+      stage(harness, options + {repair_checkpoint: invalid}, [call("edit", "forbidden")])
+    }
+    require is_err(rejected) && contains(to_string(unwrap_err(rejected)), "repair checkpoint"),
+      "agent_loop must reject invalid checkpoints at ingestion"
+  }
+  require calls == ["edit", "verify"], "invalid checkpoint cannot reach tool dispatch"
+  const one_turn = options + {session_id: "repair-" + harness.random.uuid(), max_iterations: 1}
+  const failing = stage(harness, one_turn, [call("fail", "f1")])
+  const diagnosed = agent_repair_checkpoint_state(
+    harness.agent,
+    required_checkpoint(failing.repair_checkpoint),
+  )
+  require diagnosed.last_diagnostic_class == "fail",
+    "failed verifier must establish current failure"
+  const read = stage(
+    harness,
+    one_turn + {repair_checkpoint: failing.repair_checkpoint},
+    [call("look", "l1")],
+  )
+  require agent_repair_checkpoint_state(harness.agent, required_checkpoint(read.repair_checkpoint))
+    .last_diagnostic_class
+    == "fail",
+    "successful read must not clear failed verification"
+  const before_deferred = len(calls)
+  const deferred = stage(
+    harness,
+    one_turn + {repair_checkpoint: read.repair_checkpoint},
+    [{tool_calls: call("edit", "e2").tool_calls + call("verify", "deferred-v").tool_calls}],
+  )
+  require len(calls) == before_deferred + 1 && calls[len(calls) - 1] == "edit",
+    "canonical phase boundary must execute mutation and defer verification"
+  const pending_repair = agent_repair_checkpoint_state(
+    harness.agent,
+    required_checkpoint(deferred.repair_checkpoint),
+  )
+  require pending_repair.last_diagnostic_class == "fail" && pending_repair.reverify_owed,
+    "deferred verification cannot clear the failure or the reverify obligation"
+  const repaired = stage(
+    harness,
+    one_turn + {repair_checkpoint: deferred.repair_checkpoint},
+    [{tool_calls: call("fail", "f2").tool_calls + call("verify", "v2").tool_calls}],
+  )
+  require calls[len(calls) - 2] == "fail" && calls[len(calls) - 1] == "verify",
+    "both ordered verifications must execute"
+  require agent_repair_checkpoint_state(
+    harness.agent,
+    required_checkpoint(repaired.repair_checkpoint),
+  ).last_diagnostic_class
+    == "pass",
+    "last executed verification must clear the earlier failure"
+  const before_stop = len(calls)
+  const stopped = stage(
+    harness,
+    options
+      + {
+        repair_checkpoint: second.repair_checkpoint,
+        loop_control: { _state -> {action: "stop", reason: "requested_stop"} },
+      },
+    [call("look", "s1"), call("edit", "must-not-run")],
+  )
+  require stopped.stop_reason == "requested_stop" && len(calls) == before_stop + 1,
+    "accepted stop must prevent the next scripted mutation"
+  const workflow_session = "workflow-" + harness.random.uuid()
+  const other_session = "other-" + harness.random.uuid()
+  const inherited = workflow_graph(
+    {
+      provider: "mock",
+      act: {
+        model_policy: {
+          session_id: workflow_session,
+          repair_diagnostics: {post_edit_reverify: false},
+        },
+      },
+    },
+  )
+  require inherited.nodes.act.model_policy.provider == "mock"
+    && inherited.nodes.act.model_policy.session_id == workflow_session
+    && inherited.nodes.act.model_policy?.repair_diagnostics?.post_edit_reverify == false,
+    "live policy preservation must retain normalized workflow defaults"
+  const node = {
+    kind: "agent",
+    prompt: "Continue the task",
+    tools: tools,
+    model_policy: options + {session_id: workflow_session, max_iterations: 1},
+  }
+  const graph = workflow_graph(
+    {
+      entry: "edit",
+      nodes: {
+        edit: scripted_node(node, "edit"),
+        other: scripted_node(
+          node + {model_policy: node.model_policy + {session_id: other_session}},
+          "look",
+        ),
+        verify: scripted_node(node, "verify"),
+        fresh: scripted_node(node + {model_policy: node.model_policy + {session_id: nil}}, "look"),
+      },
+      edges: [
+        {from: "edit", to: "other"},
+        {from: "other", to: "verify"},
+        {from: "verify", to: "fresh"},
+      ],
+    },
+  )
+  const before_workflow = len(calls)
+  const workflow = workflow_execute(
+    harness,
+    "Edit, inspect separately, then verify",
+    graph,
+    [],
+    {max_steps: 4},
+  )
+  require calls.slice(before_workflow, len(calls)) == ["edit", "look", "verify", "look"],
+    "workflow must execute the declared tools in stage order: ${json_stringify(calls.slice(before_workflow, len(calls)))}"
+  const workflow_checkpoint = workflow.repair_checkpoints[workflow_session]
+  if workflow_checkpoint == nil {
+    throw "workflow must return A's checkpoint under its declared session identity"
+  }
+  const workflow_state = agent_repair_checkpoint_state(harness.agent, workflow_checkpoint)
+  require workflow_state.write_epoch == 1 && workflow_state.verified_write_epoch == 1,
+    "workflow must preserve A's edit across B before A's final verification"
+  require workflow_checkpoint.dispatch_position
+    == workflow_checkpoint.consumed_dispatch_position + 1,
+    "workflow return must preserve its final pending verification"
+  require len(keys(workflow.repair_checkpoints)) == 3,
+    "unnamed stage must own a fresh session checkpoint"
+  for id in keys(workflow.repair_checkpoints) {
+    if id != workflow_session {
+      require agent_repair_checkpoint_state(
+        harness.agent,
+        required_checkpoint(workflow.repair_checkpoints[id]),
+      ).write_epoch
+        == 0,
+        "unrelated sessions must not inherit A's edit"
+    }
+  }
+  const chained = workflow_execute(
+    harness,
+    "Continue A",
+    workflow_graph({entry: "continue", nodes: {continue: scripted_node(node, "look")}, edges: []}),
+    [],
+    {max_steps: 1, repair_checkpoints: workflow.repair_checkpoints},
+  )
+  const chained_state = agent_repair_checkpoint_state(
+    harness.agent,
+    required_checkpoint(chained.repair_checkpoints[workflow_session]),
+  )
+  require chained_state.write_epoch == 1 && chained_state.verified_write_epoch == 1,
+    "explicitly chained workflow must retain verified evidence without double-counting"
+  require calls.slice(before_workflow, len(calls)) == ["edit", "look", "verify", "look", "look"],
+    "chained workflow must actually execute its read"
+  contract_effect(harness.stdio, "verified_handoff", committed.verified_write_epoch == 1)
+  contract_effect(harness.stdio, "workflow_lifetime", chained_state.verified_write_epoch == 1)
+}

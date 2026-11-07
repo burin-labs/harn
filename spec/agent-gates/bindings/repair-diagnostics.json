@@ -1,0 +1,20 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "RepairDiagnostics",
+    "prefix": "RepairDiagnostics.",
+    "types": ["RepairDiagnostics", "AgentRepairConfig"],
+    "parameters": [
+      {"function": "agent_repair_config", "name": "raw"},
+      {"function": "__agent_loop_call_budget_new", "name": "reserve_cfg"},
+      {"function": "__agent_loop_post_edit_reverify_mandated", "name": "repair_cfg"},
+      {"function": "__agent_loop_should_spend_reserve", "name": "repair_cfg"},
+      {"function": "agent_loop_run_settings", "name": "opts", "path": ["repair_diagnostics"]},
+      {"function": "__agent_loop_effective_llm_options", "name": "opts", "path": ["repair_diagnostics"]},
+      {"function": "agent_merge_llm_options", "name": "base", "path": ["repair_diagnostics"]},
+      {"function": "__agent_loop_llm_overrides", "name": "opts", "path": ["repair_diagnostics"]}
+    ],
+    "normalizers": ["agent_repair_config"],
+    "containers": []
+  }
+}

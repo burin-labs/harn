@@ -267,9 +267,8 @@ pub(super) fn host_agent_session_totals_builtin(
         Ok(SessionUsageTotals::from(&*session))
     })?;
     // `tokens_used` is cumulative input+output. `input_tokens` / `output_tokens`
-    // are the split components — surfaced so budget/detector logic that keys on
-    // the re-sent context size (e.g. std/agent/stall's token-runaway guard) can
-    // read cumulative INPUT tokens rather than the input+output sum.
+    // are the split components, so a host can read cumulative input tokens
+    // separately from the input+output sum.
     //
     // `physical_usage` is the run's complete provider ledger, including
     // preparation calls no accepted turn owns. Hosts read it for running

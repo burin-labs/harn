@@ -42,7 +42,7 @@ pipeline test(harness: Harness, task: unknown) {
     provider: "mock",
     loop_until_done: true,
     iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},
-    stall_diagnostics: {enabled: true, threshold: 3},
+    repair_diagnostics: {post_edit_reverify: true},
     turn_policy: {require_action_or_yield: true, max_prose_chars: 800},
   }
   const model_opts: AgentModelSpec = {provider: "mock", model: "mock-small"}

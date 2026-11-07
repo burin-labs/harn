@@ -2,7 +2,7 @@ import { agent_loop_control_invoke } from "std/agent/control"
 // Run: harn test tests/agent/call_budget_projection_test.harn
 //
 // Regression coverage for #7619. The loop must project call-budget exhaustion
-// BEFORE it enters the terminal region, so verification, recovery, and terminal
+// BEFORE it enters the terminal region, so verification and terminal
 // reporting still have calls to spend when they run — instead of the loop
 // discovering exhaustion once useful work can no longer be completed.
 //
@@ -117,13 +117,11 @@ pipeline test_reserve_boundary_is_projected_before_the_terminal_region(
         // allowance it started from (#7762).
         assert(projection.grants_remaining != nil, "the projection reports the live grant state")
         assert(projection.grants_remaining.verification <= projection.reserve.verification)
-        assert(projection.grants_remaining.recovery <= projection.reserve.recovery)
         assert(projection.grants_remaining.terminal_report <= projection.reserve.terminal_report)
         assert(projection.remaining != nil, "a projected turn carries a measurement")
         assert_eq(
           projection.reserve.total,
           projection.reserve.verification
-            + projection.reserve.recovery
             + projection.reserve.terminal_report,
         )
       }

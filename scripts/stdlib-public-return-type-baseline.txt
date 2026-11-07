@@ -26,7 +26,7 @@
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   26  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
-# count   16  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
+# count   10  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   22  crates/harn-stdlib/src/stdlib/agent/options_public.harn
@@ -45,9 +45,6 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/retry.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/sitrep.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/skills.harn
-# count    3  crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn
-# count    3  crates/harn-stdlib/src/stdlib/agent/stall_observation.harn
-# count    1  crates/harn-stdlib/src/stdlib/agent/stall_verification.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/stance.harn
 # count   28  crates/harn-stdlib/src/stdlib/agent/state.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/step_judge.harn
@@ -301,16 +298,10 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__strip_internal_key
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__sync_tool_search_state
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_active_skill_mcp_specs
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_effective_wrapup_context
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_emit_thrash_recovery_checkpoint
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_has_host_wrapup_directive
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_monologue_recovery_feedback
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_render_wrapup_context
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_repeated_observation_recovery_feedback
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_stall_warning_receipt
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_terminal_callback_continue_allowed
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_terminal_callback_extend_by
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_thrash_recovery_allowed
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_thrash_recovery_skip_outcome
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_tool_call_names
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_wrapup_directive
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_wrapup_eligible_status
@@ -464,13 +455,6 @@ crates/harn-stdlib/src/stdlib/agent/retry.harn::agent_apply_default_retry
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep_append
 crates/harn-stdlib/src/stdlib/agent/skills.harn::agent_skills_match
-crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::detector_spec_token_runaway
-crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::token_runaway_post_turn
-crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::unified_detectors_post_turn
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_clip_head_tail
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_delta_previous
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_maybe_emit
-crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::agent_stall_current_failure
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_apply
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_default_consent_check
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_post_turn

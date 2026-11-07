@@ -192,9 +192,6 @@ the named gap to the next actor turn. Standalone callers can use
 - [Completion control](../llm/completion-control.md)
   — the judge in the context of the loop's other completion seams
   (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).
-- [Host-supplied facts](./fact-intake-seams.md) — the broader
-  Harn-owns-mechanism / host-owns-facts pattern the judge follows.
-- [Agent detectors](./detectors.md) — the stall side of
-  the same placement contract.
+- [Agent verification](./agent-verification.md) describes post-edit and terminal checks.
 - [The expressiveness spectrum](../concepts/expressiveness-spectrum.md#level-4-tune-the-loop-by-composing-building-blocks)
   — where completion control sits when you compose loop control by hand.

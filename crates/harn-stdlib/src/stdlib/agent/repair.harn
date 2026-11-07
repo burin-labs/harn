@@ -1,0 +1,243 @@
+import { __judge_tool_descriptor } from "std/agent/judge_evidence"
+import { AgentToolDispatch, __tool_result_name } from "std/agent/loop_result_status"
+import { RepairDiagnostics } from "std/agent/options_types"
+import {
+  AgentRepairCheckpoint,
+  AgentRepairConfig,
+  AgentRepairFailure,
+  AgentRepairState,
+} from "std/agent/repair_types"
+import { verification_gate_input } from "std/verification"
+
+/**
+ * Normalize the caller's explicit verification controls.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_config(raw: RepairDiagnostics?) -> AgentRepairConfig {
+  const config: RepairDiagnostics = raw ?? {}
+  return {
+    post_edit_reverify: config?.post_edit_reverify ?? true,
+    reserved_terminal_verify: config?.reserved_terminal_verify ?? false,
+    reserved_terminal_verify_iterations: max(1, config?.reserved_terminal_verify_iterations ?? 2),
+    zero_write_terminal_verify: config?.zero_write_terminal_verify ?? false,
+  }
+}
+
+fn agent_repair_initial_state() -> AgentRepairState {
+  return {
+    last_diagnostic_class: "",
+    last_diagnostic_signature: "",
+    last_diagnostic_snippet: "",
+    last_diagnostic_delta_current: {},
+    write_epoch: 0,
+    reverify_owed: false,
+    verified_write_epoch: 0,
+  }
+}
+
+/**
+ * Start a session-bound verification checkpoint with no pending dispatch.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_initial_checkpoint(session_id: string) -> AgentRepairCheckpoint {
+  return {
+    session_id: session_id,
+    state: agent_repair_initial_state(),
+    dispatch: nil,
+    dispatch_position: 0,
+    consumed_dispatch_position: 0,
+    dispatch_made_edit: false,
+    verification_dispatch: [],
+  }
+}
+
+/**
+ * Reject a checkpoint with missing or out-of-order dispatch evidence.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_validate_checkpoint(checkpoint: AgentRepairCheckpoint) -> nil {
+  require checkpoint.consumed_dispatch_position >= 0
+    && checkpoint.dispatch_position >= checkpoint.consumed_dispatch_position
+    && checkpoint.dispatch_position <= checkpoint.consumed_dispatch_position + 1,
+    "agent_loop: invalid repair checkpoint dispatch position"
+  require checkpoint.consumed_dispatch_position == checkpoint.dispatch_position
+    || checkpoint.dispatch != nil,
+    "agent_loop: pending repair checkpoint has no dispatch"
+  return nil
+}
+
+/**
+ * Inspect pending verification without committing it twice across stages.
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_repair_checkpoint_state(
+  agent: HarnessAgent,
+  checkpoint: AgentRepairCheckpoint,
+) -> AgentRepairState {
+  agent_repair_validate_checkpoint(checkpoint)
+  if checkpoint.consumed_dispatch_position == checkpoint.dispatch_position {
+    return checkpoint.state
+  }
+  return agent_repair_observe(
+    agent,
+    checkpoint.state,
+    checkpoint.verification_dispatch,
+    checkpoint.dispatch_made_edit,
+  )
+}
+
+/**
+ * Select the latest declared, completed verification in a dispatch.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_verification_dispatch(
+  dispatch: AgentToolDispatch?,
+  opts: dict,
+) -> AgentToolDispatch {
+  let latest = []
+  for result in dispatch ?? [] {
+    const semantics = __judge_tool_descriptor(opts, __tool_result_name(result))
+    if semantics.evidence_role == "verification"
+      && (result?.dispatch_receipt?.disposition ?? "executed") == "executed"
+      && result?.status != "running" {
+      latest = [result]
+    }
+  }
+  return latest
+}
+
+fn __agent_clip_head_tail(text: string, cap: int) -> string {
+  if len(text) <= cap {
+    return text
+  }
+  const tail_len = cap / 3
+  const head_len = cap - tail_len
+  const omitted = len(text) - cap
+  return "${text.substring(0, head_len)}\n…[${omitted} chars elided]…\n${text.substring(len(text) - tail_len, len(text))}"
+}
+
+fn __agent_repair_delta_previous(state: AgentRepairState) -> dict? {
+  const current = state.last_diagnostic_delta_current
+  const signatures = current?.signatures ?? []
+  if state.last_diagnostic_class != "fail" || len(signatures) == 0 {
+    return nil
+  }
+  return {
+    diagnostics: signatures,
+    diagnostic_count: to_int(current?.count) ?? len(signatures),
+    feedsGates: current?.feedsGates ?? current?.feeds_gates ?? true,
+    classification: {status: "bound_fresh", feedsGates: true, advisory: false},
+  }
+}
+
+/**
+ * Fold declared verification before the next turn. A successful edit is not a
+ * passing check; only fresh gate evidence can clear the prior failure.
+ * @effects: [agent]
+ * @errors: []
+ */
+fn agent_repair_observe(
+  agent: HarnessAgent,
+  state: AgentRepairState,
+  verification_dispatch: AgentToolDispatch,
+  turn_made_edit: bool,
+) -> AgentRepairState {
+  const write_epoch = state.write_epoch + if turn_made_edit {
+    1
+  } else {
+    0
+  }
+  const results = verification_dispatch ?? []
+  const result = if len(results) > 0 {
+    results[len(results) - 1]
+  } else {
+    nil
+  }
+  if result == nil {
+    return state
+      + {
+        write_epoch: write_epoch,
+        reverify_owed: state.reverify_owed
+          || (turn_made_edit && state.last_diagnostic_class == "fail"),
+      }
+  }
+  const hashes = result?.current_hashes ?? result?.currentHashes
+    ?? result?.file_hashes
+    ?? result?.fileHashes
+  const gate = verification_gate_input(agent, __agent_repair_delta_previous(state), result, hashes)
+  if gate.status == "cleared" {
+    return state
+      + {
+        last_diagnostic_class: "pass",
+        last_diagnostic_signature: "",
+        last_diagnostic_snippet: "",
+        last_diagnostic_delta_current: {},
+        write_epoch: write_epoch,
+        reverify_owed: false,
+        verified_write_epoch: max(write_epoch, state.verified_write_epoch),
+      }
+  }
+  if !(gate?.gate_bearing_failure ?? false) {
+    return state
+      + {
+        write_epoch: write_epoch,
+        reverify_owed: state.reverify_owed
+          || (turn_made_edit && state.last_diagnostic_class == "fail"),
+      }
+  }
+  const current = gate.delta.current
+  const signature = {
+    signatures: current?.signatures ?? [],
+    count: to_int(current?.count) ?? len(current?.signatures ?? []),
+  }
+  const snippet = trim(
+    to_string(result?.error ?? result?.message ?? result?.rendered_result ?? result?.result ?? ""),
+  )
+  return state
+    + {
+      last_diagnostic_class: "fail",
+      last_diagnostic_signature: "err:${sha256(json_stringify(signature))}",
+      last_diagnostic_snippet: __agent_clip_head_tail(snippet, 4000),
+      last_diagnostic_delta_current: current,
+      write_epoch: write_epoch,
+      reverify_owed: false,
+    }
+}
+
+/**
+ * Project the latest verification failure into terminal evidence.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_current_failure(state: AgentRepairState) -> AgentRepairFailure? {
+  if state.last_diagnostic_class != "fail" {
+    return nil
+  }
+  return {
+    class: "fail",
+    signature: state.last_diagnostic_signature,
+    snippet: state.last_diagnostic_snippet,
+  }
+}
+
+/**
+ * Clear a failure after the terminal verification authority accepted it.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_repair_clear_current_failure(state: AgentRepairState) -> AgentRepairState {
+  return state
+    + {
+      last_diagnostic_class: "pass",
+      last_diagnostic_signature: "",
+      last_diagnostic_snippet: "",
+      last_diagnostic_delta_current: {},
+      reverify_owed: false,
+      verified_write_epoch: state.write_epoch,
+    }
+}

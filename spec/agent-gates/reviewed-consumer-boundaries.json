@@ -1,5 +1,53 @@
 [
   {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+    "expression": "__agent_loop_effective_llm_options(llm, opts)",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "The nested verification controls pass unchanged through option normalization; its nested opts origin is independently scanned.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "__agent_loop_effective_llm_options", "parameter": "opts", "path": ["repair_diagnostics"]}]
+  },
+  {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+    "expression": "agent_repair_config(opts?.repair_diagnostics)",
+    "owner": "agent_repair_config",
+    "evidence": "The normalizer owns defaults and returns AgentRepairConfig, whose consumers are independently scanned.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "agent_repair_config", "parameter": "raw"}]
+  },
+  {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_post_turn.harn",
+    "expression": "__agent_loop_post_edit_reverify_mandated(\n    repair_cfg,\n    context.turn_opts,\n    next.stall_state,\n    context.dispatch,\n    next.opts?.tools,\n  )",
+    "owner": "__agent_loop_post_edit_reverify_mandated",
+    "evidence": "The existing reverify guard reads the normalized post_edit_reverify control at its declared repair_cfg origin.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "__agent_loop_post_edit_reverify_mandated", "parameter": "repair_cfg"}]
+  },
+  {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__agent_loop_call_budget_new(opts, __reserve_cfg)",
+    "owner": "__agent_loop_call_budget_new",
+    "evidence": "The existing call-budget owner reads only the explicit terminal-verification controls from reserve_cfg.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "__agent_loop_call_budget_new", "parameter": "reserve_cfg"}]
+  },
+  {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "agent_merge_llm_options(base, __agent_loop_llm_overrides(base))",
+    "owner": "agent_merge_llm_options",
+    "evidence": "The nested verification bag is copied through the option merge; the base origin is independently scanned.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "agent_merge_llm_options", "parameter": "base", "path": ["repair_diagnostics"]}]
+  },
+  {
+    "scope": "RepairDiagnostics",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_llm_overrides(base)",
+    "owner": "__agent_loop_llm_overrides",
+    "evidence": "The nested verification bag is preserved by the existing option override projection, whose opts origin is independently scanned.",
+    "consumers": [{"scope": "RepairDiagnostics", "function": "__agent_loop_llm_overrides", "parameter": "opts", "path": ["repair_diagnostics"]}]
+  },
+  {
     "scope": "AgentBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
     "expression": "agent.budget_pre_call_blocked(session.session_id, envelope)",
@@ -37,13 +85,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__agent_loop_budget_exhaustion(\n              harness.agent,\n              harness.clock,\n              session.session_id,\n              budget,\n              iteration,\n              stall_totals,\n              loop_start_ms,\n              current_max,\n            )",
-    "owner": "__agent_loop_budget_exhaustion",
-    "evidence": "The nested iteration_budget value becomes IterationBudget; the budget consumer is independently scanned under that owner."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "__agent_loop_budget_exhaustion(\n              harness.agent,\n              harness.clock,\n              session.session_id,\n              budget,\n              iteration,\n              step_totals,\n              loop_start_ms,\n              current_max,\n            )",
     "owner": "__agent_loop_budget_exhaustion",
     "evidence": "The nested iteration_budget value becomes IterationBudget; the budget consumer is independently scanned under that owner."
@@ -65,28 +106,14 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_stall_observe_tool_calls(\n          harness.agent,\n          session.session_id,\n          tool_calls,\n          iteration_index + 1,\n          turn_opts?.stall_diagnostics,\n          stall_state,\n          stall_judge_due,\n          stall_prev_dispatch,\n          raw_text,\n          had_full_parse_rejection,\n          stall_prev_turn_made_edit,\n          llm_result?.stop_reason ?? \"\",\n          {\n            dispatch: stall_prev_dispatch,\n            iteration: iteration_index + 1,\n            session_id: session.session_id,\n          },\n          stall_checkpoint.consumed_dispatch_position == stall_checkpoint.dispatch_position,\n          stall_checkpoint.verification_dispatch,\n          false,\n        )",
-    "owner": "agent_stall_observe_tool_calls",
-    "evidence": "The nested stall_diagnostics value becomes AgentStallConfig; observation parameters are independently scanned under that owner."
+    "expression": "agent_repair_config(opts?.repair_diagnostics)",
+    "owner": "agent_repair_config",
+    "evidence": "The nested repair_diagnostics value becomes AgentRepairConfig; its normalizer and consuming parameters are independently scanned under RepairDiagnostics."
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_stall_repair_config(opts?.stall_diagnostics)",
-    "owner": "agent_stall_repair_config",
-    "evidence": "The nested stall_diagnostics value becomes AgentStallConfig; its normalizer and consuming parameters are independently scanned under that owner."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_stall_verified_write_satisfied(turn_opts?.stall_diagnostics, stall_state)",
-    "owner": "agent_stall_verified_write_satisfied",
-    "evidence": "The nested stall_diagnostics value becomes AgentStallConfig; verification parameters are independently scanned under that owner."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "const final_state = {\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_assessment: terminal_assessment,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
+    "expression": "const final_state = {\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_assessment: terminal_assessment,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      repair_checkpoint: stall_checkpoint + {state: stall_state},\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -121,7 +148,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n            budget: budget,\n            bridge_step_delivered: bridge_step_delivered,\n            completed_no_information_gain: completed_observation.no_information_gain,\n            stall_checkpoint: if stall_enabled_seen {\n              stall_checkpoint\n            } else {\n              nil\n            },\n            consecutive_failure_count: consecutive_failure_count,\n            dispatch: dispatch,\n            dispatched_turn_opts: dispatched.turn_opts,\n            fallback_accepted: fallback_outcome.accepted,\n            fallback_triggered: fallback_outcome.triggered,\n            had_parse_errors: had_parse_errors,\n            iteration: iteration,\n            iteration_index: iteration_index,\n            llm_result: llm_result,\n            loop_start_ms: loop_start_ms,\n            normalized: normalized,\n            parsed_done_marker: parsed?.done_marker ?? \"\",\n            raw_text: raw_text,\n            rejected_tools_seen: rejected_tools_seen,\n            successful_tools_seen: successful_tools_seen,\n            tool_calls: tool_calls,\n            totals: totals,\n            turn_llm_opts: turn_llm_opts,\n            turn_opts: turn_opts,\n            visible_text: visible_text,\n          }",
+    "expression": "{\n            budget: budget,\n            bridge_step_delivered: bridge_step_delivered,\n            repair_checkpoint: stall_checkpoint,\n            consecutive_failure_count: consecutive_failure_count,\n            dispatch: dispatch,\n            dispatched_turn_opts: dispatched.turn_opts,\n            fallback_accepted: fallback_outcome.accepted,\n            fallback_triggered: fallback_outcome.triggered,\n            had_parse_errors: had_parse_errors,\n            iteration: iteration,\n            iteration_index: iteration_index,\n            llm_result: llm_result,\n            loop_start_ms: loop_start_ms,\n            normalized: normalized,\n            parsed_done_marker: parsed?.done_marker ?? \"\",\n            raw_text: raw_text,\n            rejected_tools_seen: rejected_tools_seen,\n            successful_tools_seen: successful_tools_seen,\n            tool_calls: tool_calls,\n            totals: totals,\n            turn_llm_opts: turn_llm_opts,\n            turn_opts: turn_opts,\n            visible_text: visible_text,\n          }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -129,13 +156,6 @@
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "{\n            budget_decisions: budget_decisions,\n            consecutive_text_only: consecutive_text_only,\n            current_max: current_max,\n            turn_end_judge_invocations: turn_end_judge_invocations,\n            turn_end_judge_vetoes: turn_end_judge_vetoes,\n            extensions_used: extensions_used,\n            feedback_history: feedback_history,\n            final_status: final_status,\n            last_tool_count: last_tool_count,\n            made_source_write: made_source_write,\n            opts: opts,\n            stall_state: stall_state,\n            stop_reason: stop_reason,\n            terminal_assessment: terminal_assessment,\n            terminal_write_unverified: terminal_write_unverified,\n            turns_since_loop_progress: turns_since_loop_progress,\n            turns_since_progress: turns_since_progress,\n            verify_attempts: verify_attempts,\n            verify_completion_judge_invocations: verify_completion_judge_invocations,\n            verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n          }",
-    "owner": "__agent_loop_run",
-    "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n            harness: harness,\n            session_id: session.session_id,\n            tool_calls: tool_calls,\n            dispatch: dispatch,\n            iteration: iteration_index + 1,\n            stall_config: stall_observation.config,\n            stall_state: stall_state,\n            turn_opts: turn_opts,\n          }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -156,7 +176,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_assessment: terminal_assessment,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      stall_checkpoint: if stall_enabled_seen {\n        stall_checkpoint + {state: stall_state}\n      } else {\n        nil\n      },\n      stall_enabled_seen: stall_enabled_seen,\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
+    "expression": "{\n      successful_tools_seen: successful_tools_seen,\n      opts: opts,\n      final_status: final_status,\n      stop_reason: stop_reason,\n      iteration: iteration,\n      loop_start_ms: loop_start_ms,\n      suspend_result: suspend_result,\n      terminal_error: terminal_error,\n      terminal_assessment: terminal_assessment,\n      abandonment: abandonment,\n      audit_background_tasks: audit_background_tasks,\n      budget: budget,\n      budget_exhausted_emitted: budget_exhausted_emitted,\n      budget_decisions: budget_decisions,\n      current_max: current_max,\n      extensions_used: extensions_used,\n      last_tool_count: last_tool_count,\n      stall_state: stall_state,\n      repair_checkpoint: stall_checkpoint + {state: stall_state},\n      verify_completion_judge_invocations: verify_completion_judge_invocations,\n      verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n      turn_end_judge_invocations: turn_end_judge_invocations,\n      turn_end_judge_vetoes: turn_end_judge_vetoes,\n    }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -217,39 +237,18 @@
     "evidence": "The step checkpoint carries judge_cfg and opts; StepJudgeOptions and AgentSpec consumers have explicit nested origins and registered literal settings."
   },
   {
-    "scope": "AgentStallConfig",
+    "scope": "RepairDiagnostics",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
     "expression": "{\n    primary_provider: to_string(primary_llm_opts?.provider ?? \"\"),\n    primary_model: to_string(primary_llm_opts?.model ?? \"\"),\n    primary_tool_format: to_string(primary_llm_opts?.tool_format ?? \"\"),\n    max_verify_attempts: opts?.max_verify_attempts ?? 20,\n    budget: budget,\n    current_max: budget.initial,\n    loop_start_ms: __agent_loop_clock_now_ms(clock),\n    reserve_cfg: reserve_cfg,\n    terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,\n    command_wait: command_wait_normalize(opts?.command_wait),\n  }",
     "owner": "agent_loop_run_settings",
     "evidence": "Resolved runner settings project the options and stall configuration; downstream roots identify each preserved option view."
   },
   {
-    "scope": "AgentStallConfig",
+    "scope": "RepairDiagnostics",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "{\n          opts: opts,\n          final_status: final_status,\n          stop_reason: stop_reason,\n          reserve_cfg: __reserve_cfg,\n          terminal_write_unverified: terminal_write_unverified,\n          terminal_assessment: terminal_assessment,\n          made_source_write: made_source_write,\n          call_budget: call_budget,\n          verify_attempts: verify_attempts,\n          max_verify_attempts: max_verify_attempts,\n          verify_completion_judge_invocations: verify_completion_judge_invocations,\n          verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n          turn_end_judge_invocations: turn_end_judge_invocations,\n          iteration: iteration,\n          current_max: current_max,\n          budget: budget,\n          budget_exhausted_emitted: budget_exhausted_emitted,\n          budget_decisions: budget_decisions,\n          suspend_result: suspend_result,\n          terminal_error: terminal_error,\n          last_turn_parse_dropped: last_turn_parse_dropped,\n          stall_state: stall_state,\n          successful_tools_seen: successful_tools_seen,\n          rejected_tools_seen: rejected_tools_seen,\n          tool_calls_attempted: tool_calls_attempted,\n          tool_calls_succeeded: tool_calls_succeeded,\n          last_tool_rejection_category: last_tool_rejection_category,\n          feedback_history: feedback_history,\n        }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
-  },
-  {
-    "scope": "AgentStallConfig",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
-    "expression": "{enabled: value}",
-    "owner": "__agent_stall_config",
-    "evidence": "The boolean shorthand becomes the existing AgentStallConfig.enabled setting."
-  },
-  {
-    "scope": "AgentStallConfig",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-    "expression": "{\n      state: state,\n      enabled: false,\n      warning: nil,\n      feedback_deferred: false,\n      config: config,\n      hard_stop: false,\n    }",
-    "owner": "__agent_stall_observe_core",
-    "evidence": "The observation returns config beside measured state and warning; the observation normalizer declares the config view."
-  },
-  {
-    "scope": "AgentStallConfig",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
-    "expression": "{\n    state: state,\n    enabled: true,\n    warning: warning,\n    feedback_deferred: feedback_deferred,\n    config: config,\n    hard_stop: state.hard_stop,\n  }",
-    "owner": "__agent_stall_observation",
-    "evidence": "The observation returns config beside measured state and warning; the observation normalizer declares the config view."
   },
   {
     "scope": "CallerTransport",
@@ -564,20 +563,6 @@
     "expression": "{\n      judge_cfg: judge_cfg,\n      opts: opts,\n      payload: payload,\n      checkpoint_name: \"agent.step_judge\",\n      system: system,\n      user: user,\n      schema: schema,\n    }",
     "owner": "__invoke",
     "evidence": "The step checkpoint carries judge_cfg and opts; StepJudgeOptions and AgentSpec consumers have explicit nested origins and registered literal settings."
-  },
-  {
-    "scope": "TokenRunaway",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
-    "expression": "token_runaway_decision(config, obs)",
-    "owner": "token_runaway_decision",
-    "evidence": "The first parameter has an explicit TokenRunaway origin; its thresholds are audited independently.",
-    "consumers": [
-      {
-        "scope": "TokenRunaway",
-        "function": "token_runaway_decision",
-        "parameter": "config"
-      }
-    ]
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",

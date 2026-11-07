@@ -35,8 +35,8 @@
       "to": "MissingToolCallRecoveryOptions."
     },
     {
-      "from": "AgentSpec.stall_diagnostics.",
-      "to": "AgentStallConfig."
+      "from": "AgentSpec.repair_diagnostics.",
+      "to": "RepairDiagnostics."
     },
     {
       "from": "AgentSpec.verify_completion_judge.",
@@ -49,10 +49,6 @@
     {
       "from": "AgentSpec.auto_compact.policy.",
       "to": "CompactionPolicy."
-    },
-    {
-      "from": "AgentStallConfig.repair_diagnostics.",
-      "to": "AgentStallConfig."
     }
   ],
   "repo": "harn",
@@ -70,12 +66,11 @@
     "spec/agent-gates/agent-loop-retry-options.json",
     "spec/agent-gates/agent-model-spec.json",
     "spec/agent-gates/agent-observability-spec.json",
-    "spec/agent-gates/agent-stall-config.json",
+    "spec/agent-gates/repair-diagnostics.json",
     "spec/agent-gates/agent-stop-options.json",
     "spec/agent-gates/command-wait-options.json",
     "spec/agent-gates/compaction-policy.json",
     "spec/agent-gates/consecutive-failure-budget.json",
-    "spec/agent-gates/detector-spec.json",
     "spec/agent-gates/harn_agent_tool_format.json",
     "spec/agent-gates/harn_llm_model.json",
     "spec/agent-gates/harn_llm_provider.json",
@@ -311,12 +306,10 @@
     "spec/agent-gates/reviewed-consumer-boundaries.json",
     "spec/agent-gates/forwarding-agentlifecycletoolsoptions.json",
     "spec/agent-gates/forwarding-agentspec.json",
-    "spec/agent-gates/forwarding-agentstallconfig.json",
     "spec/agent-gates/forwarding-agentstopoptions.json",
     "spec/agent-gates/forwarding-commandwaitoptions.json",
     "spec/agent-gates/forwarding-compactionpolicy.json",
     "spec/agent-gates/forwarding-consecutivefailurebudget.json",
-    "spec/agent-gates/forwarding-detectorspec.json",
     "spec/agent-gates/forwarding-judgeconfig.json",
     "spec/agent-gates/forwarding-missingtoolcallrecoveryoptions.json",
     "spec/agent-gates/forwarding-modelpolicyspec.json",
@@ -348,17 +341,15 @@
     "spec/agent-gates/bindings/skill-match.json",
     "spec/agent-gates/bindings/compaction-options.json",
     "spec/agent-gates/bindings/caller-transport.json",
-    "spec/agent-gates/bindings/token-runaway.json",
     "spec/agent-gates/bindings/judge-cadence.json",
     "spec/agent-gates/bindings/agent-lifecycle-tools-options.json",
     "spec/agent-gates/bindings/agent-loop-retry-options.json",
     "spec/agent-gates/bindings/agent-spec.json",
-    "spec/agent-gates/bindings/agent-stall-config.json",
+    "spec/agent-gates/bindings/repair-diagnostics.json",
     "spec/agent-gates/bindings/agent-stop-options.json",
     "spec/agent-gates/bindings/command-wait-options.json",
     "spec/agent-gates/bindings/compaction-policy.json",
     "spec/agent-gates/bindings/consecutive-failure-budget.json",
-    "spec/agent-gates/bindings/detector-spec.json",
     "spec/agent-gates/bindings/iteration-budget.json",
     "spec/agent-gates/bindings/judge-config.json",
     "spec/agent-gates/bindings/missing-tool-call-recovery-options.json",

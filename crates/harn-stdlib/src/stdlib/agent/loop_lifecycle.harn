@@ -6,7 +6,7 @@ import {
 } from "std/agent/loop_finalize"
 import { __agent_loop_clock_now_ms } from "std/agent/loop_foundation"
 import { __agent_loop_effective_llm_options } from "std/agent/loop_support"
-import { agent_stall_repair_config } from "std/agent/stall_verification"
+import { agent_repair_config } from "std/agent/repair"
 
 pub type AgentLoopRunSettings = {
   primary_provider: string,
@@ -45,7 +45,7 @@ pub fn agent_loop_run_settings(
       total_cost_usd: nil,
       consecutive_failures: nil,
     }
-  const reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
+  const reserve_cfg = agent_repair_config(opts?.repair_diagnostics)
   const terminal_verify_reserve_remaining = if reserve_cfg.reserved_terminal_verify
     || reserve_cfg.zero_write_terminal_verify {
     reserve_cfg.reserved_terminal_verify_iterations

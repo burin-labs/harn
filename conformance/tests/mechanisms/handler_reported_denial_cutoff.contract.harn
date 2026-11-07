@@ -146,7 +146,6 @@ fn base_opts(session: any, tools: any, extra: dict = {}) {
     max_iterations: 4,
     final_wrapup: false,
     session_id: session,
-    stall_diagnostics: {enabled: false},
   }
     + extra
 }
