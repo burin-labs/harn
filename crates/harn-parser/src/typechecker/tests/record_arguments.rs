@@ -129,7 +129,7 @@ fn optional_record_fields_accept_nil_unions_in_closed_and_open_records() {
              fn missing() -> Record {{ return {{}} }}\n\
              fn literal_nil() -> Record {{ return {{name: nil}} }}"
         );
-        let checked = errors(&source);
+        let checked = strict_errors(&source);
         assert!(checked.is_empty(), "{tail}: {checked:?}");
     }
 }
@@ -143,7 +143,7 @@ fn optional_record_fields_reject_wrong_union_members_and_missing_required_fields
         "fn wrong(value: string?) -> {name: string} { return {name: value} }",
         "fn wrong(value: {name?: string}) -> {name: string?} { return value }",
     ] {
-        let checked = errors(source);
+        let checked = strict_errors(source);
         assert_eq!(checked.len(), 1, "{source}: {checked:?}");
         assert!(checked[0].contains("return value"), "{checked:?}");
     }
