@@ -5,6 +5,7 @@ mod control;
 mod correlation;
 mod host_boundaries;
 mod injection_lifecycle;
+mod outbound;
 mod pending_call;
 mod remind;
 mod response_deadline;
@@ -18,6 +19,7 @@ pub use host_boundaries::{
     UserInjectionBoundary, UserInjectionStage,
 };
 pub use injection_lifecycle::UserMessageDeliveryOwner;
+pub use outbound::{OutboundRequests, RequestError};
 use remind::queued_session_remind_from_params;
 #[cfg(test)]
 use response_deadline::bridge_call_timeout;
@@ -68,9 +70,8 @@ fn stdout_writer(stdout_lock: Arc<std::sync::Mutex<()>>) -> HostBridgeWriter {
 /// waiting callers by request ID. All stdout writes are serialized through
 /// a mutex to prevent interleaving.
 pub struct HostBridge {
-    next_id: AtomicU64,
-    /// Pending request waiters, keyed by JSON-RPC id.
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    outbound: Arc<OutboundRequests>,
+    cancel_outstanding_requests: bool,
     /// Whether the host has sent a cancel notification.
     cancelled: Arc<AtomicBool>,
     /// Tool calls routed through this bridge. The bridge owns the registry so
@@ -79,9 +80,6 @@ pub struct HostBridge {
     tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
     /// Wakes pending host calls when cancellation arrives.
     cancel_notify: Arc<Notify>,
-    /// Whether the host transport has closed. Checked while holding `pending`
-    /// so a request cannot register after the reader's final clear.
-    disconnected: Arc<AtomicBool>,
     /// Transport writer used to send JSON-RPC to the host.
     writer: HostBridgeWriter,
     /// ACP session ID (set in ACP mode for session-scoped notifications).
@@ -653,12 +651,15 @@ impl HostBridge {
         });
 
         Self {
-            next_id: AtomicU64::new(1),
-            pending,
+            outbound: Arc::new(OutboundRequests {
+                pending,
+                next_id: AtomicU64::new(1),
+                disconnected,
+            }),
+            cancel_outstanding_requests: false,
             cancelled,
             tool_call_cancellations,
             cancel_notify,
-            disconnected,
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             caller_message_id: std::sync::Mutex::new(None),
@@ -709,13 +710,27 @@ impl HostBridge {
         start_id: u64,
         control: HostBridgeControlState,
     ) -> Self {
+        let mut bridge = Self::from_outbound_requests(
+            Arc::new(OutboundRequests::from_parts(pending, start_id)),
+            writer,
+            control,
+        );
+        bridge.cancel_outstanding_requests = false;
+        bridge
+    }
+
+    /// Join the ACP connection's outgoing request and cancellation owner.
+    pub fn from_outbound_requests(
+        outbound: Arc<OutboundRequests>,
+        writer: HostBridgeWriter,
+        control: HostBridgeControlState,
+    ) -> Self {
         Self {
-            next_id: AtomicU64::new(start_id),
-            pending,
+            outbound,
+            cancel_outstanding_requests: true,
             cancelled: control.cancelled,
             tool_call_cancellations: control.tool_call_cancellations,
             cancel_notify: control.cancel_notify,
-            disconnected: Arc::new(AtomicBool::new(false)),
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             caller_message_id: std::sync::Mutex::new(None),
@@ -737,12 +752,11 @@ impl HostBridge {
     pub async fn from_harn_module(mut vm: Vm, module_path: &Path) -> Result<Self, VmError> {
         let exported_functions = vm.load_module_exports(module_path).await?;
         Ok(Self {
-            next_id: AtomicU64::new(1),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            outbound: Arc::default(),
+            cancel_outstanding_requests: false,
             cancelled: Arc::new(AtomicBool::new(false)),
             tool_call_cancellations: crate::tool_call_cancellations::fresh_registry(),
             cancel_notify: Arc::new(Notify::new()),
-            disconnected: Arc::new(AtomicBool::new(false)),
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             caller_message_id: std::sync::Mutex::new(None),
@@ -827,64 +841,34 @@ impl HostBridge {
             return in_process.dispatch(method, params).await;
         }
 
-        if self.is_cancelled() {
-            return Err(VmError::Runtime("Bridge: operation cancelled".into()));
-        }
-
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let cancel_wait = self.cancel_notify.notified();
-        tokio::pin!(cancel_wait);
-        // `notify_waiters` does not retain a permit for a waiter that has not
-        // been polled. Register before the final atomic cancellation check so
-        // cancellation cannot land in the check/select gap and be lost.
-        cancel_wait.as_mut().enable();
-
-        let request = crate::jsonrpc::request(id, method, params);
-
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().await;
-            if self.disconnected.load(Ordering::SeqCst) {
-                return Err(VmError::Runtime(
-                    "Bridge: host connection is already closed".into(),
-                ));
-            }
-            pending.insert(id, tx);
-        }
-        let _registration = pending_call::PendingCallRegistration::new(self.pending.clone(), id);
-
-        let line = serde_json::to_string(&request)
-            .map_err(|e| VmError::Runtime(format!("Bridge serialization error: {e}")))?;
-        self.write_line(&line)?;
-
-        if self.is_cancelled() {
-            return Err(VmError::Runtime("Bridge: operation cancelled".into()));
-        }
-
-        let timeout_wait =
-            wait_for_bridge_call_timeout(method, &request["params"], DEFAULT_TIMEOUT);
-        tokio::pin!(timeout_wait);
-
-        let response = tokio::select! {
-            result = rx => match result {
-                Ok(msg) => msg,
-                Err(_) => {
-                    // Sender dropped: host closed or stdin reader exited.
-                    return Err(VmError::Runtime(
-                        "Bridge: host closed connection before responding".into(),
-                    ));
-                }
-            },
-            _ = &mut cancel_wait => {
-                return Err(VmError::Runtime("Bridge: operation cancelled".into()));
-            }
-            timeout = &mut timeout_wait => {
-                return Err(VmError::Runtime(format!(
-                    "Bridge: host did not respond to '{method}' within {}s",
-                    timeout.as_secs()
-                )));
-            }
-        };
+        let response = self
+            .outbound
+            .call(
+                self.writer.clone(),
+                method,
+                params,
+                Some((&self.cancelled, &self.cancel_notify)),
+                DEFAULT_TIMEOUT,
+                self.cancel_outstanding_requests,
+            )
+            .await
+            .map_err(|error| {
+                VmError::Runtime(match error {
+                    RequestError::Cancelled => "Bridge: operation cancelled".into(),
+                    RequestError::Disconnected => {
+                        "Bridge: host connection is already closed".into()
+                    }
+                    RequestError::Closed => {
+                        "Bridge: host closed connection before responding".into()
+                    }
+                    RequestError::Timeout(timeout) => format!(
+                        "Bridge: host did not respond to '{method}' within {}s",
+                        timeout.as_secs()
+                    ),
+                    RequestError::Encoding(error) => format!("Bridge serialization error: {error}"),
+                    RequestError::Transport(error) => error,
+                })
+            })?;
 
         if let Some(error) = response.get("error") {
             let message = error["message"].as_str().unwrap_or("Unknown host error");

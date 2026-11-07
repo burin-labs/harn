@@ -96,6 +96,13 @@ impl HostCallBridge for AcpHostCallBridge {
             let name = format!("{capability}.{operation}");
             let args = harn_vm::VmValue::dict(params.clone());
             let args_json = harn_vm::llm::vm_value_to_json(&args);
+            if capability == "mcp"
+                && operation == "elicit"
+                && self.bridge.client_capabilities.elicitation.is_some()
+            {
+                let result = self.bridge.elicit(args_json).await?;
+                return Ok(Some(harn_vm::bridge::json_result_to_vm_value(&result)));
+            }
             let result = self
                 .bridge
                 .call_client(

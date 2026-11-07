@@ -2,6 +2,26 @@
 pub const ACP_SCHEMA_COMPATIBILITY: &str =
     "agentclientprotocol/agent-client-protocol schema v1.26.0";
 
+pub const ACP_CLIENT_METHODS: &[&str] = &[
+    "fs/read_text_file",
+    "fs/write_text_file",
+    "terminal/create",
+    "terminal/output",
+    "terminal/release",
+    "terminal/wait_for_exit",
+    "terminal/kill",
+    "session/request_permission",
+    "elicitation/create",
+];
+
+pub const ACP_AGENT_NOTIFICATIONS: &[&str] = &[
+    "session/message",
+    "session/update",
+    "terminal/output",
+    "elicitation/complete",
+    "$/cancel_request",
+];
+
 macro_rules! session_update_vocabulary {
     (updates [$($kind:literal => $standard:literal),* $(,)?], extensions [$($extension:literal),* $(,)?]) => {
         pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[$($kind,)*];

@@ -691,7 +691,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/fork` | Fork an existing session into an independent branch |
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution; with `delivery`, steer or queue it into a busy session |
-| `$/cancel_request` | Withdraw a delivery prompt that has not been inserted yet |
+| `$/cancel_request` | Cancel the matching admitted prompt request or withdraw an uninserted delivery prompt |
 | `session/remind` | Queue a typed system reminder for the active agent loop |
 | `session/pending_prompts` | List pending delivery prompts and reminders |
 | `session/revoke_reminder` | Revoke a pending bridge reminder before delivery |
@@ -717,6 +717,49 @@ The ACP server supports these JSON-RPC methods:
 | `workflow/update` | Send a workflow update request and wait for a response |
 | `workflow/pause` | Mark a workflow paused and enqueue a control message |
 | `workflow/resume` | Mark a workflow resumed and enqueue a control message |
+
+### Structured client input
+
+Declare `clientCapabilities.elicitation.form: {}` or
+`clientCapabilities.elicitation.url: {}` to handle standard `elicitation/create`
+requests for that mode. Harn forwards MCP input through its existing input
+owner and scopes each request to the ACP session. An explicitly ungranted mode
+fails the originating operation. Clients without an `elicitation` declaration
+retain the existing `host/call` fallback for `mcp.elicit`.
+
+Return `action: "accept"`, `"decline"`, or `"cancel"`. Accepted form content
+must match the requested schema. Dismissing a form should return `cancel`.
+Human input has no response deadline; stopping the prompt or disconnecting
+settles its waiter. Harn sends `$/cancel_request` with the exact outgoing
+request ID when that request is abandoned. A late answer is ignored.
+
+URL requests carry an opaque ID unique to the ACP connection. Accepting one
+records consent, not completion. Harn sends `elicitation/complete` only after
+an originating MCP peer reports completion for a known outstanding URL ID;
+unknown and repeated completion signals are ignored. MCP 2026-07-28 URL flows
+without a completion ID produce no synthetic completion notification. Harn
+doesn't open or prefetch these URLs.
+
+### Optional protocol boundaries
+
+Harn doesn't advertise `logout`, `session/delete`, or terminal authentication.
+These features require their own authenticated persistence lifecycle before
+adoption. Unstable provider methods and `mcp/message` return Method not found.
+Requested client system prompts and session MCP servers are refused before
+session admission, as described in [Outbound workflow server](./harn-serve.md).
+Stable `plan` updates remain supported; unstable plan, subagent, and session
+message shapes aren't advertised.
+
+Existing Harn extensions retain their wire ownership. `state_update` keeps its
+top-level state payload and requires an exact extension grant. Caller
+`session/prompt.messageId` is a Harn extension bound to the canonical message
+owner. The gated user-message and history/rollback variants remain Harn
+extensions rather than aliases for upstream unstable shapes. Removed upstream
+NES, document, environment-variable authentication, and model-selection types
+aren't compatibility targets; existing Harn config options retain their own
+contract.
+
+### Closing and resuming sessions
 
 `session/close` can return an opaque `continuation` string for the most recently
 completed transcript in that server process. A client that already holds the

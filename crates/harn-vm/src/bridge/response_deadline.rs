@@ -7,6 +7,7 @@ pub(super) fn bridge_call_timeout(
 ) -> Option<Duration> {
     match method {
         crate::llm::acp_permission::METHOD_REQUEST_PERMISSION => None,
+        "elicitation/create" => None,
         "host/call"
             if params
                 .get("name")

@@ -40,6 +40,7 @@ fn relay_stream_notification(server_name: &str, msg: &serde_json::Value) -> bool
         || method == "notifications/resources/list_changed"
         || method == "notifications/tools/list_changed"
         || method == "notifications/prompts/list_changed"
+        || method == "notifications/elicitation/complete"
     {
         relay_resource_notification(server_name, method, msg);
         return true;

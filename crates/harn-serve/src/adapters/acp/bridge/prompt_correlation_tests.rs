@@ -1,6 +1,7 @@
 use super::*;
 use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::bridge::HostBridge;
+use tokio::sync::Mutex;
 
 fn correlation(id: &str) -> AcpPromptCorrelation {
     serde_json::from_value(serde_json::json!({"messageId": id})).unwrap()
@@ -104,8 +105,11 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         client_capabilities: Default::default(),
         session_id: "same-session".into(),
         output,
-        pending: pending.clone(),
-        next_id_counter: AtomicU64::new(first_id),
+        outbound: Arc::new(harn_vm::bridge::OutboundRequests::from_parts(
+            pending.clone(),
+            first_id,
+        )),
+        elicitations: Arc::default(),
         cancellation: SessionCancellation::default().prepare_prompt(),
         assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         host_responder: None,

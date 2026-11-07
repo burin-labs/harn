@@ -388,8 +388,7 @@ impl ConcurrentSessionControls {
         }
     }
 
-    /// `$/cancel_request` withdraws a pending delivery prompt. Other requests
-    /// ignore it, as ACP allows.
+    /// Cancel only the prompt lifetime owned by this connection's request ID.
     pub(super) async fn preempt_cancel_request(
         &self,
         msg: &serde_json::Value,
@@ -399,8 +398,12 @@ impl ConcurrentSessionControls {
         {
             return false;
         }
-        if let Some(request_id) = msg.pointer("/params/requestId") {
+        if let Some(request_id) = msg
+            .pointer("/params/requestId")
+            .filter(|id| id.is_string() || id.is_i64() || id.is_u64())
+        {
             if self.authenticated.load(Ordering::SeqCst) {
+                self.cancel_request(request_id);
                 self.withdraw(
                     |prompt| prompt.request_id == *request_id,
                     "request_cancelled",

@@ -546,7 +546,8 @@ impl AcpServer {
                     self.concurrent_controls.pending_prompts.clone(),
                     self.output.clone(),
                 ),
-            ),
+            )
+            .with_elicitations(self.elicitations.clone()),
         ));
         let bridge = Arc::new(AcpBridge {
             client_capabilities: self
@@ -556,28 +557,25 @@ impl AcpServer {
                 .clone(),
             session_id: session_id.clone(),
             output: output.clone(),
-            pending: self.pending.clone(),
-            next_id_counter: AtomicU64::new(self.next_id.fetch_add(1000, Ordering::SeqCst)),
+            outbound: self.outbound.clone(),
+            elicitations: self.elicitations.clone(),
             cancellation: cancellation.clone(),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
             host_responder,
         });
-        let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-                bridge.pending.clone(),
-                Arc::new(move |line| {
-                    output.write_line(line);
-                    Ok(())
-                }),
-                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-                harn_vm::bridge::HostBridgeControlState::new(
-                    cancellation.cancelled.clone(),
-                    cancellation.notify.clone(),
-                    inject_state,
-                    tool_call_cancellations,
-                ),
+        let host_bridge = Arc::new(harn_vm::bridge::HostBridge::from_outbound_requests(
+            self.outbound.clone(),
+            Arc::new(move |line| {
+                output.write_line(line);
+                Ok(())
+            }),
+            harn_vm::bridge::HostBridgeControlState::new(
+                cancellation.cancelled.clone(),
+                cancellation.notify.clone(),
+                inject_state,
+                tool_call_cancellations,
             ),
-        );
+        ));
         host_bridge.set_session_id(&bridge.session_id);
         host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
         #[cfg(feature = "hostlib")]

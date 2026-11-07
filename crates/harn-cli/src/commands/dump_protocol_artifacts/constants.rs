@@ -1,5 +1,6 @@
 pub(super) use harn_serve::adapters::acp::ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE;
 use harn_serve::adapters::acp::HARN_PROVIDER_CATALOG_METHOD;
+pub(super) use harn_serve::adapters::acp::{ACP_AGENT_NOTIFICATIONS, ACP_CLIENT_METHODS};
 pub(super) use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD;
 pub(super) use harn_vm::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE;
@@ -34,14 +35,6 @@ pub(super) const ACP_DEPRECATED_AGENT_METHODS: &[DeprecatedWireValue] = &[Deprec
     value: "session/stop",
     replacement: "session/close",
 }];
-
-pub(super) const ACP_CLIENT_METHODS: &[&str] = &[
-    "fs/read_text_file",
-    "fs/write_text_file",
-    "terminal/create",
-    "terminal/kill",
-    "session/request_permission",
-];
 
 /// Every JSON-RPC method the ACP adapter's `dispatch` actually handles,
 /// reconciled against the match arms in
@@ -139,9 +132,6 @@ pub(super) const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
 ];
 
 pub(super) const HARN_SESSION_RECAP_METHODS: &[&str] = &[SESSION_RECAP_QUERY_METHOD];
-
-pub(super) const ACP_AGENT_NOTIFICATIONS: &[&str] =
-    &["session/message", "session/update", "terminal/output"];
 
 pub(super) const ACP_CONTENT_BLOCK_TYPES: &[&str] =
     &["text", "resource_link", "resource", "image", "audio"];

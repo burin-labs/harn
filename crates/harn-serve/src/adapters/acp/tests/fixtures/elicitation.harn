@@ -1,0 +1,3 @@
+fn main(tools: HarnessTools) {
+  return tools.mcp_call(mcp.probe, "collect", {})
+}
