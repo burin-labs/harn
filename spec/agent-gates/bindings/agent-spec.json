@@ -90,10 +90,6 @@
         "name": "opts"
       },
       {
-        "function": "__agent_monologue_actuation_route_suppression",
-        "name": "options"
-      },
-      {
         "function": "agent_render_tool_call_prefix",
         "name": "options"
       },
@@ -182,10 +178,6 @@
         "name": "opts"
       },
       {
-        "function": "agent_monologue_actuation_take",
-        "name": "llm_options"
-      },
-      {
         "function": "__with_load_skill_tool",
         "name": "opts"
       },
@@ -212,14 +204,6 @@
       {
         "function": "agent_direct_llm_options",
         "name": "turn_llm_opts"
-      },
-      {
-        "function": "agent_monologue_actuation_take_for_turn",
-        "name": "turn_options"
-      },
-      {
-        "function": "agent_monologue_actuation_take_for_turn",
-        "name": "llm_options"
       },
       {
         "function": "__agent_loop_enable_equivalent_failover",

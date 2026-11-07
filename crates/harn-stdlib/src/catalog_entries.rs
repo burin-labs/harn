@@ -328,8 +328,6 @@ catalog_entries! {
     "agent/loop_turn_setup" => "stdlib/agent/loop_turn_setup.harn",
     "agent/purpose_labels" => "stdlib/agent/purpose_labels.harn",
     "agent/loop_purpose_labels" => "stdlib/agent/loop_purpose_labels.harn",
-    "agent/monologue_actuation" => "stdlib/agent/monologue_actuation.harn",
-    "agent/monologue_actuation_types" => "stdlib/agent/monologue_actuation_types.harn",
     "agent/stall_types" => "stdlib/agent/stall_types.harn",
     "agent/stall" => "stdlib/agent/stall.harn",
     "agent/recurring_diagnostic" => "stdlib/agent/recurring_diagnostic.harn",

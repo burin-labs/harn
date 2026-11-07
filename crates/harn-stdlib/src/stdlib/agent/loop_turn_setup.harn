@@ -46,7 +46,7 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
   let opts = state.opts
   const iteration = state.iteration
   let call_budget = state.call_budget
-  let stall_state = state.stall_state
+  const stall_state = state.stall_state
   let command_hold_cap_tokens = state.command_hold_cap_tokens
   let budget_decisions = state.budget_decisions
   let audit_background_tasks = state.audit_background_tasks
@@ -115,9 +115,6 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
       }
   }
   const iteration_index = iteration
-  const monologue_actuation_prior_read_streak = stall_state.monologue_actuation.read_only_streak
-  stall_state = stall_state
-    + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
   const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
   opts = pending_prefill.options
   let iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
@@ -185,23 +182,7 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     session.session_id,
     iteration_index + 1,
   )
-  const monologue_actuation = agent_monologue_actuation_take_for_turn(
-    harness.agent,
-    harness.llm,
-    session.session_id,
-    iteration_index + 1,
-    stall_state.monologue_actuation,
-    turn_opts,
-    turn_llm_opts,
-    pending_prefill.prefill == "",
-    agent_tool_call_paradigm(harness.llm, turn_llm_opts),
-  )
-  stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
-  const one_shot_prefill = if monologue_actuation.applied {
-    monologue_actuation.prefill
-  } else {
-    pending_prefill.prefill
-  }
+  const one_shot_prefill = pending_prefill.prefill
   const prefill_eligibility = agent_prefill_eligibility(
     harness.llm,
     one_shot_prefill,
@@ -215,9 +196,6 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
   } else {
     __agent_loop_enable_equivalent_failover(direct_llm_opts, primary_provider, primary_model, opts)
   }
-  // Caller-supplied and recovery-generated prefills converge here. The
-  // typed eligibility decision above is shared with monologue actuation,
-  // so no path can bypass caller, routing, or catalog capability checks.
   const llm_opts = if prefill_eligibility.allowed {
     llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
   } else {
@@ -232,7 +210,6 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
       stall_state: stall_state,
       command_hold_cap_tokens: command_hold_cap_tokens,
       iteration_index: iteration_index,
-      monologue_actuation_prior_read_streak: monologue_actuation_prior_read_streak,
       turn_opts: turn_opts,
       turn_llm_opts: turn_llm_opts,
       turn_prompt: turn_prompt,

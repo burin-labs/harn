@@ -53,10 +53,6 @@
     {
       "from": "AgentStallConfig.repair_diagnostics.",
       "to": "AgentStallConfig."
-    },
-    {
-      "from": "AgentStallConfig.monologue_actuation.",
-      "to": "MonologueActuationConfig."
     }
   ],
   "repo": "harn",
@@ -92,7 +88,6 @@
     "spec/agent-gates/judge-config.json",
     "spec/agent-gates/missing-tool-call-recovery-options.json",
     "spec/agent-gates/model-policy-spec.json",
-    "spec/agent-gates/monologue-actuation-config.json",
     "spec/agent-gates/purpose-label-config.json",
     "spec/agent-gates/read-only-stance-options.json",
     "spec/agent-gates/stage-spec.json",
@@ -325,7 +320,6 @@
     "spec/agent-gates/forwarding-judgeconfig.json",
     "spec/agent-gates/forwarding-missingtoolcallrecoveryoptions.json",
     "spec/agent-gates/forwarding-modelpolicyspec.json",
-    "spec/agent-gates/forwarding-monologueactuationconfig.json",
     "spec/agent-gates/forwarding-purposelabelconfig.json",
     "spec/agent-gates/forwarding-readonlystanceoptions.json",
     "spec/agent-gates/forwarding-toolsurfacenarrowingoptions.json",
@@ -369,7 +363,6 @@
     "spec/agent-gates/bindings/judge-config.json",
     "spec/agent-gates/bindings/missing-tool-call-recovery-options.json",
     "spec/agent-gates/bindings/model-policy-spec.json",
-    "spec/agent-gates/bindings/monologue-actuation-config.json",
     "spec/agent-gates/bindings/purpose-label-config.json",
     "spec/agent-gates/bindings/read-only-stance-options.json",
     "spec/agent-gates/bindings/stage-spec.json",

@@ -1,8 +1,3 @@
-import {
-  MonologueActuationConfig,
-  MonologueActuationState,
-} from "std/agent/monologue_actuation_types"
-
 /** Normalized internal configuration for the agent stall detector. */
 pub type AgentStallConfig = {
   enabled: bool,
@@ -36,7 +31,6 @@ pub type AgentStallConfig = {
   verify_state_stall_turns: int,
   verify_state_recurrence_hard: int,
   no_verifier_progress_limit: int,
-  monologue_actuation: MonologueActuationConfig,
   progress_signal: any?,
   remediation_delivered: any?,
   action_signal: any?,
@@ -122,7 +116,6 @@ pub type AgentStallState = {
   verify_signature_counts: dict,
   remediation_delivered_signature: string,
   remediation_delivered_count: int,
-  monologue_actuation: MonologueActuationState,
 }
 
 /** Committed detector state plus at most one completed, unconsumed dispatch. */

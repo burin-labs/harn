@@ -135,7 +135,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n            harness: harness,\n            session_id: session.session_id,\n            tool_calls: tool_calls,\n            dispatch: dispatch,\n            iteration: iteration_index + 1,\n            stall_config: stall_observation.config,\n            stall_state: stall_state,\n            turn_opts: turn_opts,\n            prior_read_streak: monologue_actuation_prior_read_streak,\n          }",
+    "expression": "{\n            harness: harness,\n            session_id: session.session_id,\n            tool_calls: tool_calls,\n            dispatch: dispatch,\n            iteration: iteration_index + 1,\n            stall_config: stall_observation.config,\n            stall_state: stall_state,\n            turn_opts: turn_opts,\n          }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -486,13 +486,6 @@
     "expression": "__missing_tool_call_policy(harness.llm, cfg)",
     "owner": "__missing_tool_call_policy",
     "evidence": "The consumer cfg is typed MissingToolCallRecoveryOptions in the required classifier source; it resolves the route and constructs one typed EvaluationPolicy."
-  },
-  {
-    "scope": "MonologueActuationConfig",
-    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-    "expression": "{enabled: value}",
-    "owner": "agent_monologue_actuation_config",
-    "evidence": "The boolean shorthand becomes the existing enabled setting; it creates no independent option key."
   },
   {
     "scope": "ReadOnlyStanceOptions",

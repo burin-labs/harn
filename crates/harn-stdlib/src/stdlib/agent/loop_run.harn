@@ -176,7 +176,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           break
         }
         const iteration_index = setup.iteration_index
-        const monologue_actuation_prior_read_streak = setup.monologue_actuation_prior_read_streak
         const turn_opts = setup.turn_opts
         const turn_llm_opts = setup.turn_llm_opts
         const turn_prompt = setup.turn_prompt
@@ -882,7 +881,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             stall_config: stall_observation.config,
             stall_state: stall_state,
             turn_opts: turn_opts,
-            prior_read_streak: monologue_actuation_prior_read_streak,
           },
         )
         stall_state = completed_observation.state

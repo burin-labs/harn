@@ -279,10 +279,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
         "reader": "__agent_loop_run"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
-        "reader": "agent_monologue_actuation_take_for_turn"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
