@@ -2,6 +2,21 @@
 import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_320: MessageTemplate = {
+  arity: 2,
+  fallback: [0, "source: ", 1, "\n"],
+  translations: {
+    de: [0, "Quelle: ", 1, "\n"],
+    es: [0, "origen: ", 1, "\n"],
+    fr: [0, "source : ", 1, "\n"],
+    it: [0, "origine: ", 1, "\n"],
+    ko: [0, "출처: ", 1, "\n"],
+    "pt-BR": [0, "fonte: ", 1, "\n"],
+    ru: [0, "источник: ", 1, "\n"],
+    "zh-Hans": [0, "来源：", 1, "\n"],
+  },
+}
+
+pub const MESSAGE_321: MessageTemplate = {
   arity: 7,
   fallback: [0, 1, ". ", 2, " ", 3, " (", 4, ", selector ", 5, ", tools ", 6, ")\n"],
   translations: {

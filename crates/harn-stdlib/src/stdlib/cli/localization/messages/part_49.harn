@@ -2,6 +2,22 @@
 import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_245: MessageTemplate = {
+  arity: 0,
+  fallback: ["missing"],
+  translations: {
+    de: ["fehlend"],
+    es: ["faltante"],
+    fr: ["manquant"],
+    it: ["mancante"],
+    ja: ["不足"],
+    ko: ["누락됨"],
+    "pt-BR": ["ausente"],
+    ru: ["отсутствует"],
+    "zh-Hans": ["缺失"],
+  },
+}
+
+pub const MESSAGE_246: MessageTemplate = {
   arity: 7,
   fallback: [
     "model_id=",
@@ -22,7 +38,7 @@ pub const MESSAGE_245: MessageTemplate = {
   translations: {},
 }
 
-pub const MESSAGE_246: MessageTemplate = {
+pub const MESSAGE_247: MessageTemplate = {
   arity: 0,
   fallback: ["no"],
   translations: {
@@ -36,7 +52,7 @@ pub const MESSAGE_246: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_247: MessageTemplate = {
+pub const MESSAGE_248: MessageTemplate = {
   arity: 0,
   fallback: ["no credentials"],
   translations: {
@@ -52,7 +68,7 @@ pub const MESSAGE_247: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_248: MessageTemplate = {
+pub const MESSAGE_249: MessageTemplate = {
   arity: 3,
   fallback: ["no model recommendation for ram_bucket=", 0, " gpu=", 1, " has_provider_key=", 2],
   translations: {
@@ -86,21 +102,5 @@ pub const MESSAGE_248: MessageTemplate = {
     ],
     ru: ["нет рекомендации модели для ram_bucket=", 0, " gpu=", 1, " has_provider_key=", 2],
     "zh-Hans": ["没有适用于 ram_bucket=", 0, " gpu=", 1, " has_provider_key=", 2, " 的模型建议"],
-  },
-}
-
-pub const MESSAGE_249: MessageTemplate = {
-  arity: 0,
-  fallback: ["not buildable"],
-  translations: {
-    de: ["nicht baubar"],
-    es: ["no compilable"],
-    fr: ["non constructible"],
-    it: ["non compilabile"],
-    ja: ["ビルド不可"],
-    ko: ["빌드 불가"],
-    "pt-BR": ["não compilável"],
-    ru: ["не собирается"],
-    "zh-Hans": ["不可构建"],
   },
 }

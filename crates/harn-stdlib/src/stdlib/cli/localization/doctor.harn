@@ -6,21 +6,20 @@ import {
   MESSAGE_174,
 } from "std/cli/localization/messages/part_34"
 import { MESSAGE_194 } from "std/cli/localization/messages/part_38"
-import { MESSAGE_197 } from "std/cli/localization/messages/part_39"
+import { MESSAGE_196 } from "std/cli/localization/messages/part_39"
 import { MESSAGE_206, MESSAGE_209 } from "std/cli/localization/messages/part_41"
 import { MESSAGE_211 } from "std/cli/localization/messages/part_42"
 import { MESSAGE_217, MESSAGE_219 } from "std/cli/localization/messages/part_43"
-import { MESSAGE_238 } from "std/cli/localization/messages/part_47"
-import { MESSAGE_244 } from "std/cli/localization/messages/part_48"
-import { MESSAGE_247, MESSAGE_249 } from "std/cli/localization/messages/part_49"
-import { MESSAGE_250 } from "std/cli/localization/messages/part_50"
-import { MESSAGE_259 } from "std/cli/localization/messages/part_51"
-import { MESSAGE_267, MESSAGE_268 } from "std/cli/localization/messages/part_53"
-import { MESSAGE_291, MESSAGE_294 } from "std/cli/localization/messages/part_58"
-import { MESSAGE_295, MESSAGE_296 } from "std/cli/localization/messages/part_59"
-import { MESSAGE_304 } from "std/cli/localization/messages/part_60"
-import { MESSAGE_313 } from "std/cli/localization/messages/part_62"
-import { MESSAGE_315, MESSAGE_317 } from "std/cli/localization/messages/part_63"
+import { MESSAGE_239 } from "std/cli/localization/messages/part_47"
+import { MESSAGE_245, MESSAGE_248 } from "std/cli/localization/messages/part_49"
+import { MESSAGE_250, MESSAGE_251 } from "std/cli/localization/messages/part_50"
+import { MESSAGE_260 } from "std/cli/localization/messages/part_52"
+import { MESSAGE_268, MESSAGE_269 } from "std/cli/localization/messages/part_53"
+import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_295, MESSAGE_296, MESSAGE_297 } from "std/cli/localization/messages/part_59"
+import { MESSAGE_305 } from "std/cli/localization/messages/part_61"
+import { MESSAGE_314 } from "std/cli/localization/messages/part_62"
+import { MESSAGE_316, MESSAGE_318 } from "std/cli/localization/messages/part_63"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
 const MESSAGES: dict<string, MessageTemplate> = {
@@ -29,28 +28,28 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "--- Summary ---\n": MESSAGE_173,
   "--- Targets ---\n": MESSAGE_174,
   FAIL: MESSAGE_194,
-  "Harn doctor\n\n": MESSAGE_197,
+  "Harn doctor\n\n": MESSAGE_196,
   OK: MESSAGE_206,
   SKIP: MESSAGE_209,
   WARN: MESSAGE_211,
   buildable: MESSAGE_217,
   configured: MESSAGE_219,
-  installed: MESSAGE_238,
-  missing: MESSAGE_244,
-  "no credentials": MESSAGE_247,
-  "not buildable": MESSAGE_249,
-  "not probed": MESSAGE_250,
-  probed: MESSAGE_259,
-  reachable: MESSAGE_267,
-  "reachable ({0}ms)": MESSAGE_268,
-  unreachable: MESSAGE_291,
-  "{0}       blocks: {1}\n": MESSAGE_294,
-  "{0}       docs: {1}\n": MESSAGE_295,
-  "{0}       fix: {1}\n": MESSAGE_296,
-  "{0}  {1} sandbox: {2}\n": MESSAGE_304,
-  "{0}--- Next step ---\n": MESSAGE_313,
-  "{0}OK={1} WARN={2} FAIL={3} SKIP={4}\n": MESSAGE_315,
-  "{0}blocked: {1}\n": MESSAGE_317,
+  installed: MESSAGE_239,
+  missing: MESSAGE_245,
+  "no credentials": MESSAGE_248,
+  "not buildable": MESSAGE_250,
+  "not probed": MESSAGE_251,
+  probed: MESSAGE_260,
+  reachable: MESSAGE_268,
+  "reachable ({0}ms)": MESSAGE_269,
+  unreachable: MESSAGE_292,
+  "{0}       blocks: {1}\n": MESSAGE_295,
+  "{0}       docs: {1}\n": MESSAGE_296,
+  "{0}       fix: {1}\n": MESSAGE_297,
+  "{0}  {1} sandbox: {2}\n": MESSAGE_305,
+  "{0}--- Next step ---\n": MESSAGE_314,
+  "{0}OK={1} WARN={2} FAIL={3} SKIP={4}\n": MESSAGE_316,
+  "{0}blocked: {1}\n": MESSAGE_318,
 }
 
 /**

@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_285: MessageTemplate = {
   arity: 0,
+  fallback: ["train adapter"],
+  translations: {
+    de: ["Adapter trainieren"],
+    es: ["adaptador de entrenamiento"],
+    fr: ["entraîner l’adaptateur"],
+    it: ["addestra adapter"],
+    ja: ["トレーナーアダプター"],
+    ko: ["어댑터 학습"],
+    "pt-BR": ["treinar adaptador"],
+    ru: ["обучить адаптер"],
+    "zh-Hans": ["训练适配器"],
+  },
+}
+
+pub const MESSAGE_286: MessageTemplate = {
+  arity: 0,
   fallback: ["trainer contract"],
   translations: {
     de: ["Trainervertrag"],
@@ -17,7 +33,7 @@ pub const MESSAGE_285: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_286: MessageTemplate = {
+pub const MESSAGE_287: MessageTemplate = {
   arity: 0,
   fallback: ["trainer environment errors"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_286: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_287: MessageTemplate = {
+pub const MESSAGE_288: MessageTemplate = {
   arity: 0,
   fallback: ["trainer identity errors"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_287: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_288: MessageTemplate = {
+pub const MESSAGE_289: MessageTemplate = {
   arity: 0,
   fallback: ["training notes"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_288: MessageTemplate = {
     "pt-BR": ["observações de treinamento"],
     ru: ["заметки по обучению"],
     "zh-Hans": ["训练说明"],
-  },
-}
-
-pub const MESSAGE_289: MessageTemplate = {
-  arity: 0,
-  fallback: ["unclassified record ids"],
-  translations: {
-    de: ["nicht klassifizierte Datensatz-IDs"],
-    es: ["IDs de registros no clasificados"],
-    fr: ["identifiants d’enregistrements non classifiés"],
-    it: ["ID record non classificati"],
-    ja: ["未分類のレコードID"],
-    ko: ["미분류 레코드 ID"],
-    "pt-BR": ["IDs de registros não classificados"],
-    ru: ["неотнесённые идентификаторы записей"],
-    "zh-Hans": ["未分类记录 ID"],
   },
 }

@@ -10,14 +10,14 @@ import { MESSAGE_113 } from "std/cli/localization/messages/part_22"
 import { MESSAGE_146 } from "std/cli/localization/messages/part_29"
 import { MESSAGE_18 } from "std/cli/localization/messages/part_3"
 import { MESSAGE_162 } from "std/cli/localization/messages/part_32"
-import { MESSAGE_232 } from "std/cli/localization/messages/part_46"
-import { MESSAGE_243 } from "std/cli/localization/messages/part_48"
-import { MESSAGE_246 } from "std/cli/localization/messages/part_49"
+import { MESSAGE_233 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_244 } from "std/cli/localization/messages/part_48"
+import { MESSAGE_247 } from "std/cli/localization/messages/part_49"
 import { MESSAGE_25, MESSAGE_26 } from "std/cli/localization/messages/part_5"
-import { MESSAGE_275 } from "std/cli/localization/messages/part_55"
-import { MESSAGE_290, MESSAGE_293 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_276 } from "std/cli/localization/messages/part_55"
+import { MESSAGE_291, MESSAGE_294 } from "std/cli/localization/messages/part_58"
 import { MESSAGE_33 } from "std/cli/localization/messages/part_6"
-import { MESSAGE_308 } from "std/cli/localization/messages/part_61"
+import { MESSAGE_309 } from "std/cli/localization/messages/part_61"
 import { MESSAGE_35, MESSAGE_37, MESSAGE_38 } from "std/cli/localization/messages/part_7"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
@@ -41,13 +41,13 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "  request model: {0}": MESSAGE_113,
   "  tool format: {0}": MESSAGE_146,
   "  warning: {0}": MESSAGE_162,
-  exact: MESSAGE_232,
-  mismatch: MESSAGE_243,
-  no: MESSAGE_246,
-  "same basename": MESSAGE_275,
-  unknown: MESSAGE_290,
-  yes: MESSAGE_293,
-  "{0} -> {1} via {2}": MESSAGE_308,
+  exact: MESSAGE_233,
+  mismatch: MESSAGE_244,
+  no: MESSAGE_247,
+  "same basename": MESSAGE_276,
+  unknown: MESSAGE_291,
+  yes: MESSAGE_294,
+  "{0} -> {1} via {2}": MESSAGE_309,
 }
 
 /**

@@ -702,40 +702,27 @@ fn __write_if_new(
   dir: string,
   rel: string,
   content: string,
-) {
+) -> bool {
   const path = path_join(dir, rel)
-  const parent = dirname(path)
-  if parent != "" && !fs.exists(parent) {
-    try {
-      fs.mkdir(parent)
-    } catch (e) {
-      stdio.eprintln(
-        cli_message(
-          __cli_locale,
-          "Failed to create {0}: {1}",
-          [to_string(parent), to_string(to_string(e))],
-        ),
-      )
-      return
-    }
-  }
-  if fs.exists(path) {
-    stdio.println(cli_message(__cli_locale, "  skip  {0} (already exists)", [to_string(path)]))
-    return
-  }
   try {
+    const parent = dirname(path)
+    if parent != "" && !fs.exists(parent) {
+      fs.mkdir(parent)
+    }
+    if fs.exists(path) {
+      if !fs.stat(path).is_file {
+        throw cli_message(__cli_locale, "destination is not a regular file", [])
+      }
+      stdio.println(cli_message(__cli_locale, "  skip  {0} (already exists)", [path]))
+      return true
+    }
     fs.write_text(path, content)
   } catch (e) {
-    stdio.eprintln(
-      cli_message(
-        __cli_locale,
-        "Failed to write {0}: {1}",
-        [to_string(path), to_string(to_string(e))],
-      ),
-    )
-    return
+    stdio.eprintln(cli_message(__cli_locale, "Failed to write {0}: {1}", [path, to_string(e)]))
+    return false
   }
-  stdio.println(cli_message(__cli_locale, "  create  {0}", [to_string(path)]))
+  stdio.println(cli_message(__cli_locale, "  create  {0}", [path]))
+  return true
 }
 
 fn __print_next_steps(__cli_locale: string, stdio: HarnessStdio, name: string, template: string) {
@@ -820,8 +807,17 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(to_string(e))
     harness.runtime.exit(2)
   }
+  let failures = 0
   for entry in files {
-    __write_if_new(__cli_locale, harness.fs, harness.stdio, dir, entry[0], entry[1])
+    if !__write_if_new(__cli_locale, harness.fs, harness.stdio, dir, entry[0], entry[1]) {
+      failures = failures + 1
+    }
+  }
+  if failures > 0 {
+    harness.stdio.eprintln(
+      cli_message(__cli_locale, "Initialization failed for {0} file(s).", [to_string(failures)]),
+    )
+    harness.runtime.exit(1)
   }
   __print_next_steps(__cli_locale, harness.stdio, name, template)
 }

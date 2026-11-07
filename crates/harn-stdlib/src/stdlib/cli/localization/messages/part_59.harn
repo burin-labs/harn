@@ -3,11 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_295: MessageTemplate = {
   arity: 2,
+  fallback: [0, "       blocks: ", 1, "\n"],
+  translations: {
+    es: [0, "       bloques: ", 1, "\n"],
+    fr: [0, "       blocs : ", 1, "\n"],
+    it: [0, "       blocchi: ", 1, "\n"],
+    "pt-BR": [0, "       blocos: ", 1, "\n"],
+  },
+}
+
+pub const MESSAGE_296: MessageTemplate = {
+  arity: 2,
   fallback: [0, "       docs: ", 1, "\n"],
   translations: {fr: [0, "       docs : ", 1, "\n"], it: [0, "       documentazione: ", 1, "\n"]},
 }
 
-pub const MESSAGE_296: MessageTemplate = {
+pub const MESSAGE_297: MessageTemplate = {
   arity: 2,
   fallback: [0, "       fix: ", 1, "\n"],
   translations: {
@@ -18,7 +29,7 @@ pub const MESSAGE_296: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_297: MessageTemplate = {
+pub const MESSAGE_298: MessageTemplate = {
   arity: 2,
   fallback: [0, "   caveat: ", 1, "\n"],
   translations: {
@@ -29,62 +40,8 @@ pub const MESSAGE_297: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_298: MessageTemplate = {
+pub const MESSAGE_299: MessageTemplate = {
   arity: 6,
   fallback: [0, "  - ", 1, " (size=", 2, " vram=", 3, " ctx=", 4, " expires=", 5, ")\n"],
   translations: {},
-}
-
-pub const MESSAGE_299: MessageTemplate = {
-  arity: 7,
-  fallback: [
-    0,
-    "  buckets: cache_effective=",
-    1,
-    " cache_supported_miss=",
-    2,
-    " unsupported_zero=",
-    3,
-    " support_unknown_zero=",
-    4,
-    " no_prompt_tokens=",
-    5,
-    " provider_field_inconsistent=",
-    6,
-    "\n",
-  ],
-  translations: {
-    fr: [
-      0,
-      "  buckets : cache_effective=",
-      1,
-      " cache_supported_miss=",
-      2,
-      " unsupported_zero=",
-      3,
-      " support_unknown_zero=",
-      4,
-      " no_prompt_tokens=",
-      5,
-      " provider_field_inconsistent=",
-      6,
-      "\n",
-    ],
-    it: [
-      0,
-      "  bucket: cache_effective=",
-      1,
-      " cache_supported_miss=",
-      2,
-      " unsupported_zero=",
-      3,
-      " support_unknown_zero=",
-      4,
-      " no_prompt_tokens=",
-      5,
-      " provider_field_inconsistent=",
-      6,
-      "\n",
-    ],
-  },
 }

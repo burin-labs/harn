@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_225: MessageTemplate = {
   arity: 0,
+  fallback: ["difficulty signals"],
+  translations: {
+    de: ["Schwierigkeitssignale"],
+    es: ["señales de dificultad"],
+    fr: ["signaux de difficulté"],
+    it: ["segnali di difficoltà"],
+    ja: ["難易度シグナル"],
+    ko: ["난이도 신호"],
+    "pt-BR": ["sinais de dificuldade"],
+    ru: ["сигналы сложности"],
+    "zh-Hans": ["难度信号"],
+  },
+}
+
+pub const MESSAGE_226: MessageTemplate = {
+  arity: 0,
   fallback: ["dry-run only"],
   translations: {
     de: ["nur Trockenlauf"],
@@ -17,7 +33,7 @@ pub const MESSAGE_225: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_226: MessageTemplate = {
+pub const MESSAGE_227: MessageTemplate = {
   arity: 2,
   fallback: [
     "effort-probe: ",
@@ -87,7 +103,7 @@ pub const MESSAGE_226: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_227: MessageTemplate = {
+pub const MESSAGE_228: MessageTemplate = {
   arity: 0,
   fallback: [
     "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
@@ -121,7 +137,7 @@ pub const MESSAGE_227: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_228: MessageTemplate = {
+pub const MESSAGE_229: MessageTemplate = {
   arity: 1,
   fallback: ["error: ", 0],
   translations: {
@@ -132,21 +148,5 @@ pub const MESSAGE_228: MessageTemplate = {
     "pt-BR": ["erro: ", 0],
     ru: ["ошибка: ", 0],
     "zh-Hans": ["错误：", 0],
-  },
-}
-
-pub const MESSAGE_229: MessageTemplate = {
-  arity: 0,
-  fallback: ["errors"],
-  translations: {
-    de: ["Fehler"],
-    es: ["errores"],
-    fr: ["erreurs"],
-    it: ["errori"],
-    ja: ["エラー"],
-    ko: ["오류"],
-    "pt-BR": ["erros"],
-    ru: ["ошибки"],
-    "zh-Hans": ["错误"],
   },
 }

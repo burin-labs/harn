@@ -373,6 +373,37 @@ fn init_preserves_an_existing_ignore_file() {
 }
 
 #[test]
+fn init_reports_file_conflicts_without_overwriting_authored_data() {
+    for conflict in ["lib", "main.harn"] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join(conflict);
+        if conflict == "lib" {
+            fs::write(&path, b"Authored file must survive.\n").unwrap();
+        } else {
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("authored.txt"), b"Authored child must survive.\n").unwrap();
+        }
+        let init = run_scaffold(&["init"], tmp.path());
+        assert_eq!(init.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&init.stderr);
+        assert!(stderr.contains(conflict), "{stderr}");
+        assert!(
+            stderr.contains("Initialization failed for 1 file(s)."),
+            "{stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&init.stdout).contains("harn run main.harn"));
+        if conflict == "lib" {
+            assert_eq!(fs::read(&path).unwrap(), b"Authored file must survive.\n");
+        } else {
+            assert_eq!(
+                fs::read(path.join("authored.txt")).unwrap(),
+                b"Authored child must survive.\n"
+            );
+        }
+    }
+}
+
+#[test]
 fn new_package_dispatch_is_deterministic() {
     let (harn_snap, repeat_snap) = pair_run(
         "new package",

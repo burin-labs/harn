@@ -2,12 +2,66 @@
 import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_300: MessageTemplate = {
+  arity: 7,
+  fallback: [
+    0,
+    "  buckets: cache_effective=",
+    1,
+    " cache_supported_miss=",
+    2,
+    " unsupported_zero=",
+    3,
+    " support_unknown_zero=",
+    4,
+    " no_prompt_tokens=",
+    5,
+    " provider_field_inconsistent=",
+    6,
+    "\n",
+  ],
+  translations: {
+    fr: [
+      0,
+      "  buckets : cache_effective=",
+      1,
+      " cache_supported_miss=",
+      2,
+      " unsupported_zero=",
+      3,
+      " support_unknown_zero=",
+      4,
+      " no_prompt_tokens=",
+      5,
+      " provider_field_inconsistent=",
+      6,
+      "\n",
+    ],
+    it: [
+      0,
+      "  bucket: cache_effective=",
+      1,
+      " cache_supported_miss=",
+      2,
+      " unsupported_zero=",
+      3,
+      " support_unknown_zero=",
+      4,
+      " no_prompt_tokens=",
+      5,
+      " provider_field_inconsistent=",
+      6,
+      "\n",
+    ],
+  },
+}
+
+pub const MESSAGE_301: MessageTemplate = {
   arity: 2,
   fallback: [0, "  protocol=", 1],
   translations: {},
 }
 
-pub const MESSAGE_301: MessageTemplate = {
+pub const MESSAGE_302: MessageTemplate = {
   arity: 11,
   fallback: [
     0,
@@ -229,7 +283,7 @@ pub const MESSAGE_301: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_302: MessageTemplate = {
+pub const MESSAGE_303: MessageTemplate = {
   arity: 7,
   fallback: [
     0,
@@ -379,7 +433,7 @@ pub const MESSAGE_302: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_303: MessageTemplate = {
+pub const MESSAGE_304: MessageTemplate = {
   arity: 8,
   fallback: [
     0,
@@ -544,16 +598,5 @@ pub const MESSAGE_303: MessageTemplate = {
       7,
       "\n",
     ],
-  },
-}
-
-pub const MESSAGE_304: MessageTemplate = {
-  arity: 3,
-  fallback: [0, "  ", 1, " sandbox: ", 2, "\n"],
-  translations: {
-    es: [0, "  sandbox de ", 1, ": ", 2, "\n"],
-    fr: [0, "  sandbox ", 1, " : ", 2, "\n"],
-    it: [0, "  sandbox ", 1, ": ", 2, "\n"],
-    "pt-BR": [0, "  sandbox ", 1, ": ", 2, "\n"],
   },
 }
