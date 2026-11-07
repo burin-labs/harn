@@ -9,6 +9,92 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.189
+
+### Breaking
+
+- Read retained evaluation accounting with `harness.llm.evaluation_receipt(reference)` before the run ends.
+  The typed result preserves unknown usage and transport reports, shares execution ownership across child VMs,
+  and distinguishes missing or invalid references without another provider request.
+  Partial known costs stay in `usage_certainty` while the unsettled total remains unknown.
+
+  Migration: Rust implementations of `NativeBuiltinCtxExt` must implement
+  `evaluation_receipt` to read retained accounting in their execution context.
+- ACP servers and embedding hosts can opt into the same bounded flight recorder
+  as `harn run`, retaining one recording per executed prompt with session and
+  prompt identities and complete function and source tables after ring overflow.
+
+  Migration: Rust embedders constructing `AcpServerConfig` with a struct literal must
+  provide `flight_recorder: Default::default()`, or use `AcpServerConfig::new` and
+  `with_flight_recorder` to select recording explicitly.
+- Read-only session-store access distinguishes an empty database awaiting its first committed schema from an old schema.
+  Agent reads treat the empty database as absent without changing it; stale schemas remain errors.
+
+  Migration: exhaustive matches on `harn_session_store::StoreError` must handle the new `Uninitialized` variant.
+  It means no application schema has committed yet; readers may treat that state as an absent store.
+
+### Added
+
+- Connector authors can share HTTPS endpoint and host validation through `std/connectors/http`,
+  using Harn's canonical private-address classifier instead of copying IPv4 and IPv6 rules.
+- Serve A2A 1.0 JSON-RPC discovery, message sending, task retrieval, streaming,
+  filtered task listing with cursor pagination, active-task subscription,
+  cancellation, and authenticated extended cards over
+  the same task lifecycle as the retained 0.3 interface.
+
+  Include the required task, message, and part fields in 0.3 responses and use the
+  canonical `canceled` task state while retaining extension fields.
+- Reconcile a turn's resolved tool-call inventory with its transcript lifecycle, including missing and ambiguous evidence.
+
+### Changed
+
+- Share generated CLI message renderers and reuse the English fallback for identical
+  translations while preserving each command's messages, localized output and validation errors.
+
+### Fixed
+
+- **Agent stall feedback reports observed success (#10852).** Repeated successful
+  actions no longer imply that another execution must produce the same result.
+  Feedback lives in an embedded prompt asset, rendered through
+  `render_stdlib_prompt` without filesystem authority.
+- ACP clients receive Harn extension session updates only for kinds named in
+  their initialize capabilities, keeping standard clients' update streams schema-valid.
+  Typed progress reports use that update stream rather than appearing as assistant replies.
+- Candidate recovery selects each archive from its successful upload step in the producing attempt.
+  An earlier attempt's duplicate name cannot block or replace the current upload.
+- Tool-surface narrowing now waits for a new user message and preserves the active read-only stance's escape tool.
+  Re-entering the same user turn reuses its recorded surface decision.
+- Include compatibility gzip runtime archives in future release candidates' checksums,
+  so older verified updaters can validate those downloads.
+- When a direct seed download fails, the bootstrap adapter can use the GitHub release-assets API if `jq` is available.
+  It still verifies the pinned release checksum before running the seed.
+- Keep verifier findings advisory and respect task scope when suggesting repairs.
+- Agent tools now dispatch their declared host capabilities through the host's capability adapter,
+  preserving command policy checks.
+- Host-backed plan tools can return acknowledgement objects without breaking
+  collaborative plan recording. Harn recovers the executable plan from the tool
+  arguments and continues validating explicitly returned canonical artifacts.
+- CLI help and sandbox documentation now explain that on Linux a subprocess can write a read-only root nested inside a
+  writable root.
+- Keep SQLite dependencies on the shared 0.40 compatibility line so embedding
+  hosts using that line can resolve one native SQLite library alongside Harn.
+- Transcript statistics now count canonical public events, excluding internal tool output.
+- Update the editor extension's file-pattern matcher while preserving language-client file-operation filtering.
+
+### Security
+
+- Scope A2A task reads, cancellation, subscriptions, listings, and legacy push
+  configuration access to the authenticated owner across protocol versions and
+  REST aliases. Keep acknowledged cancellation terminal even before dispatch or
+  when a late completion arrives.
+- Runtime-approved child network hosts default to ports 80 and 443. Pass an explicit
+  port to `harness.net.child_network_allow` for another service. The proxy also
+  refuses approved names resolving to the machine's own interface addresses, the
+  entire IPv4 0/8 range, or well-known and local-use NAT64 translation prefixes.
+- Updated minimatch in repository tooling and VS Code packaging to fix denial of service from crafted glob patterns.
+- Use patched re2js in Markdown tooling to address GHSA-gg6h-894w-4m9c
+  while retaining the existing lint rules.
+
 ## v0.10.188
 
 ### Breaking
