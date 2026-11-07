@@ -122,7 +122,9 @@ concurrency:
 jobs:
   bump:
     runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: 30
+    # Large consumers run refresh, capability migrations, codegen, and their
+    # own validation in the same driver. Keep teardown outside its budget.
+    timeout-minutes: 75
     steps:
       - name: Mint GitHub App installation token
         id: app-token
@@ -293,7 +295,7 @@ jobs:
           fi
 
       - name: Run bump orchestration
-        timeout-minutes: 20
+        timeout-minutes: 60
         working-directory: package
         # Caller-owned refresh and validation commands inherit this step's
         # environment. The driver's App identity therefore uses driver-owned

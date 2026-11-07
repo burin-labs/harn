@@ -168,10 +168,10 @@ fn bump_capacity_errors(inputs: dict, job: dict) -> list<string> {
   const job_minutes = to_int(job.get("timeout-minutes")) ?? 0
   const orchestration = job?.steps?.find({ step -> step?.name == "Run bump orchestration" })
   const orchestration_minutes = to_int(orchestration?.get("timeout-minutes")) ?? 0
-  if job_minutes <= 0 || job_minutes > 30
-    || orchestration_minutes <= 0
-    || orchestration_minutes >= job_minutes {
-    errors = errors + ["consumer bump orchestration must time out before its bounded job"]
+  if job_minutes <= 0 || job_minutes > 75
+    || orchestration_minutes < 45
+    || job_minutes - orchestration_minutes < 10 {
+    errors = errors + ["consumer bump orchestration needs bounded work and cleanup time"]
   }
   return errors
 }
@@ -367,11 +367,23 @@ pipeline test_bump_workflow_refuses_starved_or_unbounded_capacity(harness: Harne
     {"runs-on": "ubuntu-24.04"},
     {"timeout-minutes": nil},
     {"timeout-minutes": 90},
+    {"timeout-minutes": 65},
     {
       steps: job.steps.map(
         { step ->
           if step.name == "Run bump orchestration" {
             return step + {"timeout-minutes": nil}
+          }
+          return step
+        },
+      )
+        .to_list(),
+    },
+    {
+      steps: job.steps.map(
+        { step ->
+          if step.name == "Run bump orchestration" {
+            return step + {"timeout-minutes": 20}
           }
           return step
         },
