@@ -169,13 +169,13 @@ pipeline test_discover_notices(harness: Harness) {
         licenses: [{id: "MIT", text: "Full MIT text", used_by: [{crate: pkg}]}],
       },
   )
-  assert(
-    inventory.crates[0].package.notices.any(
-      { notice ->
-        notice.name == "NOTICE.models-dev" && contains(notice.text, "Copyright (c) 2025 models.dev")
-      },
-    ),
+  const notice = inventory.crates[0].package.notices.find(
+    { notice -> notice.name == "NOTICE.models-dev" },
   )
+  assert(notice != nil)
+  assert(contains(notice.text, "Copyright (c) 2025 models.dev"))
+  assert(contains(notice.text, "THE SOFTWARE IS PROVIDED \"AS IS\""))
+  assert(contains(render(inventory), notice.text))
 }
 
 pipeline test_policy_owners(harness: Harness) {

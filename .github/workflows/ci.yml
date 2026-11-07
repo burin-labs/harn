@@ -629,16 +629,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify release license notices and archive assembly
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          make test-release-notices
-
       - name: Install the bootstrap Harn
+        id: notice_runtime
         uses: ./.github/actions/setup-harn
         with:
           version-file: .harn-bootstrap-version
           token: ${{ github.token }}
+
+      - name: Verify release license notices and archive assembly
+        env:
+          HARN_BIN: ${{ steps.notice_runtime.outputs.path }}
+          HARN_BIN_NO_BUILD: "1"
+        run: make test-release-notices
 
       - name: Rehearse release staging and development cutover offline
         run: bash scripts/release_rehearsal.sh
