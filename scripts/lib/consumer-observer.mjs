@@ -710,6 +710,9 @@ export async function githubRunJobs(token,repository,runId,attempt,fetchRecord=f
 
 function candidateArtifacts(jobs, artifacts, source, targets) {
   if (!Array.isArray(artifacts)) refuse('archive_producer_artifacts_unproven');
+  // GitHub's artifact and job-step timestamps can differ by one second even
+  // when the upload succeeded. Keep the attempt window bounded and unique.
+  const uploadCompletionSkewMs = 1000;
   return [...targets.map(target=>[`harn-${target}`, `Build ${target}`,
     `Upload candidate archive (${target.includes('windows')?'windows':'unix'})`]),
     [`candidate-manifest-${source}`, 'Assemble candidate manifest', 'Upload candidate manifest'],
@@ -720,7 +723,7 @@ function candidateArtifacts(jobs, artifacts, source, targets) {
       || typeof step.started_at!=='string' || typeof step.completed_at!=='string'
       || !Number.isFinite(start) || !Number.isFinite(end) || start>end) refuse('archive_producer_artifacts_unproven');
     const matches=artifacts.filter(artifact=>artifact.name===name && typeof artifact.created_at==='string'
-      && Date.parse(artifact.created_at)>=start && Date.parse(artifact.created_at)<=end);
+      && Date.parse(artifact.created_at)>=start && Date.parse(artifact.created_at)<=end+uploadCompletionSkewMs);
     if (matches.length!==1) refuse('archive_producer_artifacts_unproven');
     return matches[0];
   });
