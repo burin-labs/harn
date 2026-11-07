@@ -157,6 +157,15 @@ test('the producing upload interval selects rerun archives and refuses ambiguous
   }
 });
 
+test('archive custody accepts the observed one-second upload timestamp skew without accepting ambiguous attempts',()=>{
+  const archive=artifacts.find(item=>item.name===`harn-${targets[0]}`);
+  const justAfter=artifacts.map(item=>item===archive?{...item,created_at:'2026-11-02T10:00:03Z'}:item);
+  assert.equal(qualifyArchiveProducer(run,jobs,justAfter,request,targets).verdict,'pass');
+  const tooLate=justAfter.map(item=>item.name===archive.name?{...item,created_at:'2026-11-02T10:00:04Z'}:item);
+  assert.throws(()=>qualifyArchiveProducer(run,jobs,tooLate,request,targets),/artifacts_unproven/);
+  assert.throws(()=>qualifyArchiveProducer(run,jobs,[...justAfter,{...archive,id:999}],request,targets),/artifacts_unproven/);
+});
+
 test('historical source admission reads the exact manifest bytes under its main build policy',async()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-historical-producer-'));
   try {
