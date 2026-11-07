@@ -704,10 +704,6 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     VmValue::dict(result)
 }
 
-pub(super) fn resolve_process_exec_cwd(cwd: &str) -> std::path::PathBuf {
-    crate::stdlib::process::resolve_source_relative_path(cwd)
-}
-
 pub(super) fn process_exec_argv(
     params: &crate::value::DictMap,
 ) -> Result<(String, Vec<String>), VmError> {

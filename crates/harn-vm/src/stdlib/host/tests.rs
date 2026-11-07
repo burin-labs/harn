@@ -1,4 +1,4 @@
-use super::process_exec::{process_exec_stdin, resolve_process_exec_cwd};
+use super::process_exec::process_exec_stdin;
 use super::{
     build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
     dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
@@ -244,7 +244,7 @@ fn process_exec_relative_cwd_resolves_against_execution_root() {
     ));
 
     assert_eq!(
-        resolve_process_exec_cwd("subdir"),
+        crate::stdlib::process::resolve_source_relative_path("subdir"),
         dir.path().join("subdir")
     );
 

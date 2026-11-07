@@ -785,7 +785,6 @@ where
             ParsedPreHookAction::Rewrite(rewrite) => {
                 apply_command_rewrite(&mut current_params, &rewrite)?;
                 prepared = prepare(current_params).await?;
-                current_params = prepared.parameters().clone();
                 rewritten_by_hook = true;
                 decisions.push(decision(
                     "rewrite",

@@ -52,7 +52,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use harn_vm::json_to_vm_value;
-use harn_vm::llm::vm_value_dict_to_json;
+use harn_vm::llm::vm_value_to_json;
 use harn_vm::{HostCallBridge, HostCallDispatchFuture, VmError, VmValue};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
@@ -262,7 +262,7 @@ impl HostCallBridge for DapHostBridge {
             let start = std::time::Instant::now();
             self.emit_output("host_call", &format!("→ {capability}.{operation}"));
 
-            let params_json = vm_value_dict_to_json(params);
+            let params_json = vm_value_to_json(&VmValue::dict(params.clone()));
             let (_call, rx) = self.send_reverse_request(capability, operation, params_json)?;
             let reply = self.await_reply(rx, capability, operation).await?;
             let elapsed_ms = start.elapsed().as_millis();
@@ -319,7 +319,7 @@ impl harn_vm::stdlib::host::PreparedCommandTransport for DapHostBridge {
                 .dispatch("process", operation, params)
                 .await?
                 .ok_or_else(|| VmError::Runtime("DAP host cannot bind command execution".into()))?;
-            Ok(harn_vm::llm::vm_value_to_json(&result))
+            Ok(vm_value_to_json(&result))
         })
     }
 }
