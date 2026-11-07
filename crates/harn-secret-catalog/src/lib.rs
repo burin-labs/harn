@@ -54,15 +54,20 @@ impl SecretPatternSpec {
         let Some(separator) = matched.find(['=', ':']) else {
             return false;
         };
-        let Some(mut value) = matched.get(separator + 1..) else {
+        let Some(value) = matched.get(separator + 1..) else {
             return false;
         };
-        if matched[separator..].starts_with(":=") {
-            value = &value[1..];
+        let value = if matched
+            .get(separator..)
+            .is_some_and(|rest| rest.starts_with(":="))
+        {
+            value.strip_prefix('=').unwrap_or(value)
         } else if value.starts_with('=') {
             // `token == ""` compares; the second `=` is not a value.
             return false;
-        }
+        } else {
+            value
+        };
         let value = value.trim_start();
         if value.is_empty() {
             return false;
