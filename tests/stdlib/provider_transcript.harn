@@ -142,12 +142,15 @@ pipeline test_content_normalizes_native_calls_reasoning_and_explicit_aliases() {
     {
       type: "response",
       thinking: " a ",
+      thinking_summary: "summary",
       reasoning: "a",
       reasoning_content: "b",
       message: {reasoning: "c"},
     },
   )
-  assert(reasoning.reasoning_text == "a\nb\nc" && reasoning.reasoning_only_completion)
+  assert(reasoning.reasoning_text == "a\nsummary\nb\nc" && reasoning.reasoning_only_completion)
+  const summary = provider_response_content_shape({type: "response", thinking_summary: "summary"})
+  assert(summary.reasoning_text == "summary" && summary.reasoning_only_completion)
   const alias = provider_response_content_shape(
     {
       type: "response",

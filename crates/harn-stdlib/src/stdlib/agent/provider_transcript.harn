@@ -1,5 +1,5 @@
-import { read_jsonl } from "std/jsonl"
 import { ProviderResponseToolProjection, provider_response_tool_calls } from "std/agent/artifacts"
+import { read_jsonl } from "std/jsonl"
 
 pub type ProviderTranscriptToolCall = {name: string?, arguments: unknown, id: string?}
 
@@ -72,6 +72,7 @@ type WireProviderResponse = ProviderResponseToolProjection \
   type: string,
   text?: string?,
   thinking?: string?,
+  thinking_summary?: string?,
   reasoning?: string?,
   reasoning_content?: string?,
   message?: {reasoning?: string?}?,
@@ -109,6 +110,7 @@ fn __content(record: WireProviderResponse) -> ProviderResponseContentShape {
   let reasoning: list<string> = []
   for block in [
     record.thinking,
+    record.thinking_summary,
     record.reasoning,
     record.reasoning_content,
     record.message?.reasoning,
