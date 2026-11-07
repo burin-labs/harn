@@ -1,3 +1,4 @@
+import { ReceiptResult } from "../ci/summarize_nextest_receipt"
 import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
 
 type CliResult = {exit_code: int, stdout: string, stderr: string}
@@ -42,6 +43,13 @@ fn check_collectors(harness: Harness, group: string) -> nil {
     assert_eq(selected.exit_code, 0, selected.stderr)
     assert_eq(trim(selected.stdout), "2")
     assert(selected.stderr.contains("excluded=1 ignored=1 unlisted_suites=[\"excluded\"]"))
+    const missing_required = run_cli(
+      harness,
+      "nextest_inventory.harn",
+      [inventory_path, "demo::tests$missing"],
+    )
+    assert_eq(missing_required.exit_code, 2, missing_required.stderr)
+    assert(missing_required.stderr.contains("did not select required test"))
     for invalid in [
       {"test-count": 0, "rust-suites": {}},
       inventory + {"test-count": 4},
@@ -127,6 +135,76 @@ pipeline test_actual_nextest_receipt_refuses_duplicates_foreign_tests_and_invali
   harness: Harness,
 ) {
   check_collectors(harness, "invalid")
+}
+
+pipeline test_actual_stress_receipt_requires_every_selected_test_in_every_iteration(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-stress-evidence-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  harness.fs.write_text(
+    inventory_path,
+    json_stringify(
+      {
+        "test-count": 1,
+        "rust-suites": {
+          demo: {
+            "package-name": "demo",
+            "binary-name": "tests",
+            status: "listed",
+            testcases: {real: {ignored: false, "filter-match": {status: "matches"}}},
+          },
+        },
+      },
+    ),
+  )
+  const first = {type: "test", event: "ok", name: "demo::tests@stress-0$real"}
+  const second = first + {name: "demo::tests@stress-1$real"}
+  for scenario in [
+    {events: [first, second], count: "2", code: 0, reason: "complete"},
+    {events: [first], count: "2", code: 1, reason: "tests-not-run"},
+    {events: [first, first], count: "2", code: 2, reason: "receipt-invalid"},
+    {
+      events: [first, second + {name: "demo::tests@stress-2$real"}],
+      count: "2",
+      code: 2,
+      reason: "receipt-invalid",
+    },
+    {events: [first, second], count: "0", code: 2, reason: "receipt-invalid"},
+  ] {
+    harness.fs.write_text(
+      events_path,
+      scenario.events.map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const result = run_cli(
+      harness,
+      "summarize_nextest_receipt.harn",
+      [
+        "--inventory",
+        inventory_path,
+        "--events",
+        events_path,
+        "--runner-status",
+        "0",
+        "--threads",
+        "32",
+        "--stress-count",
+        scenario.count,
+        "--format",
+        "json",
+      ],
+    )
+    assert_eq(result.exit_code, scenario.code, result.stderr)
+    if scenario.code != 2 {
+      const receipt = schema_expect(json_parse(result.stdout), schema_of(ReceiptResult))
+      assert_eq(receipt.receipt.reason, scenario.reason)
+      assert_eq(receipt.receipt.selected, 2)
+      assert_eq(receipt.receipt.run, len(scenario.events))
+    } else {
+      assert(result.stderr.contains("receipt-invalid"), result.stderr)
+    }
+  }
 }
 
 pipeline test_actual_build_evidence_observes_changes_without_reading_fingerprint_json(

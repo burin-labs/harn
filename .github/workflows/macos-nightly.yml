@@ -45,6 +45,11 @@ on:
         description: Reviewed main ancestor to qualify (empty selects this workflow revision)
         required: false
         type: string
+      hostlib_stress:
+        description: Also qualify hostlib with 20 stress iterations at 32 test threads and no retries
+        required: false
+        type: boolean
+        default: false
   pull_request:
     # Only the code these lanes actually exercise. A fragment- or docs-only
     # pull request cannot change what a workspace test run proves, so it does
@@ -123,6 +128,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
+        with:
+          components: rust-analyzer, rust-src
       # The hosted cache restores a whole target directory; on a self-hosted
       # runner that would replace the persistent one with a colder copy.
       - uses: ./.github/actions/rust-cache
@@ -225,6 +232,8 @@ jobs:
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: nextest@0.9.132
+      - name: Install rename language-server fixtures
+        run: bash scripts/ci/install_rename_language_servers.sh
       # The hosted runner is two machines under one label. Most runs land on a
       # 3-core, 7 GiB M1; a few land on a 14 GiB host. Cargo's default of one
       # compiler per core runs two or three at once on the small one, which
@@ -259,6 +268,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           RUST_TEST_JOB_LIMIT_MINUTES: 90
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
           # Routine feedback gets an early signal, separate from the cold-build fuse.
           RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}
         # The whole workspace runs, less one member that contributes nothing to
@@ -279,6 +289,21 @@ jobs:
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
         run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
+      - name: Stress hostlib under the original concurrency and deadline policy
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
+          RUST_TEST_JOB_LIMIT_MINUTES: 90
+        run: scripts/ci/run_rust_test_lane.sh bash "$RUNNER_TEMP/native-qualification-tools/hostlib_macos_stress.sh"
+      - name: Upload hostlib stress evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-hostlib-stress-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-qualification-tools/hostlib-stress/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload workspace compile timings
         if: ${{ always() && !cancelled() && (steps.workspace-nextest.outcome == 'success' || steps.workspace-nextest.outcome == 'failure') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -324,6 +349,7 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          HOSTLIB_STRESS: ${{ inputs.hostlib_stress }}
         run: bash "$RUNNER_TEMP/native-qualification-tools/receipt.sh"
       - name: Upload native qualification receipt
         if: ${{ github.event_name == 'workflow_dispatch' }}

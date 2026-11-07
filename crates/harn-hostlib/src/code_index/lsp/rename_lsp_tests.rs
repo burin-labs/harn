@@ -348,7 +348,15 @@ fn strict_rename(
 fn rust_analyzer_runs() -> bool {
     let probe = tempdir().unwrap();
     write_tree(probe.path(), SMALL_CRATE);
-    server_rename(&index(probe.path()), "src/reading.rs", "Reading", "Probe").is_some()
+    let Some(result) = server_rename(&index(probe.path()), "src/reading.rs", "Reading", "Probe")
+    else {
+        return false;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let backend = field(&result, "backend");
+    assert_eq!(s(field(backend, "name")), "language_server", "{result:?}");
+    assert_eq!(s(field(backend, "server")), "rust-analyzer", "{result:?}");
+    true
 }
 
 #[test]

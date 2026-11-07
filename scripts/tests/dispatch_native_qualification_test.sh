@@ -54,6 +54,8 @@ if [[ $status != 0 ]] || ! grep -q '^workflow run' "$tmp/gh.log"; then fail "a s
 # Exercise admission before a candidate can execute on a trusted runner.
 mkdir -p "$tmp/repo/scripts/ci" "$tmp/runner"
 cp "$root/scripts/ci/native_qualification_probe.sh" "$root/scripts/ci/native_qualification_receipt.sh" "$tmp/repo/scripts/ci/"
+cp "$root/scripts/ci/hostlib_macos_stress.sh" "$root/scripts/ci/nextest_inventory.harn" \
+  "$root/scripts/ci/summarize_nextest_receipt.harn" "$tmp/repo/scripts/ci/"
 cp "$root/scripts/release_audit_contract.json" "$tmp/repo/scripts/"
 git -C "$tmp/repo" init -q -b main
 fixture_commit() {
@@ -72,6 +74,42 @@ admit() {
 admit refs/heads/main "$policy" "$candidate"
 [[ $(cat "$tmp/runner/native-qualification-tools/admitted-source") == "$candidate" ]] || fail 'admitted source was not recorded'
 [[ $(cat "$tmp/job-env") == "HARN_BUILD_REVISION=$candidate" ]] || fail 'compiled CLI identity was not bound to admitted source'
+
+# Optional stress proof must be complete before the ordinary exact-source
+# receipt is published. Missing evidence cannot inherit an old green receipt.
+mkdir -p "$tmp/target/debug"
+cat > "$tmp/target/debug/harn" <<'EOF'
+#!/usr/bin/env bash
+printf '{"data":{"source_revision":"%s"}}\n' "$SOURCE_SHA"
+EOF
+chmod +x "$tmp/target/debug/harn"
+receipt() {
+  (cd "$tmp/repo" && env SOURCE_SHA="$candidate" GITHUB_SHA="$policy" \
+    GITHUB_REPOSITORY=fixture/repo GITHUB_RUN_ID=81 GITHUB_RUN_ATTEMPT=1 \
+    RUNNER_TEMP="$tmp/runner" CARGO_TARGET_DIR="$tmp/target" HOSTLIB_STRESS="$1" \
+    bash "$root/scripts/ci/native_qualification_receipt.sh")
+}
+git -C "$tmp/repo" checkout -q --detach "$candidate"
+receipt false
+rm "$tmp/runner/native-qualification-tools/receipt.json"
+if receipt unknown; then fail 'an unknown stress-proof mode published a receipt'; fi
+if receipt true; then fail 'missing stress evidence published a qualification receipt'; fi
+stress="$tmp/runner/native-qualification-tools/hostlib-stress"
+mkdir -p "$stress"
+printf '4\n' > "$stress/selected-count.txt"
+complete='{"status":0,"threads":32,"stress_count":20,"receipt":{"reason":"complete","selected":80,"run":80,"passed":80,"failed":0,"missing":[]}}'
+printf '%s\n' "$complete" > "$stress/summary.json"
+receipt true
+rm "$tmp/runner/native-qualification-tools/receipt.json"
+for defect in '.stress_count=19' '.threads=31' '.status=70' '.receipt.run=79' \
+  '.receipt.passed=79|.receipt.failed=1' '.receipt.missing=["not-run"]' \
+  '.receipt.selected=0' '.receipt.reason="tests-not-run"' \
+  '.receipt.selected=100|.receipt.run=100|.receipt.passed=100'; do
+  jq "$defect" <<< "$complete" > "$stress/summary.json"
+  if receipt true; then fail "incomplete stress evidence accepted: $defect"; fi
+  [[ ! -e "$tmp/runner/native-qualification-tools/receipt.json" ]] || fail 'failed stress proof wrote a receipt'
+done
+git -C "$tmp/repo" checkout -q --detach "$policy"
 if admit refs/heads/topic "$policy" "$candidate"; then fail 'untrusted workflow ref was admitted'; fi
 if admit refs/heads/main "$candidate" "$candidate"; then fail 'workflow checkout mismatch was admitted'; fi
 printf 'unreviewed\n' > "$tmp/repo/topic"

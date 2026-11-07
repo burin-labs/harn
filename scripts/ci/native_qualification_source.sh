@@ -11,6 +11,8 @@ tools="${RUNNER_TEMP:?}/native-qualification-tools"
 mkdir -p "$tools"
 cp scripts/ci/native_qualification_probe.sh "$tools/probe.sh"
 cp scripts/ci/native_qualification_receipt.sh "$tools/receipt.sh"
+cp scripts/ci/hostlib_macos_stress.sh scripts/ci/nextest_inventory.harn \
+  scripts/ci/summarize_nextest_receipt.harn "$tools/"
 jq '.platforms[] | select(.name == "macos") | .required_steps' scripts/release_audit_contract.json > "$tools/phases.json"
 printf '%s\n' "$SOURCE_SHA" > "$tools/admitted-source"
 printf '%s\n' "$GITHUB_SHA" > "$tools/policy-source"

@@ -8,6 +8,29 @@ const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace"
 
 const RAW = "cargo nextest run --workspace --test-threads=8"
 
+pipeline test_macos_workspace_proof_requires_actual_language_server_fixtures(harness: Harness) {
+  const step = {
+    name: "Run workspace nextest",
+    run: WRAPPED,
+    env: {HARN_EXT_LSP_FIXTURES_REQUIRED: "1"},
+  }
+  for workflow in ["macos-nightly.yml", "macos-pr-tests.yml"] {
+    const document = read_yaml(harness.fs, "../../.github/workflows/${workflow}", nil)
+    assert(document != nil, "the actual macOS workflow must be read")
+    assert_eq(workflow_violations(workflow, document ?? {}), [])
+    assert_eq(workflow_violations(workflow, {jobs: {nextest: {steps: [step]}}}), [])
+    for steps in [
+      [],
+      [step + {env: {}}],
+      [step + {if: "false"}],
+      [step + {"continue-on-error": true}],
+    ] {
+      const failures = workflow_violations(workflow, {jobs: {nextest: {steps: steps}}})
+      assert(failures.any({ failure -> failure.reason.contains("MACOS_LSP_FIXTURES_UNMEASURED") }))
+    }
+  }
+}
+
 pipeline test_native_qualification_cannot_fall_back_to_compatibility_or_empty_scope() {
   const policy: NativeQualificationPolicy = {
     schema: "harn.native_qualification.v1",
