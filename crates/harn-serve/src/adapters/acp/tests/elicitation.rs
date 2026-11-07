@@ -12,6 +12,9 @@ async fn mcp_input(
     Json(request): Json<serde_json::Value>,
 ) -> axum::response::Response {
     input.requests.send(request.clone()).unwrap();
+    if request.get("id").is_none() {
+        return axum::http::StatusCode::ACCEPTED.into_response();
+    }
     let id = &request["id"];
     if request["method"] == "server/discover" {
         return Json(serde_json::json!({"jsonrpc":"2.0", "id":id,"result":{
@@ -148,6 +151,8 @@ async fn real_mcp_inputs_use_only_negotiated_elicitation_and_complete_known_urls
             request_tx.send(serde_json::json!({"jsonrpc":"2.0","id":102,"method":"session/new","params":{"cwd":workspace.path(),"environmentPolicy":{"kind":"isolated"}}})).unwrap();
             let created = recv_response_with_id(&mut response_rx, 102).await;
             let session = created["result"]["sessionId"].as_str().unwrap();
+            request_tx.send(serde_json::json!({"jsonrpc":"2.0","id":105,"method":"session/set_mode","params":{"sessionId":session,"modeId":"code"}})).unwrap();
+            assert!(recv_response_with_id(&mut response_rx, 105).await.get("result").is_some());
             request_tx.send(serde_json::json!({"jsonrpc":"2.0","id":103,"method":"session/prompt","params":{"sessionId":session,"prompt":[{"type":"text","text":"collect"}]}})).unwrap();
             let answer = if action == "bad_content" {
                 serde_json::json!({"action":"accept","content":{"answer":{"nested":"invalid"}}})
