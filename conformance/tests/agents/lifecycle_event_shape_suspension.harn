@@ -1,14 +1,37 @@
+type Suspension = {
+  handle: string,
+  initiator: string,
+  reason: string,
+  conditions: {kind: string, approval_id: string},
+  resume_by_mechanism: string,
+  suspended_at_turn: int,
+  span_id: string,
+}
+
+type SuspensionEvent = {
+  kind: string,
+  role: string,
+  visibility: string,
+  text: string,
+  suspension: Suspension,
+  metadata: Suspension,
+  ...dict,
+}
+
 pipeline main(harness: Harness) {
-  const evt = transcript_suspension_event(
-    {
-      handle: "worker://triage/42",
-      initiator: "operator",
-      reason: "waiting for human approval",
-      conditions: {kind: "approval", approval_id: "approval-1"},
-      resume_by_mechanism: "ResumeBy.operator",
-      suspended_at_turn: 5,
-      span_id: "span-1",
-    },
+  const evt = schema_expect(
+    transcript_suspension_event(
+      {
+        handle: "worker://triage/42",
+        initiator: "operator",
+        reason: "waiting for human approval",
+        conditions: {kind: "approval", approval_id: "approval-1"},
+        resume_by_mechanism: "ResumeBy.operator",
+        suspended_at_turn: 5,
+        span_id: "span-1",
+      },
+    ),
+    schema_of(SuspensionEvent),
   )
   harness.stdio.println(evt?.kind == "suspension")
   harness.stdio.println(evt?.role == "system")

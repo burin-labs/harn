@@ -1,17 +1,39 @@
+type DrainDecision = {
+  pipeline_id: string,
+  item: {category: string, id: string, summary: string},
+  action: string,
+  reason: string,
+  decided_at_turn: int,
+  settlement_agent_session_id: string,
+}
+
+type DrainDecisionEvent = {
+  kind: string,
+  role: string,
+  visibility: string,
+  text: string,
+  drain: DrainDecision,
+  metadata: DrainDecision,
+  ...dict,
+}
+
 pipeline main(harness: Harness) {
-  const evt = transcript_drain_decision_event(
-    {
-      pipeline_id: "pipeline-1",
-      item: {
-        category: "suspended_subagent",
-        id: "worker://triage/42",
-        summary: "worker is suspended",
+  const evt = schema_expect(
+    transcript_drain_decision_event(
+      {
+        pipeline_id: "pipeline-1",
+        item: {
+          category: "suspended_subagent",
+          id: "worker://triage/42",
+          summary: "worker is suspended",
+        },
+        action: "resume",
+        reason: "settlement agent selected continuation",
+        decided_at_turn: 7,
+        settlement_agent_session_id: "settlement-session-1",
       },
-      action: "resume",
-      reason: "settlement agent selected continuation",
-      decided_at_turn: 7,
-      settlement_agent_session_id: "settlement-session-1",
-    },
+    ),
+    schema_of(DrainDecisionEvent),
   )
   harness.stdio.println(evt?.kind == "drain_decision")
   harness.stdio.println(evt?.role == "system")
