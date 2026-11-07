@@ -143,8 +143,16 @@ fn preferred_provider_order(preferred_provider: Option<&str>) -> Vec<String> {
     if let Some(model) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
         push_unique(&mut providers, llm_config::infer_provider(&model));
     }
-    for route in llm_config::automatic_default_candidates() {
-        push_unique(&mut providers, route.provider);
+    for provider in [
+        "local",
+        "ollama",
+        "openrouter",
+        "together",
+        "huggingface",
+        "openai",
+        "anthropic",
+    ] {
+        push_unique(&mut providers, provider);
     }
     providers
 }

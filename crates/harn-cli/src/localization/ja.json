@@ -347,7 +347,6 @@
   "Accept a run that executes no tests": "テストを実行しない run を受け入れる",
   "Accept a run that executes no tests.\n\nBy default a selection that matches nothing exits non-zero, because an empty run is otherwise indistinguishable from every test passing at the exit-code boundary. Set this for the rare caller that legitimately tolerates an empty selection.": "テストを実行しない run を受け入れる。\n\n既定では、何も一致しない選択は非ゼロで終了する。空の run は、終了コードの境界では全テスト成功と区別できないため。空の選択を正当に許容する稀な呼び出し元のためにこれを設定する。",
   "Accept bundles that carry no Ed25519 signature. Without this flag, an unsigned bundle is treated as a verification failure": "Ed25519 署名を持たない bundle を受け入れる。このフラグがない場合、署名なしの bundle は検証失敗として扱われる",
-  "Accept first-run provider setup prompts": "初回実行時の provider 設定プロンプトを受け入れる",
   "Accept the model's upstream license. Required — nothing is downloaded without it (the license text is printed for review first)": "モデルの upstream ライセンスを受け入れる。必須 — これがないと何もダウンロードされない（ライセンス本文は先に確認用として表示される）",
   "Accepted for host symmetry; output is always newline-delimited JSON": "ホスト対称性のために受け入れられる。出力は常に改行区切りの JSON",
   "Ack a leased reminder, so it is not redelivered": "リースされたリマインダーを確認済みにする。これにより再配信されない",
