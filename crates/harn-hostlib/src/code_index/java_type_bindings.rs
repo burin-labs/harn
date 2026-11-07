@@ -368,15 +368,6 @@ impl JavaBindings<'_> {
                 );
             }
             if is_type(scope) {
-                if scope
-                    .child_by_field_name("name")
-                    .is_some_and(|name| text(name, self.source) == first)
-                {
-                    return self
-                        .type_identity(scope)
-                        .map(|identity| format!("{identity}{suffix}"))
-                        .ok_or("the Java type owner is absent".into());
-                }
                 let within_body = scope.child_by_field_name("body").filter(|body| {
                     body.start_byte() <= at.start_byte() && at.end_byte() <= body.end_byte()
                 });
@@ -404,6 +395,15 @@ impl JavaBindings<'_> {
                     return Err(
                         "inherited Java member type bindings require compiler resolution".into(),
                     );
+                }
+                if scope
+                    .child_by_field_name("name")
+                    .is_some_and(|name| text(name, self.source) == first)
+                {
+                    return self
+                        .type_identity(scope)
+                        .map(|identity| format!("{identity}{suffix}"))
+                        .ok_or("the Java type owner is absent".into());
                 }
             }
             if is_local_scope(scope) {

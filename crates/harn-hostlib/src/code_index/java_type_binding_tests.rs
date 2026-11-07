@@ -97,6 +97,7 @@ fn ambiguous_type_imports_inheritance_and_patterns_refuse_real_occurrences() {
         "package app; import lab.*; import other.*; class Page { DocumentStore field; }",
         "package app; import lab.DocumentStore; import other.DocumentStore; class Page { DocumentStore field; }",
         "package lab; class Page extends UnknownBase { DocumentStore field; }",
+        "package app; class DocumentStore extends UnknownBase { DocumentStore field; }",
         "package lab; class Page<DocumentStore> { class Child extends UnknownBase { DocumentStore field; } }",
         "package lab; class Page { static class DocumentStore {} class Child extends UnknownBase { DocumentStore field; } }",
         "package lab; class Page { int use(Object value) { if (value instanceof Page DocumentStore) { return DocumentStore.hashCode(); } return 0; } }",
