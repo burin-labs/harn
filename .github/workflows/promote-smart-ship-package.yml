@@ -60,7 +60,7 @@ jobs:
 
   promote:
     needs: plan
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@afd182de69c70f74aef97e24b2ac12801983eec4
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@50fca67b27e3f9b1272b526cb4dac2de933f66ab
     permissions:
       contents: read
       actions: read
