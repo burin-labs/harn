@@ -100,7 +100,10 @@ if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')
     }
     if(options.method&&options.method!=='GET')throw new Error('unexpected-budget-write');
     const p=new URL(url).pathname;
-    if(p.endsWith('/'+parent.id+'/attempts/'+parent.run_attempt))return {ok:true,json:async()=>parent};
+    if(p.endsWith('/'+parent.id+'/attempts/'+parent.run_attempt)){
+      if(process.env.CANARY_TEST_PARENT_DENIED==='1')return new Response('{"message":"Forbidden"}',{status:403});
+      return {ok:true,json:async()=>parent};
+    }
     if(p.endsWith('/'+child.id)){
       const response=spawnSync('gh',['api','--include','repos/acme/widget-host/actions/runs/'+child.id],
         {encoding:'utf8',env:process.env});
@@ -823,6 +826,11 @@ if observe fixture-expired; then
   echo 'expired read authority reported success' >&2; exit 1
 fi
 grep -q 'reason=api_access_denied read=consumer_read_refused status=401 token=GH_TOKEN repository=secret:CONSUMER_CANARY_REPOSITORY attempts=1 ratelimit_remaining=4000 run=42 verdict=unmeasured' "$scratch/out"
+if CANARY_TEST_PARENT_DENIED=1 observe fixture-fresh; then
+  echo 'denied parent authority reported success' >&2; exit 1
+fi
+grep -q 'reason=api_access_denied read=consumer_read_refused status=403 token=github-token repository=GITHUB_REPOSITORY attempts=1 run=42 verdict=unmeasured' "$scratch/out"
+assert_no_verdict
 if grep -qE 'fixture-private-value|widget-host|github\.com' "$scratch/out"; then
   echo 'authorization refusal exposed private input' >&2; exit 1
 fi

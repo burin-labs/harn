@@ -525,7 +525,7 @@ canary_observe() {
   canary_observation_checkpoint pending none observe_same_run
 
   local status conclusion now record timing reason read_error retry_count=0 retry_wait remaining advice
-  local read_status read_retryable read_final read_token read_attempts read_remaining read_detail
+  local read_status read_retryable read_final read_token read_repository read_attempts read_remaining read_detail
   while true; do
     CANARY_TIMING_RECEIPT=
     now=$(date +%s)
@@ -570,10 +570,13 @@ canary_observe() {
         fi
         if [[ "$read_final" == true ]]; then
           read_token=${CANARY_TOKEN_LABEL:-GH_TOKEN}
-          if [[ "$(jq -r '.read_role // ""' <<< "$timing")" == repository ]]; then read_token=github-token; fi
+          read_repository=secret:CONSUMER_CANARY_REPOSITORY
+          if [[ "$(jq -r '.read_role // ""' <<< "$timing")" == repository ]]; then
+            read_token=github-token read_repository=GITHUB_REPOSITORY
+          fi
           read_attempts=$(jq -r '.attempts // "unmeasured"' <<< "$timing")
           read_remaining=$(jq -r '.ratelimit_remaining // empty' <<< "$timing")
-          read_detail="read=consumer_read_refused status=$read_status token=$read_token repository=secret:CONSUMER_CANARY_REPOSITORY attempts=$read_attempts"
+          read_detail="read=consumer_read_refused status=$read_status token=$read_token repository=$read_repository attempts=$read_attempts"
           [[ -z "$read_remaining" ]] || read_detail+=" ratelimit_remaining=$read_remaining"
           canary_fail "$read_error" "$read_detail run=$run_id verdict=unmeasured"
         fi
