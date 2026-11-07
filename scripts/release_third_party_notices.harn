@@ -237,7 +237,7 @@ pub fn generate(
   repository: string,
   output: string,
   executable: string,
-) {
+) -> nil {
   with_temp_dir(
     harness.fs,
     { scratch ->
