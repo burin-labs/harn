@@ -3,11 +3,15 @@ import { with_llm_script } from "std/testing"
 fn main(harness: Harness) {
   if argv[1] != "skip" {
     const rebuilt = harness.code_index.rebuild({root: argv[0]})
-    assert(rebuilt.files_indexed == 1)
+    require rebuilt.files_indexed == 1, "Rebuild must index the fixture file"
   }
   const found = harness.code_index.query({needle: "replay_index_sentinel"})
-  assert(len(found.results) == 1)
-  assert(found.results[0].path == "indexed.rs")
+  require len(found.results) == 1, "Index query must return one fixture match"
+  const hit = found.results[0]
+  if hit == nil {
+    throw "Index query must retain its fixture match"
+  }
+  require hit.path == "indexed.rs", "Index query must return the recorded fixture path"
   with_llm_script(
     harness.llm,
     [{text: "recorded", model: "mock"}],
@@ -17,8 +21,8 @@ fn main(harness: Harness) {
         nil,
         {provider: "mock", model: "mock"},
       )
-      assert(reply.text == "recorded")
+      require reply.text == "recorded", "Replay must retain the recorded model reply"
     },
   )
-  harness.stdio.println(json_stringify({matches: len(found.results), path: found.results[0].path}))
+  harness.stdio.println(json_stringify({matches: len(found.results), path: hit.path}))
 }
