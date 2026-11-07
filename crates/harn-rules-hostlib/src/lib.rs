@@ -51,7 +51,7 @@ use harn_hostlib::ast::Language;
 use harn_hostlib::{
     BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry, RegisteredBuiltin,
 };
-use harn_vm::{AsyncBuiltinCtx, Vm, VmError, VmValue};
+use harn_vm::{json_to_vm_value, AsyncBuiltinCtx, Vm, VmError, VmValue};
 
 use harn_rules::{
     data_table, Applicability, BindingMetadata, CompiledRule, Diagnostic, ResolvedBinding, Rule,
@@ -170,7 +170,7 @@ fn report_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let rule = compile_rule(REPORT, &dict)?;
     let files = load_files(REPORT, &dict)?;
     let table = data_table(&rule, &files).map_err(|e| backend(REPORT, &e))?;
-    Ok(json_to_vm(&table.to_json_value()))
+    Ok(json_to_vm_value(&table.to_json_value()))
 }
 
 fn diagnostics_run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -207,7 +207,7 @@ async fn visit_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, 
         _ => {
             return Err(VmError::Runtime(format!(
                 "{VISIT}: `on_match` must be a function `fn(node, ctx)`"
-            )))
+            )));
         }
     };
 
@@ -717,26 +717,6 @@ fn parse_safety(s: &str) -> Option<Safety> {
         "capability-changing" => Some(Safety::CapabilityChanging),
         "needs-human" => Some(Safety::NeedsHuman),
         _ => None,
-    }
-}
-
-fn json_to_vm(value: &serde_json::Value) -> VmValue {
-    match value {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(b) => VmValue::Bool(*b),
-        serde_json::Value::Number(n) => n
-            .as_i64()
-            .map(VmValue::Int)
-            .unwrap_or_else(|| VmValue::Float(n.as_f64().unwrap_or(0.0))),
-        serde_json::Value::String(s) => str_vm(s),
-        serde_json::Value::Array(items) => {
-            VmValue::List(Arc::new(items.iter().map(json_to_vm).collect()))
-        }
-        serde_json::Value::Object(map) => VmValue::dict(
-            map.iter()
-                .map(|(k, v)| (k.clone(), json_to_vm(v)))
-                .collect::<harn_vm::value::DictMap>(),
-        ),
     }
 }
 

@@ -1,7 +1,5 @@
+use harn_vm::{json_to_vm_value, VmValue};
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
-
-use harn_vm::VmValue;
 
 use crate::{CallArguments, DispatchError};
 
@@ -123,25 +121,4 @@ fn trim_trailing_defaults(args: Vec<VmValue>) -> Vec<VmValue> {
         tail.pop_back();
     }
     tail.into_iter().collect()
-}
-
-fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
-    match value {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(value) => VmValue::Bool(*value),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(VmValue::Int)
-            .or_else(|| value.as_f64().map(VmValue::Float))
-            .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(arcstr::ArcStr::from(value.as_str())),
-        serde_json::Value::Array(items) => VmValue::List(Arc::new(
-            items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
-        )),
-        serde_json::Value::Object(map) => VmValue::dict(
-            map.iter()
-                .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
-                .collect::<harn_vm::value::DictMap>(),
-        ),
-    }
 }

@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::predicates::result::vm_value_to_json as value_to_json;
 use crate::{
     parse_invariants_source, Approver, AtomId, ByteSpan, EvidenceItem, InvariantBlockError,
     InvariantResult, PredicateExecutor, PredicateExecutorConfig, PredicateHash, PredicateKind,
@@ -1185,27 +1186,6 @@ fn decode_remediation(value: &VmValue) -> Result<Remediation, VmError> {
             "flow_with_remediation: invalid remediation: {error}"
         ))
     })
-}
-
-fn value_to_json(value: &VmValue) -> serde_json::Value {
-    match value {
-        VmValue::Nil => serde_json::Value::Null,
-        VmValue::Bool(b) => serde_json::Value::Bool(*b),
-        VmValue::Int(n) => serde_json::Value::from(*n),
-        VmValue::Float(n) => serde_json::Number::from_f64(*n)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        VmValue::String(s) => serde_json::Value::String(s.to_string()),
-        VmValue::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
-        VmValue::Dict(map) => {
-            let mut object = BTreeMap::new();
-            for (key, item) in map.iter() {
-                object.insert(key.to_string(), value_to_json(item));
-            }
-            serde_json::Value::Object(object.into_iter().collect())
-        }
-        other => serde_json::Value::String(other.display()),
-    }
 }
 
 #[cfg(test)]

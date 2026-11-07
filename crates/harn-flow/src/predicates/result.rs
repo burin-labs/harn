@@ -128,7 +128,7 @@ impl InvariantResult {
     }
 }
 
-fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Nil => serde_json::Value::Null,
         VmValue::Bool(b) => serde_json::Value::Bool(*b),
