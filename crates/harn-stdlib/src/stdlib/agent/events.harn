@@ -3,6 +3,165 @@ import "std/schema"
 /** The callback result is retained as a VM value; event payloads are JSON. */
 pub type AgentEventCapture<T> = {result: T, events: list<unknown>}
 
+pub type AgentEvent = {type: string, ...dict}
+
+pub type AgentValidatedEventCapture = {result?: unknown, events: list<AgentEvent>, ...dict}
+
+pub type AgentMutationStatus = "applied" | "unchanged" | "not_applied" | "unknown"
+
+pub type AgentToolExecutor = "harn" | "host_bridge" | "mcp_server" | "provider_native"
+
+type AgentToolEventFields = {
+  tool_call_id: string,
+  tool_name: string,
+  raw_input?: unknown,
+  raw_output?: unknown,
+  error?: unknown,
+  duration_ms?: int | float,
+  execution_duration_ms?: int | float,
+  error_category?: string,
+  executor?: unknown,
+}
+
+pub type AgentToolPendingEvent = {
+  type: "tool_call",
+  status: "pending",
+  ...AgentToolEventFields,
+  ...dict,
+}
+
+pub type AgentToolUpdateEvent = {
+  type: "tool_call_update",
+  status: "pending" | "in_progress" | "completed" | "failed",
+  mutation_status: AgentMutationStatus,
+  changed_paths?: list<string>,
+  data?: unknown,
+  ...AgentToolEventFields,
+  ...dict,
+}
+
+pub type AgentToolLifecycleEvent = AgentToolPendingEvent | AgentToolUpdateEvent
+
+pub type AgentToolCallReceipt = {
+  schema_version: 1,
+  session_id: string,
+  run_id: string?,
+  tool_call_id: string,
+  tool_name: string,
+  iteration: int,
+  turn_index: int?,
+  emit_order: int,
+  reason: string?,
+  kind: string?,
+  executor: AgentToolExecutor?,
+  status: "ok" | "schema_violation" | "consent_denied" | "timeout" | "error",
+  error_category: string?,
+  duration_ms: int,
+  args_hash: string,
+  result_hash: string?,
+  audit: unknown,
+  emitted_at: string,
+  model: string?,
+  provider: string?,
+}
+
+pub type AgentToolAuditEvent = {
+  type: "tool_call_audit",
+  tool_call_id: string,
+  tool_name: string,
+  audit?: dict<string, unknown>,
+  receipt?: AgentToolCallReceipt,
+  ...dict,
+}
+
+pub type AgentToolBatchPhase = "observation" \
+  | "mutation" \
+  | "process_verification" \
+  | "terminal" \
+  | "provider_native"
+
+pub type AgentToolBatchDispositionReceipt = {
+  schema: "harn.agent_tool_batch_disposition.v1",
+  batch_id: string,
+  source_batch_id: string?,
+  call_index: int,
+  tool_call_id: string,
+  tool_name: string,
+  phase: AgentToolBatchPhase,
+  selected_phase: AgentToolBatchPhase,
+  disposition: "executed" | "deferred" | "skipped_after_blocking_result",
+  proposal_status: "new" | "re_proposed",
+  reason: string,
+  planned_at_ms: int | float,
+  started_at_ms: int | float | nil,
+  finished_at_ms: int | float | nil,
+  duration_ms: int | float | nil,
+  blocking_tool_call_id: string?,
+  blocking_tool_name: string?,
+  blocking_mutation_status: string?,
+}
+
+pub type AgentToolBatchDispositionEvent = {
+  type: "tool_batch_disposition",
+  receipt: AgentToolBatchDispositionReceipt,
+  ...dict,
+}
+
+pub type AgentTypedCheckpoint = {
+  kind: string,
+  phase?: string,
+  iteration?: int,
+  attempt?: int,
+  context_overflow_recovery_attempt?: int,
+  provider?: string,
+  model?: string,
+  tool_format?: string,
+  final_wrapup?: bool,
+  ...dict,
+}
+
+pub type AgentTypedCheckpointEvent = {
+  type: "typed_checkpoint",
+  checkpoint: AgentTypedCheckpoint,
+  ...dict,
+}
+
+pub type AgentFeedbackInjectedEvent = {
+  type: "feedback_injected",
+  kind: string,
+  content: string,
+  streak?: int,
+  ...dict,
+}
+
+pub type AgentNextToolClaimReceipt = {
+  iteration: int,
+  kind: "next_tool_claim_applied",
+  receipt_kind: "next_tool_claim_applied",
+  schema: "harn.agent_next_tool_claim_receipt.v1",
+  source: string,
+  status: "applied",
+  tool_name: string,
+}
+
+/**
+ * A shape owns presence and field types. Refinements retain the stricter
+ * value constraints, including optional fields that reject explicit nil.
+ */
+fn __agent_event_fields<T>(shape: Schema<T>, constraints: dict) -> Schema<T> {
+  return schema_refine(
+    shape,
+    schema_object(
+      constraints.map_values({ rule -> schema_field(rule, false) }),
+      {additional_properties: schema_any()},
+    ),
+  )
+}
+
+fn __agent_closed_event_schema<T>(shape: Schema<T>) -> Schema<T> {
+  return schema_refine(shape, schema_extend(shape, {additional_properties: false}))
+}
+
 fn __agent_event_number_schema() {
   return schema_union([schema_int(), schema_float()])
 }
@@ -26,8 +185,8 @@ fn __agent_event_digest_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_schema() {
-  return schema_object({type: schema_string()}, {additional_properties: schema_any()})
+pub fn agent_event_schema() -> Schema<AgentEvent> {
+  return schema_of(AgentEvent)
 }
 
 /**
@@ -37,11 +196,8 @@ pub fn agent_event_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_capture_schema() {
-  return schema_object(
-    {result: schema_field(schema_any(), false), events: schema_list(agent_event_schema())},
-    {additional_properties: schema_any()},
-  )
+pub fn agent_event_capture_schema() -> Schema<AgentValidatedEventCapture> {
+  return schema_of(AgentValidatedEventCapture)
 }
 
 /**
@@ -54,36 +210,25 @@ pub fn agent_event_capture_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_lifecycle_event_schema() {
-  const common = {
-    tool_call_id: schema_string(),
-    tool_name: schema_string(),
-    status: schema_enum(["pending", "in_progress", "completed", "failed"]),
-    raw_input: schema_field(schema_any(), false),
-    raw_output: schema_field(schema_any(), false),
-    error: schema_field(schema_any(), false),
-    duration_ms: schema_field(__agent_event_number_schema(), false),
-    execution_duration_ms: schema_field(__agent_event_number_schema(), false),
-    error_category: schema_field(schema_string(), false),
-    executor: schema_field(schema_any(), false),
-  }
-  return schema_union(
-    [
-      schema_object(
-        common + {type: schema_literal("tool_call"), status: schema_literal("pending")},
-        {additional_properties: schema_any()},
-      ),
-      schema_object(
-        common
-          + {
-            type: schema_literal("tool_call_update"),
-            mutation_status: schema_enum(["applied", "unchanged", "not_applied", "unknown"]),
-            changed_paths: schema_field(schema_list(schema_string()), false),
-            data: schema_field(schema_any(), false),
-          },
-        {additional_properties: schema_any()},
-      ),
-    ],
+pub fn agent_tool_lifecycle_event_schema() -> Schema<AgentToolLifecycleEvent> {
+  return schema_refine(
+    __agent_event_fields(
+      schema_of(AgentToolLifecycleEvent),
+      {
+        duration_ms: __agent_event_number_schema(),
+        execution_duration_ms: __agent_event_number_schema(),
+        error_category: schema_string(),
+      },
+    ),
+    schema_union(
+      [
+        schema_of(AgentToolPendingEvent),
+        __agent_event_fields(
+          schema_of(AgentToolUpdateEvent),
+          {changed_paths: schema_list(schema_string())},
+        ),
+      ],
+    ),
   )
 }
 
@@ -98,34 +243,20 @@ pub fn agent_tool_lifecycle_event_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_call_receipt_schema() {
-  const nullable_string = schema_nullable(schema_string())
-  return schema_object(
+pub fn agent_tool_call_receipt_schema() -> Schema<AgentToolCallReceipt> {
+  return __agent_event_fields(
+    __agent_closed_event_schema(schema_of(AgentToolCallReceipt)),
     {
-      schema_version: schema_literal(1),
       session_id: schema_string() + {min_length: 1},
-      run_id: nullable_string,
       tool_call_id: schema_string() + {min_length: 1},
       tool_name: schema_string() + {min_length: 1},
       iteration: __agent_event_nonnegative_int_schema(),
       turn_index: schema_nullable(__agent_event_nonnegative_int_schema()),
       emit_order: __agent_event_nonnegative_int_schema(),
-      reason: nullable_string,
-      kind: nullable_string,
-      executor: schema_nullable(
-        schema_enum(["harn", "host_bridge", "mcp_server", "provider_native"]),
-      ),
-      status: schema_enum(["ok", "schema_violation", "consent_denied", "timeout", "error"]),
-      error_category: nullable_string,
       duration_ms: __agent_event_nonnegative_int_schema(),
       args_hash: __agent_event_digest_schema(),
       result_hash: schema_nullable(__agent_event_digest_schema()),
-      audit: schema_any(),
-      emitted_at: schema_string(),
-      model: nullable_string,
-      provider: nullable_string,
     },
-    {additional_properties: false},
   )
 }
 
@@ -136,16 +267,10 @@ pub fn agent_tool_call_receipt_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_audit_event_schema() {
-  return schema_object(
-    {
-      type: schema_literal("tool_call_audit"),
-      tool_call_id: schema_string(),
-      tool_name: schema_string(),
-      audit: schema_field(schema_dict(schema_any()), false),
-      receipt: schema_field(agent_tool_call_receipt_schema(), false),
-    },
-    {additional_properties: schema_any()},
+pub fn agent_tool_audit_event_schema() -> Schema<AgentToolAuditEvent> {
+  return __agent_event_fields(
+    schema_of(AgentToolAuditEvent),
+    {audit: schema_dict(schema_any()), receipt: agent_tool_call_receipt_schema()},
   )
 }
 
@@ -156,35 +281,16 @@ pub fn agent_tool_audit_event_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_batch_disposition_receipt_schema() -> dict {
-  const nullable_number = schema_union([schema_int(), schema_float(), schema_literal(nil)])
-  const nullable_string = schema_nullable(schema_string())
-  return schema_object(
+pub fn agent_tool_batch_disposition_receipt_schema() -> Schema<AgentToolBatchDispositionReceipt> {
+  return __agent_event_fields(
+    __agent_closed_event_schema(schema_of(AgentToolBatchDispositionReceipt)),
     {
-      schema: schema_literal("harn.agent_tool_batch_disposition.v1"),
       batch_id: __agent_event_digest_schema(),
       source_batch_id: schema_nullable(__agent_event_digest_schema()),
       call_index: __agent_event_nonnegative_int_schema(),
-      tool_call_id: schema_string(),
       tool_name: schema_string() + {min_length: 1},
-      phase: schema_enum(
-        ["observation", "mutation", "process_verification", "terminal", "provider_native"],
-      ),
-      selected_phase: schema_enum(
-        ["observation", "mutation", "process_verification", "terminal", "provider_native"],
-      ),
-      disposition: schema_enum(["executed", "deferred", "skipped_after_blocking_result"]),
-      proposal_status: schema_enum(["new", "re_proposed"]),
       reason: schema_string() + {min_length: 1},
-      planned_at_ms: __agent_event_number_schema(),
-      started_at_ms: nullable_number,
-      finished_at_ms: nullable_number,
-      duration_ms: nullable_number,
-      blocking_tool_call_id: nullable_string,
-      blocking_tool_name: nullable_string,
-      blocking_mutation_status: nullable_string,
     },
-    {additional_properties: false},
   )
 }
 
@@ -195,13 +301,10 @@ pub fn agent_tool_batch_disposition_receipt_schema() -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_batch_disposition_event_schema() -> dict {
-  return schema_object(
-    {
-      type: schema_literal("tool_batch_disposition"),
-      receipt: agent_tool_batch_disposition_receipt_schema(),
-    },
-    {additional_properties: schema_any()},
+pub fn agent_tool_batch_disposition_event_schema() -> Schema<AgentToolBatchDispositionEvent> {
+  return __agent_event_fields(
+    schema_of(AgentToolBatchDispositionEvent),
+    {receipt: agent_tool_batch_disposition_receipt_schema()},
   )
 }
 
@@ -213,26 +316,24 @@ pub fn agent_tool_batch_disposition_event_schema() -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_typed_checkpoint_event_schema() {
-  return schema_object(
+pub fn agent_typed_checkpoint_event_schema() -> Schema<AgentTypedCheckpointEvent> {
+  return __agent_event_fields(
+    schema_of(AgentTypedCheckpointEvent),
     {
-      type: schema_literal("typed_checkpoint"),
-      checkpoint: schema_object(
+      checkpoint: __agent_event_fields(
+        schema_of(AgentTypedCheckpoint),
         {
-          kind: schema_string(),
-          phase: schema_field(schema_string(), false),
-          iteration: schema_field(schema_int(), false),
-          attempt: schema_field(schema_int(), false),
-          context_overflow_recovery_attempt: schema_field(schema_int(), false),
-          provider: schema_field(schema_string(), false),
-          model: schema_field(schema_string(), false),
-          tool_format: schema_field(schema_string(), false),
-          final_wrapup: schema_field(schema_bool(), false),
+          phase: schema_string(),
+          iteration: schema_int(),
+          attempt: schema_int(),
+          context_overflow_recovery_attempt: schema_int(),
+          provider: schema_string(),
+          model: schema_string(),
+          tool_format: schema_string(),
+          final_wrapup: schema_bool(),
         },
-        {additional_properties: schema_any()},
       ),
     },
-    {additional_properties: schema_any()},
   )
 }
 
@@ -246,15 +347,10 @@ pub fn agent_typed_checkpoint_event_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_feedback_injected_event_schema() {
-  return schema_object(
-    {
-      type: schema_literal("feedback_injected"),
-      kind: schema_string() + {min_length: 1},
-      content: schema_string(),
-      streak: schema_field(__agent_event_nonnegative_int_schema(), false),
-    },
-    {additional_properties: schema_any()},
+pub fn agent_feedback_injected_event_schema() -> Schema<AgentFeedbackInjectedEvent> {
+  return __agent_event_fields(
+    schema_of(AgentFeedbackInjectedEvent),
+    {kind: schema_string() + {min_length: 1}, streak: __agent_event_nonnegative_int_schema()},
   )
 }
 
@@ -267,22 +363,20 @@ pub fn agent_feedback_injected_event_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_next_tool_claim_receipt_schema() -> dict {
-  return schema_object(
+pub fn agent_next_tool_claim_receipt_schema() -> Schema<AgentNextToolClaimReceipt> {
+  return __agent_event_fields(
+    __agent_closed_event_schema(schema_of(AgentNextToolClaimReceipt)),
     {
       iteration: __agent_event_nonnegative_int_schema(),
-      kind: schema_literal("next_tool_claim_applied"),
-      receipt_kind: schema_literal("next_tool_claim_applied"),
-      schema: schema_literal("harn.agent_next_tool_claim_receipt.v1"),
       source: schema_string() + {min_length: 1},
-      status: schema_literal("applied"),
       tool_name: schema_string() + {min_length: 1},
     },
-    {additional_properties: false},
   )
 }
 
-fn __agent_event_contract_report(value: dict) {
+type AgentEventContractFailure = SchemaReport<never> & {ok: bool}
+
+fn __agent_event_contract_report(value: unknown) -> AgentEventContractFailure? {
   if type_of(value) != "dict" {
     return nil
   }
@@ -313,7 +407,11 @@ fn __agent_event_contract_report(value: dict) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_report(value: dict, schema: any = nil, apply_defaults: bool = false) {
+pub fn agent_event_report<T>(
+  value: unknown,
+  schema: dict | Schema<T> | nil = nil,
+  apply_defaults: bool = false,
+) -> SchemaReport<T> {
   const contract_report = __agent_event_contract_report(value)
   if contract_report != nil {
     return contract_report
@@ -329,7 +427,11 @@ pub fn agent_event_report(value: dict, schema: any = nil, apply_defaults: bool =
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_event_value(value: dict, schema: any = nil, apply_defaults: bool = false) {
+pub fn agent_event_value<T>(
+  value: unknown,
+  schema: dict | Schema<T> | nil = nil,
+  apply_defaults: bool = false,
+) -> T {
   const contract_report = __agent_event_contract_report(value)
   if contract_report != nil {
     throw contract_report.message
@@ -344,7 +446,10 @@ pub fn agent_event_value(value: dict, schema: any = nil, apply_defaults: bool = 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_capture_report(value: any, apply_defaults: bool = false) {
+pub fn agent_event_capture_report(
+  value: unknown,
+  apply_defaults: bool = false,
+) -> SchemaReport<AgentValidatedEventCapture> {
   return get_typed_report(value, agent_event_capture_schema(), apply_defaults)
 }
 
@@ -356,7 +461,10 @@ pub fn agent_event_capture_report(value: any, apply_defaults: bool = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_event_capture_value(value: any, apply_defaults: bool = false) {
+pub fn agent_event_capture_value(
+  value: unknown,
+  apply_defaults: bool = false,
+) -> AgentValidatedEventCapture {
   return get_typed_value(value, agent_event_capture_schema(), apply_defaults)
 }
 
