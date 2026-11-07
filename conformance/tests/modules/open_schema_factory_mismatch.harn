@@ -1,0 +1,8 @@
+import { get_typed_value } from "std/schema"
+import { tool_event_schema } from "./open_schema_factory_owner.harn"
+
+fn main(harness: Harness) {
+  const event = get_typed_value({tool_name: "reached", extension: true}, tool_event_schema())
+  const wrong: int = event.tool_name
+  harness.stdio.println(wrong)
+}

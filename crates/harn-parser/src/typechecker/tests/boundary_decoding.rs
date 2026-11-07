@@ -78,6 +78,33 @@ fn untyped_optional_chain_splits_an_open_row_by_declared_field() {
 }
 
 #[test]
+fn open_record_reads_preserve_declared_fields_and_typed_tails() {
+    let source = r#"
+type Event = {name: string, metadata?: {source: string}, ...dict}
+fn known(event: Event) -> string { return event.name }
+fn optional(event: Event?) -> string? { return event?.metadata?.source }
+fn map_tail(event: {tag: string, ...dict<string, {name: string}>}) -> string {
+  return event.extension.name
+}
+"#;
+    let diagnostics = check_source_with_source(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let wrong = errors(
+        "type Event = {name: string, ...dict}\nfn wrong(event: Event) -> int { return event.name }",
+    );
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("expected int, found string"), "{wrong:?}");
+    assert_eq!(
+        rule_count(
+            "type Event = {name: string, ...dict}\nfn unknown(event: Event) { return event?.extension?.name }",
+            "untyped-optional-chain",
+        ),
+        1,
+        "the unknown extension remains untyped"
+    );
+}
+
+#[test]
 fn untyped_optional_chain_ignores_typed_optional_fields_and_single_links() {
     let count = rule_count(
         r"
