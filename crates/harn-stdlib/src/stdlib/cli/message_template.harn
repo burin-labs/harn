@@ -9,7 +9,7 @@ pub type MessageTemplate = {
 /**
  * Render a compiled CLI message plan without parsing literal argument values.
  * @effects: []
- * @errors: ["CLI localization argument count does not match its registered template"]
+ * @errors: ["CLI localization argument count does not match its registered template", "Compiled CLI message argument slot is out of range"]
  */
 pub fn render_message(template: MessageTemplate, locale: string, values: list<string>) -> string {
   if len(values) != template.arity {
@@ -21,7 +21,15 @@ pub fn render_message(template: MessageTemplate, locale: string, values: list<st
     if type_of(segment) == "string" {
       parts.push(segment)
     } else {
-      parts.push(values[segment] ?? "")
+      const value = if segment >= 0 {
+        values[segment]
+      } else {
+        nil
+      }
+      if value == nil {
+        throw "Compiled CLI message argument slot is out of range"
+      }
+      parts.push(value)
     }
   }
   return parts.join("")
