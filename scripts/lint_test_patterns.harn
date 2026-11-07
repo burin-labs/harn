@@ -251,6 +251,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/relative_path_resolution_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
+  // Init exit status and Git visibility of real runtime stores require the project CLI process.
+  "crates/harn-cli/tests/harn_cli_e2e/scaffold_dispatch.rs",
   // Durable credential grants and revocation must cross fresh CLI processes.
   // These two bounded, offline cases remain in the required fast suite.
   "crates/harn-cli/tests/harn_cli_fast/file_secrets.rs",
