@@ -105,6 +105,49 @@ fn map_tail(event: {tag: string, ...dict<string, {name: string}>}) -> string {
 }
 
 #[test]
+fn nested_open_record_chains_classify_the_key_being_read() {
+    let source = r#"
+type Child = {name: string, ...dict}
+type Packet = {child?: Child, ...dict}
+fn known(packet: Packet?) -> string? { return packet?.child?.name }
+fn indexed(packet: Packet?) -> string? { return packet?.["child"]?.["name"] }
+fn unknown(packet: Packet?) { return packet?.child?.future?.name }
+fn unknown_index(packet: Packet?) { return packet?.["extra"]?.["name"] }
+fn dynamic(packet: Packet?, key: string) { return packet?.[key]?.["name"] }
+"#;
+    assert!(errors(source).is_empty(), "{:?}", errors(source));
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 3);
+}
+
+#[test]
+fn open_record_subscripts_preserve_declared_and_tail_slot_types() {
+    let source = r#"
+type Row = {name: string, count?: int, ...dict}
+fn known(row: Row) -> string { return row["name"] }
+fn optional(row: Row?) -> int? { return row?.["count"] }
+fn map_tail(row: {tag: string, ...dict<string, int>}) -> int? { return row["extra"] }
+fn writes() {
+  let row: Row = {name: "valid"}
+  row["name"] = "updated"
+  row["count"] = nil
+  row["extension"] = {arbitrary: true}
+}
+"#;
+    assert!(errors(source).is_empty(), "{:?}", errors(source));
+    for source in [
+        "type Row = {name: string, ...dict}\nfn wrong(row: Row) -> int { return row[\"name\"] }",
+        "fn wrong() { let row: {name: string, ...dict} = {name: \"valid\"}; row[\"name\"] = 7 }",
+        "fn wrong() { let row: {tag: string, ...dict<string, int>} = {tag: \"valid\"}; row[\"extra\"] = \"invalid\" }",
+    ] {
+        let checked = errors(source);
+        assert_eq!(checked.len(), 1, "{source}: {checked:?}");
+        assert!(
+            checked[0].contains("expected") && checked[0].contains("found"),
+            "{checked:?}"
+        );
+    }
+}
+#[test]
 fn untyped_optional_chain_ignores_typed_optional_fields_and_single_links() {
     let count = rule_count(
         r"

@@ -1038,6 +1038,19 @@ impl TypeChecker {
                     None
                 }
             }
+            TypeExpr::OpenShape { fields, rests } => {
+                let Node::StringLiteral(key) = &index.node else {
+                    return None;
+                };
+                if fields.iter().any(|field| field.name == *key) {
+                    return Self::shape_property_type(fields, key, optional);
+                }
+                let inferred = rests
+                    .iter()
+                    .map(|rest| self.subscript_slot_type(rest, index, scope, optional, mode))
+                    .collect::<Option<Vec<_>>>()?;
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
+            }
             // A `string` index is a one-character `string`, absent (`nil`) when
             // the index is out of bounds — the same optionality rule as `list`.
             TypeExpr::Named(name) if name == "string" => Some(Self::index_slot_type(

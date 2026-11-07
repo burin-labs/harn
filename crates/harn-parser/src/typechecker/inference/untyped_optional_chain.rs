@@ -36,10 +36,13 @@ impl TypeChecker {
                     innermost_property = Some(property.as_str());
                     cursor = object;
                 }
-                Node::OptionalSubscriptAccess { object, .. } => {
+                Node::OptionalSubscriptAccess { object, index } => {
                     links += 1;
                     innermost_receiver = Some(object.as_ref());
-                    innermost_property = None;
+                    innermost_property = match &index.node {
+                        Node::StringLiteral(key) => Some(key.as_str()),
+                        _ => None,
+                    };
                     cursor = object;
                 }
                 Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
@@ -62,8 +65,16 @@ impl TypeChecker {
         // `?.` after it still hedges an untyped value. A first link with no
         // inferred type is not evidence either way, so it stays quiet.
         let first_link_typed = || {
+            let property = match &snode.node {
+                Node::OptionalPropertyAccess { property, .. } => Some(property.as_str()),
+                Node::OptionalSubscriptAccess { index, .. } => match &index.node {
+                    Node::StringLiteral(key) => Some(key.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            };
             self.infer_type(object, scope)
-                .is_none_or(|ty| !self.type_is_untyped_record(&ty, None, scope))
+                .is_none_or(|ty| !self.type_is_untyped_record(&ty, property, scope))
         };
         if receiver_typed && first_link_typed() {
             return;
