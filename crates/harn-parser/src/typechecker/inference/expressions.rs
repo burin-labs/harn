@@ -494,8 +494,17 @@ impl TypeChecker {
                     return self.infer_pipe_type(left, right, scope);
                 }
                 let lt = self.infer_type(left, scope);
-                let rt = self.infer_type(right, scope);
+                let mut rt = self.infer_type(right, scope);
                 if matches!(op, BinaryOperator::NilCoalesce) {
+                    // An empty fallback contributes no elements. Its usual
+                    // gradual type supports mutable empty bindings, but would
+                    // erase a typed collection on the other coalesce branch.
+                    rt = match &right.node {
+                        Node::ListLiteral(items) if items.is_empty() => {
+                            Some(TypeExpr::List(Box::new(TypeExpr::Never)))
+                        }
+                        _ => rt,
+                    };
                     // `??` strips the nil arm from its left operand, but the
                     // structural `without_nil`/`contains_nil` helpers can't see
                     // through a named alias — so `type T = {..}?; x: T; x ?? d`
