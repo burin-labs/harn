@@ -56,7 +56,16 @@ TEST_CLOCK_TICK=10 run_case degraded 0 2 'coverage is degraded'
 TEST_CLOCK_TICK=20 run_case floor 1 1 'floor within budget'
 TEST_NOW=61 run_case expired 1 0 'budget expired'
 TEST_LIST_STATUS=70 run_case discovery 2 0 'discovery failed'
+grep -Fq "inventory=$tmp/harn-flake-inventory.json" "$GITHUB_OUTPUT"
 TEST_INVENTORY="$tmp/empty.json" run_case empty 2 0 'inventory is invalid or empty'
+grep -Fq "inventory=$tmp/harn-flake-inventory.json" "$GITHUB_OUTPUT"
+cmp "$tmp/empty.json" "$tmp/harn-flake-inventory.json"
 TEST_RUN_STATUS=100 run_case failed 100 1 'test failure on iteration 1'
 TEST_RUN_STATUS=70 run_case runner 70 1 'runner/discovery error (exit 70)'
-echo 'Touched-test repeatability: 8 owning controls passed; no real clock or Cargo build used.'
+FLAKE_ITERATIONS_CEILING=0 run_case zero_ceiling 2 0 'Invalid repeatability budget'
+[[ ! -s "$GITHUB_OUTPUT" && ! -s "$TEST_CALLS" ]]
+FLAKE_ITERATIONS_FLOOR=4 run_case inverted_bounds 2 0 'Invalid repeatability budget'
+FLAKE_ITERATIONS_FLOOR=0 run_case zero_floor 2 0 'Invalid repeatability budget'
+FLAKE_JOB_BUDGET_MINUTES=0 run_case zero_budget 2 0 'Invalid repeatability budget'
+FLAKE_JOB_BUDGET_MINUTES=1.5 run_case non_integer_budget 2 0 'Invalid repeatability budget'
+echo 'Touched-test repeatability: 13 owning controls passed; no real clock or Cargo build used.'

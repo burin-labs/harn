@@ -5,7 +5,14 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/../.." && pwd)
 ceiling=${FLAKE_ITERATIONS_CEILING:?}
 floor=${FLAKE_ITERATIONS_FLOOR:?}
-deadline=$(( ${FLAKE_JOB_START_EPOCH:?} + ${FLAKE_JOB_BUDGET_MINUTES:?} * 60 ))
+budget=${FLAKE_JOB_BUDGET_MINUTES:?}
+started=${FLAKE_JOB_START_EPOCH:?}
+if ! [[ "$ceiling" =~ ^[1-9][0-9]*$ && "$floor" =~ ^[1-9][0-9]*$ &&
+    "$budget" =~ ^[1-9][0-9]*$ && "$started" =~ ^(0|[1-9][0-9]*)$ ]] || ((floor > ceiling)); then
+  echo '::error::Invalid repeatability budget: positive floor/ceiling/minutes and floor <= ceiling are required.'
+  exit 2
+fi
+deadline=$(( started + budget * 60 ))
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
 inventory="${RUNNER_TEMP:?}/harn-flake-inventory.json"
 
@@ -17,8 +24,13 @@ inventory="${RUNNER_TEMP:?}/harn-flake-inventory.json"
   echo "- Iteration target: ${floor} (floor) / ${ceiling} (ceiling)"
 } >> "$summary"
 
-if ! cargo-nextest nextest list --locked --workspace --profile flake-detection \
-    -E "$NEXTEST_FILTER" --message-format json > "$inventory"; then
+list_status=0
+cargo-nextest nextest list --locked --workspace --profile flake-detection \
+  -E "$NEXTEST_FILTER" --message-format json > "$inventory" || list_status=$?
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "inventory=$inventory" >> "$GITHUB_OUTPUT"
+fi
+if ((list_status != 0)); then
   echo '::error::Touched-test discovery failed; no repeatability iteration started.'
   echo '- Result: FAILED, test discovery unmeasured.' >> "$summary"
   exit 2
@@ -30,9 +42,6 @@ if ! selected=$(HARN_BIN_NO_BUILD=1 "$repo_root/scripts/harn_bin.sh" run --stand
   exit 2
 fi
 echo "- Selected tests per iteration: $selected" >> "$summary"
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  echo "inventory=$inventory" >> "$GITHUB_OUTPUT"
-fi
 
 completed=0
 max_iter_secs=0
