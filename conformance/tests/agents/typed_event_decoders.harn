@@ -1,0 +1,101 @@
+import {
+  agent_event_report,
+  agent_event_value,
+  agent_tool_audit_event_schema,
+  agent_tool_call_receipt_schema,
+  agent_tool_lifecycle_event_schema,
+} from "std/agent/events"
+
+fn main(harness: Harness) {
+  const lifecycle = agent_event_value(
+    {
+      type: "tool_call",
+      status: "pending",
+      tool_call_id: "call",
+      tool_name: "reached",
+      future: true,
+    },
+    agent_tool_lifecycle_event_schema(),
+  )
+  const name: string = lifecycle.tool_name
+  assert_eq(name, "reached")
+  const receipt = agent_event_value(
+    {
+      schema_version: 1,
+      session_id: "session",
+      run_id: nil,
+      tool_call_id: "call",
+      tool_name: name,
+      iteration: 0,
+      turn_index: nil,
+      emit_order: 0,
+      reason: nil,
+      kind: nil,
+      executor: nil,
+      status: "ok",
+      error_category: nil,
+      duration_ms: 0,
+      args_hash: "a".repeat(64),
+      result_hash: nil,
+      audit: {},
+      emitted_at: "2026-11-06T00:00:00Z",
+      model: nil,
+      provider: nil,
+    },
+    agent_tool_call_receipt_schema(),
+  )
+  const duration: int = receipt.duration_ms
+  assert_eq(duration, 0)
+  assert_eq(receipt.executor, nil)
+  assert(!agent_event_report(receipt + {future: true}, agent_tool_call_receipt_schema()).ok)
+  assert(!agent_event_report(receipt + {duration_ms: -1}, agent_tool_call_receipt_schema()).ok)
+  assert(!agent_event_report(receipt + {args_hash: "short"}, agent_tool_call_receipt_schema()).ok)
+  const audit = agent_event_value(
+    {
+      type: "tool_call_audit",
+      tool_call_id: "call",
+      tool_name: name,
+      receipt: receipt,
+      future: true,
+    },
+    agent_tool_audit_event_schema(),
+  )
+  const audited_receipt = audit.receipt
+  if audited_receipt == nil {
+    throw "validated audit must retain the supplied receipt"
+  }
+  const audited_name: string = audited_receipt.tool_name
+  assert_eq(audited_name, name)
+  assert(
+    !agent_event_report(
+      {type: "tool_call_audit", tool_call_id: "call", tool_name: name, receipt: {}},
+      agent_tool_audit_event_schema(),
+    ).ok,
+  )
+  assert(
+    !agent_event_report(
+      {
+        type: "tool_call_update",
+        status: "completed",
+        tool_call_id: "call",
+        tool_name: name,
+        mutation_status: "unchanged",
+        changed_paths: nil,
+      },
+      agent_tool_lifecycle_event_schema(),
+    ).ok,
+  )
+  assert(
+    agent_event_report(
+      {
+        type: "tool_call",
+        status: "pending",
+        tool_call_id: "call",
+        tool_name: name,
+        changed_paths: "unowned extension",
+      },
+      agent_tool_lifecycle_event_schema(),
+    ).ok,
+  )
+  harness.stdio.println("typed event decoders reached")
+}

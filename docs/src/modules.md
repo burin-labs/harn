@@ -2189,6 +2189,17 @@ Private-span filtering and terminal envelopes for streaming chat UIs:
 |---|---|
 | `agent_capture_events(agent, session_id, body)` | Capture events while the callback runs and return `AgentEventCapture<T>` |
 | `AgentEventCapture<T>` | Preserve the callback's result type `T` alongside `events: list<unknown>` |
+| `agent_event_report(value, schema?, apply_defaults?)` | Validate an event and return `SchemaReport<T>` from its schema |
+| `agent_event_value(value, schema?, apply_defaults?)` | Validate an event and return the schema's value type `T`, throwing on failure |
+| `agent_event_capture_value(value, apply_defaults?)` | Validate an envelope and return `AgentValidatedEventCapture` |
+| `agent_tool_lifecycle_event_schema()` | Describe `AgentToolLifecycleEvent`, with distinct pending and update variants |
+| `agent_tool_call_receipt_schema()` | Describe the closed `AgentToolCallReceipt` contract and its digest and numeric limits |
+| `agent_tool_audit_event_schema()` | Describe `AgentToolAuditEvent`, including its optional typed receipt |
+| `agent_tool_batch_disposition_receipt_schema()` | Describe the closed `AgentToolBatchDispositionReceipt` contract |
+| `agent_tool_batch_disposition_event_schema()` | Describe `AgentToolBatchDispositionEvent` with its typed receipt |
+| `agent_typed_checkpoint_event_schema()` | Describe `AgentTypedCheckpointEvent` and its checkpoint fields |
+| `agent_feedback_injected_event_schema()` | Describe `AgentFeedbackInjectedEvent` |
+| `agent_next_tool_claim_receipt_schema()` | Describe the closed `AgentNextToolClaimReceipt` contract |
 
 Capture preserves callback results as runtime values, including bytes. Captured
 events are JSON payloads; validate an event against its consumer's schema before

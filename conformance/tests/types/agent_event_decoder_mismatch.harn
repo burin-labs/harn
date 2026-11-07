@@ -1,0 +1,10 @@
+import { agent_event_value, agent_tool_lifecycle_event_schema } from "std/agent/events"
+
+fn main(harness: Harness) {
+  const event = agent_event_value(
+    {type: "tool_call", status: "pending", tool_call_id: "call", tool_name: "reached"},
+    agent_tool_lifecycle_event_schema(),
+  )
+  const wrong: int = event.tool_name
+  harness.stdio.println(wrong)
+}
