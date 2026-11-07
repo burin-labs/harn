@@ -25,10 +25,14 @@ trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lin
 # Git sends one four-field line per ref update on stdin. A deletion has the
 # literal local-ref marker `(delete)` plus an all-zero local object ID, so there
 # are no local commits or files to validate. Consume the stream once and fail
-# closed: empty or malformed input is refused by the census below, while mixed
-# updates validate every nondeleted ref.
+# closed on failed reads and malformed input. An empty stream is Git's no-op
+# push; mixed updates validate every nondeleted ref.
 cat > "$push_updates"
 hook_write_push_commits "$push_commits" "$push_updates" "${2:-}"
+if [ ! -s "$push_updates" ]; then
+  echo "=== Pre-push: no ref updates; nothing to validate ==="
+  exit 0
+fi
 # The owning census validated the stream. Classification here adds no second
 # parser for the ref-update protocol.
 if awk '$1 != "(delete)" { nondeletions = 1 } END { exit nondeletions ? 1 : 0 }' "$push_updates"; then

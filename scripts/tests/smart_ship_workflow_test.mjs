@@ -11,21 +11,18 @@ const workflow = load(
   fs.readFileSync(`${root}/.github/workflows/smart-ship.yml`, "utf8"),
 );
 const ciWorkflow = load(fs.readFileSync(`${root}/.github/workflows/ci.yml`, "utf8"));
-const availability = workflow.jobs.availability;
 const ship = workflow.jobs.ship;
 
-test("CI and shipping pass the runner probe's declared secret names", () => {
-  for (const caller of [ciWorkflow.jobs["runner-availability"], availability]) {
-    assert.match(
-      caller.uses,
-      /^burin-labs\/\.github\/\.github\/workflows\/runner-availability\.yml@[0-9a-f]{40}$/,
-    );
-    assert.deepEqual(Object.keys(caller.secrets).sort(), [
-      "RUNNER_PROBE_APP_CLIENT_ID",
-      "RUNNER_PROBE_APP_PRIVATE_KEY",
-    ]);
-    assert.ok(caller.secrets.RUNNER_PROBE_APP_CLIENT_ID);
-    assert.ok(caller.secrets.RUNNER_PROBE_APP_PRIVATE_KEY);
+test("routine producers and merging have no runner-capacity dependency", () => {
+  assert.equal(ciWorkflow.jobs["runner-availability"], undefined);
+  assert.equal(ciWorkflow.jobs["rust-producer-capacity"], undefined);
+  assert.deepEqual(Object.keys(workflow.jobs), ["ship"]);
+  assert.equal(ship.needs, undefined);
+  assert.equal(JSON.parse(ship.with["runs-on"]), "ubuntu-24.04");
+  for (const name of ["rust-cli", "rust-check-inputs"]) {
+    const producer = ciWorkflow.jobs[name];
+    assert.deepEqual(producer.needs, ["changes"]);
+    assert.equal(evaluate(producer["runs-on"], {}).coerceString(), "ubuntu-24.04");
   }
 });
 
@@ -57,7 +54,7 @@ function evaluate(source, context) {
 
 function admits(context) {
   try {
-    return evaluate(availability.if, context).coerceString() === "true";
+    return evaluate(ship.if, context).coerceString() === "true";
   } catch {
     // GitHub refuses a job when evaluating malformed fromJSON input fails.
     return false;
@@ -96,6 +93,26 @@ function pullRequestContext({
     inputs: { pr: "" },
   };
 }
+
+test("privileged dispatchers refuse fork heads before forwarding secrets", () => {
+  for (const [file, jobName] of [
+    ["merge-override-dispatch.yml", "override"],
+    ["review-dispatch.yml", "dispatch"],
+  ]) {
+    const candidate = load(
+      fs.readFileSync(`${root}/.github/workflows/${file}`, "utf8"),
+    ).jobs[jobName];
+    const context = pullRequestContext({ changedLabel: "force-merge" });
+    context.needs = { eligibility: { outputs: { dispatch: "true" } } };
+    assert.equal(evaluate(candidate.if, context).coerceString(), "true", file);
+    context.github.event.pull_request.head.repo.full_name = "contributor/harn";
+    assert.equal(
+      evaluate(candidate.if, context).coerceString(),
+      "false",
+      `${file} must refuse a fork even with an eligible label or upstream result`,
+    );
+  }
+});
 
 test("the shipped caller admits every same-repository main PR labeled ship", () => {
   assert.equal(admits(pullRequestContext()), true);
@@ -379,64 +396,10 @@ test("the shipped workflow sweeps every 30 minutes and exposes a one-PR dispatch
   );
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.required, true);
   assert.equal(workflow.on.workflow_dispatch.inputs.pr.default, undefined);
-  assert.match(
-    availability.uses,
-    /^burin-labs\/\.github\/\.github\/workflows\/runner-availability\.yml@[0-9a-f]{40}$/,
-  );
-  assert.equal(availability.with.owned_only, true);
-  assert.equal(availability.with.require_measured, true);
-  assert.equal(availability.with.linux_probe_runner_tag, "harn-ci-big");
-  assert.deepEqual(JSON.parse(availability.with.minimum_online_by_pool), {
-    linux_big: 1,
-  });
-  assert.deepEqual(ship.needs, ["availability"]);
   assert.equal(ship.with.repair, false);
   assert.match(
     ship.uses,
     /^burin-labs\/\.github\/\.github\/workflows\/smart-ship\.yml@[0-9a-f]{40}$/,
   );
-  assert.deepEqual(
-    JSON.parse(evaluate(ship.with["runs-on"], {}).coerceString()),
-    ["self-hosted", "Linux", "X64", "harn-ci-big"],
-  );
-});
-
-test("the shipped merger predicate requires successful measured eligible big capacity", () => {
-  const context = {
-    needs: {
-      availability: {
-        result: "success",
-        outputs: {
-          capacity: JSON.stringify({
-            linux_big: { measured: true, eligible: true },
-          }),
-        },
-      },
-    },
-  };
-  assert.equal(evaluate(ship.if, context).coerceString(), "true");
-  for (const availability of [
-    { result: "failure", outputs: context.needs.availability.outputs },
-    {
-      result: "success",
-      outputs: {
-        capacity: JSON.stringify({
-          linux_big: { measured: false, eligible: true },
-        }),
-      },
-    },
-    {
-      result: "success",
-      outputs: {
-        capacity: JSON.stringify({
-          linux_big: { measured: true, eligible: false },
-        }),
-      },
-    },
-  ]) {
-    assert.equal(
-      evaluate(ship.if, { needs: { availability } }).coerceString(),
-      "false",
-    );
-  }
+  assert.equal(JSON.parse(ship.with["runs-on"]), "ubuntu-24.04");
 });

@@ -10,7 +10,6 @@ import {
   producer_cache_save_reserve_minutes,
   producer_cli_timeout_expression,
   producer_hosted_ceiling_minutes,
-  producer_owned_ceiling_minutes,
   producer_runner_expression,
   producer_step_budget_margin_errors,
   public_repository_runner_errors,
@@ -132,7 +131,9 @@ pipeline test_public_runner_policy_refuses_inherited_paid_capacity_route_inputs(
       {targets: []},
     ),
     [
+      "job-env.yml:e2e must not request a self-hosted runner",
       "job-env.yml:e2e-capacity runner capacity decision must not accept paid route input CAPACITY_VENDOR_RUNNER",
+      "workflow-env.yml:e2e must not request a self-hosted runner",
       "workflow-env.yml:e2e-capacity runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
     ],
   )
@@ -203,14 +204,11 @@ pipeline test_e2e_hosted_route_rejects_the_old_owned_route(harness: Harness, tas
 }
 
 @test
-pipeline test_e2e_paid_exception_is_bound_to_the_exact_job_and_runner(
-  harness: Harness,
-  task: unknown,
-) {
-  const valid = {jobs: {e2e: {"runs-on": "ubuntu-8core"}}}
+pipeline test_e2e_uses_standard_hosted_capacity(harness: Harness, task: unknown) {
+  const valid = {jobs: {e2e: {"runs-on": "ubuntu-24.04"}}}
   assert_eq(e2e_hosted_runner_errors(valid), [])
   assert_eq(public_repository_runner_errors({"e2e.yml": valid}, {targets: []}), [])
-  assert(public_repository_runner_errors({"other.yml": valid}, {targets: []}).count > 0)
+  assert_eq(public_repository_runner_errors({"other.yml": valid}, {targets: []}), [])
   assert(
     public_repository_runner_errors(
       {"e2e.yml": {jobs: {other: {"runs-on": "ubuntu-8core"}}}},
@@ -224,6 +222,16 @@ pipeline test_e2e_paid_exception_is_bound_to_the_exact_job_and_runner(
       {targets: []},
     ).count
       > 0,
+  )
+}
+
+pipeline test_routine_workflows_refuse_self_hosted_capacity() {
+  assert_eq(
+    public_repository_runner_errors(
+      {"routine.yml": {jobs: {build: {"runs-on": ["self-hosted", "Linux"]}}}},
+      {targets: []},
+    ),
+    ["routine.yml:build must not request a self-hosted runner"],
   )
 }
 
@@ -1430,22 +1438,13 @@ pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness
   )
 }
 
-/**
- * The owned ceiling is derived, not chosen. The free hosted rung now carries
- * the same cold-safe step budgets as the owned rung, plus the cache-save
- * reserve. The owned rung is pull-request-only, so it never reaches the
- * main-only cache save.
- */
-pipeline test_owned_ceiling_uses_cold_safe_budgets_without_cache_save(harness: Harness) {
-  assert_eq(
-    producer_owned_ceiling_minutes(),
-    producer_hosted_ceiling_minutes() - producer_cache_save_reserve_minutes(),
-    "the owned ceiling must carry the cold-safe step budgets without a cache-save reserve",
-  )
+pipeline test_hosted_ceiling_reserves_the_main_cache_save() {
+  assert_eq(producer_cache_save_reserve_minutes(), 12)
+  assert_eq(producer_hosted_ceiling_minutes(), 6 + 24 + 26 + producer_cache_save_reserve_minutes())
 }
 
 @test
-pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
+pipeline test_cli_rejects_a_timeout_below_its_cold_build_budget(harness: Harness) {
   const valid = workflow(harness.fs)
   const producer = valid.jobs["rust-cli"]
   const invalid = {
@@ -1475,7 +1474,6 @@ pipeline test_owned_cli_rejects_the_hosted_only_timeout(harness: Harness) {
     ),
   )
   assert_eq(producer_hosted_ceiling_minutes(), 68)
-  assert_eq(producer_owned_ceiling_minutes(), 56)
   assert_eq(cli_producer_hosted_ceiling_minutes(), 49)
 }
 
@@ -1528,22 +1526,18 @@ pipeline test_security_barrier_overlaps_the_producer(harness: Harness) {
   )
 }
 
-pipeline test_owned_producer_requires_measured_capacity(harness: Harness) {
+pipeline test_hosted_producers_depend_only_on_the_change_decision(harness: Harness) {
   const valid = workflow(harness.fs)
   const producer = valid.jobs["rust-check-inputs"]
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   for broken in [
-    {...producer, if: gha_expression("!cancelled() && needs.changes.outputs.rust == 'true'")},
+    {...producer, if: "github.event_name == 'pull_request'"},
     {...producer, needs: ["changes", "runner-availability"]},
   ] {
     const errors = ci_linux_lane_policy_errors(
       {...valid, jobs: {...valid.jobs, "rust-check-inputs": broken}},
     )
-    assert(
-      errors.contains(
-        "ci.yml:rust-check-inputs must require a successful capacity decision on trusted pull requests",
-      ),
-    )
+    assert(errors.contains("ci.yml:rust-check-inputs must depend only on the Rust change decision"))
   }
 }
 
@@ -1570,25 +1564,21 @@ pipeline test_rejects_a_producer_ladder_off_its_rungs_or_ceilings(harness: Harne
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(
-    errors.contains(
-      "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, then ubuntu-24.04",
-    ),
-  )
+  assert(errors.contains("ci.yml:rust-check-inputs must use standard hosted ubuntu-24.04"))
   assert(errors.contains("ci.yml:rust-check-inputs must mirror every one of its runner tiers"))
   // The shared CLI must not wait on the owned pool's compile budget: an owned
   // rung on it is refused, and the hosted-only ladder is the valid one.
   const cli = valid.jobs["rust-cli"]
-  const cli_ladder_error = "ci.yml:rust-cli must ladder then ubuntu-24.04"
+  const cli_ladder_error = "ci.yml:rust-cli must use standard hosted ubuntu-24.04"
   const regressed = {
     ...valid,
-    jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": producer_runner_expression(true)}},
+    jobs: {...valid.jobs, "rust-cli": {...cli, "runs-on": "self-hosted"}},
   }
   assert(ci_linux_lane_policy_errors(regressed).contains(cli_ladder_error))
   assert(!ci_linux_lane_policy_errors(valid).contains(cli_ladder_error))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 56-minute owned ceiling and the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+      "ci.yml:rust-check-inputs must keep the 68-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -2009,7 +1999,9 @@ pipeline test_cli_producer_runs_only_on_the_free_hosted_runner(harness: Harness,
     },
   }
   assert(
-    ci_linux_lane_policy_errors(reserved).contains("ci.yml:rust-cli must ladder then ubuntu-24.04"),
+    ci_linux_lane_policy_errors(reserved).contains(
+      "ci.yml:rust-cli must use standard hosted ubuntu-24.04",
+    ),
   )
 }
 
@@ -2025,11 +2017,7 @@ pipeline test_merge_groups_take_the_hosted_workspace_producer(harness: Harness, 
   assert_eq(ci_linux_lane_policy_errors(valid), [])
   assert(!contains(producer_runner_expression(), "merge_route"))
   assert(!contains(producer_runner_expression(), "hetzner-1"))
-  assert_eq(
-    producer_runner_expression(),
-    "$"
-      + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || 'ubuntu-24.04' }}",
-  )
+  assert_eq(producer_runner_expression(), "$" + "{{ 'ubuntu-24.04' }}")
   const producer = valid.jobs["rust-check-inputs"]
   const datacenter_ladder = "$"
     + "{{ (needs.rust-producer-capacity.outputs.route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]'))\n  || (needs.rust-producer-capacity.outputs.merge_route == 'owned'\n  && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\", \"hetzner-1\"]'))\n  || 'ubuntu-24.04' }}"
@@ -2040,8 +2028,6 @@ pipeline test_merge_groups_take_the_hosted_workspace_producer(harness: Harness, 
         jobs: {...valid.jobs, "rust-check-inputs": {...producer, "runs-on": datacenter_ladder}},
       },
     )
-      .contains(
-        "ci.yml:rust-check-inputs must ladder the owned linux_big pool on same-repository pull requests, then ubuntu-24.04",
-      ),
+      .contains("ci.yml:rust-check-inputs must use standard hosted ubuntu-24.04"),
   )
 }

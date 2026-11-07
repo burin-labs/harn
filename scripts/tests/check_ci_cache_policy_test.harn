@@ -209,10 +209,15 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
       "test \"$PROVIDER_CONTRACT_PROBE_EXPECTED\" = \"false\"",
     ),
   )
-  // Standalone live runs keep their original build, branch policy and notifier.
+  // Live requests require a deliberate manual dispatch.
   assert_eq(standalone.on?.pull_request, nil)
   assert_eq(standalone.on?.push, nil)
-  assert_eq(standalone.on.schedule, [{cron: "17 11 * * 1"}])
+  assert_eq(standalone.on?.schedule, nil)
+  assert_eq(standalone.on.keys(), ["workflow_dispatch"])
+  assert_eq(
+    standalone.env.PROVIDER_CONTRACT_PROBE_LIVE,
+    "$" + "{{ inputs.live && 'true' || 'false' }}",
+  )
   assert_eq(standalone.on.workflow_dispatch.inputs.live.default, false)
   assert_eq(standalone.jobs["notify-live-failure"].permissions.issues, "write")
   assert(standalone.jobs.probe.steps.any({ step -> step?.run == "make build-harn" }))

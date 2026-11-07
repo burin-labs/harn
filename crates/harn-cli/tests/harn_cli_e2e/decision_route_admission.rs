@@ -62,11 +62,41 @@ fn a_decision_only_route_is_refused_as_a_chat_driver_by_name() {
 /// operation refusal — it is an unknown route, which is a different sentence.
 #[test]
 fn an_unserved_sibling_route_is_refused() {
+    assert!(harn_vm::llm_config::model_catalog_id_for_route(
+        "vercel_ai_gateway",
+        "vercel/typesafe-ai/jev-2"
+    )
+    .is_none());
+    assert!(
+        harn_vm::llm::capabilities::lookup("vercel_ai_gateway", "vercel/typesafe-ai/jev-2")
+            .decision_protocol
+            .is_some_and(|protocol| protocol.is_native())
+    );
     let (ok, output) = run_script(UNSERVED_SIBLING_SCRIPT);
     assert!(!ok, "an unserved sibling must not run: {output}");
     assert!(
         output.contains("jev-2"),
         "refusal must name the route asked for, got: {output}"
+    );
+    assert!(
+        output.contains("native decision route is not declared in the model catalog"),
+        "an unserved decision route must fail admission before credentials: {output}"
+    );
+}
+
+#[test]
+fn an_unknown_chat_route_is_still_admitted() {
+    assert!(harn_vm::llm_config::model_catalog_id_for_route("mock", "uncatalogued-chat").is_none());
+    let (ok, output) = run_script(
+        r#"fn main(harness: Harness) {
+  const response = harness.llm.call("hello", nil, {provider: "mock", model: "uncatalogued-chat"})
+  harness.stdio.println(response.text)
+}"#,
+    );
+    assert!(ok, "an open-ended chat route remains valid: {output}");
+    assert!(
+        output.contains("Mock response"),
+        "model call was not reached: {output}"
     );
 }
 

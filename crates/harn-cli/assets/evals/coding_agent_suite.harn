@@ -618,7 +618,7 @@ fn __seed_mock(llm: HarnessLlm, fixture: string, tool_format: string, python: st
 
 fn __command_verification(
   success: bool,
-  exit_code: int,
+  exit_code: int?,
   stdout: string,
   stderr: string,
   duration_ms: int,

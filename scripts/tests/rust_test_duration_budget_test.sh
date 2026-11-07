@@ -30,5 +30,8 @@ unreachable_feedback=$(report_duration_budget 1 75 7168 4501)
 workflow="$root/.github/workflows/macos-nightly.yml"
 job_limit=$(sed -n 's/^    timeout-minutes: //p' "$workflow")
 reported_limit=$(sed -n 's/^          RUST_TEST_JOB_LIMIT_MINUTES: //p' "$workflow")
-[[ -n "$job_limit" && "$job_limit" == "$reported_limit" ]]
+[[ -n "$job_limit" && -n "$reported_limit" ]]
+while IFS= read -r limit; do
+  [[ "$job_limit" == "$limit" ]]
+done <<< "$reported_limit"
 echo 'rust_test_duration_budget_test: ok'

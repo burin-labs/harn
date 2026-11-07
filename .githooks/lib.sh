@@ -598,7 +598,12 @@ hook_write_push_commits() (
   trap 'rm -rf "$census_dir"' EXIT
   : > "$output"
   : > "$census_dir/revisions"
-  if [ ! -s "$updates" ] || ! awk '
+  if [ ! -f "$updates" ] || [ ! -r "$updates" ]; then
+    echo "error: cannot census pushed commits: ref updates are unavailable" >&2
+    return 1
+  fi
+  if [ ! -s "$updates" ]; then return 0; fi
+  if ! awk '
     function oid(v) { return v ~ /^[0-9a-f]+$/ && (length(v) == 40 || length(v) == 64) }
     NF != 4 || !oid($2) || !oid($4) || length($2) != length($4) ||
       ($2 ~ /^0+$/ && $1 != "(delete)") ||

@@ -1,0 +1,43 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("chat accepted")],
+    { ->
+      const refused = try {
+        harness.llm.call(
+          "hello",
+          nil,
+          {provider: "vercel_ai_gateway", model: "vercel/typesafe-ai/jev-2"},
+        )
+      }
+      contract_effect(harness.stdio, "unserved_native_route_refused", is_err(refused))
+      const reason = if is_err(refused) {
+        to_string(unwrap_err(refused))
+      } else {
+        ""
+      }
+      contract_effect(
+        harness.stdio,
+        "refusal_names_route_before_credentials",
+        contains(reason, "native decision route is not declared in the model catalog")
+          && contains(reason, "vercel/typesafe-ai/jev-2"),
+      )
+      const accepted = try {
+        harness.llm.call("hello", nil, {provider: "mock", model: "uncatalogued-chat"})
+      }
+      const text = if is_err(accepted) {
+        ""
+      } else {
+        unwrap(accepted).text
+      }
+      contract_negative(
+        harness.stdio,
+        "unknown_chat_route_reaches_the_model",
+        is_err(accepted) || text != "chat accepted",
+      )
+    },
+  )
+}
