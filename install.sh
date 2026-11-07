@@ -166,7 +166,6 @@ in_path() {
 }
 
 INSTALL_DIR=""
-PATH_HINT=""
 if [ -n "${HARN_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$HARN_INSTALL_DIR"
 elif [ -n "${XDG_BIN_DIR:-}" ]; then
@@ -178,9 +177,6 @@ elif [ -n "${HOME:-}" ] && [ -d "$HOME/.local/bin" ] && in_path "$HOME/.local/bi
 else
   [ -n "${HOME:-}" ] || die "HOME is unset; pass HARN_INSTALL_DIR explicitly"
   INSTALL_DIR="$HOME/.harn/bin"
-  if ! in_path "$INSTALL_DIR"; then
-    PATH_HINT="$INSTALL_DIR"
-  fi
 fi
 
 # Stage download in a temp dir so a failed install never leaves a
@@ -272,17 +268,18 @@ done
 
 ok "Installed harn ${VERSION} to ${INSTALL_DIR}"
 
-if [ -n "$PATH_HINT" ] && [ "${HARN_NO_MODIFY_PATH:-0}" != "1" ]; then
+if ! in_path "$INSTALL_DIR" && [ "${HARN_NO_MODIFY_PATH:-0}" != "1" ]; then
   echo
-  note "Add ${PATH_HINT} to your PATH:"
+  note "Add ${INSTALL_DIR} to your PATH:"
+  PATH_EXPORT_DIR="$(printf '%s' "$INSTALL_DIR" | sed 's/[\\`"$]/\\&/g')"
   # shellcheck disable=SC2016  # $PATH must stay literal in the printed snippet
-  printf '  %sexport PATH="%s:$PATH"%s\n' "$bold" "$PATH_HINT" "$reset"
+  printf '  %sexport PATH="%s:$PATH"%s\n' "$bold" "$PATH_EXPORT_DIR" "$reset"
   echo
   info "Then restart your shell or run \`hash -r\`."
 fi
 
-if [ "$INSTALL_DIR/harn" != "$(command -v harn 2>/dev/null || true)" ] \
-  && [ -z "$PATH_HINT" ]; then
+RESOLVED_HARN="$(command -v harn 2>/dev/null || true)"
+if [ -n "$RESOLVED_HARN" ] && [ ! "$INSTALL_DIR/harn" -ef "$RESOLVED_HARN" ]; then
   warn "harn is installed at $INSTALL_DIR/harn but another version may be ahead of it on PATH"
 fi
 
