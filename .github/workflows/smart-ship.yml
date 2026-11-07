@@ -31,7 +31,6 @@ on:
       - SDK codegen
       - Secret exposure report
       - Supply chain
-      - Windows installer
       - Windows workspace tests
     types: [completed]
   schedule:

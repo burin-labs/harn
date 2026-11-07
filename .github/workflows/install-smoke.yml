@@ -24,6 +24,7 @@ on:
       - 'install.ps1'
       - 'examples/first-hour/**'
       - 'scripts/smoke_first_hour.mjs'
+      - 'scripts/tests/windows-installer.ps1'
   schedule:
     - cron: '23 11 * * 1' # Mondays
   workflow_dispatch:
@@ -144,6 +145,13 @@ jobs:
         env:
           HARN_BINARY: ${{ runner.temp }}/harn-install/${{ matrix.binary }}
         run: node scripts/smoke_first_hour.mjs
+
+      - name: Reject an incomplete Windows archive without replacing installed files
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          HARN_INSTALL_DIR: ${{ runner.temp }}/harn-install
+        run: ./scripts/tests/windows-installer.ps1 -InstalledDir $env:HARN_INSTALL_DIR
 
       - name: Smoke the installed binary
         if: runner.os != 'Windows'
