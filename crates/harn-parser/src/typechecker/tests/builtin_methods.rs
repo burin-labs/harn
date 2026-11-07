@@ -123,7 +123,7 @@ fn union_receivers_preserve_joined_element_types() {
 type Step = {with?: {name?: string}}
 type Job = {steps?: list<Step>}
 fn names(job: Job) -> string? {
-  const steps = (job.steps ?? []).filter({step -> step?.with?.name == "x"}).to_list()
+  const steps = (job.steps ?? []).filter({step -> step.with?.name == "x"}).to_list()
   return steps[0]?.with?.name
 }
 fn nullable(values: list<int> | list<string> | nil) -> list<int | string>? {
