@@ -54,10 +54,19 @@ impl SecretPatternSpec {
         let Some(separator) = matched.find(['=', ':']) else {
             return false;
         };
-        let Some(value) = matched.get(separator + 1..) else {
+        let Some(mut value) = matched.get(separator + 1..) else {
             return false;
         };
+        if matched[separator..].starts_with(":=") {
+            value = &value[1..];
+        } else if value.starts_with('=') {
+            // `token == ""` compares; the second `=` is not a value.
+            return false;
+        }
         let value = value.trim_start();
+        if value.is_empty() {
+            return false;
+        }
         if value.starts_with('"') || value.starts_with('\'') {
             return true;
         }
@@ -228,7 +237,7 @@ pub const DEFAULT_SECRET_PATTERN_SPECS: &[SecretPatternSpec] = &[
         detector: "sensitive-assignment",
         source: "detect-secrets-keyword-detector",
         title: "Sensitive key/value assignment",
-        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9_\-+/=]*[0-9_\-+/=][A-Za-z0-9_\-+/=]*|secret|hidden|hideme|password|passwd|token)(?:"(?:[^"\\$`]|\\(?:[\s\S]|$))*(?:"|$|[$`][\s\S]*)|'[^']*(?:'|$)|\\(?:[\s\S]|$)|[^\s"'\\$`;|&()<>]|[$`][\s\S]*)*"#,
+        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*(?::=|[:=])\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9_\-+/=]*[0-9_\-+/=][A-Za-z0-9_\-+/=]*|secret|hidden|hideme|password|passwd|token)(?:"(?:[^"\\$`]|\\(?:[\s\S]|$))*(?:"|$|[$`][\s\S]*)|'[^']*(?:'|$)|\\(?:[\s\S]|$)|[^\s"'\\$`;|&()<>]|[$`][\s\S]*)*"#,
         precision: PRECISION_HEURISTIC,
     },
 ];
