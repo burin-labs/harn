@@ -6,7 +6,6 @@ use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmError, VmValue};
 use harn_builtin_macros::harn_builtin;
 
-use super::batch_projection::string_list_to_vm_value;
 use super::catalog_projection::toml_value_to_vm_value;
 use super::model_projection::{
     model_def_to_vm_value, model_info_to_vm_value, resolved_model_to_vm_value, PricingView,
@@ -70,7 +69,7 @@ fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     sig = "llm_known_models() -> list", category = "llm.config"
 )]
 fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(string_list_to_vm_value(llm_config::known_model_names()))
+    Ok(VmValue::strings(llm_config::known_model_names()))
 }
 
 /// Return the configured cheap QC/repair model for a provider.

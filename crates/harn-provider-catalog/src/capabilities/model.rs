@@ -580,7 +580,7 @@ impl ToolModeParitySource {
 
 /// Runtime evidence attached to the effective capability answer for a
 /// self-hosted route.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CapabilityProbeReceipt {
     pub status: CapabilityProbeStatus,
     pub endpoint: String,
@@ -961,6 +961,23 @@ impl Default for Capabilities {
         }
     }
 }
+
+macro_rules! serialize_capability_names {
+    ($($ty:ty),* $(,)?) => {$(
+        impl serde::Serialize for $ty {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+    )*};
+}
+
+serialize_capability_names!(
+    WireDialect,
+    ToolModeParitySource,
+    CapabilityProbeStatus,
+    StructuredOutputStrategy,
+);
 
 #[cfg(test)]
 mod structured_strategy_tests {

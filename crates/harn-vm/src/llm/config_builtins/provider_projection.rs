@@ -3,10 +3,10 @@
 
 use crate::llm_config;
 use crate::schema::json_to_vm_value;
-use crate::value::{VmDictExt, VmValue};
+use crate::value::{DictRetain, VmDictExt, VmValue};
 
-use super::batch_projection::string_list_to_vm_value;
 use super::model_projection::{model_def_to_vm_value, PricingView};
+use super::serialization::{fields, value};
 
 /// Region-introspection block for multi-region providers, so a
 /// region-aware `.harn` gateway can discover which knobs to set and what
@@ -31,10 +31,7 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
     };
     let mut region = crate::value::DictMap::new();
     region.put_str("override_key", "region");
-    region.insert(
-        crate::value::intern_key("envs"),
-        string_list_to_vm_value(envs.iter().map(|s| s.to_string()).collect()),
-    );
+    region.insert(crate::value::intern_key("envs"), VmValue::strings(envs));
     region.insert(
         crate::value::intern_key("resolved"),
         match resolved {
@@ -50,16 +47,19 @@ pub(super) fn provider_def_to_vm_value(
     provider_name: Option<&str>,
     pdef: &llm_config::ProviderDef,
 ) -> VmValue {
-    let mut dict = crate::value::DictMap::new();
-    dict.put_opt_str("display_name", pdef.display_name.as_deref());
-    dict.put_opt_str("icon", pdef.icon.as_deref());
-    dict.put_opt_str("protocol", pdef.protocol.as_deref());
-    dict.put_str("base_url", pdef.base_url.as_str());
-    dict.put_opt_str("base_url_env", pdef.base_url_env.as_deref());
-    dict.put_str("auth_style", pdef.auth_style.as_str());
+    let mut dict = fields!(pdef;
+        display_name, icon, protocol, base_url, base_url_env, auth_style,
+        chat_endpoint, completion_endpoint, embeddings_endpoint, command,
+        args, env, cwd, mcp_servers, auth_header, extra_headers, features, rpm,
+    );
+    dict.retain(|_, value| {
+        !matches!(value, VmValue::Nil)
+            && !matches!(value, VmValue::List(items) if items.is_empty())
+            && !matches!(value, VmValue::Dict(fields) if fields.is_empty())
+    });
     dict.insert(
         crate::value::intern_key("auth_envs"),
-        string_list_to_vm_value(llm_config::auth_env_names(&pdef.auth_env)),
+        VmValue::strings(llm_config::auth_env_names(&pdef.auth_env)),
     );
     if let Some(region) = provider_region_value(provider_name) {
         dict.insert(crate::value::intern_key("region"), region);
@@ -70,48 +70,6 @@ pub(super) fn provider_def_to_vm_value(
             .map(|name| crate::llm::provider_auth_status(name).available)
             .unwrap_or(pdef.auth_style == "none"),
     );
-    dict.put_str("chat_endpoint", pdef.chat_endpoint.as_str());
-    dict.put_opt_str("completion_endpoint", pdef.completion_endpoint.as_deref());
-    dict.put_opt_str("embeddings_endpoint", pdef.embeddings_endpoint.as_deref());
-    dict.put_opt_str("command", pdef.command.as_deref());
-    if !pdef.args.is_empty() {
-        dict.insert(
-            crate::value::intern_key("args"),
-            string_list_to_vm_value(pdef.args.clone()),
-        );
-    }
-    if !pdef.env.is_empty() {
-        dict.insert(
-            crate::value::intern_key("env"),
-            json_to_vm_value(&serde_json::json!(pdef.env)),
-        );
-    }
-    dict.put_opt_str("cwd", pdef.cwd.as_deref());
-    if !pdef.mcp_servers.is_empty() {
-        dict.insert(
-            crate::value::intern_key("mcp_servers"),
-            json_to_vm_value(&serde_json::Value::Array(pdef.mcp_servers.clone())),
-        );
-    }
-    dict.put_opt_str("auth_header", pdef.auth_header.as_deref());
-    if !pdef.extra_headers.is_empty() {
-        let mut headers = crate::value::DictMap::new();
-        for (k, v) in &pdef.extra_headers {
-            headers.insert(crate::value::intern_key(k), VmValue::string(v.as_str()));
-        }
-        dict.put("extra_headers", VmValue::dict(headers));
-    }
-    if !pdef.features.is_empty() {
-        let features: Vec<VmValue> = pdef
-            .features
-            .iter()
-            .map(|f| VmValue::string(f.as_str()))
-            .collect();
-        dict.put("features", VmValue::list(features));
-    }
-    if let Some(rpm) = pdef.rpm {
-        dict.put_int("rpm", rpm as i64);
-    }
     let rate_limits = pdef
         .rate_limits
         .clone()
@@ -146,11 +104,11 @@ pub(super) fn provider_def_to_vm_value(
 }
 
 pub(super) fn rate_limits_to_vm_value(rate_limits: &llm_config::RateLimitsDef) -> VmValue {
-    json_to_vm_value(&serde_json::to_value(rate_limits).unwrap_or_else(|_| serde_json::json!({})))
+    value(rate_limits)
 }
 
 pub(super) fn performance_to_vm_value(performance: &llm_config::ServingPerformanceDef) -> VmValue {
-    json_to_vm_value(&serde_json::to_value(performance).unwrap_or_else(|_| serde_json::json!({})))
+    value(performance)
 }
 
 pub(super) fn provider_catalog_to_vm_value() -> VmValue {
@@ -178,11 +136,11 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     dict.put("providers", VmValue::list(providers));
     dict.insert(
         crate::value::intern_key("known_model_names"),
-        string_list_to_vm_value(llm_config::known_model_names()),
+        VmValue::strings(llm_config::known_model_names()),
     );
     dict.insert(
         crate::value::intern_key("available_providers"),
-        string_list_to_vm_value(crate::llm::available_provider_names()),
+        VmValue::strings(crate::llm::available_provider_names()),
     );
     let aliases = llm_config::alias_entries()
         .into_iter()
@@ -196,22 +154,15 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     dict.put("models", VmValue::list(models));
     dict.insert(
         crate::value::intern_key("variants"),
-        json_to_vm_value(
-            &serde_json::to_value(&artifact.variants).unwrap_or_else(|_| serde_json::json!([])),
-        ),
+        value(&artifact.variants),
     );
     dict.insert(
         crate::value::intern_key("families"),
-        json_to_vm_value(
-            &serde_json::to_value(&artifact.families).unwrap_or_else(|_| serde_json::json!([])),
-        ),
+        value(&artifact.families),
     );
     dict.insert(
         crate::value::intern_key("routing_routes"),
-        json_to_vm_value(
-            &serde_json::to_value(&artifact.routing_routes)
-                .unwrap_or_else(|_| serde_json::json!([])),
-        ),
+        value(&artifact.routing_routes),
     );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
@@ -223,11 +174,8 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
 }
 
 fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
-    let mut dict = crate::value::DictMap::new();
+    let mut dict = fields!(alias; id, provider, tool_format);
     dict.put_str("name", name);
-    dict.put_str("id", alias.id.as_str());
-    dict.put_str("provider", alias.provider.as_str());
-    dict.put_nullable_str("tool_format", alias.tool_format.as_deref());
     VmValue::dict(dict)
 }
 

@@ -8,7 +8,6 @@
 //! it right now) — and each shares the `*_projection` modules that render a
 //! config row as a `VmValue`.
 
-mod batch_projection;
 mod cache_report;
 mod capability_projection;
 mod catalog_builtins;
@@ -20,6 +19,7 @@ mod option_registry;
 mod provider_projection;
 mod rate_limit_builtins;
 mod selection_builtins;
+mod serialization;
 
 #[cfg(test)]
 mod tests;

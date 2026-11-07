@@ -61,12 +61,6 @@ pub(super) fn insert_tool_mode_parity_fields(dict: &mut DictMap, caps: &Capabili
     );
 }
 
-pub(super) fn reasoning_history_wire_field_value(caps: &Capabilities) -> VmValue {
-    caps.reasoning_history_wire_field
-        .map(|field| VmValue::string(field.as_str()))
-        .unwrap_or(VmValue::Nil)
-}
-
 /// Mirrors the VM's tool-capability gate: either native or text-format tool
 /// calling makes a route tool-capable.
 pub(super) fn tools_value(caps: &Capabilities) -> VmValue {

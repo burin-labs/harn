@@ -5,7 +5,6 @@ use crate::llm_config;
 use crate::value::{VmError, VmValue};
 use harn_builtin_macros::harn_builtin;
 
-use super::batch_projection::string_list_to_vm_value;
 use super::capability_projection::capabilities_to_vm_value;
 use super::provider_projection::{provider_catalog_to_vm_value, provider_def_to_vm_value};
 
@@ -100,9 +99,7 @@ fn llm_available_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    Ok(string_list_to_vm_value(
-        crate::llm::available_provider_names(),
-    ))
+    Ok(VmValue::strings(crate::llm::available_provider_names()))
 }
 
 /// Return the loaded provider, alias, model, pricing, and availability catalog.

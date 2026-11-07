@@ -5,5 +5,6 @@ mod capabilities;
 mod catalog;
 mod fixtures;
 mod logical_defaults;
+mod projection;
 mod rate_limit;
 mod selection;
