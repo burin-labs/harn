@@ -20,7 +20,9 @@ fn unconditional_update_vocabulary_is_upstream_and_extensions_require_exact_gran
     let upstream = schema["$defs"]["SessionUpdate"]["oneOf"]
         .as_array()
         .unwrap();
-    let capabilities = super::super::client_capabilities::ClientCapabilities::default();
+    let capabilities = super::super::client_capabilities::ClientCapabilities::from_initialize(
+        &serde_json::json!({"clientCapabilities":{"session":{"notices":{},"compaction":{}}}}),
+    );
     let mut standards = 0;
     for kind in ACP_SESSION_UPDATE_VARIANTS
         .iter()

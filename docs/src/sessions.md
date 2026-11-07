@@ -79,6 +79,7 @@ the "one-shot" call shape.
 | `harness.agent.fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
 | `harness.agent.trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
 | `harness.agent.compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
+| `harness.agent.compaction_scope(id, body)` | Body result | Runs a closure with one compaction activity identity. Preparation admits the activity; recording the applied session compaction completes it. Errors or cancellation terminate an admitted activity; a no-op emits none. Automatic and emergency compaction use this scope internally. |
 | `harness.agent.attach(id, client_id, opts?)` | `dict` | Attaches a live client. `opts.mode` is `"observer"` or `"controller"`; a second controller requires `takeover: true` or `harness.agent.takeover`. |
 | `harness.agent.takeover(id, client_id, opts?)` | `dict` | Attaches `client_id` as the controller and demotes any prior controller to observer. |
 | `harness.agent.detach(id, client_id, opts?)` | `dict` | Detaches a live client. If it was the controller, control is released. |

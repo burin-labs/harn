@@ -225,7 +225,30 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                 &payloads::AgentLoopStallWarning::from_value(warning.clone()),
             );
         }
-        AgentEvent::CapabilityGap { session_id, .. } => {
+        AgentEvent::CapabilityGap {
+            session_id,
+            level,
+            message,
+            ..
+        } => {
+            let severity = match level.as_str() {
+                "info" => Some("info"),
+                "warn" | "warning" => Some("warning"),
+                "error" => Some("error"),
+                _ => None,
+            };
+            if let Some(severity) =
+                severity.filter(|_| !sink.replayed && !message.trim().is_empty())
+            {
+                sink.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "notice",
+                        "severity": severity,
+                        "title": message,
+                    },
+                }));
+            }
             if let Some(payload) = ext_payloads::capability_gap(event) {
                 sink.emit_agent_event(session_id, &payload);
             }

@@ -1,0 +1,75 @@
+import { agent_autocompact_if_needed, agent_emergency_compact } from "std/agent/autocompact"
+
+fn main(harness: Harness) {
+  const fields = split(prompt, "|")
+  const id = harness.agent.open(fields[0])
+  const mode = fields[1]
+  harness.agent.emit_event(
+    id,
+    "capability_gap",
+    {
+      level: "warning",
+      capability: "preferred_tool_format",
+      resolution: "unresolved",
+      reason: "unknown_route",
+      provider: "fixture",
+      model: "fixture",
+      fallback_tool_format: "json",
+      message: "A real session notice reached its event producer.",
+    },
+  )
+  for index in range(12) {
+    harness.agent.inject(
+      id,
+      {
+        role: if index % 2 == 0 {
+          "user"
+        } else {
+          "assistant"
+        },
+        content: "Compaction witness " + to_string(index) + " " + "retained context ".repeat(20),
+      },
+    )
+  }
+  const before = len(harness.agent.session_messages(id))
+  if mode == "auto" {
+    agent_autocompact_if_needed(
+      harness.agent,
+      {session_id: id},
+      {compact_strategy: "truncate", compact_keep_last: 1, compact_threshold: 1},
+    )
+  } else if mode == "emergency" {
+    agent_emergency_compact(harness.agent, {session_id: id}, {}, 3)
+  } else {
+    harness.agent.compact(
+      id,
+      {
+        keep_last: 1,
+        token_threshold: if mode == "noop" {
+          1000000
+        } else {
+          1
+        },
+        compact_strategy: if mode == "fail" || mode == "cancel" {
+          "custom"
+        } else {
+          "truncate"
+        },
+        custom_compactor: { _archived, _reminders ->
+          if mode == "fail" {
+            throw "controlled compaction strategy failure"
+          }
+          harness.interaction.ask({message: "compaction cancellation witness"})
+          return {summary: "custom compaction completed"}
+        },
+      },
+    )
+  }
+  const after = len(harness.agent.session_messages(id))
+  if mode == "noop" {
+    assert_eq(after, before)
+  } else {
+    assert(after < before, "the owning session must actually apply compaction")
+  }
+  harness.stdio.println("compaction applied: " + mode)
+}

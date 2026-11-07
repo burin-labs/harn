@@ -670,7 +670,7 @@ headerless clients can still use the in-band ACP `authenticate` method.
 
 ### Protocol overview
 
-Harn sends standard ACP session updates to every client. To receive Harn
+Harn sends unconditional standard ACP session updates to every client. To receive Harn
 extension updates, list their exact kinds in
 `initialize.params.clientCapabilities._meta.harn.sessionUpdateExtensions`,
 for example `["log", "progress", "inference_speed"]`. An omitted, malformed,
@@ -678,6 +678,22 @@ or empty list enables no extension updates. This also applies to replayed
 updates and the history kinds `user_message`, `session_redo`,
 `session_rollback`, and `session_truncated`. Standard updates, including
 `plan` and `available_commands_update`, require no Harn extension grant.
+
+`usage_update` reports estimated resident context tokens in `used`, the known
+model context window in `size`, and cumulative session cost in USD. Harn
+withholds the update when either required context measurement is unknown.
+`cost: null` means at least one call has an unknown price; a measured zero
+remains `amount: 0`. `_meta.harn.knownCostUsd` retains the priced subtotal,
+and `_meta.harn.contextMeasurement` identifies the context estimate.
+
+Standard `notice` updates require `clientCapabilities.session.notices: {}`.
+Standard `compaction_update` updates require
+`clientCapabilities.session.compaction: {}`. Harn extension grants don't
+enable either capability. Compaction updates share the receipt's
+`compactionId` through `in_progress` and `completed`, `failed`, or `cancelled`.
+Completion follows the session change; preparing a candidate doesn't complete
+the compaction. A no-op emits no activity. Synchronous transcript-budget
+recovery first publishes a completed upsert after applying its change.
 
 The ACP server supports these JSON-RPC methods:
 

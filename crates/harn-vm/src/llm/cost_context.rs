@@ -16,6 +16,8 @@ pub(crate) struct LlmContextTokenBreakdown {
     pub schema: &'static str,
     pub segments: Vec<LlmContextTokenSegment>,
     pub input_tokens: i64,
+    #[serde(skip)]
+    pub resident_input_tokens: i64,
     pub output_budget_tokens: i64,
     pub context_tokens: i64,
     pub message_count: usize,
@@ -265,6 +267,7 @@ pub(crate) fn project_llm_call_context_breakdown(
         schema: "harn.llm.context_token_breakdown.v1",
         segments,
         input_tokens: projected_input_tokens,
+        resident_input_tokens: projected_input_tokens.saturating_sub(deferred_tool_tokens),
         output_budget_tokens: projected_output_tokens,
         context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
         message_count: opts.messages.len(),

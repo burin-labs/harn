@@ -1467,7 +1467,19 @@ async fn agent_session_compact_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_compact", "id")?;
-    if !agent_sessions::exists(&id) {
+    crate::orchestration::scope_compaction_activity(
+        &id,
+        agent_session_compact_admitted(&ctx, &id, &args),
+    )
+    .await
+}
+
+async fn agent_session_compact_admitted(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    id: &str,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    if !agent_sessions::exists(id) {
         return Err(err(format!(
             "agent_session_compact: unknown session id '{id}'"
         )));
@@ -1478,9 +1490,9 @@ async fn agent_session_compact_builtin(
         _ => return Err(err("agent_session_compact: `opts` must be a dict or nil")),
     };
     let mut config = build_compact_config(&opts_dict)?;
-    let mut messages = agent_sessions::messages_json(&id);
+    let mut messages = agent_sessions::messages_json(id);
     let original_count = messages.len();
-    let reminder_events = session_compactable_events(&id);
+    let reminder_events = session_compactable_events(id);
     let provider_options = if opts_dict.is_empty() {
         serde_json::json!({})
     } else {
@@ -1489,12 +1501,12 @@ async fn agent_session_compact_builtin(
 
     let lifecycle =
         crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Host)
-            .with_session_id(Some(&id))
+            .with_session_id(Some(id))
             .with_reminder_events(reminder_events)
             .with_provider_options(provider_options);
 
     let Some(outcome) = crate::orchestration::run_compaction_lifecycle_with_ctx(
-        Some(&ctx),
+        Some(ctx),
         &mut messages,
         &mut config,
         None,
@@ -1505,7 +1517,7 @@ async fn agent_session_compact_builtin(
         return Ok(VmValue::Int(original_count as i64));
     };
 
-    agent_sessions::replace_messages_with_summary(&id, &messages, Some(&outcome.summary))
+    agent_sessions::replace_messages_with_summary(id, &messages, Some(&outcome.summary))
         .map_err(err)?;
     let compaction_event = crate::llm::helpers::transcript_event_with_id(
         &outcome.receipt.receipt_id,
@@ -1515,10 +1527,11 @@ async fn agent_session_compact_builtin(
         "",
         Some(outcome.event_metadata),
     );
-    agent_sessions::append_event(&id, compaction_event).map_err(err)?;
+    agent_sessions::append_event(id, compaction_event).map_err(err)?;
     for preserved in outcome.reminder_report.preserved_events {
-        agent_sessions::append_event(&id, preserved).map_err(err)?;
+        agent_sessions::append_event(id, preserved).map_err(err)?;
     }
+    crate::orchestration::emit_transcript_compacted_event(Some(ctx), id, outcome.receipt).await;
     Ok(VmValue::Int(messages.len() as i64))
 }
 

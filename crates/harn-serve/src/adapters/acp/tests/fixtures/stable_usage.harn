@@ -1,0 +1,12 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn main(harness: Harness) {
+  const opts: AgentSpec = {
+    provider: "gemini",
+    model: "gemini-3.6-flash",
+    max_iterations: 1,
+    llm_options: {stream: false},
+  }
+  agent_loop(harness, prompt, nil, opts)
+}

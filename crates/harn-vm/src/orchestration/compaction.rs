@@ -447,6 +447,7 @@ pub(crate) async fn prepare_compaction_messages_with_ctx(
     else {
         return Ok(None);
     };
+    super::begin_compaction_activity()?;
     // Mutating the caller before an awaited strategy succeeds loses source
     // context on refusal, cancellation, or a dropped future. Allocate only
     // after compaction is admitted, then publish the complete candidate once.

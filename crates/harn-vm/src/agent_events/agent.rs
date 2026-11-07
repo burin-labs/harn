@@ -315,6 +315,13 @@ pub enum AgentEvent {
         model: String,
         speed: crate::llm::inference_speed::InferenceSpeed,
     },
+    /// The resident input measured for the current provider request.
+    ContextUsage {
+        session_id: String,
+        used_tokens: Option<u64>,
+        context_window: Option<u64>,
+        estimated: bool,
+    },
     /// The session's physical usage after a provider attempt settles.
     ProviderUsage {
         session_id: String,
@@ -804,6 +811,12 @@ pub enum AgentEvent {
     /// into `RunObservabilityRecord.compaction_events`. `receipt.receipt_id` is
     /// the stable identity shared across all four surfaces, so hosts never
     /// synthesize their own.
+    CompactionUpdated {
+        session_id: String,
+        compaction_id: String,
+        status: crate::orchestration::CompactionStatus,
+        error: Option<String>,
+    },
     TranscriptCompacted {
         session_id: String,
         receipt: crate::orchestration::CompactionReceipt,

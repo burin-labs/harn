@@ -293,12 +293,14 @@ fn compact_transcript_for_budget(
             .with_evaluate_providers(false);
     let llm_opts =
         crate::llm::extract_llm_options(&[VmValue::string(""), VmValue::Nil, VmValue::Nil]).ok();
-    let outcome = futures::executor::block_on(crate::orchestration::run_compaction_lifecycle(
-        &mut json_messages,
-        &mut config,
-        llm_opts.as_ref(),
-        lifecycle,
-    ))
+    let outcome = crate::orchestration::without_compaction_activity(|| {
+        futures::executor::block_on(crate::orchestration::run_compaction_lifecycle(
+            &mut json_messages,
+            &mut config,
+            llm_opts.as_ref(),
+            lifecycle,
+        ))
+    })
     .ok()
     .flatten();
 

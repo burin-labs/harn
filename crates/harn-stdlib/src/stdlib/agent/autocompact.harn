@@ -442,10 +442,17 @@ pub fn compact_retaining_current_plan(opts: any = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any) {
+pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any) -> nil {
   if !__compaction_enabled(opts) {
     return nil
   }
+  return agent.compaction_scope(
+    session.session_id,
+    { -> __agent_autocompact_if_needed(agent, session, opts) },
+  )
+}
+
+fn __agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any) -> nil {
   const policy_label = if opts?.compaction != nil {
     __compaction_strategy_label(opts.compaction)
   } else {
@@ -558,7 +565,19 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, attempt: int) {
+pub fn agent_emergency_compact(
+  agent: HarnessAgent,
+  session: dict,
+  opts: dict?,
+  attempt: int,
+) -> int {
+  return agent.compaction_scope(
+    session.session_id,
+    { -> __agent_emergency_compact(agent, session, opts, attempt) },
+  )
+}
+
+fn __agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, attempt: int) -> int {
   const messages = agent.session_messages(session.session_id)
   // Shrink the preserved tail as attempts escalate: a longer tail is tried
   // first (least lossy), collapsing toward keeping only the latest user turn so

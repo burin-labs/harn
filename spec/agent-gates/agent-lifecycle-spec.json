@@ -76,7 +76,7 @@
   },
   {
     "default": "observation_mask when compaction is enabled without a policy strategy",
-    "evidence": "autocompact.agent_autocompact_if_needed selects compaction policy strategy, compact_strategy, then observation_mask. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "autocompact.__agent_autocompact_if_needed selects compaction policy strategy, compact_strategy, then observation_mask. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -89,7 +89,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "reader": "agent_autocompact_if_needed"
+        "reader": "__agent_autocompact_if_needed"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -135,7 +135,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "reader": "agent_autocompact_if_needed"
+        "reader": "__agent_autocompact_if_needed"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

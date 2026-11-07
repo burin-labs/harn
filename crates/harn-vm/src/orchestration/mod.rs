@@ -64,6 +64,12 @@ mod repair_ledger;
 
 mod compact_lifecycle;
 pub use compact_lifecycle::*;
+mod compaction_activity;
+pub use compaction_activity::CompactionStatus;
+pub(crate) use compaction_activity::{
+    active_compaction_receipt_id, begin_compaction_activity, commit_compaction_activity,
+    scope_compaction_activity, without_compaction_activity,
+};
 
 mod compaction_receipt;
 pub use compaction_receipt::*;

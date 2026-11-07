@@ -282,6 +282,10 @@
         "name": "opts"
       },
       {
+        "function": "__agent_autocompact_if_needed",
+        "name": "opts"
+      },
+      {
         "function": "__compaction_keep_last",
         "name": "opts"
       },
@@ -1131,6 +1135,10 @@
       },
       {
         "function": "agent_emergency_compact",
+        "name": "opts"
+      },
+      {
+        "function": "__agent_emergency_compact",
         "name": "opts"
       },
       {

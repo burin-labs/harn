@@ -22,36 +22,54 @@ pub const ACP_AGENT_NOTIFICATIONS: &[&str] = &[
     "$/cancel_request",
 ];
 
+#[derive(Clone, Copy)]
+pub(super) enum SessionUpdateRequirement {
+    Standard,
+    Notices,
+    Compaction,
+    Extension,
+}
+
 macro_rules! session_update_vocabulary {
-    (updates [$($kind:literal => $standard:literal),* $(,)?], extensions [$($extension:literal),* $(,)?]) => {
+    (updates [$($kind:literal => $requirement:ident),* $(,)?], extensions [$($extension:literal),* $(,)?]) => {
         pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[$($kind,)*];
         pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[$($extension,)*];
 
-        pub(super) fn is_standard_session_update(kind: &str) -> bool {
+        pub(super) fn session_update_requirement(kind: &str) -> SessionUpdateRequirement {
             match kind {
-                $($kind => $standard,)*
-                _ => false,
+                $($kind => SessionUpdateRequirement::$requirement,)*
+                _ => SessionUpdateRequirement::Extension,
             }
         }
     };
 }
 
+pub(super) fn is_standard_session_update(kind: &str) -> bool {
+    !matches!(
+        session_update_requirement(kind),
+        SessionUpdateRequirement::Extension
+    )
+}
+
 session_update_vocabulary! {
   updates [
-    "user_message" => false,
-    "user_message_chunk" => true,
-    "agent_message_chunk" => true,
-    "agent_thought_chunk" => true,
-    "tool_call" => true,
-    "tool_call_update" => true,
-    "plan" => true,
-    "available_commands_update" => true,
-    "current_mode_update" => true,
-    "config_option_update" => true,
-    "session_info_update" => true,
-    "session_redo" => false,
-    "session_rollback" => false,
-    "session_truncated" => false,
+    "user_message" => Extension,
+    "user_message_chunk" => Standard,
+    "agent_message_chunk" => Standard,
+    "agent_thought_chunk" => Standard,
+    "tool_call" => Standard,
+    "tool_call_update" => Standard,
+    "plan" => Standard,
+    "available_commands_update" => Standard,
+    "current_mode_update" => Standard,
+    "config_option_update" => Standard,
+    "session_info_update" => Standard,
+    "usage_update" => Standard,
+    "notice" => Notices,
+    "compaction_update" => Compaction,
+    "session_redo" => Extension,
+    "session_rollback" => Extension,
+    "session_truncated" => Extension,
   ],
   extensions [
     "artifact",

@@ -28,6 +28,34 @@ async fn call_scoped_closure(
 harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_runtime_scope_builtins);
 
 #[harn_builtin(
+    exposure = "harness.agent.compaction_scope",
+    effects = ["state.mutate@arg0"],
+    runtime_control_plane = true,
+    sig = "compaction_scope(session_id: string, body: closure) -> any",
+    kind = "async",
+    category = "agent.session"
+)]
+async fn compaction_scope_impl(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let Some(VmValue::String(session_id)) = args.first() else {
+        return Err(VmError::Runtime(
+            "compaction_scope: session_id must be a string".into(),
+        ));
+    };
+    if !crate::agent_sessions::exists(session_id) {
+        return Err(VmError::Runtime("compaction_scope: unknown session".into()));
+    }
+    let body = closure_arg(&args, 1, "compaction_scope")?;
+    crate::orchestration::scope_compaction_activity(
+        session_id,
+        call_scoped_closure(&ctx, body, "compaction_scope"),
+    )
+    .await
+}
+
+#[harn_builtin(
     exposure = "harness.runtime.evaluate_approval_policy",
     effects = [],
     sig = "evaluate_approval_policy(policy: dict, request: @TOOL_APPROVAL_REQUEST) -> @APPROVAL_POLICY_DECISION",

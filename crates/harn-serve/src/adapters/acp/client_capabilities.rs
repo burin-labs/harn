@@ -123,8 +123,20 @@ impl ClientCapabilities {
     }
 
     pub(super) fn supports_session_update(&self, kind: &str) -> bool {
-        super::schema::is_standard_session_update(kind)
-            || self.meta.harn.session_update_extensions.contains(kind)
+        use super::schema::SessionUpdateRequirement;
+        match super::schema::session_update_requirement(kind) {
+            SessionUpdateRequirement::Standard => true,
+            SessionUpdateRequirement::Notices => {
+                self.session.as_ref().is_some_and(|s| s.notices.is_some())
+            }
+            SessionUpdateRequirement::Compaction => self
+                .session
+                .as_ref()
+                .is_some_and(|s| s.compaction.is_some()),
+            SessionUpdateRequirement::Extension => {
+                self.meta.harn.session_update_extensions.contains(kind)
+            }
+        }
     }
 
     pub(super) fn from_initialize(params: &serde_json::Value) -> Self {

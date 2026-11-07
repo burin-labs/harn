@@ -984,16 +984,8 @@ impl SessionFold {
         let metadata = record.metadata();
         let input_tokens = integer(&metadata.input_tokens).unwrap_or(0);
         let output_tokens = integer(&metadata.output_tokens).unwrap_or(0);
+        let cost = metadata.recorded_call_cost();
         let cache = metadata.reported_cache;
-        let cost_usd = float(&metadata.cost_usd);
-        // New call records carry the physical ledger's certainty directly.
-        // Older records carry only a nullable total and accounting status.
-        let accounting_unknown =
-            nonblank(&metadata.accounting_status).as_deref() == Some("unknown");
-        let unpriced_calls = integer(&metadata.unpriced_calls)
-            .unwrap_or_else(|| i64::from(cost_usd.is_none() || accounting_unknown));
-        let usage_unknown_calls =
-            integer(&metadata.usage_unknown_calls).unwrap_or_else(|| i64::from(accounting_unknown));
         let model = nonblank(&metadata.model);
         let provider = nonblank(&metadata.provider);
         self.llm_calls.push(LlmCallFacts {
@@ -1004,16 +996,14 @@ impl SessionFold {
             output_tokens,
             cache_read_tokens: cache.and_then(|cache| cache.reported_read_tokens()),
             cache_write_tokens: cache.and_then(|cache| cache.reported_write_tokens()),
-            cost_usd: cost_usd.filter(|_| unpriced_calls == 0),
+            cost_usd: cost.cost_usd,
         });
         self.usage.call_count += 1;
-        self.usage.unpriced_calls += unpriced_calls;
-        self.usage.usage_unknown_calls += usage_unknown_calls;
+        self.usage.unpriced_calls += cost.unpriced_calls;
+        self.usage.usage_unknown_calls += cost.usage_unknown_calls;
         self.usage.input_tokens += input_tokens;
         self.usage.output_tokens += output_tokens;
-        if let Some(cost) = float(&metadata.known_cost_usd).or(cost_usd) {
-            self.total_cost += Decimal::from_f64_retain(cost).unwrap_or_default();
-        }
+        self.total_cost += Decimal::from_f64_retain(cost.known_cost_usd).unwrap_or_default();
         if let Some(cache) = cache {
             self.cache.merge(&cache);
         }

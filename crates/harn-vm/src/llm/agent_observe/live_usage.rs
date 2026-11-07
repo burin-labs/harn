@@ -1,6 +1,24 @@
 use super::ObservedAttemptToken;
 use crate::llm::{api::LlmResult, usage::LlmUsage};
 
+pub(super) fn context(
+    session_id: Option<&str>,
+    opts: &crate::llm::api::LlmCallOptions,
+    resident_tokens: i64,
+) {
+    let Some(session_id) = session_id else { return };
+    let context_window = crate::llm_config::model_catalog_id_for_route(&opts.provider, &opts.model)
+        .and_then(|id| crate::llm_config::model_catalog_entry(&id))
+        .map(|model| model.runtime_context_window.unwrap_or(model.context_window))
+        .filter(|tokens| *tokens > 0);
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::ContextUsage {
+        session_id: session_id.to_string(),
+        used_tokens: u64::try_from(resident_tokens).ok(),
+        context_window,
+        estimated: true,
+    });
+}
+
 #[inline(never)]
 pub(super) fn settled(observed: &ObservedAttemptToken, call_id: &str, result: &LlmResult) -> bool {
     let Some(session_id) = observed.session_id.as_deref() else {

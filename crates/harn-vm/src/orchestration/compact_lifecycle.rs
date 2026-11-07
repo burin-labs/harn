@@ -4,7 +4,7 @@
 //! `harness.agent.compact()`, `transcript_auto_compact()`, worker-transcript
 //! compaction during resume, and host-script-driven auto-compaction — funnels
 //! through [`run_compaction_lifecycle`] so the hook contract, reminder
-//! lifecycle, and `AgentEvent::TranscriptCompacted` payload are identical
+//! lifecycle, and compaction receipt payload are identical
 //! regardless of entry point.
 //!
 //! Lifecycle ordering:
@@ -23,8 +23,9 @@
 //! 8. Fire `PostCompact` lifecycle hooks (non-veto).
 //! 9. Re-evaluate registered reminder providers against the post-compact
 //!    payload so injected reminders land on the next turn.
-//! 10. Emit `AgentEvent::TranscriptCompacted` when the call carries a
-//!     `session_id`.
+//! 10. Return the candidate and receipt. Session owners publish
+//!     `AgentEvent::TranscriptCompacted` after applying the candidate; preparing
+//!     a candidate alone does not claim a committed transcript change.
 
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
@@ -411,7 +412,7 @@ pub async fn run_compaction_lifecycle_with_ctx(
 
     let receipt = CompactionReceipt {
         schema_version: COMPACTION_RECEIPT_SCHEMA_VERSION,
-        receipt_id: new_compaction_receipt_id(),
+        receipt_id: super::active_compaction_receipt_id().unwrap_or_else(new_compaction_receipt_id),
         session_id: lifecycle.session_id.map(str::to_string),
         transcript_id: lifecycle.transcript_id.map(str::to_string),
         mode: lifecycle.mode.as_str().to_string(),
@@ -462,7 +463,6 @@ pub async fn run_compaction_lifecycle_with_ctx(
         run_lifecycle_hooks_with_ctx(ctx, HookEvent::PostCompact, &post_payload).await?;
 
         if let Some(session_id) = lifecycle.session_id {
-            emit_transcript_compacted_event(ctx, session_id, receipt.clone()).await;
             if lifecycle.evaluate_providers {
                 let _ = crate::llm::reminder_providers::evaluate_and_inject(
                     ctx,
@@ -497,14 +497,14 @@ pub async fn run_compaction_lifecycle_with_ctx(
 }
 
 /// Emit `AgentEvent::TranscriptCompacted` carrying the canonical receipt.
-/// Lifecycle callers reach this through [`run_compaction_lifecycle`]; the
-/// host-script and budget-pressure paths build their own receipt and call the
-/// sync variant.
+/// Session owners call this after applying the lifecycle's candidate. The
+/// host-script and budget-pressure owners use the synchronous variant.
 pub async fn emit_transcript_compacted_event(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     session_id: &str,
     receipt: CompactionReceipt,
 ) {
+    super::commit_compaction_activity(session_id, &receipt.receipt_id);
     crate::llm::emit_live_agent_event_with_ctx(
         ctx,
         &AgentEvent::TranscriptCompacted {
@@ -519,6 +519,7 @@ pub async fn emit_transcript_compacted_event(
 /// `host_agent_record_compaction` and the transcript-budget path, which run in
 /// sync contexts and can't `.await` directly.
 pub fn emit_transcript_compacted_event_sync(session_id: &str, receipt: CompactionReceipt) {
+    super::commit_compaction_activity(session_id, &receipt.receipt_id);
     crate::llm::emit_live_agent_event_sync(&AgentEvent::TranscriptCompacted {
         session_id: session_id.to_string(),
         receipt,

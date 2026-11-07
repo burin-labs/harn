@@ -13,6 +13,8 @@ pub(super) struct ConcurrentSessionControl {
     /// Shared with the transport router, which records `session/set_budget`
     /// re-arms here while a prompt may be running.
     pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
+    pub(super) usage_cost:
+        Arc<std::sync::Mutex<harn_vm::agent_session_spend::SessionLlmCostCursor>>,
     cancellation: SessionCancellation,
     prompt_active: Arc<AtomicBool>,
     /// The live prompt's client event transport. Controls are answered by
@@ -146,6 +148,7 @@ impl ConcurrentSessionControl {
                 harn_vm::tool_call_cancellations::CancellationRegistry::default(),
             ),
             llm_spend: Arc::default(),
+            usage_cost: Arc::default(),
             cancellation,
             prompt_active: Arc::new(AtomicBool::new(false)),
             prompt_transport: Arc::default(),

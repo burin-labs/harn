@@ -3281,5 +3281,21 @@
     "owner": "__tool_surface_record_boundary",
     "evidence": "Explicit skill activation records a derived full-surface decision through the same identity projection, without interpreting configuration at the forwarding site.",
     "consumers": [{"scope": "AgentSpec", "function": "__tool_surface_record_boundary", "parameter": "opts"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__agent_autocompact_if_needed(agent, session, opts)",
+    "owner": "__agent_autocompact_if_needed",
+    "evidence": "The public wrapper retains the unchanged options inside the compaction activity scope; the private body owns policy reads.",
+    "consumers": [{"scope": "AgentSpec", "function": "__agent_autocompact_if_needed", "parameter": "opts"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__agent_emergency_compact(agent, session, opts, attempt)",
+    "owner": "__agent_emergency_compact",
+    "evidence": "The public emergency wrapper retains the unchanged options inside the compaction activity scope; the private body owns recovery policy reads.",
+    "consumers": [{"scope": "AgentSpec", "function": "__agent_emergency_compact", "parameter": "opts"}]
   }
 ]

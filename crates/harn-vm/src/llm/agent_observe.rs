@@ -453,8 +453,10 @@ impl ObservedAttemptToken {
         opts: &super::api::LlmCallOptions,
         call_id: &str,
         token_projection: super::cost_context::LlmCallTokenProjection,
+        resident_context_tokens: i64,
     ) -> Self {
         let session_id = super::agent_runtime::current_agent_session_id();
+        live_usage::context(session_id.as_deref(), opts, resident_context_tokens);
         Self {
             inference_speed: super::inference_speed::InferenceMeter::new(
                 session_id.clone(),
@@ -654,8 +656,12 @@ pub(crate) async fn observed_llm_call(
             opts,
             &context_tokens,
         )?;
-        let observed_attempt =
-            ObservedAttemptToken::for_current_session(opts, &call_id, token_projection);
+        let observed_attempt = ObservedAttemptToken::for_current_session(
+            opts,
+            &call_id,
+            token_projection,
+            context_tokens.resident_input_tokens,
+        );
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();

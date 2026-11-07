@@ -36,6 +36,7 @@ impl AgentEvent {
             | Self::IterationEnd { session_id, .. }
             | Self::InferenceSpeed { session_id, .. }
             | Self::ProviderUsage { session_id, .. }
+            | Self::ContextUsage { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::AnchorChanged { session_id, .. }
             | Self::JudgeStarted { session_id, .. }
@@ -66,6 +67,7 @@ impl AgentEvent {
             | Self::StanceTransition { session_id, .. }
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
+            | Self::CompactionUpdated { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }
             | Self::TranscriptProjected { session_id, .. }
             | Self::ReminderEmitted { session_id, .. }

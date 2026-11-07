@@ -21,6 +21,7 @@ mod flight_recorder;
 mod provider_default_tests;
 mod replay_inputs;
 mod root_projection;
+mod stable_lifecycle;
 mod update_negotiation;
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

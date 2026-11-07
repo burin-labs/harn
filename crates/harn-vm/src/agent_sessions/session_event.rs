@@ -488,6 +488,35 @@ pub(crate) struct KnownMetadata {
     pub plan_document_event: Option<Value>,
 }
 
+pub(crate) struct RecordedCallCost {
+    pub known_cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub unpriced_calls: i64,
+    pub usage_unknown_calls: i64,
+}
+
+impl KnownMetadata {
+    pub(crate) fn recorded_call_cost(&self) -> RecordedCallCost {
+        let total = float(&self.cost_usd).filter(|cost| cost.is_finite() && *cost >= 0.0);
+        let known = float(&self.known_cost_usd)
+            .filter(|cost| cost.is_finite() && *cost >= 0.0)
+            .or(total);
+        let unknown = nonblank(&self.accounting_status).as_deref() == Some("unknown");
+        let unpriced_calls = integer(&self.unpriced_calls)
+            .filter(|count| *count >= 0)
+            .unwrap_or_else(|| i64::from(total.is_none() || unknown))
+            .max(i64::from(known.is_none()));
+        RecordedCallCost {
+            known_cost_usd: known.unwrap_or(0.0),
+            cost_usd: known.filter(|_| unpriced_calls == 0),
+            unpriced_calls,
+            usage_unknown_calls: integer(&self.usage_unknown_calls)
+                .filter(|count| *count >= 0)
+                .unwrap_or_else(|| i64::from(unknown)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct ProviderAttempts {

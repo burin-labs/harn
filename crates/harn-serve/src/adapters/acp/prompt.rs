@@ -538,6 +538,28 @@ impl AcpServer {
         if let Some(sink) = durable_sink {
             sink.register(&session_id);
         }
+        let (store_scope, usage_cursor) = {
+            let session = self.sessions.get(&session_id).expect("admitted session");
+            (
+                session.store_scope.clone(),
+                session.concurrent_control.usage_cost.clone(),
+            )
+        };
+        let mut cursor = usage_cursor
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let prior_cost = store_scope
+            .run(cursor.refresh(store_scope.workspace(), &session_id))
+            .await
+            .unwrap_or_default();
+        *usage_cursor
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = cursor;
+        let usage = Arc::new(std::sync::Mutex::new(super::usage::PromptUsageView::new(
+            &session_id,
+            prior_cost,
+        )));
         let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
             AcpAgentEventSink::for_prompt(
                 output.clone(),
@@ -547,7 +569,8 @@ impl AcpServer {
                     self.output.clone(),
                 ),
             )
-            .with_elicitations(self.elicitations.clone()),
+            .with_elicitations(self.elicitations.clone())
+            .with_usage(usage),
         ));
         let bridge = Arc::new(AcpBridge {
             client_capabilities: self

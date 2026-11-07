@@ -13,6 +13,7 @@ pub(super) struct AcpAgentEventSink {
     hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
     receipts: Option<super::delivery::PromptReceipts>,
     elicitations: Option<std::sync::Arc<super::elicitation::UrlElicitations>>,
+    usage: Option<std::sync::Arc<std::sync::Mutex<super::usage::PromptUsageView>>>,
 }
 
 impl AcpAgentEventSink {
@@ -23,6 +24,7 @@ impl AcpAgentEventSink {
             hitl_log: None,
             receipts: None,
             elicitations: None,
+            usage: None,
         }
     }
 
@@ -37,6 +39,7 @@ impl AcpAgentEventSink {
             hitl_log: Some(hitl_log),
             receipts: Some(receipts),
             elicitations: None,
+            usage: None,
         }
     }
 
@@ -47,6 +50,7 @@ impl AcpAgentEventSink {
             hitl_log: None,
             receipts: None,
             elicitations: None,
+            usage: None,
         }
     }
 
@@ -55,6 +59,14 @@ impl AcpAgentEventSink {
         elicitations: std::sync::Arc<super::elicitation::UrlElicitations>,
     ) -> Self {
         self.elicitations = Some(elicitations);
+        self
+    }
+
+    pub(super) fn with_usage(
+        mut self,
+        usage: std::sync::Arc<std::sync::Mutex<super::usage::PromptUsageView>>,
+    ) -> Self {
+        self.usage = Some(usage);
         self
     }
 
@@ -179,6 +191,17 @@ fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
 
 impl AgentEventSink for AcpAgentEventSink {
     fn handle_event(&self, event: &AgentEvent) {
+        if !self.replayed {
+            if let Some(usage) = &self.usage {
+                let update = usage
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .observe(event);
+                if let Some(update) = update {
+                    self.write_notification(update);
+                }
+            }
+        }
         match event {
             // Handler diagnostics that carry the whole record their stdlib
             // emitter built.
@@ -549,10 +572,33 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::CompactionUpdated {
+                session_id,
+                compaction_id,
+                status,
+                error,
+            } => self.write_notification(serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "compaction_update",
+                    "compactionId": compaction_id,
+                    "status": status,
+                    "error": error,
+                },
+            })),
             AgentEvent::TranscriptCompacted {
                 session_id,
                 receipt,
             } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "compaction_update",
+                        "compactionId": receipt.receipt_id,
+                        "status": "completed",
+                        "error": null,
+                    },
+                }));
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_compacted",
                 });

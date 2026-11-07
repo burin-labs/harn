@@ -55,6 +55,7 @@ mod task_admission;
 mod tests;
 mod transport;
 mod types;
+mod usage;
 mod workspace_roots;
 
 use auth::acp_auth_request_for_method;
