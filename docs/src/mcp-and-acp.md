@@ -687,6 +687,8 @@ remains `amount: 0`. `_meta.harn.knownCostUsd` retains the priced subtotal,
 and `_meta.harn.contextMeasurement` identifies the context estimate.
 After an assistant message enters the session, Harn refreshes the estimate
 and identifies that message in `_meta.harn.historySourceEventId`.
+The estimate follows the measured request and its committed reply.
+It doesn't rescan concurrent session changes.
 
 Standard `notice` updates require `clientCapabilities.session.notices: {}`.
 Standard `compaction_update` updates require
