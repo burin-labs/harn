@@ -14,9 +14,9 @@ base64 = "0.23"
 blake3 = "1.8.7"
 ed25519-dalek = { version = "3", features = ["rand_core"] }
 hex = "0.4"
-harn-clock = { path = "../harn-clock", version = "=0.10.190" }
-harn-flock = { path = "../harn-flock", version = "=0.10.190" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.190" }
+harn-clock = { path = "../harn-clock", version = "=0.10.191" }
+harn-flock = { path = "../harn-flock", version = "=0.10.191" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.191" }
 rusqlite.workspace = true
 schemars = "=1.2.3"
 serde = { version = "1", features = ["derive"] }
