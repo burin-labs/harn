@@ -11,6 +11,7 @@ use crate::test_util::process::harn_e2e_command;
 #[derive(Debug)]
 struct RequestRecord {
     uri: String,
+    path: String,
     body: Value,
 }
 
@@ -28,9 +29,10 @@ impl ProviderFixture {
             let recorded = recorded.clone();
             async move {
                 let uri = request.uri().to_string();
+                let path = request.uri().path().to_string();
                 let bytes = to_bytes(request.into_body(), 1024 * 1024).await.unwrap();
                 let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-                recorded.lock().unwrap().push(RequestRecord { uri, body });
+                recorded.lock().unwrap().push(RequestRecord { uri, path, body });
                 Json(json!({
                     "models": [{"name": "qwen3:8b", "model": "qwen3:8b"}],
                     "id": "fixture", "type": "message", "role": "assistant",
@@ -165,8 +167,12 @@ async fn mock_runs_do_not_probe_or_configure_but_explicit_setup_remains_reachabl
         "catalog route reached\n"
     );
     let requests = fixture.take_requests();
-    assert_eq!(requests.len(), 1, "{requests:?}");
-    assert_eq!(requests[0].body["model"], "qwen3:8b", "{requests:?}");
+    let generations: Vec<_> = requests
+        .iter()
+        .filter(|request| request.path == "/api/generate")
+        .collect();
+    assert_eq!(generations.len(), 1, "{requests:?}");
+    assert_eq!(generations[0].body["model"], "qwen3:8b", "{requests:?}");
 }
 
 #[tokio::test]
