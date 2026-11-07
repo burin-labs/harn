@@ -22,9 +22,7 @@ fn call(id: string, query: string) {
 }
 
 pipeline default(harness: Harness) {
-  // Case 1: the boundary turn itself is a repeated read (no information gain),
-  // but a progressing turn sits one turn back — inside the `extend_by` window.
-  // The loop extends and the run completes.
+  // Repeated reads do not prevent an extension within the caller's maximum.
   with_llm_script(
     harness.llm,
     [
@@ -53,10 +51,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(windowed.adaptive_budget.decisions[0].reason)
     },
   )
-  // Case 2: matched control for case 1 — the SAME script with the window
-  // narrowed to the boundary turn alone. This is the pre-window behavior, and
-  // it stops at the initial cap. If case 1 and case 2 ever agree, the window is
-  // not the thing deciding the extension.
+  // The same requested work completes with a one-turn progress window too.
   with_llm_script(
     harness.llm,
     [
@@ -89,9 +84,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(narrow.adaptive_budget.final_limit)
     },
   )
-  // Case 3: thrash control. Every turn in the window is the same read returning
-  // the same result, so no turn satisfies the progress predicate and the loop
-  // stops at the cap instead of buying itself another window.
+  // Identical reads still obey the explicit maximum, with every call dispatched.
   with_llm_script(
     harness.llm,
     [
@@ -100,6 +93,10 @@ pipeline default(harness: Harness) {
       call("t3", "same"),
       call("t4", "same"),
       call("t5", "same"),
+      call("t6", "same"),
+      call("t7", "same"),
+      call("t8", "same"),
+      call("t9", "same"),
     ],
     { ->
       const thrash = agent_loop(
@@ -117,6 +114,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(thrash.status)
       harness.stdio.println(thrash.adaptive_budget.extensions_used)
       harness.stdio.println(thrash.adaptive_budget.final_limit)
+      harness.stdio.println(len(thrash.tools.calls))
     },
   )
   // Case 4: the max cap still binds after repeated extensions. Every turn
