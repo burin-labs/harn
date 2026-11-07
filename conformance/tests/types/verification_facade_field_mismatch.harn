@@ -1,0 +1,5 @@
+import { VerificationFileHashSnapshotEntry } from "std/verification"
+
+pub fn wrong(entry: VerificationFileHashSnapshotEntry) -> int {
+  return entry.path
+}

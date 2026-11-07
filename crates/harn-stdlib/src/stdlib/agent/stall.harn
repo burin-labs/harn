@@ -1,6 +1,15 @@
-pub import { agent_unheeded_recurring_diagnostic } from "std/agent/recurring_diagnostic"
+pub import {
+  DiagnosticCategories,
+  DiagnosticCategoryPattern,
+  RecurringDiagnosticCategory,
+  RecurringDiagnosticObservation,
+  RecurringDiagnosticState,
+  UnheededRecurringDiagnostic,
+  agent_unheeded_recurring_diagnostic,
+} from "std/agent/recurring_diagnostic"
 pub import { agent_stall_initial_state } from "std/agent/stall_config"
 pub import {
+  DetectorSpec,
   detector_action_of,
   detector_spec_to_stall,
   detector_spec_token_runaway,
@@ -32,60 +41,6 @@ pub import {
   agent_stall_verified_write_satisfied,
 } from "std/agent/stall_verification"
 pub import { agent_stall_turn_end_judge_due } from "std/agent/turn_end"
-
-// Keep this public alias on the facade: runtime `pub import` re-exports carry
-// type schemas, but the type checker currently resolves consumer annotations
-// only from aliases declared directly in the imported module.
-pub type DetectorSpec = {
-  enabled?: bool,
-  hard_stop_after_trips?: int,
-  loop?: {ping_pong_cycles?: int, repeat?: int},
-  no_progress?: {messages?: int},
-  stuck?: {same_diagnostic?: int, same_error?: int},
-  token_runaway?: {
-    fallback?: float,
-    hard_multiple?: float,
-    median?: float,
-    sigma?: float,
-    stddev?: float,
-  },
-}
-
-pub type RecurringDiagnosticCategory = "syntax" | "resolution" | "type" | "semantic" | "unknown"
-
-pub type DiagnosticCategoryPattern = {pattern: string, category: RecurringDiagnosticCategory}
-
-pub type DiagnosticCategories = {
-  codes?: dict<string, RecurringDiagnosticCategory>,
-  patterns?: list<DiagnosticCategoryPattern>,
-}
-
-pub type UnheededRecurringDiagnostic = {
-  signature: string,
-  category: RecurringDiagnosticCategory,
-  streak: int,
-  first_attempt: int,
-  last_attempt: int,
-  location: string?,
-  message: string,
-}
-
-pub type RecurringDiagnosticState = {
-  signatures: list<string>,
-  diagnostic_count: int,
-  signature: string,
-  category: RecurringDiagnosticCategory,
-  streak: int,
-  first_attempt: int,
-  last_attempt: int,
-  location: string?,
-  message: string,
-}
-
-pub type RecurringDiagnosticObservation = {
-  state: RecurringDiagnosticState?,
-  signal: UnheededRecurringDiagnostic?,
-}
 
 /** One caller-declared environment surface used to judge action futility. */
 pub type AgentObservationSurface = {
