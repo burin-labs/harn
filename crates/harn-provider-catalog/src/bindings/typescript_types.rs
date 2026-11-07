@@ -16,6 +16,12 @@ pub(super) const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalo
   routing_routes?: HarnCatalogRoutingRoute[]
   qc_defaults: Record<string, string>
   portal_defaults?: Record<string, HarnCatalogPortalDefault>
+  automatic_defaults?: HarnCatalogAutomaticDefault[]
+}
+
+export interface HarnCatalogAutomaticDefault {
+  provider: string
+  model_id: string
 }
 
 export interface HarnCatalogPortalDefault {

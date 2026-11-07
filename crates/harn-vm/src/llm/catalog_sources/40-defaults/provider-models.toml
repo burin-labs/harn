@@ -10,6 +10,9 @@
 [provider_defaults.anthropic]
 runtime = "claude-sonnet-5-5"
 portal = "claude-sonnet-5-5"
+# A host with no model choice and an Anthropic credential takes this route.
+automatic = "claude-sonnet-5-5"
+automatic_order = 10
 
 [provider_defaults.local]
 runtime = "gemma-4-26b-a4b-it"
@@ -25,6 +28,10 @@ portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 runtime = "gpt-6-luna"
 portal = "gpt-6-luna"
 portal_reasoning_effort = "high"
+# The mid-tier GPT-6.1 Sol row (`openai/mid`) is the automatic route, ranked
+# after Anthropic; Luna stays the low-cost setup offer.
+automatic = "gpt-6.1-sol"
+automatic_order = 20
 
 # The setup-UI offer is the catalog's recommended local model, the `local`
 # variant's Gemma 4 row, in place of Llama 3.2.

@@ -141,7 +141,28 @@ pub(crate) fn project(
                 })
             })
             .collect(),
+        automatic_defaults: automatic_defaults(&config.provider_defaults),
     }
+}
+
+/// Providers declaring an automatic route, ordered by their `automatic_order`.
+fn automatic_defaults(
+    defaults: &BTreeMap<String, llm_config::ProviderDefaultModels>,
+) -> Vec<CatalogAutomaticDefault> {
+    let mut ranked: Vec<_> = defaults
+        .iter()
+        .filter_map(|(provider, entry)| {
+            Some((entry.automatic_order?, provider, entry.automatic.clone()?))
+        })
+        .collect();
+    ranked.sort();
+    ranked
+        .into_iter()
+        .map(|(_, provider, model_id)| CatalogAutomaticDefault {
+            provider: provider.clone(),
+            model_id,
+        })
+        .collect()
 }
 
 /// `[suppress]` route selectors parsed as `(provider, model_id)` pairs.

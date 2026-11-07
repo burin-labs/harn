@@ -1,6 +1,6 @@
 {
-  "schema_version": 15,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v15.json",
+  "schema_version": 16,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v16.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -51089,5 +51089,15 @@
     "openrouter": {
       "model_id": "google/gemma-4-26b-a4b-it"
     }
-  }
+  },
+  "automatic_defaults": [
+    {
+      "provider": "anthropic",
+      "model_id": "claude-sonnet-5-5"
+    },
+    {
+      "provider": "openai",
+      "model_id": "gpt-6.1-sol"
+    }
+  ]
 }

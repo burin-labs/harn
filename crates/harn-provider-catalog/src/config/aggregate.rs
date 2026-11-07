@@ -79,6 +79,14 @@ pub struct ProviderDefaultModels {
     /// own `effort_levels`. `None` leaves the model's default.
     #[serde(default)]
     pub portal_reasoning_effort: Option<String>,
+    /// The mid-tier route a host selects when the person named no model and
+    /// holds a credential for this provider. Paired with `automatic_order`.
+    #[serde(default)]
+    pub automatic: Option<String>,
+    /// Rank among providers declaring `automatic`; the lowest rank whose
+    /// credential is present wins. Ranks are unique across the catalog.
+    #[serde(default)]
+    pub automatic_order: Option<u16>,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.

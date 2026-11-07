@@ -16,6 +16,7 @@ pub(super) const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codab
     public let routingRoutes: [HarnCatalogRoutingRoute]?
     public let qcDefaults: [String: String]
     public let portalDefaults: [String: HarnCatalogPortalDefault]?
+    public let automaticDefaults: [HarnCatalogAutomaticDefault]?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -29,6 +30,17 @@ pub(super) const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codab
         case routingRoutes = "routing_routes"
         case qcDefaults = "qc_defaults"
         case portalDefaults = "portal_defaults"
+        case automaticDefaults = "automatic_defaults"
+    }
+}
+
+public struct HarnCatalogAutomaticDefault: Codable, Sendable, Equatable {
+    public let provider: String
+    public let modelId: String
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case modelId = "model_id"
     }
 }
 
