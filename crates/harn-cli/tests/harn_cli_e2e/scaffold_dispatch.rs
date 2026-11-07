@@ -276,8 +276,8 @@ fn init_runtime_state_is_ignored_but_authored_files_remain_visible() {
         "{}",
         String::from_utf8_lossy(&init.stderr)
     );
-    let agent = run_scaffold(
-        &[
+    let agent = crate::test_util::process::harn_e2e_command()
+        .args([
             "run",
             "--environment-policy",
             "isolated",
@@ -290,9 +290,10 @@ fn main(harness: Harness) {
   harness.stdio.println(result.status)
   harness.stdio.println(result.visible_text)
 }"#,
-        ],
-        root,
-    );
+        ])
+        .current_dir(root)
+        .output()
+        .expect("run offline agent in its project");
     assert!(
         agent.status.success(),
         "{}",
