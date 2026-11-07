@@ -25,7 +25,7 @@ pipeline main(harness: Harness) {
     },
   )
   assert_eq(len(captured.events), 1, "the native capture must collect the actual event")
-  harness.stdio.println(captured.result?.nested?.count == 3)
+  harness.stdio.println(captured.result.nested.count == 3)
   harness.stdio.println(captured.result.bytes == bytes)
   const event = schema_expect(captured.events[0], schema_of(CapturedEvent))
   harness.stdio.println(event.type == "tool_call_update" && event.tool_name == "inspect")
