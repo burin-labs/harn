@@ -1,6 +1,8 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 
-type WorkspacePackage = {dir: string, name: string}
+type TestTarget = {name: string, path: string}
+
+type WorkspacePackage = {dir: string, name: string, tests: list<TestTarget>}
 
 fn command_stdout(
   process: HarnessProcess,
@@ -56,7 +58,16 @@ pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<Worksp
     if name == "" || manifest_path == "" {
       continue
     }
-    packages = packages + [{dir: rel_path(dirname(manifest_path) ?? ".", root), name: name}]
+    let tests: list<TestTarget> = []
+    for target in package?.targets ?? [] {
+      if (target?.kind ?? []).contains("test") {
+        tests.push({name: to_string(target.name), path: rel_path(to_string(target.src_path), root)})
+      }
+    }
+    packages.push({dir: rel_path(dirname(manifest_path) ?? ".", root), name: name, tests: tests})
+  }
+  if len(packages) == 0 {
+    throw "Cargo metadata contains no workspace packages"
   }
   return packages.sorted_by({ package -> package.dir })
 }
@@ -68,6 +79,7 @@ fn load_workspace_packages(process: HarnessProcess, root: string) -> list<Worksp
       program: "cargo",
       args: [
         "metadata",
+        "--locked",
         "--no-deps",
         "--format-version",
         "1",
@@ -86,15 +98,6 @@ fn load_workspace_packages(process: HarnessProcess, root: string) -> list<Worksp
   return workspace_packages_from_metadata(json_parse(raw), root)
 }
 
-pub fn package_for_crate_dir(crate_dir: string, packages: list<WorkspacePackage>) -> string? {
-  for package in packages {
-    if package.dir == crate_dir {
-      return package.name
-    }
-  }
-  return nil
-}
-
 fn add_filter(filters: list<string>, filter: string) -> list<string> {
   if filters.contains(filter) {
     return filters
@@ -102,66 +105,35 @@ fn add_filter(filters: list<string>, filter: string) -> list<string> {
   return filters + [filter]
 }
 
-pub fn filter_for_path(
-  fs: HarnessFs,
-  raw_path: string,
-  packages: list<WorkspacePackage>,
-  root: string,
-) -> string? {
+pub fn filter_for_path(raw_path: string, packages: list<WorkspacePackage>) -> string? {
   const path = normalize_input_path(raw_path)
   if path == "" || !path.ends_with(".rs") {
     return nil
   }
-  const top_level = regex_captures(r"^crates/([^/]+)/tests/([^/]+)\.rs$", path)
-  if top_level.count > 0 {
-    const groups = top_level[0].groups
-    const crate_dir = "crates/" + to_string(groups[0])
-    const package = package_for_crate_dir(crate_dir, packages)
-    if package == nil {
-      return nil
+  for package in packages.sorted_by({ package -> -len(package.dir) }) {
+    if !path.starts_with("${package.dir}/") {
+      continue
     }
-    return "binary(" + to_string(groups[1]) + ")"
-  }
-  const nested = regex_captures(r"^crates/([^/]+)/tests/([^/]+)/", path)
-  if nested.count > 0 {
-    const groups = nested[0].groups
-    const crate_dir = "crates/" + to_string(groups[0])
-    const dir = to_string(groups[1])
-    const package = package_for_crate_dir(crate_dir, packages)
-    if package == nil {
-      return nil
+    for target in package.tests {
+      const modules = if basename(target.path) == "main.rs" {
+        dirname(target.path)
+      } else {
+        target.path[:-3]
+      }
+      if path == target.path || path.starts_with("${modules}/") {
+        return "binary(${target.name})"
+      }
     }
-    // `tests/<dir>.rs` is the companion-module pattern (a top-level test file
-    // with a sibling directory of submodules); `tests/<dir>/main.rs` is the
-    // consolidated pattern (many former test binaries merged into one whose
-    // root is `main.rs`, e.g. `harn_cli_fast`/`harn_cli_e2e`/`harn_vm`). Either
-    // way the nextest binary name is `<dir>`.
-    if fs.exists(path_join(root, crate_dir, "tests", dir + ".rs"))
-      || fs.exists(path_join(root, crate_dir, "tests", dir, "main.rs")) {
-      return "binary(" + dir + ")"
-    }
-    return "package(" + package + ")"
-  }
-  const crate_match = regex_captures(r"^crates/([^/]+)/", path)
-  if crate_match.count > 0 {
-    const package = package_for_crate_dir("crates/" + to_string(crate_match[0].groups[0]), packages)
-    if package == nil {
-      return nil
-    }
-    return "package(" + package + ")"
+    // Deleted and consolidated targets still select their current owning package.
+    return "package(${package.name})"
   }
   return nil
 }
 
-pub fn nextest_filter_for_paths(
-  fs: HarnessFs,
-  paths: list<string>,
-  packages: list<WorkspacePackage>,
-  root: string,
-) -> string {
+pub fn nextest_filter_for_paths(paths: list<string>, packages: list<WorkspacePackage>) -> string {
   let filters: list<string> = []
   for path in paths {
-    const filter = filter_for_path(fs, path, packages, root)
+    const filter = filter_for_path(path, packages)
     if filter != nil {
       filters = add_filter(filters, filter)
     }
@@ -212,10 +184,8 @@ fn main(harness: Harness) {
     path_normalize(to_string(parsed?.root ?? ""))
   }
   const filter = nextest_filter_for_paths(
-    harness.fs,
     paths.map({ path -> to_string(path) }).to_list(),
     load_workspace_packages(harness.process, root),
-    root,
   )
   if filter != "" {
     harness.stdio.println(filter)

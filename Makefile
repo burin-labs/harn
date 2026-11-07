@@ -898,6 +898,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	fi
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/touched_test_repeats_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	$(MAKE) test-sccache-rustc-wrapper
 	$(MAKE) test-cargo-wrapper-refresh-native
