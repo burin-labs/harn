@@ -2005,7 +2005,9 @@ Command scans report `execution_syntax_complete` separately from
 `io_coverage.complete`. Shell stages have a nullable `cwd`; `null` means the
 scanner hasn't established that stage's directory. A remote executor's
 filesystem isn't available to the VM scanner, so its I/O coverage remains
-unmeasured. Inspection-only preflight has no bound `invocation`. See
+unmeasured. With a command policy installed, `executor_io_unmeasured` requires
+consent even when syntax is resolved. Inspection-only preflight has no bound
+`invocation`. See
 [Prepared process execution](bridge-protocol.md#prepared-process-execution)
 for the host migration contract.
 Pushes that delete a remote ref (`--delete`, `--prune`, or a `:ref` refspec)

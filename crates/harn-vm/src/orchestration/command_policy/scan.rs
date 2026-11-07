@@ -5,6 +5,7 @@ use request::*;
 
 pub(super) const EXECUTION_SEMANTICS_UNRESOLVED_LABEL: &str = "execution_semantics_unresolved";
 pub(super) const SHELL_DIALECT_UNKNOWN_LABEL: &str = "shell_dialect_unknown";
+pub(super) const EXECUTOR_IO_UNMEASURED_LABEL: &str = "executor_io_unmeasured";
 
 pub(super) fn scan_command_risk_scan_json(
     ctx: &JsonValue,
@@ -128,6 +129,10 @@ pub(super) fn scan_command_risk_scan_json(
     if command_analysis.unresolved {
         labels.insert(EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string());
         rationale.push("execution syntax, dialect, or dynamic dispatch left semantics unresolved");
+    }
+    if !filesystem_local {
+        labels.insert(EXECUTOR_IO_UNMEASURED_LABEL.to_string());
+        rationale.push("the executor filesystem is unavailable to the runtime scanner");
     }
     if execution_semantics["unresolved_reason"].as_str() == Some(SHELL_DIALECT_UNKNOWN_LABEL) {
         labels.insert(SHELL_DIALECT_UNKNOWN_LABEL.to_string());

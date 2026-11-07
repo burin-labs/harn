@@ -923,9 +923,11 @@ fn approval_required_label(
     risk_labels
         .iter()
         .find(|label| {
-            label.as_str() == EXECUTION_SEMANTICS_UNRESOLVED_LABEL
-                && !sealed_dispatch
-                    .is_some_and(|authority| authority.allow_risk_labels.contains(label.as_str()))
+            matches!(
+                label.as_str(),
+                EXECUTION_SEMANTICS_UNRESOLVED_LABEL | EXECUTOR_IO_UNMEASURED_LABEL
+            ) && !sealed_dispatch
+                .is_some_and(|authority| authority.allow_risk_labels.contains(label.as_str()))
         })
         .cloned()
         .or_else(|| {

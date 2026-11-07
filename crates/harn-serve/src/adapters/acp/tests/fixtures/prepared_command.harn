@@ -37,6 +37,11 @@ pipeline default(harness: Harness) {
             ctx.request.argv,
             "the executor retained the literal request",
           )
+          const scan = command_risk_scan(ctx)
+          assert(scan.execution_syntax_complete, "literal argv syntax is known")
+          assert(!scan.io_coverage.complete, "remote I/O must not look locally measured")
+          assert_eq(scan.io_coverage.reason, "executor_filesystem_unavailable")
+          assert(contains(ctx.consent.risk_labels, "executor_io_unmeasured"))
           harness.stdio.println("EXECUTOR_CONSENT_REACHED")
           if spec.mode == "deny" {
             return {decision: "invalid-consent"}
