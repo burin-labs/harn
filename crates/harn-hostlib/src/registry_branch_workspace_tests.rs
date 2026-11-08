@@ -148,7 +148,7 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
             let recorded_root = recorded_root.clone();
             let start = start.clone();
             let grade = grade.clone();
-            std::thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 start.wait();
                 let prepared = (|| {
                     let workspace = ReplayWorkspace::fork_saved_in(&saved, &parent)

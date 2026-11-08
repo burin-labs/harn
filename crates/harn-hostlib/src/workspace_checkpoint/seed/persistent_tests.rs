@@ -74,7 +74,7 @@ fn concurrent_saved_branches_case() {
     let (grade_tx, grade_rx) = std::sync::mpsc::sync_channel(0);
     let left_saved = saved.clone();
     let left_parent = storage.path().to_path_buf();
-    let left = std::thread::spawn(move || {
+    let left = harn_parser::runtime_stack::spawn(move || {
         let branch = ReplayWorkspace::fork_saved_in(&left_saved, &left_parent).unwrap();
         fs::write(branch.path().join("value"), "left").unwrap();
         ready_tx.send(()).unwrap();
