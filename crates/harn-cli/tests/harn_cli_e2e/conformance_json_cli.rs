@@ -209,7 +209,10 @@ fn parallel_text_conformance_skips_xfail_cases_without_executing_them() {
         String::from_utf8_lossy(&output.stderr),
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("xfail.harn  (tracked in #999)"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches("SKIP  xfail.harn").count(), 1, "{stderr}");
+    assert!(stderr.contains("tracked in #999"), "{stderr}");
+    assert!(!stdout.contains("xfail.harn"), "{stdout}");
     assert!(stdout.contains("0 passed, 0 failed, 1 skipped, 1 total"));
 }
 
@@ -411,10 +414,11 @@ fn conformance_fails_when_a_mixed_selection_contains_an_unasserted_entry_fixture
             String::from_utf8_lossy(&output.stderr),
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("tests/orphan.harn: missing .expected, .error, or .lint file"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("tests/orphan.harn: missing .expected, .error, or .lint file"));
         assert!(
-            !stdout.contains("tests/_common.harn"),
-            "library modules remain inert: {stdout}"
+            !stdout.contains("tests/_common.harn") && !stderr.contains("tests/_common.harn"),
+            "library modules remain inert: stdout={stdout} stderr={stderr}"
         );
         assert!(stdout.contains("1 passed, 1 failed, 0 skipped, 2 total"));
     }
