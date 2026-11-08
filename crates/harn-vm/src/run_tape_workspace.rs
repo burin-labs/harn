@@ -4,6 +4,99 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct RecordedWorkspace {
+    pub root: Option<PathBuf>,
+    pub aliases: Vec<PathBuf>,
+    pub ancestors: Vec<PathBuf>,
+}
+
+impl RecordedWorkspace {
+    pub fn from_tape(tape: &super::EventTape) -> Result<Self, String> {
+        let Some(run) = &tape.header.run else {
+            return Ok(Self::default());
+        };
+        let recorded = Self {
+            root: run.workspace_root.clone(),
+            aliases: run.workspace_aliases.clone(),
+            ancestors: run.workspace_ancestors.clone(),
+        };
+        if recorded
+            .ancestors
+            .iter()
+            .chain(recorded.aliases.iter())
+            .any(|root| {
+                !root.is_absolute()
+                    || root
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+            })
+        {
+            return Err("recorded workspace names must be absolute normalized paths".into());
+        }
+        Ok(recorded)
+    }
+
+    pub fn roots(&self) -> Vec<PathBuf> {
+        let mut roots = self.physical_roots();
+        for alias in &self.aliases {
+            if !roots.contains(alias) {
+                roots.push(alias.clone());
+            }
+        }
+        roots
+    }
+
+    pub fn physical_roots(&self) -> Vec<PathBuf> {
+        let mut roots = self.ancestors.clone();
+        if let Some(root) = &self.root {
+            if !roots.contains(root) {
+                roots.push(root.clone());
+            }
+        }
+        roots
+    }
+
+    pub fn identity(&self, physical_root: &Path) -> ReplayWorkspaceIdentity {
+        ReplayWorkspaceIdentity {
+            logical_root: self
+                .ancestors
+                .first()
+                .or(self.root.as_ref())
+                .map_or_else(|| physical_root.to_path_buf(), Clone::clone),
+            physical_root: physical_root.to_path_buf(),
+        }
+    }
+}
+
+pub(super) fn recording_workspace(
+    workspace: Option<&super::TapeWorkspace>,
+) -> Result<RecordedWorkspace, String> {
+    let mut recorded = RecordedWorkspace {
+        root: workspace.map(|workspace| {
+            crate::workspace_path::canonicalize_existing_ancestor(&workspace.root)
+                .unwrap_or_else(|_| workspace.root.clone())
+        }),
+        ..RecordedWorkspace::default()
+    };
+    if let Some(branch) = super::scope::state_branch().filter(|_| recorded.root.is_some()) {
+        if recorded.root.as_deref() != Some(branch.workspace()) {
+            return Err("a branch recording must name its scoped workspace".into());
+        }
+        recorded.ancestors = branch.recorded_physical_workspaces();
+        recorded.aliases = branch.recorded_aliases().to_vec();
+    }
+    if let (Some(workspace), Some(canonical)) = (workspace, &recorded.root) {
+        if workspace.root.is_absolute()
+            && &workspace.root != canonical
+            && !recorded.aliases.contains(&workspace.root)
+        {
+            recorded.aliases.push(workspace.root.clone());
+        }
+    }
+    Ok(recorded)
+}
+
 /// The stable name seen by a replay and the directory that owns its effects.
 #[derive(Clone, Debug)]
 pub struct ReplayWorkspaceIdentity {
@@ -153,15 +246,11 @@ pub(super) fn for_branch(branch: &super::BranchHandle) -> ReplayWorkspaceProject
         })
         .collect();
     ReplayWorkspaceProjection::new(branch.workspace(), branch.logical_workspace())
-        .with_ancestors(&branch.recorded_workspaces(), branch.logical_workspace())
+        .with_ancestors(
+            &branch.recorded_physical_workspaces(),
+            branch.logical_workspace(),
+        )
         .with_sources(&sources)
-}
-
-pub(super) fn identity_for(branch: &super::BranchHandle) -> ReplayWorkspaceIdentity {
-    ReplayWorkspaceIdentity {
-        logical_root: branch.logical_workspace().to_path_buf(),
-        physical_root: branch.workspace().to_path_buf(),
-    }
 }
 
 pub(crate) fn physical_projection() -> Option<ReplayWorkspaceProjection> {

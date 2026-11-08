@@ -33,8 +33,8 @@ pub(crate) struct BranchHandle {
     /// Recording-owned trees, longest first, with where each lands under
     /// `state_root`.
     protected: Vec<(PathBuf, PathBuf)>,
-    recorded_workspace: Option<PathBuf>,
-    workspace_ancestors: Vec<PathBuf>,
+    recorded_workspace: super::workspace::RecordedWorkspace,
+    workspace_identity: super::ReplayWorkspaceIdentity,
     workspace: PathBuf,
     workspace_container: PathBuf,
     source_roots: Vec<super::ReplaySourceRoot>,
@@ -55,18 +55,17 @@ impl BranchHandle {
         state_root: PathBuf,
         workspace_container: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
-        recorded_workspace: Option<PathBuf>,
-        workspace_ancestors: Vec<PathBuf>,
+        recorded_workspace: super::workspace::RecordedWorkspace,
         source_roots: Vec<super::ReplaySourceRoot>,
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
         ARMED.fetch_add(1, Ordering::AcqRel);
         HELD.fetch_add(1, Ordering::AcqRel);
         Arc::new(Self {
+            workspace_identity: recorded_workspace.identity(&state.workspace_root),
             workspace: state.workspace_root.clone(),
             workspace_container,
             recorded_workspace,
-            workspace_ancestors,
             source_roots,
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
@@ -100,17 +99,19 @@ impl BranchHandle {
     }
 
     pub(crate) fn recorded_workspace(&self) -> Option<&Path> {
-        self.recorded_workspace.as_deref()
+        self.recorded_workspace.root.as_deref()
     }
 
     pub(crate) fn recorded_workspaces(&self) -> Vec<PathBuf> {
-        let mut roots = self.workspace_ancestors.clone();
-        if let Some(root) = &self.recorded_workspace {
-            if !roots.contains(root) {
-                roots.push(root.clone());
-            }
-        }
-        roots
+        self.recorded_workspace.roots()
+    }
+
+    pub(crate) fn recorded_physical_workspaces(&self) -> Vec<PathBuf> {
+        self.recorded_workspace.physical_roots()
+    }
+
+    pub(crate) fn recorded_aliases(&self) -> &[PathBuf] {
+        &self.recorded_workspace.aliases
     }
 
     pub(crate) fn workspace(&self) -> &Path {
@@ -118,10 +119,7 @@ impl BranchHandle {
     }
 
     pub(crate) fn logical_workspace(&self) -> &Path {
-        self.workspace_ancestors
-            .first()
-            .or(self.recorded_workspace.as_ref())
-            .map_or(&self.workspace, PathBuf::as_path)
+        self.workspace_identity.logical_root()
     }
 
     pub(crate) fn workspace_container(&self) -> &Path {
@@ -150,14 +148,13 @@ impl BranchHandle {
                 return root.recorded.join(relative).display().to_string();
             }
         }
-        match (
-            self.workspace_ancestors
-                .first()
-                .or(self.recorded_workspace.as_ref()),
-            workspace_relative(path, &self.workspace),
-        ) {
-            (Some(recorded), Some(relative)) => recorded.join(relative).display().to_string(),
-            _ => uri.to_string(),
+        match workspace_relative(path, &self.workspace) {
+            Some(relative) => self
+                .logical_workspace()
+                .join(relative)
+                .display()
+                .to_string(),
+            None => uri.to_string(),
         }
     }
 
@@ -309,9 +306,12 @@ pub(super) fn validate_source_roots(
                 overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
             })
             || tape.header.run.as_ref().is_some_and(|run| {
-                run.workspace_ancestors.iter().any(|recorded| {
-                    overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
-                })
+                run.workspace_ancestors
+                    .iter()
+                    .chain(&run.workspace_aliases)
+                    .any(|recorded| {
+                        overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
+                    })
             })
         {
             return Err(
@@ -369,7 +369,7 @@ pub struct BranchScope {
 impl BranchScope {
     /// The validated workspace view for host inputs outside VM execution.
     pub fn workspace_identity(&self) -> super::ReplayWorkspaceIdentity {
-        super::workspace::identity_for(&self.handle)
+        self.handle.workspace_identity.clone()
     }
 
     /// Bind the branch for a synchronous stretch on this thread. Use

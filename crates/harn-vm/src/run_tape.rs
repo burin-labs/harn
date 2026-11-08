@@ -122,6 +122,9 @@ pub struct RunTapeHeader {
     /// The recorded run's canonical workspace.
     #[serde(default)]
     pub workspace_root: Option<PathBuf>,
+    /// Alternate recorded spellings, resolved only at physical I/O boundaries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_aliases: Vec<PathBuf>,
     /// Earlier workspace roots, oldest first. A recorded branch retains these
     /// names so descendants can relocate unchanged source and served data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -195,29 +198,12 @@ pub fn start_recording(
     let mut header =
         TapeHeader::current(Some(crate::stdlib::clock::now_wall_ms()), None, Vec::new());
     header.version = crate::testbench::tape::TAPE_FORMAT_VERSION;
-    let workspace_root = workspace.as_ref().map(|workspace| {
-        crate::workspace_path::canonicalize_existing_ancestor(&workspace.root)
-            .unwrap_or_else(|_| workspace.root.clone())
-    });
-    let mut workspace_ancestors = match scope::state_branch() {
-        Some(branch) if workspace_root.is_some() => {
-            if workspace_root.as_deref() != Some(branch.workspace()) {
-                return Err("a branch recording must name its scoped workspace".into());
-            }
-            branch.recorded_workspaces()
-        }
-        _ => Vec::new(),
-    };
-    if let (Some(workspace), Some(canonical)) = (&workspace, &workspace_root) {
-        if workspace.root.is_absolute() && &workspace.root != canonical {
-            if workspace_ancestors.is_empty() {
-                workspace_ancestors.push(canonical.clone());
-            }
-            if !workspace_ancestors.contains(&workspace.root) {
-                workspace_ancestors.push(workspace.root.clone());
-            }
-        }
-    }
+    let recorded = workspace::recording_workspace(workspace.as_ref())?;
+    let workspace::RecordedWorkspace {
+        root: workspace_root,
+        aliases: workspace_aliases,
+        ancestors: workspace_ancestors,
+    } = recorded;
     header.run = Some(RunTapeHeader {
         recording: level,
         effects_observed: workspace.is_some(),
@@ -235,6 +221,7 @@ pub fn start_recording(
                 .collect()
         }),
         workspace_root,
+        workspace_aliases,
         workspace_ancestors,
     });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
@@ -929,20 +916,7 @@ pub fn start_branch_with_sources(
         return Err("branch workspace must be strictly inside its workspace container".into());
     }
     let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
-    let workspace_ancestors = tape
-        .header
-        .run
-        .as_ref()
-        .map(|run| run.workspace_ancestors.clone())
-        .unwrap_or_default();
-    if workspace_ancestors.iter().any(|root| {
-        !root.is_absolute()
-            || root
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-    }) {
-        return Err("recorded workspace ancestors must be absolute normalized paths".into());
-    }
+    let recorded_workspace = workspace::RecordedWorkspace::from_tape(&tape)?;
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
         prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
@@ -978,11 +952,7 @@ pub fn start_branch_with_sources(
             state_root,
             workspace_container_root,
             protected,
-            tape.header
-                .run
-                .as_ref()
-                .and_then(|run| run.workspace_root.clone()),
-            workspace_ancestors,
+            recorded_workspace,
             source_roots,
         ),
     })
@@ -1003,10 +973,12 @@ fn recording_trees(
     let workspaces = run
         .and_then(|run| run.workspace_root.clone())
         .into_iter()
-        .chain(
-            run.into_iter()
-                .flat_map(|run| run.workspace_ancestors.iter().cloned()),
-        )
+        .chain(run.into_iter().flat_map(|run| {
+            run.workspace_ancestors
+                .iter()
+                .chain(&run.workspace_aliases)
+                .cloned()
+        }))
         .chain(std::iter::once(workspace.to_path_buf()));
     let mut trees: Vec<(PathBuf, PathBuf)> = Vec::new();
     let roots = state_roots

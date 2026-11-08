@@ -92,6 +92,9 @@ Its header retains prior physical workspace roots, oldest first, while its reque
 payloads retain the original logical identity. A later branch resolves every
 retained root at the filesystem boundary and preserves the original prompt source
 identity. The recording refuses a workspace that differs from its scope.
+Alternate root spellings are retained separately from physical ancestor roots.
+They resolve at I/O boundaries even after an alias disappears; their spelling
+in recorded prompt and tool data stays unchanged.
 
 On Linux, local foreground commands use the existing OS-hardened sandbox with
 the branch workspace, required runtime/toolchain access, and projected explicit

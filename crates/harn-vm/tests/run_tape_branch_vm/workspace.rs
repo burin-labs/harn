@@ -263,6 +263,56 @@ fn recorded_absolute_paths_read_and_write_only_the_isolated_workspace() {
     isolated_filesystem_case(false, false);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_recorded_root_alias_keeps_its_identity_after_the_alias_is_removed() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let names = tempfile::tempdir().unwrap();
+    let alias = names.path().join("recorded-alias");
+    std::os::unix::fs::symlink(&recorded.workspace, &alias).unwrap();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call({root}, nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    harness.fs.write_text(path_join({root}, "alias-result"), "branch only")
+  }})
+}}
+"#,
+        root = quote(&alias)
+    );
+    let recording = start_recording(
+        &recorded.tapes,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: alias.clone(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    run_at(&source, &alias, None, &alias).unwrap();
+    assert_eq!(recording.error(), None);
+    drop(recording);
+    std::fs::remove_file(alias).unwrap();
+    let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
+    assert_eq!(replay.report.divergence, None, "{:?}", replay.output);
+    replay.output.unwrap();
+    assert_eq!(
+        (replay.report.served_calls, replay.report.live_calls),
+        (1, 1)
+    );
+    assert_eq!(
+        std::fs::read_to_string(isolated.workspace.join("alias-result")).unwrap(),
+        "branch only"
+    );
+}
+
 #[test]
 fn live_file_reads_cannot_address_a_peer_in_the_storage_pool() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());

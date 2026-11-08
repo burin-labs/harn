@@ -48,8 +48,7 @@ fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
-    let elsewhere = tmp.path().join("elsewhere");
-    std::fs::create_dir_all(&elsewhere).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("one"), &result("a", None));
@@ -83,7 +82,11 @@ fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
     let refused =
         |outcome: Option<Result<VmValue, crate::value::VmError>>| matches!(outcome, Some(Err(_)));
     assert!(
-        refused(call(CapabilityId::CodeIndex, "rebuild", root(&elsewhere))),
+        refused(call(
+            CapabilityId::CodeIndex,
+            "rebuild",
+            root(elsewhere.path())
+        )),
         "a rebuild outside the restored workspace is refused"
     );
     assert!(refused(call(
