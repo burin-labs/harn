@@ -231,3 +231,24 @@ current_snapshot = "openrouter/typesafe/jev-1.14"
 family = "typesafe-jev"
 lineage = "typesafe-jev-1"
 models_dev = {provider = "openrouter", model = "~typesafe/jev-latest", fields = ["open_weight", "pricing"]}
+
+# OpenRouter, dated revision. On 2026-11-08 /api/alpha/decisions accepted
+# `typesafe/jev-1.14-20261014` and answered from that same revision, which is
+# also what `typesafe/jev-1.14` serves today. Pin this ID wherever thresholds
+# are fit to the model's probabilities. https://openrouter.ai/typesafe
+[models."openrouter/typesafe/jev-1.14-20261014"]
+name = "Jev 1.14 2026-10-14 (OpenRouter)"
+provider = "openrouter"
+wire_model = "typesafe/jev-1.14-20261014"
+logical_model = "typesafe-jev-1.14"
+equivalence_group = "typesafe-jev-1.14"
+served_variant = "openrouter"
+operations = ["decision"]
+context_window = 32000
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+released = "2026-10-14"
+row_kind = "snapshot"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"

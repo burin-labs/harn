@@ -26,7 +26,34 @@ pub(crate) async fn run(args: ConformanceHelperArgs) -> Result<(), String> {
     match args.command {
         ConformanceHelperCommand::BridgeMockHost(args) => run_bridge_mock_host(args).await,
         ConformanceHelperCommand::HttpProxy(args) => run_http_proxy(args).await,
+        ConformanceHelperCommand::StalledProxy(args) => run_stalled_proxy(args).await,
     }
+}
+
+/// Hold every accepted connection open without a byte of reply until
+/// `timeout_ms` passes, then exit.
+async fn run_stalled_proxy(args: ConformanceHelperHttpProxyArgs) -> Result<(), String> {
+    let state_dir = PathBuf::from(args.state_dir);
+    std::fs::create_dir_all(&state_dir)
+        .map_err(|error| format!("create state dir {}: {error}", state_dir.display()))?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("bind stalled proxy listener: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| format!("read listener addr: {error}"))?
+        .port();
+    let port_path = state_dir.join("port");
+    std::fs::write(&port_path, port.to_string())
+        .map_err(|error| format!("write port file {}: {error}", port_path.display()))?;
+    let mut held = Vec::new();
+    let _ = timeout(Duration::from_millis(args.timeout_ms), async {
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream);
+        }
+    })
+    .await;
+    Ok(())
 }
 
 async fn run_bridge_mock_host(args: ConformanceHelperBridgeMockHostArgs) -> Result<(), String> {

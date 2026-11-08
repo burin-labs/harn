@@ -347,6 +347,7 @@
   "Accept a run that executes no tests": "接受一次不执行任何测试的运行",
   "Accept a run that executes no tests.\n\nBy default a selection that matches nothing exits non-zero, because an empty run is otherwise indistinguishable from every test passing at the exit-code boundary. Set this for the rare caller that legitimately tolerates an empty selection.": "接受一次不执行任何测试的运行。\n\n默认情况下，匹配不到任何内容的选择会以非零退出，因为在退出码层面，空运行否则与所有测试通过无法区分。仅对少数确实能容忍空选择的调用方设置此项。",
   "Accept bundles that carry no Ed25519 signature. Without this flag, an unsigned bundle is treated as a verification failure": "接受不包含 Ed25519 签名的 bundles。没有此标志时，未签名的 bundle 会被视为验证失败",
+  "Accept proxy connections and never answer, so a client's own bound fires": "接受代理连接且从不应答，使客户端自身的时限触发",
   "Accept the model's upstream license. Required — nothing is downloaded without it (the license text is printed for review first)": "接受模型的上游许可。必需——未接受前不会下载任何内容（会先打印许可文本供审阅）",
   "Accepted for host symmetry; output is always newline-delimited JSON": "为主机对称性而接受；输出始终为以换行分隔的 JSON",
   "Ack a leased reminder, so it is not redelivered": "确认一条已租赁的提醒，使其不再被重新投递",

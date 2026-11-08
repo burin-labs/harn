@@ -486,6 +486,31 @@ fn approval_review_policy_projections_match_the_rust_owner_bidirectionally() {
             &[],
         );
     }
+
+    // The bundled policy has no screen, so its keys come from a constructed one.
+    let screen = serde_json::to_value(crate::orchestration::ScreenConfig {
+        model: "screen".to_string(),
+        provider: None,
+        timeout_ms: 1,
+    })
+    .expect("serialize screen policy");
+    let screen_keys = screen
+        .as_object()
+        .expect("screen record")
+        .keys()
+        .cloned()
+        .collect();
+    let Ty::Shape(screen_shape) = harn_builtin_meta::shapes::APPROVAL_REVIEW_SCREEN_POLICY else {
+        panic!("screen policy must remain a closed record");
+    };
+    assert_eq!(shape_keys(screen_shape), screen_keys, "builtin screen");
+    assert_key_parity(
+        "ApprovalReviewerScreenPolicy",
+        &harn_alias_keys(source, "ApprovalReviewerScreenPolicy"),
+        &screen_keys,
+        &[],
+        &[],
+    );
 }
 
 /// Removed keys must stay out of the typed alias, and the removal table

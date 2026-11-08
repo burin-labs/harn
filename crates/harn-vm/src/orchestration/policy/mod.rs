@@ -50,7 +50,7 @@ pub use approval_resolver::{
 };
 pub use approval_review_config::{
     ApprovalReviewPolicy, BreakerConfig, DenylistConfig, FloorConfig, OnReviewerError,
-    ReviewerConfig, TrustConfig, VerdictConfig, APPROVAL_REVIEW_POLICY,
+    ReviewerConfig, ScreenConfig, TrustConfig, VerdictConfig, APPROVAL_REVIEW_POLICY,
 };
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,

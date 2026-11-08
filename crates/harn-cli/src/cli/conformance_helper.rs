@@ -14,6 +14,9 @@ pub(crate) enum ConformanceHelperCommand {
     /// Serve one raw HTTP proxy request and write a state receipt.
     #[command(name = "http-proxy")]
     HttpProxy(ConformanceHelperHttpProxyArgs),
+    /// Accept proxy connections and never answer, so a client's own bound fires.
+    #[command(name = "stalled-proxy")]
+    StalledProxy(ConformanceHelperHttpProxyArgs),
 }
 
 #[derive(Debug, Args, Clone)]

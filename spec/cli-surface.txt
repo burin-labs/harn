@@ -116,6 +116,9 @@ harn conformance-helper bridge-mock-host <positional 1>
 harn conformance-helper http-proxy
 harn conformance-helper http-proxy --timeout-ms
 harn conformance-helper http-proxy <positional 1>
+harn conformance-helper stalled-proxy
+harn conformance-helper stalled-proxy --timeout-ms
+harn conformance-helper stalled-proxy <positional 1>
 harn connect
 harn connect --generic
 harn connect --json
