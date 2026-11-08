@@ -140,9 +140,23 @@ impl ReplayWorkspace {
         storage_parent: &Path,
         limits: SeedLimits,
     ) -> Result<Self, SeedError> {
+        Self::capture_excluding(source, storage_parent, limits, &[])
+    }
+
+    /// Capture without Harn's runtime-owned paths and the host's own state,
+    /// given relative to `source`. Their writers, such as an editor's indexer
+    /// or a running session, keep going while the tree is read, and their
+    /// contents are not part of the workspace a run edits.
+    pub fn capture_excluding(
+        source: &Path,
+        storage_parent: &Path,
+        limits: SeedLimits,
+        host_owned: &[PathBuf],
+    ) -> Result<Self, SeedError> {
         let canonical_source = source
             .canonicalize()
             .map_err(|error| io("resolve source", source, error))?;
+        let excluded = excluded_paths(&canonical_source, host_owned)?;
         let canonical_parent = storage_parent
             .canonicalize()
             .map_err(|error| io("resolve storage parent", storage_parent, error))?;
@@ -153,13 +167,14 @@ impl ReplayWorkspace {
             });
         }
         let original = open_dir(source)?;
-        Self::capture_directory_in(&original, &canonical_parent, limits)
+        Self::capture_directory_in(&original, &canonical_parent, limits, &excluded)
     }
 
     fn capture_directory_in(
         original: &Dir,
         storage_parent: &Path,
         limits: SeedLimits,
+        excluded: &[PathBuf],
     ) -> Result<Self, SeedError> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("harn-replay-");
@@ -179,8 +194,8 @@ impl ReplayWorkspace {
         let seed = parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
-        let receipt = copy_and_measure(original, Some(&seed), limits)?;
-        if copy_and_measure(original, None, limits)? != receipt {
+        let receipt = copy_and_measure(original, Some(&seed), limits, excluded)?;
+        if copy_and_measure(original, None, limits, excluded)? != receipt {
             return Err(SeedError::SourceChanged);
         }
         parent
@@ -189,7 +204,7 @@ impl ReplayWorkspace {
         let workspace_dir = parent
             .open_dir(ReplayWorkspaceLocation::DIRECTORY_NAME)
             .map_err(|error| io("open", Path::new("workspace"), error))?;
-        if copy_and_measure(&seed, Some(&workspace_dir), limits)? != receipt {
+        if copy_and_measure(&seed, Some(&workspace_dir), limits, &[])? != receipt {
             return Err(SeedError::SeedChanged);
         }
         Ok(Self {
@@ -237,7 +252,7 @@ impl ReplayWorkspace {
                 .map_err(|error| io("create staging", self.storage.path(), error))?,
         );
         let next = open_dir(staging.path())?;
-        if copy_and_measure(&seed, Some(&next), self.limits)? != self.receipt {
+        if copy_and_measure(&seed, Some(&next), self.limits, &[])? != self.receipt {
             return Err(SeedError::SeedChanged);
         }
         drop(next);
@@ -312,10 +327,34 @@ fn limit(resource: &'static str, observed: u64, maximum: u64) -> Result<(), Seed
     }
 }
 
+/// Relative paths the capture skips: Harn's runtime-owned paths inside
+/// `source`, then the host's. A host path must stay inside the source.
+fn excluded_paths(source: &Path, host_owned: &[PathBuf]) -> Result<Vec<PathBuf>, SeedError> {
+    let mut excluded: Vec<PathBuf> = crate::workspace_runtime_paths::owned_paths(source)
+        .into_iter()
+        .filter_map(|path| path.strip_prefix(source).ok().map(Path::to_path_buf))
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect();
+    for path in host_owned {
+        let inside = path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        if !inside || path.as_os_str().is_empty() {
+            return Err(SeedError::Unsupported {
+                path: path.clone(),
+                reason: "an excluded path must be relative and inside the source",
+            });
+        }
+        excluded.push(path.clone());
+    }
+    Ok(excluded)
+}
+
 fn copy_and_measure(
     source: &Dir,
     destination: Option<&Dir>,
     limits: SeedLimits,
+    excluded: &[PathBuf],
 ) -> Result<SeedReceipt, SeedError> {
     let mut manifest = BTreeMap::new();
     let mut pending = vec![PathBuf::new()];
@@ -338,6 +377,9 @@ fn copy_and_measure(
         for entry in entries {
             let entry = entry.map_err(|error| io("enumerate", &directory, error))?;
             let path = directory.join(entry.file_name());
+            if excluded.iter().any(|skip| path.starts_with(skip)) {
+                continue;
+            }
             let name = path
                 .iter()
                 .map(|part| part.to_str())

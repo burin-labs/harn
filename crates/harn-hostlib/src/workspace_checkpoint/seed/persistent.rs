@@ -79,7 +79,7 @@ impl ReplayWorkspace {
                 reason: "branch storage must be outside the saved workspace storage",
             });
         }
-        let branch = Self::capture_directory_in(&seed, &destination, saved.limits)?;
+        let branch = Self::capture_directory_in(&seed, &destination, saved.limits, &[])?;
         if branch.receipt != saved.receipt {
             return Err(SeedError::SeedChanged);
         }
