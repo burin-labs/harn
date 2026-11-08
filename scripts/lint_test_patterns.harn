@@ -438,12 +438,15 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
 // and any direct access fails the lint.
 const DIRECT_HARN_BINARY_BASELINE = []
 
-// File-level ratchet for direct shell process spawns in Rust tests. These two
-// platform-specific tests predate the gate; delete each row when its shell
-// dependency is removed. New process probes should use harn-test-echo-env.
+// File-level ratchet for direct shell process spawns in Rust tests. Retain a
+// shell only when shell behavior is the contract; other process probes use
+// harn-test-echo-env. Delete a row when its shell dependency is removed.
 const SHELL_SPAWN_LITERAL_BASELINE = [
   {path: "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs", count: 1},
   {path: "crates/harn-vm/src/stdlib/sandbox/tests.rs", count: 1},
+  // Execute the printed POSIX shell step: an environment-only helper cannot
+  // prove that its assignments are exported to the real doctor subprocess.
+  {path: "crates/harn-cli/tests/harn_cli_e2e/quickstart_env.rs", count: 1},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a

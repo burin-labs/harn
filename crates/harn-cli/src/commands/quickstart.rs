@@ -679,7 +679,7 @@ fn print_completion(selection: &ProviderSelection, actions: &[FileAction]) {
     }
     println!();
     println!("{}", crate::localization::formatted!("Next:"));
-    println!("  source .env");
+    println!("  set -a; . ./.env; set +a");
     println!("  harn doctor --no-network");
 }
 

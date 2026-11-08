@@ -9,8 +9,11 @@ Run setup in your project:
 
 ```bash
 harn quickstart
-source .env
+set -a; . ./.env; set +a
 ```
+
+In Bash, Zsh, or a POSIX shell, this loads `.env` and exports its assignments
+to commands such as `harn doctor` and `harn run`.
 
 The command inspects credential paths and local Ollama models, lets you choose
 a provider and model, and writes starter defaults to `harn.toml`, `.env`, and
