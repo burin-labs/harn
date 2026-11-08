@@ -114,10 +114,12 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    # Every trigger, release qualification included, runs on the standard hosted
-    # Mac. The owned Mac's tool cache sat under the runner user's home, which the
-    # OS sandbox tests correctly refuse to read.
-    runs-on: macos-latest
+    # Release qualification (a main dispatch) runs on the larger hosted Mac, an
+    # approved paid runner (APPROVED_PAID_RUNNERS in the CI cache policy). The
+    # owned Mac's tool cache sat under the runner user's home, which the OS
+    # sandbox tests correctly refuse to read. PR and scheduled coverage stay on
+    # the standard hosted Mac.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && 'macos-latest-xlarge' || 'macos-latest' }}
     # A cold hosted build plus the complete workspace suite needs this fuse;
     # the separate feedback budget still reports slow routine PR runs.
     timeout-minutes: 90
