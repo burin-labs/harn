@@ -311,6 +311,101 @@ fn main(harness: Harness) {{
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_removed_nested_alias_keeps_its_child_read_denial_in_the_branch() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let names = tempfile::tempdir().unwrap();
+    let parent_alias = names.path().join("parent-alias");
+    std::os::unix::fs::symlink(&recorded.markers, &parent_alias).unwrap();
+    let direct_alias = recorded.markers.join("recorded-alias");
+    std::os::unix::fs::symlink(&recorded.workspace, &direct_alias).unwrap();
+    let alias = parent_alias.join("recorded-alias");
+    for workspace in [&recorded.workspace, &isolated.workspace] {
+        std::fs::create_dir(workspace.join("readonly")).unwrap();
+    }
+    std::fs::write(recorded.workspace.join("readonly/data"), "recorded canary").unwrap();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call({root}, nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    const result = harness.process.run({{program: "cat", args: ["readonly/data"]}})
+    harness.stdio.println(result)
+  }})
+}}
+"#,
+        root = quote(&alias),
+    );
+    let recording = start_recording(
+        &recorded.tapes,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: alias.clone(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(run_at(&source, &alias, None, &alias)
+        .unwrap()
+        .contains("recorded canary"));
+    assert_eq!(recording.error(), None);
+    drop(recording);
+    std::fs::remove_file(direct_alias).unwrap();
+    for (case, denied) in [("read-control", false), ("read-denied", true)] {
+        let target = isolated.workspace.join("readonly/data");
+        std::fs::write(&target, "private canary").unwrap();
+        let guard = start_branch(BranchPlan {
+            tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
+            live_after_calls: 1,
+            workspace: location(&isolated.workspace),
+            state_root: isolated.markers.join(case),
+            host_state_roots: Vec::new(),
+            prompt_edits: Vec::new(),
+        })
+        .unwrap();
+        let output = run_at_with_path_grants(
+            &source,
+            &isolated.workspace,
+            Some(guard.scope()),
+            &isolated.workspace,
+            Vec::new(),
+            if denied {
+                vec![alias.join("readonly")]
+            } else {
+                Vec::new()
+            },
+        );
+        let report = guard.finish();
+        assert_eq!((report.served_calls, report.live_calls), (1, 1));
+        assert_eq!(report.divergence, None);
+        let output = output.unwrap_or_else(|error| error);
+        if denied {
+            assert!(
+                !output.contains("private canary"),
+                "read denial was lost: {output}"
+            );
+            assert!(
+                output.contains("denied") || output.contains("permitted"),
+                "{output}"
+            );
+        } else {
+            assert!(output.contains("private canary"), "{output}");
+        }
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "private canary");
+    }
+    assert_eq!(
+        std::fs::read_to_string(recorded.workspace.join("readonly/data")).unwrap(),
+        "recorded canary"
+    );
+}
+
 #[test]
 fn live_file_reads_cannot_address_a_peer_in_the_storage_pool() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -506,6 +601,8 @@ fn source_only_relocation_confines_commands_to_the_current_package() {
     }
     std::fs::write(original.join("asset"), "old package canary").unwrap();
     std::fs::write(current.join("asset"), "current package canary").unwrap();
+    let alias = assets.path().join("original-alias");
+    std::os::unix::fs::symlink(&original, &alias).unwrap();
     let source = |root: &Path| {
         format!(
             r#"
@@ -552,6 +649,8 @@ fn main(harness: Harness) {{
             ("broad-old", &original, assets.path(), false),
             ("exact-old", &original, current.as_path(), false),
             ("exact-current", &current, current.as_path(), true),
+            ("alias-old-argv", &original, alias.as_path(), false),
+            ("alias-current-argv", &current, alias.as_path(), true),
         ] {
             let guard = start_branch_with_sources(
                 BranchPlan {

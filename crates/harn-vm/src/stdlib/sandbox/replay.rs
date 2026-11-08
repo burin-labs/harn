@@ -26,6 +26,13 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     policy.sandbox_profile = SandboxProfile::OsHardened;
     policy.workspace_roots = vec![workspace.display().to_string()];
     let projection = crate::run_tape::workspace::physical_projection().expect("branch projection");
+    let project_root = |root: &str| {
+        let path = super::paths::lexical_for_policy(std::path::Path::new(root));
+        // Retained aliases remain meaningful after unlinking. Resolve those
+        // before canonicalizing, then project canonical filesystem aliases.
+        let named = projection.text(&path.to_string_lossy());
+        projection.text(&super::render_policy_root(&named).to_string_lossy())
+    };
     let process = policy.process_sandbox.as_mut();
     for roots in [
         &mut policy.read_only_roots,
@@ -34,16 +41,16 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
         &mut process.unix_socket_roots,
     ] {
         for root in roots {
-            *root = projection.text(root);
+            *root = project_root(root);
         }
     }
     if let Some(socket) = &mut process.ssh_agent_socket {
-        *socket = projection.text(socket);
+        *socket = project_root(socket);
     }
     let mapped_denials: Vec<_> = process
         .read_deny_roots
         .iter()
-        .map(|root| projection.text(root))
+        .map(|root| project_root(root))
         .collect();
     for root in mapped_denials {
         if !process.read_deny_roots.contains(&root) {

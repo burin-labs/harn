@@ -81,7 +81,12 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
 /// confinement. These tests replay process runs rather than confine them,
 /// and hosted macOS runners refuse sandbox-exec (SIP allows unrestricted
 /// DTrace), so the default profile would reject every recorded exec there.
-fn enter_run(workspace: &Path, write_root: &Path, read_roots: &[PathBuf]) {
+fn enter_run(
+    workspace: &Path,
+    write_root: &Path,
+    read_roots: &[PathBuf],
+    read_denials: &[PathBuf],
+) {
     harn_vm::stdlib::process::set_thread_execution_context(Some(
         harn_vm::orchestration::RunExecutionRecord {
             cwd: Some(workspace.display().to_string()),
@@ -89,7 +94,7 @@ fn enter_run(workspace: &Path, write_root: &Path, read_roots: &[PathBuf]) {
             ..Default::default()
         },
     ));
-    harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+    let mut policy = harn_vm::orchestration::CapabilityPolicy {
         workspace_roots: vec![write_root.display().to_string()],
         read_only_roots: read_roots
             .iter()
@@ -97,7 +102,12 @@ fn enter_run(workspace: &Path, write_root: &Path, read_roots: &[PathBuf]) {
             .collect(),
         sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
         ..Default::default()
-    });
+    };
+    policy.process_sandbox.read_deny_roots = read_denials
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect();
+    harn_vm::orchestration::push_execution_policy(policy);
 }
 
 fn leave_run() {
@@ -131,6 +141,17 @@ fn run_at_with_read_roots(
     root: &Path,
     read_roots: Vec<PathBuf>,
 ) -> Result<String, String> {
+    run_at_with_path_grants(source, workspace, branch, root, read_roots, Vec::new())
+}
+
+fn run_at_with_path_grants(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    root: &Path,
+    read_roots: Vec<PathBuf>,
+    read_denials: Vec<PathBuf>,
+) -> Result<String, String> {
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
     let root = root.to_path_buf();
@@ -144,7 +165,7 @@ fn run_at_with_read_roots(
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
-            enter_run(&workspace, &root, &read_roots);
+            enter_run(&workspace, &root, &read_roots, &read_denials);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -895,7 +916,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root, &[]);
+            enter_run(root, root, &[], &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_persistent_state_builtins_at_root(
@@ -1004,7 +1025,7 @@ pipeline main(harness: Harness, task: unknown) {{
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root, &[]);
+            enter_run(root, root, &[], &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);

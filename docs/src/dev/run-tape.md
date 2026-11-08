@@ -117,6 +117,9 @@ renderer refuses any implicit grant that would reopen the recorded workspace or
 the branch storage pool outside this arm. Ambient temporary trees, package
 configuration, and external mounts are withheld. A restored script's embedded
 absolute path is not edited: accessing the recorded tree or a peer is denied.
+Declared path grants retain recorded alias names even after unlinking, then
+resolve filesystem aliases before the final physical projection. Explicit
+denials retain both their original and mapped locations.
 
 ## Prompt source edits
 
