@@ -10,7 +10,8 @@ import {
 import { MESSAGE_65, MESSAGE_66, MESSAGE_67 } from "std/cli/localization/messages/part_13"
 import { MESSAGE_125 } from "std/cli/localization/messages/part_25"
 import { MESSAGE_193 } from "std/cli/localization/messages/part_38"
-import { MESSAGE_195, MESSAGE_196, MESSAGE_198 } from "std/cli/localization/messages/part_39"
+import { MESSAGE_195, MESSAGE_197, MESSAGE_198 } from "std/cli/localization/messages/part_39"
+import { MESSAGE_224 } from "std/cli/localization/messages/part_44"
 import { MESSAGE_41 } from "std/cli/localization/messages/part_8"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
@@ -28,9 +29,10 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "  harn serve mcp main.harn # expose the starter MCP server": MESSAGE_67,
   "  skip  {0} (already exists)": MESSAGE_125,
   "Creating project '{0}'...": MESSAGE_193,
-  "Failed to create {0}: {1}": MESSAGE_195,
-  "Failed to write {0}: {1}": MESSAGE_196,
+  "Failed to write {0}: {1}": MESSAGE_195,
+  "Initialization failed for {0} file(s).": MESSAGE_197,
   "Initializing harn project in current directory...": MESSAGE_198,
+  "destination is not a regular file": MESSAGE_224,
 }
 
 /**

@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_290: MessageTemplate = {
   arity: 0,
+  fallback: ["unclassified record ids"],
+  translations: {
+    de: ["nicht klassifizierte Datensatz-IDs"],
+    es: ["IDs de registros no clasificados"],
+    fr: ["identifiants d’enregistrements non classifiés"],
+    it: ["ID record non classificati"],
+    ja: ["未分類のレコードID"],
+    ko: ["미분류 레코드 ID"],
+    "pt-BR": ["IDs de registros não classificados"],
+    ru: ["неотнесённые идентификаторы записей"],
+    "zh-Hans": ["未分类记录 ID"],
+  },
+}
+
+pub const MESSAGE_291: MessageTemplate = {
+  arity: 0,
   fallback: ["unknown"],
   translations: {
     de: ["unbekannt"],
@@ -17,7 +33,7 @@ pub const MESSAGE_290: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_291: MessageTemplate = {
+pub const MESSAGE_292: MessageTemplate = {
   arity: 0,
   fallback: ["unreachable"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_291: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_292: MessageTemplate = {
+pub const MESSAGE_293: MessageTemplate = {
   arity: 0,
   fallback: ["warnings"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_292: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_293: MessageTemplate = {
+pub const MESSAGE_294: MessageTemplate = {
   arity: 0,
   fallback: ["yes"],
   translations: {
@@ -62,16 +78,5 @@ pub const MESSAGE_293: MessageTemplate = {
     "pt-BR": ["sim"],
     ru: ["да"],
     "zh-Hans": ["是"],
-  },
-}
-
-pub const MESSAGE_294: MessageTemplate = {
-  arity: 2,
-  fallback: [0, "       blocks: ", 1, "\n"],
-  translations: {
-    es: [0, "       bloques: ", 1, "\n"],
-    fr: [0, "       blocs : ", 1, "\n"],
-    it: [0, "       blocchi: ", 1, "\n"],
-    "pt-BR": [0, "       blocos: ", 1, "\n"],
   },
 }

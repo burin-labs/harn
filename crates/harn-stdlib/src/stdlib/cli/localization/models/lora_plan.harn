@@ -23,35 +23,26 @@ import { MESSAGE_162 } from "std/cli/localization/messages/part_32"
 import { MESSAGE_201 } from "std/cli/localization/messages/part_40"
 import { MESSAGE_214 } from "std/cli/localization/messages/part_42"
 import { MESSAGE_215, MESSAGE_218 } from "std/cli/localization/messages/part_43"
-import {
-  MESSAGE_221,
-  MESSAGE_222,
-  MESSAGE_223,
-  MESSAGE_224,
-} from "std/cli/localization/messages/part_44"
-import { MESSAGE_230, MESSAGE_231, MESSAGE_233 } from "std/cli/localization/messages/part_46"
-import { MESSAGE_236, MESSAGE_237 } from "std/cli/localization/messages/part_47"
-import { MESSAGE_241 } from "std/cli/localization/messages/part_48"
-import { MESSAGE_246 } from "std/cli/localization/messages/part_49"
+import { MESSAGE_221, MESSAGE_222, MESSAGE_223 } from "std/cli/localization/messages/part_44"
+import { MESSAGE_225 } from "std/cli/localization/messages/part_45"
+import { MESSAGE_231, MESSAGE_232, MESSAGE_234 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_237, MESSAGE_238 } from "std/cli/localization/messages/part_47"
+import { MESSAGE_242 } from "std/cli/localization/messages/part_48"
+import { MESSAGE_247 } from "std/cli/localization/messages/part_49"
 import { MESSAGE_28 } from "std/cli/localization/messages/part_5"
-import { MESSAGE_251, MESSAGE_254 } from "std/cli/localization/messages/part_50"
-import { MESSAGE_255 } from "std/cli/localization/messages/part_51"
-import { MESSAGE_260, MESSAGE_263 } from "std/cli/localization/messages/part_52"
+import { MESSAGE_252 } from "std/cli/localization/messages/part_50"
+import { MESSAGE_255, MESSAGE_256 } from "std/cli/localization/messages/part_51"
+import { MESSAGE_261, MESSAGE_264 } from "std/cli/localization/messages/part_52"
+import { MESSAGE_271, MESSAGE_272, MESSAGE_274 } from "std/cli/localization/messages/part_54"
 import {
-  MESSAGE_270,
-  MESSAGE_271,
-  MESSAGE_273,
-  MESSAGE_274,
-} from "std/cli/localization/messages/part_54"
-import {
-  MESSAGE_276,
+  MESSAGE_275,
   MESSAGE_277,
   MESSAGE_278,
   MESSAGE_279,
 } from "std/cli/localization/messages/part_55"
-import { MESSAGE_280, MESSAGE_281, MESSAGE_284 } from "std/cli/localization/messages/part_56"
-import { MESSAGE_285, MESSAGE_288 } from "std/cli/localization/messages/part_57"
-import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_280, MESSAGE_281, MESSAGE_282 } from "std/cli/localization/messages/part_56"
+import { MESSAGE_285, MESSAGE_286, MESSAGE_289 } from "std/cli/localization/messages/part_57"
+import { MESSAGE_294 } from "std/cli/localization/messages/part_58"
 import { MESSAGE_39 } from "std/cli/localization/messages/part_7"
 import { MESSAGE_40, MESSAGE_44 } from "std/cli/localization/messages/part_8"
 import { MessageTemplate, render_message } from "std/cli/message_template"
@@ -100,33 +91,33 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "corpus gates": MESSAGE_221,
   "corpus refresh": MESSAGE_222,
   "data validation": MESSAGE_223,
-  "difficulty signals": MESSAGE_224,
-  eval: MESSAGE_230,
-  "eval gates": MESSAGE_231,
-  "export dataset": MESSAGE_233,
-  "hard negatives": MESSAGE_236,
-  "inspect adapter": MESSAGE_237,
-  "local launch": MESSAGE_241,
-  no: MESSAGE_246,
-  "optional batch receipts": MESSAGE_251,
-  "precision gates": MESSAGE_254,
-  "preflight corpus": MESSAGE_255,
-  "promotion gates": MESSAGE_260,
-  "provenance manifest": MESSAGE_263,
-  "refinement loop": MESSAGE_270,
-  "required columns": MESSAGE_271,
-  "required metrics": MESSAGE_273,
-  "required receipts": MESSAGE_274,
-  "sampling policy": MESSAGE_276,
-  "selection stop conditions": MESSAGE_277,
-  "serving notes": MESSAGE_278,
-  "stop sequences": MESSAGE_279,
-  "template notes": MESSAGE_280,
-  "template requirements": MESSAGE_281,
-  "train adapter": MESSAGE_284,
-  "trainer contract": MESSAGE_285,
-  "training notes": MESSAGE_288,
-  yes: MESSAGE_293,
+  "difficulty signals": MESSAGE_225,
+  eval: MESSAGE_231,
+  "eval gates": MESSAGE_232,
+  "export dataset": MESSAGE_234,
+  "hard negatives": MESSAGE_237,
+  "inspect adapter": MESSAGE_238,
+  "local launch": MESSAGE_242,
+  no: MESSAGE_247,
+  "optional batch receipts": MESSAGE_252,
+  "precision gates": MESSAGE_255,
+  "preflight corpus": MESSAGE_256,
+  "promotion gates": MESSAGE_261,
+  "provenance manifest": MESSAGE_264,
+  "refinement loop": MESSAGE_271,
+  "required columns": MESSAGE_272,
+  "required metrics": MESSAGE_274,
+  "required receipts": MESSAGE_275,
+  "sampling policy": MESSAGE_277,
+  "selection stop conditions": MESSAGE_278,
+  "serving notes": MESSAGE_279,
+  "stop sequences": MESSAGE_280,
+  "template notes": MESSAGE_281,
+  "template requirements": MESSAGE_282,
+  "train adapter": MESSAGE_285,
+  "trainer contract": MESSAGE_286,
+  "training notes": MESSAGE_289,
+  yes: MESSAGE_294,
 }
 
 /**

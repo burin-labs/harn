@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_275: MessageTemplate = {
   arity: 0,
+  fallback: ["required receipts"],
+  translations: {
+    de: ["erforderliche Belege"],
+    es: ["recibos requeridos"],
+    fr: ["reçus requis"],
+    it: ["ricevute richieste"],
+    ja: ["必須レシート"],
+    ko: ["필수 수신증"],
+    "pt-BR": ["recebimentos obrigatórios"],
+    ru: ["обязательные квитанции"],
+    "zh-Hans": ["必需收据"],
+  },
+}
+
+pub const MESSAGE_276: MessageTemplate = {
+  arity: 0,
   fallback: ["same basename"],
   translations: {
     de: ["gleicher Dateiname"],
@@ -17,7 +33,7 @@ pub const MESSAGE_275: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_276: MessageTemplate = {
+pub const MESSAGE_277: MessageTemplate = {
   arity: 0,
   fallback: ["sampling policy"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_276: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_277: MessageTemplate = {
+pub const MESSAGE_278: MessageTemplate = {
   arity: 0,
   fallback: ["selection stop conditions"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_277: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_278: MessageTemplate = {
+pub const MESSAGE_279: MessageTemplate = {
   arity: 0,
   fallback: ["serving notes"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_278: MessageTemplate = {
     "pt-BR": ["observações de serving"],
     ru: ["заметки по подаче"],
     "zh-Hans": ["服务说明"],
-  },
-}
-
-pub const MESSAGE_279: MessageTemplate = {
-  arity: 0,
-  fallback: ["stop sequences"],
-  translations: {
-    de: ["Stoppsequenzen"],
-    es: ["secuencias de parada"],
-    fr: ["séquences d’arrêt"],
-    it: ["sequenze di arresto"],
-    ja: ["停止シーケンス"],
-    ko: ["중지 시퀀스"],
-    "pt-BR": ["sequências de parada"],
-    ru: ["стоп-последовательности"],
-    "zh-Hans": ["停止序列"],
   },
 }

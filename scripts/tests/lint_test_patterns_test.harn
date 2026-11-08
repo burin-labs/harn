@@ -384,6 +384,7 @@ pipeline test_literal_sleep_pattern(harness: Harness, task: unknown) {
   assert_eq(find_hits("sleep(500)\n", literal_sleep_pattern()).count, 1)
   assert_eq(find_hits("x = sleep(5)\n", literal_sleep_pattern()).count, 1)
   assert_eq(find_hits("time.sleep(3)\n", literal_sleep_pattern()).count, 1)
+  assert_eq(find_hits("harness.clock.sleep_ms(10)\n", literal_sleep_pattern()).count, 1)
 }
 
 @test
@@ -392,6 +393,7 @@ pipeline test_literal_sleep_pattern_rejections(harness: Harness, task: unknown) 
   assert_eq(find_hits("my_sleep(4)\n", literal_sleep_pattern()).count, 0)
   assert_eq(find_hits("xsleep(4)\n", literal_sleep_pattern()).count, 0)
   assert_eq(find_hits("sleep(ms)\n", literal_sleep_pattern()).count, 0)
+  assert_eq(find_hits("harness.clock.sleep_ms(ms)\n", literal_sleep_pattern()).count, 0)
 }
 
 @test

@@ -20,7 +20,11 @@ pipeline default(harness: Harness) {
   )
   with_llm_script(
     harness.llm,
-    [{text: "truncated", stop_reason: "max_tokens"}],
+    [
+      {text: "truncated", stop_reason: "max_tokens"},
+      {text: "truncated", stop_reason: "max_tokens"},
+      {text: "truncated", stop_reason: "max_tokens"},
+    ],
     { ->
       const truncated = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(truncated.acp_stop_reason)
@@ -28,7 +32,11 @@ pipeline default(harness: Harness) {
   )
   with_llm_script(
     harness.llm,
-    [{text: "truncated", stop_reason: "length"}],
+    [
+      {text: "truncated", stop_reason: "length"},
+      {text: "truncated", stop_reason: "length"},
+      {text: "truncated", stop_reason: "length"},
+    ],
     { ->
       const length = agent_loop(harness, "hi", nil, {provider: "mock"})
       harness.stdio.println(length.acp_stop_reason)
@@ -56,7 +64,7 @@ pipeline default(harness: Harness) {
     },
   )
 }
-// Provider truncated the response → max_tokens.
+// Provider truncated the response on every auto-continue attempt → max_tokens.
 // OpenAI-style finish_reason "length" maps to the same canonical value.
 // Anthropic refusal → refusal.
 // Iteration cap → max_turn_requests. Persistent + text-only keeps the

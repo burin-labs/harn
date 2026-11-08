@@ -1,6 +1,6 @@
 import { atomic_raise_max } from "../_common"
 
-pipeline default(harness: Harness) {
+pipeline test(harness: Harness) {
   // Baseline: no `with { max_concurrent }` — existing behavior, all
   // tasks run concurrently. Each task returns its index.
   const nums = [0, 1, 2, 3, 4]
@@ -31,17 +31,29 @@ pipeline default(harness: Harness) {
     return n * 3
   }
   harness.stdio.println(big_cap)
-  // Observable cap: track peak in-flight count via atomics. With 8
-  // tasks each sleeping briefly and a cap of 2, peak must be <= 2.
+  // Two admitted workers must overlap before either can finish.
   const in_flight = harness.runtime.atomic(0)
   const peak = harness.runtime.atomic(0)
+  const admitted = harness.runtime.channel("admitted", 8)
+  const release = harness.runtime.channel("release", 8)
+  const coordinator = spawn {
+    for _ in 0..4 {
+      harness.runtime.receive(admitted)
+      harness.runtime.receive(admitted)
+      assert_eq(harness.runtime.atomic_get(in_flight), 2)
+      harness.runtime.send(release, true)
+      harness.runtime.send(release, true)
+    }
+  }
   const work = [1, 2, 3, 4, 5, 6, 7, 8]
   parallel each work with { max_concurrent: 2 } { _ ->
     const now = harness.runtime.atomic_add(in_flight, 1) + 1
     atomic_raise_max(harness.runtime, peak, now)
-    harness.clock.sleep_ms(25ms)
+    harness.runtime.send(admitted, true)
+    harness.runtime.receive(release)
     harness.runtime.atomic_add(in_flight, -1)
   }
+  await(coordinator)
   harness.stdio.println(harness.runtime.atomic_get(peak) <= 2)
   harness.stdio.println(harness.runtime.atomic_get(peak) == 2)
 }

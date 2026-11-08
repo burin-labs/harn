@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_235: MessageTemplate = {
   arity: 2,
+  fallback: ["failed to create ", 0, ": ", 1],
+  translations: {
+    de: [0, " konnte nicht erstellt werden: ", 1],
+    es: ["no se pudo crear ", 0, ": ", 1],
+    fr: ["échec de la création de ", 0, " : ", 1],
+    it: ["impossibile creare ", 0, ": ", 1],
+    ja: [0, " の作成に失敗しました: ", 1],
+    ko: [0, " 생성 실패: ", 1],
+    "pt-BR": ["falha ao criar ", 0, ": ", 1],
+    ru: ["не удалось создать ", 0, ": ", 1],
+    "zh-Hans": ["创建 ", 0, " 失败：", 1],
+  },
+}
+
+pub const MESSAGE_236: MessageTemplate = {
+  arity: 2,
   fallback: ["failed to write ", 0, ": ", 1],
   translations: {
     de: [0, " konnte nicht geschrieben werden: ", 1],
@@ -17,7 +33,7 @@ pub const MESSAGE_235: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_236: MessageTemplate = {
+pub const MESSAGE_237: MessageTemplate = {
   arity: 0,
   fallback: ["hard negatives"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_236: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_237: MessageTemplate = {
+pub const MESSAGE_238: MessageTemplate = {
   arity: 0,
   fallback: ["inspect adapter"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_237: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_238: MessageTemplate = {
+pub const MESSAGE_239: MessageTemplate = {
   arity: 0,
   fallback: ["installed"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_238: MessageTemplate = {
     "pt-BR": ["instalado"],
     ru: ["установлено"],
     "zh-Hans": ["已安装"],
-  },
-}
-
-pub const MESSAGE_239: MessageTemplate = {
-  arity: 0,
-  fallback: ["live submit"],
-  translations: {
-    de: ["Live-Einreichung"],
-    es: ["envío en vivo"],
-    fr: ["soumission en direct"],
-    it: ["invio live"],
-    ja: ["ライブ送信"],
-    ko: ["실시간 제출"],
-    "pt-BR": ["envio ao vivo"],
-    ru: ["отправка в live-режиме"],
-    "zh-Hans": ["实时提交"],
   },
 }

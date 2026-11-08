@@ -3,6 +3,28 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_270: MessageTemplate = {
   arity: 0,
+  fallback: ["recommendation table requested a cloud default without cloud credentials"],
+  translations: {
+    de: ["Die Empfehlungstabelle verlangte einen Cloud-Standardwert ohne Cloud-Anmeldedaten"],
+    es: [
+      "la tabla de recomendaciones solicitó un valor predeterminado en la nube sin credenciales de nube",
+    ],
+    fr: [
+      "le tableau de recommandations a demandé une valeur par défaut cloud sans identifiants cloud",
+    ],
+    it: ["la tabella delle raccomandazioni ha richiesto un default cloud senza credenziali cloud"],
+    ja: ["推奨表がクラウド認証情報なしでクラウドのデフォルトを要求しました"],
+    ko: ["권장 사항 표에서 클라우드 자격 증명 없이 클라우드 기본값을 요청했습니다"],
+    "pt-BR": ["a tabela de recomendações solicitou um padrão de nuvem sem credenciais de nuvem"],
+    ru: [
+      "таблица рекомендаций запросила облачное значение по умолчанию без облачных учетных данных",
+    ],
+    "zh-Hans": ["建议表在没有云凭据的情况下请求了云默认值"],
+  },
+}
+
+pub const MESSAGE_271: MessageTemplate = {
+  arity: 0,
   fallback: ["refinement loop"],
   translations: {
     de: ["Verfeinerungsschleife"],
@@ -17,7 +39,7 @@ pub const MESSAGE_270: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_271: MessageTemplate = {
+pub const MESSAGE_272: MessageTemplate = {
   arity: 0,
   fallback: ["required columns"],
   translations: {
@@ -33,7 +55,7 @@ pub const MESSAGE_271: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_272: MessageTemplate = {
+pub const MESSAGE_273: MessageTemplate = {
   arity: 0,
   fallback: ["required example metadata"],
   translations: {
@@ -49,7 +71,7 @@ pub const MESSAGE_272: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_273: MessageTemplate = {
+pub const MESSAGE_274: MessageTemplate = {
   arity: 0,
   fallback: ["required metrics"],
   translations: {
@@ -62,21 +84,5 @@ pub const MESSAGE_273: MessageTemplate = {
     "pt-BR": ["métricas obrigatórias"],
     ru: ["обязательные метрики"],
     "zh-Hans": ["必需指标"],
-  },
-}
-
-pub const MESSAGE_274: MessageTemplate = {
-  arity: 0,
-  fallback: ["required receipts"],
-  translations: {
-    de: ["erforderliche Belege"],
-    es: ["recibos requeridos"],
-    fr: ["reçus requis"],
-    it: ["ricevute richieste"],
-    ja: ["必須レシート"],
-    ko: ["필수 수신증"],
-    "pt-BR": ["recebimentos obrigatórios"],
-    ru: ["обязательные квитанции"],
-    "zh-Hans": ["必需收据"],
   },
 }

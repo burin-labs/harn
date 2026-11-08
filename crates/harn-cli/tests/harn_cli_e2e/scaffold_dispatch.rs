@@ -267,6 +267,144 @@ fn init_basic_project_runs_and_tests_green() {
 }
 
 #[test]
+fn init_runtime_state_is_ignored_but_authored_files_remain_visible() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let init = run_scaffold(&["init"], root);
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let agent = crate::test_util::process::harn_e2e_command()
+        .args([
+            "run",
+            "--environment-policy",
+            "isolated",
+            "-e",
+            r#"import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+fn main(harness: Harness) {
+  const options: AgentSpec = {provider: "mock", max_iterations: 2}
+  const result = agent_loop(harness, "Say hello.", nil, options)
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.visible_text)
+}"#,
+        ])
+        .current_dir(root)
+        .output()
+        .expect("run offline agent in its project");
+    assert!(
+        agent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&agent.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&agent.stdout),
+        "done\nMock response to 2-word prompt: Say hello.\n"
+    );
+    fs::create_dir(root.join("fixtures")).expect("fixture directory");
+    fs::write(
+        root.join("fixtures/expected.jsonl"),
+        "{\"expected\":\"synthetic\"}\n",
+    )
+    .expect("authored fixture");
+    let git = |args: &[&str]| {
+        let result = Command::new("git")
+            .args(["-c", "core.excludesFile="])
+            .args(args)
+            .current_dir(root)
+            .output()
+            .expect("git");
+        assert!(
+            result.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).expect("git stdout")
+    };
+    git(&["init", "--quiet"]);
+    for path in [".harn/events.sqlite", ".harn/session-store.sqlite"] {
+        assert!(
+            fs::metadata(root.join(path))
+                .expect("reached runtime store")
+                .len()
+                > 0
+        );
+        let ignored = git(&["check-ignore", "-v", "--", path]);
+        assert!(
+            ignored.starts_with(".gitignore:"),
+            "the generated root rules must own {path}: {ignored}"
+        );
+    }
+    let visible = git(&["ls-files", "--others", "--exclude-standard"]);
+    for path in [
+        "harn.toml",
+        "main.harn",
+        "lib/helpers.harn",
+        "tests/test_main.harn",
+        "fixtures/expected.jsonl",
+    ] {
+        assert!(
+            visible.lines().any(|line| line == path),
+            "authored file missing: {path}\n{visible}"
+        );
+    }
+    assert!(
+        !visible
+            .lines()
+            .any(|line| line.starts_with(".harn/") || line.starts_with(".harn-runs/")),
+        "runtime state is visible: {visible}"
+    );
+}
+
+#[test]
+fn init_preserves_an_existing_ignore_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let authored = b"# Project rules\n/private-notes/\n";
+    fs::write(tmp.path().join(".gitignore"), authored).expect("authored ignore file");
+    let init = run_scaffold(&["init"], tmp.path());
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    assert!(tmp.path().join("harn.toml").exists());
+    assert_eq!(fs::read(tmp.path().join(".gitignore")).unwrap(), authored);
+}
+
+#[test]
+fn init_reports_file_conflicts_without_overwriting_authored_data() {
+    for conflict in ["lib", "main.harn"] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join(conflict);
+        if conflict == "lib" {
+            fs::write(&path, b"Authored file must survive.\n").unwrap();
+        } else {
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("authored.txt"), b"Authored child must survive.\n").unwrap();
+        }
+        let init = run_scaffold(&["init"], tmp.path());
+        assert_eq!(init.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&init.stderr);
+        assert!(stderr.contains(conflict), "{stderr}");
+        assert!(
+            stderr.contains("Initialization failed for 1 file(s)."),
+            "{stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&init.stdout).contains("harn run main.harn"));
+        if conflict == "lib" {
+            assert_eq!(fs::read(&path).unwrap(), b"Authored file must survive.\n");
+        } else {
+            assert_eq!(
+                fs::read(path.join("authored.txt")).unwrap(),
+                b"Authored child must survive.\n"
+            );
+        }
+    }
+}
+
+#[test]
 fn new_package_dispatch_is_deterministic() {
     let (harn_snap, repeat_snap) = pair_run(
         "new package",

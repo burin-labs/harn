@@ -3,22 +3,6 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_195: MessageTemplate = {
   arity: 2,
-  fallback: ["Failed to create ", 0, ": ", 1],
-  translations: {
-    de: ["Fehler beim Erstellen von ", 0, ": ", 1],
-    es: ["No se pudo crear ", 0, ": ", 1],
-    fr: ["Échec de la création de ", 0, " : ", 1],
-    it: ["Impossibile creare ", 0, ": ", 1],
-    ja: [0, " の作成に失敗しました: ", 1],
-    ko: [0, " 생성 실패: ", 1],
-    "pt-BR": ["Falha ao criar ", 0, ": ", 1],
-    ru: ["Не удалось создать ", 0, ": ", 1],
-    "zh-Hans": ["创建 ", 0, " 失败：", 1],
-  },
-}
-
-pub const MESSAGE_196: MessageTemplate = {
-  arity: 2,
   fallback: ["Failed to write ", 0, ": ", 1],
   translations: {
     de: ["Fehler beim Schreiben von ", 0, ": ", 1],
@@ -33,7 +17,7 @@ pub const MESSAGE_196: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_197: MessageTemplate = {
+pub const MESSAGE_196: MessageTemplate = {
   arity: 0,
   fallback: ["Harn doctor\n\n"],
   translations: {
@@ -42,6 +26,22 @@ pub const MESSAGE_197: MessageTemplate = {
     ja: ["Harn の診断\n\n"],
     ko: ["Harn 진단\n\n"],
     "zh-Hans": ["Harn 诊断\n\n"],
+  },
+}
+
+pub const MESSAGE_197: MessageTemplate = {
+  arity: 1,
+  fallback: ["Initialization failed for ", 0, " file(s)."],
+  translations: {
+    de: ["Initialisierung für ", 0, " Datei(en) fehlgeschlagen."],
+    es: ["Error al inicializar ", 0, " archivo(s)."],
+    fr: ["Échec de l’initialisation pour ", 0, " fichier(s)."],
+    it: ["Inizializzazione non riuscita per ", 0, " file."],
+    ja: [0, " 個のファイルの初期化に失敗しました。"],
+    ko: ["파일 ", 0, "개의 초기화에 실패했습니다."],
+    "pt-BR": ["Falha ao inicializar ", 0, " arquivo(s)."],
+    ru: ["Не удалось инициализировать файлы: ", 0, "."],
+    "zh-Hans": [0, " 个文件初始化失败。"],
   },
 }
 

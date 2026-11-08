@@ -2,6 +2,22 @@
 import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_310: MessageTemplate = {
+  arity: 2,
+  fallback: [0, " route(s) declare the ", 1, " operation"],
+  translations: {
+    de: [0, " Route(n) deklarieren die ", 1, "-Operation"],
+    es: [0, " ruta(s) declaran la operación ", 1],
+    fr: [0, " route(s) déclarent l'opération ", 1],
+    it: [0, " route dichiarano l'operazione ", 1],
+    ja: [0, " 個のルートが ", 1, " オペレーションを宣言しています"],
+    ko: [0, " 경로가 ", 1, " 작업을 선언합니다"],
+    "pt-BR": [0, " rota(s) declaram a operação ", 1],
+    ru: [0, " маршрутов объявляют операцию ", 1],
+    "zh-Hans": [0, " 路由声明了 ", 1, " 操作"],
+  },
+}
+
+pub const MESSAGE_311: MessageTemplate = {
   arity: 7,
   fallback: [
     0,
@@ -22,7 +38,7 @@ pub const MESSAGE_310: MessageTemplate = {
   translations: {},
 }
 
-pub const MESSAGE_311: MessageTemplate = {
+pub const MESSAGE_312: MessageTemplate = {
   arity: 6,
   fallback: [
     0,
@@ -41,7 +57,7 @@ pub const MESSAGE_311: MessageTemplate = {
   translations: {},
 }
 
-pub const MESSAGE_312: MessageTemplate = {
+pub const MESSAGE_313: MessageTemplate = {
   arity: 1,
   fallback: [0, "(no local model outcomes found)\n"],
   translations: {
@@ -57,7 +73,7 @@ pub const MESSAGE_312: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_313: MessageTemplate = {
+pub const MESSAGE_314: MessageTemplate = {
   arity: 1,
   fallback: [0, "--- Next step ---\n"],
   translations: {
@@ -71,10 +87,4 @@ pub const MESSAGE_313: MessageTemplate = {
     ru: [0, "--- Следующий шаг ---\n"],
     "zh-Hans": [0, "--- 下一步 ---\n"],
   },
-}
-
-pub const MESSAGE_314: MessageTemplate = {
-  arity: 6,
-  fallback: [0, ":", 1, " ", 2, " claim=", 3, " observed=", 4, " ", 5],
-  translations: {},
 }
