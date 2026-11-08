@@ -1,4 +1,7 @@
 use crate::support;
+use harn_vm::orchestration::{
+    pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+};
 use harn_vm::security::session_environment::SessionEnvironment;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
 use std::path::Path;
@@ -68,9 +71,22 @@ impl GithubFixture {
                 let chunk = harn_vm::compile_source(body)?;
                 let mut vm = harn_vm::new_vm();
                 harn_runtime::register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|error| error.to_string())?;
+                push_execution_policy(CapabilityPolicy {
+                    tools: Vec::new(),
+                    capabilities: Default::default(),
+                    workspace_roots: vec![std::env::current_dir().unwrap().display().to_string()],
+                    read_only_roots: vec![self._root.path().join("bin").display().to_string()],
+                    side_effect_level: Some("workspace_write".into()),
+                    recursion_limit: None,
+                    tool_arg_constraints: Vec::new(),
+                    tool_annotations: Default::default(),
+                    sandbox_profile: SandboxProfile::Worktree,
+                    process_sandbox: Default::default(),
+                    process_network_proxy: None,
+                });
+                let result = vm.execute(&chunk).await.map_err(|error| error.to_string());
+                pop_execution_policy();
+                result?;
                 Ok(vm.output().to_string())
             }));
             harn_vm::stdlib::process::set_session_environment(None);
