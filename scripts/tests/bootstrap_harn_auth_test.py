@@ -254,5 +254,7 @@ if __name__ == "__main__":
     available = [mode for mode in ["curl", "wget"] if shutil.which(mode)]
     if not available:
         raise SystemExit("no real downloader available for transport tests")
+    if sys.platform.startswith("linux") and available != ["curl", "wget"]:
+        raise SystemExit("Linux transport verification requires both curl and wget")
     print(f"Real seed transport coverage: {', '.join(available)}", flush=True)
     unittest.main()
