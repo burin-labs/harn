@@ -329,13 +329,15 @@ fn cli_rejects_unknown_harn_environment_name_before_dispatch() {
 }
 
 #[test]
-fn cli_accepts_hook_build_policy_environment() {
+fn cli_accepts_hook_policy_environment() {
     for value in ["0", "1"] {
         let output = run_harn_e2e(
             &["--version"],
             &[
                 ("HARN_HOOKS_FULL_LOCAL", value),
                 ("HARN_HOOKS_NO_LOCAL_BUILD", value),
+                ("HARN_PREPUSH_FULL_TESTS", value),
+                ("HARN_PREPUSH_VALIDATION_BASE", "HEAD"),
             ],
         );
         assert_eq!(output.exit_code, 0, "{}", output.stderr);

@@ -270,6 +270,7 @@ fn consumer_for(name: &str) -> EnvironmentConsumer {
         "HARN_DEV_",
         "HARN_GC_",
         "HARN_HOOKS_",
+        "HARN_PREPUSH_",
         "HARN_RELEASE_",
         "HARN_TARGET_GC_",
     ]
@@ -818,23 +819,30 @@ mod tests {
     }
 
     #[test]
-    fn public_hook_build_policy_names_are_registered() {
+    fn public_hook_policy_names_are_registered() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
             .expect("harn-vm lives below workspace/crates");
-        let source = std::fs::read_to_string(root.join(".githooks/lib.sh"))
-            .expect("read the public hook build-policy owner");
-        let names: std::collections::BTreeSet<_> = bounded_harn_tokens(&source)
-            .filter(|name| name.starts_with("HARN_HOOKS_"))
-            .collect();
+        let mut names = std::collections::BTreeSet::new();
+        for path in [".githooks/lib.sh", ".githooks/pre-push"] {
+            let source = std::fs::read_to_string(root.join(path))
+                .expect("read the public hook policy owner");
+            names.extend(
+                bounded_harn_tokens(&source)
+                    .filter(|name| {
+                        name.starts_with("HARN_HOOKS_") || name.starts_with("HARN_PREPUSH_")
+                    })
+                    .map(str::to_string),
+            );
+        }
         assert!(
             names.contains("HARN_HOOKS_FULL_LOCAL"),
             "the hook policy census must measure its established opt-in switch"
         );
         for name in names {
             let spec =
-                variable_spec(name).unwrap_or_else(|| panic!("unregistered hook switch {name}"));
+                variable_spec(&name).unwrap_or_else(|| panic!("unregistered hook setting {name}"));
             assert_eq!(spec.consumer, EnvironmentConsumer::BuildTooling, "{name}");
         }
     }
