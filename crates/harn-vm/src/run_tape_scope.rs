@@ -131,9 +131,24 @@ impl BranchHandle {
     }
 
     pub(crate) fn relocated(&self) -> bool {
-        self.recorded_workspaces()
-            .iter()
-            .any(|root| root != &self.workspace)
+        !self.sources.physical().is_empty()
+            || self
+                .recorded_workspaces()
+                .iter()
+                .any(|root| root != &self.workspace)
+    }
+
+    pub(crate) fn recorded_process_roots(&self) -> Vec<PathBuf> {
+        let mut roots = self.recorded_workspaces();
+        roots.extend(
+            self.sources
+                .physical()
+                .iter()
+                .map(|root| root.recorded.clone()),
+        );
+        roots.sort();
+        roots.dedup();
+        roots
     }
 
     pub(crate) fn runtime_store(&self, path: PathBuf) -> crate::store::SharedStore {

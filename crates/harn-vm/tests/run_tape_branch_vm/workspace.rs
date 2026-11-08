@@ -491,6 +491,114 @@ fn main(harness: Harness) {{
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn source_only_relocation_confines_commands_to_the_current_package() {
+    use harn_vm::run_tape::{start_branch_with_sources, ReplaySourceRoot};
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let assets = tempfile::tempdir().unwrap();
+    let original = assets.path().join("original");
+    let current = assets.path().join("current");
+    for root in [&original, &current] {
+        std::fs::create_dir(root).unwrap();
+    }
+    std::fs::write(original.join("asset"), "old package canary").unwrap();
+    std::fs::write(current.join("asset"), "current package canary").unwrap();
+    let source = |root: &Path| {
+        format!(
+            r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    const result = harness.process.run({{program: "cat", args: [{asset}]}})
+    harness.stdio.println(result)
+  }})
+}}
+"#,
+            asset = quote(&root.join("asset")),
+        )
+    };
+    let recording = start_recording(
+        &recorded.tapes,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: recorded.workspace.clone(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    let baseline = run_at_with_read_roots(
+        &source(&original),
+        &recorded.workspace,
+        None,
+        &recorded.workspace,
+        vec![assets.path().to_path_buf()],
+    )
+    .unwrap();
+    assert!(baseline.contains("old package canary"), "{baseline}");
+    assert_eq!(recording.error(), None);
+    drop(recording);
+    for (arm, workspace) in [&recorded.workspace, &isolated.workspace]
+        .into_iter()
+        .enumerate()
+    {
+        for (case, argv, grant, success) in [
+            ("broad-old", &original, assets.path(), false),
+            ("exact-old", &original, current.as_path(), false),
+            ("exact-current", &current, current.as_path(), true),
+        ] {
+            let guard = start_branch_with_sources(
+                BranchPlan {
+                    tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
+                    live_after_calls: 1,
+                    workspace: location(workspace),
+                    state_root: isolated
+                        .markers
+                        .join(format!("source-command-{arm}-{case}")),
+                    host_state_roots: Vec::new(),
+                    prompt_edits: Vec::new(),
+                },
+                vec![ReplaySourceRoot {
+                    recorded: original.clone(),
+                    restored: current.clone(),
+                }],
+            )
+            .unwrap();
+            let output = run_at_with_read_roots(
+                &source(argv),
+                workspace,
+                Some(guard.scope()),
+                workspace,
+                vec![grant.to_path_buf()],
+            );
+            let report = guard.finish();
+            assert_eq!((report.served_calls, report.live_calls), (1, 1));
+            assert_eq!(report.divergence, None);
+            let output = output.unwrap_or_else(|error| error);
+            assert!(
+                !output.contains("old package canary"),
+                "arm {arm} {case}: {output}"
+            );
+            if success {
+                assert!(output.contains("current package canary"), "{output}");
+            } else {
+                assert!(
+                    output.contains("cannot admit grant")
+                        || output.contains("denied")
+                        || output.contains("permitted"),
+                    "arm {arm} {case}: {output}"
+                );
+            }
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_recorded_path_cannot_follow_a_branch_symlink_into_the_original_workspace() {

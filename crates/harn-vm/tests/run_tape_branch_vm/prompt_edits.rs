@@ -370,7 +370,14 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
         vec![mapping.clone()],
     )
     .unwrap();
-    let output = run_in(&source, &dirs.workspace, Some(guard.scope())).unwrap();
+    let output = run_at_with_read_roots(
+        &source,
+        &dirs.workspace,
+        Some(guard.scope()),
+        &dirs.workspace,
+        vec![package.clone()],
+    )
+    .unwrap();
     let report = guard.finish();
     assert_eq!(report.divergence, None);
     assert_eq!((report.served_calls, report.live_calls), (1, 1));
@@ -411,9 +418,15 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
         vec![mapping],
     )
     .unwrap();
-    assert!(run_in(&source, &dirs.workspace, Some(guard.scope()))
-        .unwrap_err()
-        .contains("changed since recording"));
+    assert!(run_at_with_read_roots(
+        &source,
+        &dirs.workspace,
+        Some(guard.scope()),
+        &dirs.workspace,
+        vec![package.clone()],
+    )
+    .unwrap_err()
+    .contains("changed since recording"));
     let report = guard.finish();
     assert_eq!(report.live_calls, 0);
     assert_eq!(report.divergence.unwrap().what, "prompt source edit");
@@ -483,10 +496,12 @@ fn main(harness: Harness) {{
         )
         .unwrap()
         .unwrap();
-        let output = run_in(
+        let output = run_at_with_read_roots(
             &source(&packages[generation]),
             &dirs.workspace,
             Some(scope.clone()),
+            &dirs.workspace,
+            vec![packages[generation - 1].clone()],
         )
         .unwrap_or_else(|error| panic!("source generation {generation}: {error}"));
         assert!(

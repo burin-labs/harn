@@ -105,6 +105,9 @@ recorded. Model data keeps the earliest logical root across later moves, while
 file I/O resolves every retained root to the current package. Prompt edits use the
 selected tape's own recorded template identities. Missing restored packages,
 relative retained names, and overlapping source ownership refuse before execution.
+Source packages cannot overlap the replay storage pool. Moving only a source
+package also activates command confinement: grants cannot reopen its earlier
+locations, while an exact grant to the current package remains usable.
 
 On Linux, local foreground commands use the existing OS-hardened sandbox with
 the branch workspace, required runtime/toolchain access, and projected explicit

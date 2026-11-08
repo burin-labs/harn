@@ -8,7 +8,7 @@ fn roots() -> Option<(Vec<std::path::PathBuf>, std::path::PathBuf)> {
     branch.relocated().then(|| {
         (
             branch
-                .recorded_workspaces()
+                .recorded_process_roots()
                 .into_iter()
                 .filter(|root| root.as_path() != branch.workspace())
                 .collect(),

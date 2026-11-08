@@ -11,32 +11,6 @@ pub struct ReplayWorkspaceLocation {
     storage_pool: PathBuf,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn one_storage_location_binds_the_copy_to_the_whole_pool() {
-        let pool = tempfile::tempdir().unwrap();
-        let pool_root = pool.path().canonicalize().unwrap();
-        let mut locations = Vec::new();
-        for arm in ["left", "right"] {
-            let storage = pool.path().join(arm);
-            std::fs::create_dir(&storage).unwrap();
-            let location = ReplayWorkspaceLocation::from_storage_root(&storage).unwrap();
-            assert_eq!(
-                location.workspace_root(),
-                storage.canonicalize().unwrap().join("workspace")
-            );
-            assert_eq!(location.storage_pool(), pool_root);
-            locations.push(location);
-        }
-        assert_ne!(locations[0].workspace_root(), locations[1].workspace_root());
-        assert!(ReplayWorkspaceLocation::from_storage_root(Path::new("relative")).is_err());
-        assert!(ReplayWorkspaceLocation::from_storage_root(&pool.path().join("left/..")).is_err());
-    }
-}
-
 impl ReplayWorkspaceLocation {
     /// The working-copy directory inside independently owned storage.
     pub const DIRECTORY_NAME: &str = "workspace";
@@ -76,5 +50,31 @@ impl ReplayWorkspaceLocation {
     /// The entire pool, including peers created after execution starts.
     pub fn storage_pool(&self) -> &Path {
         &self.storage_pool
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_storage_location_binds_the_copy_to_the_whole_pool() {
+        let pool = tempfile::tempdir().unwrap();
+        let pool_root = pool.path().canonicalize().unwrap();
+        let mut locations = Vec::new();
+        for arm in ["left", "right"] {
+            let storage = pool.path().join(arm);
+            std::fs::create_dir(&storage).unwrap();
+            let location = ReplayWorkspaceLocation::from_storage_root(&storage).unwrap();
+            assert_eq!(
+                location.workspace_root(),
+                storage.canonicalize().unwrap().join("workspace")
+            );
+            assert_eq!(location.storage_pool(), pool_root);
+            locations.push(location);
+        }
+        assert_ne!(locations[0].workspace_root(), locations[1].workspace_root());
+        assert!(ReplayWorkspaceLocation::from_storage_root(Path::new("relative")).is_err());
+        assert!(ReplayWorkspaceLocation::from_storage_root(&pool.path().join("left/..")).is_err());
     }
 }
