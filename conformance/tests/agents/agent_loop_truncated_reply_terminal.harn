@@ -11,8 +11,8 @@ fn cut_off() {
   return {text: "I'll update the matcher", stop_reason: "max_tokens"}
 }
 
-fn report(harness: Harness, label: string, result: dict) {
-  harness.stdio.println(
+fn report(stdio: HarnessStdio, label: string, result: dict) {
+  stdio.println(
     label + " status=" + to_string(result?.status) + " kind="
       + to_string(result.terminal.kind)
       + " reason="
@@ -28,7 +28,7 @@ pipeline default(harness: Harness) {
     [cut_off(), cut_off(), cut_off()],
     { ->
       const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
-      report(harness, "exhausted", result)
+      report(harness.stdio, "exhausted", result)
       assert(result.status != "done", "a reply cut off on every attempt must not complete")
       assert_eq(result.terminal.kind, "policy_budget")
       assert_eq(result.stop_reason, "output_limit")
@@ -40,7 +40,7 @@ pipeline default(harness: Harness) {
     [llm_text("Fixed the matcher.")],
     { ->
       const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
-      report(harness, "normal", result)
+      report(harness.stdio, "normal", result)
       assert_eq(result.status, "done")
       assert_eq(result.terminal.kind, "natural")
     },
@@ -50,7 +50,7 @@ pipeline default(harness: Harness) {
     [cut_off(), llm_text("Fixed the matcher.")],
     { ->
       const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
-      report(harness, "recovered", result)
+      report(harness.stdio, "recovered", result)
       assert_eq(result.status, "done")
       assert_eq(result.terminal.kind, "natural")
     },
