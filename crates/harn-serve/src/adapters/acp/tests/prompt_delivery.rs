@@ -51,7 +51,7 @@ impl DeliveryHarness {
 
 fn wait_for_gate(harness: Harness) {{
   while !harness.fs.exists({gate_literal}) {{
-    harness.clock.sleep_ms(10)
+    harness.runtime.yield_now()
   }}
 }}
 
@@ -139,6 +139,26 @@ pipeline default(harness: Harness, task: unknown) {{
 
     fn open_gate(&self) {
         std::fs::write(&self.gate, "").expect("open gate");
+    }
+
+    async fn pending_prompt(&mut self, id: u64, text: &str, delivery: &str) {
+        self.prompt(id, text, Some(delivery));
+        let query_id = id + 1000;
+        self.send(serde_json::json!({
+            "jsonrpc": "2.0", "id": query_id, "method": "session/pending_prompts",
+            "params": {"sessionId": self.session_id},
+        }));
+        let (_, pending) = self.reply(query_id).await;
+        let prompts = pending["result"]["prompts"]
+            .as_array()
+            .expect("pending prompts");
+        assert!(
+            prompts.iter().any(|prompt| {
+                prompt["messageId"] == format!("m{id}") && prompt["delivery"] == delivery
+            }),
+            "prompt was not admitted while the gate was closed: {pending}"
+        );
+        assert!(self.seen.iter().all(|message| message["id"] != id));
     }
 
     fn send(&self, message: serde_json::Value) {
@@ -276,17 +296,7 @@ async fn steer_is_inserted_mid_turn_and_answered_at_insertion() {
         let mut h = DeliveryHarness::start().await;
         h.prompt(3, "tick", None);
         h.ticks_reach(1).await;
-        h.prompt(4, "change course", Some("steer"));
-
-        // The tool is still blocked, so the steer is pending, not inserted.
-        h.send(serde_json::json!({
-            "jsonrpc": "2.0", "id": 5, "method": "session/pending_prompts",
-            "params": {"sessionId": h.session_id},
-        }));
-        let (_, pending) = h.reply(5).await;
-        assert_eq!(pending["result"]["prompts"][0]["messageId"], "m4");
-        assert_eq!(pending["result"]["prompts"][0]["delivery"], "steer");
-        assert!(h.seen.iter().all(|message| message["id"] != 4));
+        h.pending_prompt(4, "change course", "steer").await;
 
         h.open_gate();
         let (receipt_at, receipt) = h.reply(4).await;
@@ -321,7 +331,7 @@ async fn steer_captures_the_workspace_at_transcript_insertion() {
             "params":{"sessionId":h.session_id, "messageId":"first", "prompt":[{"type":"text", "text":"tick"}]},
         }));
         h.ticks_reach(1).await;
-        h.prompt(4, "change course", Some("steer"));
+        h.pending_prompt(4, "change course", "steer").await;
         h.open_gate();
         let (_, receipt) = h.reply(4).await;
         assert_eq!(receipt["result"]["messageId"], "m4", "{receipt}");
@@ -358,7 +368,7 @@ async fn failed_steer_capture_never_exposes_an_older_boundary() {
         h.ticks_reach(1).await;
         let begin = checkpoint::call_begin(&h.session_id, "in-flight").unwrap();
         assert!(matches!(begin, checkpoint::Outcome::Ready(_)), "{begin:?}");
-        h.prompt(4, "change course", Some("steer"));
+        h.pending_prompt(4, "change course", "steer").await;
         h.open_gate();
         let (_, receipt) = h.reply(4).await;
         assert_eq!(receipt["result"]["messageId"], "m4", "{receipt}");
@@ -385,7 +395,7 @@ async fn queued_prompt_starts_its_own_turn_after_the_running_one() {
         let mut h = DeliveryHarness::start().await;
         h.prompt(3, "tick", None);
         h.ticks_reach(1).await;
-        h.prompt(4, "after this", Some("queue"));
+        h.pending_prompt(4, "after this", "queue").await;
         h.open_gate();
 
         let (first_end_at, first_end) = h.reply(3).await;
@@ -419,13 +429,7 @@ async fn queued_prompt_captures_its_boundary_when_the_turn_starts() {
         let mut h = DeliveryHarness::start_with_checkpoint(true).await;
         h.prompt(3, "tick", None);
         h.ticks_reach(1).await;
-        h.prompt(4, "after this", Some("queue"));
-        h.send(serde_json::json!({
-            "jsonrpc":"2.0", "id":5, "method":"session/pending_prompts",
-            "params":{"sessionId":h.session_id},
-        }));
-        let (_, pending) = h.reply(5).await;
-        assert_eq!(pending["result"]["prompts"][0]["messageId"], "m4");
+        h.pending_prompt(4, "after this", "queue").await;
         h.open_gate();
         let (_, first) = h.reply(3).await;
         assert_eq!(first["result"]["stopReason"], "end_turn");
@@ -555,12 +559,12 @@ async fn cancel_request_withdraws_only_a_prompt_not_yet_inserted() {
         let mut h = DeliveryHarness::start().await;
         h.prompt(3, "tick", None);
         h.ticks_reach(1).await;
-        h.prompt(4, "never mind", Some("steer"));
+        h.pending_prompt(4, "never mind", "steer").await;
         h.cancel_request(4);
         let (_, withdrawn) = h.reply(4).await;
         assert_cancelled(&withdrawn);
 
-        h.prompt(5, "keep going", Some("steer"));
+        h.pending_prompt(5, "keep going", "steer").await;
         h.open_gate();
         let (_, receipt) = h.reply(5).await;
         assert_eq!(receipt["result"]["messageId"], "m5");
@@ -586,15 +590,15 @@ async fn session_cancel_keeps_pending_prompts_for_the_next_turns() {
         let mut h = DeliveryHarness::start().await;
         h.prompt(3, "tick", None);
         h.ticks_reach(1).await;
-        h.prompt(4, "steer me", Some("steer"));
-        h.prompt(5, "queue me", Some("queue"));
+        h.pending_prompt(4, "steer me", "steer").await;
+        h.pending_prompt(5, "queue me", "queue").await;
         h.send(serde_json::json!({
             "jsonrpc": "2.0", "method": "session/cancel",
             "params": {"sessionId": h.session_id},
         }));
-        h.open_gate();
         let (cancelled_at, turn_end) = h.reply(3).await;
         assert_eq!(turn_end["result"]["stopReason"], "cancelled");
+        h.open_gate();
 
         let (steer_at, steer) = h.reply(4).await;
         assert_eq!(steer["result"]["messageId"], "m4");
