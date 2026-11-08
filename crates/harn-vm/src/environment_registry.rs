@@ -1174,7 +1174,7 @@ mod tests {
         harn_token_spans(source).filter_map(|(start, end)| source.get(start..end))
     }
 
-    fn harn_token_spans(source: &str) -> impl Iterator<Item = (usize, usize)> {
+    fn harn_token_spans(source: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
         let bytes = source.as_bytes();
         source.match_indices("HARN_").filter_map(move |(start, _)| {
             if start > 0 {
