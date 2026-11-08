@@ -1,51 +1,11 @@
 name: Portable kernel browser Wasm
 
+# Nightly on main, not per pull request. It gates nothing; `main health`
+# (main-health.yml) reports it once it fails three nights in a row, per
+# scripts/scheduled_workflows.toml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/portable-kernel-wasm.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "Makefile"
-      - "crates/harn-builtin-meta/**"
-      - "crates/harn-builtin-registry/**"
-      - "crates/harn-capability-contracts/**"
-      - "crates/harn-kernel/**"
-      - "crates/harn-lexer/**"
-      - "crates/harn-parser/**"
-      - "crates/harn-wasm/**"
-      - "crates/harn-cli/src/commands/app_host/**"
-      - "rust-toolchain.toml"
-      - "scripts/check_wasm_imports.mjs"
-      - "scripts/package_app_runtime.mjs"
-      - "scripts/app_host_runtime_conformance.mjs"
-      - "scripts/test_app_host_runtime_conformance.mjs"
-      - "scripts/generated_artifacts.toml"
-      - "scripts/resolve_chromedriver.sh"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/portable-kernel-wasm.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "Makefile"
-      - "crates/harn-builtin-meta/**"
-      - "crates/harn-builtin-registry/**"
-      - "crates/harn-capability-contracts/**"
-      - "crates/harn-kernel/**"
-      - "crates/harn-lexer/**"
-      - "crates/harn-parser/**"
-      - "crates/harn-wasm/**"
-      - "crates/harn-cli/src/commands/app_host/**"
-      - "rust-toolchain.toml"
-      - "scripts/check_wasm_imports.mjs"
-      - "scripts/package_app_runtime.mjs"
-      - "scripts/app_host_runtime_conformance.mjs"
-      - "scripts/test_app_host_runtime_conformance.mjs"
-      - "scripts/generated_artifacts.toml"
-      - "scripts/resolve_chromedriver.sh"
-  merge_group:
-    types: [checks_requested]
+  schedule:
+    - cron: "53 10 * * *"
   workflow_dispatch:
 
 permissions:
@@ -53,7 +13,7 @@ permissions:
 
 concurrency:
   group: portable-kernel-wasm-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 env:
   CARGO_INCREMENTAL: "0"

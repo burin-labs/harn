@@ -17,14 +17,11 @@ on:
   workflow_run: # zizmor: ignore[dangerous-triggers] the shared loop admits only an owned same-repository pull request run, reads metadata through the API, and never checks out the parent-run ref
     workflows:
       - Agent shell guard
-      - All features compile
       - Build release binaries
       - CI
       - CLI end-to-end behavior
       - Install channels smoke
-      - Lean embedding surface
       - macOS workspace tests
-      - Portable kernel browser Wasm
       - PR gates
       - Public metadata privacy
       - Release PR drift check

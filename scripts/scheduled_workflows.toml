@@ -23,6 +23,15 @@ job_ids = ["zizmor-online"]
 health_failures = 3
 
 [[workflow]]
+path = ".github/workflows/all-features.yml"
+name = "All features compile"
+claim = "Off-by-default Cargo feature sets still compile, the WASI process runtime passes, and source and binary drift stay clean"
+crons = ["33 10 * * *"]
+cadence_reason = "Daily keeps a 45-minute cold compile off every pull request while bounding optional-feature rot to one day."
+job_ids = ["all-features"]
+health_failures = 3
+
+[[workflow]]
 path = ".github/workflows/cli-cold-start-budget.yml"
 name = "CLI cold-start budget"
 claim = "Optimized CLI startup remains within its published latency budgets"
@@ -102,6 +111,15 @@ job_ids = ["cargo-install", "release-installer"]
 health_failures = 2
 
 [[workflow]]
+path = ".github/workflows/lean-embedding.yml"
+name = "Lean embedding surface"
+claim = "The lean harn-serve configurations link no tree-sitter grammar or sqlx crate while the full configuration links both"
+crons = ["13 10 * * *"]
+cadence_reason = "Daily bounds a dependency-graph regression to one day without a per-pull-request job."
+job_ids = ["lean-embedding"]
+health_failures = 3
+
+[[workflow]]
 path = ".github/workflows/macos-nightly.yml"
 name = "macOS workspace tests"
 claim = "The full workspace test surface passes on macOS"
@@ -118,6 +136,15 @@ crons = ["23 13 * * *"]
 cadence_reason = "Daily recomputes after the overnight suites; every push to main carries the verdict to the new head, so the daily run is the only one that measures."
 job_ids = ["report"]
 health_exempt = "This is the reader. A failed run of it is a red check on the main commit it ran for."
+
+[[workflow]]
+path = ".github/workflows/portable-kernel-wasm.yml"
+name = "Portable kernel browser Wasm"
+claim = "The portable kernel builds for browser Wasm, passes its import authority audit, and runs in a real Chrome worker"
+crons = ["53 10 * * *"]
+cadence_reason = "Daily bounds a browser-target break to one day without a per-pull-request Chrome job."
+job_ids = ["browser-wasm"]
+health_failures = 3
 
 [[workflow]]
 path = ".github/workflows/release-size-watch.yml"
