@@ -8560,7 +8560,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "DeepInfra's authenticated customer notice announces deprecation on 2026-11-15 and redirects continuing requests for inclusionAI/Ling-3.1-flash to deepseek-ai/DeepSeek-V4.1-Flash-1017. This is a DeepInfra-only serving change, not model equivalence; the historical Ling identity and pricing are retained. Cutoff time and redirect pricing are not confirmed.",
+        "retires_on": "2026-11-15",
+        "superseded_by": "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017"
       },
       "availability": "serverless",
       "quality_tags": [],

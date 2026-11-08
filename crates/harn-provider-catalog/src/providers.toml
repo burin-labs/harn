@@ -4789,16 +4789,19 @@ capabilities = [
     "prompt_caching",
 ]
 context_window = 262144
+deprecation_note = "DeepInfra's authenticated customer notice announces deprecation on 2026-11-15 and redirects continuing requests for inclusionAI/Ling-3.1-flash to deepseek-ai/DeepSeek-V4.1-Flash-1017. This is a DeepInfra-only serving change, not model equivalence; the historical Ling identity and pricing are retained. Cutoff time and redirect pricing are not confirmed."
 family = "inclusionai-ling"
 lineage = "inclusionai-ling-3"
 name = "Ling 3.1 Flash (DeepInfra)"
 open_weight = true
 provider = "deepinfra"
+retires_on = "2026-11-15"
 strengths = [
     "speed",
     "cheap",
     "tool_use",
 ]
+superseded_by = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017"
 tier = "mid"
 wire_model = "inclusionAI/Ling-3.1-flash"
 
