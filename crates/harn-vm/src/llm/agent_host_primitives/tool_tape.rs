@@ -6,13 +6,20 @@
 //! tool runs a second time.
 
 use crate::run_tape::{RecordedToolResult, ToolCallRecording, ToolServe};
+use crate::testbench::tape::CommandEffect;
 use crate::tool_annotations::SideEffectLevel;
 use crate::value::{DictMap, VmError, VmValue};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 tokio::task_local! {
-    static IN_RECORDED_DISPATCH: Arc<AtomicBool>;
+    static IN_RECORDED_DISPATCH: Arc<DispatchEffects>;
+}
+
+#[derive(Default)]
+struct DispatchEffects {
+    command_requested: AtomicBool,
+    background: AtomicBool,
 }
 
 /// Dispatch one agent tool call: served whole from a branch prefix, or run
@@ -44,13 +51,18 @@ async fn run_recorded(
     mut recording: Option<ToolCallRecording>,
     live: impl std::future::Future<Output = Result<VmValue, VmError>>,
 ) -> Result<VmValue, VmError> {
-    let background = Arc::new(AtomicBool::new(false));
-    let live = IN_RECORDED_DISPATCH.scope(background.clone(), live);
+    let effects = Arc::new(DispatchEffects::default());
+    let live = IN_RECORDED_DISPATCH.scope(effects.clone(), live);
     let result = crate::run_tape::capture_transcript_changes(&mut recording, live)
         .await
         .map(crate::run_tape::workspace::project_value);
-    if let Some(recording) = recording {
-        let outcome = if background.load(Ordering::Acquire) {
+    if let Some(mut recording) = recording {
+        recording.command_effect = if effects.command_requested.load(Ordering::Acquire) {
+            CommandEffect::Requested
+        } else {
+            CommandEffect::None
+        };
+        let outcome = if effects.background.load(Ordering::Acquire) {
             Err("a background command outlives the recorded dispatch".to_string())
         } else {
             recorded_from_result(&result)
@@ -63,10 +75,11 @@ async fn run_recorded(
 /// A command started in the foreground outlived its inline window and keeps
 /// running as a handle, so the recorded dispatch around it cannot be replayed.
 pub fn note_command_outlived_dispatch() {
-    let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
+    let _ =
+        IN_RECORDED_DISPATCH.try_with(|effects| effects.background.store(true, Ordering::Release));
 }
 
-/// Record a foreground host command, or serve its result and workspace effects.
+/// Record a host command, or serve its result and workspace effects.
 /// Commands inside an agent dispatch belong to that dispatch's recording.
 pub async fn taped_command_run(
     name: &str,
@@ -74,20 +87,13 @@ pub async fn taped_command_run(
     background: bool,
     live: impl std::future::Future<Output = Result<VmValue, VmError>>,
 ) -> Result<VmValue, VmError> {
+    if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
+        return run_command(name, background, live)
+            .await
+            .map(crate::run_tape::workspace::project_value);
+    }
     if background {
         crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
-        if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
-            return Err(VmError::Runtime(
-                "background command cannot retain a relocated replay filesystem namespace".into(),
-            ));
-        }
-        let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
-        crate::run_tape::check_live_command_workspace()?;
-        return live.await.map(crate::run_tape::workspace::project_value);
-    }
-    if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
-        crate::run_tape::check_live_command_workspace()?;
-        return live.await.map(crate::run_tape::workspace::project_value);
     }
     let tool = format!("process:{name}");
     let args = serde_json::Value::Array(
@@ -98,13 +104,31 @@ pub async fn taped_command_run(
     match begin_with("", &tool, &args, false) {
         Taped::Served(result) => result,
         Taped::Live(recording) => {
-            run_recorded(recording, async {
-                crate::run_tape::check_live_command_workspace()?;
-                live.await
-            })
-            .await
+            run_recorded(recording, run_command(name, background, live)).await
         }
     }
+}
+
+async fn run_command(
+    name: &str,
+    background: bool,
+    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
+) -> Result<VmValue, VmError> {
+    let _ = IN_RECORDED_DISPATCH
+        .try_with(|effects| effects.command_requested.store(true, Ordering::Release));
+    if background {
+        crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
+        if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+            return Err(VmError::Runtime(
+                "background command cannot retain a relocated replay filesystem namespace".into(),
+            ));
+        }
+    }
+    crate::run_tape::check_live_command_workspace()?;
+    if background {
+        note_command_outlived_dispatch();
+    }
+    live.await
 }
 
 enum Taped {
@@ -146,10 +170,11 @@ fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -
     let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
     match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
-        ToolServe::Served(recorded, changes, store_changes) => {
+        ToolServe::Served(recorded, changes, store_changes, command_effect) => {
             if let Some(mut recording) = recording {
                 recording.transcript_changes = changes;
                 recording.store_changes = store_changes;
+                recording.command_effect = command_effect;
                 crate::run_tape::finish_tool_call(recording, Ok(recorded.clone()));
             }
             Taped::Served(result_from_recorded(recorded))

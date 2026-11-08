@@ -131,11 +131,7 @@ impl BranchHandle {
     }
 
     pub(crate) fn relocated(&self) -> bool {
-        !self.sources.physical().is_empty()
-            || self
-                .recorded_workspaces()
-                .iter()
-                .any(|root| root != &self.workspace)
+        relocated(&self.workspace, &self.recorded_workspace, &self.sources)
     }
 
     pub(crate) fn recorded_process_roots(&self) -> Vec<PathBuf> {
@@ -372,6 +368,14 @@ pub(super) fn workspace_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a 
 /// constructor; unsupported hosts keep refusing before a child can start.
 pub(crate) fn check_live_command_workspace() -> Result<(), VmError> {
     crate::stdlib::sandbox::replay::check_supported()
+}
+
+pub(super) fn relocated(
+    workspace: &Path,
+    recorded: &super::workspace::RecordedWorkspace,
+    sources: &super::sources::ReplaySources,
+) -> bool {
+    !sources.physical().is_empty() || recorded.roots().iter().any(|root| root != workspace)
 }
 
 /// The scope a host enters around the execution that branches. It is `Send`,

@@ -63,7 +63,17 @@ mod privacy;
 /// Version 6 records runtime store mutations inside each tool dispatch.
 /// Version 7 records session reminder retirement state inside each dispatch.
 /// Version 8 requires session permission grant checks for served dispatches.
-pub const TAPE_FORMAT_VERSION: u32 = 8;
+/// Version 9 measures command requests inside every tool dispatch.
+pub const TAPE_FORMAT_VERSION: u32 = 9;
+
+/// Whether a dispatch reached the command capability, including a refused request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandEffect {
+    #[default]
+    None,
+    Requested,
+}
 
 /// Retired reminder identities, ordered canonically for recording and replay.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,6 +344,9 @@ pub enum TapeRecordKind {
         /// did not measure them, rather than measuring no changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         store_changes: Option<TapePayload>,
+        /// Missing means unmeasured, not that the dispatch requested no command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command_effect: Option<CommandEffect>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {
