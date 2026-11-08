@@ -75,6 +75,112 @@ fn command_effects_measure_execution_inside_identically_named_tools() {
 }
 
 #[test]
+fn native_background_spawn_records_its_command_and_unservable_handle() {
+    use harn_vm::stdlib::host::dispatch_host_operation;
+    use harn_vm::value::json::{json_to_vm_value, vm_value_to_json};
+
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    let marker = dirs.markers.join("native-background");
+    let recording = start_recording(
+        &dirs.tapes,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: dirs.workspace.clone(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    run(
+        r#"
+import { with_llm_script } from "std/testing"
+fn main(harness: Harness) {
+  with_llm_script(harness.llm, [{text: "baseline"}], { ->
+    harness.llm.call("baseline", nil, {provider: "mock", model: "mock"})
+  })
+}
+"#,
+        &dirs.workspace,
+    )
+    .unwrap();
+    assert!(!marker.exists());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(harn_clock::test_support::with_local_tasks(async {
+        enter_run(&dirs.workspace, dirs._root.path(), &[], &[]);
+        let request = json_to_vm_value(&serde_json::json!({
+            "mode": "argv",
+            "argv": ["sh", "-c", "printf core-background > \"$1\"", "fixture", marker],
+            "cwd": dirs.workspace,
+            "sandbox_profile": "workspace_paths"
+        }));
+        let handle = dispatch_host_operation("process", "spawn", request.as_dict().unwrap())
+            .await
+            .unwrap();
+        let id = vm_value_to_json(&handle)["handle_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let request = json_to_vm_value(&serde_json::json!({"handle_id": id}));
+        let waited = dispatch_host_operation("process", "wait", request.as_dict().unwrap())
+            .await
+            .unwrap();
+        let waited = vm_value_to_json(&waited);
+        assert_eq!(waited["status"], "exited");
+        assert_eq!(waited["exit_code"], 0);
+        dispatch_host_operation("process", "release", request.as_dict().unwrap())
+            .await
+            .unwrap();
+        leave_run();
+    }));
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "core-background");
+    assert_eq!(recording.error(), None);
+    drop(recording);
+    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let commands: Vec<_> = tape
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TapeRecordKind::ToolCall {
+                command_effect,
+                unservable,
+                ..
+            } => Some((*command_effect, unservable)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        commands.len(),
+        1,
+        "a real native background command must be measured"
+    );
+    assert_eq!(
+        commands[0].0,
+        Some(harn_vm::testbench::tape::CommandEffect::Requested)
+    );
+    assert!(commands[0]
+        .1
+        .as_deref()
+        .is_some_and(|reason| reason.contains("background")));
+    #[cfg(not(target_os = "linux"))]
+    {
+        let isolated = super::dirs();
+        let error = match start_branch(plan(tape, &isolated.workspace, 0)) {
+            Ok(_) => panic!("native background command evidence was lost at admission"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("cannot replay commands in a moved workspace"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn missing_command_evidence_refuses_even_in_the_live_suffix() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let recorded = dirs();

@@ -27,58 +27,6 @@ pub(super) fn async_builtin_cancel_token(
     ctx.and_then(|ctx| ctx.child_vm().cancellation_token())
 }
 
-/// Apply the command-policy preflight (deny-patterns, approval gating,
-/// sandbox decisions) and then spawn the process non-blocking. Mirrors
-/// [`dispatch_process_exec_with_policy`] so spawn is gated identically to
-/// exec. There is no postflight here: spawn returns a handle immediately,
-/// not a completed command result; completion is observed later via
-/// poll/wait, which are not themselves command executions.
-pub(super) async fn dispatch_process_spawn_with_policy(
-    ctx: Option<&AsyncBuiltinCtx>,
-    params: &crate::value::DictMap,
-    caller: serde_json::Value,
-    mode: super::HostDispatch,
-) -> Result<VmValue, VmError> {
-    if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
-        return Err(VmError::Runtime(
-            "background process cannot retain a relocated replay filesystem namespace".into(),
-        ));
-    }
-    let prepared = match crate::orchestration::run_prepared_command_policy_preflight(
-        ctx,
-        params,
-        caller,
-        crate::orchestration::CommandDispatchOrigin::ArbitraryProcess,
-        |params| super::prepared_command::prepare_command(ctx, params, "spawn", mode),
-    )
-    .await?
-    {
-        crate::orchestration::CommandPolicyPreflight::Proceed { params, .. } => params,
-        crate::orchestration::CommandPolicyPreflight::Blocked {
-            status,
-            message,
-            context,
-            decisions,
-        } => {
-            return Ok(crate::orchestration::blocked_command_response(
-                params, status, &message, context, decisions,
-            ));
-        }
-    };
-
-    match prepared {
-        super::prepared_command::PreparedCommand::Host { command, .. } => command.execute().await,
-        super::prepared_command::PreparedCommand::Local(prepared) => {
-            crate::stdlib::process_spawn::spawn_prepared(
-                &prepared.params,
-                prepared.command,
-                async_builtin_cancel_token(ctx),
-            )
-            .await
-        }
-    }
-}
-
 pub(super) async fn dispatch_process_exec_after_policy(
     ctx: Option<&AsyncBuiltinCtx>,
     prepared: PreparedLocalCommand,

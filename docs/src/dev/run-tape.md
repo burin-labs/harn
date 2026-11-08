@@ -170,12 +170,14 @@ establishes whether an edit improves model behavior.
   A baseline recorded in an isolated workspace can replay at that same path;
   the host restores its initial contents between runs.
 - Each tool dispatch records whether it requested a command, including requests
-  refused before launch. On unsupported hosts, admission refuses a moved replay
+  refused before launch. On non-Linux hosts, admission refuses a moved replay
   with recorded command requests after the served prefix, before any model call.
   Answer-only and filesystem-only replay remain available. Served commands need
   no child process and retain their command evidence in descendant recordings.
-  New live commands still pass the runtime confinement check. Missing command
-  evidence requires a new recording; it never means no commands were requested.
+  Linux checks the active command policy and filesystem backend at execution;
+  a Linux host without that backend can make a model call before refusing the
+  command. New live commands still pass the runtime confinement check. Missing
+  command evidence requires a new recording; it never means no commands were requested.
 - Background commands cannot be served because their process handles do not
   exist in the branch. A dispatch that starts one is marked unservable.
   Relocated branches also refuse live background commands because the workspace
