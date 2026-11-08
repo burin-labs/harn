@@ -143,7 +143,10 @@ fn caller_removals_cannot_undo_the_protected_login_environment() {
 fn main(harness: Harness) {
   const result = harness.process.run({
     program: "gh", args: ["api", "fixture/probe"],
-    env_remove: ["GH_CONFIG_DIR", "GIT_CONFIG_COUNT", "GH_PAGER", "GIT_PAGER"]
+    env_remove: [
+      "GH_CONFIG_DIR", "gh_config_dir", "Gh_Config_Dir",
+      "GIT_CONFIG_COUNT", "git_config_count", "GH_PAGER", "GIT_PAGER"
+    ]
   })
   assert(result.success)
   const response = json_parse(result.stdout)
