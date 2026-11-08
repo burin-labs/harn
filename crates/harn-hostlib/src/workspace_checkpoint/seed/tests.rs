@@ -318,3 +318,103 @@ fn directory_permissions_survive_restore_and_private_cleanup() {
     )
     .unwrap();
 }
+
+/// Rewrite `path` with a fresh counter until the guard drops, as an editor's
+/// indexer or a running session does while a capture reads the tree.
+struct Writer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Writer {
+    fn start(path: std::path::PathBuf) -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let writes = std::sync::Arc::new(AtomicU64::new(0));
+        let thread = {
+            let (stop, writes) = (stop.clone(), writes.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let next = writes.fetch_add(1, Ordering::Relaxed);
+                    fs::write(&path, next.to_string()).unwrap();
+                }
+            })
+        };
+        while writes.load(Ordering::Relaxed) < 100 {
+            std::thread::yield_now();
+        }
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
+    }
+}
+
+#[test]
+fn runtime_state_written_during_capture_is_not_part_of_the_seed() {
+    let source = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("input.txt"), "project").unwrap();
+    fs::create_dir_all(source.path().join(".harn-runs")).unwrap();
+    fs::create_dir_all(source.path().join(".harn/skills")).unwrap();
+    fs::write(source.path().join(".harn/skills/user.md"), "user").unwrap();
+    let _writer = Writer::start(source.path().join(".harn-runs/live.json"));
+    let replay =
+        ReplayWorkspace::capture_in(source.path(), storage.path(), SeedLimits::default()).unwrap();
+    assert_eq!(
+        fs::read_to_string(replay.path().join("input.txt")).unwrap(),
+        "project"
+    );
+    assert_eq!(
+        fs::read_to_string(replay.path().join(".harn/skills/user.md")).unwrap(),
+        "user"
+    );
+    assert!(!replay.path().join(".harn-runs").exists());
+}
+
+#[test]
+fn host_owned_paths_written_during_capture_are_not_part_of_the_seed() {
+    let source = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    fs::create_dir_all(source.path().join(".burin/index")).unwrap();
+    fs::write(source.path().join(".burin/rules.md"), "shared").unwrap();
+    let _buffers = Writer::start(source.path().join(".burin/dirty-buffers.json"));
+    let _index = Writer::start(source.path().join(".burin/index/scan-result.json"));
+    let host_owned = [
+        PathBuf::from(".burin/dirty-buffers.json"),
+        PathBuf::from(".burin/index"),
+    ];
+    let mut replay = ReplayWorkspace::capture_excluding(
+        source.path(),
+        storage.path(),
+        SeedLimits::default(),
+        &host_owned,
+    )
+    .unwrap();
+    replay.restore().unwrap();
+    assert_eq!(
+        fs::read_to_string(replay.path().join(".burin/rules.md")).unwrap(),
+        "shared"
+    );
+    assert!(!replay.path().join(".burin/dirty-buffers.json").exists());
+    assert!(!replay.path().join(".burin/index").exists());
+    let escaping = [PathBuf::from("../outside")];
+    assert!(matches!(
+        ReplayWorkspace::capture_excluding(
+            source.path(),
+            storage.path(),
+            SeedLimits::default(),
+            &escaping
+        ),
+        Err(SeedError::Unsupported { .. })
+    ));
+}
