@@ -13,6 +13,7 @@ import {
 //
 //   harn run scripts/run_approval_review_calibration.harn
 //   harn run scripts/run_approval_review_calibration.harn -- --model <id>
+//   harn run scripts/run_approval_review_calibration.harn -- --screen <decision-model id>
 //   harn run scripts/run_approval_review_calibration.harn -- --policy <overlay.toml>
 //
 // `--policy` overlays a TOML file on the runtime's bundled policy, and
@@ -37,6 +38,7 @@ fn format_rate(value: any) -> string {
 fn main(harness: Harness) {
   const args = {
     model: __flag_value(argv, "--model", ""),
+    screen: __flag_value(argv, "--screen", ""),
     policy: __flag_value(argv, "--policy", ""),
     receipt: __flag_value(argv, "--receipt", ""),
     corpus: __flag_value(argv, "--corpus", CORPUS_PATH),
@@ -65,19 +67,23 @@ fn main(harness: Harness) {
     )
     return 2
   }
+  // The flags join the overlay before it resolves, so the policy owner fills
+  // and checks them the way it does a file.
+  let reviewer = unwrap(overlay)?.reviewer ?? {}
+  if args.model != "" {
+    reviewer = reviewer + {model: args.model}
+  }
+  if args.screen != "" {
+    reviewer = reviewer + {screen: {model: args.screen}}
+  }
   const resolved = try {
-    approval_review_policy(unwrap(overlay) ?? {})
+    approval_review_policy((unwrap(overlay) ?? {}) + {reviewer: reviewer})
   }
   if is_err(resolved) {
     harness.stdio.println("invalid policy overlay: " + to_string(unwrap_err(resolved)))
     return 2
   }
-  const policy_doc = unwrap(resolved)
-  const policy = if trim(to_string(args.model)) != "" {
-    policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
-  } else {
-    policy_doc
-  }
+  const policy = unwrap(resolved)
   const corpus = approval_review_corpus(harness.fs, to_string(args.corpus))
   if len(corpus) == 0 {
     harness.stdio.println("no calibration cases found at " + to_string(args.corpus))
@@ -135,6 +141,22 @@ fn main(harness: Harness) {
   harness.stdio.println("unanswered (failed closed) " + to_string(report.unanswered_count))
   harness.stdio.println("cost                      " + format_cost(report))
   harness.stdio.println("priced-reason buckets     " + json_stringify(report?.priced_reasons ?? {}))
+  const screened = results.filter({ result -> result.screen != nil }).to_list()
+  if len(screened) > 0 {
+    let escalations = {}
+    for result in screened {
+      if result.screen.outcome == "escalated" {
+        const reason = to_string(result.screen.reason)
+        escalations = escalations + {[reason]: to_int(escalations[reason] ?? 0) + 1}
+      }
+    }
+    const settled = screened.filter({ result -> result.screen.outcome != "escalated" }).to_list()
+    harness.stdio.println(
+      "screen settled            " + to_string(len(settled)) + " of " + to_string(len(screened))
+        + ", escalated "
+        + json_stringify(escalations),
+    )
+  }
   if len(report.ambiguous_observed) > 0 {
     harness.stdio.println("ambiguous (not scored):")
     for row in report.ambiguous_observed {

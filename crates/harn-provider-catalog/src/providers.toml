@@ -12934,6 +12934,26 @@ wire_model = "typesafe/jev-1.14"
 input_per_mtok = 0.042
 output_per_mtok = 0.0
 
+[models."openrouter/typesafe/jev-1.14-20261014"]
+context_window = 32000
+equivalence_group = "typesafe-jev-1.14"
+family = "typesafe-jev"
+lineage = "typesafe-jev-1"
+logical_model = "typesafe-jev-1.14"
+name = "Jev 1.14 2026-10-14 (OpenRouter)"
+open_weight = false
+operations = ["decision"]
+provider = "openrouter"
+released = "2026-10-14"
+row_kind = "snapshot"
+served_variant = "openrouter"
+tier = "small"
+wire_model = "typesafe/jev-1.14-20261014"
+
+[models."openrouter/typesafe/jev-1.14-20261014".pricing]
+input_per_mtok = 0.042
+output_per_mtok = 0.0
+
 [models."openrouter/typesafe/jev-latest"]
 blurb = "Follows TypeSafe's current Jev release through OpenRouter's alpha decisions endpoint."
 context_window = 32000

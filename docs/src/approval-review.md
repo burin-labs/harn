@@ -167,22 +167,49 @@ reviews do not contribute to judgment-quality rates and remain visible in
 never answered measured nothing. Deterministic floor refusals are measured
 without model calls. `ambiguous_observed` is reported and deliberately not scored.
 
-### A decision model as the reviewer
+### Screen reviews with a decision model
 
-A reviewer route whose model is a decision model, one that answers typed
-questions with probabilities instead of generating text, is asked through
-`harness.llm.evaluate_request` rather than the verdict schema. It answers the
-same two questions as score questions whose levels carry the prompt's rubric,
-`approval_review_decision_questions(policy)`, over
-`approval_review_decision_state(request)`: the goal, the requested action, and the
-labeled untrusted context. The outcome is computed from the two levels by the
-same thresholds. The record names `reviewer_backend: "native_decision"` and its
-`decision_receipt`, and its rationale states the levels and their confidence,
-because a decision model writes no prose. A route on `structured_llm` stays on
-the generative path.
+A policy can name a decision model, one that answers typed questions with
+probabilities instead of generating text, as a screen in front of the reviewer.
+No screen is configured by default.
+
+```toml
+[reviewer.screen]
+model = "openrouter/typesafe/jev-1.14-20261014"
+timeout_ms = 1000 # the default
+```
+
+The screen answers the reviewer's two questions as score questions whose levels
+carry the same rubric, `approval_review_decision_questions(policy)`, over
+`approval_review_decision_state(request)`: the goal, the requested action, and
+the labeled untrusted context. From the two distributions it computes the
+probability that the thresholds approve. It settles the review only when that
+probability is at least `APPROVAL_REVIEW_SCREEN_APPROVE_AT` (0.7) and its most
+likely levels approve, or at most `APPROVAL_REVIEW_SCREEN_DENY_AT` (0.3) and they
+deny. Everything else goes to the reviewer:
+
+| `screen.reason` | cause |
+|---|---|
+| `uncertain` | the probability falls between the bounds, or disagrees with the most likely levels |
+| `timeout` | no answer within `timeout_ms`; the call is cancelled |
+| `error` | the call failed |
+| `not_answered` | the evaluation came back unanswered, including an inference-boundary refusal |
+| `malformed` | a distribution is missing a level, out of range, or does not sum to 1 |
+| `not_a_decision_model` | the screen's route does not speak a decision protocol |
+
+The screen's call passes the same inference boundary as any model call. A
+boundary that refuses routes with unknown training terms refuses OpenRouter's
+decisions route, because the catalog records no training term for it, and the
+reviewer answers instead. Pin a dated model ID: the bounds are fit to one
+model's probabilities.
+
+Every record from a screened review carries `screen`: its outcome, reason,
+levels, approval probability, duration and cost. A review the screen settled
+names `reviewer_route_source: "screen"`; an escalated one counts both calls in
+`duration_ms` and `cost_usd`.
 
 ```sh
-harn run scripts/run_approval_review_calibration.harn -- --model openrouter/typesafe/jev-1.14
+harn run scripts/run_approval_review_calibration.harn -- --screen openrouter/typesafe/jev-1.14-20261014
 ```
 
 ## Read the rollup on a run

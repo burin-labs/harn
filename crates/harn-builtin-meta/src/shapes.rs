@@ -113,6 +113,13 @@ pub const APPROVAL_POLICY_DECISION: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("receipt", TY_DICT),
 ]);
 
+/// The reviewer's optional decision-model screen.
+pub const APPROVAL_REVIEW_SCREEN_POLICY: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("model", TY_STRING),
+    ShapeFieldDescriptor::new("provider", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("timeout_ms", TY_INT),
+]);
+
 /// Closed projection of the Rust-parsed bundled approval-review policy.
 /// The runtime serialization and Harn aliases are checked by typed-options parity.
 pub const APPROVAL_REVIEW_POLICY: Ty = Ty::Shape(&[
@@ -125,6 +132,7 @@ pub const APPROVAL_REVIEW_POLICY: Ty = Ty::Shape(&[
             ShapeFieldDescriptor::new("timeout_ms", TY_INT),
             ShapeFieldDescriptor::new("on_error", Ty::LitString("deny")),
             ShapeFieldDescriptor::new("provider", TY_STRING_OR_NIL),
+            ShapeFieldDescriptor::new("screen", Ty::Optional(&APPROVAL_REVIEW_SCREEN_POLICY)),
         ]),
     ),
     ShapeFieldDescriptor::new(

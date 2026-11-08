@@ -54,6 +54,8 @@ pub type CalibrationCaseResult = {
   priced_reason: string,
   accounting_status: any,
   duration_ms: any,
+  // What the reviewer's screen did, or nil when the policy has none.
+  screen: any,
 }
 
 /**
@@ -122,6 +124,7 @@ pub fn approval_review_run_case(
     priced_reason: __priced_reason(decision),
     accounting_status: decision?.accounting_status,
     duration_ms: decision?.duration_ms,
+    screen: decision?.screen,
   }
 }
 

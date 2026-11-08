@@ -1,0 +1,5 @@
+confident_screen_settles=true
+uncertain_screen_escalates=true
+malformed_screen_escalates=true
+screen_error_escalates=true
+boundary_refused_screen_escalates=true
