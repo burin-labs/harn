@@ -1,4 +1,5 @@
 pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
   const starts = harness.runtime.atomic(0)
   const sup = harness.runtime.supervisor_start(
     {
@@ -8,7 +9,7 @@ pipeline default(harness: Harness) {
         {
           name: "windowed-worker",
           kind: "workflow_runner",
-          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1, backoff_ms: 5},
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 60000},
           task: { _ctx ->
             let attempt = harness.runtime.atomic_add(starts, 1) + 1
             if attempt < 3 {
@@ -20,12 +21,14 @@ pipeline default(harness: Harness) {
       ],
     },
   )
-  let state = harness.runtime.supervisor_state(sup)
-  const deadline_ms = harness.clock.timestamp() * 1000 + 250
-  while state.status != "completed" && harness.clock.timestamp() * 1000 < deadline_ms {
-    harness.clock.sleep_ms(5ms)
-    state = harness.runtime.supervisor_state(sup)
+  for attempt in [1, 2] {
+    while harness.runtime.atomic_get(starts) != attempt
+      || harness.runtime.supervisor_state(sup).children[0].status != "waiting" {
+      harness.runtime.yield_now()
+    }
+    harness.testing.clock_advance(60000)
   }
+  const state = harness.runtime.supervisor_wait(sup)
   harness.stdio.println(harness.runtime.atomic_get(starts))
   harness.stdio.println(state.status)
   harness.stdio.println(state.children[0].status)
@@ -33,4 +36,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(state.metrics.failed)
   harness.stdio.println(state.metrics.restarted)
   harness.stdio.println(state.metrics.suppressed)
+  harness.testing.clock_reset()
 }

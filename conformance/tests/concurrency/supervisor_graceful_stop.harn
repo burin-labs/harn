@@ -1,4 +1,5 @@
 pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
   const drained = harness.runtime.atomic(0)
   const ready = harness.runtime.channel("supervisor-graceful-stop-ready", 1)
   const sup = harness.runtime.supervisor_start(
@@ -34,4 +35,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.runtime.atomic_get(drained))
   harness.stdio.println(final_event.kind)
   harness.stdio.println(final_event.message)
+  harness.testing.clock_reset()
 }
