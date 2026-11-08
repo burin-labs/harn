@@ -10,8 +10,8 @@ fn a_dispatch_starting_a_background_command_is_not_replayed() {
         .unwrap();
     {
         let _guard = record_full(tmp.path());
-        rt.block_on(taped_command_run("outer", &[], false, |_| async {
-            taped_command_run("background", &[], true, |_| async { Ok(VmValue::Nil) }).await
+        rt.block_on(taped_command_run("outer", &[], false, async {
+            taped_command_run("background", &[], true, async { Ok(VmValue::Nil) }).await
         }))
         .unwrap();
         record_llm_call(&request("first"), &result("done", None));
@@ -19,7 +19,7 @@ fn a_dispatch_starting_a_background_command_is_not_replayed() {
     let workspace = tmp.path().join("branch");
     let replay = branch(tmp.path(), 1, &workspace);
     let ran = std::sync::atomic::AtomicBool::new(false);
-    let result = rt.block_on(taped_command_run("outer", &[], false, |_| async {
+    let result = rt.block_on(taped_command_run("outer", &[], false, async {
         ran.store(true, Ordering::SeqCst);
         Ok(VmValue::Nil)
     }));

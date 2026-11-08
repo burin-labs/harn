@@ -22,7 +22,9 @@ use super::builtins::SharedIndex;
 use super::state::{canonicalize, IndexState};
 use super::CodeIndexCapability;
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, optional_bool, optional_string, str_value};
+use crate::tools::args::{
+    build_dict, dict_arg, optional_bool, optional_string, resolve_host_path, str_value,
+};
 use crate::HarnReferenceResolver;
 
 /// Outcome of [`CodeIndexCapability::warm_session`].
@@ -592,9 +594,12 @@ pub(super) fn run_rebuild_single_flight(
     let raw = dict_arg(BUILTIN_REBUILD, args)?;
     let dict = raw.as_ref();
     let force = optional_bool(BUILTIN_REBUILD, dict, "force", false)?;
-    let root = optional_string(BUILTIN_REBUILD, dict, "root")?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let root = resolve_host_path(
+        BUILTIN_REBUILD,
+        optional_string(BUILTIN_REBUILD, dict, "root")?
+            .as_deref()
+            .unwrap_or("."),
+    )?;
     if !root.exists() {
         return Err(HostlibError::InvalidParameter {
             builtin: BUILTIN_REBUILD,

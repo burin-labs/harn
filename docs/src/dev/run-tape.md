@@ -15,8 +15,7 @@ Hosts declare additional durable storage directories in `TapeWorkspace.state_roo
 The recording retains those roots so a branch can isolate writes to them.
 
 `taped_command_run` wraps a host command before its policy hooks and execution.
-Its live callback receives the branch-projected arguments before command
-preparation, policy hooks, and execution. It records the returned value and
+It records the returned value and
 observed workspace changes. Commands inside
 an agent tool dispatch belong to that dispatch's recording and are not recorded
 again. The host identifies background requests before entering the wrapper;
@@ -79,18 +78,25 @@ establishes that session permission grants were checked. Older recordings stay
 inspectable but need to be recorded again for branching.
 
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
-prefix. Replay projects recorded workspace paths in served values, model-facing
-requests and results, and tool arguments into the branch's physical root.
-Request and argument comparisons use that same projection in memory; the original
-tape and its content-addressed payloads remain unchanged. Filesystem builtins
+prefix. Each branch has one workspace identity: the logical root is the original
+recorded root, and the physical root is its private working copy. Pipeline and
+model data retain the logical root, including tool results and request digests.
+The original tape and its content-addressed payloads remain unchanged. Filesystem builtins
 resolve paths before normal permission checks and refuse parent-component or
-symlink escapes. `ReplayWorkspaceProjection` supplies the same name projection
-for host configuration that runs outside the VM.
+symlink escapes. Host filesystem adapters use `workspace_path` at their I/O
+boundary. `BranchScope.workspace_identity()` exposes the two roots without
+assigning path policy to the host.
+
+Enter the branch scope before calling `start_recording` to record a descendant.
+Its header retains prior physical workspace roots, oldest first, while its request
+payloads retain the original logical identity. A later branch resolves every
+retained root at the filesystem boundary and preserves the original prompt source
+identity. The recording refuses a workspace that differs from its scope.
 
 On Linux, local foreground commands use the existing OS-hardened sandbox with
 the branch workspace, required runtime/toolchain access, and projected explicit
-host grants. Working
-directories, arguments, and environment values use the projected root. The OS
+host grants. Process working directories resolve to the physical root. Command
+arguments and environment values remain unchanged. The OS
 renderer refuses any implicit grant that would reopen the recorded workspace or
 the branch storage pool outside this arm. Ambient temporary trees, package
 configuration, and external mounts are withheld. A restored script's embedded

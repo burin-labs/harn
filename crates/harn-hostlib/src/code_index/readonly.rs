@@ -35,7 +35,8 @@ use super::builtins::SharedIndex;
 use super::state::IndexState;
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_string_list, str_value, to_agent_path,
+    build_dict, dict_arg, optional_bool, optional_string_list, resolve_host_path, str_value,
+    to_agent_path,
 };
 
 /// Shared cell holding the read-only secondary indexes. Each entry is a
@@ -68,7 +69,7 @@ pub(super) fn run_add_readonly_roots(
     let mut added: Vec<VmValue> = Vec::with_capacity(roots.len());
     let mut total_files: usize = 0;
     for raw_root in roots {
-        let root = PathBuf::from(&raw_root);
+        let root = resolve_host_path(BUILTIN_ADD_READONLY_ROOTS, &raw_root)?;
         if !root.exists() {
             return Err(HostlibError::InvalidParameter {
                 builtin: BUILTIN_ADD_READONLY_ROOTS,

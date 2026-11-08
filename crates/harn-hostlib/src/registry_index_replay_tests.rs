@@ -73,8 +73,9 @@ fn indexed_run(
 fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
     let temporary = tempfile::tempdir().unwrap();
     let workspace = temporary.path().join("workspace");
+    let restored = temporary.path().join("restored");
     let outside = temporary.path().join("outside");
-    for root in [&workspace, &outside] {
+    for root in [&workspace, &restored, &outside] {
         std::fs::create_dir(root).unwrap();
         std::fs::write(
             root.join("indexed.rs"),
@@ -111,14 +112,14 @@ fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
     let plan = |name: &str| BranchPlan {
         tape: tape.clone(),
         live_after_calls: 1,
-        workspace_root: workspace.clone(),
+        workspace_root: restored.clone(),
         workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         state_root: temporary.path().join(name),
         host_state_roots: vec![],
         prompt_edits: vec![],
     };
     let replay = start_branch(plan("branch-state")).unwrap();
-    let (branched, rebuilt) = indexed_run(&workspace, &workspace, false, Some(replay.scope()));
+    let (branched, rebuilt) = indexed_run(&restored, &workspace, false, Some(replay.scope()));
     assert_eq!(branched.unwrap(), recorded);
     assert_eq!(
         rebuilt, 1,
@@ -137,7 +138,7 @@ fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
     );
     assert_eq!(rebuilt, 0);
     let refused = start_branch(plan("refused-state")).unwrap();
-    let (outside_result, rebuilt) = indexed_run(&workspace, &outside, false, Some(refused.scope()));
+    let (outside_result, rebuilt) = indexed_run(&restored, &outside, false, Some(refused.scope()));
     assert!(outside_result.is_err());
     assert_eq!(
         rebuilt, 0,

@@ -34,6 +34,7 @@ pub(crate) struct BranchHandle {
     /// `state_root`.
     protected: Vec<(PathBuf, PathBuf)>,
     recorded_workspace: Option<PathBuf>,
+    workspace_ancestors: Vec<PathBuf>,
     workspace: PathBuf,
     workspace_container: PathBuf,
     source_roots: Vec<super::ReplaySourceRoot>,
@@ -55,6 +56,7 @@ impl BranchHandle {
         workspace_container: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
         recorded_workspace: Option<PathBuf>,
+        workspace_ancestors: Vec<PathBuf>,
         source_roots: Vec<super::ReplaySourceRoot>,
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
@@ -64,6 +66,7 @@ impl BranchHandle {
             workspace: state.workspace_root.clone(),
             workspace_container,
             recorded_workspace,
+            workspace_ancestors,
             source_roots,
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
@@ -100,8 +103,25 @@ impl BranchHandle {
         self.recorded_workspace.as_deref()
     }
 
+    pub(crate) fn recorded_workspaces(&self) -> Vec<PathBuf> {
+        let mut roots = self.workspace_ancestors.clone();
+        if let Some(root) = &self.recorded_workspace {
+            if !roots.contains(root) {
+                roots.push(root.clone());
+            }
+        }
+        roots
+    }
+
     pub(crate) fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    pub(crate) fn logical_workspace(&self) -> &Path {
+        self.workspace_ancestors
+            .first()
+            .or(self.recorded_workspace.as_ref())
+            .map_or(&self.workspace, PathBuf::as_path)
     }
 
     pub(crate) fn workspace_container(&self) -> &Path {
@@ -113,9 +133,9 @@ impl BranchHandle {
     }
 
     pub(crate) fn relocated(&self) -> bool {
-        self.recorded_workspace
-            .as_ref()
-            .is_some_and(|root| root != &self.workspace)
+        self.recorded_workspaces()
+            .iter()
+            .any(|root| root != &self.workspace)
     }
 
     pub(crate) fn runtime_store(&self, path: PathBuf) -> crate::store::SharedStore {
@@ -131,7 +151,9 @@ impl BranchHandle {
             }
         }
         match (
-            &self.recorded_workspace,
+            self.workspace_ancestors
+                .first()
+                .or(self.recorded_workspace.as_ref()),
             workspace_relative(path, &self.workspace),
         ) {
             (Some(recorded), Some(relative)) => recorded.join(relative).display().to_string(),
@@ -207,7 +229,7 @@ pub(crate) fn state_branch() -> Option<Arc<BranchHandle>> {
 /// Resolve a recorded workspace path before the normal filesystem permission
 /// check. Do not rewrite text or canonicalize against the original file tree:
 /// a symlink there may have changed since recording.
-pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
+pub fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     let Some(branch) = state_branch() else {
         return Ok(path);
     };
@@ -219,16 +241,25 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
             return confined_mapping(&path, &root.restored, relative);
         }
     }
-    let Some(recorded) = &branch.recorded_workspace else {
-        return Ok(path);
-    };
-    if recorded == &branch.workspace {
-        return Ok(path);
+    let roots = branch.recorded_workspaces();
+    let mapped = roots
+        .iter()
+        .filter_map(|root| workspace_relative(&path, root))
+        .min_by_key(|relative| relative.components().count());
+    match mapped {
+        Some(relative) => confined_mapping(&path, &branch.workspace, relative),
+        None => {
+            let resolved = crate::workspace_path::canonicalize_existing_ancestor(&path)
+                .map_err(|error| VmError::Runtime(format!("branch workspace path: {error}")))?;
+            if resolved.starts_with(&branch.workspace_container) {
+                return Err(VmError::Runtime(format!(
+                    "workspace path {} addresses another replay workspace",
+                    path.display()
+                )));
+            }
+            Ok(path)
+        }
     }
-    let Some(relative) = workspace_relative(&path, recorded) else {
-        return Ok(path);
-    };
-    confined_mapping(&path, &branch.workspace, relative)
 }
 
 fn confined_mapping(path: &Path, root: &Path, relative: &Path) -> Result<PathBuf, VmError> {
@@ -276,6 +307,11 @@ pub(super) fn validate_source_roots(
             || overlaps(&root.recorded, workspace)
             || recorded_workspace.is_some_and(|recorded| {
                 overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
+            })
+            || tape.header.run.as_ref().is_some_and(|run| {
+                run.workspace_ancestors.iter().any(|recorded| {
+                    overlaps(&root.recorded, recorded) || overlaps(&root.restored, recorded)
+                })
             })
         {
             return Err(
@@ -331,6 +367,11 @@ pub struct BranchScope {
 }
 
 impl BranchScope {
+    /// The validated workspace view for host inputs outside VM execution.
+    pub fn workspace_identity(&self) -> super::ReplayWorkspaceIdentity {
+        super::workspace::identity_for(&self.handle)
+    }
+
     /// Bind the branch for a synchronous stretch on this thread. Use
     /// [`BranchScope::run`] across async suspensions.
     pub fn enter(&self) -> crate::persistent_state::ScopedPersistentStateRoot {

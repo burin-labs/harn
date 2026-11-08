@@ -23,7 +23,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     tools: Option<&VmValue>,
     options: &DictMap,
 ) -> Result<VmValue, VmError> {
-    let call = match crate::run_tape::workspace::project_value(call) {
+    let call = match call {
         VmValue::Dict(call) => call,
         other => {
             return Err(VmError::Runtime(format!(
@@ -46,7 +46,9 @@ async fn run_recorded(
 ) -> Result<VmValue, VmError> {
     let background = Arc::new(AtomicBool::new(false));
     let live = IN_RECORDED_DISPATCH.scope(background.clone(), live);
-    let result = crate::run_tape::capture_transcript_changes(&mut recording, live).await;
+    let result = crate::run_tape::capture_transcript_changes(&mut recording, live)
+        .await
+        .map(crate::run_tape::workspace::project_value);
     if let Some(recording) = recording {
         let outcome = if background.load(Ordering::Acquire) {
             Err("a background command outlives the recorded dispatch".to_string())
@@ -66,29 +68,12 @@ pub fn note_command_outlived_dispatch() {
 
 /// Record a foreground host command, or serve its result and workspace effects.
 /// Commands inside an agent dispatch belong to that dispatch's recording.
-pub async fn taped_command_run<F, Fut>(
+pub async fn taped_command_run(
     name: &str,
     args: &[VmValue],
     background: bool,
-    live: F,
-) -> Result<VmValue, VmError>
-where
-    F: FnOnce(Vec<VmValue>) -> Fut,
-    Fut: std::future::Future<Output = Result<VmValue, VmError>>,
-{
-    let mut projected: Vec<_> = args
-        .iter()
-        .cloned()
-        .map(crate::run_tape::workspace::project_value)
-        .collect();
-    if let Some(branch) = crate::run_tape::state_branch().filter(|branch| branch.relocated()) {
-        if let Some(VmValue::Dict(params)) = projected.first_mut() {
-            let params = std::sync::Arc::make_mut(params);
-            params
-                .entry(crate::value::intern_key("cwd"))
-                .or_insert_with(|| VmValue::string(branch.workspace().display().to_string()));
-        }
-    }
+    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
+) -> Result<VmValue, VmError> {
     if background {
         crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
         if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
@@ -98,16 +83,15 @@ where
         }
         let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
         crate::run_tape::check_live_command_workspace()?;
-        return live(projected).await;
+        return live.await.map(crate::run_tape::workspace::project_value);
     }
     if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
         crate::run_tape::check_live_command_workspace()?;
-        return live(projected).await;
+        return live.await.map(crate::run_tape::workspace::project_value);
     }
     let tool = format!("process:{name}");
     let args = serde_json::Value::Array(
-        projected
-            .iter()
+        args.iter()
             .map(crate::llm::helpers::vm_value_to_json)
             .collect(),
     );
@@ -116,7 +100,7 @@ where
         Taped::Live(recording) => {
             run_recorded(recording, async {
                 crate::run_tape::check_live_command_workspace()?;
-                live(projected).await
+                live.await
             })
             .await
         }
@@ -154,6 +138,9 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
 }
 
 fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -> Taped {
+    let mut logical_args = args.clone();
+    crate::run_tape::workspace::project_json(&mut logical_args);
+    let args = &logical_args;
     // Recording starts before serving, so a branch's own tape keeps what it
     // served and the effects it re-applied.
     let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);

@@ -76,6 +76,10 @@ fn main(harness: Harness) {{
     harness.llm.call("continue", nil, {{provider: "mock", model: "mock"}})
     const written = harness.tools.run_command({{argv: ["/bin/sh", "-c", {command}], cwd: {root}, env_mode: "replace", env: {{REPLAY_VALUE: {value}}}}})
     assert(written.exit_code == 0)
+    const read = harness.tools.read_file({{path: path_join({root}, "value")}})
+    assert(read.content == {value})
+    const search = harness.tools.search({{pattern: {value}, path: {root}, fixed_strings: true}})
+    assert(len(search.matches) > 0)
   }})
 }}
 "#
@@ -169,12 +173,9 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
                 grade.wait();
                 let (workspace, guard, output) = prepared.unwrap();
                 let output = output.unwrap();
+                assert!(output.contains(recorded_root.to_str().unwrap()), "{output}");
                 assert!(
-                    output.contains(workspace.path().to_str().unwrap()),
-                    "{output}"
-                );
-                assert!(
-                    !output.contains(recorded_root.to_str().unwrap()),
+                    !output.contains(workspace.path().to_str().unwrap()),
                     "{output}"
                 );
                 assert_eq!(
@@ -198,7 +199,7 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
     let roots: Vec<_> = arms.into_iter().map(|arm| arm.join().unwrap()).collect();
     assert_ne!(roots[0], roots[1]);
     // A recorded branch is itself a valid baseline. Keep literal source paths
-    // unchanged while each descendant records requests at its physical root.
+    // unchanged while descendants retain the original logical root.
     let mut parent_tape = tapes.path().to_path_buf();
     let mut descendants = Vec::new();
     for generation in 1..=2 {
@@ -233,10 +234,7 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
             Some(scope.clone()),
         )
         .expect("a recorded branch must remain branchable");
-        assert!(
-            output.contains(workspace.path().to_str().unwrap()),
-            "{output}"
-        );
+        assert!(output.contains(recorded_root.to_str().unwrap()), "{output}");
         assert_eq!(
             std::fs::read_to_string(workspace.path().join("value")).unwrap(),
             "descendant"

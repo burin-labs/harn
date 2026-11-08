@@ -4,78 +4,87 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// Project workspace paths in host configuration and model-facing data.
-/// This relocates names only. Process execution separately requires an
-/// OS-enforced filesystem view; text projection cannot confine a child.
+/// The stable name seen by a replay and the directory that owns its effects.
 #[derive(Clone, Debug)]
-pub struct ReplayWorkspaceProjection {
-    roots: Vec<(String, String)>,
+pub struct ReplayWorkspaceIdentity {
+    logical_root: PathBuf,
+    physical_root: PathBuf,
+}
+
+impl ReplayWorkspaceIdentity {
+    pub fn logical_root(&self) -> &Path {
+        &self.logical_root
+    }
+    pub fn physical_root(&self) -> &Path {
+        &self.physical_root
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReplayWorkspaceProjection {
+    roots: Vec<RootMapping>,
+}
+
+#[derive(Clone, Debug)]
+struct RootMapping {
+    recorded: String,
+    restored: String,
 }
 
 impl ReplayWorkspaceProjection {
     pub fn new(recorded: &Path, restored: &Path) -> Self {
         Self {
-            roots: vec![(
-                recorded.display().to_string(),
-                restored.display().to_string(),
-            )],
+            roots: vec![RootMapping {
+                recorded: recorded.display().to_string(),
+                restored: restored.display().to_string(),
+            }],
         }
     }
 
     pub(super) fn with_sources(mut self, sources: &[super::ReplaySourceRoot]) -> Self {
-        self.roots.extend(sources.iter().map(|root| {
-            (
-                root.recorded.display().to_string(),
-                root.restored.display().to_string(),
-            )
+        self.roots.extend(sources.iter().map(|root| RootMapping {
+            recorded: root.recorded.display().to_string(),
+            restored: root.restored.display().to_string(),
         }));
         self.roots
-            .sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
+            .sort_by_key(|root| std::cmp::Reverse(root.recorded.len()));
+        self
+    }
+
+    fn with_ancestors(mut self, roots: &[PathBuf], restored: &Path) -> Self {
+        self.roots.extend(roots.iter().map(|root| RootMapping {
+            recorded: root.display().to_string(),
+            restored: restored.display().to_string(),
+        }));
         self
     }
 
     /// Replace a complete root, including inside prose, shell words and JSON
     /// strings. A prefix of another path component is never a root match.
     pub fn text(&self, text: &str) -> String {
-        self.rewrite(text, false)
-    }
-
-    pub fn path(&self, path: &Path) -> PathBuf {
-        PathBuf::from(self.text(&path.display().to_string()))
+        self.rewrite(text)
     }
 
     pub fn json(&self, value: &mut Value) {
-        self.map_json(value, false);
+        self.map_json(value);
     }
 
-    pub(super) fn recorded_json(&self, value: &mut Value) {
-        self.map_json(value, true);
-    }
-
-    pub(super) fn recorded_text(&self, text: &str) -> String {
-        self.rewrite(text, true)
-    }
-
-    fn map_json(&self, value: &mut Value, reverse: bool) {
+    fn map_json(&self, value: &mut Value) {
         match value {
-            Value::String(text) => *text = self.rewrite(text, reverse),
-            Value::Array(values) => values.iter_mut().for_each(|v| self.map_json(v, reverse)),
-            Value::Object(values) => values.values_mut().for_each(|v| self.map_json(v, reverse)),
+            Value::String(text) => *text = self.rewrite(text),
+            Value::Array(values) => values.iter_mut().for_each(|v| self.map_json(v)),
+            Value::Object(values) => values.values_mut().for_each(|v| self.map_json(v)),
             _ => {}
         }
     }
 
-    fn rewrite(&self, text: &str, reverse: bool) -> String {
+    fn rewrite(&self, text: &str) -> String {
         let mut result = String::with_capacity(text.len());
         let mut offset = 0;
         while offset < text.len() {
             let rest = &text[offset..];
-            let matched = self.roots.iter().find_map(|(recorded, restored)| {
-                let (from, to) = if reverse {
-                    (restored, recorded)
-                } else {
-                    (recorded, restored)
-                };
+            let matched = self.roots.iter().find_map(|root| {
+                let (from, to) = (&root.recorded, &root.restored);
                 if !root_match(text, offset, from) {
                     return None;
                 }
@@ -84,7 +93,7 @@ impl ReplayWorkspaceProjection {
             let existing = self
                 .roots
                 .iter()
-                .map(|(from, to)| if reverse { from } else { to })
+                .map(|root| &root.restored)
                 .filter(|root| root_match(text, offset, root))
                 .map(String::len)
                 .max();
@@ -126,11 +135,42 @@ fn root_match(text: &str, offset: usize, root: &str) -> bool {
 
 pub(crate) fn current_projection() -> Option<ReplayWorkspaceProjection> {
     let branch = super::scope::state_branch()?;
-    let recorded = branch.recorded_workspace()?;
-    Some(
-        ReplayWorkspaceProjection::new(recorded, branch.workspace())
-            .with_sources(branch.source_roots()),
+    Some(for_branch(&branch))
+}
+
+pub(super) fn for_branch(branch: &super::BranchHandle) -> ReplayWorkspaceProjection {
+    let sources: Vec<_> = branch
+        .source_roots()
+        .iter()
+        .map(|root| super::ReplaySourceRoot {
+            recorded: root.restored.clone(),
+            restored: root.recorded.clone(),
+        })
+        .collect();
+    ReplayWorkspaceProjection::new(branch.workspace(), branch.logical_workspace())
+        .with_ancestors(&branch.recorded_workspaces(), branch.logical_workspace())
+        .with_sources(&sources)
+}
+
+pub(super) fn identity_for(branch: &super::BranchHandle) -> ReplayWorkspaceIdentity {
+    ReplayWorkspaceIdentity {
+        logical_root: branch.logical_workspace().to_path_buf(),
+        physical_root: branch.workspace().to_path_buf(),
+    }
+}
+
+pub(crate) fn physical_projection() -> Option<ReplayWorkspaceProjection> {
+    let branch = super::scope::state_branch()?;
+    Some(physical_for_branch(&branch))
+}
+
+fn physical_for_branch(branch: &super::BranchHandle) -> ReplayWorkspaceProjection {
+    ReplayWorkspaceProjection::new(
+        branch.recorded_workspace().unwrap_or(branch.workspace()),
+        branch.workspace(),
     )
+    .with_ancestors(&branch.recorded_workspaces(), branch.workspace())
+    .with_sources(branch.source_roots())
 }
 
 pub(crate) fn project_json(value: &mut Value) {
@@ -231,6 +271,5 @@ mod tests {
         let projected = "file:///recorded/arm/value '/recorded/arm' /recorded-sibling/value /prefix/recorded/value";
         assert_eq!(projection.text(original), projected);
         assert_eq!(projection.text(projected), projected);
-        assert_eq!(projection.recorded_text(projected), original);
     }
 }

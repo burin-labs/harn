@@ -60,13 +60,12 @@ async fn dispatch_process_exec_with_policy_origin(
     mode: HostDispatch,
 ) -> Result<VmValue, VmError> {
     let args = [VmValue::dict(params.clone())];
-    crate::run_tape::taped_command_run("process.exec", &args, false, |args| async move {
-        let params = args
-            .first()
-            .and_then(VmValue::as_dict)
-            .expect("command parameters");
-        dispatch_untaped(ctx, params, caller, origin, mode).await
-    })
+    crate::run_tape::taped_command_run(
+        "process.exec",
+        &args,
+        false,
+        Box::pin(dispatch_untaped(ctx, params, caller, origin, mode)),
+    )
     .await
 }
 

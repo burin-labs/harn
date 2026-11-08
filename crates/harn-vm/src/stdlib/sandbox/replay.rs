@@ -5,14 +5,15 @@ use std::path::Path;
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::VmError;
 
-fn roots() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+fn roots() -> Option<(Vec<std::path::PathBuf>, std::path::PathBuf)> {
     let branch = crate::run_tape::state_branch()?;
     branch.relocated().then(|| {
         (
             branch
-                .recorded_workspace()
-                .expect("relocated branch")
-                .to_path_buf(),
+                .recorded_workspaces()
+                .into_iter()
+                .filter(|root| root.as_path() != branch.workspace())
+                .collect(),
             branch.workspace().to_path_buf(),
         )
     })
@@ -26,7 +27,7 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     };
     policy.sandbox_profile = SandboxProfile::OsHardened;
     policy.workspace_roots = vec![workspace.display().to_string()];
-    let projection = crate::run_tape::workspace::current_projection().expect("branch projection");
+    let projection = crate::run_tape::workspace::physical_projection().expect("branch projection");
     let process = policy.process_sandbox.as_mut();
     for roots in [
         &mut policy.read_only_roots,
@@ -95,7 +96,9 @@ pub(super) fn check_grant(path: &Path) -> Result<(), VmError> {
     let branch = crate::run_tape::state_branch().expect("relocated branch");
     let container = branch.workspace_container();
     let overlaps = |a: &Path, b: &Path| a.starts_with(b) || b.starts_with(a);
-    if overlaps(path, &recorded) || (!path.starts_with(&workspace) && overlaps(path, container)) {
+    if recorded.iter().any(|recorded| overlaps(path, recorded))
+        || (!path.starts_with(&workspace) && overlaps(path, container))
+    {
         return Err(super::sandbox_rejection(format!(
             "replay filesystem namespace cannot admit grant '{}' outside its isolated workspace",
             path.display()
@@ -108,41 +111,15 @@ pub(super) fn workspace_roots() -> Option<Vec<std::path::PathBuf>> {
     roots().map(|(_, workspace)| vec![workspace])
 }
 
-pub(super) fn project_environment(
-    command: &mut std::process::Command,
-    closed: bool,
-) -> Result<(), VmError> {
+pub(super) fn bind_command_cwd(command: &mut std::process::Command) -> Result<(), VmError> {
     let Some((_, workspace)) = roots() else {
         return Ok(());
     };
-    let projection = crate::run_tape::workspace::current_projection().expect("branch projection");
-    let mut environment: std::collections::BTreeMap<_, _> = (!closed)
-        .then(std::env::vars_os)
-        .into_iter()
-        .flatten()
-        .collect();
-    for (name, value) in command.get_envs() {
-        match value {
-            Some(value) => {
-                environment.insert(name.to_owned(), value.to_owned());
-            }
-            None => {
-                environment.remove(name);
-            }
-        }
-    }
-    for (name, value) in environment {
-        if let Some(text) = value.to_str() {
-            let mapped = projection.text(text);
-            if mapped != text {
-                command.env(name, mapped);
-            }
-        }
-    }
     let cwd = command
         .get_current_dir()
-        .map(|p| projection.path(p))
+        .map(std::path::Path::to_path_buf)
         .unwrap_or(workspace.clone());
+    let cwd = crate::run_tape::workspace_path(cwd)?;
     let cwd = super::normalize_for_policy(&cwd);
     if !cwd.starts_with(&workspace) {
         return Err(super::sandbox_rejection(

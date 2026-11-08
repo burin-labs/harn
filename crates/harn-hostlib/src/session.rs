@@ -376,7 +376,7 @@ fn normalized_root(builtin: &'static str, root: &str) -> Result<PathBuf, Hostlib
             message: "must be non-empty".to_string(),
         });
     }
-    let path = crate::tools::args::resolve_host_path(root);
+    let path = crate::tools::args::resolve_host_path(builtin, root)?;
     Ok(path.canonicalize().unwrap_or(path))
 }
 

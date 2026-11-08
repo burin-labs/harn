@@ -400,7 +400,7 @@ impl HostlibRegistry {
                             .is_some_and(crate::tools::run_command_request_is_detached);
                         Box::pin(async move {
                             let taped_args = args.clone();
-                            let live = move |args: Vec<VmValue>| Box::pin(async move {
+                            let live = Box::pin(async move {
                             let request = crate::schemas::validate_request_args(
                                 ambient_name,
                                 module,

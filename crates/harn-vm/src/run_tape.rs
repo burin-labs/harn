@@ -122,6 +122,10 @@ pub struct RunTapeHeader {
     /// The recorded run's canonical workspace.
     #[serde(default)]
     pub workspace_root: Option<PathBuf>,
+    /// Earlier workspace roots, oldest first. A recorded branch retains these
+    /// names so descendants can relocate unchanged source and served data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_ancestors: Vec<PathBuf>,
 }
 
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
@@ -195,6 +199,25 @@ pub fn start_recording(
         crate::workspace_path::canonicalize_existing_ancestor(&workspace.root)
             .unwrap_or_else(|_| workspace.root.clone())
     });
+    let mut workspace_ancestors = match scope::state_branch() {
+        Some(branch) if workspace_root.is_some() => {
+            if workspace_root.as_deref() != Some(branch.workspace()) {
+                return Err("a branch recording must name its scoped workspace".into());
+            }
+            branch.recorded_workspaces()
+        }
+        _ => Vec::new(),
+    };
+    if let (Some(workspace), Some(canonical)) = (&workspace, &workspace_root) {
+        if workspace.root.is_absolute() && &workspace.root != canonical {
+            if workspace_ancestors.is_empty() {
+                workspace_ancestors.push(canonical.clone());
+            }
+            if !workspace_ancestors.contains(&workspace.root) {
+                workspace_ancestors.push(workspace.root.clone());
+            }
+        }
+    }
     header.run = Some(RunTapeHeader {
         recording: level,
         effects_observed: workspace.is_some(),
@@ -212,6 +235,7 @@ pub fn start_recording(
                 .collect()
         }),
         workspace_root,
+        workspace_ancestors,
     });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
     if slot.is_some() {
@@ -905,6 +929,20 @@ pub fn start_branch_with_sources(
         return Err("branch workspace must be strictly inside its workspace container".into());
     }
     let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
+    let workspace_ancestors = tape
+        .header
+        .run
+        .as_ref()
+        .map(|run| run.workspace_ancestors.clone())
+        .unwrap_or_default();
+    if workspace_ancestors.iter().any(|root| {
+        !root.is_absolute()
+            || root
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+    }) {
+        return Err("recorded workspace ancestors must be absolute normalized paths".into());
+    }
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
         prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
@@ -944,6 +982,7 @@ pub fn start_branch_with_sources(
                 .run
                 .as_ref()
                 .and_then(|run| run.workspace_root.clone()),
+            workspace_ancestors,
             source_roots,
         ),
     })
@@ -964,6 +1003,10 @@ fn recording_trees(
     let workspaces = run
         .and_then(|run| run.workspace_root.clone())
         .into_iter()
+        .chain(
+            run.into_iter()
+                .flat_map(|run| run.workspace_ancestors.iter().cloned()),
+        )
         .chain(std::iter::once(workspace.to_path_buf()));
     let mut trees: Vec<(PathBuf, PathBuf)> = Vec::new();
     let roots = state_roots
@@ -1110,16 +1153,8 @@ pub(crate) fn serve_llm_call(
     let call_number = state.report.served_calls + 1;
     let recorded = &state.calls[index];
     let surface = request_surface(request);
-    let mut expected = recorded.surface.clone().map(serde_json::Value::Object);
-    if let Some(expected) = &mut expected {
-        workspace::project_json(expected);
-    }
-    let expected = expected.and_then(|v| v.as_object().cloned());
-    let expected_digest = expected
-        .as_ref()
-        .map_or_else(|| recorded.digest.clone(), surface_digest);
-    if surface_digest(&surface) != expected_digest {
-        let detail = expected.as_ref().map_or_else(
+    if surface_digest(&surface) != recorded.digest {
+        let detail = recorded.surface.as_ref().map_or_else(
             || "the recorded request body was not kept".to_string(),
             |recorded| first_difference(recorded, &surface),
         );
@@ -1169,10 +1204,8 @@ fn recorded_lookup(
     unknown_is_live: bool,
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
-    let recorded_key = workspace::current_projection().map_or_else(
-        || key.to_string(),
-        |projection| projection.recorded_text(key),
-    );
+    let recorded_key = workspace::current_projection()
+        .map_or_else(|| key.to_string(), |projection| projection.text(key));
     let served = {
         let branch = current_branch();
         let mut guard = branch.as_ref().map(|branch| branch.state());
@@ -1285,7 +1318,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     // the same provider id: text-format calls get fresh ids on every parse.
     let mut original_args = args.clone();
     if let Some(projection) = workspace::current_projection() {
-        projection.recorded_json(&mut original_args);
+        projection.json(&mut original_args);
     }
     let digest = args_digest(&original_args);
     let candidates = state.tools.get(&call).map_or(&[][..], Vec::as_slice);
@@ -1388,11 +1421,12 @@ mod scope;
 pub use scope::BranchScope;
 #[path = "run_tape_workspace.rs"]
 pub(crate) mod workspace;
+pub use scope::workspace_path;
 pub(crate) use scope::{
     branch_event_log, branch_path, check_live_command_workspace, current_branch, durable_path,
-    scoped_state_root, state_branch, workspace_path, BranchHandle,
+    scoped_state_root, state_branch, BranchHandle,
 };
-pub use workspace::ReplayWorkspaceProjection;
+pub use workspace::ReplayWorkspaceIdentity;
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;

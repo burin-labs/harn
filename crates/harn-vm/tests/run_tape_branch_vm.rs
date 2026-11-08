@@ -891,7 +891,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root);
+            enter_run(root, root, &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_persistent_state_builtins_at_root(
@@ -1001,7 +1001,7 @@ pipeline main(harness: Harness, task: unknown) {{
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root);
+            enter_run(root, root, &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);

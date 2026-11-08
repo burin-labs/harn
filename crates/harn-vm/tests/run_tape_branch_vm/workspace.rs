@@ -85,7 +85,8 @@ pipeline main(harness: Harness, task: unknown) {{
   with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
     harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
     harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
-    harness.process.run({{program: "touch", args: [{marker}]}})
+    const result = harness.process.run({{program: "touch", args: [{marker}]}})
+    harness.stdio.println(result)
   }})
 }}
 "#,
@@ -97,11 +98,16 @@ pipeline main(harness: Harness, task: unknown) {{
     let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
     assert_eq!(replay.report.served_calls, 1);
     assert_eq!(replay.report.live_calls, 1);
-    replay
-        .output
-        .expect("a relocated branch must execute in its own filesystem view");
+    let refusal = match replay.output {
+        Ok(output) => output,
+        Err(error) => error,
+    };
+    assert!(
+        refusal.contains("denied") || refusal.contains("permitted"),
+        "{refusal}"
+    );
     assert!(!marker.exists());
-    assert!(isolated.workspace.join("command-marker").exists());
+    assert!(!isolated.workspace.join("command-marker").exists());
 }
 
 #[cfg(target_os = "linux")]
@@ -174,7 +180,7 @@ pipeline main(harness: Harness, task: unknown) {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn command_arguments_cwd_and_environment_share_the_branch_view() {
+fn command_cwd_relocates_without_rewriting_arguments_or_environment() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let recorded = dirs();
     let isolated = dirs();
@@ -208,7 +214,7 @@ pipeline main(harness: Harness, task: unknown) {{
         .to_string();
     assert_eq!(
         std::fs::read_to_string(isolated.workspace.join("projected-env")).unwrap(),
-        root
+        recorded.workspace.display().to_string()
     );
     assert_eq!(
         std::fs::read_to_string(isolated.workspace.join("projected-cwd"))
@@ -255,6 +261,37 @@ pipeline main(harness: Harness, task: unknown) {
 #[test]
 fn recorded_absolute_paths_read_and_write_only_the_isolated_workspace() {
     isolated_filesystem_case(false, false);
+}
+
+#[test]
+fn live_file_reads_cannot_address_a_peer_in_the_storage_pool() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let peer = isolated.workspace.parent().unwrap().join("peer-canary");
+    std::fs::write(&peer, "peer content").unwrap();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    harness.stdio.println(harness.fs.read_text({peer}))
+  }})
+}}
+"#,
+        peer = quote(&peer)
+    );
+    assert!(record(&source, &recorded.tapes, &recorded.workspace).contains("peer content"));
+    let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
+    let refusal = replay.output.unwrap_err();
+    assert!(refusal.contains("another replay workspace"), "{refusal}");
+    assert_eq!(
+        (replay.report.served_calls, replay.report.live_calls),
+        (1, 1)
+    );
+    assert_eq!(std::fs::read_to_string(peer).unwrap(), "peer content");
 }
 
 #[cfg(target_os = "linux")]
