@@ -356,8 +356,10 @@ fn render(declarations: &[Declaration], root: &Path) -> String {
             .source
             .strip_prefix(root)
             .unwrap()
-            .display()
-            .to_string();
+            .iter()
+            .map(|part| part.to_str().expect("native source paths are UTF-8"))
+            .collect::<Vec<_>>()
+            .join("/");
         modules.push(quote! {
             #cfg
             #[doc = #source]
