@@ -4,6 +4,7 @@ use harn_vm::orchestration::{
 };
 use harn_vm::security::session_environment::SessionEnvironment;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
+use harn_vm::tool_annotations::SideEffectLevel;
 use std::path::Path;
 
 const TOKEN: &str = "protected-gh-fixture-canary-8827";
@@ -76,7 +77,7 @@ impl GithubFixture {
                     capabilities: Default::default(),
                     workspace_roots: vec![std::env::current_dir().unwrap().display().to_string()],
                     read_only_roots: vec![self._root.path().join("bin").display().to_string()],
-                    side_effect_level: Some("workspace_write".into()),
+                    side_effect_level: Some(SideEffectLevel::ProcessExec.as_str().to_string()),
                     recursion_limit: None,
                     tool_arg_constraints: Vec::new(),
                     tool_annotations: Default::default(),
