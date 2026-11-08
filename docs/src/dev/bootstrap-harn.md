@@ -14,9 +14,11 @@ The shell adapter needs curl or wget, a SHA256 utility, and tar. On Windows,
 run it in Git Bash; ZIP seed extraction uses PowerShell. Node is unnecessary.
 `.harn-bootstrap-version` pins the published installer-capable seed independently
 of the requested runtime, so the same seed can install older Harn releases.
-If the direct seed download fails and `jq` is available, the adapter selects
-the exact release assets through the GitHub API. Both download paths use the
-same checksum and cache verification.
+Set `HARN_BOOTSTRAP_TOKEN` to authenticate release API requests. With a token,
+the adapter selects exact seed assets through the GitHub API and requires `jq`.
+Without one, it tries the direct download once before using the API fallback
+when `jq` is available. Tokens go only to `api.github.com`; redirected asset
+downloads receive no credentials. Both paths use the same checksum verification.
 
 The adapter runs the checked-in `std/runtime/bootstrap` source, which delegates
 release verification and cache policy to `std/runtime/install`. Native archive
@@ -27,6 +29,10 @@ The command prints one `harn-bootstrap-v1` JSON receipt containing `version`,
 installation receipt.
 
 ## Cache and offline use
+
+An already cached seed manifest and archive whose checksum agrees are reused
+without network access, including in online mode. If a seed download is needed,
+newly fetched checksums must still match previously cached metadata.
 
 Online installs refresh the release's checksum manifest and reject changes to
 previously cached metadata. While the aggregate manifest is unpublished, a

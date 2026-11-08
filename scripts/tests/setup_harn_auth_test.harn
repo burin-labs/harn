@@ -1,0 +1,17 @@
+type SetupStep = {id?: string, env?: dict<string, string>}
+
+type SetupAction = {runs: {steps: list<SetupStep>}}
+
+@test
+pipeline test_setup_action_supplies_token_to_resolve_and_install(harness: Harness) {
+  const action = schema_expect(
+    yaml_parse(harness.fs.read_text("../../.github/actions/setup-harn/action.yml")),
+    schema_of(SetupAction),
+  )
+  const steps = action.runs.steps.filter({ step -> ["resolve", "install"].contains(step.id) })
+  assert_eq(len(steps), 2, "both bootstrap invocations must be measured")
+  for step in steps {
+    const environment = step.env ?? {}
+    assert_eq(environment["HARN_BOOTSTRAP_TOKEN"], r"${{ inputs.token }}")
+  }
+}
