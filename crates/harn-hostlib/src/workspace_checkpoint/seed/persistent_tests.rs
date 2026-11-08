@@ -52,12 +52,30 @@ fn concurrent_saved_branches_case() {
         ReplayWorkspace::capture_in(source.path(), storage.path(), SeedLimits::default()).unwrap();
     let saved = captured.persist();
     drop(captured);
+    let original = open_dir(saved.storage_path()).unwrap();
+    let _reader = persistent::lease(
+        &original,
+        saved.storage_path(),
+        persistent::LeaseAccess::ReadSeed,
+    )
+    .unwrap();
+    assert!(matches!(
+        ReplayWorkspace::restore_saved(&saved),
+        Err(SeedError::InUse { .. })
+    ));
+    let Err(SeedError::Unsupported { path, .. }) =
+        ReplayWorkspace::fork_saved_in(&saved, saved.storage_path())
+    else {
+        panic!("branch storage inside its source must be refused");
+    };
+    assert_eq!(path, saved.storage_path());
 
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
     let (grade_tx, grade_rx) = std::sync::mpsc::sync_channel(0);
     let left_saved = saved.clone();
+    let left_parent = storage.path().to_path_buf();
     let left = std::thread::spawn(move || {
-        let branch = ReplayWorkspace::restore_saved(&left_saved).unwrap();
+        let branch = ReplayWorkspace::fork_saved_in(&left_saved, &left_parent).unwrap();
         fs::write(branch.path().join("value"), "left").unwrap();
         ready_tx.send(()).unwrap();
         grade_rx.recv().unwrap();
@@ -67,7 +85,7 @@ fn concurrent_saved_branches_case() {
         )
     });
     ready_rx.recv().unwrap();
-    let right = ReplayWorkspace::restore_saved(&saved);
+    let right = ReplayWorkspace::fork_saved_in(&saved, storage.path());
     if let Ok(branch) = &right {
         fs::write(branch.path().join("value"), "right").unwrap();
     }
@@ -198,6 +216,13 @@ fn saved_seed_tampering_case() {
         ReplayWorkspace::restore_saved(&saved),
         Err(SeedError::SeedChanged)
     ));
+    let entries = fs::read_dir(storage.path()).unwrap().count();
+    assert!(entries > 0);
+    assert!(matches!(
+        ReplayWorkspace::fork_saved_in(&saved, storage.path()),
+        Err(SeedError::SeedChanged)
+    ));
+    assert_eq!(fs::read_dir(storage.path()).unwrap().count(), entries);
     assert_eq!(fs::read_to_string(path.join("file")).unwrap(), "keep trial");
     let mut descriptor = serde_json::to_value(&saved).unwrap();
     descriptor["receipt"]["schema"] = serde_json::json!("unknown");

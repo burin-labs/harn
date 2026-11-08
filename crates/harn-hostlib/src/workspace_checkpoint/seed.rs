@@ -1,4 +1,4 @@
-//! A private initial workspace and repeatable copies at one stable path.
+//! Private verified workspace seeds and repeatable working copies.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -152,6 +152,14 @@ impl ReplayWorkspace {
             });
         }
         let original = open_dir(source)?;
+        Self::capture_directory_in(&original, &canonical_parent, limits)
+    }
+
+    fn capture_directory_in(
+        original: &Dir,
+        storage_parent: &Path,
+        limits: SeedLimits,
+    ) -> Result<Self, SeedError> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("harn-replay-");
         #[cfg(unix)]
@@ -160,7 +168,7 @@ impl ReplayWorkspace {
         );
         let storage = storage::PrivateStorage::new(
             builder
-                .tempdir_in(&canonical_parent)
+                .tempdir_in(storage_parent)
                 .map_err(|error| io("create private storage", storage_parent, error))?,
         );
         let parent = open_dir(storage.path())?;
@@ -170,8 +178,8 @@ impl ReplayWorkspace {
         let seed = parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
-        let receipt = copy_and_measure(&original, Some(&seed), limits)?;
-        if copy_and_measure(&original, None, limits)? != receipt {
+        let receipt = copy_and_measure(original, Some(&seed), limits)?;
+        if copy_and_measure(original, None, limits)? != receipt {
             return Err(SeedError::SourceChanged);
         }
         parent
@@ -184,7 +192,11 @@ impl ReplayWorkspace {
             return Err(SeedError::SeedChanged);
         }
         Ok(Self {
-            _lease: persistent::lease(&parent, storage.path(), true)?,
+            _lease: persistent::lease(
+                &parent,
+                storage.path(),
+                persistent::LeaseAccess::CreateWorkspace,
+            )?,
             workspace: storage.path().join("workspace"),
             storage,
             receipt,
