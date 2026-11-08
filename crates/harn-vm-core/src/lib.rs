@@ -28,6 +28,7 @@ pub mod module_source;
 pub mod op_interrupt;
 pub mod prepared_module;
 pub mod process_liveness;
+pub mod replay_workspace;
 pub mod runtime_effects;
 pub mod runtime_guards;
 pub mod runtime_limits;

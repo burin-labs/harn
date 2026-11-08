@@ -187,6 +187,10 @@ fn index_root_outside_workspace(
         .map(crate::llm::helpers::vm_value_to_json)
         .and_then(|args| args.get("root")?.as_str().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())?;
+    let root = match super::workspace_path(root.clone()) {
+        Ok(root) => root,
+        Err(_) => return Some(root),
+    };
     let canonical =
         |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     (!canonical(&root).starts_with(canonical(workspace))).then_some(root)
@@ -376,7 +380,8 @@ fn record_read_on_tape(
     let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) else {
         return;
     };
-    let json = crate::llm::helpers::vm_value_to_json(value);
+    let mut json = crate::llm::helpers::vm_value_to_json(value);
+    super::workspace::project_json(&mut json);
     tape.recorder.record(TapeRecordKind::CacheLookup {
         namespace: READ_NAMESPACE.to_string(),
         key: read_key(owner, name, args),
@@ -403,11 +408,12 @@ pub(crate) fn taped_random(name: &str, draw: impl Fn() -> String) -> String {
 }
 
 fn read_key(owner: Owner<'_>, name: &str, args: &[VmValue]) -> String {
-    let args = serde_json::Value::Array(
+    let mut args = serde_json::Value::Array(
         args.iter()
             .map(crate::llm::helpers::vm_value_to_json)
             .collect(),
     );
+    super::workspace::project_json(&mut args);
     let name = owner.map_or_else(
         || name.to_string(),
         |(capability, method)| format!("{capability:?}.{method}"),

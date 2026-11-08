@@ -906,7 +906,7 @@ fn read_text_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let dict = raw.as_ref();
     let path_str = require_string(READ_TEXT_BUILTIN, dict, "path")?;
     let session_id = optional_string(READ_TEXT_BUILTIN, dict, "session_id")?;
-    let path = resolve_host_path(&path_str);
+    let path = resolve_host_path(READ_TEXT_BUILTIN, &path_str)?;
     enforce_path_scope(READ_TEXT_BUILTIN, &path, FsAccess::Read)?;
 
     let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, &path, session_id.as_deref())?;
@@ -941,7 +941,7 @@ fn safe_text_patch_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let create_parents = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "create_parents", true)?;
     let overwrite = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "overwrite", true)?;
 
-    let path = resolve_host_path(&path_str);
+    let path = resolve_host_path(SAFE_TEXT_PATCH_BUILTIN, &path_str)?;
     enforce_path_scope(SAFE_TEXT_PATCH_BUILTIN, &path, FsAccess::Write)?;
     let outcome = safe_text_patch(
         &path,
@@ -1025,15 +1025,15 @@ fn emit_safe_text_patch_result_builtin(args: &[VmValue]) -> Result<VmValue, Host
 }
 
 fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let raw = dict_arg(SET_MODE_BUILTIN, args)?;
-    let dict = raw.as_ref();
-    let session_id = require_string(SET_MODE_BUILTIN, dict, "session_id")?;
+    let dict = dict_arg(SET_MODE_BUILTIN, args)?;
+    let session_id = require_string(SET_MODE_BUILTIN, &dict, "session_id")?;
     let mode = FsMode::parse(
         SET_MODE_BUILTIN,
-        &require_string(SET_MODE_BUILTIN, dict, "mode")?,
+        &require_string(SET_MODE_BUILTIN, &dict, "mode")?,
     )?;
-    let root =
-        optional_string(SET_MODE_BUILTIN, dict, "root")?.map(|path| resolve_host_path(&path));
+    let root = optional_string(SET_MODE_BUILTIN, &dict, "root")?
+        .map(|path| resolve_host_path(SET_MODE_BUILTIN, &path))
+        .transpose()?;
     let result = set_mode(&session_id, mode, root.as_deref())?;
     Ok(build_dict([(
         "previous_mode",

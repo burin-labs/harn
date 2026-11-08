@@ -39,6 +39,11 @@ pub(super) async fn dispatch_process_spawn_with_policy(
     caller: serde_json::Value,
     mode: super::HostDispatch,
 ) -> Result<VmValue, VmError> {
+    if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+        return Err(VmError::Runtime(
+            "background process cannot retain a relocated replay filesystem namespace".into(),
+        ));
+    }
     let prepared = match crate::orchestration::run_prepared_command_policy_preflight(
         ctx,
         params,

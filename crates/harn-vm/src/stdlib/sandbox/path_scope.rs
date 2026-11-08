@@ -91,7 +91,7 @@ pub(super) fn declared_path_roots_active() -> bool {
 /// it stays writable even then: a child's `TMPDIR` that its own sandbox
 /// refuses is a broken child.
 pub(super) fn topology_extension_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
-    if declared_path_roots_active() {
+    if declared_path_roots_active() || super::replay::workspace_roots().is_some() {
         return Vec::new();
     }
     let mut outside = git_scope_extension_for_roots(roots).read_write;

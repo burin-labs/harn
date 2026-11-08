@@ -183,15 +183,18 @@ fn worker_snapshot_uses_the_branch_mapped_execution_environment_root() {
         drop(recording);
 
         let branch_root = dir.path().join("branch-state");
-        let workspace = dir.path().join("branch-workspace");
-        std::fs::create_dir(&workspace).unwrap();
+        let workspace = dir.path().join("pool/arm/workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
         let branch = crate::run_tape::start_branch(BranchPlan {
             tape: crate::testbench::tape::EventTape::load(
                 &recorded.join(crate::run_tape::TAPE_FILE_NAME),
             )
             .unwrap(),
             live_after_calls: 1,
-            workspace_root: workspace,
+            workspace: crate::run_tape::ReplayWorkspaceLocation::from_storage_root(
+                workspace.parent().unwrap(),
+            )
+            .unwrap(),
             state_root: branch_root.clone(),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

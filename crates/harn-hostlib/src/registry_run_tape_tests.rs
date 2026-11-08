@@ -12,6 +12,10 @@ use std::sync::Arc;
 #[cfg(feature = "ast")]
 mod index_replay;
 
+#[path = "registry_branch_workspace_tests.rs"]
+#[cfg(target_os = "linux")]
+mod branch_workspace;
+
 #[test]
 fn owner_death_guardian_fixture() {
     if crate::process::owner_death::guardian_requested() {

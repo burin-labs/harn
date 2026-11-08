@@ -116,11 +116,10 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 /// with its parent repository. Errors remain errors, never a fallback identity.
 pub(super) fn repository_identity(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg("hostlib_tools_git_repository_identity", args)?;
-    let repo = resolve_host_path(&require_string(
+    let repo = resolve_host_path(
         "hostlib_tools_git_repository_identity",
-        &raw,
-        "repo",
-    )?);
+        &require_string("hostlib_tools_git_repository_identity", &raw, "repo")?,
+    )?;
     let scope_error =
         |violation: harn_vm::process_sandbox::SandboxViolation| HostlibError::SandboxViolation {
             builtin: "hostlib_tools_git_repository_identity",

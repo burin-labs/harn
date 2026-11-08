@@ -62,7 +62,7 @@ fn plan(
 ) -> BranchPlan {
     BranchPlan {
         tape,
-        workspace_root: workspace.to_path_buf(),
+        workspace: location(workspace),
         state_root: state.to_path_buf(),
         live_after_calls: k,
         host_state_roots: Vec::new(),
@@ -302,8 +302,8 @@ fn prompt_edits_follow_recorded_paths_into_a_relocated_workspace() {
         record(&source, &dirs.tapes, &dirs.workspace);
         let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
         let edit = edit_for(&tape, "Original", "Edited");
-        let moved = dirs.markers.join("isolated");
-        std::fs::create_dir(&moved).unwrap();
+        let moved = dirs.markers.join("pool/isolated/workspace");
+        std::fs::create_dir_all(&moved).unwrap();
         std::fs::write(moved.join("prompt.harn.prompt"), "Original").unwrap();
         std::fs::write(&original, "Original workspace changed").unwrap();
         let guard = start_branch(plan(
@@ -370,7 +370,14 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
         vec![mapping.clone()],
     )
     .unwrap();
-    let output = run_in(&source, &dirs.workspace, Some(guard.scope())).unwrap();
+    let output = run_at_with_read_roots(
+        &source,
+        &dirs.workspace,
+        Some(guard.scope()),
+        &dirs.workspace,
+        vec![alias.join("original-package")],
+    )
+    .unwrap();
     let report = guard.finish();
     assert_eq!(report.divergence, None);
     assert_eq!((report.served_calls, report.live_calls), (1, 1));
@@ -411,12 +418,147 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
         vec![mapping],
     )
     .unwrap();
-    assert!(run_in(&source, &dirs.workspace, Some(guard.scope()))
-        .unwrap_err()
-        .contains("changed since recording"));
+    assert!(run_at_with_read_roots(
+        &source,
+        &dirs.workspace,
+        Some(guard.scope()),
+        &dirs.workspace,
+        vec![alias.join("original-package")],
+    )
+    .unwrap_err()
+    .contains("changed since recording"));
     let report = guard.finish();
     assert_eq!(report.live_calls, 0);
     assert_eq!(report.divergence.unwrap().what, "prompt source edit");
+}
+
+#[test]
+fn recorded_source_relocations_preserve_logical_paths_in_descendant_requests() {
+    use harn_vm::run_tape::{start_branch_with_sources, ReplaySourceRoot};
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    let packages: Vec<_> = (0..3)
+        .map(|generation| {
+            let root = dirs.markers.join(format!("package-{generation}"));
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("asset.txt"), format!("package-{generation}")).unwrap();
+            root.canonicalize().unwrap()
+        })
+        .collect();
+    let source = |root: &Path| {
+        format!(
+            r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: {original}, model: "mock"}}, {{text: {original}, model: "mock"}}], {{ ->
+    const original = harness.llm.call({root}, nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call({root}, nil, {{provider: "mock", model: "mock"}})
+    const value = harness.fs.read_text(path_join(original.text, "asset.txt"))
+    assert(value == {value})
+    harness.stdio.println(value)
+  }})
+}}
+"#,
+            root = quote(root),
+            original = quote(&packages[0]),
+            value = serde_json::to_string(root.file_name().unwrap().to_str().unwrap()).unwrap(),
+        )
+    };
+    record(&source(&packages[0]), &dirs.tapes, &dirs.workspace);
+    let mut parent = dirs.tapes.clone();
+    for generation in 1..=2 {
+        let next = dirs.markers.join(format!("generation-{generation}"));
+        let guard = start_branch_with_sources(
+            BranchPlan {
+                tape: EventTape::load(&parent.join(TAPE_FILE_NAME)).unwrap(),
+                live_after_calls: 1,
+                workspace: location(&dirs.workspace),
+                state_root: dirs.markers.join(format!("state-{generation}")),
+                host_state_roots: Vec::new(),
+                prompt_edits: Vec::new(),
+            },
+            vec![ReplaySourceRoot {
+                recorded: packages[generation - 1].clone(),
+                restored: packages[generation].clone(),
+            }],
+        )
+        .unwrap();
+        let scope = guard.scope();
+        let entered = scope.enter();
+        let recording = start_recording(
+            &next,
+            RecordingLevel::Full,
+            Some(TapeWorkspace {
+                root: dirs.workspace.clone(),
+                observer: Box::new(NoChanges),
+                state_roots: Vec::new(),
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        let output = run_at_with_read_roots(
+            &source(&packages[generation]),
+            &dirs.workspace,
+            Some(scope.clone()),
+            &dirs.workspace,
+            vec![packages[generation - 1].clone()],
+        )
+        .unwrap_or_else(|error| panic!("source generation {generation}: {error}"));
+        assert!(
+            output.contains(&format!("package-{generation}")),
+            "{output}"
+        );
+        let report = guard.finish();
+        assert_eq!((report.served_calls, report.live_calls), (1, 1));
+        assert_eq!(report.divergence, None);
+        assert_eq!(recording.error(), None);
+        drop(recording);
+        drop(entered);
+        if generation == 1 {
+            let captured = EventTape::load(&next.join(TAPE_FILE_NAME)).unwrap();
+            let roots = &captured.header.run.as_ref().unwrap().source_workspaces;
+            assert_eq!(roots.len(), 1);
+            assert_eq!(roots[0].root, packages[1]);
+            assert_eq!(roots[0].ancestors, vec![packages[0].clone()]);
+            for invalid in ["relative", "duplicate"] {
+                let mut forged = captured.clone();
+                let roots = &mut forged.header.run.as_mut().unwrap().source_workspaces;
+                if invalid == "relative" {
+                    roots[0].ancestors.push(PathBuf::from("relative"));
+                } else {
+                    roots.push(roots[0].clone());
+                }
+                let state = dirs.markers.join(format!("invalid-{invalid}"));
+                let error = start_branch_with_sources(
+                    BranchPlan {
+                        tape: forged,
+                        live_after_calls: 1,
+                        workspace: location(&dirs.workspace),
+                        state_root: state.clone(),
+                        host_state_roots: Vec::new(),
+                        prompt_edits: Vec::new(),
+                    },
+                    vec![ReplaySourceRoot {
+                        recorded: packages[1].clone(),
+                        restored: packages[2].clone(),
+                    }],
+                )
+                .err()
+                .expect("invalid retained source ownership must refuse");
+                assert!(
+                    error.contains(if invalid == "relative" {
+                        "absolute normalized"
+                    } else {
+                        "unique"
+                    }),
+                    "{error}"
+                );
+                assert!(!state.exists());
+            }
+            std::fs::remove_dir_all(&packages[0]).unwrap();
+        }
+        parent = next;
+    }
 }
 
 #[test]

@@ -78,6 +78,12 @@ pub(super) async fn prepare_command(
         );
         match bridge.prepare_command(operation, &params, &trace).await? {
             HostCommandPreparation::Bound(command) => {
+                if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+                    return Err(VmError::Runtime(
+                        "host command adapter cannot bind a relocated replay filesystem namespace"
+                            .into(),
+                    ));
+                }
                 command.invocation().bind_directory(&mut params);
                 return Ok(PreparedCommand::Host { params, command });
             }

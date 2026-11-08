@@ -17,6 +17,7 @@ pub(super) fn validate_for_policy(
     closed: bool,
     policy: Option<&CapabilityPolicy>,
 ) -> Result<(), VmError> {
+    super::replay::bind_command_cwd(command)?;
     let boundary = boundary(policy)?;
     if boundary == ProcessEnvironmentBoundary::Payload {
         return Ok(());

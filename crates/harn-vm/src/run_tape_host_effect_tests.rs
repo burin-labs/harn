@@ -46,10 +46,9 @@ fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
     assert!(index_mutations >= 10);
 
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let workspace = tmp.path().join("workspace");
-    let elsewhere = tmp.path().join("elsewhere");
-    std::fs::create_dir_all(&elsewhere).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("one"), &result("a", None));
@@ -83,7 +82,11 @@ fn code_index_maintenance_of_the_restored_workspace_runs_in_a_prefix() {
     let refused =
         |outcome: Option<Result<VmValue, crate::value::VmError>>| matches!(outcome, Some(Err(_)));
     assert!(
-        refused(call(CapabilityId::CodeIndex, "rebuild", root(&elsewhere))),
+        refused(call(
+            CapabilityId::CodeIndex,
+            "rebuild",
+            root(elsewhere.path())
+        )),
         "a rebuild outside the restored workspace is refused"
     );
     assert!(refused(call(
@@ -114,7 +117,7 @@ fn command_output_reads_are_served_from_the_recording() {
     )];
     let output = crate::schema::json_to_vm_value(&serde_json::json!({"stdout": "ok\n"}));
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("one"), &result("ran", None));

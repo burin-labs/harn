@@ -294,6 +294,39 @@ runs:
         restore-keys: |
           ${{ steps.cache-paths.outputs.restore-prefix }}
 
+    # Name what the restore brought back, so a cold build is visible on the run
+    # instead of only as a slow compile. A key whose toolchain or environment
+    # hash moved restores nothing until a main refresh writes the new
+    # generation; that miss read as nothing for a day (harn CLI builds at 12 to
+    # 19 minutes instead of 0 to 9). Reports only; never fails the job.
+    - name: Report the Rust cache restore
+      if: inputs.persistent-target != 'true'
+      shell: bash
+      env:
+        CACHE_SHARED_KEY: ${{ steps.cache-paths.outputs.shared-key }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_PATHS: ${{ steps.cache-paths.outputs.paths }}
+        CACHE_HOME: ${{ env.CARGO_HOME }}
+      run: |
+        cargo_home="${CACHE_HOME:-$HOME/.cargo}"
+        target_kib=0
+        while IFS= read -r path; do
+          [[ -n "$path" && -d "$path" ]] || continue
+          case "$path" in "$cargo_home"/*) continue ;; esac
+          kib="$(du -sk "$path" 2>/dev/null | cut -f1)"
+          target_kib=$((target_kib + ${kib:-0}))
+        done <<< "$CACHE_PATHS"
+        if [[ "$CACHE_HIT" == true ]]; then restore=exact
+        elif (( target_kib > 0 )); then restore=partial
+        else restore=none
+        fi
+        line="HARN_RUST_CACHE key=$CACHE_SHARED_KEY restore=$restore target_mib=$((target_kib / 1024))"
+        echo "$line"
+        if [[ "$restore" == none ]]; then
+          echo "::warning::$line: nothing restored, this job compiles cold"
+        fi
+        printf -- '- Rust cache `%s`: restore %s, %s MiB of target\n' "$CACHE_SHARED_KEY" "$restore" "$((target_kib / 1024))" >> "$GITHUB_STEP_SUMMARY"
+
     # A fresh checkout stamps every source with the checkout time, so after an
     # exact hit Cargo still rebuilt every workspace crate. This dates unchanged
     # paths before the cached build and leaves changed ones new.

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn sensitive_store_keys_retain_redaction_context_in_recorded_payloads() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     let marker = "synthetic-store-canary-without-a-token-pattern";
     let mut control = serde_json::json!({"api_key": marker});
     crate::redact::current_policy().redact_json_in_place(&mut control);
@@ -51,7 +51,7 @@ fn sensitive_store_keys_retain_redaction_context_in_recorded_payloads() {
     let result = start_branch(BranchPlan {
         tape,
         live_after_calls: 1,
-        workspace_root: dir.path().to_path_buf(),
+        workspace: branch_location(dir.path()),
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -65,7 +65,7 @@ fn sensitive_store_keys_retain_redaction_context_in_recorded_payloads() {
 #[test]
 fn a_worker_store_write_refuses_instead_of_claiming_zero_captured_changes() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     let store_root = dir.path().join("worker-store");
     {
         let _guard = record_full(dir.path());
@@ -92,7 +92,7 @@ fn a_worker_store_write_refuses_instead_of_claiming_zero_captured_changes() {
         assert_eq!(written["worker"], "observed");
         finish_tool_call(tool.unwrap(), Ok(ok(serde_json::json!("done"))));
     }
-    let workspace = dir.path().join("branch");
+    let workspace = dir.path().join("pool/arm/workspace");
     let replay = branch(dir.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     assert!(matches!(
@@ -111,7 +111,7 @@ fn a_worker_store_write_refuses_instead_of_claiming_zero_captured_changes() {
 #[test]
 fn version_five_remains_readable_but_cannot_claim_store_mutation_evidence() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     record_run(dir.path());
     let path = dir.path().join(TAPE_FILE_NAME);
     let mut tape = EventTape::load(&path).unwrap();
@@ -121,7 +121,7 @@ fn version_five_remains_readable_but_cannot_claim_store_mutation_evidence() {
     let result = start_branch(BranchPlan {
         tape: loaded,
         live_after_calls: 1,
-        workspace_root: dir.path().to_path_buf(),
+        workspace: branch_location(dir.path()),
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -135,7 +135,7 @@ fn version_five_remains_readable_but_cannot_claim_store_mutation_evidence() {
 #[test]
 fn a_failed_store_write_makes_the_dispatch_unservable() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     let blocked = dir.path().join("blocked");
     std::fs::write(&blocked, "a file cannot be a store directory").unwrap();
     {
@@ -155,7 +155,7 @@ fn a_failed_store_write_makes_the_dispatch_unservable() {
             }),
         );
     }
-    let workspace = dir.path().join("branch");
+    let workspace = dir.path().join("pool/arm/workspace");
     let replay = branch(dir.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     assert!(matches!(
@@ -174,7 +174,7 @@ fn a_failed_store_write_makes_the_dispatch_unservable() {
 #[test]
 fn unmeasured_store_changes_refuse_before_any_tool_effect_is_applied() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     record_run(dir.path());
     let path = dir.path().join(TAPE_FILE_NAME);
     let mut tape = EventTape::load(&path).unwrap();
@@ -190,7 +190,7 @@ fn unmeasured_store_changes_refuse_before_any_tool_effect_is_applied() {
     }
     assert_eq!(measured_tools, 1);
     tape.persist(&path).unwrap();
-    let workspace = dir.path().join("branch");
+    let workspace = dir.path().join("pool/arm/workspace");
     let replay = branch(dir.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     assert!(matches!(

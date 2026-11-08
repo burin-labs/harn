@@ -1,5 +1,19 @@
 use crate::orchestration::{CapabilityPolicy, ProcessNetworkProxy};
 
+/// Resolve the existing child policy. A relocated replay narrows it to an
+/// OS-hardened view, so an ambient sandbox fallback cannot weaken that view.
+pub(crate) fn active_sandbox_policy(
+) -> Option<(CapabilityPolicy, crate::orchestration::SandboxProfile)> {
+    let policy = super::replay::policy(crate::orchestration::current_execution_policy()?);
+    let profile = policy.sandbox_profile;
+    if !profile.confines_processes()
+        || super::effective_fallback(profile) == super::SandboxFallback::Off
+    {
+        return None;
+    }
+    Some((crate::process_sandbox::reconcile(policy), profile))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessNetworkGrant {
     Denied,

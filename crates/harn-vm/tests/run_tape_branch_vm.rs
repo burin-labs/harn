@@ -62,6 +62,14 @@ fn quote(value: &Path) -> String {
     serde_json::to_string(&value.display().to_string()).unwrap()
 }
 
+fn location(workspace: &Path) -> harn_vm::run_tape::ReplayWorkspaceLocation {
+    let location =
+        harn_vm::run_tape::ReplayWorkspaceLocation::from_storage_root(workspace.parent().unwrap())
+            .unwrap();
+    assert_eq!(location.workspace_root(), workspace.canonicalize().unwrap());
+    location
+}
+
 /// Every run is pointed at the recording's session store, as a host reusing
 /// its configuration would be; a branch must keep out of it on its own.
 fn run(source: &str, workspace: &Path) -> Result<String, String> {
@@ -73,7 +81,12 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
 /// confinement. These tests replay process runs rather than confine them,
 /// and hosted macOS runners refuse sandbox-exec (SIP allows unrestricted
 /// DTrace), so the default profile would reject every recorded exec there.
-fn enter_run(workspace: &Path, write_root: &Path) {
+fn enter_run(
+    workspace: &Path,
+    write_root: &Path,
+    read_roots: &[PathBuf],
+    read_denials: &[PathBuf],
+) {
     harn_vm::stdlib::process::set_thread_execution_context(Some(
         harn_vm::orchestration::RunExecutionRecord {
             cwd: Some(workspace.display().to_string()),
@@ -81,11 +94,20 @@ fn enter_run(workspace: &Path, write_root: &Path) {
             ..Default::default()
         },
     ));
-    harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+    let mut policy = harn_vm::orchestration::CapabilityPolicy {
         workspace_roots: vec![write_root.display().to_string()],
+        read_only_roots: read_roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect(),
         sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
         ..Default::default()
-    });
+    };
+    policy.process_sandbox.read_deny_roots = read_denials
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect();
+    harn_vm::orchestration::push_execution_policy(policy);
 }
 
 fn leave_run() {
@@ -99,7 +121,7 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
         source,
         workspace,
         branch,
-        workspace.parent().expect("workspace has a parent"),
+        workspace.ancestors().nth(3).expect("fixture root"),
     )
 }
 
@@ -108,6 +130,27 @@ fn run_at(
     workspace: &Path,
     branch: Option<BranchScope>,
     root: &Path,
+) -> Result<String, String> {
+    run_at_with_read_roots(source, workspace, branch, root, Vec::new())
+}
+
+fn run_at_with_read_roots(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    root: &Path,
+    read_roots: Vec<PathBuf>,
+) -> Result<String, String> {
+    run_at_with_path_grants(source, workspace, branch, root, read_roots, Vec::new())
+}
+
+fn run_at_with_path_grants(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    root: &Path,
+    read_roots: Vec<PathBuf>,
+    read_denials: Vec<PathBuf>,
 ) -> Result<String, String> {
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
@@ -122,7 +165,7 @@ fn run_at(
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
-            enter_run(&workspace, &root);
+            enter_run(&workspace, &root, &read_roots, &read_denials);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -228,7 +271,7 @@ fn branch_with_roots(
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
-        workspace_root: workspace.to_path_buf(),
+        workspace: location(workspace),
         state_root: state.clone(),
         host_state_roots,
         prompt_edits: Vec::new(),
@@ -304,7 +347,7 @@ struct Dirs {
 fn dirs() -> Dirs {
     let root = tempfile::tempdir().unwrap();
     let tapes = root.path().join("tapes");
-    let workspace = root.path().join("workspace");
+    let workspace = root.path().join("pool/arm/workspace");
     let markers = root.path().join("markers");
     for dir in [&tapes, &workspace, &markers] {
         std::fs::create_dir_all(dir).unwrap();
@@ -620,7 +663,7 @@ fn a_branch_refuses_the_recordings_state_root() {
     let error = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: dirs.workspace.clone(),
+        workspace: location(&dirs.workspace),
         state_root: recording_state(&dirs.workspace),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -637,7 +680,7 @@ fn a_branch_refuses_the_recordings_state_root() {
         let error = start_branch(BranchPlan {
             tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
-            workspace_root: dirs.workspace.clone(),
+            workspace: location(&dirs.workspace),
             state_root: state_root.clone(),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),
@@ -858,7 +901,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
     let plan = BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
-        workspace_root: dirs.workspace.clone(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -873,7 +916,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root);
+            enter_run(root, root, &[], &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_persistent_state_builtins_at_root(
@@ -964,7 +1007,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
-        workspace_root: dirs.workspace.clone(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -982,7 +1025,7 @@ pipeline main(harness: Harness, task: unknown) {{
             .unwrap();
         rt.block_on(harn_clock::test_support::with_local_tasks(async move {
             let root = workspace.parent().unwrap();
-            enter_run(root, root);
+            enter_run(root, root, &[], &[]);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -1247,7 +1290,7 @@ fn a_session_store_named_after_the_branch_starts_lands_in_the_branch() {
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: dirs.workspace.clone(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

@@ -37,6 +37,74 @@ struct Invocation {
 }
 
 #[test]
+fn concurrent_saved_branches_grade_only_their_own_edits() {
+    run_isolated(
+        "concurrent_saved_branches_grade_only_their_own_edits",
+        concurrent_saved_branches_case,
+    );
+}
+
+fn concurrent_saved_branches_case() {
+    let source = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("value"), "seed").unwrap();
+    let mut captured =
+        ReplayWorkspace::capture_in(source.path(), storage.path(), SeedLimits::default()).unwrap();
+    let saved = captured.persist();
+    drop(captured);
+    let original = open_dir(saved.storage_path()).unwrap();
+    let _reader = persistent::lease(
+        &original,
+        saved.storage_path(),
+        persistent::LeaseAccess::ReadSeed,
+    )
+    .unwrap();
+    assert!(matches!(
+        ReplayWorkspace::restore_saved(&saved),
+        Err(SeedError::InUse { .. })
+    ));
+    let Err(SeedError::Unsupported { path, .. }) =
+        ReplayWorkspace::fork_saved_in(&saved, saved.storage_path())
+    else {
+        panic!("branch storage inside its source must be refused");
+    };
+    assert_eq!(path, saved.storage_path());
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    let (grade_tx, grade_rx) = std::sync::mpsc::sync_channel(0);
+    let left_saved = saved.clone();
+    let left_parent = storage.path().to_path_buf();
+    let left = harn_parser::runtime_stack::spawn(move || {
+        let branch = ReplayWorkspace::fork_saved_in(&left_saved, &left_parent).unwrap();
+        fs::write(branch.path().join("value"), "left").unwrap();
+        ready_tx.send(()).unwrap();
+        grade_rx.recv().unwrap();
+        (
+            branch.path().to_path_buf(),
+            fs::read_to_string(branch.path().join("value")).unwrap(),
+        )
+    });
+    ready_rx.recv().unwrap();
+    let right = ReplayWorkspace::fork_saved_in(&saved, storage.path());
+    if let Ok(branch) = &right {
+        fs::write(branch.path().join("value"), "right").unwrap();
+    }
+    grade_tx.send(()).unwrap();
+    let (left_root, left_grade) = left.join().unwrap();
+    let right = right.expect("a second branch must restore while the first is still running");
+    assert_ne!(left_root, right.path());
+    assert_eq!(left_grade, "left");
+    assert_eq!(
+        fs::read_to_string(right.path().join("value")).unwrap(),
+        "right"
+    );
+    assert_eq!(
+        fs::read_to_string(saved.storage_path().join("workspace/value")).unwrap(),
+        "seed"
+    );
+}
+
+#[test]
 fn saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners() {
     run_isolated(
         "saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners",
@@ -148,6 +216,13 @@ fn saved_seed_tampering_case() {
         ReplayWorkspace::restore_saved(&saved),
         Err(SeedError::SeedChanged)
     ));
+    let entries = fs::read_dir(storage.path()).unwrap().count();
+    assert!(entries > 0);
+    assert!(matches!(
+        ReplayWorkspace::fork_saved_in(&saved, storage.path()),
+        Err(SeedError::SeedChanged)
+    ));
+    assert_eq!(fs::read_dir(storage.path()).unwrap().count(), entries);
     assert_eq!(fs::read_to_string(path.join("file")).unwrap(), "keep trial");
     let mut descriptor = serde_json::to_value(&saved).unwrap();
     descriptor["receipt"]["schema"] = serde_json::json!("unknown");

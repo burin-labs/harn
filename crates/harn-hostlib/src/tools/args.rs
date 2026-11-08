@@ -136,8 +136,18 @@ pub fn str_value(s: impl AsRef<str>) -> VmValue {
 
 /// Resolve a host filesystem argument relative to the current Harn execution
 /// root before sandbox checks or disk I/O.
-pub(crate) fn resolve_host_path(path: impl AsRef<str>) -> std::path::PathBuf {
-    harn_vm::stdlib::process::resolve_source_relative_path(path.as_ref())
+pub(crate) fn resolve_host_path(
+    builtin: &'static str,
+    path: impl AsRef<str>,
+) -> Result<std::path::PathBuf, HostlibError> {
+    let path = harn_vm::stdlib::process::resolve_source_relative_path(path.as_ref());
+    harn_vm::run_tape::workspace_path(path.clone()).map_err(|error| {
+        HostlibError::SandboxViolation {
+            builtin,
+            path: path.display().to_string(),
+            message: error.to_string(),
+        }
+    })
 }
 
 /// Normalize a filesystem path into the string form the agent/tool surface

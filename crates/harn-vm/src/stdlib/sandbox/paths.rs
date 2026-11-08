@@ -17,13 +17,17 @@ pub(super) fn normalize_entry_for_policy(path: &Path) -> PathBuf {
     parent.join(name)
 }
 
-pub(crate) fn normalize_for_policy(path: &Path) -> PathBuf {
+pub(super) fn lexical_for_policy(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         crate::stdlib::process::execution_root_path().join(path)
     };
-    let absolute = normalize_lexically(&absolute);
+    normalize_lexically(&absolute)
+}
+
+pub(crate) fn normalize_for_policy(path: &Path) -> PathBuf {
+    let absolute = lexical_for_policy(path);
     if let Ok(canonical) = absolute.canonicalize() {
         return normalize_os_path_alias(&canonical);
     }

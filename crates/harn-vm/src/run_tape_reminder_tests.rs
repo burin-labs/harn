@@ -37,7 +37,7 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let session = crate::agent_sessions::open_or_create(None).unwrap();
     let prior_revoked = reminder("already revoked", None);
     let prior_expired = reminder("already expired", Some(1));
@@ -116,7 +116,7 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
         assert!(after.revoked_ids.remove(&prior_revoked.id));
         tape.persist(&path).unwrap();
     }
-    let workspace = tmp.path().join("branch");
+    let workspace = tmp.path().join("pool/arm/workspace");
     if matches!(case, ReplayCase::Legacy) {
         let mut removed = 0;
         for record in &mut tape.records {
@@ -137,11 +137,11 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
         tape.header.version = 6;
         tape.persist(&path).unwrap();
         let loaded = EventTape::load(&path).expect("format six stays inspectable");
-        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
         let result = start_branch(BranchPlan {
             tape: loaded,
             live_after_calls: 1,
-            workspace_root: workspace.clone(),
+            workspace: branch_location(&workspace),
             state_root: fresh_branch_state(&workspace),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),
@@ -233,7 +233,7 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
         crate::agent_sessions::open_or_create(Some(session.clone())).unwrap();
         seed_history(&session, &prior_revoked, &prior_expired);
         crate::agent_sessions::store_transcript(&session, initial).unwrap();
-        let workspace = tmp.path().join("rerecorded-branch");
+        let workspace = tmp.path().join("pool/rerecorded/workspace");
         let replay = branch(own_tapes.as_ref().unwrap().path(), 1, &workspace);
         serve_llm_call(&request("first")).unwrap().unwrap();
         let served = serve_tool_call("retire", "retire_reminder", &args);
@@ -293,7 +293,7 @@ fn reminder_state_in_a_closed_child_is_validated_without_reopening_it() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let child = format!("reminder-child-{}", uuid::Uuid::now_v7());
     let args = serde_json::json!({});
     {
@@ -313,7 +313,7 @@ fn reminder_state_in_a_closed_child_is_validated_without_reopening_it() {
         assert_eq!(recording.error(), None);
     }
     assert!(!crate::agent_sessions::exists(&child));
-    let workspace = tmp.path().join("branch");
+    let workspace = tmp.path().join("pool/arm/workspace");
     let replay = branch(tmp.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     let served = serve_tool_call("child", "child_reminders", &args);

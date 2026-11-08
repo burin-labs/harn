@@ -717,6 +717,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
         payload.messages = crate::llm::tool_call_history::repair_tool_call_history(std::mem::take(
             &mut payload.messages,
         ));
+        crate::run_tape::workspace::project_request(&mut payload);
         payload
     }
 }

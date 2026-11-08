@@ -44,7 +44,10 @@ impl SessionManager {
     fn start(&self, request: StartRequest) -> Result<(String, Arc<TerminalSession>), HostlibError> {
         ensure_unrestricted(START)?;
         validate_start_request(&request)?;
-        let cwd = request.cwd.map(resolve_host_path);
+        let cwd = request
+            .cwd
+            .map(|path| resolve_host_path(START, path))
+            .transpose()?;
         let workspace_roots = current_execution_policy()
             .map(|policy| policy.workspace_roots)
             .unwrap_or_else(|| {
