@@ -84,7 +84,7 @@ fn quickstart_printed_shell_step_activates_credentials_for_doctor() {
     fs::write(
         &script,
         format!(
-            "{}\nexec \"$HARN_ACTIVATION_TEST_BIN\" doctor --no-network --json\n",
+            "{}\nexec \"$HARN_EXT_ACTIVATION_TEST_BIN\" doctor --no-network --json\n",
             next_steps[0].trim()
         ),
     )
@@ -100,7 +100,7 @@ fn quickstart_printed_shell_step_activates_credentials_for_doctor() {
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env("HARN_SECRET_PROVIDERS", "env")
         .env("HARN_LLM_CALLS_DISABLED", "1")
-        .env("HARN_ACTIVATION_TEST_BIN", binary)
+        .env("HARN_EXT_ACTIVATION_TEST_BIN", binary)
         .arg(script)
         .output()
         .unwrap();
