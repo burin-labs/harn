@@ -4,7 +4,9 @@ use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
 use super::prepared_command::{prepare_command, PreparedCommand};
-use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
+use super::process_exec::{
+    async_builtin_cancel_token, dispatch_process_exec_after_policy, process_exec_argv,
+};
 use super::HostDispatch;
 use crate::orchestration::CommandPolicyParameters;
 
@@ -50,6 +52,62 @@ pub(super) async fn dispatch_process_exec_with_policy(
         mode,
     )
     .await
+}
+
+pub(super) async fn dispatch_process_spawn_with_policy(
+    ctx: Option<&AsyncBuiltinCtx>,
+    params: &crate::value::DictMap,
+    caller: JsonValue,
+    mode: HostDispatch,
+) -> Result<VmValue, VmError> {
+    let args = [VmValue::dict(params.clone())];
+    crate::run_tape::taped_command_run(
+        "process.spawn",
+        &args,
+        true,
+        Box::pin(dispatch_spawn_live(ctx, params, caller, mode)),
+    )
+    .await
+}
+
+async fn dispatch_spawn_live(
+    ctx: Option<&AsyncBuiltinCtx>,
+    params: &crate::value::DictMap,
+    caller: JsonValue,
+    mode: HostDispatch,
+) -> Result<VmValue, VmError> {
+    let prepared = match crate::orchestration::run_prepared_command_policy_preflight(
+        ctx,
+        params,
+        caller,
+        crate::orchestration::CommandDispatchOrigin::ArbitraryProcess,
+        |params| super::prepared_command::prepare_command(ctx, params, "spawn", mode),
+    )
+    .await?
+    {
+        crate::orchestration::CommandPolicyPreflight::Proceed { params, .. } => params,
+        crate::orchestration::CommandPolicyPreflight::Blocked {
+            status,
+            message,
+            context,
+            decisions,
+        } => {
+            return Ok(crate::orchestration::blocked_command_response(
+                params, status, &message, context, decisions,
+            ));
+        }
+    };
+    match prepared {
+        PreparedCommand::Host { command, .. } => command.execute().await,
+        PreparedCommand::Local(prepared) => {
+            crate::stdlib::process_spawn::spawn_prepared(
+                &prepared.params,
+                prepared.command,
+                async_builtin_cancel_token(ctx),
+            )
+            .await
+        }
+    }
 }
 
 async fn dispatch_process_exec_with_policy_origin(

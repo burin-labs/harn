@@ -4,7 +4,9 @@ use super::{
     overlap, process_tape, record_payload_redaction, transcript, ProcessTape, RecordedToolResult,
     RecordingLevel, RECORDING_FULL,
 };
-use crate::testbench::tape::{content_hash, FileEffect, TapeRecordKind, TranscriptChange};
+use crate::testbench::tape::{
+    content_hash, CommandEffect, FileEffect, TapeRecordKind, TranscriptChange,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -21,6 +23,7 @@ pub(crate) struct ToolCallRecording {
     watch: EffectWatch,
     pub(crate) transcript_changes: Vec<TranscriptChange>,
     pub(crate) store_changes: Vec<crate::store::StoreChange>,
+    pub(crate) command_effect: CommandEffect,
     unservable: Option<String>,
 }
 
@@ -68,6 +71,7 @@ pub(crate) fn begin_tool_call(
         watch,
         transcript_changes: Vec::new(),
         store_changes: Vec::new(),
+        command_effect: CommandEffect::None,
         unservable: None,
     })
 }
@@ -127,6 +131,7 @@ pub(crate) fn finish_tool_call(
         watch,
         transcript_changes,
         store_changes,
+        command_effect,
         unservable,
     } = recording;
     let recorder = &tape.recorder;
@@ -234,5 +239,6 @@ pub(crate) fn finish_tool_call(
         unservable,
         transcript_changes: if full { transcript_changes } else { Vec::new() },
         store_changes,
+        command_effect: Some(command_effect),
     });
 }

@@ -73,16 +73,24 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     policy
 }
 
+/// Admission has no active command policy yet; check platform support only.
+pub(crate) fn check_platform_supported() -> Result<(), VmError> {
+    if !cfg!(target_os = "linux") {
+        return Err(super::sandbox_rejection(
+            "cannot replay commands in a moved workspace on this host; an enforced filesystem namespace is required".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn check_supported() -> Result<(), VmError> {
     if roots().is_none() {
         return Ok(());
     }
     // Other renderers retain the refusal until their complete grant set is
     // checked and the opaque-child negative control proves confinement.
-    if !cfg!(target_os = "linux")
-        || super::active_sandbox_policy().is_none()
-        || !super::active_backend_filesystem_available()
-    {
+    check_platform_supported()?;
+    if super::active_sandbox_policy().is_none() || !super::active_backend_filesystem_available() {
         return Err(super::sandbox_rejection(
             "live commands in a relocated replay workspace require an enforced filesystem namespace on this host".into(),
         ));

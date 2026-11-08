@@ -31,9 +31,8 @@ pub use bridge::{
     set_host_call_bridge, HostCallBridge, HostCallBridgeGuard, HostCallDispatchFuture,
 };
 
-use process_dispatch::dispatch_process_exec_with_policy;
 pub use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
-use process_exec::dispatch_process_spawn_with_policy;
+use process_dispatch::{dispatch_process_exec_with_policy, dispatch_process_spawn_with_policy};
 pub(crate) use process_exec::{
     build_sandboxed_command, PreparedProcessCommand, ProcessCommandKind,
 };

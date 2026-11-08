@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::api::{LlmRequestPayload, LlmResult};
 use crate::testbench::tape::{
-    content_hash, EventTape, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
+    content_hash, CommandEffect, EventTape, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
     TranscriptChange,
 };
 
@@ -569,6 +569,7 @@ struct RecordedTool {
     unservable: Option<String>,
     transcript_changes: Vec<TranscriptChange>,
     store_changes: Vec<crate::store::StoreChange>,
+    command_effect: CommandEffect,
 }
 
 struct PrefixTool {
@@ -745,7 +746,7 @@ pub fn start_branch_with_sources(
     {
         return Err(format!(
             "this tape is format {}; branch replay requires format {} with session lifecycle, \
-             reminder state, state-location, runtime store evidence and session permission checks; re-record it to branch",
+             reminder state, state-location, runtime store evidence, session permission checks and command effects; re-record it to branch",
             tape.header.version,
             crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));
@@ -780,6 +781,7 @@ pub fn start_branch_with_sources(
     let mut cache_lookups: RecordedLookups = BTreeMap::new();
     let mut recorded_keys = BTreeSet::new();
     let mut store_seeds = BTreeMap::new();
+    let mut live_command = false;
     let decode = |payload: &Option<TapePayload>| -> Result<Option<serde_json::Value>, String> {
         payload
             .as_ref()
@@ -848,7 +850,15 @@ pub fn start_branch_with_sources(
                 unservable,
                 transcript_changes,
                 store_changes,
-            } if *after_calls <= k => {
+                command_effect,
+            } => {
+                let command_effect = command_effect.ok_or_else(|| {
+                    "this tape did not measure command effects; re-record it to branch".to_string()
+                })?;
+                if *after_calls > k {
+                    live_command |= command_effect == CommandEffect::Requested;
+                    continue;
+                }
                 let bytes = tape.resolve_payload(outcome)?;
                 let outcome = if bytes.is_empty() {
                     None
@@ -888,6 +898,7 @@ pub fn start_branch_with_sources(
                         unservable,
                         transcript_changes: transcript_changes.clone(),
                         store_changes,
+                        command_effect,
                     },
                     used: false,
                 });
@@ -918,6 +929,10 @@ pub fn start_branch_with_sources(
     let workspace_container_root = plan.workspace.storage_pool().to_path_buf();
     let sources = sources::ReplaySources::from_tape(&tape, source_roots, &plan.workspace)?;
     let recorded_workspace = workspace::RecordedWorkspace::from_tape(&tape)?;
+    if live_command && scope::relocated(&workspace_root, &recorded_workspace, &sources) {
+        crate::stdlib::sandbox::replay::check_platform_supported()
+            .map_err(|error| error.to_string())?;
+    }
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
         prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, sources.roots())?;
@@ -1258,6 +1273,7 @@ pub(crate) enum ToolServe {
         RecordedToolResult,
         Vec<TranscriptChange>,
         Vec<crate::store::StoreChange>,
+        CommandEffect,
     ),
     /// The prefix diverged; refuse the call.
     Diverged(crate::value::VmError),
@@ -1330,6 +1346,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     let effects = recorded.effects.clone();
     let changes = recorded.transcript_changes.clone();
     let store_changes = recorded.store_changes.clone();
+    let command_effect = recorded.command_effect;
     if let Err(error) = transcript::preflight(&changes) {
         return diverge(state, "transcript change", error);
     }
@@ -1353,7 +1370,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
                 .state()
                 .report
                 .served_tool_calls += 1;
-            ToolServe::Served(outcome, changes, store_changes)
+            ToolServe::Served(outcome, changes, store_changes, command_effect)
         }
         Err(error) => {
             let branch = branch.expect("a served call has a branch");

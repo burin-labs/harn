@@ -226,7 +226,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     // The tool named by the served response returns its recorded result and
     // writes its recorded effect into the branch workspace without running.
     match serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"})) {
-        ToolServe::Served(outcome, _, _) => assert_eq!(outcome, ok(serde_json::json!("done"))),
+        ToolServe::Served(outcome, ..) => assert_eq!(outcome, ok(serde_json::json!("done"))),
         _ => panic!("expected a served tool call"),
     }
     assert_eq!(

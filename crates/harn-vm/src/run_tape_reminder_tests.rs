@@ -200,12 +200,13 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
         assert!(crate::agent_sessions::close(&session));
         return;
     }
-    let ToolServe::Served(outcome, changes, store_changes) = served else {
+    let ToolServe::Served(outcome, changes, store_changes, command_effect) = served else {
         panic!("the retirement must be served")
     };
     if let Some(mut recording) = own_tool {
         recording.transcript_changes = changes;
         recording.store_changes = store_changes;
+        recording.command_effect = command_effect;
         finish_tool_call(recording, Ok(outcome.clone()));
     }
     assert_eq!(outcome, ok(recorded_outcome.clone()));
@@ -237,7 +238,7 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
         let replay = branch(own_tapes.as_ref().unwrap().path(), 1, &workspace);
         serve_llm_call(&request("first")).unwrap().unwrap();
         let served = serve_tool_call("retire", "retire_reminder", &args);
-        let ToolServe::Served(outcome, _, _) = served else {
+        let ToolServe::Served(outcome, ..) = served else {
             panic!("the branch's own tape must preserve reminder retirement")
         };
         assert_eq!(outcome, ok(recorded_outcome));
@@ -317,7 +318,7 @@ fn reminder_state_in_a_closed_child_is_validated_without_reopening_it() {
     let replay = branch(tmp.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     let served = serve_tool_call("child", "child_reminders", &args);
-    let ToolServe::Served(outcome, _, _) = served else {
+    let ToolServe::Served(outcome, ..) = served else {
         panic!("the closed child's reminder changes must be served")
     };
     assert_eq!(outcome, ok(serde_json::json!("closed")));

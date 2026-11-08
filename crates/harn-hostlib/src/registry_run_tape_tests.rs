@@ -4,7 +4,7 @@ use super::HostlibRegistry;
 use harn_vm::run_tape::{
     start_recording, EffectScan, RecordingLevel, TapeWorkspace, ToolEffectObserver, TAPE_FILE_NAME,
 };
-use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
+use harn_vm::testbench::tape::{CommandEffect, EventTape, TapeRecordKind};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -164,8 +164,14 @@ return harness.tools.dispatch_agent_call({{id: "launch-1", name: "launch", argum
         .iter()
         .filter_map(|record| match &record.kind {
             TapeRecordKind::ToolCall {
-                tool, unservable, ..
-            } if tool == "launch" => Some(unservable),
+                tool,
+                unservable,
+                command_effect,
+                ..
+            } if tool == "launch" => {
+                assert_eq!(*command_effect, Some(CommandEffect::Requested));
+                Some(unservable)
+            }
             _ => None,
         })
         .collect();
@@ -243,11 +249,76 @@ return harness.tools.dispatch_agent_call({{id: "check-1", name: "check", argumen
     let tape = EventTape::load(&dir.path().join(TAPE_FILE_NAME)).unwrap();
     let mut checks = tape.records.iter().filter_map(|record| match &record.kind {
         TapeRecordKind::ToolCall {
-            tool, unservable, ..
-        } if tool == "check" => Some(unservable.clone()),
+            tool,
+            unservable,
+            command_effect,
+            ..
+        } if tool == "check" => {
+            assert_eq!(*command_effect, Some(CommandEffect::Requested));
+            Some(unservable.clone())
+        }
         _ => None,
     });
     let reason = checks.next().expect("the dispatch was recorded");
     assert!(checks.next().is_none());
     reason
+}
+
+#[test]
+fn standalone_commands_measure_foreground_and_background_effects() {
+    for background in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let _session = harn_vm::agent_sessions::enter_current_session("standalone-command-effect");
+        let guard = start_recording(
+            dir.path(),
+            RecordingLevel::Full,
+            Some(TapeWorkspace {
+                root: dir.path().to_path_buf(),
+                observer: Box::new(NoChanges),
+                state_roots: Vec::new(),
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        let marker = dir.path().join("executed");
+        let source = format!(
+            r#"
+const command = harness.tools.run_command({{
+  argv: ["/usr/bin/touch", {marker}], cwd: {root}, sandbox_profile: "workspace_paths",
+  background: {background}, env_mode: "replace",
+}})
+if command.handle_id != nil {{
+  const settled = harness.tools.wait_command({{handle_id: command.handle_id, timeout_ms: 5000}})
+  assert(settled.status == "completed")
+}} else {{
+  assert(command.status == "completed")
+}}
+harness.stdio.log("command-settled")
+"#,
+            marker = serde_json::to_string(&marker.display().to_string()).unwrap(),
+            root = serde_json::to_string(&dir.path().display().to_string()).unwrap(),
+        );
+        assert!(!marker.exists());
+        let (_, output) = run(&source, dir.path());
+        assert!(output.contains("command-settled"), "{output}");
+        assert!(marker.is_file(), "the real command must execute");
+        assert_eq!(guard.error(), None);
+        drop(guard);
+        let tape = EventTape::load(&dir.path().join(TAPE_FILE_NAME)).unwrap();
+        let commands: Vec<_> = tape
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TapeRecordKind::ToolCall {
+                    command_effect,
+                    unservable,
+                    ..
+                } => Some((command_effect, unservable)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(*commands[0].0, Some(CommandEffect::Requested));
+        assert_eq!(commands[0].1.is_some(), background, "{commands:?}");
+    }
 }
