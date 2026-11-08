@@ -23,6 +23,9 @@ if [[ "$group" == tooling ]]; then
   filter+=" and (${tooling_filter# or })"
 fi
 args=(--profile ci -E "$filter")
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  rm -f "$RUNNER_TEMP/harn-nextest-junit.xml"
+fi
 is_tooling() {
   local name
   for name in "${tooling_packages[@]}"; do [[ "$1" == "$name" ]] && return 0; done
@@ -95,7 +98,24 @@ else
   args+=(--locked "${packages[@]}")
 fi
 census=$(mktemp)
-trap 'rm -f "$census"; if [[ -n "$extracted" ]]; then rm -rf "$extracted"; fi' EXIT
+junit_source=
+preserve_results() {
+  local status=$?
+  if [[ -n "$junit_source" && -n "${RUNNER_TEMP:-}" ]]; then
+    if [[ -f "$junit_source" ]]; then
+      if ! cp "$junit_source" "$RUNNER_TEMP/harn-nextest-junit.xml"; then
+        [[ "$status" != 0 ]] || status=1
+      fi
+    else
+      echo "Nextest timing report missing: $junit_source" >&2
+      [[ "$status" != 0 ]] || status=1
+    fi
+  fi
+  rm -f "$census"
+  if [[ -n "$extracted" ]]; then rm -rf "$extracted"; fi
+  exit "$status"
+}
+trap preserve_results EXIT
 if [[ "$selected" == archive ]]; then
   extracted=$(mktemp -d)
   cargo-nextest nextest list "${args[@]}" --extract-to "$extracted" --message-format json > "$census"
@@ -126,6 +146,12 @@ if [[ -n "${RUNNER_TEMP:-}" ]]; then
   cp "$census" "$RUNNER_TEMP/harn-nextest-inventory.json"
 fi
 eligible=$("${harn[@]}" "$script_dir/nextest_inventory.harn" -- "$census")
+# Nextest's store is workspace-relative, independent of Cargo's target remap.
+# Remove stale output and preserve fresh timings on both success and failure.
+report_workspace=$PWD
+[[ "$selected" != archive ]] || report_workspace=$GITHUB_WORKSPACE
+junit_source="$report_workspace/target/nextest/ci/junit.xml"
+rm -f "$junit_source"
 echo "Workspace tests: packages=$selected eligible=$eligible partition=$partition"
 if [[ "$partition" == all ]]; then
   cargo-nextest nextest run "${args[@]}" --no-tests fail
