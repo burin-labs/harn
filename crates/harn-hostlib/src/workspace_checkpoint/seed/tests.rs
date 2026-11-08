@@ -333,7 +333,7 @@ impl Writer {
         let writes = std::sync::Arc::new(AtomicU64::new(0));
         let thread = {
             let (stop, writes) = (stop.clone(), writes.clone());
-            std::thread::spawn(move || {
+            harn_parser::runtime_stack::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let next = writes.fetch_add(1, Ordering::Relaxed);
                     fs::write(&path, next.to_string()).unwrap();
