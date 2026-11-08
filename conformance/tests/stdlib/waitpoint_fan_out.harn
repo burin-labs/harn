@@ -11,7 +11,6 @@ pipeline test(harness: Harness, task: unknown) {
     let resolved = wait(harness.runtime, points)
     return {count: len(resolved), first: resolved[0].value, last: resolved[4].value}
   }
-  harness.clock.sleep_ms(10ms)
   complete(harness.runtime, p0, "a")
   complete(harness.runtime, p1, "b")
   complete(harness.runtime, p2, "c")

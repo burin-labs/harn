@@ -245,8 +245,6 @@ const CONFORMANCE_SLEEP_BASELINE = [
     path: "conformance/tests/scenarios/orchestrator_worker_claim_expiry_requeue.harn",
     count: 1,
   },
-  {rule: "conformance_sleep", path: "conformance/tests/stdlib/waitpoint_fan_out.harn", count: 1},
-  {rule: "conformance_sleep", path: "conformance/tests/stdlib/waitpoints_fan_out.harn", count: 1},
 ]
 
 const EXACT_PATTERN_BASELINE = LITERAL_TIMEOUT_BASELINE
