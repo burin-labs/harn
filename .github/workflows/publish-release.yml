@@ -197,7 +197,7 @@ jobs:
       issues: write
       id-token: write
       attestations: write
-    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@b7e805dbc176a8503341df00cb75a58174c52e24
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@91626346595d83a96c69f395141aa165b0afec7c
     with:
       source-revision: ${{ needs.detect-drift.outputs.source_sha }}
       policy: false
