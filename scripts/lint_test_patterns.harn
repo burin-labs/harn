@@ -219,9 +219,6 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/concurrency/deadline_catch.harn",
   "conformance/tests/concurrency/parallel_each_as_stream.harn",
   "conformance/tests/concurrency/parallel_race.harn",
-  "conformance/tests/concurrency/supervisor_circuit_open.harn",
-  "conformance/tests/concurrency/supervisor_one_for_one.harn",
-  "conformance/tests/concurrency/supervisor_restart_window.harn",
   "conformance/tests/scenarios/agent_loop_mcp_servers.harn",
   "conformance/tests/scenarios/orchestrator_hot_reload_add.harn",
   "conformance/tests/scenarios/orchestrator_hot_reload_modify_inflight.harn",
@@ -714,7 +711,6 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // process can remove it past the age bound. Host time must survive process
   // death, so the real clock is the source of truth.
   "crates/harn-vm/src/stdlib/sandbox/grant_spawn.rs",
-  "crates/harn-vm/src/stdlib/supervisor.rs",
   "crates/harn-vm/src/stdlib/tracing.rs",
   "crates/harn-vm/src/stdlib/triggers_stdlib.rs",
   "crates/harn-vm/src/stdlib/waitpoint.rs",

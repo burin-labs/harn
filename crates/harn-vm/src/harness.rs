@@ -918,6 +918,15 @@ impl HarnessClock {
     pub fn clock(&self) -> &Arc<dyn Clock> {
         self.inner.clock()
     }
+
+    /// Wait for the owning clock without advancing a paused test clock.
+    pub(crate) async fn wait_until(&self, deadline: OffsetDateTime) {
+        self.inner
+            .clock_control
+            .active()
+            .sleep_until_utc(deadline)
+            .await;
+    }
 }
 
 include!("harness/fixtures.rs");

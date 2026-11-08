@@ -3,11 +3,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use time::OffsetDateTime;
 
 use tokio::sync::{mpsc, Notify};
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
+use crate::harness::{Harness, HarnessClock, HarnessInner};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_DICT, TY_LIST};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
@@ -53,7 +55,7 @@ struct ChildSlot {
     status: String,
     restart_count: usize,
     generation: u64,
-    failures: VecDeque<SystemTime>,
+    failures: VecDeque<i64>,
     last_error: Option<String>,
     current_wait_reason: Option<String>,
     next_restart_time_ms: Option<i64>,
@@ -72,6 +74,7 @@ struct SupervisorEvent {
 }
 
 struct SupervisorState {
+    clock: HarnessClock,
     id: String,
     name: String,
     strategy: Strategy,
@@ -243,8 +246,13 @@ async fn supervisor_stop_impl(
         }
     }
 
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let (clock, terminal_notify) = {
+        let state = handle.state.lock();
+        (state.clock.clone(), state.terminal_notify.clone())
+    };
+    let deadline = clock.clock().now_utc() + time::Duration::milliseconds(timeout_ms as i64);
     loop {
+        let notified = terminal_notify.notified();
         if handle
             .state
             .lock()
@@ -254,10 +262,10 @@ async fn supervisor_stop_impl(
         {
             break;
         }
-        if tokio::time::Instant::now() >= deadline {
-            break;
+        tokio::select! {
+            _ = notified => {},
+            _ = clock.wait_until(deadline) => break,
         }
-        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 
     {
@@ -306,6 +314,11 @@ async fn supervisor_stop_impl(
 }
 
 fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandle, VmError> {
+    let inner = base_vm
+        .harness()
+        .and_then(|harness| harness.host_state_arc::<HarnessInner>())
+        .ok_or_else(|| VmError::Runtime("supervisor_start requires a Harness clock".to_string()))?;
+    let clock = Harness::from_inner(inner).clock();
     let spec = require_dict(spec_value, "supervisor_start")?;
     let id = spec
         .get("id")
@@ -353,6 +366,7 @@ fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandl
         .collect();
 
     let state = Arc::new(parking_lot::Mutex::new(SupervisorState {
+        clock,
         id,
         name,
         strategy,
@@ -478,6 +492,7 @@ fn handle_child_exit(
 
         let child_name = state_ref.children[index].spec.name.clone();
         let stop_requested = state_ref.stop_requested;
+        let failure_at = state_ref.clock.clock().monotonic_ms();
         {
             let child = &mut state_ref.children[index];
             child.join = None;
@@ -492,7 +507,7 @@ fn handle_child_exit(
                 Err(error) => {
                     child.status = "failed".to_string();
                     child.last_error = Some(error.clone());
-                    child.failures.push_back(SystemTime::now());
+                    child.failures.push_back(failure_at);
                     state_ref.failed_count += 1;
                     push_event(
                         &mut state_ref,
@@ -579,11 +594,12 @@ fn handle_child_exit(
         }
     }
 
-    for (idx, delay_ms, gen) in restart_plan {
-        if delay_ms == 0 {
+    let clock = state.lock().clock.clone();
+    for (idx, deadline, gen) in restart_plan {
+        if deadline <= clock.clock().now_utc() {
             spawn_child(state.clone(), tx.clone(), base_vm.clone(), idx, true);
         } else {
-            schedule_restart(tx.clone(), idx, gen, delay_ms);
+            schedule_restart(tx.clone(), clock.clone(), idx, gen, deadline);
         }
     }
 }
@@ -615,7 +631,7 @@ fn restart_decision(
     state: &mut SupervisorState,
     index: usize,
     failed: bool,
-) -> Option<(usize, u64, u64)> {
+) -> Option<(usize, OffsetDateTime, u64)> {
     let should_restart = match state.children.get(index)?.spec.restart.mode {
         RestartMode::Never => false,
         RestartMode::OnFailure => failed,
@@ -625,15 +641,15 @@ fn restart_decision(
         return None;
     }
 
-    let now = SystemTime::now();
+    let now = state.clock.clock().now_utc();
+    let monotonic_now = state.clock.clock().monotonic_ms();
     if state.children[index].spec.restart.window_ms > 0 {
-        let window = Duration::from_millis(state.children[index].spec.restart.window_ms);
+        let window = state.children[index].spec.restart.window_ms;
         let child = &mut state.children[index];
         while child
             .failures
             .front()
-            .and_then(|at| now.duration_since(*at).ok())
-            .is_some_and(|age| age > window)
+            .is_some_and(|at| monotonic_now.saturating_sub(*at).max(0) as u64 > window)
         {
             child.failures.pop_front();
         }
@@ -651,10 +667,11 @@ fn restart_decision(
             state.suppressed_count += 1;
             let name = state.children[index].spec.name.clone();
             if let Some(open_ms) = state.children[index].spec.restart.circuit_open_ms {
+                let deadline = now + time::Duration::milliseconds(open_ms as i64);
                 let child = &mut state.children[index];
                 child.status = "circuit_open".to_string();
                 child.current_wait_reason = Some("circuit_open".to_string());
-                child.next_restart_time_ms = Some(now_ms() + open_ms as i64);
+                child.next_restart_time_ms = Some(wall_ms(deadline));
                 child.restart_count = 0;
                 child.failures.clear();
                 let generation = child.generation;
@@ -664,7 +681,7 @@ fn restart_decision(
                     "child_suppressed",
                     Some("restart cap reached; circuit opened".to_string()),
                 );
-                return Some((index, open_ms, generation));
+                return Some((index, deadline, generation));
             }
             {
                 let child = &mut state.children[index];
@@ -683,11 +700,12 @@ fn restart_decision(
 
     let child = &mut state.children[index];
     let delay_ms = restart_delay_ms(&child.spec.restart, child.restart_count, index);
+    let deadline = now + time::Duration::milliseconds(delay_ms as i64);
     child.restart_count += 1;
     child.generation = child.generation.saturating_add(1);
     child.status = "waiting".to_string();
     child.current_wait_reason = Some("restart_backoff".to_string());
-    child.next_restart_time_ms = Some(now_ms() + delay_ms as i64);
+    child.next_restart_time_ms = Some(wall_ms(deadline));
     let generation = child.generation;
     let name = child.spec.name.clone();
     state.restarted_count += 1;
@@ -697,7 +715,7 @@ fn restart_decision(
         "child_restarted",
         Some(format!("scheduled after {delay_ms}ms")),
     );
-    Some((index, delay_ms, generation))
+    Some((index, deadline, generation))
 }
 
 fn spawn_child(
@@ -774,13 +792,18 @@ fn spawn_child(
 
 fn schedule_restart(
     tx: mpsc::UnboundedSender<SupervisorMsg>,
+    clock: HarnessClock,
     index: usize,
     generation: u64,
-    delay_ms: u64,
+    deadline: OffsetDateTime,
 ) {
     crate::task_spawn::spawn_local(async move {
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        let _ = tx.send(SupervisorMsg::RestartDue { index, generation });
+        tokio::select! {
+            _ = clock.wait_until(deadline) => {
+                let _ = tx.send(SupervisorMsg::RestartDue { index, generation });
+            },
+            _ = tx.closed() => {},
+        }
     });
 }
 
@@ -1142,7 +1165,7 @@ fn push_event(
 ) {
     let event = SupervisorEvent {
         seq: state.next_seq,
-        at_ms: now_ms(),
+        at_ms: wall_ms(state.clock.clock().now_utc()),
         supervisor_id: state.id.clone(),
         child,
         kind: kind.to_string(),
@@ -1208,11 +1231,8 @@ fn strategy_name(strategy: Strategy) -> &'static str {
     }
 }
 
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+fn wall_ms(at: OffsetDateTime) -> i64 {
+    (at.unix_timestamp_nanos() / 1_000_000) as i64
 }
 
 #[cfg(test)]

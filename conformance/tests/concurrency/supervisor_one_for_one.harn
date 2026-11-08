@@ -1,4 +1,5 @@
 pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
   const flaky_starts = harness.runtime.atomic(0)
   const stable_starts = harness.runtime.atomic(0)
   const sup = harness.runtime.supervisor_start(
@@ -9,7 +10,7 @@ pipeline default(harness: Harness) {
         {
           name: "flaky",
           kind: "generic_task",
-          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 60000},
           task: { _ctx ->
             let attempt = harness.runtime.atomic_add(flaky_starts, 1) + 1
             if attempt == 1 {
@@ -30,6 +31,13 @@ pipeline default(harness: Harness) {
       ],
     },
   )
+  while harness.runtime.supervisor_state(sup).children[0].status != "waiting" {
+    harness.runtime.yield_now()
+  }
+  const waiting = harness.runtime.supervisor_state(sup)
+  harness.stdio.println(harness.clock.now_ms())
+  harness.stdio.println(waiting.children[0].next_restart_time)
+  harness.testing.clock_advance(60000)
   const state = harness.runtime.supervisor_wait(sup)
   const events = harness.runtime.supervisor_events(sup)
   const debug = harness.runtime.context().debug
@@ -43,4 +51,6 @@ pipeline default(harness: Harness) {
   harness.stdio.println(state.children[1].status)
   harness.stdio.println(events[0].kind)
   harness.stdio.println(debug.supervisors[0].name)
+  harness.stdio.println(events[0].at_ms)
+  harness.testing.clock_reset()
 }

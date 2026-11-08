@@ -449,13 +449,12 @@ It exposes a synchronous control channel so the test drives process state
 
 ### Unified `harness.testing.clock_set(...)` for Harn fixtures and stdlib builtins
 
-Conformance fixtures and Rust-side tests that exercise stdlib timing
-builtins (`sleep`, `sleep_ms`, `now_ms`, `monotonic_ms`, `timestamp`,
-`elapsed`, `command_step` retry) all share one mock-clock stack
-(`harn_vm::clock_mock`). This same stack also drives the trigger
-dispatcher and the cron scheduler — installing one mock pins time
-everywhere a Harn script, a connector, or a Rust test would otherwise
-read it.
+`harness.testing.clock_set(...)` pins the clock owned by that Harness.
+Sibling tasks and supervisor children using the same handle observe that
+clock; unrelated Harness instances keep their own time. Supervisor event
+timestamps, restart windows, backoff, circuit reopening, and shutdown grace
+periods use this clock. Background supervisor timers wait for an explicit
+`clock_advance(...)`; they do not advance paused time themselves.
 
 ```harn
 pipeline test(harness: Harness, task) {
@@ -472,10 +471,10 @@ pipeline test(harness: Harness, task) {
 }
 ```
 
-Rust tests can install the same mock through `stdlib::clock::MockClockGuard`
-or `clock_mock::install_override(MockClock::new(...))` — both push onto
-the same thread-local stack, so a stdlib-side guard is observed by the
-trigger dispatcher and vice versa.
+Rust tests of legacy clock builtins can use `stdlib::clock::MockClockGuard`
+or `clock_mock::install_override(MockClock::new(...))`. Those thread-local
+overrides do not configure a production Harness; exercise Harness methods
+with its injected clock or explicit testing controls.
 
 Fixtures that genuinely need wall-clock time (real subprocess I/O,
 real socket-bound servers, scheduler tests timing real backoffs) are
