@@ -21,13 +21,13 @@ embed = ["dep:harn-stdlib-compiler", "dep:zstd"]
 # each one reaches the compiler's declaration projection, since resolver v2
 # never unifies the build script's features with the host's.
 # `register` refuses a table whose contract differs from the running binary.
-full = ["harn-stdlib-compiler?/full"]
-postgres = ["harn-stdlib-compiler?/postgres"]
-sqlite = ["harn-stdlib-compiler?/sqlite"]
-content = ["harn-stdlib-compiler?/content"]
-compression = ["harn-stdlib-compiler?/compression"]
-cloud-aws = ["harn-stdlib-compiler?/cloud-aws"]
-native-keyring = ["harn-stdlib-compiler?/native-keyring"]
+full = ["harn-vm/full", "harn-runtime/full", "harn-stdlib-compiler?/full"]
+postgres = ["harn-vm/postgres", "harn-runtime/postgres", "harn-stdlib-compiler?/postgres"]
+sqlite = ["harn-vm/sqlite", "harn-runtime/sqlite", "harn-stdlib-compiler?/sqlite"]
+content = ["harn-vm/content", "harn-runtime/content", "harn-stdlib-compiler?/content"]
+compression = ["harn-vm/compression", "harn-runtime/compression", "harn-stdlib-compiler?/compression"]
+cloud-aws = ["harn-vm/cloud-aws", "harn-stdlib-compiler?/cloud-aws"]
+native-keyring = ["harn-vm/native-keyring", "harn-stdlib-compiler?/native-keyring"]
 
 [dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.192", default-features = false }

@@ -216,7 +216,7 @@ description = "Native builtin attributes projected into the compiler's handler-f
 gen = "gen-vm-exposures"
 check = "check-vm-exposures"
 outputs = ["crates/harn-capability-contracts/src/vm_declared.rs", "crates/harn-stdlib-compiler/src/declarations.rs", "crates/harn-stdlib-compiler/Cargo.toml"]
-sources = ["Cargo.toml", "crates/harn-vm/src/", "crates/harn-builtins/src/", "crates/harn-flow/src/", "crates/harn-vm/Cargo.toml", "crates/harn-runtime/Cargo.toml", "crates/harn-builtin-macros/examples/native_contracts.rs"]
+sources = ["Cargo.toml", "crates/harn-vm/src/", "crates/harn-builtins/src/", "crates/harn-flow/src/", "crates/harn-vm/Cargo.toml", "crates/harn-runtime/Cargo.toml", "crates/harn-stdlib-artifacts/Cargo.toml", "crates/harn-builtin-macros/examples/native_contracts.rs"]
 ci = true
 make_all = true
 
