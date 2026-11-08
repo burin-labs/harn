@@ -18,6 +18,8 @@ proc-macro2 = "1"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.192" }
 
 [dev-dependencies]
+tempfile = "3"
+toml = "1.1"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.192" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.192" }
 

@@ -64,6 +64,19 @@ pub fn harn_builtin(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// Project a builtin declaration into a compiler without linking its handler.
+/// Generated source supplies the original attributes and function name. The
+/// signature and authority fields use the same expansion as `harn_builtin`.
+#[proc_macro_attribute]
+pub fn harn_builtin_metadata(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attrs = parse_macro_input!(attr as BuiltinAttrs);
+    let item_fn = parse_macro_input!(item as ItemFn);
+    match expand_with_handler(attrs, item_fn, false) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 /// Declare one method-dispatched capability surface without manufacturing a
 /// runtime handler. The declaration contributes the same `BuiltinDef` shape
 /// as `#[harn_builtin]`, so every consumer reads one manifest.
@@ -419,6 +432,14 @@ fn parse_str_array(expr: &Expr) -> syn::Result<Vec<LitStr>> {
 }
 
 fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
+    expand_with_handler(attrs, item_fn, true)
+}
+
+fn expand_with_handler(
+    attrs: BuiltinAttrs,
+    item_fn: ItemFn,
+    runtime_handler: bool,
+) -> syn::Result<TokenStream2> {
     let fn_name = &item_fn.sig.ident;
     let def_ident = format_ident!("{}_DEF", fn_name.to_string().to_uppercase());
     let support = quote!(::harn_vm_core::builtin_support);
@@ -500,7 +521,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
     // functions we emit a sibling thunk that boxes the future to match the
     // `AsyncHandler` signature.
     let async_thunk_ident = format_ident!("__harn_async_wrap_{}", fn_name);
-    let (handler_expr, extra_items) = match (attrs.kind, attrs.parser_only) {
+    let (handler_expr, extra_items) = match (attrs.kind, attrs.parser_only || !runtime_handler) {
         (_, true) => (quote!(#support::VmBuiltinHandler::None), quote!()),
         (BuiltinKind::Sync, _) => (quote!(#support::VmBuiltinHandler::Sync(#fn_name)), quote!()),
         (BuiltinKind::Async, _) => {
@@ -542,8 +563,13 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
     // the static name.
     let link_ident = format_ident!("__{}_LINKME", fn_name.to_string().to_uppercase());
 
+    let function = runtime_handler.then(|| quote!(#item_fn));
+    // Metadata parity tests link the real runtime and compare declarations.
+    // They must not also register the compiler's handler-free definitions.
+    let link_condition = (!runtime_handler).then(|| quote!(#[cfg(not(test))]));
+
     let out = quote! {
-        #item_fn
+        #function
 
         #extra_items
 
@@ -564,6 +590,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
 
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
+        #link_condition
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
         #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;

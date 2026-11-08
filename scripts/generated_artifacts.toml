@@ -212,11 +212,11 @@ make_all = true
 
 [[artifact]]
 id = "vm-exposures"
-description = "Names of every `harness.<capability>.<method>` declared by `#[harn_builtin]` in harn-vm, projected into the dependency-leaf contracts crate so `harn check` can reject an unknown capability method without a running VM."
+description = "Native builtin attributes projected into the compiler's handler-free declarations and the parser's capability method names, preserving source conditions and selected families."
 gen = "gen-vm-exposures"
 check = "check-vm-exposures"
-outputs = ["crates/harn-capability-contracts/src/vm_declared.rs"]
-sources = ["crates/harn-vm/src/", "crates/harn-builtins/src/", "crates/harn-flow/src/"]
+outputs = ["crates/harn-capability-contracts/src/vm_declared.rs", "crates/harn-stdlib-compiler/src/declarations.rs", "crates/harn-stdlib-compiler/Cargo.toml"]
+sources = ["Cargo.toml", "crates/harn-vm/src/", "crates/harn-builtins/src/", "crates/harn-flow/src/", "crates/harn-vm/Cargo.toml", "crates/harn-runtime/Cargo.toml", "crates/harn-builtin-macros/examples/native_contracts.rs"]
 ci = true
 make_all = true
 

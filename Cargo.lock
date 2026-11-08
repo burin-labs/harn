@@ -3444,6 +3444,8 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]
@@ -4351,6 +4353,7 @@ version = "0.10.192"
 dependencies = [
  "harn-runtime",
  "harn-stdlib",
+ "harn-stdlib-compiler",
  "harn-vm",
  "tempfile",
  "tokio",
@@ -4360,6 +4363,18 @@ dependencies = [
 [[package]]
 name = "harn-stdlib-catalog"
 version = "0.10.192"
+
+[[package]]
+name = "harn-stdlib-compiler"
+version = "0.10.192"
+dependencies = [
+ "harn-builtin-macros",
+ "harn-builtin-meta",
+ "harn-runtime",
+ "harn-stdlib",
+ "harn-vm",
+ "harn-vm-core",
+]
 
 [[package]]
 name = "harn-terminal"
