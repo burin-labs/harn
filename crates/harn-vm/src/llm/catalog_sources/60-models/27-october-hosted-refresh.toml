@@ -166,6 +166,9 @@ models_dev = {provider = "openrouter", model = "inclusionai/ling-3.1-flash", fie
 
 [models."deepinfra/inclusionAI/Ling-3.1-flash"]
 name = "Ling 3.1 Flash (DeepInfra)"
+retires_on = "2026-11-15"
+superseded_by = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017"
+deprecation_note = "DeepInfra's authenticated customer notice announces deprecation on 2026-11-15 and redirects continuing requests for inclusionAI/Ling-3.1-flash to deepseek-ai/DeepSeek-V4.1-Flash-1017. This is a DeepInfra-only serving change, not model equivalence; the historical Ling identity and pricing are retained. Cutoff time and redirect pricing are not confirmed."
 provider = "deepinfra"
 wire_model = "inclusionAI/Ling-3.1-flash"
 context_window = 262144
