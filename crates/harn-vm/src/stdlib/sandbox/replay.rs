@@ -1,7 +1,5 @@
 //! A moved replay is a confined filesystem view, never just rewritten text.
 
-use std::path::Path;
-
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::VmError;
 
@@ -89,13 +87,14 @@ pub(crate) fn check_supported() -> Result<(), VmError> {
 /// Presets and executable/PATH grants must not reopen the recorded tree or
 /// the container holding this arm. Other arms in that container therefore
 /// stay outside the view, including ones created after this child starts.
-pub(super) fn check_grant(path: &Path) -> Result<(), VmError> {
+#[cfg(target_os = "linux")]
+pub(super) fn check_grant(path: &std::path::Path) -> Result<(), VmError> {
     let Some((recorded, workspace)) = roots() else {
         return Ok(());
     };
     let branch = crate::run_tape::state_branch().expect("relocated branch");
     let container = branch.workspace_container();
-    let overlaps = |a: &Path, b: &Path| a.starts_with(b) || b.starts_with(a);
+    let overlaps = |a: &std::path::Path, b: &std::path::Path| a.starts_with(b) || b.starts_with(a);
     if recorded.iter().any(|recorded| overlaps(path, recorded))
         || (!path.starts_with(&workspace) && overlaps(path, container))
     {

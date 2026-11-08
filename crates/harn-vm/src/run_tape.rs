@@ -1219,7 +1219,7 @@ fn recorded_lookup(
                 let slot = (
                     state.report.served_calls,
                     namespace.to_string(),
-                    recorded_key.clone(),
+                    recorded_key,
                 );
                 let recorded = state
                     .cache_lookups

@@ -12,9 +12,11 @@ pub struct ReplayWorkspaceIdentity {
 }
 
 impl ReplayWorkspaceIdentity {
+    /// The stable directory name used in pipeline and model data.
     pub fn logical_root(&self) -> &Path {
         &self.logical_root
     }
+    /// The private working copy where filesystem effects land.
     pub fn physical_root(&self) -> &Path {
         &self.physical_root
     }
@@ -82,7 +84,7 @@ impl ReplayWorkspaceProjection {
         let mut result = String::with_capacity(text.len());
         let mut offset = 0;
         while offset < text.len() {
-            let rest = &text[offset..];
+            let rest = text.get(offset..).expect("offset follows UTF-8 boundaries");
             let matched = self.roots.iter().find_map(|root| {
                 let (from, to) = (&root.recorded, &root.restored);
                 if !root_match(text, offset, from) {
@@ -100,7 +102,7 @@ impl ReplayWorkspaceProjection {
             if let Some(len) =
                 existing.filter(|len| matched.as_ref().is_none_or(|(from_len, _)| len >= from_len))
             {
-                result.push_str(&rest[..len]);
+                result.push_str(rest.get(..len).expect("matched UTF-8 root"));
                 offset += len;
                 continue;
             }
@@ -122,15 +124,18 @@ fn path_component(c: char) -> bool {
 }
 
 fn root_match(text: &str, offset: usize, root: &str) -> bool {
-    let rest = &text[offset..];
-    if root.is_empty() || !rest.starts_with(root) {
+    let (Some(before), Some(rest)) = (text.get(..offset), text.get(offset..)) else {
         return false;
-    }
-    let before = text[..offset].chars().next_back();
-    let after = rest[root.len()..].chars().next();
-    (before.is_none_or(|c| !path_component(c) && c != '/' && c != '\\')
-        || text[..offset].ends_with("file://"))
-        && after.is_none_or(|c| !path_component(c))
+    };
+    let Some(after) = rest.strip_prefix(root).filter(|_| !root.is_empty()) else {
+        return false;
+    };
+    (before
+        .chars()
+        .next_back()
+        .is_none_or(|c| !path_component(c) && c != '/' && c != '\\')
+        || before.ends_with("file://"))
+        && after.chars().next().is_none_or(|c| !path_component(c))
 }
 
 pub(crate) fn current_projection() -> Option<ReplayWorkspaceProjection> {
@@ -271,5 +276,6 @@ mod tests {
         let projected = "file:///recorded/arm/value '/recorded/arm' /recorded-sibling/value /prefix/recorded/value";
         assert_eq!(projection.text(original), projected);
         assert_eq!(projection.text(projected), projected);
+        assert_eq!(projection.text("é '/recorded/猫'"), "é '/recorded/arm/猫'");
     }
 }

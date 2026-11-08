@@ -283,14 +283,51 @@ fn main(harness: Harness) {{
 "#,
         peer = quote(&peer)
     );
-    assert!(record(&source, &recorded.tapes, &recorded.workspace).contains("peer content"));
-    let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
-    let refusal = replay.output.unwrap_err();
+    let reads = vec![isolated.workspace.parent().unwrap().to_path_buf()];
+    name_session_store(&recorded.workspace);
+    let recording = start_recording(
+        &recorded.tapes,
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: recorded.workspace.clone(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    let baseline = run_at_with_read_roots(
+        &source,
+        &recorded.workspace,
+        None,
+        &recorded.workspace,
+        reads.clone(),
+    )
+    .unwrap();
+    assert!(baseline.contains("peer content"));
+    assert_eq!(recording.error(), None);
+    drop(recording);
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: isolated.workspace.clone(),
+        workspace_container_root: isolated.workspace.parent().unwrap().to_path_buf(),
+        state_root: isolated.markers.join("peer-state"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    let refusal = run_at_with_read_roots(
+        &source,
+        &isolated.workspace,
+        Some(guard.scope()),
+        &isolated.workspace,
+        reads,
+    )
+    .unwrap_err();
+    let report = guard.finish();
     assert!(refusal.contains("another replay workspace"), "{refusal}");
-    assert_eq!(
-        (replay.report.served_calls, replay.report.live_calls),
-        (1, 1)
-    );
+    assert_eq!((report.served_calls, report.live_calls), (1, 1));
     assert_eq!(std::fs::read_to_string(peer).unwrap(), "peer content");
 }
 

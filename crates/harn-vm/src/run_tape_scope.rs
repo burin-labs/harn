@@ -251,7 +251,7 @@ pub fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
         None => {
             let resolved = crate::workspace_path::canonicalize_existing_ancestor(&path)
                 .map_err(|error| VmError::Runtime(format!("branch workspace path: {error}")))?;
-            if resolved.starts_with(&branch.workspace_container) {
+            if resolved.starts_with(branch.workspace_container()) {
                 return Err(VmError::Runtime(format!(
                     "workspace path {} addresses another replay workspace",
                     path.display()

@@ -1025,14 +1025,13 @@ fn emit_safe_text_patch_result_builtin(args: &[VmValue]) -> Result<VmValue, Host
 }
 
 fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let raw = dict_arg(SET_MODE_BUILTIN, args)?;
-    let dict = raw.as_ref();
-    let session_id = require_string(SET_MODE_BUILTIN, dict, "session_id")?;
+    let dict = dict_arg(SET_MODE_BUILTIN, args)?;
+    let session_id = require_string(SET_MODE_BUILTIN, &dict, "session_id")?;
     let mode = FsMode::parse(
         SET_MODE_BUILTIN,
-        &require_string(SET_MODE_BUILTIN, dict, "mode")?,
+        &require_string(SET_MODE_BUILTIN, &dict, "mode")?,
     )?;
-    let root = optional_string(SET_MODE_BUILTIN, dict, "root")?
+    let root = optional_string(SET_MODE_BUILTIN, &dict, "root")?
         .map(|path| resolve_host_path(SET_MODE_BUILTIN, &path))
         .transpose()?;
     let result = set_mode(&session_id, mode, root.as_deref())?;
