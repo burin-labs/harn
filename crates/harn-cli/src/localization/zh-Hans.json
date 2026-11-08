@@ -2127,7 +2127,7 @@
   "Show install status for a model (or all models)": "显示某个模型（或所有模型）的安装状态",
   "Show layered-resolution skills discovered from the filesystem": "显示从文件系统发现的分层解析技能",
   "Show package registry metadata for one package": "显示一个包的包注册表元数据",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "显示每个测试的计时和详细失败信息。还会打印通过案例的 `log`/`print`/`println` 输出；否则这些输出只会在失败案例中显示",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "在 stderr 中显示通过的用例及其捕获的输出。失败和跳过的用例始终显示在 stderr 中；摘要和计时数据仍输出到 stdout",
   "Show stored OAuth status for a server": "显示某个服务器已存储的 OAuth 状态",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "显示技能清单的作者、背书链和信任分数",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "显示当前选中的本地提供方/模型，以及其他每个本地运行时的简要摘要",

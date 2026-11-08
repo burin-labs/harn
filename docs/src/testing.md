@@ -59,7 +59,7 @@ harn test conformance --filter agent
 # Verbose output
 harn test conformance --filter my_test -v
 
-# Timing summary without verbose failure details
+# Detailed timing summary
 harn test conformance --timing --filter my_test
 ```
 
@@ -80,6 +80,13 @@ parallel path.
 The [CLI reference](cli-reference.md#harn-test) lists every test flag. The
 [JSON contract](cli-json-contract.md#harn-test-conformance---json) defines the
 machine-readable result shape.
+
+User-test and conformance summaries and requested timing data go to stdout.
+Passing cases are quiet by default. Failures, skips, and their captured output
+go to stderr once; `--verbose` also includes passing cases and their output.
+Progress and report-write announcements appear only when stderr is a terminal,
+so redirected runs retain results without a stream of status lines. JSON and
+JUnit reports provide case and timing data independently of console verbosity.
 
 For user tests, `--timeout` bounds only the pipeline execution phase. VM,
 stdlib, skill, and manifest setup is measured separately and cannot consume the

@@ -28,12 +28,12 @@ pub(super) fn warm_stdlib_before_cases(threads: usize, json: bool) {
     if json {
         return;
     }
-    cli_diagnostic!(
+    TestConsole::new(false).progress(format_args!(
         "harn conformance: warmed {} of {} stdlib module(s) in {:.1}s",
         report.warmed,
         report.modules,
         started.elapsed().as_secs_f64()
-    );
+    ));
     for (module, error) in &report.failed {
         cli_diagnostic!("harn conformance: stdlib module {module} left lazy: {error}");
     }
@@ -1077,10 +1077,9 @@ async fn evaluate_conformance_case(
                 format!("{rel_path}: expected error containing '{expected_error}', but succeeded"),
                 duration_ms,
             ),
-            ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
-                deadline.hang_message(rel_path),
-                deadline.limit_ms,
-            ),
+            ConformanceExecution::TimedOut => {
+                ConformanceCaseEvaluation::fail(deadline.hang_message(rel_path), deadline.limit_ms)
+            }
         };
     }
 
@@ -1138,11 +1137,6 @@ pub(crate) async fn run_conformance_tests(
 
     let suite_start = std::time::Instant::now();
 
-    let mut passed = 0;
-    let mut failed = 0;
-    let mut skipped = 0;
-    let mut skipped_summary: Vec<(String, String)> = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
     let mut json_results: Vec<ConformanceJsonResult> = Vec::new();
     let mut run_summary = ConformanceJsonSummary::default();
     let mut report = TestReport::new("conformance", Some(&suite_root));
@@ -1187,21 +1181,14 @@ pub(crate) async fn run_conformance_tests(
         let skip_xfail = !options.json || options.skip_xfail;
         if skip_xfail {
             if let Some(reason) = xfail_reason.as_ref() {
-                if options.json {
-                    run_summary.record(ConformanceJsonOutcome::Skipped);
-                    json_results.push(ConformanceJsonResult {
-                        name: rel_path.clone(),
-                        outcome: ConformanceJsonOutcome::Skipped,
-                        duration_ms: 0,
-                        message: Some(reason.clone()),
-                        diagnostic_codes: Vec::new(),
-                    });
-                    continue;
-                }
-                println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
                 run_summary.record(ConformanceJsonOutcome::Skipped);
-                skipped_summary.push((rel_path.clone(), reason.clone()));
-                skipped += 1;
+                json_results.push(ConformanceJsonResult {
+                    name: rel_path.clone(),
+                    outcome: ConformanceJsonOutcome::Skipped,
+                    duration_ms: 0,
+                    message: Some(reason.clone()),
+                    diagnostic_codes: Vec::new(),
+                });
                 continue;
             }
         }
@@ -1238,107 +1225,52 @@ pub(crate) async fn run_conformance_tests(
         };
         run_summary.record(outcome);
 
-        if options.json {
-            let message = match (
-                outcome,
-                xfail_reason.as_deref(),
-                evaluation.message.as_deref(),
-            ) {
-                (ConformanceJsonOutcome::XfailUnexpectedPass, Some(reason), _) => {
-                    Some(format!("xfail marker is stale: {reason}"))
-                }
-                (ConformanceJsonOutcome::XfailExpected, Some(reason), Some(message)) => {
-                    Some(format!("expected failure ({reason}): {message}"))
-                }
-                (ConformanceJsonOutcome::XfailExpected, Some(reason), None) => {
-                    Some(format!("expected failure ({reason})"))
-                }
-                (_, _, Some(message)) => Some(message.to_string()),
-                _ => None,
-            };
-
-            let junit_passed = matches!(
-                outcome,
-                ConformanceJsonOutcome::Pass | ConformanceJsonOutcome::XfailExpected
-            );
-            report.push(TestCaseReport {
-                name: rel_path.clone(),
-                file: rel_path.clone(),
-                classname: rel_path.clone(),
-                outcome: if junit_passed {
-                    TestOutcome::Passed
-                } else {
-                    TestOutcome::Failed
-                },
-                duration_ms: evaluation.duration_ms,
-                timeout: None,
-                phases: None,
-                work: None,
-                timing_spans: Vec::new(),
-                message: if junit_passed { None } else { message.clone() },
-                captured_output: None,
-            });
-            json_results.push(ConformanceJsonResult {
-                name: rel_path.clone(),
-                outcome,
-                duration_ms: evaluation.duration_ms,
-                message,
-                diagnostic_codes: evaluation.diagnostic_codes,
-            });
-            continue;
-        }
-
-        if evaluation.passed {
-            if show_timing {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {rel_path} ({} ms)",
-                    evaluation.duration_ms
-                );
-            } else {
-                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+        let message = match (
+            outcome,
+            xfail_reason.as_deref(),
+            evaluation.message.as_deref(),
+        ) {
+            (ConformanceJsonOutcome::XfailUnexpectedPass, Some(reason), _) => {
+                Some(format!("xfail marker is stale: {reason}"))
             }
-            report.push(TestCaseReport {
-                name: rel_path.clone(),
-                file: rel_path.clone(),
-                classname: rel_path.clone(),
-                outcome: TestOutcome::Passed,
-                duration_ms: evaluation.duration_ms,
-                timeout: None,
-                phases: None,
-                work: None,
-                timing_spans: Vec::new(),
-                message: None,
-                captured_output: None,
-            });
-            passed += 1;
-        } else {
-            if show_timing {
-                println!(
-                    "  \x1b[31mFAIL\x1b[0m  {rel_path} ({} ms)",
-                    evaluation.duration_ms
-                );
-            } else {
-                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+            (ConformanceJsonOutcome::XfailExpected, Some(reason), Some(message)) => {
+                Some(format!("expected failure ({reason}): {message}"))
             }
-            let msg = evaluation
-                .message
-                .unwrap_or_else(|| format!("{rel_path}: failed without diagnostic message"));
-            errors.push(msg.clone());
-            report.push(TestCaseReport {
-                name: rel_path.clone(),
-                file: rel_path.clone(),
-                classname: rel_path.clone(),
-                outcome: TestOutcome::Failed,
-                duration_ms: evaluation.duration_ms,
-                timeout: None,
-                phases: None,
-                work: None,
-                timing_spans: Vec::new(),
-                message: Some(msg),
-                captured_output: None,
-            });
-            failed += 1;
-        }
+            (ConformanceJsonOutcome::XfailExpected, Some(reason), None) => {
+                Some(format!("expected failure ({reason})"))
+            }
+            (_, _, Some(message)) => Some(message.to_string()),
+            _ => None,
+        };
+
+        let junit_passed = matches!(
+            outcome,
+            ConformanceJsonOutcome::Pass | ConformanceJsonOutcome::XfailExpected
+        );
+        report.push(TestCaseReport {
+            name: rel_path.clone(),
+            file: rel_path.clone(),
+            classname: rel_path.clone(),
+            outcome: if junit_passed {
+                TestOutcome::Passed
+            } else {
+                TestOutcome::Failed
+            },
+            duration_ms: evaluation.duration_ms,
+            timeout: None,
+            phases: None,
+            work: None,
+            timing_spans: Vec::new(),
+            message: if junit_passed { None } else { message.clone() },
+            captured_output: None,
+        });
+        json_results.push(ConformanceJsonResult {
+            name: rel_path.clone(),
+            outcome,
+            duration_ms: evaluation.duration_ms,
+            message,
+            diagnostic_codes: evaluation.diagnostic_codes,
+        });
     }
 
     let total_duration_ms = suite_start.elapsed().as_millis() as u64;
@@ -1354,29 +1286,26 @@ pub(crate) async fn run_conformance_tests(
         );
     }
 
+    let snapshot_key = conformance_snapshot_key(&suite_root, &selected_harn_files);
+    let ok = run_summary.is_success();
+    let json_report = ConformanceJsonReport::new(snapshot_key, json_results, run_summary);
     if options.json {
         if let Some(path) = junit_path {
             write_junit_xml_or_exit(path, &report, false);
         }
-        let snapshot_key = conformance_snapshot_key(&suite_root, &selected_harn_files);
-        let ok = run_summary.is_success();
         let error = (!ok).then(|| JsonError {
             code: "conformance_failed".to_string(),
             message: "one or more conformance tests failed or unexpectedly passed an xfail marker"
                 .to_string(),
             details: serde_json::json!({
-                "fail": run_summary.fail,
-                "xfail_unexpected_pass": run_summary.xfail_unexpected_pass,
+                "fail": json_report.summary.fail,
+                "xfail_unexpected_pass": json_report.summary.xfail_unexpected_pass,
             }),
         });
         let envelope = JsonEnvelope {
             schema_version: CONFORMANCE_TEST_SCHEMA_VERSION,
             ok,
-            data: Some(ConformanceJsonReport::new(
-                snapshot_key,
-                json_results,
-                run_summary,
-            )),
+            data: Some(json_report),
             error,
             warnings: Vec::new(),
         };
@@ -1387,49 +1316,17 @@ pub(crate) async fn run_conformance_tests(
         return;
     }
 
-    println!();
-    let total = passed + failed + skipped;
-    if failed > 0 {
-        println!(
-            "\x1b[31m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
-        );
-    } else {
-        println!(
-            "\x1b[32m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
-        );
-    }
-
-    if !skipped_summary.is_empty() {
-        println!();
-        println!("{}", crate::localization::formatted!("Skipped (xfail):"));
-        for (path, reason) in &skipped_summary {
-            println!("  {path}  ({reason})");
-        }
-    }
-
-    if show_timing {
-        println!();
-        println!(
-            "{}",
-            crate::localization::formatted!(
-                "Total time: {total_duration_ms} ms",
-                total_duration_ms = total_duration_ms
-            )
-        );
-
-        print_per_test_timing(&report);
-    }
+    print_conformance_results(
+        &json_report,
+        options.verbose,
+        show_timing.then_some(&report),
+    );
 
     if let Some(path) = junit_path {
         write_junit_xml_or_exit(path, &report, true);
     }
 
-    if !errors.is_empty() {
-        println!();
-        println!("{}", crate::localization::formatted!("Failures:"));
-        for err in &errors {
-            println!("  {err}");
-        }
+    if !ok {
         process::exit(1);
     }
 }
@@ -1452,7 +1349,7 @@ pub(crate) async fn run_conformance_determinism_tests(
     });
     let mut passed = 0usize;
     let mut failed = 0usize;
-    let mut errors = Vec::new();
+    let console = TestConsole::new(false);
 
     for path in files {
         let rel_path = path.strip_prefix(&suite_root).unwrap_or(&path);
@@ -1462,34 +1359,27 @@ pub(crate) async fn run_conformance_determinism_tests(
         }
         match run_determinism_case(&path, timeout_ms, cli_skill_dirs).await {
             Ok(()) => {
-                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
                 passed += 1;
             }
             Err(error) => {
-                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                 failed += 1;
-                errors.push(error);
+                console.case(
+                    TestOutcome::Failed,
+                    format_args!("{rel_path}"),
+                    Some(&error),
+                    None,
+                );
             }
         }
     }
 
-    println!();
-    if failed > 0 {
-        println!(
-            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
-            passed + failed
-        );
-        println!();
-        println!("{}", crate::localization::formatted!("Failures:"));
-        for error in errors {
-            println!("  {error}");
-        }
-        process::exit(1);
-    }
     println!(
-        "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
+        "{passed} passed, {failed} failed, {} total",
         passed + failed
     );
+    if failed > 0 {
+        process::exit(1);
+    }
 }
 
 #[cfg(test)]

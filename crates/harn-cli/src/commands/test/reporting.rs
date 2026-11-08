@@ -1,6 +1,8 @@
 //! User-test report conversion and terminal timing output.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
@@ -164,15 +166,7 @@ pub(super) fn user_test_report_from_summary(
 ) -> TestReport {
     let mut report = TestReport::new("user", Some(suite_root));
     for result in &summary.results {
-        let outcome = if result.passed {
-            TestOutcome::Passed
-        } else if result.skip_reason.is_some() {
-            TestOutcome::Skipped
-        } else if result.timeout.is_some() {
-            TestOutcome::TimedOut
-        } else {
-            TestOutcome::Failed
-        };
+        let outcome = user_test_outcome(result);
         let relative = report_relative_path(suite_root, &result.file);
         report.push(TestCaseReport {
             name: result.name.clone(),
@@ -230,20 +224,82 @@ fn report_relative_path(suite_root: &Path, file: &str) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
-/// Prints a case's buffered `log`/`print`/`println` output beneath its
-/// result line, indented one level past the `{line}` convention already
-/// used for error text so the two blocks stay visually distinct.
-pub(super) fn print_captured_output(output: &str) {
-    println!(
-        "{}",
-        crate::localization::formatted!("        captured output:")
-    );
-    for line in output.lines() {
-        println!("          {line}");
+fn user_test_outcome(result: &test_runner::TestResult) -> TestOutcome {
+    if result.passed {
+        TestOutcome::Passed
+    } else if result.skip_reason.is_some() {
+        TestOutcome::Skipped
+    } else if result.timeout.is_some() {
+        TestOutcome::TimedOut
+    } else {
+        TestOutcome::Failed
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct TestConsole {
+    terminal: bool,
+    verbose: bool,
+}
+
+impl TestConsole {
+    pub(super) fn new(verbose: bool) -> Self {
+        Self {
+            terminal: std::io::stderr().is_terminal(),
+            verbose,
+        }
+    }
+
+    pub(super) fn progress(self, message: fmt::Arguments<'_>) {
+        if self.terminal {
+            eprintln!("{message}");
+        }
+    }
+
+    pub(super) fn case(
+        self,
+        outcome: TestOutcome,
+        label: fmt::Arguments<'_>,
+        message: Option<&str>,
+        captured: Option<&str>,
+    ) {
+        let (status, color) = match outcome {
+            TestOutcome::Passed if !self.verbose => return,
+            TestOutcome::Passed => ("PASS", 32),
+            TestOutcome::Skipped => ("SKIP", 33),
+            TestOutcome::TimedOut => ("TIMEOUT", 31),
+            TestOutcome::Failed => ("FAIL", 31),
+        };
+        if self.terminal {
+            eprintln!("  \x1b[{color}m{status}\x1b[0m  {label}");
+        } else {
+            eprintln!("  {status}  {label}");
+        }
+        let message = match outcome {
+            TestOutcome::Failed | TestOutcome::TimedOut => {
+                message.or(Some("failed without diagnostic message"))
+            }
+            _ => message,
+        };
+        if let Some(message) = message {
+            for line in message.lines() {
+                eprintln!("        {line}");
+            }
+        }
+        if let Some(output) = captured {
+            eprintln!(
+                "{}",
+                crate::localization::formatted!("        captured output:")
+            );
+            for line in output.lines() {
+                eprintln!("          {line}");
+            }
+        }
     }
 }
 
 pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
+    let console = TestConsole::new(verbose);
     std::sync::Arc::new(move |event| match event {
         test_runner::TestRunEvent::SuiteDiscovered {
             total_tests,
@@ -253,7 +309,7 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
         } => {
             if total_tests > 0 {
                 let mode = if parallel { "dynamic" } else { "sequential" };
-                println!(
+                console.progress(format_args!(
                     "{}",
                     crate::localization::formatted!(
                         "Running tests: {}, files: {}, workers: {} ({mode} scheduling)\n",
@@ -262,15 +318,15 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
                         workers,
                         mode = mode
                     )
-                );
+                ));
             }
         }
         test_runner::TestRunEvent::LargeSequentialSuite {
             total_tests,
             total_files,
         } => {
-            println!(
-                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` to enable the bounded worker pool.\n"
+            cli_diagnostic!(
+                "warning: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` to enable the bounded worker pool."
             );
         }
         test_runner::TestRunEvent::TestStarted {
@@ -280,7 +336,7 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
             total_tests,
         } => {
             if verbose {
-                println!(
+                console.progress(format_args!(
                     "{}",
                     crate::localization::formatted!(
                         "    RUN   {name} [{file}] ({test_index}/{total_tests})",
@@ -289,42 +345,10 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
                         test_index = test_index,
                         total_tests = total_tests
                     )
-                );
+                ));
             }
         }
-        test_runner::TestRunEvent::TestFinished(result) => {
-            if let Some(reason) = &result.skip_reason {
-                println!(
-                    "  \x1b[33mSKIP\x1b[0m  {} [{}]: {reason}",
-                    result.name, result.file
-                );
-            } else if result.passed {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
-                    result.name, result.file, result.duration_ms
-                );
-                // Passing tests stay quiet by default; --verbose is the
-                // existing "I want detail even when green" escape hatch,
-                // so probes placed to trace a passing path are visible too.
-                if verbose {
-                    if let Some(output) = &result.captured_output {
-                        print_captured_output(output);
-                    }
-                }
-            } else {
-                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
-                if verbose {
-                    if let Some(err) = &result.error {
-                        for line in err.lines() {
-                            println!("        {line}");
-                        }
-                    }
-                    if let Some(output) = &result.captured_output {
-                        print_captured_output(output);
-                    }
-                }
-            }
-        }
+        test_runner::TestRunEvent::TestFinished(_) => {}
     })
 }
 
@@ -332,54 +356,22 @@ pub(super) fn print_test_results(
     summary: &test_runner::TestSummary,
     options: UserTestOutputOptions,
 ) {
-    let file_count = summary
-        .results
-        .iter()
-        .map(|result| result.file.as_str())
-        .collect::<HashSet<_>>()
-        .len();
-
-    if !options.progress && summary.total > 0 {
-        println!(
-            "{}",
-            crate::localization::formatted!(
-                "Running tests: {}, files: {}...\n",
-                summary.total,
-                file_count,
-            )
+    let console = TestConsole::new(options.verbose);
+    for result in &summary.results {
+        console.case(
+            user_test_outcome(result),
+            format_args!(
+                "{} [{}] ({} ms)",
+                result.name, result.file, result.duration_ms
+            ),
+            result.skip_reason.as_deref().or(result.error.as_deref()),
+            result.captured_output.as_deref(),
         );
     }
 
-    if !options.progress {
-        for result in &summary.results {
-            if let Some(reason) = &result.skip_reason {
-                println!(
-                    "  \x1b[33mSKIP\x1b[0m  {} [{}]: {reason}",
-                    result.name, result.file
-                );
-            } else if result.passed {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
-                    result.name, result.file, result.duration_ms
-                );
-            } else {
-                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
-                if let Some(error) = &result.error {
-                    for line in error.lines() {
-                        println!("        {line}");
-                    }
-                }
-                if let Some(output) = &result.captured_output {
-                    print_captured_output(output);
-                }
-            }
-        }
-    }
-
-    println!();
     if summary.failed > 0 {
         println!(
-            "\x1b[31m{} passed, {} failed, {} skipped, {} total ({} ms)\x1b[0m",
+            "{} passed, {} failed, {} skipped, {} total ({} ms)",
             summary.passed, summary.failed, summary.skipped, summary.total, summary.duration_ms
         );
     } else if summary.total == 0 {
@@ -389,7 +381,7 @@ pub(super) fn print_test_results(
         );
     } else {
         println!(
-            "\x1b[32m{} passed, {} skipped, {} total ({} ms)\x1b[0m",
+            "{} passed, {} skipped, {} total ({} ms)",
             summary.passed, summary.skipped, summary.total, summary.duration_ms
         );
     }
@@ -412,21 +404,43 @@ pub(super) fn print_test_results(
     if options.timing {
         print_user_test_timing(summary);
     }
+}
 
-    if options.progress && summary.failed > 0 {
-        println!();
-        println!("{}", crate::localization::formatted!("Failures:"));
-        for result in summary.results.iter().filter(|result| !result.passed) {
-            if let Some(error) = &result.error {
-                println!("  {} [{}]", result.name, result.file);
-                for line in error.lines() {
-                    println!("        {line}");
-                }
-                if let Some(output) = &result.captured_output {
-                    print_captured_output(output);
-                }
+pub(super) fn print_conformance_results(
+    report: &ConformanceJsonReport,
+    verbose: bool,
+    timing: Option<&TestReport>,
+) {
+    let console = TestConsole::new(verbose);
+    for result in &report.results {
+        let outcome = match result.outcome {
+            ConformanceJsonOutcome::Pass => TestOutcome::Passed,
+            ConformanceJsonOutcome::Skipped | ConformanceJsonOutcome::XfailExpected => {
+                TestOutcome::Skipped
             }
-        }
+            ConformanceJsonOutcome::Fail | ConformanceJsonOutcome::XfailUnexpectedPass => {
+                TestOutcome::Failed
+            }
+        };
+        console.case(
+            outcome,
+            format_args!("{} ({} ms)", result.name, result.duration_ms),
+            result.message.as_deref(),
+            None,
+        );
+    }
+    let passed = report.summary.pass;
+    let failed = report.summary.fail + report.summary.xfail_unexpected_pass;
+    let skipped = report.summary.skipped + report.summary.xfail_expected;
+    let total = passed + failed + skipped;
+    println!("{passed} passed, {failed} failed, {skipped} skipped, {total} total");
+    if let Some(timing) = timing {
+        println!();
+        println!(
+            "{}",
+            crate::localization::formatted!("Total time: {} ms", timing.duration_ms)
+        );
+        print_per_test_timing(timing);
     }
 }
 
@@ -511,13 +525,18 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
 
     let aggregate = summary.aggregate;
     println!();
-    println!("{}", crate::localization::formatted!("Phase totals: collection={} ms  setup={} ms  compile={} ms  admission={} ms  execute={} ms  teardown={} ms",
-        aggregate.collection_ms,
-        aggregate.setup_ms,
-        aggregate.compile_ms,
-        aggregate.admission_ms,
-        aggregate.execute_ms,
-        aggregate.teardown_ms,));
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Phase totals: collection={} ms  setup={} ms  compile={} ms  admission={} ms  execute={} ms  teardown={} ms",
+            aggregate.collection_ms,
+            aggregate.setup_ms,
+            aggregate.compile_ms,
+            aggregate.admission_ms,
+            aggregate.execute_ms,
+            aggregate.teardown_ms,
+        )
+    );
     println!(
         "{}",
         crate::localization::formatted!(
@@ -527,11 +546,16 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
             aggregate.test_entries_compiled,
         )
     );
-    println!("{}", crate::localization::formatted!("Module attribution (overlaps phases): compile={} ms ({} modules)  load={} ms ({} modules)",
-        aggregate.modules.module_compile_ms,
-        aggregate.modules.modules_compiled,
-        aggregate.modules.module_load_ms,
-        aggregate.modules.modules_loaded,));
+    println!(
+        "{}",
+        crate::localization::formatted!(
+            "Module attribution (overlaps phases): compile={} ms ({} modules)  load={} ms ({} modules)",
+            aggregate.modules.module_compile_ms,
+            aggregate.modules.modules_compiled,
+            aggregate.modules.module_load_ms,
+            aggregate.modules.modules_loaded,
+        )
+    );
 }
 
 #[cfg(test)]

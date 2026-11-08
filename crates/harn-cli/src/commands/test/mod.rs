@@ -34,9 +34,9 @@ use conformance::{
 
 pub(crate) use reporting::CONFORMANCE_TEST_SCHEMA_VERSION;
 use reporting::{
-    extract_diagnostic_codes, print_per_test_timing, print_test_results, user_test_progress,
+    extract_diagnostic_codes, print_conformance_results, print_test_results, user_test_progress,
     user_test_report_from_summary, ConformanceJsonOutcome, ConformanceJsonReport,
-    ConformanceJsonResult, ConformanceJsonSummary,
+    ConformanceJsonResult, ConformanceJsonSummary, TestConsole,
 };
 
 pub(crate) async fn run_command(mut args: TestArgs) {
@@ -935,10 +935,10 @@ fn write_junit_xml_or_exit(path: &str, report: &TestReport, announce: bool) {
     match test_report::write_junit(path, report) {
         Ok(written) => {
             if announce {
-                println!(
+                TestConsole::new(false).progress(format_args!(
                     "{}",
                     crate::localization::formatted!("JUnit XML written to {}", written.display())
-                );
+                ));
             }
         }
         Err(error) => {
@@ -952,10 +952,10 @@ fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool)
     match test_report::write_json(path, report) {
         Ok(written) => {
             if announce {
-                println!(
+                TestConsole::new(false).progress(format_args!(
                     "{}",
                     crate::localization::formatted!("JSON report written to {}", written.display())
-                );
+                ));
             }
         }
         Err(error) => {
@@ -968,7 +968,7 @@ fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool)
 #[derive(Debug, Clone, Copy)]
 struct UserTestOutputOptions {
     timing: bool,
-    progress: bool,
+    verbose: bool,
 }
 
 struct UserTestRun {
@@ -1017,7 +1017,7 @@ async fn run_user_test_paths_once_with_session(
         &summary,
         UserTestOutputOptions {
             timing: args.timing,
-            progress: true,
+            verbose: args.verbose,
         },
     );
     UserTestRun { summary, census }
@@ -1450,7 +1450,7 @@ pub(crate) async fn run_determinism_tests(
     });
     let mut passed = 0usize;
     let mut failed = 0usize;
-    let mut errors = Vec::new();
+    let console = TestConsole::new(false);
 
     for path in files {
         let rel_path = path.display().to_string();
@@ -1467,32 +1467,25 @@ pub(crate) async fn run_determinism_tests(
 
         match run_determinism_case(&path, timeout_ms, cli_skill_dirs).await {
             Ok(()) => {
-                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
                 passed += 1;
             }
             Err(error) => {
-                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                 failed += 1;
-                errors.push(error);
+                console.case(
+                    TestOutcome::Failed,
+                    format_args!("{rel_path}"),
+                    Some(&error),
+                    None,
+                );
             }
         }
     }
 
-    println!();
-    if failed > 0 {
-        println!(
-            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
-            passed + failed
-        );
-        println!();
-        println!("{}", crate::localization::formatted!("Failures:"));
-        for error in errors {
-            println!("  {error}");
-        }
-        process::exit(1);
-    }
     println!(
-        "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
+        "{passed} passed, {failed} failed, {} total",
         passed + failed
     );
+    if failed > 0 {
+        process::exit(1);
+    }
 }

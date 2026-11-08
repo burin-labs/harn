@@ -2127,7 +2127,7 @@
   "Show install status for a model (or all models)": "モデル（または全モデル）のインストール状態を表示する",
   "Show layered-resolution skills discovered from the filesystem": "ファイルシステムから検出されたレイヤード解決のスキルを表示する",
   "Show package registry metadata for one package": "1 つのパッケージのパッケージレジストリのメタデータを表示する",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "テストごとの所要時間と詳細な失敗情報を表示する。また、成功したケースの `log`/`print`/`println` 出力も表示します。これは失敗ケースでのみ表示されます",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "成功したケースとそのキャプチャ済み出力を stderr に表示します。失敗とスキップは常に stderr に表示し、概要と時間データは stdout に出力します",
   "Show stored OAuth status for a server": "サーバーの保存済み OAuth 状態を表示する",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "スキルマニフェストの作者、推奨チェーン、信頼スコアを表示する",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "現在選択中のローカルプロバイダー/モデルと、他のすべてのローカルランタイムの簡単な要約を表示する",
