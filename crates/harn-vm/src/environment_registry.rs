@@ -884,6 +884,12 @@ mod tests {
             "script aliases are not GitHub context variables"
         );
         assert!(!names.contains("HARN_CI_REPOSITORY_SETTING"));
+        for name in ["HARN_WINDOWS_DEVDRIVE", "HARN_WINDOWS_LLD"] {
+            assert!(
+                variable_spec(name).is_none(),
+                "repository-only variables are not process-environment settings"
+            );
+        }
         let path = std::path::Path::new("scripts/ci/probe.sh");
         let refused = ci_environment_census(path, "echo $HARN_CI_DOT_READ");
         assert_eq!(refused.observed.len(), 1);
