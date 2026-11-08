@@ -50,4 +50,4 @@ jobs:
       issues: write # the shared workflow's default-branch tracking issue
       id-token: write
       attestations: write
-    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@afd182de69c70f74aef97e24b2ac12801983eec4
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@b7e805dbc176a8503341df00cb75a58174c52e24
