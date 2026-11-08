@@ -205,6 +205,60 @@ fn quickstart_protects_existing_env_and_preserves_authored_ignore_rules() {
 }
 
 #[test]
+fn quickstart_refuses_invalid_provider_configuration_before_any_writes() {
+    for invalid in ["not valid = [\n", "default_provider = 7\n"] {
+        for populated in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let providers = root.path().join("home/config/harn/providers.toml");
+            fs::create_dir_all(providers.parent().unwrap()).unwrap();
+            fs::write(&providers, invalid).unwrap();
+            let authored = [
+                (".env", "ANTHROPIC_API_KEY=synthetic-preservation-fixture\n"),
+                (".gitignore", "/build/\n"),
+                ("harn.toml", "[package]\nname = 'existing'\n"),
+            ];
+            for (name, content) in authored {
+                if populated {
+                    fs::write(root.path().join(name), content).unwrap();
+                }
+            }
+            let output = quickstart(root.path());
+            let text = output_text(&output);
+            assert!(!output.status.success(), "{text}");
+            assert!(text.contains(&providers.display().to_string()), "{text}");
+            assert!(text.contains("not valid provider configuration"), "{text}");
+            assert!(!text.contains("Configured provider="), "{text}");
+            assert!(!text.contains("synthetic-preservation-fixture"), "{text}");
+            assert_eq!(fs::read_to_string(&providers).unwrap(), invalid);
+            for (name, content) in authored {
+                let path = root.path().join(name);
+                if populated {
+                    assert_eq!(fs::read_to_string(path).unwrap(), content, "{name}");
+                } else {
+                    assert!(!path.exists(), "created {name} after refusal");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quickstart_preserves_valid_provider_configuration_and_completes_setup() {
+    let root = tempfile::tempdir().unwrap();
+    let providers = root.path().join("home/config/harn/providers.toml");
+    fs::create_dir_all(providers.parent().unwrap()).unwrap();
+    let authored = "# authored overlay\ndefault_provider = 'anthropic'\n";
+    fs::write(&providers, authored).unwrap();
+    let output = quickstart(root.path());
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert_eq!(fs::read_to_string(&providers).unwrap(), authored);
+    assert!(output_text(&output).contains("Configured provider=anthropic"));
+    for name in [".env", ".gitignore", "harn.toml"] {
+        assert!(root.path().join(name).is_file(), "missing {name}");
+    }
+}
+
+#[test]
 fn quickstart_refuses_tracked_env_and_unreadable_repository_before_writing() {
     for tracked_name in [".env", ".ENV"] {
         let root = tempfile::tempdir().unwrap();
