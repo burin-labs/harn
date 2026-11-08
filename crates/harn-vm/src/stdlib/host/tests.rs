@@ -1,4 +1,4 @@
-use super::process_exec::process_exec_stdin;
+use super::process_exec::{process_exec_stdin, ProcessCommandKind};
 use super::{
     build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
     dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
@@ -55,7 +55,7 @@ fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
         VmValue::list(vec![VmValue::string(worker.to_string_lossy())]),
     );
     params.put("sandbox", VmValue::dict_map(sandbox));
-    let error = build_sandboxed_command(&params, "process.exec")
+    let error = build_sandboxed_command(&params, ProcessCommandKind::Foreground)
         .expect_err("a worker command cannot launch from its controller root");
     assert!(error.to_string().contains("process.exec cwd"), "{error}");
     assert!(
@@ -85,7 +85,7 @@ fn build_sandboxed_command_forces_deterministic_message_locale() {
     caller_env.put_str("CARGO_TARGET_DIR", "/tmp/target");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec")
+    let cmd = build_sandboxed_command(&params, ProcessCommandKind::Foreground)
         .expect("build command")
         .command;
     let env = command_env(&cmd);
@@ -121,7 +121,7 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
     caller_env.put_str("LC_MESSAGES", "fr_FR.UTF-8");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec")
+    let cmd = build_sandboxed_command(&params, ProcessCommandKind::Foreground)
         .expect("build command")
         .command;
     let env = command_env(&cmd);
@@ -169,7 +169,7 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
         ]),
     );
 
-    let result = build_sandboxed_command(&params, "process.exec");
+    let result = build_sandboxed_command(&params, ProcessCommandKind::Foreground);
     crate::orchestration::pop_execution_policy();
     if let Some(expected) = crate::sandbox_host::unavailable_default_warn_worktree_sandbox() {
         let Err(VmError::SandboxMechanismUnavailable(actual)) = result else {
@@ -210,7 +210,7 @@ fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
     );
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec")
+    let cmd = build_sandboxed_command(&params, ProcessCommandKind::Foreground)
         .expect("build command")
         .command;
     let env = command_env(&cmd);

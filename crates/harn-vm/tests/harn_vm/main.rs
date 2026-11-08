@@ -56,6 +56,7 @@ mod otel_sink_export;
 mod persona_policy_public_api;
 mod pool_multithread;
 mod process_options_cross_platform;
+mod protected_process_grants;
 mod redaction_fixtures;
 mod run_view_fixtures;
 mod runtime_introspection;
