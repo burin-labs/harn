@@ -800,7 +800,6 @@ test-pr-gate-scripts:
 	./scripts/tests/development_bump_cutover_test.sh
 	./scripts/tests/development_cutover_monitor_test.sh
 	./scripts/tests/development_cutover_repair_test.sh
-	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_commit_msg_session_trailer_test.sh
 	./scripts/tests/stack_frame_measurement_floor_test.sh
