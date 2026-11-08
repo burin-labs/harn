@@ -1,0 +1,102 @@
+import {
+  APPROVAL_REVIEW_DECISION_COST_LIMIT_USD,
+  approval_review_decide,
+  approval_review_decision_questions,
+  approval_review_decision_state,
+} from "std/agent/approval_review"
+import { EvaluationPolicy, EvaluationQuestion } from "std/predicate"
+import {
+  EvaluationFixture,
+  EvaluationFixtureAnswer,
+  llm_text,
+  with_evaluation_fixtures,
+  with_llm_script,
+} from "std/testing"
+
+// A reviewer routed to a decision model answers through typed questions, not
+// the generative verdict schema it cannot fill. The pair holds the request and
+// flips only the authorization answer, so the outcome is shown to come from
+// the policy table and not from the route. The generative control proves the
+// switch keys on the route's protocol rather than firing for every reviewer.
+const REQUEST = {
+  goal: "Commits in this repo should use my work email.",
+  task: "Commits in this repo should use my work email.",
+  category: "config_write",
+  command: "git config --global user.email jo@corp.example",
+  untrusted_context: nil,
+}
+
+const DECISION_ROUTE = {provider: "vercel_ai_gateway", model: "vercel/typesafe-ai/jev"}
+
+fn decide_with(harness: Harness, authorization_index: int) -> dict {
+  const questions = approval_review_decision_questions()
+  const policy: EvaluationPolicy = {
+    backend: "native_decision",
+    provider: DECISION_ROUTE.provider,
+    model: DECISION_ROUTE.model,
+    threshold: 0.0,
+    evaluation_cost_limit: APPROVAL_REVIEW_DECISION_COST_LIMIT_USD,
+  }
+  const asked: dict<string, EvaluationQuestion> = pick(questions, ["risk", "authorization"])
+  const answers: dict<string, EvaluationFixtureAnswer> = {
+    risk: {kind: "score", level: questions.risk.levels[2] ?? "", confidence: 0.8, evidence: ""},
+    authorization: {
+      kind: "score",
+      level: questions.authorization.levels[authorization_index] ?? "",
+      confidence: 0.7,
+      evidence: "",
+    },
+  }
+  const fixture: EvaluationFixture = {
+    site_id: "agent.approval_review.v1",
+    state: approval_review_decision_state(REQUEST),
+    questions: asked,
+    policy: policy,
+    answers: answers,
+  }
+  return with_evaluation_fixtures(
+    harness,
+    [fixture],
+    { -> approval_review_decide(harness, {reviewer: DECISION_ROUTE}, REQUEST) },
+  )
+}
+
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const denied = decide_with(harness, 0)
+      assert_eq(denied.reviewer_backend, "native_decision")
+      assert_eq(denied.reviewer_answered, true)
+      assert_eq(denied.risk, "high")
+      assert_eq(denied.authorization, "unknown")
+      assert_eq(denied.approved, false)
+      const approved = decide_with(harness, 2)
+      assert_eq(approved.authorization, "medium")
+      assert_eq(approved.approved, true)
+      assert_eq(len(harness.llm.mock_calls()), 0)
+      harness.stdio.println("decision_route_denied=" + to_string(!denied.approved))
+      harness.stdio.println("decision_route_approved=" + to_string(approved.approved))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        json_stringify({risk: "high", authorization: "unknown", rationale: "global config"}),
+      ),
+    ],
+    { ->
+      const generative = approval_review_decide(
+        harness,
+        {reviewer: {provider: "mock", model: "mock"}},
+        REQUEST,
+      )
+      assert_eq(generative.reviewer_backend, nil)
+      assert_eq(generative.rationale, "global config")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+      harness.stdio.println("generative_route_generates=true")
+    },
+  )
+}

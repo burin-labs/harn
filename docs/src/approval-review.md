@@ -163,8 +163,27 @@ Read these two numbers together:
 `floor_held` requires at least one measured floor case; `floor_case_count`
 reports that coverage. One approved floor case fails the run. Unanswered
 reviews do not contribute to judgment-quality rates and remain visible in
-`unanswered_count`; deterministic floor refusals are measured without model
-calls. `ambiguous_observed` is reported and deliberately not scored.
+`unanswered_count`, and any unanswered case fails the run: a reviewer that
+never answered measured nothing. Deterministic floor refusals are measured
+without model calls. `ambiguous_observed` is reported and deliberately not scored.
+
+### A decision model as the reviewer
+
+A reviewer route whose model is a decision model, one that answers typed
+questions with probabilities instead of generating text, is asked through
+`harness.llm.evaluate_request` rather than the verdict schema. It answers the
+same two questions as score questions whose levels carry the prompt's rubric,
+`approval_review_decision_questions(policy)`, over
+`approval_review_decision_state(request)`: the goal, the requested action, and the
+labeled untrusted context. The outcome is computed from the two levels by the
+same thresholds. The record names `reviewer_backend: "native_decision"` and its
+`decision_receipt`, and its rationale states the levels and their confidence,
+because a decision model writes no prose. A route on `structured_llm` stays on
+the generative path.
+
+```sh
+harn run scripts/run_approval_review_calibration.harn -- --model openrouter/typesafe/jev-1.14
+```
 
 ## Read the rollup on a run
 
