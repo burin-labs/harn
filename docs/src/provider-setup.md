@@ -64,6 +64,12 @@ one.
 
 ## 4. Set the provider credential
 
+For guided setup, run `harn quickstart` in your project directory. Quickstart
+adds `/.env` to the project's `.gitignore`, preserves existing ignore rules,
+and writes `.env` with owner-only permissions on Unix. It refuses an environment
+file already tracked by Git. On Windows, the file inherits the directory's
+access permissions.
+
 Each provider reads its key from an environment variable. Set the one for the
 provider you picked:
 

@@ -14,7 +14,6 @@
 //! caller to pass the previous result back over the wire.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -43,15 +42,7 @@ mod subproject;
 mod symbols;
 mod test_mapping;
 
-pub(crate) fn strip_ambient_git_env(cmd: &mut Command) {
-    // Git exports repository-specific GIT_* variables while running hooks.
-    // Scanner probes must honor their explicit `-C <root>` argument instead.
-    for (key, _) in std::env::vars_os() {
-        if key.as_encoded_bytes().starts_with(b"GIT_") {
-            cmd.env_remove(&key);
-        }
-    }
-}
+pub(crate) use crate::git_repository::strip_ambient_git_env;
 
 pub use git::GitCapabilities;
 pub use result::{

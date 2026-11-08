@@ -1,5 +1,64 @@
+//! Read-only Git worktree queries with explicit repository ownership.
+
 use std::io::ErrorKind;
 use std::path::Path;
+
+/// Check whether a worktree-relative path or case alias is in Git's index.
+///
+/// A directory outside Git returns false. Unreadable repository metadata,
+/// unavailable Git, and failed queries return errors rather than absence.
+/// Case aliases are included on every platform so a secret-file guard also
+/// protects worktrees on case-insensitive filesystems.
+pub fn path_or_case_alias_is_tracked(root: &Path, path: &Path) -> Result<bool, String> {
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err("Git tracked-path queries require a worktree-relative path".to_string());
+    }
+    let root = std::fs::canonicalize(root)
+        .map_err(|error| format!("cannot resolve Git worktree {}: {error}", root.display()))?;
+    if !may_be_git_worktree(&root) {
+        return Ok(false);
+    }
+    let mut command = harn_vm::process_sandbox::session_std_command("git")
+        .map_err(|error| format!("cannot prepare Git tracked-path query: {error}"))?;
+    strip_ambient_git_env(&mut command);
+    let mut pathspec = std::ffi::OsString::from(":(literal,icase)");
+    pathspec.push(path);
+    let output = command
+        .arg("-C")
+        .arg(&root)
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "ls-files",
+            "--cached",
+            "-z",
+            "--",
+        ])
+        .arg(pathspec)
+        .output()
+        .map_err(|error| format!("cannot query Git's index: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot query Git's index in {} (exit {})",
+            root.display(),
+            output.status
+        ));
+    }
+    Ok(!output.stdout.is_empty())
+}
+
+pub(crate) fn strip_ambient_git_env(command: &mut std::process::Command) {
+    // Git's hook environment must not redirect an explicit worktree query.
+    for (key, _) in std::env::vars_os() {
+        if key.as_encoded_bytes().starts_with(b"GIT_") {
+            command.env_remove(&key);
+        }
+    }
+}
 
 /// Only a fully observed absence rules out Git; unreadable metadata stays unknown.
 pub(crate) fn may_be_git_worktree(root: &Path) -> bool {

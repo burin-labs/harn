@@ -70,11 +70,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Atomically write `bytes` to `path`, giving the file the Unix permission
 /// bits `mode` (e.g. `0o600`).
 ///
-/// The mode is applied to the temp file *before* the rename, so the bytes are
-/// never observable at the process umask's default permissions — not even for
-/// the width of the write. That ordering is the whole point of this variant:
-/// writing first and `chmod`ing the destination afterwards leaves a window in
-/// which a secret is world-readable. On non-Unix targets `mode` is ignored.
+/// The mode is supplied when creating the temp file, then applied exactly
+/// before writing so a restrictive umask cannot change the final permissions.
+/// On non-Unix targets `mode` is ignored.
 pub fn atomic_write_with_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
     atomic_write_stream_with_durability_and_mode(
         path,
@@ -287,8 +285,7 @@ fn sync_parent_dir(path: &Path) -> bool {
     false
 }
 
-/// Set `path`'s permission bits. Uses `set_permissions` rather than
-/// `OpenOptions::mode` so the umask cannot widen or narrow the request.
+/// Set `path`'s exact permission bits independently of the creation umask.
 #[cfg(unix)]
 fn apply_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -305,6 +302,8 @@ fn apply_mode(_path: &Path, _mode: u32) -> io::Result<()> {
 struct TempFile {
     path: PathBuf,
     file: Option<File>,
+    #[cfg(all(test, unix))]
+    creation_permissions: std::fs::Permissions,
 }
 
 /// Longest prefix of the target file name kept in the temp sibling's name.
@@ -377,18 +376,36 @@ impl TempFile {
         } else {
             parent.join(tmp_name)
         };
-        let file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&tmp_path)?;
+        let inherited_permissions = if mode.is_none() {
+            std::fs::metadata(target)
+                .ok()
+                .map(|metadata| metadata.permissions())
+        } else {
+            None
+        };
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            if let Some(mode) =
+                mode.or_else(|| inherited_permissions.as_ref().map(|value| value.mode()))
+            {
+                options.mode(mode);
+            }
+        }
+        let file = options.open(&tmp_path)?;
+        // Witness the inode's permissions before any follow-up chmod.
+        #[cfg(all(test, unix))]
+        let creation_permissions = file.metadata()?.permissions();
         if let Some(mode) = mode {
             if let Err(error) = apply_mode(&tmp_path, mode) {
                 drop(file);
                 let _ = std::fs::remove_file(&tmp_path);
                 return Err(error);
             }
-        } else if let Ok(metadata) = std::fs::metadata(target) {
-            if let Err(error) = file.set_permissions(metadata.permissions()) {
+        } else if let Some(permissions) = inherited_permissions {
+            if let Err(error) = file.set_permissions(permissions) {
                 drop(file);
                 let _ = std::fs::remove_file(&tmp_path);
                 return Err(error);
@@ -397,6 +414,8 @@ impl TempFile {
         Ok(Self {
             path: tmp_path,
             file: Some(file),
+            #[cfg(all(test, unix))]
+            creation_permissions,
         })
     }
 }
@@ -540,6 +559,31 @@ mod tests {
             std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o640
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_modes_are_present_when_the_inode_is_created() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for explicit_mode in [Some(0o600), None] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("credentials");
+            std::fs::write(&path, b"old").unwrap();
+            let existing_mode = if explicit_mode.is_some() {
+                0o644
+            } else {
+                0o600
+            };
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(existing_mode))
+                .unwrap();
+            let temporary = TempFile::create(&path, explicit_mode).unwrap();
+            assert_eq!(
+                temporary.creation_permissions.mode() & 0o077,
+                0,
+                "private mode must be present at creation: explicit={explicit_mode:?}"
+            );
+        }
     }
 
     #[cfg(unix)]

@@ -122,6 +122,7 @@ mod provider_dispatch_audit;
 mod provider_initialization;
 mod provider_option_qualification;
 mod providers_dispatch;
+mod quickstart_env;
 #[cfg(unix)]
 mod relative_path_resolution_cli;
 mod replay_session_cli;

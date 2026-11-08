@@ -7,6 +7,8 @@ use crate::cli::QuickstartArgs;
 use crate::commands::hardware::{self, GpuKind};
 use crate::commands::local_readiness;
 
+mod env_file;
+
 const QUICKSTART_ALIAS: &str = "quickstart";
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProviderChoice {
@@ -387,11 +389,11 @@ fn write_quickstart_files(
     selection: &ProviderSelection,
 ) -> Result<Vec<FileAction>, String> {
     validate_existing_harn_toml(&paths.harn_toml)?;
-    Ok(vec![
-        write_providers_toml(&paths.providers_toml, selection)?,
-        write_or_update_harn_toml(paths, selection)?,
-        write_or_update_env_file(&paths.env_file, selection)?,
-    ])
+    let environment = env_file::prepare(&paths.cwd, &paths.env_file, selection)?;
+    let mut actions = environment.write()?;
+    actions.push(write_providers_toml(&paths.providers_toml, selection)?);
+    actions.push(write_or_update_harn_toml(paths, selection)?);
+    Ok(actions)
 }
 
 fn validate_existing_harn_toml(path: &Path) -> Result<(), String> {
@@ -469,36 +471,6 @@ fn write_or_update_harn_toml(
         path: path.clone(),
         status: "update",
         detail: "added [llm] defaults".to_string(),
-    })
-}
-
-fn write_or_update_env_file(
-    path: &Path,
-    selection: &ProviderSelection,
-) -> Result<FileAction, String> {
-    let existing = match std::fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
-    };
-    let content = merge_env_file(&existing, selection);
-    if content == existing {
-        return Ok(FileAction {
-            path: path.to_path_buf(),
-            status: "skip",
-            detail: "already has quickstart env keys".to_string(),
-        });
-    }
-    harn_vm::atomic_io::atomic_write(path, content.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    Ok(FileAction {
-        path: path.to_path_buf(),
-        status: if existing.is_empty() {
-            "create"
-        } else {
-            "update"
-        },
-        detail: "starter environment file".to_string(),
     })
 }
 
