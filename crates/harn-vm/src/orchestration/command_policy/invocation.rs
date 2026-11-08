@@ -113,6 +113,7 @@ pub fn prepare_local_command_cwd(requested: Option<&str>) -> Result<PathBuf, VmE
         Some(path) => crate::stdlib::process::resolve_source_relative_path(path),
         None => crate::stdlib::process::inherited_process_cwd()?,
     };
+    let path = crate::run_tape::command_cwd(path)?;
     let canonical = path
         .canonicalize()
         .map_err(|error| VmError::Runtime(format!("command cwd {}: {error}", path.display())))?;

@@ -423,8 +423,15 @@ pub(crate) fn process_sandbox_read_deny_roots(policy: &CapabilityPolicy) -> Vec<
     if let Some(root) = super::workspace_env::grant_spawn::denied_read_root() {
         denied.push(normalize_for_policy(&root));
     }
-    for root in &policy.process_sandbox.read_deny_roots {
-        let normalized = normalize_for_policy(Path::new(root));
+    let branch_root = crate::run_tape::denied_command_root();
+    for root in policy
+        .process_sandbox
+        .read_deny_roots
+        .iter()
+        .map(Path::new)
+        .chain(branch_root.as_deref())
+    {
+        let normalized = normalize_for_policy(root);
         if !denied.contains(&normalized) {
             denied.push(normalized);
         }

@@ -99,19 +99,33 @@ impl BranchHandle {
 
     /// Resolve a physical branch asset back to the recorded source identity.
     pub(super) fn prompt_uri(&self, uri: &str) -> String {
-        let path = Path::new(uri);
+        self.recorded_path(Path::new(uri))
+            .map_or_else(|| uri.to_string(), |path| path.display().to_string())
+    }
+
+    /// The recorded identity of a physical branch path, the inverse of
+    /// [`workspace_path`]. `None` when `path` is outside every tree the
+    /// branch restored.
+    fn recorded_path(&self, path: &Path) -> Option<PathBuf> {
+        // `join("")` would add a trailing separator to the root itself.
+        let under = |root: &Path, relative: &Path| match relative.as_os_str().is_empty() {
+            true => root.to_path_buf(),
+            false => root.join(relative),
+        };
         for root in &self.source_roots {
             if let Some(relative) = workspace_relative(path, &root.restored) {
-                return root.recorded.join(relative).display().to_string();
+                return Some(under(&root.recorded, relative));
             }
         }
-        match (
-            &self.recorded_workspace,
-            workspace_relative(path, &self.workspace),
-        ) {
-            (Some(recorded), Some(relative)) => recorded.join(relative).display().to_string(),
-            _ => uri.to_string(),
-        }
+        let recorded = self.recorded_workspace.as_ref()?;
+        workspace_relative(path, &self.workspace).map(|relative| under(recorded, relative))
+    }
+
+    /// The recorded workspace, when this branch runs in another directory.
+    fn relocated_from(&self) -> Option<&Path> {
+        self.recorded_workspace
+            .as_deref()
+            .filter(|recorded| *recorded != self.workspace)
     }
 
     /// Where `path` lands for this branch, or `None` when it is outside every
@@ -288,21 +302,62 @@ pub(super) fn workspace_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a 
     None
 }
 
-/// A shell's path literals do not pass through the VM filesystem resolver.
-/// Until a host supplies a filesystem namespace, do not execute them against
-/// a moved workspace where recorded absolute paths could reach the original.
+/// The recorded identity of `path` in this execution's branch: what the
+/// pipeline and the model see for a directory the branch restored, such as a
+/// session anchored at the branch's own workspace. `path` itself outside a
+/// branch or outside every restored tree.
+pub(crate) fn recorded_path(path: PathBuf) -> PathBuf {
+    state_branch()
+        .and_then(|branch| branch.recorded_path(&path))
+        .unwrap_or(path)
+}
+
+/// Where a command whose working directory names `path` starts: the
+/// directory resolves to the branch's own workspace, like every other
+/// filesystem access, once [`check_live_command_workspace`] admits the
+/// command. Hosts resolving their own command directories call this.
+pub fn command_cwd(path: PathBuf) -> Result<PathBuf, VmError> {
+    let path = workspace_path(path)?;
+    check_live_command_workspace()?;
+    Ok(path)
+}
+
+/// A command's text is never rewritten: a recorded absolute path in it still
+/// names the recorded workspace, which [`denied_command_root`] keeps out of
+/// the child's sandbox. A relocated branch therefore runs a live command only
+/// under OS filesystem confinement that holds that denial. Checked when the
+/// command is taped and again under any per-command sandbox profile.
 pub(crate) fn check_live_command_workspace() -> Result<(), VmError> {
-    if state_branch().is_some_and(|branch| {
-        branch
-            .recorded_workspace
-            .as_ref()
-            .is_some_and(|root| root != &branch.workspace)
-    }) {
-        return Err(VmError::Runtime(
-            "live commands in a relocated replay workspace require a filesystem namespace; recorded command paths cannot be safely rewritten".into(),
-        ));
-    }
-    Ok(())
+    let Some(branch) = state_branch() else {
+        return Ok(());
+    };
+    let Some(recorded) = branch.relocated_from() else {
+        return Ok(());
+    };
+    let reason =
+        if recorded.starts_with(&branch.workspace) || branch.workspace.starts_with(recorded) {
+            format!(
+                "the branch workspace {} overlaps it",
+                branch.workspace.display()
+            )
+        } else {
+            match crate::stdlib::sandbox::command_confinement_gap(recorded) {
+                Some(reason) => reason,
+                None => return Ok(()),
+            }
+        };
+    Err(VmError::Runtime(format!(
+        "live commands in a relocated replay workspace run only when OS filesystem \
+         confinement keeps the recorded workspace {} out of the command: {reason}",
+        recorded.display()
+    )))
+}
+
+/// Roots a confined command must not reach: the recorded workspace of a
+/// branch running in another directory, so a recorded absolute path in a
+/// command fails visibly instead of touching what the branch was copied from.
+pub(crate) fn denied_command_root() -> Option<PathBuf> {
+    state_branch().and_then(|branch| branch.relocated_from().map(Path::to_path_buf))
 }
 
 /// The scope a host enters around the execution that branches. It is `Send`,

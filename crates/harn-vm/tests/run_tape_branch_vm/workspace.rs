@@ -99,7 +99,7 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(replay
         .output
         .unwrap_err()
-        .contains("require a filesystem namespace"));
+        .contains("the sandbox profile does not confine commands"));
     assert!(!marker.exists());
     assert!(!isolated.workspace.join("command-marker").exists());
 }

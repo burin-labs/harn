@@ -224,6 +224,7 @@ pub(crate) fn read_only_mount_overriding_writable(
         )
     });
     let depth = anchor_roots
+        .filter_map(|root| crate::run_tape::workspace_path(root).ok())
         .chain(workspace_root.map(Path::to_path_buf))
         .map(|root| normalize_for_policy(&root))
         .filter(|root| path.starts_with(root))

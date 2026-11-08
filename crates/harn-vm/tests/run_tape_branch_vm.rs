@@ -44,6 +44,9 @@ use store_effects::mark_script;
 #[path = "run_tape_branch_vm/permissions.rs"]
 mod permissions;
 
+#[path = "run_tape_branch_vm/own_roots.rs"]
+mod own_roots;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;

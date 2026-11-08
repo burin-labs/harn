@@ -118,6 +118,9 @@ pub struct ReplayWorkspace {
     _lease: std::fs::File,
     storage: storage::PrivateStorage,
     workspace: PathBuf,
+    /// The storage holding the seed: this object's own, or the saved
+    /// workspace a private copy was restored from.
+    seed_root: PathBuf,
     receipt: SeedReceipt,
     limits: SeedLimits,
 }
@@ -184,8 +187,13 @@ impl ReplayWorkspace {
             return Err(SeedError::SeedChanged);
         }
         Ok(Self {
-            _lease: persistent::lease(&parent, storage.path(), true)?,
+            _lease: persistent::lease(
+                &parent,
+                storage.path(),
+                persistent::Lease::Exclusive { create: true },
+            )?,
             workspace: storage.path().join("workspace"),
+            seed_root: storage.path().to_path_buf(),
             storage,
             receipt,
             limits,
@@ -206,8 +214,9 @@ impl ReplayWorkspace {
     /// stable. Verify the seed before retiring the previous copy.
     pub fn restore(&mut self) -> Result<&SeedReceipt, SeedError> {
         let parent = open_dir(self.storage.path())?;
-        persistent::require_directory(&parent, "seed")?;
-        let seed = parent
+        let seed_parent = open_dir(&self.seed_root)?;
+        persistent::require_directory(&seed_parent, "seed")?;
+        let seed = seed_parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
         storage::remove_abandoned_staging(&parent)?;

@@ -126,6 +126,89 @@ fn saved_workspace_restarts_case() {
 }
 
 #[test]
+fn private_copies_share_a_saved_seed_and_exclude_an_in_place_restore() {
+    run_isolated(
+        "private_copies_share_a_saved_seed_and_exclude_an_in_place_restore",
+        private_copies_case,
+    );
+}
+
+fn private_copies_case() {
+    let source = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("file"), "initial").unwrap();
+    let mut owner =
+        ReplayWorkspace::capture_in(source.path(), storage.path(), SeedLimits::default()).unwrap();
+    let saved = owner.persist();
+    let saved_copy = owner.path().to_path_buf();
+    drop(owner);
+    let restore = || ReplayWorkspace::restore_private(&saved, copies.path());
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(restore);
+        let second = scope.spawn(restore);
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    let mut first = first.unwrap();
+    let second = second.unwrap();
+    assert_ne!(first.path(), second.path());
+    let copies_root = copies.path().canonicalize().unwrap();
+    for copy in [&first, &second] {
+        assert!(copy.path().starts_with(&copies_root));
+        assert_eq!(copy.receipt(), saved.receipt());
+        assert_eq!(
+            fs::read_to_string(copy.path().join("file")).unwrap(),
+            "initial"
+        );
+    }
+    fs::write(first.path().join("file"), "first trial").unwrap();
+    fs::write(second.path().join("file"), "second trial").unwrap();
+    assert_eq!(
+        fs::read_to_string(first.path().join("file")).unwrap(),
+        "first trial"
+    );
+    assert_eq!(
+        fs::read_to_string(saved_copy.join("file")).unwrap(),
+        "initial"
+    );
+    assert_eq!(
+        fs::read_to_string(saved.storage_path().join("seed/file")).unwrap(),
+        "initial"
+    );
+    // The in-place restore would replace a working copy the copies share a
+    // seed with; it waits for every copy.
+    assert!(matches!(
+        ReplayWorkspace::restore_saved(&saved),
+        Err(SeedError::InUse { .. })
+    ));
+    first.restore().unwrap();
+    assert_eq!(
+        fs::read_to_string(first.path().join("file")).unwrap(),
+        "initial"
+    );
+    assert_eq!(first.persist().storage_path(), saved.storage_path());
+    let first_storage = first.path().parent().unwrap().to_path_buf();
+    drop(first);
+    assert!(
+        !first_storage.exists(),
+        "a private copy removes its own directory"
+    );
+    assert!(matches!(
+        ReplayWorkspace::restore_saved(&saved),
+        Err(SeedError::InUse { .. })
+    ));
+    drop(second);
+    let in_place = ReplayWorkspace::restore_saved(&saved).unwrap();
+    assert!(matches!(restore(), Err(SeedError::InUse { .. })));
+    drop(in_place);
+    assert!(matches!(
+        ReplayWorkspace::restore_private(&saved, saved.storage_path()),
+        Err(SeedError::Unsupported { .. })
+    ));
+    assert_eq!(fs::read_dir(copies.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn saved_seed_tampering_refuses_without_replacing_the_previous_trial() {
     run_isolated(
         "saved_seed_tampering_refuses_without_replacing_the_previous_trial",

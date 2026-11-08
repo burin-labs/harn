@@ -12,7 +12,8 @@ pub async fn install_workspace_roots(
     scope: &crate::SessionStoreScope,
     session_type: SessionType,
 ) -> Result<bool, VmError> {
-    let mut anchor = prepared.into_anchor();
+    let mut anchor =
+        agent_sessions::session_anchor(prepared.into_anchor()).map_err(VmError::Runtime)?;
     if !agent_sessions::exists(session_id) {
         return Err(VmError::Runtime(format!("unknown session '{session_id}'")));
     }
@@ -20,6 +21,7 @@ pub async fn install_workspace_roots(
         let previous_primary = previous.primary.canonicalize().map_err(|error| {
             VmError::Runtime(format!("session workspace cannot be resolved: {error}"))
         })?;
+        let previous_primary = crate::run_tape::recorded_path(previous_primary);
         if previous_primary != anchor.primary {
             return Err(VmError::Runtime(
                 "workspace root replacement cannot reanchor a session".into(),
@@ -35,7 +37,7 @@ pub async fn install_workspace_roots(
                 root.mounted_at = prior.mounted_at.clone();
             }
         }
-    } else if anchor.primary != scope.workspace() {
+    } else if anchor.primary != crate::run_tape::recorded_path(scope.workspace().to_path_buf()) {
         return Err(VmError::Runtime(
             "workspace root replacement cannot move the session cwd".into(),
         ));

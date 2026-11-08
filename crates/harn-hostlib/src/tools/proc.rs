@@ -981,7 +981,14 @@ pub(crate) fn parse_cwd(
     if raw.is_empty() {
         return Ok(None);
     }
-    let path = Path::new(raw);
+    // A replay branch resolves the directory into its own workspace.
+    let path = harn_vm::run_tape::command_cwd(PathBuf::from(raw)).map_err(|error| {
+        HostlibError::InvalidParameter {
+            builtin,
+            param: "cwd",
+            message: error.to_string(),
+        }
+    })?;
     if !path.is_dir() {
         return Err(HostlibError::InvalidParameter {
             builtin,
@@ -1050,12 +1057,12 @@ pub(crate) fn resolve_effective_cwd(
     if let Some(requested) = requested {
         return Ok(requested.to_path_buf());
     }
-    let current = harn_vm::stdlib::process::inherited_process_cwd().map_err(|error| {
-        HostlibError::Backend {
+    let current = harn_vm::stdlib::process::inherited_process_cwd()
+        .and_then(harn_vm::run_tape::command_cwd)
+        .map_err(|error| HostlibError::Backend {
             builtin,
             message: format!("failed to resolve inherited cwd: {error}"),
-        }
-    })?;
+        })?;
     current
         .canonicalize()
         .map_err(|error| HostlibError::Backend {

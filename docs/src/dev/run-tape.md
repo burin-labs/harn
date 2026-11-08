@@ -122,9 +122,12 @@ establishes whether an edit improves model behavior.
 
 ## Refusals and limits
 
-- Live commands in a relocated workspace are refused: their embedded paths
-  require a host filesystem namespace. Workspace path mapping is not a sandbox
-  for arbitrary host tools or external processes.
+- Live commands in a relocated workspace run only under OS filesystem
+  confinement that keeps the recorded workspace out. Command text is never
+  rewritten, so a recorded absolute path in a command names the recorded
+  workspace, and the sandbox denies it there. A profile that does not confine
+  commands, a host without a filesystem sandbox, a writable grant covering the
+  recorded workspace, or a branch workspace overlapping it refuses the command.
   A baseline recorded in an isolated workspace can replay at that same path;
   the host restores its initial contents between runs.
 - Background commands cannot be served because their process handles do not
@@ -146,6 +149,18 @@ establishes whether an edit improves model behavior.
   recording are not repeated.
 - Dropping a branch scope does not cancel a session. Hosts must use their
   session cancellation path and wait for its terminal result.
+
+## Branches in their own directories
+
+A branch's `workspace_root` may differ from the recorded one, so several
+branches of one recording can run at once, each in its own copy. The branch has
+one identity per workspace: the logical root is the recorded root, and the
+physical root is the branch's own directory. The pipeline and the model see the
+logical root. A session anchored at the physical root records the logical root
+as its primary, so the workspace reminder, tool arguments built from the anchor,
+and request digests match the recording. Paths map to the physical root only
+at the physical boundary: VM file I/O, a command's working directory, and the
+write jail derived from a session anchor.
 
 ## Private trial workspaces
 
@@ -183,6 +198,12 @@ acquires an exclusive operating-system file lock, verifies the seed, and restore
 the working copy before returning it for a new trial. A competing owner refuses
 before restoration. Closing a retained owner releases its lock but keeps its
 files; the product's run-retention policy owns their eventual retirement.
+
+`ReplayWorkspace::restore_private(&saved, parent)` restores the saved seed into
+a new owner-only directory under `parent` for one of several concurrent
+branches. Each copy holds a shared lock on the saved workspace, so copies
+coexist, and `restore_saved` refuses until every copy is dropped. A copy owns
+its directory and removes it when dropped; `restore()` re-copies the seed into it.
 
 Keep the handle inside the execution owner until the session and every child
 process has stopped. A frontend holding it on behalf of an independent worker

@@ -1341,11 +1341,12 @@ pub(crate) use transcript::{
 
 #[path = "run_tape_scope.rs"]
 mod scope;
-pub use scope::BranchScope;
 pub(crate) use scope::{
-    branch_event_log, branch_path, check_live_command_workspace, current_branch, durable_path,
-    scoped_state_root, state_branch, workspace_path, BranchHandle,
+    branch_event_log, branch_path, check_live_command_workspace, current_branch,
+    denied_command_root, durable_path, recorded_path, scoped_state_root, state_branch,
+    workspace_path, BranchHandle,
 };
+pub use scope::{command_cwd, BranchScope};
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;

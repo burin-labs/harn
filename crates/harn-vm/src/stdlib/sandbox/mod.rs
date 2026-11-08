@@ -1218,6 +1218,43 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
     Some((crate::process_sandbox::reconcile(policy), profile))
 }
 
+/// Why a command spawned now could still reach `denied`, or `None` when the
+/// OS sandbox will keep it out: confinement engages, its backend holds read
+/// and write grants, and no writable grant covers `denied`. The denial itself
+/// rides on [`process_sandbox_read_deny_roots`], which beats every read grant;
+/// writes are refused because nothing grants them there.
+pub(crate) fn command_confinement_gap(denied: &Path) -> Option<String> {
+    let Some((policy, _)) = active_sandbox_policy() else {
+        return Some("the sandbox profile does not confine commands".to_string());
+    };
+    let held = active_backend_filesystem_available()
+        && enforcement::active_enforcement().is_some_and(|row| {
+            [
+                enforcement::ConfinementDimension::Writes,
+                enforcement::ConfinementDimension::Reads,
+            ]
+            .into_iter()
+            .all(|dimension| row.cell(dimension) == enforcement::Enforcement::Enforced)
+        });
+    if !held {
+        return Some("this host has no filesystem sandbox that holds it".to_string());
+    }
+    let denied = normalize_for_policy(denied);
+    let writable = process_sandbox_roots(&policy)
+        .into_iter()
+        .chain(process_sandbox_policy_write_roots(&policy))
+        .chain(process_sandbox_developer_toolchain_cache_roots(&policy));
+    for root in writable {
+        if path_is_within(&denied, &root) {
+            return Some(format!(
+                "the command may write {}, which contains it",
+                root.display()
+            ));
+        }
+    }
+    None
+}
+
 fn spawn_error(error: std::io::Error) -> VmError {
     environment_io_error_thrown(&error, format!("process spawn failed: {error}"))
 }
@@ -1380,20 +1417,29 @@ fn toolchain_cache_default_named_in_denial(
 /// writable jail roots (a read of one is permitted via the read-only-roots
 /// path, but a write must not be). Returns `None` when there is no current
 /// session or the session has no anchor, so the caller falls back to the
-/// process execution root.
+/// process execution root. A branch anchors at its recorded identity; the
+/// jail grants the directory that identity resolves to, never the recording.
 fn current_session_anchor_workspace_roots() -> Option<Vec<PathBuf>> {
     let session_id = crate::agent_sessions::current_session_id()?;
     let anchor = crate::agent_sessions::workspace_anchor(&session_id)?;
-    let mut roots = vec![anchor.primary.clone()];
-    for mounted in &anchor.additional_roots {
-        if matches!(
-            mounted.mount_mode,
-            crate::workspace_anchor::MountMode::Extend
-        ) {
-            roots.push(mounted.path.clone());
-        }
-    }
-    Some(roots)
+    let writable = std::iter::once(anchor.primary).chain(
+        anchor
+            .additional_roots
+            .into_iter()
+            .filter(|mounted| {
+                matches!(
+                    mounted.mount_mode,
+                    crate::workspace_anchor::MountMode::Extend
+                )
+            })
+            .map(|mounted| mounted.path),
+    );
+    // A root that escapes the branch's workspace is granted nowhere.
+    Some(
+        writable
+            .filter_map(|root| crate::run_tape::workspace_path(root).ok())
+            .collect(),
+    )
 }
 
 /// The project root a run is bound to even when the OS process cwd differs.
