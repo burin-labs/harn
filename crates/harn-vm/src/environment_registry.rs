@@ -261,16 +261,29 @@ fn spec_for_registered_name(name: &str) -> EnvironmentVariableSpec {
 fn consumer_for(name: &str) -> EnvironmentConsumer {
     if name.starts_with("HARN_TEST_") || name.contains("_TEST_") || name.starts_with("HARN_E2E_") {
         EnvironmentConsumer::TestHarness
-    } else if [
+    } else if matches!(
+        name,
+        "HARN_CLI_AOT_GEN_BIN"
+            | "HARN_ENUM_COMPILER_ARCHIVE_STAGE"
+            | "HARN_LSP_INSTALL_ATTEMPTS"
+            | "HARN_RATE_LIMIT_EXHAUSTED_PERCENT"
+            | "HARN_RATE_LIMIT_MAX_WAIT_SECONDS"
+            | "HARN_WASM_PACK"
+    ) || [
         "HARN_BUILD_",
         "HARN_CARGO_",
         "HARN_CHECK_",
         "HARN_CI_",
+        "HARN_CLI_ARTIFACT_",
         "HARN_CODEGEN_",
         "HARN_DEV_",
         "HARN_GC_",
+        "HARN_HOOKS_",
+        "HARN_PERSISTENT_TARGET_",
+        "HARN_PREPUSH_",
         "HARN_RELEASE_",
         "HARN_TARGET_GC_",
+        "HARN_WARM_",
     ]
     .iter()
     .any(|prefix| name.starts_with(prefix))
@@ -700,120 +713,275 @@ mod tests {
         );
     }
 
-    /// The `HARN_*` names a workflow file ASSIGNS.
-    ///
-    /// Only the assigning forms count. A name that is merely referenced cannot
-    /// put itself into a child process's environment, so it cannot trip
-    /// `validate_startup_environment`; a name a workflow sets can, and will.
-    /// `harn_name_tokens` cannot serve here because it anchors on `"HARN_`,
-    /// and a YAML mapping key is bare.
-    fn workflow_assigned_names(source: &str) -> std::collections::BTreeSet<String> {
+    /// Conservatively census executable CI references, including inherited
+    /// reads and inline child assignments. Repository variables, comments,
+    /// unexported shell constants and literal workflow-command labels are not
+    /// process-environment inputs.
+    fn ci_environment_names<'a>(
+        path: &std::path::Path,
+        source: &'a str,
+    ) -> std::collections::BTreeSet<&'a str> {
         let mut names = std::collections::BTreeSet::new();
+        let mut constants = std::collections::BTreeSet::new();
+        let workflow = matches!(
+            path.extension().and_then(OsStr::to_str),
+            Some("yml" | "yaml")
+        );
+        let mut run_indent = None;
+        let exported: std::collections::BTreeSet<_> = source
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix("export "))
+            .flat_map(bounded_harn_tokens)
+            .collect();
         for line in source.lines() {
             let trimmed = line.trim_start();
-            let candidate = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-            let Some(rest) = candidate.strip_prefix("HARN_") else {
+            let indent = line.len() - trimmed.len();
+            if !trimmed.is_empty() && run_indent.is_some_and(|base| indent <= base) {
+                run_indent = None;
+            }
+            let mapping = trimmed.strip_prefix("- ").unwrap_or(trimmed).trim_start();
+            if workflow
+                && run_indent.is_none()
+                && (mapping.starts_with("run:")
+                    || mapping.starts_with("\"run\":")
+                    || mapping.starts_with("'run':"))
+            {
+                run_indent = Some(line.len() - mapping.len());
+            }
+            if trimmed.starts_with('#') || trimmed.starts_with("//") {
                 continue;
-            };
-            let mut name = String::from("HARN_");
-            let mut terminator = None;
-            for character in rest.chars() {
-                if character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+            }
+            let constant = (path.extension().and_then(OsStr::to_str) == Some("sh"))
+                .then(|| trimmed.strip_prefix("readonly "))
+                .flatten()
+                .and_then(|binding| binding.split_once('='))
+                .map(|(name, _)| name.trim())
+                .filter(|name| name.starts_with("HARN_") && !exported.contains(name));
+            let diagnostic = trimmed
+                .strip_prefix("echo ")
+                .or_else(|| trimmed.strip_prefix("printf "))
+                .map(str::trim_start)
+                .map(|text| text.trim_start_matches(['\'', '"']))
+                .and_then(|text| text.strip_prefix("::"))
+                .and_then(|text| text.split([' ', ':']).next())
+                .is_some_and(|kind| matches!(kind, "notice" | "warning" | "error" | "debug"));
+            for (start, end) in harn_token_spans(line) {
+                let name = line.get(start..end).expect("ASCII name boundaries");
+                let before = line.get(..start).expect("ASCII name boundary");
+                let process_read =
+                    before.ends_with("env.") || before.to_ascii_lowercase().ends_with("$env:");
+                let expanded = before.ends_with('$') || before.ends_with("${") || process_read;
+                let repository_variable = workflow
+                    && before.ends_with("vars.")
+                    && (run_indent.is_none()
+                        || before
+                            .rsplit_once("${{")
+                            .is_some_and(|(_, expression)| !expression.contains("}}")));
+                if name.ends_with('_')
+                    || repository_variable
+                    || (constants.contains(name) && !process_read)
+                    || (constant == Some(name) && before.trim() == "readonly")
+                    || (diagnostic && !expanded)
                 {
-                    name.push(character);
-                } else {
-                    terminator = Some(character);
-                    break;
+                    continue;
                 }
+                names.insert(name);
             }
-            if name == "HARN_" {
-                continue;
+            if let Some(constant) = constant {
+                constants.insert(constant);
             }
-            // `NAME:` is a YAML mapping key and `NAME=` is a shell assignment.
-            // Anything else is prose, a reference on a right-hand side, or a
-            // bare token that assigns nothing.
-            if !matches!(terminator, Some(':') | Some('=')) {
-                continue;
-            }
-            names.insert(name);
         }
         names
     }
 
+    struct CiEnvironmentCensus<'a> {
+        observed: std::collections::BTreeSet<&'a str>,
+        missing: std::collections::BTreeSet<&'a str>,
+    }
+
+    fn ci_environment_census<'a>(
+        path: &std::path::Path,
+        source: &'a str,
+    ) -> CiEnvironmentCensus<'a> {
+        let observed: std::collections::BTreeSet<_> = environment_reference_tokens(path, source)
+            .into_iter()
+            .collect();
+        let missing = observed
+            .iter()
+            .copied()
+            .filter(|name| variable_spec(name).is_none())
+            .collect();
+        CiEnvironmentCensus { observed, missing }
+    }
+
     #[test]
-    fn workflow_name_scan_reads_assignments_and_ignores_references() {
+    fn ci_name_scan_reads_inputs_without_registering_non_environment_symbols() {
         let source = concat!(
-            "        env:\n",
-            "          HARN_BUMP_BRANCH: main\n",
-            "        run: |\n",
-            "          export HARN_BUMP_REFRESH=\"$HARN_BUMP_REFRESH_COMMAND\"\n",
-            "          echo \"$HARN_BUMP_TOKEN\"\n",
-            "          # HARN_BUMP_NOT_A_KEY: prose\n",
+            "HARN_CI_ASSIGNED=1 child\n",
+            "echo \"$HARN_BIN ${HARN_CI_INHERITED:-1}\"\n",
+            "process.env.HARN_CI_DOT_READ\n",
+            "os.environ['HARN_CI_STRING_READ']\n",
+            "$env:HARN_CI_POWERSHELL_READ\n",
+            "${{ env.HARN_CI_WORKFLOW_READ }}\n",
+            "readonly HARN_CI_LOCAL_CONSTANT=7\n",
+            "echo \"$HARN_CI_LOCAL_CONSTANT\"\n",
+            "readonly HARN_CI_DEFAULTED=\"${HARN_CI_DEFAULTED:-1}\"\n",
+            "readonly HARN_CI_EXPORTED=7\nexport HARN_CI_EXPORTED\n",
+            "echo \"::notice::HARN_CI_LOG_LABEL=value\"\n",
+            "echo \"::notice::$HARN_CI_LOG_READ\"\n",
+            "# HARN_CI_COMMENT_ONLY=1\n",
+            "// HARN_CI_COMMENT_ONLY\n",
         );
-        let names = workflow_assigned_names(source);
-        assert!(names.contains("HARN_BUMP_BRANCH"), "reads a YAML env key");
-        assert!(names.contains("HARN_BUMP_REFRESH"), "reads a shell export");
+        let names: std::collections::BTreeSet<_> =
+            environment_reference_tokens(std::path::Path::new("scripts/ci/probe.sh"), source)
+                .into_iter()
+                .collect();
+        for name in [
+            "HARN_BIN",
+            "HARN_CI_ASSIGNED",
+            "HARN_CI_INHERITED",
+            "HARN_CI_DOT_READ",
+            "HARN_CI_STRING_READ",
+            "HARN_CI_POWERSHELL_READ",
+            "HARN_CI_WORKFLOW_READ",
+            "HARN_CI_LOG_READ",
+            "HARN_CI_DEFAULTED",
+            "HARN_CI_EXPORTED",
+        ] {
+            assert!(names.contains(name), "missed input {name}");
+        }
         assert!(
-            !names.contains("HARN_BUMP_REFRESH_COMMAND"),
-            "a reference on a right-hand side is not an assignment"
+            variable_spec("HARN_BIN").is_some(),
+            "known registered positive control"
         );
         assert!(
-            !names.contains("HARN_BUMP_TOKEN"),
-            "an echoed reference is not an assignment"
+            variable_spec("HARN_CI_DOT_READ").is_none(),
+            "unregistered read must remain a refusal"
         );
+        for name in [
+            "HARN_CI_LOCAL_CONSTANT",
+            "HARN_CI_LOG_LABEL",
+            "HARN_CI_COMMENT_ONLY",
+        ] {
+            assert!(!names.contains(name), "non-environment symbol {name}");
+        }
+        let workflow = concat!(
+            "if: vars.HARN_CI_REPOSITORY_SETTING == 'on'\n",
+            "steps:\n  - run: |\n",
+            "      echo \"$HARN_CI_SCRIPT_READ\"\n",
+            "      node -e 'const vars=process.env; vars.HARN_CI_JS_ALIAS'\n",
+            "      echo \"${{ vars.HARN_CI_REPOSITORY_SETTING }}\"\n",
+        );
+        let names: std::collections::BTreeSet<_> = environment_reference_tokens(
+            std::path::Path::new(".github/workflows/probe.yml"),
+            workflow,
+        )
+        .into_iter()
+        .collect();
+        assert!(names.contains("HARN_CI_SCRIPT_READ"));
         assert!(
-            !names.contains("HARN_BUMP_NOT_A_KEY"),
-            "a comment is not an assignment"
+            names.contains("HARN_CI_JS_ALIAS"),
+            "script aliases are not GitHub context variables"
+        );
+        assert!(!names.contains("HARN_CI_REPOSITORY_SETTING"));
+        for name in ["HARN_WINDOWS_DEVDRIVE", "HARN_WINDOWS_LLD"] {
+            assert!(
+                variable_spec(name).is_none(),
+                "repository-only variables are not process-environment settings"
+            );
+        }
+        let path = std::path::Path::new("scripts/ci/probe.sh");
+        let refused = ci_environment_census(path, "echo $HARN_CI_DOT_READ");
+        assert_eq!(refused.observed.len(), 1);
+        assert_eq!(
+            refused.missing.into_iter().collect::<Vec<_>>(),
+            vec!["HARN_CI_DOT_READ"]
+        );
+        let admitted = ci_environment_census(path, "echo $HARN_BIN");
+        assert_eq!(admitted.observed.len(), 1);
+        assert!(
+            admitted.missing.is_empty(),
+            "a measured zero after the refusal control"
         );
     }
 
-    /// A workflow that sets an unregistered `HARN_*` name ships a job that dies
-    /// on `HARN-ENV-001` the first time it starts a Harn process. The compiled
-    /// and Harn-script censuses above never see it, because a workflow is
-    /// neither. This closes that hole.
     #[test]
-    fn every_workflow_assigned_name_is_registered() {
+    fn every_ci_environment_name_is_registered_or_structurally_owned() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
             .expect("harn-vm lives below workspace/crates");
-        let workflows = workspace_root.join(".github/workflows");
-        assert!(
-            workflows.is_dir(),
-            "no workflow directory at {}; this gate would pass by seeing nothing",
-            workflows.display()
-        );
-        let mut scanned = 0usize;
+        let mut observed = std::collections::BTreeSet::new();
         let mut missing = std::collections::BTreeSet::new();
-        for entry in walkdir::WalkDir::new(&workflows)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry.file_type().is_file()
-                    && matches!(
-                        entry.path().extension().and_then(OsStr::to_str),
-                        Some("yml") | Some("yaml")
-                    )
-            })
-        {
-            let source = std::fs::read_to_string(entry.path()).expect("read workflow");
-            scanned += 1;
-            for name in workflow_assigned_names(&source) {
-                if variable_spec(&name).is_none() {
+        for root in ["scripts/ci", ".github/workflows"] {
+            let directory = workspace_root.join(root);
+            assert!(
+                directory.is_dir(),
+                "missing CI owner {}",
+                directory.display()
+            );
+            let mut scanned = 0;
+            for entry in walkdir::WalkDir::new(directory)
+                .into_iter()
+                .filter_entry(|entry| !is_pruned_reference_directory(entry))
+            {
+                let entry = entry.expect("walk every CI contract owner");
+                if !entry.file_type().is_file() || !is_reference_source(entry.path()) {
+                    continue;
+                }
+                let source = std::fs::read_to_string(entry.path()).expect("read CI source");
+                scanned += 1;
+                let census = ci_environment_census(entry.path(), &source);
+                for name in census.missing {
                     missing.insert(format!("{}: {name}", entry.path().display()));
                 }
+                observed.extend(census.observed.into_iter().map(str::to_owned));
             }
+            assert!(scanned > 0, "no executable CI sources measured in {root}");
         }
         assert!(
-            scanned > 0,
-            "scanned no workflow files; the gate cannot see anything"
+            observed.contains("HARN_BIN"),
+            "known registered positive control"
+        );
+        assert!(
+            observed.contains("HARN_PERSISTENT_TARGET_MAX_GIB"),
+            "must census the read that broke release smoke"
         );
         assert!(
             missing.is_empty(),
-            "workflow-assigned HARN_* names missing from \
+            "CI-owned HARN_* names missing from \
              environment_registry_names.txt:\n{}",
             missing.into_iter().collect::<Vec<_>>().join("\n")
         );
+    }
+
+    #[test]
+    fn public_hook_policy_names_are_registered() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let mut names = std::collections::BTreeSet::new();
+        for path in [".githooks/lib.sh", ".githooks/pre-push"] {
+            let source = std::fs::read_to_string(root.join(path))
+                .expect("read the public hook policy owner");
+            names.extend(
+                bounded_harn_tokens(&source)
+                    .filter(|name| {
+                        name.starts_with("HARN_HOOKS_") || name.starts_with("HARN_PREPUSH_")
+                    })
+                    .map(str::to_string),
+            );
+        }
+        assert!(
+            names.contains("HARN_HOOKS_FULL_LOCAL"),
+            "the hook policy census must measure its established opt-in switch"
+        );
+        for name in names {
+            let spec =
+                variable_spec(&name).unwrap_or_else(|| panic!("unregistered hook setting {name}"));
+            assert_eq!(spec.consumer, EnvironmentConsumer::BuildTooling, "{name}");
+        }
     }
 
     #[test]
@@ -826,13 +994,16 @@ mod tests {
         for script in [
             "scripts/prune_stale_targets.sh",
             "scripts/target_gc_maintenance.sh",
+            "scripts/ci/bound_persistent_target.sh",
         ] {
             let source = std::fs::read_to_string(root.join(script)).expect("read target collector");
             names.extend(
                 source
                     .split(|c: char| !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_')
                     .filter(|name| {
-                        (name.starts_with("HARN_TARGET_GC_") || name.starts_with("HARN_GC_"))
+                        (name.starts_with("HARN_TARGET_GC_")
+                            || name.starts_with("HARN_GC_")
+                            || name.starts_with("HARN_PERSISTENT_TARGET_"))
                             && !name.ends_with('_')
                     })
                     .map(str::to_owned),
@@ -987,6 +1158,15 @@ mod tests {
     }
 
     fn environment_reference_tokens<'a>(path: &std::path::Path, source: &'a str) -> Vec<&'a str> {
+        // Forward registration and reverse ownership use the same CI reader.
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let relative = path.strip_prefix(workspace_root).unwrap_or(path);
+        if relative.starts_with("scripts/ci") || relative.starts_with(".github/workflows") {
+            return ci_environment_names(path, source).into_iter().collect();
+        }
         match environment_reference_syntax(path) {
             EnvironmentReferenceSyntax::StringLiteral => harn_name_tokens(source).collect(),
             EnvironmentReferenceSyntax::ShellLike => bounded_harn_tokens(source).collect(),
@@ -996,11 +1176,11 @@ mod tests {
     /// Every maximal `HARN_*` token that starts at an identifier boundary.
     /// Shell, Make, and YAML reference variables without quoting their names;
     /// compiled languages use the literal-only scanner instead.
-    #[expect(
-        clippy::string_slice,
-        reason = "start/end bound an ASCII HARN_* token found by match_indices"
-    )]
     fn bounded_harn_tokens(source: &str) -> impl Iterator<Item = &str> {
+        harn_token_spans(source).filter_map(|(start, end)| source.get(start..end))
+    }
+
+    fn harn_token_spans(source: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
         let bytes = source.as_bytes();
         source.match_indices("HARN_").filter_map(move |(start, _)| {
             if start > 0 {
@@ -1017,7 +1197,7 @@ mod tests {
             {
                 end += 1;
             }
-            Some(&source[start..end])
+            Some((start, end))
         })
     }
 

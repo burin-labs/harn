@@ -389,6 +389,7 @@ fn write_quickstart_files(
     selection: &ProviderSelection,
 ) -> Result<Vec<FileAction>, String> {
     validate_existing_harn_toml(&paths.harn_toml)?;
+    validate_existing_providers_toml(&paths.providers_toml)?;
     let environment = env_file::prepare(&paths.cwd, &paths.env_file, selection)?;
     let mut actions = environment.write()?;
     actions.push(write_providers_toml(&paths.providers_toml, selection)?);
@@ -405,6 +406,22 @@ fn validate_existing_harn_toml(path: &Path) -> Result<(), String> {
     toml::from_str::<toml::Value>(&existing)
         .map(|_| ())
         .map_err(|error| format!("{} is not valid TOML: {error}", path.display()))
+}
+
+fn validate_existing_providers_toml(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    harn_vm::llm_config::parse_config_toml(&existing)
+        .map(|_| ())
+        .map_err(|error| {
+            format!(
+                "{} is not valid provider configuration: {error}",
+                path.display()
+            )
+        })
 }
 
 fn write_providers_toml(path: &Path, selection: &ProviderSelection) -> Result<FileAction, String> {

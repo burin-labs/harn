@@ -7,7 +7,6 @@ pipeline test(harness: Harness, task: unknown) {
   harness.runtime.waitpoint_create("fan-out-d")
   harness.runtime.waitpoint_create("fan-out-e")
   const completer = spawn {
-    harness.clock.sleep_ms(20ms)
     harness.runtime.waitpoint_complete("fan-out-a")
     harness.runtime.waitpoint_complete("fan-out-b")
     harness.runtime.waitpoint_complete("fan-out-c")
