@@ -11,7 +11,7 @@ import {
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
   createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
-  readRetry,
+  readRetry, cleanupReadScope,
 } from '../lib/consumer-observer.mjs';
 import {archiveJson} from './fixtures/artifact_archive.mjs';
 
@@ -43,6 +43,42 @@ const child = {
   display_title: observerRunName(context),
 };
 const event = { inputs: { observer: JSON.stringify(context), source_revision: context.source_revision } };
+
+test('cleanup census retries share a deadline and never accept a late or unmeasured zero', async () => {
+  const previous=readRetry.backoffMs;
+  readRetry.backoffMs=5;
+  try {
+    let now=0;
+    let reads=0;
+    const waits=[];
+    const scoped=cleanupReadScope(async()=>{
+      reads++;
+      return {ok:true,json:async()=>reads===1 ? {total_count:1} : {total_count:1,artifacts:[{id:501}]}};
+    },{now:()=>now,wait:async ms=>{waits.push(ms);now+=ms;}});
+    assert.deepEqual(await githubArtifactCensus('fixture','acme/widget-host','73',scoped),[{id:501}]);
+    assert.equal(reads,2);
+    assert.deepEqual(waits,[5]);
+    now=599_999;
+    const expired=cleanupReadScope(async()=>{
+      now+=600_001;
+      return {ok:true,json:async()=>({total_count:0,artifacts:[]})};
+    },{now:()=>now,wait:async()=>assert.fail('an expired read cannot wait')});
+    await assert.rejects(githubArtifactCensus('fixture','acme/widget-host','73',expired),/cleanup_read_budget_exhausted/);
+    // The original scope retains its deadline after an earlier successful census.
+    await assert.rejects(githubArtifactCensus('fixture','acme/widget-host','73',scoped),/cleanup_read_budget_exhausted/);
+    assert.equal(reads,2,'budget exhaustion must not start another request');
+    now=0;
+    let pendingReads=0;
+    const pending=cleanupReadScope(async()=>{
+      pendingReads++;
+      return {ok:true,json:async()=>({total_count:1})};
+    },{now:()=>now,wait:async()=>{now=600_000;}});
+    await assert.rejects(githubArtifactCensus('fixture','acme/widget-host','73',pending),/cleanup_read_budget_exhausted/);
+    assert.equal(pendingReads,1,'waiting consumes the same cleanup budget');
+  } finally {
+    readRetry.backoffMs=previous;
+  }
+});
 
 test('admission binds an authenticated child to a live current parent and separately frozen source', () => {
   const receipt = admitChild(context, parent, expected, child, event, context);

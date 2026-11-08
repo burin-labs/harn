@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
-import { assessConsumerObservation, unmeasuredConsumerTiming } from './consumer-observation-budget.mjs';
+import { assessConsumerObservation, unmeasuredConsumerTiming, consumerObservationBudget } from './consumer-observation-budget.mjs';
 
 const parentRepository = 'burin-labs/harn';
 export {parentRepository as observerParentRepository};
@@ -469,6 +469,59 @@ export async function githubDeclaration(token, context, fetchRecord = fetch, ext
 export const readRetry = { attempts: 4, backoffMs: 5_000, limitMs: 300_000 };
 const retryableReadResponses = new WeakMap();
 const readResponseFacts = new WeakMap();
+const cleanupReadScopes = new WeakMap();
+
+/** One cleanup invocation shares its existing deadline across all census reads.
+ * Only pure read operations below may retry; cancellation is never replayed. */
+export function cleanupReadScope(fetchRecord = fetch, {now = () => performance.now(), wait = pause} = {}) {
+  const deadline = now() + consumerObservationBudget.cleanup_seconds * 1000;
+  const remaining = () => {
+    const ms = Math.floor(deadline - now());
+    if (ms <= 0) refuse('cleanup_read_budget_exhausted');
+    return ms;
+  };
+  const scoped = async (url, options = {}) => {
+    const signal = AbortSignal.timeout(Math.min(30_000, remaining()));
+    const response = await fetchRecord(url, {...options,
+      signal: options.signal ? AbortSignal.any([signal, options.signal]) : signal});
+    remaining();
+    return response;
+  };
+  cleanupReadScopes.set(scoped, {remaining, wait, depth:0});
+  return scoped;
+}
+
+async function waitForRead(fetchRecord, ms) {
+  const scope = cleanupReadScopes.get(fetchRecord);
+  if (scope && ms >= scope.remaining()) refuse('cleanup_read_budget_exhausted');
+  if (ms > 0) await (scope?.wait ?? pause)(ms);
+  scope?.remaining();
+}
+
+async function retryCleanupCensus(fetchRecord, read) {
+  const scope = cleanupReadScopes.get(fetchRecord);
+  if (!scope || scope.depth > 0) return read();
+  scope.depth++;
+  try {
+    for (let attempt = 1; ; attempt++) {
+      scope.remaining();
+      try {
+        const measured = await read();
+        scope.remaining();
+        return measured;
+      } catch (error) {
+        const reason = observerRefusal(error, 'unclassified').reason;
+        const retryable = observerReadRetryable(error)
+          || ['observer_census_unmeasured', 'declaration_step_census_unmeasured'].includes(reason);
+        if (!retryable || attempt >= readRetry.attempts) throw error;
+        await waitForRead(fetchRecord, Math.max(readRetry.backoffMs * 2 ** (attempt - 1),
+          (error?.diagnostic?.retry_after_seconds ?? 0) * 1000));
+      }
+    }
+  } finally {
+    scope.depth--;
+  }
+}
 
 export function observerReadRetryable(error) {
   return error?.diagnostic?.retryable === true
@@ -551,6 +604,7 @@ async function githubRead(token, url, fetchRecord) {
       });
       if (response) readResponseFacts.set(response,{attempts:attempt,read_role:role});
     } catch { /* Transport exceptions can contain private endpoints. */ }
+    cleanupReadScopes.get(fetchRecord)?.remaining();
     if (response?.ok) return response;
     const wait = await readRetryMs(response, attempt);
     if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
@@ -558,7 +612,7 @@ async function githubRead(token, url, fetchRecord) {
       if (wait !== undefined) retryableReadResponses.set(response, Math.ceil(wait / 1000));
       return response;
     }
-    await new Promise(resolve => setTimeout(resolve, wait));
+    await waitForRead(fetchRecord, wait);
   }
 }
 
@@ -573,6 +627,10 @@ function refusalDiagnostic(response) {
 }
 
 async function githubCensus(token, url, field, fetchRecord) {
+  return retryCleanupCensus(fetchRecord, () => githubCensusOnce(token, url, field, fetchRecord));
+}
+
+async function githubCensusOnce(token, url, field, fetchRecord) {
   if (!token) refuse('read_authority_or_identity_missing');
   const records = [];
   let total;
@@ -646,6 +704,11 @@ export async function githubChildCensus(token, repository, workflow, since, fetc
  * no declaration step; a successful declaration step without its artifact is
  * unmeasured rather than silently treated as an ordinary historical run. */
 export async function githubParentDeclarations(token, runId, attempt, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  return retryCleanupCensus(fetchRecord,
+    () => githubParentDeclarationsOnce(token, runId, attempt, fetchRecord, extract));
+}
+
+async function githubParentDeclarationsOnce(token, runId, attempt, fetchRecord, extract) {
   const parent = await githubRecord(token, parentRepository, runId, fetchRecord, attempt);
   if (parent.head_repository?.full_name !== parentRepository || !parentWorkflows.has(parent.path)
     || !sha.test(parent.head_sha) || parent.status !== 'completed' || !completedConclusions.has(parent.conclusion)) {
@@ -690,6 +753,10 @@ export async function githubParentDeclarations(token, runId, attempt, fetchRecor
 
 /** The exact public attempt owns one complete measured job/step census. */
 export async function githubParentJobs(token,runId,attempt,fetchRecord=fetch) {
+  return retryCleanupCensus(fetchRecord,()=>githubParentJobsOnce(token,runId,attempt,fetchRecord));
+}
+
+async function githubParentJobsOnce(token,runId,attempt,fetchRecord) {
   const jobs=await githubRunJobs(token,parentRepository,runId,attempt,fetchRecord);
   if(jobs.some(job=>!Array.isArray(job.steps)||(job.conclusion==='success'&&job.steps.length===0))){
     refuse('declaration_step_census_unmeasured');

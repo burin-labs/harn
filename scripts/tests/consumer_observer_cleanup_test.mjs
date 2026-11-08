@@ -256,6 +256,8 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const preload = path.join(scratch, 'fetch.mjs');
     fs.writeFileSync(eventFile, JSON.stringify({ action: 'completed', repository: { full_name: context.parent_repository }, workflow_run: parent }));
     fs.writeFileSync(preload, `import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const fixture = JSON.parse(fs.readFileSync(${JSON.stringify(config)}, 'utf8'));
       const calls = [];
       let cancelled = false;
@@ -264,6 +266,10 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
         const p = new URL(url).pathname;
         calls.push({method: options.method ?? 'GET', path: p});
         fs.writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(calls));
+        const jobReads=calls.filter(call=>call.path.endsWith('/42/attempts/2/jobs')).length;
+        if(p.endsWith('/42/attempts/2/jobs') && jobReads <= (fixture.refusedJobReads ?? 0)) {
+          return {ok:false,status:fixture.refusedStatus ?? 504};
+        }
         if (p.endsWith('/cancel')) {cancelled = fixture.cancelStatus !== 403; return {status:fixture.cancelStatus ?? 202};}
         if (p.endsWith('/zip')) {
           const a = fixture.archives[p.includes('/501/') ? 0 : 1];
@@ -278,7 +284,8 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
           steps:[{status:'in_progress',conclusion:null,started_at:new Date(1010*1000).toISOString()}],
         }]};
         else if (p.endsWith('/jobs')) {
-          const jobs=[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps},...(fixture.extraJobs??[])];
+          const steps=jobReads <= (fixture.unmeasuredJobReads ?? 0) ? null : fixture.steps;
+          const jobs=[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps},...(fixture.extraJobs??[])];
           record={total_count:jobs.length,jobs};
         }
         else if (p.endsWith('/artifacts')) {
@@ -311,16 +318,39 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
           GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:parent.head_sha,
           OBSERVER_CONTEXT:JSON.stringify(context)}, encoding: 'utf8' });
       assert.doesNotMatch(run.stdout + run.stderr, /widget-host|\/73|\/74|run_id|fixture-private/);
-      return { run, posts: JSON.parse(fs.readFileSync(callsFile, 'utf8')).filter(call => call.method === 'POST') };
+      const calls=JSON.parse(fs.readFileSync(callsFile, 'utf8'));
+      return { run, posts: calls.filter(call => call.method === 'POST'),
+        jobReads:calls.filter(call=>call.path.endsWith('/42/attempts/2/jobs')).length };
     };
     const positive = execute({});
     assert.equal(positive.run.status, 0, positive.run.stderr);
     assert.match(positive.run.stdout, /discovered=1 owned=1 terminal=1 cancelled=1 pending=0 refused=0/);
     assert.deepEqual(positive.posts.map(call => call.path), ['/repos/acme/widget-host/actions/runs/73/cancel']);
+    for (const changes of [{refusedJobReads:1}, {refusedJobReads:4}, {unmeasuredJobReads:1}]) {
+      const recovered=execute(changes);
+      assert.equal(recovered.run.status,0,recovered.run.stderr);
+      assert.match(recovered.run.stdout,/discovered=1 owned=1 terminal=1 cancelled=1 pending=0 refused=0/);
+      assert.equal(recovered.posts.length,1,'a retried census must not repeat cancellation');
+    }
+    for (const changes of [{refusedJobReads:100}, {unmeasuredJobReads:100},
+      {refusedJobReads:100,refusedStatus:403}]) {
+      const refused=execute(changes);
+      assert.equal(refused.run.status,1);
+      assert.equal(refused.posts.length,0,'an unmeasured census cannot authorize cancellation');
+      assert.ok(refused.jobReads<=16,'read retries remain bounded');
+      if(changes.refusedStatus===403) assert.equal(refused.jobReads,1,'authorization refusals are final');
+    }
     const liveParent = {...parent,status:'in_progress',conclusion:null};
     const declaration = {name:observerDeclarationStep,number:2,status:'completed',conclusion:'success'};
     const witness = {name:observerPublicationWitness(context),number:3,status:'completed',conclusion:'success'};
     const declared = [declaration,witness];
+    for (const changes of [{refusedJobReads:4},{unmeasuredJobReads:1}]) {
+      const recovered=execute({...changes,parent:liveParent,steps:declared,
+        child:{...child,status:'completed',conclusion:'success'}},true);
+      assert.equal(recovered.run.status,0,recovered.run.stderr);
+      assert.match(recovered.run.stdout,/cleanup=measured declarations=1 discovered=1 owned=1 terminal=1 cancelled=0 pending=0 refused=0/);
+      assert.deepEqual(recovered.posts,[],'a successful canary needs no cancellation');
+    }
     const observed = {name:'Observe the first bounded window',number:4,status:'completed',conclusion:'failure'};
     const stoppedObserver = execute({parent:liveParent,steps:[...declared,observed]},true);
     assert.equal(stoppedObserver.run.status,1,stoppedObserver.run.stderr);

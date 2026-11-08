@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, sweepOwnedChildren, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, sweepOwnedChildren, observerContext, parentHeadSha, observerRefusal, cleanupReadScope } from '../lib/consumer-observer.mjs';
 
 function reportPending(result) {
   if (result.pending > 0 || result.refused > 0) {
@@ -10,13 +10,14 @@ function reportPending(result) {
 
 async function main() {
   const env = process.env;
+  const fetchRecord = cleanupReadScope();
   const configured = {
     repository: `${env.CANARY_OWNER}/${env.CANARY_NAME}`,
     workflow: `.github/workflows/${env.CANARY_WORKFLOW}`,
   };
   if (['schedule', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)) {
     if (env.GITHUB_REPOSITORY !== 'burin-labs/harn') throw new Error('CONSUMER_OBSERVER reason=cleanup_invocation_unproven');
-    const result = await sweepOwnedChildren(env.GH_TOKEN, configured);
+    const result = await sweepOwnedChildren(env.GH_TOKEN, configured, fetchRecord);
     console.log(`CONSUMER_OBSERVER cleanup=sweep ${Object.entries(result).map(([key,value])=>`${key}=${value}`).join(' ')}`);
     reportPending(result);
     return;
@@ -27,7 +28,7 @@ async function main() {
       || context.parent_run_attempt !== Number(env.GITHUB_RUN_ATTEMPT) || context.parent_head_sha !== parentHeadSha(env)) {
       throw new Error('CONSUMER_OBSERVER reason=observer_invocation_unproven');
     }
-    const result = await reconcileStoppedObserver(env.GH_TOKEN, context, configured);
+    const result = await reconcileStoppedObserver(env.GH_TOKEN, context, configured, fetchRecord);
     console.log(`CONSUMER_OBSERVER cleanup=measured declarations=1 ${Object.entries(result).map(([key,value])=>`${key}=${value}`).join(' ')}`);
     if (result.pending > 0 || result.refused > 0) process.exitCode = 1;
     return;
@@ -42,14 +43,14 @@ async function main() {
     throw new Error('CONSUMER_OBSERVER reason=completion_event_unproven');
   }
   const run = event.workflow_run;
-  const contexts = await githubParentDeclarations(env.GH_TOKEN, String(run.id), run.run_attempt);
+  const contexts = await githubParentDeclarations(env.GH_TOKEN, String(run.id), run.run_attempt, fetchRecord);
   if (contexts.length === 0) {
     console.log('CONSUMER_OBSERVER cleanup=ordinary declarations=0');
     return;
   }
   const total = { discovered: 0, owned: 0, terminal: 0, cancelled: 0, pending: 0, refused: 0, errors: 0 };
   for (const context of contexts) {
-    const result = await reconcileOwnedChildren(env.GH_TOKEN, context, configured);
+    const result = await reconcileOwnedChildren(env.GH_TOKEN, context, configured, fetchRecord);
     for (const key of Object.keys(total)) total[key] += result[key];
   }
   console.log(`CONSUMER_OBSERVER cleanup=measured declarations=${contexts.length} ${Object.entries(total).map(([key, value]) => `${key}=${value}`).join(' ')}`);
