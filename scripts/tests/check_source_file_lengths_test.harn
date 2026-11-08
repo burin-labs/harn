@@ -258,6 +258,9 @@ pipeline test_source_scope_and_windows_path_normalization(harness: Harness, task
       write_source(harness.fs, root, "crates/harn-stdlib/tests/fixture.harn", 1)
       write_source(harness.fs, root, "spec/protocol-artifacts/generated.rs", 1)
       write_source(harness.fs, root, "crates/harn-aws-config/src/lib.rs", 1721)
+      write_source(harness.fs, root, "crates/harn-stdlib-compiler/src/declarations.rs", 13820)
+      write_source(harness.fs, root, "crates/harn-stdlib-compiler/src/declarations.rs.extra.rs", 1)
+      write_source(harness.fs, root, "crates/harn-stdlib-compiler/src/lib.rs", 1)
       write_source(
         harness.fs,
         root,
@@ -270,6 +273,8 @@ pipeline test_source_scope_and_windows_path_normalization(harness: Harness, task
         [
           "crates/app/src/lib.rs",
           "crates/app/tests/integration.rs",
+          "crates/harn-stdlib-compiler/src/declarations.rs.extra.rs",
+          "crates/harn-stdlib-compiler/src/lib.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
           "crates/harn-vm/src/llm/providers/bedrock/session_client.rs",
         ],
