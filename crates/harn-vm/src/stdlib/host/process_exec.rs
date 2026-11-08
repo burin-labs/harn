@@ -521,9 +521,11 @@ pub(crate) fn build_sandboxed_command(
     if let Some(grant) = &grant {
         launch.program = grant.program.clone();
         launch.env = grant.env.clone();
-        launch
-            .env_remove
-            .retain(|key| !grant.env.iter().any(|(owned, _)| owned == key));
+        launch.env_remove.retain(|key| {
+            !grant.env.iter().any(|(owned, _)| {
+                crate::security::environment_policy::environment_names_equal(owned, key)
+            })
+        });
         launch.env_remove.extend(grant.remove.iter().cloned());
         launch.closed_env = true;
     }
