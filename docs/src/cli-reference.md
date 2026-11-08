@@ -2239,8 +2239,8 @@ space, and GPU detection. It creates or updates:
 - `harn.toml` in the current directory
 - `.env` in the current directory
 
-To pick up the selected provider/model defaults in your shell, run
-`source .env` before invoking Harn.
+To export the selected provider, model, and credential assignments in Bash,
+Zsh, or a POSIX shell, run `set -a; . ./.env; set +a` before invoking Harn.
 
 ## harn doctor
 
