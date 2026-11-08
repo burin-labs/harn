@@ -354,9 +354,9 @@ and `checks` under `issue`, `pr`, `repo`, `run`, `workflow`, `label` and
 Global `-R`, `--repo` and `--hostname` flags are skipped before the subcommand
 is read. Every other invocation, including `pr checkout`, `repo clone`, `repo
 fork`, an alias, an extension, `--web`, and anything unrecognized, runs without
-the grant. A read reaches it only through a foreground `run_command` that
-inherits the session environment and captures output through pipes. Background commands,
-file capture, `env_mode: "replace"`, and every other spawn path run `gh`
+the grant. A read reaches it through a foreground `run_command` or
+`harness.process.run` that inherits the session environment and captures output
+through pipes. Background commands, file capture, `env_mode: "replace"`, and other spawn paths run `gh`
 without the grant. So does a request whose `env` sets `PATH`, `HOME`, a
 `GIT_*`, `GH_*`, `SSH_*`, `LD_*`, `DYLD_*` or `XDG_*` variable, or a pager,
 browser or editor variable.
@@ -405,6 +405,8 @@ refused and the grant is not exposed.
 every other `gh auth` subcommand except a plain `gh auth status` are refused,
 because they print or change the credential. A user alias that expands to
 `auth` is dropped from the private config.
+Native process refusals carry `code: "environment_policy.command_grant_refused"`
+and the `program` name.
 
 A read that would otherwise receive the grant is refused when it names an
 output filter, `--jq`/`-q` or `--template`/`-t` in any spelling (`--jq=...`,

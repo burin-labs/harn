@@ -1,0 +1,17 @@
+/** A canary-only, offline check of the actual foreground command grant guard. */
+fn main(harness: Harness) {
+  let refused = false
+  try {
+    harness.process.run({program: "gh", args: ["auth", "token"], timeout_ms: 30000})
+  } catch (error) {
+    refused = error?.code == "environment_policy.command_grant_refused" && error?.program == "gh"
+  }
+  if !refused {
+    harness.runtime.exit(3)
+  }
+  const version = harness.process.run({program: "gh", args: ["--version"], timeout_ms: 30000})
+  if !version.success || trim(version.stdout) == "" {
+    harness.runtime.exit(3)
+  }
+  harness.stdio.println(json_stringify({contract: "harn.protected-command-grants.v1"}))
+}

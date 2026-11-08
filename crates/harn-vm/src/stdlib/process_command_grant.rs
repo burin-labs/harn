@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::security::session_environment::command_basename;
 use crate::stdlib::sandbox::workspace_env::{gh_config, grant_spawn};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 
 /// How one program can run something else with its environment, and what a
 /// granted spawn of it sets so that it cannot.
@@ -305,8 +305,16 @@ fn reopens_exec_path(profile: &ExecProfile, key: &str) -> bool {
 }
 
 fn refusal(profile: &ExecProfile, reason: String) -> VmError {
-    VmError::Thrown(VmValue::string(format!(
-        "[environment_policy.command_grant_refused] {}: {reason}; the grant was not exposed",
-        profile.program
-    )))
+    let mut error = crate::value::DictMap::new();
+    error.put_str("code", "environment_policy.command_grant_refused");
+    error.put_str("program", profile.program);
+    error.put_str("reason", &reason);
+    error.put_str(
+        "message",
+        format!(
+            "[environment_policy.command_grant_refused] {}: {reason}; the grant was not exposed",
+            profile.program
+        ),
+    );
+    VmError::Thrown(VmValue::dict(error))
 }
