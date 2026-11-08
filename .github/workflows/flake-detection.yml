@@ -140,3 +140,4 @@ jobs:
           name: touched-test-inventory
           path: ${{ steps.repeatability.outputs.inventory }}
           if-no-files-found: error
+          retention-days: 7

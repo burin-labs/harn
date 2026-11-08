@@ -139,3 +139,4 @@ jobs:
           name: release-opener-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.HARN_EXT_RELEASE_OPENER_RECEIPT }}
           if-no-files-found: error
+          retention-days: 7
