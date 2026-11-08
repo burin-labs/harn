@@ -1,39 +1,27 @@
 # Compile gate for off-by-default Cargo feature sets (issue #5690).
 # Default CI lanes omit `guard-neural` / `testbench-wasi` / … so incomplete
 # optional-dep feature flags can rot until someone opts in. This workflow
-# runs `make check-all-features` when feature-bearing manifests change.
+# runs `make check-all-features` against main.
 #
-# IMPORTANT: this workflow is NOT yet wired into the required-status set in
-# `ci.yml`'s `CI status` job. It reports a result; promote once the Linux
-# wall-time cost is observed on real PRs. The structural ort TLS contract
-# still runs in the required audit-scripts lane via
+# Nightly on main, not per pull request: a cold run takes about 45 minutes.
+# It gates nothing; `main health` (main-health.yml) reports it once it fails
+# three nights in a row, per scripts/scheduled_workflows.toml. The structural
+# ort TLS contract still runs in the required audit-scripts lane via
 # `make check-optional-dep-feature-contracts`.
 
 name: All features compile
 
 on:
-  pull_request:
-    paths:
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**/Cargo.toml'
-      - 'bench/**/Cargo.toml'
-      - 'scripts/check_all_features.sh'
-      - 'scripts/check_all_features.harn'
-      - 'scripts/check_optional_dep_feature_contracts.harn'
-      - 'scripts/tests/check_all_features_test.sh'
-      - 'scripts/tests/check_optional_dep_feature_contracts_test.harn'
-      - '.github/workflows/all-features.yml'
-      - '.github/scripts/merge-group-path-gate.sh'
-  merge_group:
+  schedule:
+    - cron: "33 10 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,19 +38,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Resolve merge-group gate scope
-        id: scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
-          HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
-          GATE_NAME: All features compile
-          PATH_PATTERN: '^(Cargo\.(toml|lock)$|crates/.+/Cargo\.toml$|bench/.+/Cargo\.toml$|scripts/check_all_features\.(sh|harn)$|scripts/check_optional_dep_feature_contracts\.harn$|scripts/tests/check_all_features_test\.sh$|scripts/tests/check_optional_dep_feature_contracts_test\.harn$|\.github/workflows/all-features\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
-        run: .github/scripts/merge-group-path-gate.sh
       - uses: ./.github/actions/rust-toolchain
-        if: steps.scope.outputs.run_gate == 'true'
       - uses: ./.github/actions/rust-cache
-        if: steps.scope.outputs.run_gate == 'true'
         continue-on-error: true
         with:
           # Restore-only consumer. Declared writers in ci.yml own cache saves;
@@ -76,25 +53,20 @@ jobs:
       # Creating node_modules after the CLI snapshot changes its root inventory.
       # Finish tooling installation before the canonical build records freshness.
       - name: Set up drift check tooling
-        if: steps.scope.outputs.run_gate == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - name: Install drift check dependencies
-        if: steps.scope.outputs.run_gate == 'true'
         run: ./scripts/npm_ci_with_retry.sh .
       - name: Install drift source scanner
-        if: steps.scope.outputs.run_gate == 'true'
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
           packages: ripgrep
           check-command: rg
       - name: Compile optional feature sets
-        if: steps.scope.outputs.run_gate == 'true'
         run: make check-all-features
       - name: Test WASI process runtime
-        if: steps.scope.outputs.run_gate == 'true'
         run: |
           log="$RUNNER_TEMP/wasi-process-tests.log"
           status=0
@@ -110,7 +82,6 @@ jobs:
           done
           grep -F 'test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured;' "$log"
       - name: Verify source and binary drift with the fresh CLI
-        if: steps.scope.outputs.run_gate == 'true'
         env:
           HARN_BIN_NO_BUILD: "1"
           HARN_EXT_SOURCE_LENGTH_COMPARISON: first-parent
@@ -120,6 +91,3 @@ jobs:
           ./scripts/harn_bin.sh --print-build-freshness
           make check-drift
           make check-drift-binary
-      - name: Skip irrelevant merge-group diff
-        if: steps.scope.outputs.run_gate != 'true'
-        run: echo "merge_group diff does not touch optional-feature surfaces; no-op pass."

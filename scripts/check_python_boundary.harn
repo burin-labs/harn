@@ -21,6 +21,14 @@ const SKIP_SEGMENTS = [
 const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
+    pattern: "scripts/tests/bootstrap_harn_auth_test.py",
+    category: "subprocess-fixture",
+    owner: "Bootstrap seed transport",
+    reason:
+      "Local HTTPS origins exercise real curl and wget credential redirects; production bootstrap remains POSIX and Harn.",
+  },
+  {
+    kind: "exact",
     pattern: "scripts/lib/release-generated-artifacts.py",
     category: "foreign-runtime-bootstrap",
     owner: "Release attempt recovery",
@@ -110,6 +118,13 @@ const PYTHON_ALLOWLIST = [
 ]
 
 const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: ".github/workflows/setup-harn-contract.yml",
+    pattern: r"^\s*run:\s+python3\s+scripts/tests/bootstrap_harn_auth_test\.py\s*$",
+    category: "subprocess-fixture",
+    owner: "Bootstrap seed transport",
+    reason: "Runs the real-downloader HTTPS credential-scope regression on Linux.",
+  },
   {
     path: "scripts/lib/release_attempt_plan.sh",
     pattern: r"release-generated-artifacts\.py.* matches ",

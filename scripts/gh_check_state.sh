@@ -4,8 +4,8 @@ set -euo pipefail
 # Read one head commit's CI check state as a typed census.
 #
 # The Harn entry point runs inside the default worktree sandbox. Grant gh its
-# token, temporary config, exact executable files, and any wrapper-owned budget
-# state. The wrapper describes its own paths; the launcher keeps the sandbox.
+# token and native executable. The protected process owner creates the private
+# CLI configuration; the launcher keeps credentials out of other commands.
 #
 # usage: scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex> [--base REF]
 #                                  [--workflow PATH] [--expect NAME ...] [--json]
@@ -33,34 +33,9 @@ if ! gh_program="$(command -v gh)" || [[ ! -f "$gh_program" ]] \
   echo "gh_check_state: GitHub CLI unavailable; no check census was measured" >&2
   exit 3
 fi
-gh_policy_args=(--sandbox-read-root "$gh_program")
-# Native gh needs only its executable. Script wrappers own additional paths;
-# require their typed contract rather than guessing installation or state roots.
 if [[ "$(head -c 2 "$gh_program")" == '#!' ]]; then
-  if ! gh_policy="$(GH_BUDGET_PRINT_REAL=1 "$gh_program" --budget-subprocess-policy)" \
-    || ! jq -e --arg executable "$gh_program" '
-      type == "object" and
-      (keys == ["executable", "implementation", "real_executable", "schema", "state_directory"]) and
-      .schema == "gh-budget.subprocess-policy.v1" and .executable == $executable and
-      ([.executable, .implementation, .real_executable, .state_directory] |
-        all(type == "string" and startswith("/") and (explode | all(. >= 32))))
-    ' <<< "$gh_policy" >/dev/null; then
-    echo "gh_check_state: wrapper subprocess policy unavailable or invalid; no check census was measured" >&2
-    exit 3
-  fi
-  gh_implementation="$(jq -r '.implementation' <<< "$gh_policy")"
-  export GH_BUDGET_REAL_GH="$(jq -r '.real_executable' <<< "$gh_policy")"
-  export GH_BUDGET_STATE_DIR="$(jq -r '.state_directory' <<< "$gh_policy")"
-  if [[ ! -f "$gh_implementation" || ! -f "$GH_BUDGET_REAL_GH" \
-    || ! -x "$GH_BUDGET_REAL_GH" ]]; then
-    echo "gh_check_state: wrapper subprocess policy files unavailable; no check census was measured" >&2
-    exit 3
-  fi
-  gh_policy_args+=(--sandbox-read-root "$gh_implementation"
-    --sandbox-read-root "$GH_BUDGET_REAL_GH"
-    --sandbox-write-root "$GH_BUDGET_STATE_DIR"
-    --grant 'gh_budget_state=env:GH_BUDGET_STATE_DIR,expose=GH_BUDGET_STATE_DIR,for=gh'
-    --grant 'gh_budget_real=env:GH_BUDGET_REAL_GH,expose=GH_BUDGET_REAL_GH,for=gh')
+  echo "gh_check_state: scripted GitHub CLI wrappers cannot receive protected command grants; no check census was measured" >&2
+  exit 3
 fi
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
@@ -75,20 +50,22 @@ gh_config_dir="$(mktemp -d "${TMPDIR:-/tmp}/gh-check-state-cfg.XXXXXX")"
 trap 'rm -rf "$gh_config_dir"' EXIT
 export GH_CONFIG_DIR="$gh_config_dir"
 
-run_args=(run \
-  --allow-process-network \
-  "${gh_policy_args[@]}" \
+run_args=(run --environment-policy granted \
+  --sandbox-read-root "$gh_program" \
   --sandbox-read-root "$gh_config_dir" \
-  --grant 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh' \
-  --grant 'gh_config=env:GH_CONFIG_DIR,expose=GH_CONFIG_DIR,for=gh')
-# Preserve an explicitly supplied Go resolver setting for gh alone. Do not
-# inherit the parent environment into arbitrary sandboxed child processes.
-if [[ -n "${GODEBUG:-}" ]]; then
-  run_args+=(--grant 'gh_dns=env:GODEBUG,expose=GODEBUG,for=gh')
+  --grant 'gh_token=env:GH_TOKEN,expose=GH_TOKEN,for=gh')
+# Prove the guard with a canary, before the real credential or an API request
+# reaches Harn. The probe makes no network request and never prints a token.
+if ! GH_TOKEN=gh-check-state-contract-canary "$harn_bin" "${run_args[@]}" \
+  "$script_dir/gh_check_state_contract.harn" >"$gh_config_dir/contract.json" 2>"$gh_config_dir/contract.err" \
+  || ! jq -e 'type == "object" and .contract == "harn.protected-command-grants.v1"' \
+    "$gh_config_dir/contract.json" >/dev/null; then
+  echo "gh_check_state: Harn cannot prove protected foreground command grants; no check census was measured" >&2
+  exit 3
 fi
 
 set +e
-"$harn_bin" "${run_args[@]}" "$script_dir/gh_check_state.harn" -- "$@"
+"$harn_bin" "${run_args[@]}" --allow-process-network "$script_dir/gh_check_state.harn" -- "$@"
 status=$?
 set -e
 exit "$status"

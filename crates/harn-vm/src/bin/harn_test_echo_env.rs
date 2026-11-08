@@ -12,6 +12,50 @@ fn write_stdout(value: impl AsRef<[u8]>) {
 fn main() {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("--version") => write_stdout("gh command-grant fixture 1\n"),
+        Some("api") => {
+            let config = env::var("GH_CONFIG_DIR").expect("protected gh config directory");
+            let hosts = std::fs::read_to_string(std::path::Path::new(&config).join("hosts.yml"))
+                .expect("protected gh login");
+            let token = hosts
+                .lines()
+                .find_map(|line| {
+                    line.trim()
+                        .strip_prefix("oauth_token:")
+                        .map(|value| value.trim().trim_matches(['\'', '"']).to_string())
+                })
+                .expect("stored gh token");
+            let path = args.next().expect("API path");
+            if token == "gh-fixture-config-failure" {
+                eprintln!("fixture GitHub configuration unavailable");
+                std::process::exit(1);
+            }
+            let response = if path == "fixture/probe" {
+                eprintln!("{token}");
+                serde_json::json!({
+                    "config_dir": config,
+                    "token": token,
+                    "token_in_env": env::var_os("GH_TOKEN").is_some(),
+                })
+            } else if path.starts_with(
+                "/repos/fixture/repo/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/check-runs?",
+            ) {
+                serde_json::json!({"total_count": 1, "check_runs": [
+                    {"id": 41, "name": "CI status", "status": "completed", "conclusion": "success"}
+                ]})
+            } else if path.starts_with(
+                "/repos/fixture/repo/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/status?",
+            ) {
+                serde_json::json!({"total_count": 0, "statuses": []})
+            } else if path.starts_with(
+                "/repos/fixture/repo/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/pulls?",
+            ) {
+                serde_json::json!([])
+            } else {
+                panic!("unexpected offline GitHub fixture path: {path}");
+            };
+            write_stdout(serde_json::to_vec(&response).expect("serialize gh fixture"));
+        }
         Some("--cwd") => {
             let cwd = env::current_dir()
                 .expect("read test helper cwd")

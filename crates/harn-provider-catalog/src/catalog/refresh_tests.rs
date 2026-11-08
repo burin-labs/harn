@@ -429,3 +429,41 @@ fn readonly_refresh_keeps_peak_prices_distinct_from_launch_and_offpeak_quotes() 
         .pricing
         .is_some());
 }
+
+#[test]
+fn deepinfra_ling_retirement_preserves_route_identity_and_prices() {
+    let config = llm_config::packaged_config();
+    let ling = &config.models["deepinfra/inclusionAI/Ling-3.1-flash"];
+    assert_eq!(ling.retires_on.as_deref(), Some("2026-11-15"));
+    assert!(
+        !ling.deprecated,
+        "announced retirement must not retire the route early"
+    );
+    assert_eq!(ling.sunset_date, None);
+    assert_eq!(
+        ling.wire_model.as_deref(),
+        Some("inclusionAI/Ling-3.1-flash")
+    );
+    assert_eq!(ling.family.as_deref(), Some("inclusionai-ling"));
+    let successor = "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017";
+    assert_eq!(ling.superseded_by.as_deref(), Some(successor));
+    let replacement = &config.models[successor];
+    assert_eq!(replacement.provider, "deepinfra");
+    assert_eq!(
+        replacement.wire_model.as_deref(),
+        Some("deepseek-ai/DeepSeek-V4.1-Flash-1017")
+    );
+    let prices = ling.pricing.as_ref().unwrap();
+    assert_eq!(prices.input_per_mtok, 0.30);
+    assert_eq!(prices.output_per_mtok, 0.90);
+    assert_eq!(prices.cache_read_per_mtok, Some(0.06));
+    assert_eq!(replacement.pricing.as_ref().unwrap().input_per_mtok, 0.20);
+    // A provider redirect does not retire another provider or equate two models.
+    let openrouter = &config.models["inclusionai/ling-3.1-flash"];
+    assert!(!openrouter.deprecated);
+    assert_eq!(openrouter.retires_on, None);
+    assert_eq!(openrouter.superseded_by, None);
+    assert!(!config
+        .models
+        .contains_key("deepinfra/inclusionAI/Ling-3.2-flash"));
+}

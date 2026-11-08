@@ -340,3 +340,229 @@ pipeline absent_release_exhausts_bounded_sources_without_inventing_success(
   assert_eq(len(harness.testing.http_mock_calls()), 2)
   assert_missing(harness.fs, f.request.install_dir)
 }
+
+@test
+pipeline release_api_fallback_identifies_its_client_and_preserves_authentication(
+  harness: Harness,
+  task: unknown,
+) {
+  for authenticated in [false, true] {
+    harness.testing.http_mock_clear()
+    const f = fixture(harness)
+    const metadata_url = "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150"
+    const checksum_url = "https://api.github.com/repos/burin-labs/harn/releases/assets/101"
+    harness.testing.http_mock("GET", "${f.plan.base}SHA256SUMS", {status: 504, body: "outage"})
+    harness.testing.http_mock(
+      "GET",
+      metadata_url,
+      {
+        status: 200,
+        body: json_stringify(
+          {
+            assets: [
+              {name: "SHA256SUMS", id: 101},
+              {name: f.plan.asset, id: 102, digest: "sha256:${f.checksum}"},
+            ],
+          },
+        ),
+      },
+    )
+    harness.testing.http_mock(
+      "GET",
+      checksum_url,
+      {status: 200, body: "${f.checksum}  ${f.plan.asset}\n"},
+    )
+    const installed = install_runtime(
+      harness,
+      f.request
+        + {
+          token: if authenticated {
+            "synthetic-scoped-token"
+          } else {
+            ""
+          },
+        },
+    )
+    assert(installed.cache_hit)
+    assert_eq(installed.checksum_source, "SHA256SUMS")
+    assert_eq(harness.fs.read_text(installed.binary_path), "runtime fixture")
+    const calls = harness.testing.http_mock_calls()
+    assert_eq(len(calls), 3)
+    assert_eq(calls[1].url, metadata_url)
+    assert_eq(calls[2].url, checksum_url)
+    for call in [calls[1], calls[2]] {
+      assert(trim(call.headers["user-agent"] ?? "") != "", "GitHub requires User-Agent")
+      assert_eq(
+        call.headers.authorization,
+        if authenticated {
+          "[redacted]"
+        } else {
+          nil
+        },
+      )
+    }
+    assert_eq(harness.fs.read_text(f.plan.metadata_path), "${f.checksum}  ${f.plan.asset}\n")
+  }
+}
+
+@test
+pipeline release_api_denial_still_refuses_installation(harness: Harness, task: unknown) {
+  const f = fixture(harness)
+  harness.testing.http_mock("GET", "${f.plan.base}SHA256SUMS", {status: 504, body: "outage"})
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
+    {status: 403, body: "denied"},
+  )
+  const result = try {
+    install_runtime(harness, f.request + {token: "synthetic-scoped-token"})
+  }
+  assert(is_err(result))
+  assert(to_string(unwrap_err(result)).contains("release metadata HTTP 403"))
+  assert(!to_string(unwrap_err(result)).contains("synthetic-scoped-token"))
+  assert_eq(len(harness.testing.http_mock_calls()), 2)
+  assert_missing(harness.fs, f.request.install_dir)
+  assert_missing(harness.fs, f.plan.metadata_path)
+}
+
+@test
+pipeline api_checksum_cannot_replace_an_existing_verified_digest(harness: Harness, task: unknown) {
+  const f = fixture(harness)
+  const pin = path_join(dirname(f.plan.metadata_path), "${f.plan.asset}.sha256")
+  harness.fs.mkdir(dirname(pin))
+  harness.fs.write_text(pin, "${f.checksum}\n")
+  harness.testing.http_mock("GET", "${f.plan.base}SHA256SUMS", {status: 504, body: "outage"})
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          assets: [
+            {name: "SHA256SUMS", id: 101},
+            {name: f.plan.asset, id: 102, digest: "sha256:${f.checksum}"},
+          ],
+        },
+      ),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/burin-labs/harn/releases/assets/101",
+    {
+      status: 200,
+      body: "0000000000000000000000000000000000000000000000000000000000000000  ${f.plan.asset}\n",
+    },
+  )
+  const result = try {
+    install_runtime(harness, f.request)
+  }
+  assert(is_err(result))
+  assert(to_string(unwrap_err(result)).contains("disagrees with the verified asset digest"))
+  assert_eq(harness.fs.read_text(pin), "${f.checksum}\n")
+  assert_eq(len(harness.testing.http_mock_calls()), 3)
+  assert_missing(harness.fs, f.request.install_dir)
+  assert_missing(harness.fs, f.plan.metadata_path)
+}
+
+@test
+pipeline cold_archive_api_fallback_keeps_native_checksum_verification(
+  harness: Harness,
+  task: unknown,
+) {
+  for direct_manifest in [false, true] {
+    harness.testing.http_mock_clear()
+    const f = fixture(harness)
+    harness.fs.delete(f.plan.archive_path)
+    harness.testing.http_mock(
+      "GET",
+      "${f.plan.base}SHA256SUMS",
+      {
+        status: if direct_manifest {
+          200
+        } else {
+          504
+        },
+        body: if direct_manifest {
+          "${f.checksum}  ${f.plan.asset}\n"
+        } else {
+          "outage"
+        },
+      },
+    )
+    harness.testing.http_mock(
+      "GET",
+      "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
+      {
+        status: 200,
+        body: json_stringify(
+          {
+            assets: [
+              {name: "SHA256SUMS", id: 101},
+              {name: f.plan.asset, id: 102, digest: "sha256:${f.checksum}"},
+            ],
+          },
+        ),
+      },
+    )
+    harness.testing.http_mock(
+      "GET",
+      "https://api.github.com/repos/burin-labs/harn/releases/assets/101",
+      {status: 200, body: "${f.checksum}  ${f.plan.asset}\n"},
+    )
+    harness.testing.http_mock("GET", "${f.plan.base}${f.plan.asset}", {status: 504, body: "outage"})
+    const archive_api = "https://api.github.com/repos/burin-labs/harn/releases/assets/102"
+    harness.testing.http_mock("GET", archive_api, {status: 200, body: "unverified archive bytes"})
+    const result = try {
+      install_runtime(harness, f.request + {version: "v0.10.150"})
+    }
+    assert(is_err(result))
+    assert(to_string(unwrap_err(result)).contains("SHA256 mismatch"))
+    const calls = harness.testing.http_mock_calls()
+    assert_eq(
+      len(calls),
+      if direct_manifest {
+        5
+      } else {
+        6
+      },
+    )
+    assert_eq(calls[len(calls) - 1].url, archive_api)
+    assert_missing(harness.fs, f.plan.archive_path)
+    assert_missing(harness.fs, f.request.install_dir)
+  }
+}
+
+@test
+pipeline ambiguous_or_unidentified_api_assets_refuse_before_installation(
+  harness: Harness,
+  task: unknown,
+) {
+  for metadata in [
+    {
+      assets: [{name: "SHA256SUMS", id: 101}, {name: "SHA256SUMS", id: 102}],
+      reason: "duplicate assets",
+    },
+    {assets: [{name: "SHA256SUMS"}], reason: "no valid ID"},
+    {assets: [{name: "SHA256SUMS", id: 0}], reason: "no valid ID"},
+  ] {
+    harness.testing.http_mock_clear()
+    const f = fixture(harness)
+    harness.testing.http_mock("GET", "${f.plan.base}SHA256SUMS", {status: 504, body: "outage"})
+    harness.testing.http_mock(
+      "GET",
+      "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.150",
+      {status: 200, body: json_stringify({assets: metadata.assets})},
+    )
+    const result = try {
+      install_runtime(harness, f.request)
+    }
+    assert(is_err(result))
+    assert(to_string(unwrap_err(result)).contains(metadata.reason))
+    assert_eq(len(harness.testing.http_mock_calls()), 2)
+    assert_eq(sha256_hex(harness.fs.read_bytes(f.plan.archive_path)), f.checksum)
+    assert_missing(harness.fs, f.request.install_dir)
+    assert_missing(harness.fs, f.plan.metadata_path)
+  }
+}

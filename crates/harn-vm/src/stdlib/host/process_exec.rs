@@ -35,6 +35,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
 ) -> Result<VmValue, VmError> {
     let PreparedLocalCommand { params, command } = prepared;
     let params = &params;
+    let private_filter = crate::session_inputs::OutputFilter::capture_for_spawn();
     // Workspace effects govern mutation and approval, not host resource cost.
     // Read-only compilers and formatters still contend for the same process,
     // CPU, and toolchain lanes as writers, so every spawned command participates.
@@ -52,8 +53,10 @@ pub(super) async fn dispatch_process_exec_after_policy(
         let exit_code = output.status.code().unwrap_or(-1);
         let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
         let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout_bytes = private_filter.redact_bytes(&output.stdout);
+        let stderr_bytes = private_filter.redact_bytes(&output.stderr);
+        let stdout = String::from_utf8_lossy(&stdout_bytes);
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
         let response = process_exec_response(ProcessExecResponse {
             verifier_receipt: None,
             pid: None,
@@ -86,6 +89,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
     let PreparedProcessCommand {
         command: mut cmd,
         witness,
+        grant,
         ..
     } = command;
     crate::op_interrupt::configure_tokio_kill_group(&mut cmd);
@@ -110,13 +114,16 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .as_std()
         .get_current_dir()
         .map(|dir| dir.display().to_string());
-    let mut child = cmd.spawn().map_err(|error| {
-        let message = match &spawn_cwd {
-            Some(dir) => format!("{error} (working directory: {dir})"),
-            None => error.to_string(),
-        };
-        crate::value::environment_io_error_thrown(&error, message)
-    })?;
+    let mut child = {
+        let _grant_launch = grant.as_ref().map(|grant| grant.launching());
+        cmd.spawn().map_err(|error| {
+            let message = match &spawn_cwd {
+                Some(dir) => format!("{error} (working directory: {dir})"),
+                None => error.to_string(),
+            };
+            crate::value::environment_io_error_thrown(&error, message)
+        })?
+    };
     let stdin_task = match stdin {
         crate::stdlib::sandbox::ProcessStdin::Bytes(input) => {
             let mut pipe = child.stdin.take().ok_or_else(|| {
@@ -253,6 +260,8 @@ pub(super) async fn dispatch_process_exec_after_policy(
         }
     }
     drop(cleanup_registration);
+    let stdout = private_filter.redact_bytes(&stdout);
+    let stderr = private_filter.redact_bytes(&stderr);
     if let Some(recording) = tape_recording {
         recording.finish_parts(exit_code, &stdout, &stderr);
     }
@@ -364,6 +373,22 @@ pub(crate) struct PreparedProcessCommand {
     pub(crate) command: tokio::process::Command,
     pub(crate) witness: Option<crate::verifier_provenance::VerifierExecutionWitness>,
     pub(crate) invocation: crate::orchestration::CommandInvocation,
+    pub(crate) grant: Option<crate::stdlib::process::GrantedSpawn>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessCommandKind {
+    Foreground,
+    Background,
+}
+
+impl ProcessCommandKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Foreground => "process.exec",
+            Self::Background => "process.spawn",
+        }
+    }
 }
 
 pub(super) struct PreparedLocalCommand {
@@ -385,7 +410,16 @@ impl PreparedLocalCommand {
                 crate::shells::resolve_shell_from_vm_params(&params).map_err(VmError::Runtime)?;
             params.put("shell", crate::shells::shell_descriptor_to_vm_value(&shell));
         }
-        let command = build_sandboxed_command(&params, operation)?;
+        let kind = match operation {
+            "exec" => ProcessCommandKind::Foreground,
+            "spawn" => ProcessCommandKind::Background,
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "unsupported process operation: {operation}"
+                )));
+            }
+        };
+        let command = build_sandboxed_command(&params, kind)?;
         command.invocation.bind_directory(&mut params);
         Ok(Self { params, command })
     }
@@ -411,8 +445,9 @@ impl std::fmt::Debug for PreparedProcessCommand {
 
 pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
-    label: &str,
+    kind: ProcessCommandKind,
 ) -> Result<PreparedProcessCommand, VmError> {
+    let label = kind.label();
     let _profile_guard = optional_string(params, "sandbox_profile")
         .as_deref()
         .map(crate::process_sandbox::push_sandbox_profile_override)
@@ -420,7 +455,29 @@ pub(crate) fn build_sandboxed_command(
     let _scope_guard = crate::process_sandbox::push_process_sandbox_scope(
         crate::process_sandbox::ProcessSandboxScope::from_value(params.get("sandbox"))?,
     )?;
-    let launch = ProcessExecLaunch::from_params(params, label)?;
+    let mut launch = ProcessExecLaunch::from_params(params, label)?;
+    let grant = if kind == ProcessCommandKind::Foreground && !launch.closed_env {
+        crate::stdlib::process::granted_spawn(
+            &launch.program,
+            &launch.args,
+            launch.cwd.as_deref().expect("normalized process cwd"),
+            &launch.grant_overlay,
+        )?
+    } else {
+        None
+    };
+    if let Some(grant) = &grant {
+        launch.program = grant.program.clone();
+        launch.env = grant.env.clone();
+        launch.env_remove.retain(|key| {
+            !grant.env.iter().any(|(owned, _)| {
+                crate::security::environment_policy::environment_names_equal(owned, key)
+            })
+        });
+        launch.env_remove.extend(grant.remove.iter().cloned());
+        launch.closed_env = true;
+    }
+    let _grant_launch = grant.as_ref().map(|grant| grant.launching());
     let invocation = crate::orchestration::CommandInvocation::new(
         std::iter::once(launch.program.clone())
             .chain(launch.args.clone())
@@ -480,10 +537,12 @@ pub(crate) fn build_sandboxed_command(
         .map_err(VmError::Runtime)?;
     #[cfg(not(target_os = "linux"))]
     let witness = None;
+    drop(_grant_launch);
     Ok(PreparedProcessCommand {
         command: cmd,
         witness,
         invocation,
+        grant,
     })
 }
 
@@ -500,6 +559,7 @@ struct ProcessExecLaunch {
     env: Vec<(String, String)>,
     env_remove: Vec<String>,
     closed_env: bool,
+    grant_overlay: std::collections::BTreeMap<String, String>,
 }
 
 impl ProcessExecLaunch {
@@ -545,6 +605,7 @@ impl ProcessExecLaunch {
         }
         let mut env_remove = optional_string_list(params, "env_remove").unwrap_or_default();
         caller_env_keys.extend(env_remove.iter().cloned());
+        let grant_overlay = env.iter().cloned().collect();
         for (key, value) in crate::process_sandbox::active_workspace_process_env_for(&program) {
             if !caller_env_keys.contains(&key) {
                 env.push((key, value));
@@ -565,6 +626,7 @@ impl ProcessExecLaunch {
             env,
             env_remove,
             closed_env,
+            grant_overlay,
         })
     }
 }

@@ -33,7 +33,9 @@ pub use bridge::{
 
 pub use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
 use process_dispatch::{dispatch_process_exec_with_policy, dispatch_process_spawn_with_policy};
-pub(crate) use process_exec::{build_sandboxed_command, PreparedProcessCommand};
+pub(crate) use process_exec::{
+    build_sandboxed_command, PreparedProcessCommand, ProcessCommandKind,
+};
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every

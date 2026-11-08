@@ -19,9 +19,13 @@ pub type RuntimeInstallRequest = {
   delay_ms?: int,
 }
 
-type ReleaseAsset = {name: string, digest?: string}
+type ReleaseAsset = {name: string, id?: int, digest?: string}
 
 type ReleaseMetadata = {assets: list<ReleaseAsset>}
+
+type ReleaseApiResponse = {status: int, body: string}
+
+type ChecksumVerification = {checksum: string, source: string, release_api?: ReleaseMetadata}
 
 type NativeReceipt = {
   schema_version: "harn-install-v1",
@@ -87,13 +91,59 @@ fn publish_immutable(fs: HarnessFs, path: string, text: string) {
   require fs.read_text(path) == text, "published checksum metadata changed for an exact release"
 }
 
+fn release_headers(request: RuntimeInstallRequest, accept: string) -> dict<string, string> {
+  const headers = {accept: accept, "user-agent": "harn-bootstrap"}
+  if (request.token ?? "") != "" {
+    return headers + {authorization: "Bearer ${request.token ?? ""}"}
+  }
+  return headers
+}
+
+fn release_api_response(
+  net: HarnessNet,
+  request: RuntimeInstallRequest,
+  suffix: string,
+  accept: string,
+) -> ReleaseApiResponse {
+  const url = "https://api.github.com/repos/${request.repository}/releases/${suffix}"
+  const response = net.request(
+    "GET",
+    url,
+    {timeout_ms: 60000, headers: release_headers(request, accept)},
+  )
+  return pick(response, ["status", "body"])
+}
+
+fn load_release_api(net: HarnessNet, request: RuntimeInstallRequest) -> ReleaseMetadata {
+  const response = release_api_response(
+    net,
+    request,
+    "tags/v${request.version}",
+    "application/vnd.github+json",
+  )
+  require response.status != 404, "release v${request.version} is absent"
+  require response.status == 200, "release metadata HTTP ${response.status}"
+  return schema_expect(json_parse(response.body), schema_of(ReleaseMetadata))
+}
+
+fn release_asset(access: ReleaseMetadata, name: string) -> ReleaseAsset? {
+  const matches = access.assets.filter({ record -> record.name == name })
+  require len(matches) <= 1, "release has duplicate assets named ${name}"
+  return matches[0]
+}
+
+fn release_asset_id(asset: ReleaseAsset) -> int {
+  require asset.id != nil && asset.id > 0, "release asset ${asset.name} has no valid ID"
+  return asset.id
+}
+
 fn expected_checksum(
   harness: Harness,
   request: RuntimeInstallRequest,
   metadata: string,
   base: string,
   asset: string,
-) -> {checksum: string, source: string} {
+) -> ChecksumVerification {
   if request.offline ?? false {
     require harness.fs.exists(metadata), "offline checksum metadata is unavailable"
     const checksum = checksum_for_asset(harness.fs.read_text(metadata), asset)
@@ -120,48 +170,50 @@ fn expected_checksum(
       publish_immutable(harness.fs, metadata, verified.body)
       return {checksum: verified.checksum, source: "SHA256SUMS"}
     }
-    const digest = try {
-      const response = harness.net.request(
-        "GET",
-        "https://api.github.com/repos/"
-          + request.repository
-          + "/releases/tags/v"
-          + request.version,
-        options
-          + {
-            headers: if (request.token ?? "") == "" {
-              {accept: "application/vnd.github+json"}
-            } else {
-              {
-                accept: "application/vnd.github+json",
-                authorization: "Bearer " + (request.token ?? ""),
-              }
-            },
-          },
-      )
-      require response.status != 404, "release v" + request.version + " is absent"
-      require response.status == 200, "release metadata HTTP " + to_string(response.status)
-      const release = schema_expect(json_parse(response.body), schema_of(ReleaseMetadata))
-      let checksum = ""
-      let found = false
-      for record in release.assets {
-        if record.name == asset {
-          found = true
-          checksum = record.digest ?? ""
-          break
+    const api_verification = try {
+      const access = load_release_api(harness.net, request)
+      const manifest_asset = release_asset(access, "SHA256SUMS")
+      if manifest_asset != nil {
+        const response = release_api_response(
+          harness.net,
+          request,
+          "assets/${release_asset_id(manifest_asset)}",
+          "application/octet-stream",
+        )
+        require response.status == 200, "SHA256SUMS asset API HTTP ${response.status}"
+        const checksum = checksum_for_asset(response.body, asset)
+        require checksum != nil, "SHA256SUMS has no runtime asset"
+        {checksum: checksum, body: response.body, source: "SHA256SUMS", release_api: access}
+      } else {
+        const record = release_asset(access, asset)
+        require record != nil, "release has no asset named ${asset}"
+        const digest = record.digest ?? ""
+        require regex_match(r"^sha256:[a-f0-9]{64}$", digest),
+          "runtime release has no verified SHA256"
+        {
+          checksum: regex_replace(r"^sha256:", "", digest),
+          body: nil,
+          source: "release asset digest",
+          release_api: access,
         }
       }
-      require found, "release has no asset named " + asset
-      require regex_match(r"^sha256:[a-f0-9]{64}$", checksum),
-        "runtime release has no verified SHA256"
-      regex_replace(r"^sha256:", "", checksum)
     }
-    if is_ok(digest) {
-      const checksum = unwrap(digest)
-      publish_immutable(harness.fs, pin, checksum + "\n")
-      return {checksum: checksum, source: "release asset digest"}
+    if is_ok(api_verification) {
+      const verified = unwrap(api_verification)
+      if verified.body != nil {
+        require !harness.fs.exists(pin) || trim(harness.fs.read_text(pin)) == verified.checksum,
+          "SHA256SUMS disagrees with the verified asset digest"
+        publish_immutable(harness.fs, metadata, verified.body)
+      } else {
+        publish_immutable(harness.fs, pin, "${verified.checksum}\n")
+      }
+      return {
+        checksum: verified.checksum,
+        source: verified.source,
+        release_api: verified.release_api,
+      }
     }
-    last_failure = to_string(unwrap_err(manifest)) + "; " + to_string(unwrap_err(digest))
+    last_failure = "${unwrap_err(manifest)}; ${unwrap_err(api_verification)}"
     if attempt + 1 < attempts {
       harness.clock.sleep_ms(request.delay_ms ?? 10000)
     }
@@ -283,11 +335,12 @@ fn run_native_installer(
 pub fn install_runtime(harness: Harness, request: RuntimeInstallRequest) -> RuntimeReceipt {
   const plan = runtime_plan(request)
   const version = plan.version
+  const selected = request + {version: version}
   const asset = plan.asset
   const base = plan.base
   const archive = plan.archive_path
   const metadata = plan.metadata_path
-  const verified = expected_checksum(harness, request + {version: version}, metadata, base, asset)
+  const verified = expected_checksum(harness, selected, metadata, base, asset)
   const checksum = verified.checksum
   const options = {
     retry: {max: request.attempts ?? 12, backoff_ms: request.delay_ms ?? 10000},
@@ -305,8 +358,23 @@ pub fn install_runtime(harness: Harness, request: RuntimeInstallRequest) -> Runt
       if !cached {
         require !(request.offline ?? false), "offline runtime archive is unavailable"
         harness.fs.mkdir(dirname(archive))
-        const response = harness.net.download(base + asset, candidate, options)
-        require response.status == 200, "runtime archive download failed"
+        const direct = try {
+          harness.net.download(base + asset, candidate, options)
+        }
+        if is_err(direct) || unwrap(direct).status != 200 {
+          const access = verified.release_api ?? load_release_api(harness.net, selected)
+          const record = release_asset(access, asset)
+          require record != nil, "release has no asset named ${asset}"
+          const url =
+            "https://api.github.com/repos/${request.repository}/releases/assets/${release_asset_id(record)}"
+          const response = harness.net.download(
+            url,
+            candidate,
+            options
+              + {headers: release_headers(request, "application/octet-stream")},
+          )
+          require response.status == 200, "runtime archive asset API HTTP ${response.status}"
+        }
       }
       let receipt = run_native_installer(
         harness.process,

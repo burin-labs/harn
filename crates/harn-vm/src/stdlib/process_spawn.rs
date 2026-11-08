@@ -58,6 +58,7 @@ use crate::value::{VmError, VmValue};
 
 use super::host::{
     audited_utc_now_rfc3339, build_sandboxed_command, optional_i64, optional_string, require_param,
+    ProcessCommandKind,
 };
 
 /// Maximum number of live spawned-process entries retained at once. Terminal
@@ -398,7 +399,7 @@ async fn spawn(
     params: &crate::value::DictMap,
     owner_cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<VmValue, VmError> {
-    let prepared = build_sandboxed_command(params, "process.spawn")?;
+    let prepared = build_sandboxed_command(params, ProcessCommandKind::Background)?;
     spawn_prepared(params, prepared, owner_cancel_token).await
 }
 
