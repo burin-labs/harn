@@ -90,10 +90,16 @@ fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
     && mutation != "workspace_write" {
     return {phase: "process_verification", declared_mutation: false, declared_verification: true}
   }
+  // A declared read-only tool observes even when it reaches the network: the
+  // phase follows whether a call changes state, not where it reads from.
   if !(annotations?.destructiveHint ?? false)
-    && ((annotations?.readOnlyHint
-        ?? annotations?.read_only_hint)
-      || contains(__TOOL_BATCH_OBSERVATION_KINDS, kind)
+    && (annotations?.readOnlyHint ?? annotations?.read_only_hint ?? false)
+    && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
+    && mutation != "workspace_write" {
+    return {phase: "observation", declared_mutation: false}
+  }
+  if !(annotations?.destructiveHint ?? false)
+    && (contains(__TOOL_BATCH_OBSERVATION_KINDS, kind)
       || side_effect == "none"
       || side_effect == "read_only")
     && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
