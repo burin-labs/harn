@@ -2,6 +2,17 @@
 import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_305: MessageTemplate = {
+  arity: 3,
+  fallback: [0, "  ", 1, " sandbox: ", 2, "\n"],
+  translations: {
+    es: [0, "  sandbox de ", 1, ": ", 2, "\n"],
+    fr: [0, "  sandbox ", 1, " : ", 2, "\n"],
+    it: [0, "  sandbox ", 1, ": ", 2, "\n"],
+    "pt-BR": [0, "  sandbox ", 1, ": ", 2, "\n"],
+  },
+}
+
+pub const MESSAGE_306: MessageTemplate = {
   arity: 15,
   fallback: [
     0,
@@ -38,7 +49,7 @@ pub const MESSAGE_305: MessageTemplate = {
   translations: {},
 }
 
-pub const MESSAGE_306: MessageTemplate = {
+pub const MESSAGE_307: MessageTemplate = {
   arity: 15,
   fallback: [
     0,
@@ -75,34 +86,18 @@ pub const MESSAGE_306: MessageTemplate = {
   translations: {},
 }
 
-pub const MESSAGE_307: MessageTemplate = {
+pub const MESSAGE_308: MessageTemplate = {
   arity: 5,
   fallback: [0, "  ", 1, ": ", 2, " ok=", 3, " reason=", 4, "\n"],
   translations: {},
 }
 
-pub const MESSAGE_308: MessageTemplate = {
+pub const MESSAGE_309: MessageTemplate = {
   arity: 3,
   fallback: [0, " -> ", 1, " via ", 2],
   translations: {
     es: [0, " -> ", 1, " mediante ", 2],
     it: [0, " -> ", 1, " tramite ", 2],
     ru: [0, " -> ", 1, " через ", 2],
-  },
-}
-
-pub const MESSAGE_309: MessageTemplate = {
-  arity: 2,
-  fallback: [0, " route(s) declare the ", 1, " operation"],
-  translations: {
-    de: [0, " Route(n) deklarieren die ", 1, "-Operation"],
-    es: [0, " ruta(s) declaran la operación ", 1],
-    fr: [0, " route(s) déclarent l'opération ", 1],
-    it: [0, " route dichiarano l'operazione ", 1],
-    ja: [0, " 個のルートが ", 1, " オペレーションを宣言しています"],
-    ko: [0, " 경로가 ", 1, " 작업을 선언합니다"],
-    "pt-BR": [0, " rota(s) declaram a operação ", 1],
-    ru: [0, " маршрутов объявляют операцию ", 1],
-    "zh-Hans": [0, " 路由声明了 ", 1, " 操作"],
   },
 }

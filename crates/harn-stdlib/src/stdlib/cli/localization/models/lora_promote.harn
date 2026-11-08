@@ -10,9 +10,9 @@ import { MESSAGE_148, MESSAGE_149 } from "std/cli/localization/messages/part_29"
 import { MESSAGE_194 } from "std/cli/localization/messages/part_38"
 import { MESSAGE_203 } from "std/cli/localization/messages/part_40"
 import { MESSAGE_207 } from "std/cli/localization/messages/part_41"
-import { MESSAGE_229 } from "std/cli/localization/messages/part_45"
-import { MESSAGE_257 } from "std/cli/localization/messages/part_51"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_258 } from "std/cli/localization/messages/part_51"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
 const MESSAGES: dict<string, MessageTemplate> = {
@@ -30,9 +30,9 @@ const MESSAGES: dict<string, MessageTemplate> = {
   FAIL: MESSAGE_194,
   "LoRA promotion probe matrix": MESSAGE_203,
   PASS: MESSAGE_207,
-  errors: MESSAGE_229,
-  "probe {0} failures": MESSAGE_257,
-  warnings: MESSAGE_292,
+  errors: MESSAGE_230,
+  "probe {0} failures": MESSAGE_258,
+  warnings: MESSAGE_293,
 }
 
 /**

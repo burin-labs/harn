@@ -51,6 +51,11 @@ harn init hello-harn
 cd hello-harn
 ```
 
+The generated `.gitignore` keeps local run history out of commits. Source and
+test fixtures remain trackable. Existing ignore files are preserved.
+Initialization reports conflicting paths or write failures and exits unsuccessfully;
+it keeps existing files and any files already created so you can inspect them.
+
 Replace `main.harn` with:
 
 ```harn,check

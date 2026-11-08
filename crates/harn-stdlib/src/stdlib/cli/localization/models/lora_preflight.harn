@@ -16,9 +16,8 @@ import { MESSAGE_194 } from "std/cli/localization/messages/part_38"
 import { MESSAGE_20, MESSAGE_21 } from "std/cli/localization/messages/part_4"
 import { MESSAGE_202 } from "std/cli/localization/messages/part_40"
 import { MESSAGE_205, MESSAGE_207 } from "std/cli/localization/messages/part_41"
-import { MESSAGE_229 } from "std/cli/localization/messages/part_45"
-import { MESSAGE_289 } from "std/cli/localization/messages/part_57"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_290, MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MESSAGE_30 } from "std/cli/localization/messages/part_6"
 import { MESSAGE_40 } from "std/cli/localization/messages/part_8"
 import { MESSAGE_46 } from "std/cli/localization/messages/part_9"
@@ -55,9 +54,9 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "LoRA preflight for {0} via {1}": MESSAGE_202,
   "MIGRATION REVIEW": MESSAGE_205,
   PASS: MESSAGE_207,
-  errors: MESSAGE_229,
-  "unclassified record ids": MESSAGE_289,
-  warnings: MESSAGE_292,
+  errors: MESSAGE_230,
+  "unclassified record ids": MESSAGE_290,
+  warnings: MESSAGE_293,
 }
 
 /**

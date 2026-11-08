@@ -5,8 +5,8 @@ import { MESSAGE_109 } from "std/cli/localization/messages/part_21"
 import { MESSAGE_126 } from "std/cli/localization/messages/part_25"
 import { MESSAGE_175, MESSAGE_176, MESSAGE_177 } from "std/cli/localization/messages/part_35"
 import { MESSAGE_22, MESSAGE_23, MESSAGE_24 } from "std/cli/localization/messages/part_4"
-import { MESSAGE_229 } from "std/cli/localization/messages/part_45"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
 const MESSAGES: dict<string, MessageTemplate> = {
@@ -20,8 +20,8 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "Batch cancel dry run written: {0}": MESSAGE_175,
   "Batch cancel failed": MESSAGE_176,
   "Batch cancellation receipt written: {0}": MESSAGE_177,
-  errors: MESSAGE_229,
-  warnings: MESSAGE_292,
+  errors: MESSAGE_230,
+  warnings: MESSAGE_293,
 }
 
 /**

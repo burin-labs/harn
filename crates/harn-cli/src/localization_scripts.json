@@ -197,9 +197,9 @@
     "Batch-capable models for {0}": 1,
     "Creating project '{0}'...": 1,
     "FAIL": 0,
-    "Failed to create {0}: {1}": 2,
     "Failed to write {0}: {1}": 2,
     "Harn doctor\n\n": 0,
+    "Initialization failed for {0} file(s).": 1,
     "Initializing harn project in current directory...": 0,
     "LoRA export for {0} via {1}": 2,
     "LoRA manifest for {0} on {1} via {2}": 3,
@@ -226,6 +226,7 @@
     "corpus gates": 0,
     "corpus refresh": 0,
     "data validation": 0,
+    "destination is not a regular file": 0,
     "difficulty signals": 0,
     "dry-run only": 0,
     "effort-probe: {0}/{1} routes could not be measured at all; no catalog conclusion is available": 2,
@@ -859,9 +860,10 @@
         "  harn serve mcp main.harn # expose the starter MCP server": 1,
         "  skip  {0} (already exists)": 1,
         "Creating project '{0}'...": 1,
-        "Failed to create {0}: {1}": 1,
         "Failed to write {0}: {1}": 1,
-        "Initializing harn project in current directory...": 1
+        "Initialization failed for {0} file(s).": 1,
+        "Initializing harn project in current directory...": 1,
+        "destination is not a regular file": 1
       }
     },
     "crates/harn-stdlib/src/stdlib/cli/scaffold/tool_new.harn": {

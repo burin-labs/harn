@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_230: MessageTemplate = {
   arity: 0,
+  fallback: ["errors"],
+  translations: {
+    de: ["Fehler"],
+    es: ["errores"],
+    fr: ["erreurs"],
+    it: ["errori"],
+    ja: ["エラー"],
+    ko: ["오류"],
+    "pt-BR": ["erros"],
+    ru: ["ошибки"],
+    "zh-Hans": ["错误"],
+  },
+}
+
+pub const MESSAGE_231: MessageTemplate = {
+  arity: 0,
   fallback: ["eval"],
   translations: {
     de: ["Auswertung"],
@@ -14,7 +30,7 @@ pub const MESSAGE_230: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_231: MessageTemplate = {
+pub const MESSAGE_232: MessageTemplate = {
   arity: 0,
   fallback: ["eval gates"],
   translations: {
@@ -30,7 +46,7 @@ pub const MESSAGE_231: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_232: MessageTemplate = {
+pub const MESSAGE_233: MessageTemplate = {
   arity: 0,
   fallback: ["exact"],
   translations: {
@@ -45,7 +61,7 @@ pub const MESSAGE_232: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_233: MessageTemplate = {
+pub const MESSAGE_234: MessageTemplate = {
   arity: 0,
   fallback: ["export dataset"],
   translations: {
@@ -58,21 +74,5 @@ pub const MESSAGE_233: MessageTemplate = {
     "pt-BR": ["exportar conjunto de dados"],
     ru: ["экспорт набора данных"],
     "zh-Hans": ["导出数据集"],
-  },
-}
-
-pub const MESSAGE_234: MessageTemplate = {
-  arity: 2,
-  fallback: ["failed to create ", 0, ": ", 1],
-  translations: {
-    de: [0, " konnte nicht erstellt werden: ", 1],
-    es: ["no se pudo crear ", 0, ": ", 1],
-    fr: ["échec de la création de ", 0, " : ", 1],
-    it: ["impossibile creare ", 0, ": ", 1],
-    ja: [0, " の作成に失敗しました: ", 1],
-    ko: [0, " 생성 실패: ", 1],
-    "pt-BR": ["falha ao criar ", 0, ": ", 1],
-    ru: ["не удалось создать ", 0, ": ", 1],
-    "zh-Hans": ["创建 ", 0, " 失败：", 1],
   },
 }

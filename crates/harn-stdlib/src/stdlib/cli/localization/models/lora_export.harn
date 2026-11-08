@@ -14,11 +14,11 @@ import { MESSAGE_199 } from "std/cli/localization/messages/part_39"
 import { MESSAGE_21 } from "std/cli/localization/messages/part_4"
 import { MESSAGE_214 } from "std/cli/localization/messages/part_42"
 import { MESSAGE_216 } from "std/cli/localization/messages/part_43"
-import { MESSAGE_229 } from "std/cli/localization/messages/part_45"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
 import { MESSAGE_27 } from "std/cli/localization/messages/part_5"
-import { MESSAGE_260, MESSAGE_261, MESSAGE_262 } from "std/cli/localization/messages/part_52"
-import { MESSAGE_272 } from "std/cli/localization/messages/part_54"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_261, MESSAGE_262, MESSAGE_263 } from "std/cli/localization/messages/part_52"
+import { MESSAGE_273 } from "std/cli/localization/messages/part_54"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MESSAGE_32, MESSAGE_34 } from "std/cli/localization/messages/part_6"
 import { MESSAGE_36, MESSAGE_38 } from "std/cli/localization/messages/part_7"
 import { MESSAGE_40, MESSAGE_44 } from "std/cli/localization/messages/part_8"
@@ -50,12 +50,12 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "LoRA export for {0} via {1}": MESSAGE_199,
   "batch eval manifest": MESSAGE_214,
   "batch receipts": MESSAGE_216,
-  errors: MESSAGE_229,
-  "promotion gates": MESSAGE_260,
-  "promotion metrics": MESSAGE_261,
-  "promotion receipts": MESSAGE_262,
-  "required example metadata": MESSAGE_272,
-  warnings: MESSAGE_292,
+  errors: MESSAGE_230,
+  "promotion gates": MESSAGE_261,
+  "promotion metrics": MESSAGE_262,
+  "promotion receipts": MESSAGE_263,
+  "required example metadata": MESSAGE_273,
+  warnings: MESSAGE_293,
 }
 
 /**

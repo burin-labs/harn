@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_240: MessageTemplate = {
   arity: 0,
+  fallback: ["live submit"],
+  translations: {
+    de: ["Live-Einreichung"],
+    es: ["envío en vivo"],
+    fr: ["soumission en direct"],
+    it: ["invio live"],
+    ja: ["ライブ送信"],
+    ko: ["실시간 제출"],
+    "pt-BR": ["envio ao vivo"],
+    ru: ["отправка в live-режиме"],
+    "zh-Hans": ["实时提交"],
+  },
+}
+
+pub const MESSAGE_241: MessageTemplate = {
+  arity: 0,
   fallback: ["loaded:\n"],
   translations: {
     de: ["geladen:\n"],
@@ -17,7 +33,7 @@ pub const MESSAGE_240: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_241: MessageTemplate = {
+pub const MESSAGE_242: MessageTemplate = {
   arity: 0,
   fallback: ["local launch"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_241: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_242: MessageTemplate = {
+pub const MESSAGE_243: MessageTemplate = {
   arity: 0,
   fallback: ["local provider recommendations\n"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_242: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_243: MessageTemplate = {
+pub const MESSAGE_244: MessageTemplate = {
   arity: 0,
   fallback: ["mismatch"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_243: MessageTemplate = {
     "pt-BR": ["não corresponde"],
     ru: ["несоответствие"],
     "zh-Hans": ["不匹配"],
-  },
-}
-
-pub const MESSAGE_244: MessageTemplate = {
-  arity: 0,
-  fallback: ["missing"],
-  translations: {
-    de: ["fehlend"],
-    es: ["faltante"],
-    fr: ["manquant"],
-    it: ["mancante"],
-    ja: ["不足"],
-    ko: ["누락됨"],
-    "pt-BR": ["ausente"],
-    ru: ["отсутствует"],
-    "zh-Hans": ["缺失"],
   },
 }

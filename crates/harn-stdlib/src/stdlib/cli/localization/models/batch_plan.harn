@@ -14,10 +14,11 @@ import {
 } from "std/cli/localization/messages/part_36"
 import { MESSAGE_192 } from "std/cli/localization/messages/part_38"
 import { MESSAGE_220 } from "std/cli/localization/messages/part_44"
-import { MESSAGE_225, MESSAGE_229 } from "std/cli/localization/messages/part_45"
-import { MESSAGE_239 } from "std/cli/localization/messages/part_47"
-import { MESSAGE_252 } from "std/cli/localization/messages/part_50"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_226 } from "std/cli/localization/messages/part_45"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_240 } from "std/cli/localization/messages/part_48"
+import { MESSAGE_253 } from "std/cli/localization/messages/part_50"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
 const MESSAGES: dict<string, MessageTemplate> = {
@@ -36,11 +37,11 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "Batch prepare receipt written: {0}": MESSAGE_183,
   "Batch-capable models for {0}": MESSAGE_192,
   constraints: MESSAGE_220,
-  "dry-run only": MESSAGE_225,
-  errors: MESSAGE_229,
-  "live submit": MESSAGE_239,
-  "planner constraints": MESSAGE_252,
-  warnings: MESSAGE_292,
+  "dry-run only": MESSAGE_226,
+  errors: MESSAGE_230,
+  "live submit": MESSAGE_240,
+  "planner constraints": MESSAGE_253,
+  warnings: MESSAGE_293,
 }
 
 /**

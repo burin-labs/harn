@@ -3,7 +3,7 @@ import { MESSAGE_77 } from "std/cli/localization/messages/part_15"
 import { MESSAGE_85 } from "std/cli/localization/messages/part_17"
 import { MESSAGE_159 } from "std/cli/localization/messages/part_31"
 import { MESSAGE_184 } from "std/cli/localization/messages/part_36"
-import { MESSAGE_266 } from "std/cli/localization/messages/part_53"
+import { MESSAGE_267 } from "std/cli/localization/messages/part_53"
 import { MESSAGE_31 } from "std/cli/localization/messages/part_6"
 import { MESSAGE_48 } from "std/cli/localization/messages/part_9"
 import { MessageTemplate, render_message } from "std/cli/message_template"
@@ -15,7 +15,7 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "  missing: {0}": MESSAGE_85,
   "  unexpected: {0}": MESSAGE_159,
   "Batch result rejoin: {0}": MESSAGE_184,
-  quarantine: MESSAGE_266,
+  quarantine: MESSAGE_267,
 }
 
 /**
