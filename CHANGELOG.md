@@ -9,6 +9,213 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.192
+
+### Breaking
+
+- Command consent and audit records now describe the retained argv and canonical
+  directory consumed by native, host-library, and prepared host executors.
+  Rewrites require a new preparation and assessment. Scan syntax coverage and I/O
+  coverage are reported separately; unknown shell-stage directories stay unknown.
+  DAP also uses the canonical typed JSON projection, including tagged byte values,
+  and retires the exact pending request when its waiter is dropped.
+
+  Migration: Rust `HostCallBridge` implementations that execute commands must
+  implement `prepare_command`. Return `Unhandled` only when local fallback is
+  intended; the default is `Unsupported`. ACP process executors must advertise and
+  implement `prepare`, `execute_prepared`, and `release_prepared`; DAP executors use
+  the same operation names through reverse requests. Bind tokens to their session,
+  retain the request until execution, and acknowledge release only after active
+  children are reaped. See the prepared process contract in `docs/src/bridge-protocol.md`.
+- **Provider setup is explicit (#11141).** `harn quickstart` owns discovery and
+  starter configuration. Mock execution stays offline, and automatic runtime
+  calls use the catalog's ordered credentialed provider and model routes.
+  Missing credentials give setup guidance instead of silently selecting a local
+  server. The setup-only `--yes` flags on `run` and `playground` are removed.
+
+  Migration: run `harn quickstart` before real-provider execution and remove
+  `--yes` from `harn run` and `harn playground` commands. Select a local provider
+  explicitly or configure it with quickstart.
+- Replay hosts can fork one saved seed into independent concurrent workspaces. Pipeline and model data keep the recorded
+  workspace identity; filesystem I/O and process working directories resolve to each branch's private copy. Commands and
+  environment values remain unchanged. Linux commands require an OS-enforced branch view; unsupported execution paths
+  retain refusal. Recorded source packages preserve their logical names across descendant moves.
+  Declared path grants preserve unlinked recorded aliases and resolve current filesystem aliases without dropping
+  explicit denials.
+
+  Migration: replace concurrent `ReplayWorkspace::restore_saved(&saved)` calls with
+  `ReplayWorkspace::fork_saved_in(&saved, &pool)`. Replace `BranchPlan.workspace_root` and
+  `workspace_container_root` with `workspace: owner.location()`, and enter the branch scope before recording a descendant.
+  Custom owners use `ReplayWorkspaceLocation::from_storage_root` with the layout `pool/storage/workspace`;
+  relative storage paths refuse. The workspace and its pool can no longer be supplied independently.
+  Host filesystem adapters resolve paths with `harn_vm::run_tape::workspace_path` before permission checks and I/O.
+- **`ReviewerConfig` gains an optional `screen` field (#11176).** The
+  approval-review policy's reviewer section can name a decision-model screen,
+  so Rust code that builds `harn_vm::orchestration::ReviewerConfig` with a
+  struct literal no longer compiles. Policies parsed from TOML or JSON are
+  unaffected: the field defaults to absent.
+
+  Migration: add `screen: None` to `ReviewerConfig` struct literals.
+
+  ```rust
+  // before
+  ReviewerConfig { model, effort, timeout_ms, on_error, provider }
+  // after
+  ReviewerConfig { model, effort, timeout_ms, on_error, provider, screen: None }
+  ```
+- **The provider catalog (schema v16) ranks a mid-tier automatic default per credentialed provider.**
+  The artifact gains `automatic_defaults`, an ordered list of provider and model pairs.
+  A host that was given no model takes the first entry whose provider it holds a credential for
+  (Claude Sonnet 5.5 for Anthropic, then GPT-6.1 Sol for OpenAI) and falls back to a local model
+  when none matches. Authored as `automatic` and `automatic_order` under `provider_defaults.<provider>`.
+
+  Migration: a host that decodes the artifact regenerates its vendored copy at schema v16, and Rust
+  code that builds `ProviderCatalogArtifact` or `ProviderDefaultModels` with a struct literal adds
+  the new fields (`automatic_defaults`; `automatic`, `automatic_order`).
+
+  ```text
+  schema_version: 15   # before
+  schema_version: 16   # after
+  ```
+- **Agent loop.** Removed `stall_diagnostics.monologue_actuation` and the
+  `std/agent/monologue_actuation` and `std/agent/monologue_actuation_types` modules (#11147).
+  Repeated reads and tool-less narration no longer arm a forced write-tool prefill.
+
+  Migration: remove the option and imports of those modules. Let the model choose
+  its next tool call within the configured run limits.
+
+### Added
+
+- Add typed provider transcript readers to `std/agent/transcript` and
+  `std/agent/provider_transcript`. Physical counts use observed per-attempt
+  dispatches, preserve measured zero before admission, and keep missing,
+  pending, malformed and duplicate records visible. Retained unusable
+  responses stay paired with their errors without double counting.
+- ACP clients can answer MCP form and URL input through negotiated standard
+  elicitation requests. Outgoing requests share one connection-wide identity and
+  send exact request cancellation when abandoned; late replies cannot settle a
+  different request. URL completion follows an observed peer completion signal.
+- Installed-release smoke now exercises the first-hour agent, tool dispatch,
+  response replay, and tool-error recovery examples across supported platforms.
+  The Windows job also checks that an incomplete archive preserves an existing
+  installation, subsuming the separate installer workflow.
+- The approval reviewer accepts an opt-in decision-model screen, `reviewer.screen`. The screen settles a review only
+  when it is confident and its most likely levels compute the same outcome; an error, a timeout, a refused route,
+  a malformed answer, or the uncertain band goes to the reviewer. No default changes.
+  `approval_review_screen_verdict`, `approval_review_decision_questions` and `approval_review_decision_state`
+  expose the decision. The catalog gains the dated `openrouter/typesafe/jev-1.14-20261014` route. The calibration
+  corpus gains 24 paired cases, the runner takes `--screen`, and it now fails when any non-floor case goes unanswered.
+- Add a credential-free first-hour tutorial with runnable agent, tool, and model
+  response record/replay examples.
+  New application projects recommend their runnable tests instead of a package
+  publication gate that requires metadata the application template doesn't create.
+
+### Changed
+
+- Release license notices now use typed Harn generation and offline verification.
+  The release notice phase no longer installs Node dependencies.
+- Agent event schema factories expose named event and receipt types. Event decoders preserve those types after validation,
+  including required fields in open events and strict receipt constraints.
+- Share one typed renderer across compiled CLI message plans while preserving
+  translations, literal argument values and each command's registered messages.
+- Routine checks and protected merging use standard GitHub-hosted runners.
+  macOS pull requests use one hosted workspace workflow; restricted macOS
+  runners remain reserved for release qualification.
+  Live provider-contract requests require an explicit manual dispatch; routine
+  provider checks remain offline.
+- Embedded stdlib bytecode is compiled from the native builtin declarations
+  without building a second native runtime. Build-time and runtime compiler
+  contracts still match, and the artifact format is unchanged.
+- Keep test summaries and timing data on stdout, with failure and skip details on
+  stderr. Passing cases stay quiet unless `--verbose` is requested, and progress
+  is suppressed when stderr is redirected. User tests and both conformance
+  runners use the same console policy.
+
+### Fixed
+
+- Language tooling preserves collection elements, model-caller requests, captured callback results, and guaranteed native
+  transcript event fields. CI cache policy inputs are decoded once into shared workflow, job, step, and action contracts.
+- Scheduled repeatability checks follow Cargo's current test targets after tests move or consolidate.
+  Discovery errors are reported separately from test failures, with the selected-case inventory retained.
+- Consumer waiting polls retain authenticated artifact custody within each observation window
+  and use the workflow token for local reads, reducing shared App API use while preserving fresh job and run checks.
+- macOS test lanes now require real language-server fixtures instead of accepting unavailable-server skips.
+  Native qualification can repeat the hostlib suite 20 times with 32 test threads and no retries,
+  retaining exact selected and executed test identities for every iteration.
+- Classify code-index source refactors as filesystem mutations and keep
+  index maintenance and coordination under the index state contract.
+  Embedders can inspect every supplied startup invocation through
+  `run_tape::preflight_prefix_calls`, using the branch executor's effect
+  policy. Host-lease refusals now explain how to move scheduling outside
+  the replayed prefix.
+- Custom installer destinations now receive PATH guidance when needed, and the
+  shadowing warning appears only when a different executable is actually selected.
+  Printed PATH commands preserve shell metacharacters in the installation path.
+- New projects ignore local runtime state and run history while keeping source
+  fixtures trackable. Initialization preserves an existing `.gitignore`.
+  File conflicts and write failures now produce a failing exit status and name
+  the affected files instead of printing successful next steps.
+- Length-truncation auto-continue no longer re-sends an identical request. When a call left
+  `max_tokens` unset and the provider default truncated it, the first continuation used to request
+  that same default; it now raises the cap past the one the truncated call billed, and stops when
+  no larger cap exists.
+- A `max_tokens` turn whose visible text was cut off before any tool call is now auto-continued
+  with a raised cap, instead of ending a single-shot run as a natural answer on the truncated text.
+- A run whose final reply is still cut off at the output limit after auto-continue now ends as
+  `budget_exhausted` with stop reason `output_limit` (terminal kind `policy_budget`) instead of a
+  natural, completed run. Its ACP `stopReason` stays `max_tokens`.
+- An empty list fallback in `typed_optional_list ?? []` preserves the collection's element type in callbacks and results.
+  Standalone mutable empty lists retain their existing inference behavior.
+- Object schema builders preserve required child fields when nesting, marking a field optional, or supplying its default.
+  Fields named `required` remain validated, and existing boolean field-presence flags remain supported.
+- Nullable schemas now accept `nil` alongside enum, constant, union, intersection, and reference constraints.
+  JSON Schema exports preserve the same acceptance rules; OpenAPI retains its nullable representation.
+- Language tooling preserves declared field types when reading open records, including values from imported schema factories.
+  Unknown extension fields still require boundary validation.
+- Accept nullable values for optional record fields consistently in closed and open records, while retaining required-field
+  and wrong-member checks.
+- Retained WebSocket sessions keep an ordinary prompt running across disconnect
+  and replay its pending host request on reconnection. Disconnect still withdraws
+  that client's queued delivery prompts; explicit request cancellation remains
+  available to the owner.
+- Make prompt-delivery and parallel-cancellation regression fixtures independent of wall-clock delays,
+  and detect canonical clock sleeps in the conformance test guard.
+- Pin conformance fixture sleep exceptions by exact finding count. New literal
+  sleeps no longer inherit a file-wide exception, and removing waits or moving
+  to a mock clock requires retiring the old baseline row.
+- Retry transient or incomplete consumer cleanup censuses within the existing cleanup deadline before failing closed.
+  Persistent refusals still fail cleanup and never authorize cancellation.
+- State the release required for quickstart's credential-file safeguards before setup prompts for a key.
+- Accept Harn-owned hook and CI tooling settings when starting Harn, including persistent-target cache limits,
+  so inherited build settings no longer abort checks or release smoke tests.
+- A recorded dispatch stays servable when a command started with `background_after_ms` finishes
+  inside its window. It becomes unservable only when the command returns `status: "running"`.
+- Already up-to-date Git pushes now succeed without running local commit checks.
+  Missing or malformed update records and failed history reads still refuse the push.
+- Check the macOS, Linux, and Windows release installers after each release is published.
+  Cold source-install checks remain weekly or manual.
+- Quickstart excludes its local `.env` from Git and writes it with owner-only
+  permissions on Unix. It preserves existing ignore rules and refuses tracked
+  environment files or symlink destinations before changing configuration.
+
+  Shared atomic writes apply requested or preserved Unix permissions when the
+  temporary file is created, before writing its contents.
+- Provider setup's shell instructions now export environment assignments so
+  subsequent Harn commands can read the configured credentials.
+- Quickstart reports invalid existing provider configuration before writing project
+  setup files, preserving the provider file and any existing project settings.
+- Repeated provider setup stops appending duplicate inactive credential
+  placeholders to `.env`.
+- Coding-agent evaluations accept process results with no exit code. Unknown
+  native decision routes fail before credential lookup, while open-ended chat
+  routes remain supported.
+- Supervisors use their Harness clock for event timestamps, restart windows, backoff,
+  circuit reopening, and shutdown grace periods, including explicitly advanced test clocks.
+
+### Security
+
+- Privileged pull request dispatchers reject fork heads before forwarding credentials to review or merge workflows.
+
 ## v0.10.191
 
 ### Changed

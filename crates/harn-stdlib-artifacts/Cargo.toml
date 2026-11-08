@@ -30,22 +30,22 @@ cloud-aws = ["harn-vm/cloud-aws", "harn-stdlib-compiler?/cloud-aws"]
 native-keyring = ["harn-vm/native-keyring", "harn-stdlib-compiler?/native-keyring"]
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.192", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.193", default-features = false }
 
 # The core compiler and exact native declarations, without native handlers.
 # Other families still produce different keys, even for modules that call no
 # feature-gated builtin.
 [build-dependencies]
-harn-stdlib-compiler = { path = "../harn-stdlib-compiler", version = "=0.10.192", default-features = false, optional = true }
+harn-stdlib-compiler = { path = "../harn-stdlib-compiler", version = "=0.10.193", default-features = false, optional = true }
 # Each artifact is embedded zstd-compressed; harn-vm decodes it on import.
 zstd = { version = "0.14", default-features = false, optional = true }
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.192" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.193" }
 # The families come from the selected features, as for a host; `otel` is a
 # runtime-only family the build-script compiler never sees.
-harn-vm = { path = "../harn-vm", version = "=0.10.192", default-features = false, features = ["otel"] }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.192" }
+harn-vm = { path = "../harn-vm", version = "=0.10.193", default-features = false, features = ["otel"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.193" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 
