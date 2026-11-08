@@ -108,8 +108,9 @@ fn read_regular_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
 #[cfg(unix)]
 fn permissions_are_private(path: &Path) -> Result<bool, String> {
     use std::os::unix::fs::PermissionsExt;
+    // The lowest six Unix mode bits grant group or other access.
     fs::metadata(path)
-        .map(|metadata| metadata.permissions().mode() & 0o077 == 0)
+        .map(|metadata| metadata.permissions().mode().trailing_zeros() >= 6)
         .map_err(|error| format!("failed to inspect {}: {error}", path.display()))
 }
 
