@@ -329,6 +329,22 @@ fn cli_rejects_unknown_harn_environment_name_before_dispatch() {
 }
 
 #[test]
+fn cli_accepts_hook_build_policy_environment() {
+    for value in ["0", "1"] {
+        let output = run_harn_e2e(
+            &["--version"],
+            &[
+                ("HARN_HOOKS_FULL_LOCAL", value),
+                ("HARN_HOOKS_NO_LOCAL_BUILD", value),
+            ],
+        );
+        assert_eq!(output.exit_code, 0, "{}", output.stderr);
+        assert!(output.stdout.starts_with("harn "), "{}", output.stdout);
+        assert!(output.stderr.is_empty(), "{}", output.stderr);
+    }
+}
+
+#[test]
 fn cli_accepts_target_cache_collector_environment() {
     let output = run_harn_e2e(
         &["--version"],
