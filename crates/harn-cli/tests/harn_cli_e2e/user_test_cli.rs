@@ -43,8 +43,9 @@ fn typed_skip_stops_assertions_and_can_fail_a_complete_suite_policy() {
             String::from_utf8_lossy(&output.stderr),
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stdout.contains("1 passed, 1 skipped, 2 total"), "{stdout}");
-        assert!(stdout.contains("SKIP") && stdout.contains("external service unavailable"));
+        assert!(stderr.contains("SKIP") && stderr.contains("external service unavailable"));
         assert!(!stdout.contains("after skip"), "{stdout}");
 
         let report: serde_json::Value =
@@ -501,7 +502,7 @@ pipeline main(harness: Harness) {
 }
 
 #[test]
-fn user_tests_emit_progress_and_timing_summary() {
+fn piped_user_tests_keep_timing_on_stdout_and_verbose_details_on_stderr() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let suite = temp.path().join("suite");
     std::fs::create_dir_all(&suite).expect("create suite");
@@ -543,25 +544,19 @@ pipeline test_beta(task) {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("Running tests: 2, files: 2, workers: 1 (sequential scheduling)"),
-        "stdout did not include the suite banner:\n{stdout}"
-    );
-    assert!(stdout.contains("RUN   test_alpha"));
-    assert!(stdout.contains("PASS"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("2 passed, 0 skipped, 2 total"), "{stdout}");
+    assert!(!stdout.contains("Running tests:") && !stdout.contains("RUN   "));
+    assert!(!stdout.contains("PASS"));
+    assert!(!stderr.contains("Running tests:") && !stderr.contains("RUN   "));
+    assert_eq!(stderr.matches("PASS  test_alpha").count(), 1, "{stderr}");
+    assert_eq!(stderr.matches("PASS  test_beta").count(), 1, "{stderr}");
     assert!(stdout.contains("Latency: p50="));
     assert!(stdout.contains("p90="));
     assert!(stdout.contains("Per-test detail: avg="));
     assert!(stdout.contains("Slowest tests: 2"));
     assert!(stdout.contains("Slowest files: 2"));
     assert!(stdout.contains("Module attribution (overlaps phases):"));
-
-    let first_run = stdout.find("RUN   test_alpha").expect("alpha start");
-    let first_pass = stdout.find("PASS").expect("pass output");
-    assert!(
-        first_run < first_pass,
-        "test-start progress should be emitted before PASS:\n{stdout}"
-    );
 }
 
 #[test]
@@ -940,9 +935,10 @@ pipeline test_manifest_typo(harness: Harness, task) {
         .expect("spawn harn test");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "unexpected success:\n{stdout}");
     assert!(
-        stdout.contains("unknown capability or host operation `synthetic_fixture.asnwer`"),
-        "missing strict registration failure:\n{stdout}"
+        stderr.contains("unknown capability or host operation `synthetic_fixture.asnwer`"),
+        "missing strict registration failure:\n{stderr}"
     );
 }

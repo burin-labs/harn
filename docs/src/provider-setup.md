@@ -3,14 +3,20 @@
 This guide helps you connect Harn to a model provider. It covers the checks
 you can run before you put a provider in a program.
 
+Before entering a credential, run `harn --version`. Quickstart's Git and Unix
+file-permission safeguards require Harn 0.10.192 or later.
+
 ## 1. Create starter configuration
 
 Run setup in your project:
 
 ```bash
 harn quickstart
-source .env
+set -a; . ./.env; set +a
 ```
+
+In Bash, Zsh, or a POSIX shell, this loads `.env` and exports its assignments
+to commands such as `harn doctor` and `harn run`.
 
 The command inspects credential paths and local Ollama models, lets you choose
 a provider and model, and writes starter defaults to `harn.toml`, `.env`, and

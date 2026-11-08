@@ -4,6 +4,10 @@
 // that projection and retain the ordinary source and test policies.
 const CHECKED_SOURCE_PREFIXES = ["spec/protocol-artifacts/", "crates/harn-aws-config/src/"]
 
+// Native declarations are byte-checked by check-vm-exposures.
+const CHECKED_SOURCE_PATHS = ["crates/harn-stdlib-compiler/src/declarations.rs"]
+
 pub fn is_mechanically_checked_source_projection(path: string) -> bool {
-  return CHECKED_SOURCE_PREFIXES.any({ prefix -> path.starts_with(prefix) })
+  return CHECKED_SOURCE_PATHS.contains(path)
+    || CHECKED_SOURCE_PREFIXES.any({ prefix -> path.starts_with(prefix) })
 }

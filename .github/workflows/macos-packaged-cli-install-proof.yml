@@ -52,3 +52,4 @@ jobs:
           name: macos-packaged-cli-install-proof-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/macos-packaged-cli-install-proof
           if-no-files-found: error
+          retention-days: 7

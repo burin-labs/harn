@@ -449,13 +449,12 @@ It exposes a synchronous control channel so the test drives process state
 
 ### Unified `harness.testing.clock_set(...)` for Harn fixtures and stdlib builtins
 
-Conformance fixtures and Rust-side tests that exercise stdlib timing
-builtins (`sleep`, `sleep_ms`, `now_ms`, `monotonic_ms`, `timestamp`,
-`elapsed`, `command_step` retry) all share one mock-clock stack
-(`harn_vm::clock_mock`). This same stack also drives the trigger
-dispatcher and the cron scheduler — installing one mock pins time
-everywhere a Harn script, a connector, or a Rust test would otherwise
-read it.
+`harness.testing.clock_set(...)` pins the clock owned by that Harness.
+Sibling tasks and supervisor children using the same handle observe that
+clock; unrelated Harness instances keep their own time. Supervisor event
+timestamps, restart windows, backoff, circuit reopening, and shutdown grace
+periods use this clock. Background supervisor timers wait for an explicit
+`clock_advance(...)`; they do not advance paused time themselves.
 
 ```harn
 pipeline test(harness: Harness, task) {
@@ -472,17 +471,17 @@ pipeline test(harness: Harness, task) {
 }
 ```
 
-Rust tests can install the same mock through `stdlib::clock::MockClockGuard`
-or `clock_mock::install_override(MockClock::new(...))` — both push onto
-the same thread-local stack, so a stdlib-side guard is observed by the
-trigger dispatcher and vice versa.
+Rust tests of legacy clock builtins can use `stdlib::clock::MockClockGuard`
+or `clock_mock::install_override(MockClock::new(...))`. Those thread-local
+overrides do not configure a production Harness; exercise Harness methods
+with its injected clock or explicit testing controls.
 
-Fixtures that genuinely need wall-clock time (real subprocess I/O,
-real socket-bound servers, scheduler tests timing real backoffs) are
-exempt via `CONFORMANCE_REAL_TIME_ALLOWLIST` in
-`scripts/lint_test_patterns.harn`. The lint catches new fixtures that
-sleep on a literal duration without either entering a `harness.testing.clock_set(...)`
-block or being added to the allowlist with reviewer justification.
+Existing non-mock fixture sleeps have exact per-file counts in
+`CONFORMANCE_SLEEP_BASELINE` in `scripts/lint_test_patterns.harn`. The guard
+rejects growth and stale rows, including a fixture that switches to a mock
+clock. A listed legacy wait remains debt until converted or verified as
+necessary real OS interaction; its count does not prove necessity. New
+fixtures use an injected clock or an acknowledged condition.
 
 ### Capability-policy roots in conformance fixtures
 
@@ -535,7 +534,7 @@ tests and don't remove subsequent runtime code from the runtime scan.
 | `#[ignore]` outside slow harn-cli integration tests | Hides regressions behind default-suite skips | run the test by default, or move subprocess coverage to the harn-cli E2E profile |
 | copied conformance subprocess wait helpers | Drifts retry ceilings and diagnostics between fixtures | import `conformance/tests/_common.harn` |
 | `harness.random.range(20000, 45000)` for server ports | Races with other tests and local services | bind port `0` and read the readiness log |
-| `harness.clock.sleep_ms(<literal>)` / `time.sleep(<literal>)` in `.harn` fixtures (outside `harness.testing.clock_set(...)`) | Wall-clock burn that races against scheduler load | wrap in `harness.testing.clock_set(...)` / `harness.testing.clock_reset()` and let the unified clock auto-advance, or add the file to `CONFORMANCE_REAL_TIME_ALLOWLIST` with justification |
+| `harness.clock.sleep_ms(<literal>)` / `time.sleep(<literal>)` in `.harn` fixtures (outside `harness.testing.clock_set(...)`) | Wall-clock burn that races against scheduler load | Use an injected clock or an acknowledged condition. Existing `CONFORMANCE_SLEEP_BASELINE` rows pin exact counts and must shrink when waits are removed. |
 
 ## Opting out
 

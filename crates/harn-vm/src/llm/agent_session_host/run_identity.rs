@@ -104,7 +104,13 @@ fn canonical_init_result(
     insert_missing(
         object,
         "acp_stop_reason",
-        serde_json::json!(super::canonical_acp_stop_reason(&final_status, 0, 0, None,)),
+        serde_json::json!(super::canonical_acp_stop_reason(
+            &final_status,
+            &stop_reason,
+            0,
+            0,
+            None
+        )),
     );
     object.insert(
         "terminal_class".to_string(),

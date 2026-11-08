@@ -951,14 +951,14 @@ harn test tests/                       # run user tests in directory
 harn test package                     # run the package's declared test selection
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
-harn test tests/ --parallel --timing   # show progress and slowest tests/files
+harn test tests/ --parallel --timing   # show detailed timing and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
 harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/ --affected-from origin/main --plan # print the selection or full-suite fallback as JSON
 harn test tests/fast.harn tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
-harn test conformance --timing         # show timing summary without verbose failures
+harn test conformance --timing         # show detailed timing summary
 harn test tests/ --record              # record LLM fixtures
 harn test tests/ --replay              # replay LLM fixtures
 harn test tests/ --coverage            # print per-file line coverage
@@ -986,7 +986,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--plan` | With `--affected-from`, print a versioned JSON plan and exit without running tests. The plan reports `selected` or `full`, the reason, and the exact test files, so CI can size its execution matrix without weakening Harn's fallback policy. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
-| `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
+| `--verbose` / `-v` | Show passing cases and their captured `log`/`print`/`println` output on stderr. Failure and skip details always appear on stderr. |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup and shared import-graph compilation are measured separately and do not consume the pipeline-execution budget; other targets bound their test case or subprocess |
@@ -2239,8 +2239,8 @@ space, and GPU detection. It creates or updates:
 - `harn.toml` in the current directory
 - `.env` in the current directory
 
-To pick up the selected provider/model defaults in your shell, run
-`source .env` before invoking Harn.
+To export the selected provider, model, and credential assignments in Bash,
+Zsh, or a POSIX shell, run `set -a; . ./.env; set +a` before invoking Harn.
 
 ## harn doctor
 

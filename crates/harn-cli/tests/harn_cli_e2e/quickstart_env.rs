@@ -62,6 +62,98 @@ fn output_text(output: &Output) -> String {
     )
 }
 
+#[cfg(unix)]
+#[test]
+fn quickstart_printed_shell_step_activates_credentials_for_doctor() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join(".env"),
+        "ANTHROPIC_API_KEY=synthetic-activation-fixture\n",
+    )
+    .unwrap();
+    let setup = quickstart(root.path());
+    assert!(setup.status.success(), "{}", output_text(&setup));
+    let stdout = String::from_utf8(setup.stdout).unwrap();
+    let next_steps: Vec<_> = stdout
+        .lines()
+        .skip_while(|line| *line != "Next:")
+        .skip(1)
+        .collect();
+    assert_eq!(next_steps.len(), 2, "{stdout}");
+    let script = root.path().join("activate.sh");
+    fs::write(
+        &script,
+        format!(
+            "{}\nexec \"$HARN_EXT_ACTIVATION_TEST_BIN\" doctor --no-network --json\n",
+            next_steps[0].trim()
+        ),
+    )
+    .unwrap();
+    let mut shell = Command::new("/bin/sh");
+    shell.env_clear();
+    restore_os_environment(&mut shell);
+    let home = root.path().join("home");
+    let binary = harn_e2e_command().get_program().to_os_string();
+    let doctor = shell
+        .current_dir(root.path())
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("HARN_SECRET_PROVIDERS", "env")
+        .env("HARN_LLM_CALLS_DISABLED", "1")
+        .env("HARN_EXT_ACTIVATION_TEST_BIN", binary)
+        .arg(script)
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&doctor.stdout)
+        .unwrap_or_else(|error| panic!("{error}: {}", output_text(&doctor)));
+    let checks = report["data"]["checks"].as_array().unwrap();
+    let credentials: Vec<_> = checks
+        .iter()
+        .filter(|check| check["id"] == "creds:anthropic")
+        .collect();
+    assert_eq!(credentials.len(), 1, "{report}");
+    assert_eq!(credentials[0]["status"], "ok", "{report}");
+    assert!(!output_text(&doctor).contains("synthetic-activation-fixture"));
+}
+
+#[test]
+fn repeated_quickstart_preserves_an_inactive_credential_placeholder() {
+    let root = tempfile::tempdir().unwrap();
+    let output = quickstart(root.path());
+    assert!(output.status.success(), "{}", output_text(&output));
+    let environment = fs::read_to_string(root.path().join(".env")).unwrap();
+    assert_eq!(
+        environment
+            .lines()
+            .filter(|line| *line == "# ANTHROPIC_API_KEY=replace-me")
+            .count(),
+        1
+    );
+    assert!(!environment
+        .lines()
+        .any(|line| line.starts_with("ANTHROPIC_API_KEY=")));
+    let snapshots: Vec<_> = [
+        ".env",
+        ".gitignore",
+        "harn.toml",
+        "home/config/harn/providers.toml",
+    ]
+    .into_iter()
+    .map(|path| (path, fs::read(root.path().join(path)).unwrap()))
+    .collect();
+    for _ in 0..2 {
+        let output = quickstart(root.path());
+        assert!(output.status.success(), "{}", output_text(&output));
+        for (path, expected) in &snapshots {
+            assert_eq!(
+                fs::read(root.path().join(path)).unwrap().as_slice(),
+                expected.as_slice(),
+                "repeated quickstart changed {path}"
+            );
+        }
+    }
+}
+
 #[test]
 fn quickstart_protects_existing_env_and_preserves_authored_ignore_rules() {
     let root = tempfile::tempdir().unwrap();

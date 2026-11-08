@@ -58,6 +58,12 @@ async fn run_recorded(
     result
 }
 
+/// A command started in the foreground outlived its inline window and keeps
+/// running as a handle, so the recorded dispatch around it cannot be replayed.
+pub fn note_command_outlived_dispatch() {
+    let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
+}
+
 /// Record a foreground host command, or serve its result and workspace effects.
 /// Commands inside an agent dispatch belong to that dispatch's recording.
 pub async fn taped_command_run(

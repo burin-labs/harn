@@ -60,6 +60,30 @@ pub struct ReviewerConfig {
     /// An explicit caller route; absent means normal reviewer route selection.
     #[serde(default)]
     pub provider: Option<String>,
+    /// An opt-in decision model asked before the reviewer. Absent means every
+    /// review goes straight to the reviewer.
+    #[serde(default)]
+    pub screen: Option<ScreenConfig>,
+}
+
+/// A decision model that answers clear reviews before the reviewer is called.
+///
+/// It may settle a review only when its answer is confident and its most
+/// likely levels yield the same outcome; anything else, including an error,
+/// a timeout, or a route the inference boundary refuses, goes to the reviewer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenConfig {
+    pub model: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// How long the screen may take before the reviewer answers instead.
+    #[serde(default = "default_screen_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_screen_timeout_ms() -> u64 {
+    1000
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

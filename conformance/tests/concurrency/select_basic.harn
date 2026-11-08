@@ -5,8 +5,6 @@ pipeline test(harness: Harness, task: unknown) {
   spawn {
     harness.runtime.send(ch2, "from ch2")
   }
-  // Small delay to ensure send completes
-  harness.clock.sleep_ms(50ms)
   select {
     msg from ch1 {
       harness.stdio.log("ch1: ${msg}")

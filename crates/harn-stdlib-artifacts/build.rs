@@ -1,7 +1,7 @@
 //! Compile the embedded stdlib with this build's compiler and embed the result.
 //!
 //! The artifacts carry the Harn version and compiler fingerprint of the
-//! harn-vm this build script links, with the builtin families the host
+//! core compiler this build script links, with the builtin families the host
 //! selected on this crate. `register` refuses a table whose build identity
 //! differs from the running binary; a per-module key mismatch, such as other
 //! compiler options, is a miss and that import compiles.
@@ -73,10 +73,8 @@ fn embed(out_dir: &Path) -> Vec<Row> {
     }
     std::fs::create_dir_all(&artifact_dir).expect("create stdlib artifact dir");
 
-    harn_runtime::force_link();
-    harn_stdlib::install().expect("install the stdlib this script compiles");
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    let build = harn_vm::compile_embedded_stdlib_artifacts(threads);
+    let build = harn_stdlib_compiler::compile(threads);
     for (module, error) in &build.failed {
         println!("cargo:warning=std/{module} is not embedded and compiles on import: {error}");
     }

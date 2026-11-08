@@ -38,6 +38,7 @@ members = [
     "crates/harn-stdlib",
     "crates/harn-stdlib-catalog",
     "crates/harn-stdlib-artifacts",
+    "crates/harn-stdlib-compiler",
     "crates/harn-vm",
     "crates/harn-vm-core",
     "crates/harn-builtins",

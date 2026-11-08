@@ -3326,6 +3326,44 @@ jobs:
 
           exit "$failed"
 
+  # The build-transfer archives exist only to hand one job's build to another
+  # job in this run. Their one-day retention still leaves every pull request
+  # run's copies in Actions storage for a day, which is most of the
+  # repository's artifact storage. Once every consumer has passed, nothing
+  # reads them again, so the run deletes its own copies. A run with any
+  # failure keeps them, so "re-run failed jobs" can still download them. Main
+  # pushes keep theirs: the check cache refresh restores the newest main CLI.
+  delete-transfer-archives:
+    name: Delete build-transfer archives
+    needs: [ci-status, binary-size-signal]
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && needs['ci-status'].result == 'success'
+      && (needs['binary-size-signal'].result == 'success' || needs['binary-size-signal'].result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete this run's transfer archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts
+        run: |
+          set -euo pipefail
+          ids="$(gh api "$RUN_URL?per_page=100" --paginate --jq '.artifacts[]
+            | select(.name == "harn-cli.tar.zst" or .name == "harn-security.tar.zst" or .name == "harn-workspace-tests.tar.zst")
+            | "\(.id)\t\(.name)\t\(.size_in_bytes)"')"
+          deleted=0 bytes=0
+          while IFS=$'\t' read -r id name size; do
+            [[ -n "$id" ]] || continue
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" --silent
+            echo "deleted $name ($size bytes)"
+            deleted=$((deleted + 1)) bytes=$((bytes + size))
+          done <<< "$ids"
+          echo "deleted $deleted transfer archives, $((bytes / 1048576)) MiB" >> "$GITHUB_STEP_SUMMARY"
+
   deploy-docs:
     name: Deploy docs
     # Gate ONLY on the docs site build, not the whole `ci-status` graph. The

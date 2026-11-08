@@ -16,7 +16,10 @@ pub type ApprovalReviewerPolicy = {
   timeout_ms: int,
   on_error: "deny",
   provider: string?,
+  screen: ApprovalReviewerScreenPolicy?,
 }
+
+pub type ApprovalReviewerScreenPolicy = {model: string, provider: string?, timeout_ms: int}
 
 pub type ApprovalReviewBreakerPolicy = {
   max_consecutive_denials: int,

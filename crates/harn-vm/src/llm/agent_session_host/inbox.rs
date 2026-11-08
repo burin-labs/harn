@@ -324,9 +324,9 @@ fn host_agent_session_inject_feedback_builtin(
 /// Inject a single typed system reminder directly into a live session's
 /// transcript event stream, bridge-free. The in-process sibling of the
 /// `push_bridge_injection` -> `drain_bridge_injections` reminder path: a host
-/// that drives the agent loop in-process (no ACP `HostBridge` attached, e.g.
-/// Burin's headless/TUI surfaces) can queue a single-turn ephemeral reminder
-/// synchronously, the same way `transcript.inject_reminder` does for a
+/// that drives the agent loop in-process without an ACP `HostBridge` can queue
+/// a single-turn ephemeral reminder synchronously, the same way
+/// `transcript.inject_reminder` does for a
 /// transcript value. `options` mirrors that shape — `body` required; optional
 /// `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
 /// `role_hint`, and `authority`. Same-`dedupe_key` reminders are replaced. The reminder renders

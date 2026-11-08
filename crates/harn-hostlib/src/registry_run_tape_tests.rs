@@ -170,3 +170,80 @@ return harness.tools.dispatch_agent_call({{id: "launch-1", name: "launch", argum
         .as_ref()
         .is_some_and(|reason| reason.contains("background")));
 }
+
+#[test]
+fn a_command_finishing_inside_its_background_window_is_servable() {
+    let reason = record_windowed_command(&["/usr/bin/touch"], 10_000);
+    assert_eq!(
+        reason, None,
+        "a command that finished inline is a foreground result"
+    );
+}
+
+#[test]
+fn a_command_outliving_its_background_window_is_unservable() {
+    let reason = record_windowed_command(&["/bin/sleep", "2"], 50);
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("background")),
+        "{reason:?}"
+    );
+}
+
+/// Run one command with an inline `background_after_ms` window inside a recorded
+/// tool dispatch and return why the recorded dispatch is unservable, if it is.
+fn record_windowed_command(argv: &[&str], window_ms: u64) -> Option<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let _session = harn_vm::agent_sessions::enter_current_session("tape-windowed-command");
+    let guard = start_recording(
+        dir.path(),
+        RecordingLevel::Full,
+        Some(TapeWorkspace {
+            root: dir.path().to_path_buf(),
+            observer: Box::new(NoChanges),
+            state_roots: Vec::new(),
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    let root = serde_json::to_string(&dir.path().display().to_string()).unwrap();
+    let mut argv: Vec<String> = argv.iter().map(|arg| (*arg).to_string()).collect();
+    if argv[0].ends_with("touch") {
+        argv.push(dir.path().join("executed").display().to_string());
+    }
+    let argv = serde_json::to_string(&argv).unwrap();
+    let source = format!(
+        r#"
+const tools = tool_define(tool_registry(), "check", "Run a check", {{
+  parameters: {{}},
+  handler: {{ _args ->
+    const command = harness.tools.run_command({{
+      argv: {argv}, cwd: {root}, sandbox_profile: "workspace_paths",
+      background_after_ms: {window_ms}, env_mode: "replace",
+    }})
+    if command.status == "running" {{
+      harness.tools.wait_command({{handle_id: command.handle_id, timeout_ms: 10000}})
+    }}
+    harness.stdio.log("ran-" + command.status)
+    return "recorded"
+  }},
+}})
+return harness.tools.dispatch_agent_call({{id: "check-1", name: "check", arguments: {{}}}}, tools, {{}})
+"#
+    );
+    let (value, output) = run(&source, dir.path());
+    assert!(output.contains("ran-"), "{value:?}: {output}");
+    assert_eq!(guard.error(), None);
+    drop(guard);
+    let tape = EventTape::load(&dir.path().join(TAPE_FILE_NAME)).unwrap();
+    let mut checks = tape.records.iter().filter_map(|record| match &record.kind {
+        TapeRecordKind::ToolCall {
+            tool, unservable, ..
+        } if tool == "check" => Some(unservable.clone()),
+        _ => None,
+    });
+    let reason = checks.next().expect("the dispatch was recorded");
+    assert!(checks.next().is_none());
+    reason
+}

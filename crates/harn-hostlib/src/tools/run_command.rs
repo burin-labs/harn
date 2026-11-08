@@ -114,6 +114,20 @@ fn dict_string(map: &harn_vm::value::DictMap, key: &str) -> Option<String> {
     }
 }
 
+/// The caller asked for a handle up front. An inline `background_after_ms`
+/// window alone does not count: such a command usually finishes inside the
+/// window and is then an ordinary foreground result.
+pub(crate) fn request_is_detached(map: &harn_vm::value::DictMap) -> bool {
+    matches!(map.get("background"), Some(VmValue::Bool(true)))
+}
+
+/// The command was still running when its response was returned.
+pub(crate) fn response_is_running(response: &VmValue) -> bool {
+    response.as_dict().is_some_and(
+        |map| matches!(map.get("status"), Some(VmValue::String(status)) if &**status == "running"),
+    )
+}
+
 pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
     matches!(map.get("background"), Some(VmValue::Bool(true)))
         || map

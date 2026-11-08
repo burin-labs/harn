@@ -32,12 +32,131 @@ fn run_test(temp: &TempDir, extra: &[&str]) -> Output {
         .expect("spawn harn test")
 }
 
+#[test]
+fn piped_user_tests_keep_results_separate_from_final_diagnostics() {
+    let temp = TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(),
+        "suite/test_console.harn",
+        r#"
+pipeline test_pass(harness: Harness) { harness.stdio.println("passing output marker") }
+pipeline test_fail(harness: Harness) {
+  harness.stdio.println("failing output marker")
+  throw "console test failure"
+}
+"#,
+    );
+    for parallel in [false, true] {
+        for verbose in [false, true] {
+            let report = temp.path().join("console.json");
+            let mut args = vec!["--json-out", report.to_str().unwrap()];
+            if parallel {
+                args.extend(["--parallel", "--jobs", "2"]);
+            }
+            if verbose {
+                args.push("--verbose");
+            }
+            let output = run_test(&temp, &args);
+            assert_eq!(output.status.code(), Some(1));
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stdout.contains("1 passed, 1 failed, 0 skipped, 2 total"),
+                "{stdout}"
+            );
+            assert!(
+                !stdout.contains("PASS") && !stdout.contains("FAIL") && !stdout.contains("\x1b["),
+                "{stdout}"
+            );
+            assert!(
+                !stdout.contains("output marker") && !stdout.contains("console test failure"),
+                "{stdout}"
+            );
+            assert!(
+                !stderr.contains("Running tests:") && !stderr.contains("RUN   "),
+                "{stderr}"
+            );
+            assert_eq!(stderr.matches("FAIL  test_fail").count(), 1, "{stderr}");
+            assert!(
+                stderr.contains("console test failure") && stderr.contains("failing output marker"),
+                "{stderr}"
+            );
+            assert_eq!(
+                stderr.matches("captured output:").count(),
+                1 + usize::from(verbose),
+                "{stderr}"
+            );
+            assert_eq!(
+                stderr.matches("PASS  test_pass").count(),
+                usize::from(verbose),
+                "{stderr}"
+            );
+            assert_eq!(
+                stderr.contains("passing output marker"),
+                verbose,
+                "{stderr}"
+            );
+            let report: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+            assert_eq!(report["summary"]["total"], 2);
+            assert_eq!(report["summary"]["passed"], 1);
+            assert_eq!(report["summary"]["failed"], 1);
+        }
+    }
+}
+
+#[test]
+fn piped_conformance_uses_the_same_console_policy_in_both_runners() {
+    let temp = TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(),
+        "conformance/pass.harn",
+        "pipeline test(harness: Harness) { harness.stdio.println(\"pass\") }",
+    );
+    write_fixture(temp.path(), "conformance/pass.expected", "pass\n");
+    write_fixture(
+        temp.path(),
+        "conformance/fail.harn",
+        "pipeline test(harness: Harness) { harness.stdio.println(\"actual output\") }",
+    );
+    write_fixture(
+        temp.path(),
+        "conformance/fail.expected",
+        "different output\n",
+    );
+    for parallel in [false, true] {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(temp.path())
+            .args(["test", "conformance", "--timeout", "10000"]);
+        if parallel {
+            command.args(["--parallel", "--jobs", "2"]);
+        }
+        let output = command.output().expect("run conformance");
+        assert_eq!(output.status.code(), Some(1));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(stdout.trim(), "1 passed, 1 failed, 0 skipped, 2 total");
+        assert_eq!(stderr.matches("FAIL  fail.harn").count(), 1, "{stderr}");
+        assert!(
+            stderr.contains("actual output") && stderr.contains("different output"),
+            "{stderr}"
+        );
+        assert!(
+            !stderr.contains("PASS")
+                && !stderr.contains("warmed")
+                && !stderr.contains("process-isolated worker"),
+            "{stderr}"
+        );
+    }
+}
+
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn work_receipts_are_repeatable_and_detect_more_work_over_the_same_imports() {
     let temp = TempDir::new().expect("tempdir");
     write_fixture(
-        temp.path(), "suite/sum.harn",
+        temp.path(),
+        "suite/sum.harn",
         "pub fn sum(n: int) -> int { let total = 0\n for i in range(0, n) { total = total + i }\n return total }\n",
     );
     let source = r#"

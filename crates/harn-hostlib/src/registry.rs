@@ -397,7 +397,7 @@ impl HostlibRegistry {
                         let background = args
                             .first()
                             .and_then(VmValue::as_dict)
-                            .is_some_and(crate::tools::run_command_request_is_background);
+                            .is_some_and(crate::tools::run_command_request_is_detached);
                         Box::pin(async move {
                             let taped_args = args.clone();
                             let live = Box::pin(async move {
@@ -465,6 +465,9 @@ impl HostlibRegistry {
                                         VmValue::dict(params.clone()),
                                     )
                                     .await?;
+                                    if crate::tools::run_command_response_is_running(&result) {
+                                        harn_vm::run_tape::note_command_outlived_dispatch();
+                                    }
                                     if crate::tools::run_command_request_is_background(&params) {
                                         return crate::schemas::validate_response(
                                             ambient_name,

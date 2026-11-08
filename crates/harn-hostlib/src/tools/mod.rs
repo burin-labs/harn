@@ -48,6 +48,8 @@ mod run_build_command;
 mod run_command;
 pub(crate) use run_command::policy_blocked_response as policy_blocked_run_command_response;
 pub(crate) use run_command::request_is_background as run_command_request_is_background;
+pub(crate) use run_command::request_is_detached as run_command_request_is_detached;
+pub(crate) use run_command::response_is_running as run_command_response_is_running;
 pub(crate) mod run_test;
 mod search;
 mod test_parsers;

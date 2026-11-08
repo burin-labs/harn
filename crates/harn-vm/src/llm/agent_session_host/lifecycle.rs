@@ -667,6 +667,7 @@ pub(super) async fn host_agent_session_finalize(
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
+        &stop_reason,
         iterations,
         session.max_iterations,
         session.last_llm_stop_reason.as_deref(),
@@ -911,11 +912,17 @@ pub(super) async fn host_agent_session_finalize(
 /// through to the most recent provider stop_reason.
 pub(crate) fn canonical_acp_stop_reason(
     final_status: &str,
+    stop_reason: &str,
     iterations: i64,
     max_iterations: i64,
     last_llm_stop_reason: Option<&str>,
 ) -> &'static str {
     if final_status == "budget_exhausted" {
+        // The loop ended because the provider cut the reply off at its output
+        // limit and auto-continue could not finish it.
+        if stop_reason == "output_limit" {
+            return "max_tokens";
+        }
         if max_iterations > 0 && iterations >= max_iterations {
             return "max_turn_requests";
         }

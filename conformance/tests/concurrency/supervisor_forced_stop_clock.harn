@@ -1,0 +1,44 @@
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
+  const ready = harness.runtime.atomic(0)
+  const cancelled = harness.runtime.atomic(0)
+  const blocked = harness.runtime.channel("forced-stop-blocked", 1)
+  const sup = harness.runtime.supervisor_start(
+    {
+      name: "forced-stop-clock",
+      children: [
+        {
+          name: "blocked-worker",
+          restart: "never",
+          task: { _ctx ->
+            harness.runtime.atomic_set(ready, 1)
+            while !is_cancelled() {
+              harness.runtime.yield_now()
+            }
+            harness.runtime.atomic_set(cancelled, 1)
+            harness.runtime.channel_select([blocked])
+          },
+        },
+      ],
+    },
+  )
+  while harness.runtime.atomic_get(ready) != 1 {
+    harness.runtime.yield_now()
+  }
+  const advancer = spawn {
+    while harness.runtime.atomic_get(cancelled) != 1 {
+      harness.runtime.yield_now()
+    }
+    harness.testing.clock_advance(60000)
+  }
+  harness.stdio.println(harness.clock.now_ms())
+  const stopped = harness.runtime.supervisor_stop(sup, 1m)
+  await(advancer)
+  const events = harness.runtime.supervisor_events(sup)
+  const last = events[len(events) - 1]
+  harness.stdio.println(stopped.status)
+  harness.stdio.println(stopped.children[0].status)
+  harness.stdio.println(last.message)
+  harness.stdio.println(last.at_ms)
+  harness.testing.clock_reset()
+}

@@ -35,7 +35,9 @@ pub(in crate::commands::test) async fn run_parallel_conformance_tests(
         .unwrap_or_else(|error| command_error(&format!("create worker session root: {error}")));
 
     if !options.json {
-        cli_diagnostic!("harn conformance: running {workers} process-isolated worker(s)");
+        TestConsole::new(false).progress(format_args!(
+            "harn conformance: running {workers} process-isolated worker(s)"
+        ));
     }
     let started = std::time::Instant::now();
     let mut children = Vec::with_capacity(workers);
@@ -115,12 +117,9 @@ pub(in crate::commands::test) async fn run_parallel_conformance_tests(
     if options.json {
         print_json_report(&report, ok);
     } else {
-        print_text_report(
-            &suite_root,
-            &report,
-            duration_ms,
-            options.verbose || options.timing,
-        );
+        let timing = (options.verbose || options.timing)
+            .then(|| test_report_from_conformance(&suite_root, duration_ms, &report.results));
+        print_conformance_results(&report, options.verbose, timing.as_ref());
     }
     if let Some(path) = junit_path {
         let junit = test_report_from_conformance(&suite_root, duration_ms, &report.results);
@@ -310,85 +309,6 @@ fn print_json_report(report: &ConformanceJsonReport, ok: bool) {
         warnings: Vec::new(),
     };
     println!("{}", json_envelope::to_string_pretty(&envelope));
-}
-
-fn print_text_report(
-    suite_root: &Path,
-    report: &ConformanceJsonReport,
-    duration_ms: u64,
-    show_timing: bool,
-) {
-    for result in &report.results {
-        let timing = show_timing.then(|| format!(" ({} ms)", result.duration_ms));
-        match result.outcome {
-            ConformanceJsonOutcome::Pass => {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {}{}",
-                    result.name,
-                    timing.unwrap_or_default()
-                );
-            }
-            ConformanceJsonOutcome::Skipped | ConformanceJsonOutcome::XfailExpected => {
-                let reason = result.message.as_deref().unwrap_or("expected failure");
-                println!("  \x1b[33mSKIP\x1b[0m  {}  ({reason})", result.name);
-            }
-            ConformanceJsonOutcome::Fail | ConformanceJsonOutcome::XfailUnexpectedPass => {
-                println!(
-                    "  \x1b[31mFAIL\x1b[0m  {}{}",
-                    result.name,
-                    timing.unwrap_or_default()
-                );
-            }
-        }
-    }
-
-    let passed = report.summary.pass;
-    let failed = report.summary.fail + report.summary.xfail_unexpected_pass;
-    let skipped = report.summary.skipped + report.summary.xfail_expected;
-    let total = passed + failed + skipped;
-    println!();
-    if failed == 0 {
-        println!(
-            "\x1b[32m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
-        );
-    } else {
-        println!(
-            "\x1b[31m{passed} passed, {failed} failed, {skipped} skipped, {total} total\x1b[0m"
-        );
-    }
-    if show_timing {
-        println!();
-        println!(
-            "{}",
-            crate::localization::formatted!(
-                "Total time: {duration_ms} ms",
-                duration_ms = duration_ms
-            )
-        );
-        let test_report = test_report_from_conformance(suite_root, duration_ms, &report.results);
-        print_per_test_timing(&test_report);
-    }
-    let failures = report.results.iter().filter(|result| {
-        matches!(
-            result.outcome,
-            ConformanceJsonOutcome::Fail | ConformanceJsonOutcome::XfailUnexpectedPass
-        )
-    });
-    let mut printed_header = false;
-    for failure in failures {
-        if !printed_header {
-            println!();
-            println!("{}", crate::localization::formatted!("Failures:"));
-            printed_header = true;
-        }
-        println!(
-            "  {}",
-            failure
-                .message
-                .as_deref()
-                .unwrap_or("failed without diagnostic message")
-        );
-    }
 }
 
 fn test_report_from_conformance(

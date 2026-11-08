@@ -1,0 +1,247 @@
+import {
+  APPROVAL_REVIEW_DECISION_COST_LIMIT_USD,
+  approval_review_decide,
+  approval_review_decision_questions,
+  approval_review_decision_state,
+  approval_review_screen_verdict,
+} from "std/agent/approval_review"
+import { command_run } from "std/command"
+import { EvaluationPolicy, EvaluationQuestion } from "std/predicate"
+import { process_shell, shell_quote } from "std/runtime"
+import {
+  EvaluationFixture,
+  EvaluationFixtureAnswer,
+  llm_text,
+  with_evaluation_fixtures,
+  with_llm_script,
+} from "std/testing"
+import { resolve_harn_bin, wait_for_file_content } from "../_common"
+
+// A screen answers a review only when it is confident and its most likely
+// levels compute the same outcome. Everything else reaches the reviewer: the
+// uncertain band, an error, a malformed distribution, and a route the
+// inference boundary refuses. The reviewer here is a scripted mock, so its
+// call count shows which side decided.
+const REQUEST = {
+  goal: "Commits in this repo should use my work email.",
+  task: "Commits in this repo should use my work email.",
+  category: "config_write",
+  command: "git config --global user.email jo@corp.example",
+  untrusted_context: nil,
+}
+
+const SCREEN = {provider: "openrouter", model: "openrouter/typesafe/jev-1.14-20261014"}
+
+const POLICY = {reviewer: {provider: "mock", model: "mock", screen: SCREEN}}
+
+const REVIEWER_DENIES = json_stringify(
+  {risk: "high", authorization: "unknown", rationale: "reviewer: global config"},
+)
+
+fn screen_fixture(authorization_index: int, confidence: float) -> EvaluationFixture {
+  const questions = approval_review_decision_questions()
+  const policy: EvaluationPolicy = {
+    backend: "native_decision",
+    provider: SCREEN.provider,
+    model: SCREEN.model,
+    threshold: 0.0,
+    evaluation_cost_limit: APPROVAL_REVIEW_DECISION_COST_LIMIT_USD,
+  }
+  const asked: dict<string, EvaluationQuestion> = pick(questions, ["risk", "authorization"])
+  const answers: dict<string, EvaluationFixtureAnswer> = {
+    risk: {
+      kind: "score",
+      level: questions.risk.levels[2] ?? "",
+      confidence: confidence,
+      evidence: "",
+    },
+    authorization: {
+      kind: "score",
+      level: questions.authorization.levels[authorization_index] ?? "",
+      confidence: confidence,
+      evidence: "",
+    },
+  }
+  return {
+    site_id: "agent.approval_review.v1",
+    state: approval_review_decision_state(REQUEST),
+    questions: asked,
+    policy: policy,
+    answers: answers,
+  }
+}
+
+/** Review REQUEST (or `request`) with the screen answering from `fixtures`. */
+fn review(harness: Harness, fixtures: list<EvaluationFixture>, request: dict) -> dict {
+  return with_llm_script(
+    harness.llm,
+    [llm_text(REVIEWER_DENIES)],
+    { ->
+      const decision = with_evaluation_fixtures(
+        harness,
+        fixtures,
+        { -> approval_review_decide(harness, POLICY, request) },
+      )
+      decision + {reviewer_calls: len(harness.llm.mock_calls())}
+    },
+  )
+}
+
+fn score_answer(scale: list<string>, probabilities: list) -> dict {
+  let by_label = {}
+  let index = 0
+  for label in scale {
+    by_label = by_label + {[label]: probabilities[index]}
+    index = index + 1
+  }
+  return {kind: "score", level: scale[0], probabilities: by_label}
+}
+
+/** Review REQUEST with the screen calling its real route. */
+fn review_live(harness: Harness) -> dict {
+  return with_llm_script(
+    harness.llm,
+    [llm_text(REVIEWER_DENIES)],
+    { ->
+      approval_review_decide(harness, POLICY, REQUEST)
+        + {reviewer_calls: len(harness.llm.mock_calls())}
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  // In a child process: the inference boundary is read once at startup.
+  if harness.env.get("HARN_EXT_APPROVAL_SCREEN_PROBE") != nil {
+    harness.stdio.println(json_stringify(review_live(harness)))
+    return
+  }
+  // Confident and agreeing: the screen settles the review in both directions
+  // and the reviewer is never called.
+  const denied = review(harness, [screen_fixture(0, 0.95)], REQUEST)
+  assert_eq(denied.reviewer_route_source, "screen")
+  assert_eq(denied.approved, false)
+  assert_eq(denied.reviewer_calls, 0)
+  const approved = review(harness, [screen_fixture(2, 0.95)], REQUEST)
+  assert_eq(approved.reviewer_route_source, "screen")
+  assert_eq(approved.authorization, "medium")
+  assert_eq(approved.approved, true)
+  assert_eq(approved.reviewer_calls, 0)
+  harness.stdio.println("confident_screen_settles=true")
+  // The same approving levels at low confidence fall in the uncertain band.
+  const uncertain = review(harness, [screen_fixture(2, 0.5)], REQUEST)
+  assert_eq(uncertain.screen.outcome, "escalated")
+  assert_eq(uncertain.screen.reason, "uncertain")
+  assert_eq(uncertain.reviewer_calls, 1)
+  assert_eq(uncertain.rationale, "reviewer: global config")
+  assert_eq(uncertain.approved, false)
+  harness.stdio.println("uncertain_screen_escalates=true")
+  // Malformed distributions escalate; the well-formed control settles.
+  const questions = approval_review_decision_questions()
+  const confident_risk = score_answer(questions.risk.levels, [0.0, 0.02, 0.96, 0.02])
+  const confident_consent = score_answer(questions.authorization.levels, [0.0, 0.02, 0.96, 0.02])
+  assert_eq(
+    approval_review_screen_verdict({}, {risk: confident_risk, authorization: confident_consent})
+      .outcome,
+    "approved",
+  )
+  for malformed in [
+    score_answer(questions.authorization.levels, [0.0, 0.02, 1.5, 0.02]),
+    score_answer(questions.authorization.levels, [0.0, 0.0, 0.0, 0.0]),
+    score_answer(questions.authorization.levels, [0.0, 0.02, "0.96", 0.02]),
+    score_answer(questions.authorization.levels, [-0.5, 0.02, 1.46, 0.02]),
+    {kind: "score", level: questions.authorization.levels[2], probabilities: nil},
+    {kind: "boolean", probability: 0.99},
+    nil,
+  ] {
+    const verdict = approval_review_screen_verdict(
+      {},
+      {risk: confident_risk, authorization: malformed},
+    )
+    assert_eq(verdict.outcome, "escalated")
+    assert_eq(verdict.reason, "malformed")
+  }
+  harness.stdio.println("malformed_screen_escalates=true")
+  // Child runs call the screen's real route with a fake key, each through a
+  // local proxy so none reaches the network. They differ in one input each:
+  //   unbounded: a closed proxy, so the call fails in transport. An error
+  //     escalates rather than approving.
+  //   stalled: a proxy that accepts and never answers, so only the screen's
+  //     1s bound ends the call. A timeout escalates rather than approving.
+  //   training_restricted: the closed proxy, plus a boundary that refuses
+  //     routes with unknown training terms. The screen is refused before
+  //     dispatch, at no cost, and the reviewer answers.
+  const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const binary = resolve_harn_bin(harness, root)
+  const script = path_join(root, "conformance/tests/agents/approval_reviewer_screen.harn")
+  const state_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-approval-screen-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(state_dir)
+  const pid_path = path_join(state_dir, "proxy.pid")
+  const started = process_shell(
+    harness.process,
+    shell_quote(binary) + " conformance-helper stalled-proxy " + shell_quote(state_dir)
+      + " --timeout-ms 20000 >/dev/null 2>&1 & echo $! > "
+      + shell_quote(pid_path),
+  )
+  assert(started?.success, "stalled proxy started")
+  const stalled_port = wait_for_file_content(
+    harness.clock,
+    harness.fs,
+    path_join(state_dir, "port"),
+    { text -> trim(text) == "" ? nil : trim(text) },
+  )
+  assert(stalled_port != nil, "stalled proxy never published its port")
+  const closed_proxy = "http://127.0.0.1:9"
+  const training_restricted = "{\"reach\":\"any_hosted\",\"allow_training_discounts\":false}"
+  let screens = {}
+  for arm in [
+    {name: "unbounded", proxy: closed_proxy, boundary: {}},
+    {name: "stalled", proxy: "http://127.0.0.1:" + stalled_port, boundary: {}},
+    {
+      name: "training_restricted",
+      proxy: closed_proxy,
+      boundary: {HARN_INFERENCE_BOUNDARY_JSON: training_restricted},
+    },
+  ] {
+    const child = command_run(
+      harness.tools,
+      [binary, "run", script],
+      {
+        env: {
+          HARN_EXT_APPROVAL_SCREEN_PROBE: "1",
+          OPENROUTER_API_KEY: "approval-screen-fixture-only",
+          HARN_LLM_CALLS_DISABLED: "0",
+          HTTPS_PROXY: arm.proxy,
+          https_proxy: arm.proxy,
+          NO_PROXY: "",
+        }
+          + arm.boundary,
+        capture: {max_inline_bytes: 65536},
+      },
+    )
+    assert(child.success, child.stderr)
+    const decision = json_parse(child.stdout.trim().split("\n").last())
+    assert_eq(decision.screen.outcome, "escalated")
+    assert_eq(decision.reviewer_calls, 1)
+    assert_eq(decision.approved, false)
+    screens = screens + {[arm.name]: decision.screen}
+  }
+  process_shell(
+    harness.process,
+    "kill $(cat " + shell_quote(pid_path) + ") >/dev/null 2>&1 || true",
+  )
+  assert_eq(screens.unbounded.reason, "not_answered")
+  assert(screens.unbounded.detail.contains("transport_failed"), screens.unbounded.detail)
+  harness.stdio.println("screen_error_escalates=true")
+  assert_eq(screens.stalled.reason, "timeout")
+  assert(screens.stalled.duration_ms < 5000, to_string(screens.stalled.duration_ms))
+  harness.stdio.println("stalled_screen_escalates=true")
+  assert(
+    screens.training_restricted.detail.contains("authority_denied"),
+    screens.training_restricted.detail,
+  )
+  assert_eq(screens.training_restricted.cost_usd, 0.0)
+  harness.stdio.println("boundary_refused_screen_escalates=true")
+}

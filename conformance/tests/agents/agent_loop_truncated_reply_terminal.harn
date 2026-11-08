@@ -1,0 +1,58 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A reply the provider cuts off at its output limit on every auto-continue
+ * attempt must not end as a natural, completed run. The run ends on the
+ * output-limit budget and still reports ACP `max_tokens`. A normal reply, and
+ * a truncation that a continuation finishes, still complete naturally.
+ */
+fn cut_off() {
+  return {text: "I'll update the matcher", stop_reason: "max_tokens"}
+}
+
+fn report(stdio: HarnessStdio, label: string, result: dict) {
+  stdio.println(
+    label + " status=" + to_string(result?.status) + " kind="
+      + to_string(result.terminal.kind)
+      + " reason="
+      + to_string(result.stop_reason)
+      + " acp="
+      + to_string(result.acp_stop_reason),
+  )
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [cut_off(), cut_off(), cut_off()],
+    { ->
+      const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
+      report(harness.stdio, "exhausted", result)
+      assert(result.status != "done", "a reply cut off on every attempt must not complete")
+      assert_eq(result.terminal.kind, "policy_budget")
+      assert_eq(result.stop_reason, "output_limit")
+      assert_eq(result.acp_stop_reason, "max_tokens")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Fixed the matcher.")],
+    { ->
+      const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
+      report(harness.stdio, "normal", result)
+      assert_eq(result.status, "done")
+      assert_eq(result.terminal.kind, "natural")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [cut_off(), llm_text("Fixed the matcher.")],
+    { ->
+      const result = agent_loop(harness, "Fix the bug.", nil, {provider: "mock"})
+      report(harness.stdio, "recovered", result)
+      assert_eq(result.status, "done")
+      assert_eq(result.terminal.kind, "natural")
+    },
+  )
+}

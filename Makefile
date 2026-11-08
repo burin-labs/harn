@@ -557,8 +557,9 @@ lint-actions-source:
 		exit 1; \
 	fi
 
-# Evaluate the admitted Smart Ship workflow predicate with GitHub's expression engine.
+# Evaluate workflow decisions with GitHub's expression engine.
 	@node --test scripts/tests/smart_ship_workflow_test.mjs
+	@node --test scripts/tests/install_smoke_workflow_test.mjs
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
@@ -1779,11 +1780,12 @@ check-ci-cache-policy:
 # owner; this projects their names into the dependency-leaf contracts crate so
 # `harn check` can reject an unknown capability method without a running VM.
 gen-vm-exposures:
-	@$(HARN_CMD) run scripts/gen_vm_capability_exposures.harn
+	@$(HARN_CARGO_CMD) run --locked -p harn-builtin-macros --example native_contracts
 
 check-vm-exposures:
-	@echo "=== Checking VM-declared capability method names are up to date ==="
-	@$(HARN_CMD) run scripts/gen_vm_capability_exposures.harn -- --check
+	@echo "=== Checking native builtin declaration projections ==="
+	@$(HARN_CARGO_CMD) run --locked -p harn-builtin-macros --example native_contracts -- --check
+	@$(HARN_CARGO_CMD) test --locked -p harn-builtin-macros --example native_contracts
 
 check-rust-test-lane-policy:
 	@echo "=== Checking Rust test lane stack contract ==="

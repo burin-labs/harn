@@ -733,6 +733,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `openrouter/togethercomputer/tev1-4b-experimental` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/typesafe/jev-1.13` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/typesafe/jev-1.14` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openrouter/typesafe/jev-1.14-20261014` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/typesafe/jev-latest` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/upstage/solar-decide` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/upstage/solar-decide-flash` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |

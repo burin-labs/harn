@@ -79,3 +79,4 @@ jobs:
           name: ci-recovery-${{ inputs.run-id }}
           path: ${{ runner.temp }}/ci-recovery-receipt.json
           if-no-files-found: error
+          retention-days: 7
