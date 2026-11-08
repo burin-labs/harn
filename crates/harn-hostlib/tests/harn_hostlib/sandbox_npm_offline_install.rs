@@ -67,13 +67,16 @@ async fn sandboxed_npm_install_resolves_file_tarball_dependency_offline() {
                 ],
                 cwd: Some("/workspace".to_string()),
                 // Environment variables outrank the fixture's project .npmrc.
-                // Pin the cache here so an inherited runner-global
-                // NPM_CONFIG_CACHE cannot escape the writable workspace mount.
-                // Keep it relative to the mapped cwd: Linux exposes
-                // `/workspace`, while the macOS sandbox uses the host path.
+                // Pin the cache here so an inherited runner-global npm cache
+                // cannot escape the writable workspace mount. npm reads its
+                // config variables in any case and the last one wins, so pin
+                // both spellings a runner may set. Keep it relative to the
+                // mapped cwd: Linux exposes `/workspace`, while the macOS
+                // sandbox uses the host path.
                 env: BTreeMap::from([
                     ("NO_UPDATE_NOTIFIER".to_string(), "1".to_string()),
                     ("NPM_CONFIG_CACHE".to_string(), ".npm-cache".to_string()),
+                    ("npm_config_cache".to_string(), ".npm-cache".to_string()),
                     ("NPM_CONFIG_PROGRESS".to_string(), "false".to_string()),
                 ]),
                 timeout: Some(Duration::from_secs(30)),
