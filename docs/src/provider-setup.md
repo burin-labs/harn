@@ -3,6 +3,9 @@
 This guide helps you connect Harn to a model provider. It covers the checks
 you can run before you put a provider in a program.
 
+Before entering a credential, run `harn --version`. Quickstart's Git and Unix
+file-permission safeguards require Harn 0.10.192 or later.
+
 ## 1. Create starter configuration
 
 Run setup in your project:
