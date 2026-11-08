@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_280: MessageTemplate = {
   arity: 0,
+  fallback: ["stop sequences"],
+  translations: {
+    de: ["Stoppsequenzen"],
+    es: ["secuencias de parada"],
+    fr: ["séquences d’arrêt"],
+    it: ["sequenze di arresto"],
+    ja: ["停止シーケンス"],
+    ko: ["중지 시퀀스"],
+    "pt-BR": ["sequências de parada"],
+    ru: ["стоп-последовательности"],
+    "zh-Hans": ["停止序列"],
+  },
+}
+
+pub const MESSAGE_281: MessageTemplate = {
+  arity: 0,
   fallback: ["template notes"],
   translations: {
     de: ["Vorlagenhinweise"],
@@ -17,7 +33,7 @@ pub const MESSAGE_280: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_281: MessageTemplate = {
+pub const MESSAGE_282: MessageTemplate = {
   arity: 0,
   fallback: ["template requirements"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_281: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_282: MessageTemplate = {
+pub const MESSAGE_283: MessageTemplate = {
   arity: 0,
   fallback: ["tool catalog gates"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_282: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_283: MessageTemplate = {
+pub const MESSAGE_284: MessageTemplate = {
   arity: 0,
   fallback: ["tool catalog notes"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_283: MessageTemplate = {
     "pt-BR": ["observações do catálogo de ferramentas"],
     ru: ["заметки каталога инструментов"],
     "zh-Hans": ["工具目录说明"],
-  },
-}
-
-pub const MESSAGE_284: MessageTemplate = {
-  arity: 0,
-  fallback: ["train adapter"],
-  translations: {
-    de: ["Adapter trainieren"],
-    es: ["adaptador de entrenamiento"],
-    fr: ["entraîner l’adaptateur"],
-    it: ["addestra adapter"],
-    ja: ["トレーナーアダプター"],
-    ko: ["어댑터 학습"],
-    "pt-BR": ["treinar adaptador"],
-    ru: ["обучить адаптер"],
-    "zh-Hans": ["训练适配器"],
   },
 }

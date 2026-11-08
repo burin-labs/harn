@@ -67,16 +67,16 @@ pub const MESSAGE_223: MessageTemplate = {
 
 pub const MESSAGE_224: MessageTemplate = {
   arity: 0,
-  fallback: ["difficulty signals"],
+  fallback: ["destination is not a regular file"],
   translations: {
-    de: ["Schwierigkeitssignale"],
-    es: ["señales de dificultad"],
-    fr: ["signaux de difficulté"],
-    it: ["segnali di difficoltà"],
-    ja: ["難易度シグナル"],
-    ko: ["난이도 신호"],
-    "pt-BR": ["sinais de dificuldade"],
-    ru: ["сигналы сложности"],
-    "zh-Hans": ["难度信号"],
+    de: ["Ziel ist keine reguläre Datei"],
+    es: ["el destino no es un archivo normal"],
+    fr: ["la destination n’est pas un fichier ordinaire"],
+    it: ["la destinazione non è un file normale"],
+    ja: ["保存先は通常のファイルではありません"],
+    ko: ["대상이 일반 파일이 아닙니다"],
+    "pt-BR": ["o destino não é um arquivo regular"],
+    ru: ["путь назначения не является обычным файлом"],
+    "zh-Hans": ["目标不是普通文件"],
   },
 }

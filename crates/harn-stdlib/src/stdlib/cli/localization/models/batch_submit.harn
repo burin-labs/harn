@@ -5,8 +5,8 @@ import { MESSAGE_108, MESSAGE_109 } from "std/cli/localization/messages/part_21"
 import { MESSAGE_129 } from "std/cli/localization/messages/part_25"
 import { MESSAGE_189 } from "std/cli/localization/messages/part_37"
 import { MESSAGE_190, MESSAGE_191 } from "std/cli/localization/messages/part_38"
-import { MESSAGE_229 } from "std/cli/localization/messages/part_45"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_230 } from "std/cli/localization/messages/part_46"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
 const MESSAGES: dict<string, MessageTemplate> = {
@@ -18,8 +18,8 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "Batch submission receipt written: {0}": MESSAGE_189,
   "Batch submit dry run written: {0}": MESSAGE_190,
   "Batch submit failed": MESSAGE_191,
-  errors: MESSAGE_229,
-  warnings: MESSAGE_292,
+  errors: MESSAGE_230,
+  warnings: MESSAGE_293,
 }
 
 /**

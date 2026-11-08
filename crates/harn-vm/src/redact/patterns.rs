@@ -571,6 +571,29 @@ mod tests {
     }
 
     #[test]
+    fn sensitive_assignment_preserves_comparisons_and_short_declarations() {
+        run_clean();
+        let input = "    if token == \"\":\n    if allow_end and token == \"-\":\n\ttoken := get(basic, \"loggy\")\n\ttoken := Get(`{\"s\": 1}`, \"s\")\nif (token === undefined) {}";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(matches!(out, Cow::Borrowed(_)), "{out}");
+    }
+
+    #[test]
+    fn sensitive_assignment_redacts_short_declared_literals() {
+        run_clean();
+        let input = "\ttoken := \"abcDEF123456\"\n\tapiKey := 'sk1234567890abcdef'\nconst password = \"hunter2hunter2\"";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert_eq!(
+            out.matches("<redacted:sensitive_assignment:").count(),
+            3,
+            "{out}"
+        );
+        for secret in ["abcDEF123456", "sk1234567890abcdef", "hunter2hunter2"] {
+            assert!(!out.contains(secret), "{out}");
+        }
+    }
+
+    #[test]
     fn sensitive_assignment_still_redacts_literal_values() {
         run_clean();
         let input = "const token = \"abcDEF123456\";\nretry with token=abc123";

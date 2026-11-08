@@ -217,7 +217,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-    "expression": "__autocontinue_raised_cap(cap, llm_opts)",
+    "expression": "__autocontinue_raised_cap(cap, applied, llm_opts)",
     "owner": "__autocontinue_raised_cap",
     "evidence": "Consumer __autocontinue_raised_cap.llm_opts in crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

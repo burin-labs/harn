@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_250: MessageTemplate = {
   arity: 0,
+  fallback: ["not buildable"],
+  translations: {
+    de: ["nicht baubar"],
+    es: ["no compilable"],
+    fr: ["non constructible"],
+    it: ["non compilabile"],
+    ja: ["ビルド不可"],
+    ko: ["빌드 불가"],
+    "pt-BR": ["não compilável"],
+    ru: ["не собирается"],
+    "zh-Hans": ["不可构建"],
+  },
+}
+
+pub const MESSAGE_251: MessageTemplate = {
+  arity: 0,
   fallback: ["not probed"],
   translations: {
     de: ["nicht geprüft"],
@@ -17,7 +33,7 @@ pub const MESSAGE_250: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_251: MessageTemplate = {
+pub const MESSAGE_252: MessageTemplate = {
   arity: 0,
   fallback: ["optional batch receipts"],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_251: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_252: MessageTemplate = {
+pub const MESSAGE_253: MessageTemplate = {
   arity: 0,
   fallback: ["planner constraints"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_252: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_253: MessageTemplate = {
+pub const MESSAGE_254: MessageTemplate = {
   arity: 0,
   fallback: ["post-training manifest"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_253: MessageTemplate = {
     "pt-BR": ["manifesto pós-treinamento"],
     ru: ["манифест после обучения"],
     "zh-Hans": ["训练后清单"],
-  },
-}
-
-pub const MESSAGE_254: MessageTemplate = {
-  arity: 0,
-  fallback: ["precision gates"],
-  translations: {
-    de: ["Genauigkeitsprüfungen"],
-    es: ["puertas de precisión"],
-    fr: ["garde-fous de précision"],
-    it: ["gate di precisione"],
-    ja: ["精度ゲート"],
-    ko: ["정밀도 게이트"],
-    "pt-BR": ["gates de precisão"],
-    ru: ["пороги точности"],
-    "zh-Hans": ["精度门控"],
   },
 }

@@ -14,11 +14,12 @@ import { MESSAGE_156, MESSAGE_158 } from "std/cli/localization/messages/part_31"
 import { MESSAGE_168, MESSAGE_169 } from "std/cli/localization/messages/part_33"
 import { MESSAGE_204 } from "std/cli/localization/messages/part_40"
 import { MESSAGE_212, MESSAGE_213 } from "std/cli/localization/messages/part_42"
-import { MESSAGE_237 } from "std/cli/localization/messages/part_47"
-import { MESSAGE_253, MESSAGE_254 } from "std/cli/localization/messages/part_50"
-import { MESSAGE_262 } from "std/cli/localization/messages/part_52"
-import { MESSAGE_285 } from "std/cli/localization/messages/part_57"
-import { MESSAGE_292 } from "std/cli/localization/messages/part_58"
+import { MESSAGE_238 } from "std/cli/localization/messages/part_47"
+import { MESSAGE_254 } from "std/cli/localization/messages/part_50"
+import { MESSAGE_255 } from "std/cli/localization/messages/part_51"
+import { MESSAGE_263 } from "std/cli/localization/messages/part_52"
+import { MESSAGE_286 } from "std/cli/localization/messages/part_57"
+import { MESSAGE_293 } from "std/cli/localization/messages/part_58"
 import { MESSAGE_38 } from "std/cli/localization/messages/part_7"
 import { MESSAGE_42, MESSAGE_43, MESSAGE_44 } from "std/cli/localization/messages/part_8"
 import { MESSAGE_45 } from "std/cli/localization/messages/part_9"
@@ -56,12 +57,12 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "LoRA train {0} for {1} on {2} via {3}": MESSAGE_204,
   backend: MESSAGE_212,
   "backend warnings": MESSAGE_213,
-  "inspect adapter": MESSAGE_237,
-  "post-training manifest": MESSAGE_253,
-  "precision gates": MESSAGE_254,
-  "promotion receipts": MESSAGE_262,
-  "trainer contract": MESSAGE_285,
-  warnings: MESSAGE_292,
+  "inspect adapter": MESSAGE_238,
+  "post-training manifest": MESSAGE_254,
+  "precision gates": MESSAGE_255,
+  "promotion receipts": MESSAGE_263,
+  "trainer contract": MESSAGE_286,
+  warnings: MESSAGE_293,
 }
 
 /**

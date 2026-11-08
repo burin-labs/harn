@@ -1,3 +1,5 @@
+lookup.deferred=0
+network_effect.deferred=1
 phased.status=done
 phased.executed=7
 phased.deferred=11

@@ -96,10 +96,11 @@ pub const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_ca
 //
 // The tool-call gate (`__host_agent_truncated_tool_call`) fires ONLY on a real
 // length truncation with zero usable calls AND a partial-call signal. A second
-// gate covers hidden-reasoning-only truncation: strict providers can return no
-// visible text/tool calls, `stop_reason: length`, and non-empty reasoning. That
-// is still a budget exhaustion, so retry with a larger output cap instead of
-// handing an empty turn to the normal loop body.
+// gate covers every other length truncation that produced no usable call:
+// hidden reasoning only, or visible text cut off before any call (a preamble
+// announcing the edit it never made). Neither is a finished answer; both are a
+// budget exhaustion, so retry with a larger output cap instead of handing the
+// cut-off turn to the normal loop body as if the model had chosen to stop.
 
 // -------------------------------------------------------------------------------------------------
 
@@ -112,15 +113,40 @@ pub fn __autocontinue_max_continuations(llm_opts: dict) {
 }
 
 /**
- * Compute the raised output-token cap for an auto-continue retry. An unset cap
- * (`<= 0`) means the provider's own default truncated us, so jump to an
- * explicit base. A set cap doubles. Both are clamped to a ceiling so a
- * misconfigured model can't request an unbounded body.
+ * The output cap a length-truncated `call` actually ran under. A request that
+ * left `max_tokens` unset ran under the provider's resolved default, which the
+ * script never sees; a length stop bills output up to the cap it ran under, so
+ * the billed output tokens recover that cap.
  *
  * @effects: []
  * @errors: []
  */
-pub fn __autocontinue_raised_cap(current: int, llm_opts: dict) {
+pub fn __autocontinue_applied_cap(requested: any, call: dict) -> int {
+  const configured = if type_of(requested) == "int" && requested > 0 {
+    requested
+  } else {
+    0
+  }
+  const billed = to_int(call?.value?.usage?.output_tokens ?? 0) ?? 0
+  return if billed > configured {
+    billed
+  } else {
+    configured
+  }
+}
+
+/**
+ * Compute the raised output-token cap for an auto-continue retry. An unset cap
+ * (`<= 0`) jumps to an explicit base; a set cap doubles. The result must exceed
+ * `applied`, the cap the truncated call ran under, so a base equal to the
+ * provider default doubles that default instead. Both are clamped to a ceiling
+ * so a misconfigured model can't request an unbounded body; a result that does
+ * not exceed `applied` means no larger cap exists.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __autocontinue_raised_cap(current: int, applied: int, llm_opts: dict) {
   const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
     && llm_opts.truncation_auto_continue_base
       > 0 {
@@ -135,10 +161,15 @@ pub fn __autocontinue_raised_cap(current: int, llm_opts: dict) {
   } else {
     32768
   }
-  const raised = if type_of(current) == "int" && current > 0 {
+  const requested = if type_of(current) == "int" && current > 0 {
     current * 2
   } else {
     base
+  }
+  const raised = if requested > applied {
+    requested
+  } else {
+    applied * 2
   }
   if raised > ceiling {
     return ceiling
@@ -151,7 +182,7 @@ pub fn __autocontinue_is_length_stop(stop_reason: string?) {
   return normalized == "length" || normalized == "max_tokens"
 }
 
-pub fn __autocontinue_hidden_reasoning_truncated(llm_result: dict, tool_call_count: int) {
+pub fn __autocontinue_toolless_truncated(llm_result: dict, tool_call_count: int) -> bool {
   if !__autocontinue_is_length_stop(llm_result?.stop_reason) {
     return false
   }
@@ -159,7 +190,7 @@ pub fn __autocontinue_hidden_reasoning_truncated(llm_result: dict, tool_call_cou
     return false
   }
   if trim(to_string(llm_result?.text ?? "")) != "" {
-    return false
+    return true
   }
   const thinking = trim(to_string(llm_result?.thinking ?? ""))
   const summary = trim(to_string(llm_result?.thinking_summary ?? ""))
@@ -197,7 +228,7 @@ pub fn __autocontinue_should_continue(agent: HarnessAgent, call: dict, turn_opts
   ) {
     return true
   }
-  return __autocontinue_hidden_reasoning_truncated(llm_result, len(tool_calls))
+  return __autocontinue_toolless_truncated(llm_result, len(tool_calls))
 }
 
 /**
@@ -231,10 +262,12 @@ pub fn __invoke_llm_with_autocontinue(
   let cap = llm_opts?.max_tokens ?? 0
   while attempts < max_continuations
     && __autocontinue_should_continue(harness.agent, call, turn_opts) {
-    const raised = __autocontinue_raised_cap(cap, llm_opts)
-    // No headroom left to raise — re-issuing would just truncate again at the
-    // same cap, so stop and let parse-guidance take the turn.
-    if type_of(cap) == "int" && cap > 0 && raised <= cap {
+    const applied = __autocontinue_applied_cap(cap, call)
+    const raised = __autocontinue_raised_cap(cap, applied, llm_opts)
+    // A continuation must change the request. When the cap cannot grow past
+    // the one that just truncated, stop and let the normal loop body take the
+    // turn instead of paying for the same truncation again.
+    if raised <= applied {
       break
     }
     attempts = attempts + 1

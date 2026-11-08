@@ -11,9 +11,9 @@ import { MESSAGE_150, MESSAGE_151, MESSAGE_152 } from "std/cli/localization/mess
 import { MESSAGE_155 } from "std/cli/localization/messages/part_31"
 import { MESSAGE_163 } from "std/cli/localization/messages/part_32"
 import { MESSAGE_208 } from "std/cli/localization/messages/part_41"
-import { MESSAGE_256, MESSAGE_258 } from "std/cli/localization/messages/part_51"
-import { MESSAGE_282, MESSAGE_283 } from "std/cli/localization/messages/part_56"
-import { MESSAGE_286, MESSAGE_287 } from "std/cli/localization/messages/part_57"
+import { MESSAGE_257, MESSAGE_259 } from "std/cli/localization/messages/part_51"
+import { MESSAGE_283, MESSAGE_284 } from "std/cli/localization/messages/part_56"
+import { MESSAGE_287, MESSAGE_288 } from "std/cli/localization/messages/part_57"
 import { MESSAGE_49 } from "std/cli/localization/messages/part_9"
 import { MessageTemplate, render_message } from "std/cli/message_template"
 
@@ -36,12 +36,12 @@ const MESSAGES: dict<string, MessageTemplate> = {
   "  training catalog: {0}": MESSAGE_155,
   "  weight tying policy: {0}": MESSAGE_163,
   "PEFT save notes": MESSAGE_208,
-  "probe {0}": MESSAGE_256,
-  "probe {0} notes": MESSAGE_258,
-  "tool catalog gates": MESSAGE_282,
-  "tool catalog notes": MESSAGE_283,
-  "trainer environment errors": MESSAGE_286,
-  "trainer identity errors": MESSAGE_287,
+  "probe {0}": MESSAGE_257,
+  "probe {0} notes": MESSAGE_259,
+  "tool catalog gates": MESSAGE_283,
+  "tool catalog notes": MESSAGE_284,
+  "trainer environment errors": MESSAGE_287,
+  "trainer identity errors": MESSAGE_288,
 }
 
 /**

@@ -3,6 +3,22 @@ import { MessageTemplate } from "std/cli/message_template"
 
 pub const MESSAGE_255: MessageTemplate = {
   arity: 0,
+  fallback: ["precision gates"],
+  translations: {
+    de: ["Genauigkeitsprüfungen"],
+    es: ["puertas de precisión"],
+    fr: ["garde-fous de précision"],
+    it: ["gate di precisione"],
+    ja: ["精度ゲート"],
+    ko: ["정밀도 게이트"],
+    "pt-BR": ["gates de precisão"],
+    ru: ["пороги точности"],
+    "zh-Hans": ["精度门控"],
+  },
+}
+
+pub const MESSAGE_256: MessageTemplate = {
+  arity: 0,
   fallback: ["preflight corpus"],
   translations: {
     de: ["Preflight-Korpus"],
@@ -17,7 +33,7 @@ pub const MESSAGE_255: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_256: MessageTemplate = {
+pub const MESSAGE_257: MessageTemplate = {
   arity: 1,
   fallback: ["probe ", 0],
   translations: {
@@ -33,7 +49,7 @@ pub const MESSAGE_256: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_257: MessageTemplate = {
+pub const MESSAGE_258: MessageTemplate = {
   arity: 1,
   fallback: ["probe ", 0, " failures"],
   translations: {
@@ -49,7 +65,7 @@ pub const MESSAGE_257: MessageTemplate = {
   },
 }
 
-pub const MESSAGE_258: MessageTemplate = {
+pub const MESSAGE_259: MessageTemplate = {
   arity: 1,
   fallback: ["probe ", 0, " notes"],
   translations: {
@@ -62,21 +78,5 @@ pub const MESSAGE_258: MessageTemplate = {
     "pt-BR": ["notas da sonda ", 0],
     ru: ["заметки проверки ", 0],
     "zh-Hans": ["探测 ", 0, " 备注"],
-  },
-}
-
-pub const MESSAGE_259: MessageTemplate = {
-  arity: 0,
-  fallback: ["probed"],
-  translations: {
-    de: ["geprüft"],
-    es: ["sondeado"],
-    fr: ["sondé"],
-    it: ["sondato"],
-    ja: ["プローブ済み"],
-    ko: ["프로브됨"],
-    "pt-BR": ["sondado"],
-    ru: ["проверено"],
-    "zh-Hans": ["已探测"],
   },
 }
