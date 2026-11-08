@@ -2126,7 +2126,7 @@
   "Show install status for a model (or all models)": "Mostra lo stato di installazione di un modello (o di tutti i modelli)",
   "Show layered-resolution skills discovered from the filesystem": "Mostra le competenze a risoluzione stratificata rilevate dal filesystem",
   "Show package registry metadata for one package": "Mostra i metadati del registro dei pacchetti per un pacchetto",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "Mostra il timing per test e i dettagli dei fallimenti. Stampa anche l'output `log`/`print`/`println` di un caso riuscito, che altrimenti viene mostrato solo per i casi falliti",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "Mostra i casi riusciti e il loro output acquisito su stderr. I fallimenti e i casi ignorati appaiono sempre lì; i riepiloghi e i dati sui tempi restano su stdout",
   "Show stored OAuth status for a server": "Mostra lo stato OAuth memorizzato per un server",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "Mostra l'autore, la catena di approvazione e i punteggi di fiducia per un manifest di competenza",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "Mostra il provider/modello locale attualmente selezionato e un breve riepilogo di ogni altro runtime locale",

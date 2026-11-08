@@ -2126,7 +2126,7 @@
   "Show install status for a model (or all models)": "모델(또는 모든 모델)의 설치 상태 표시",
   "Show layered-resolution skills discovered from the filesystem": "파일시스템에서 발견된 계층적 해석(layered-resolution) 스킬 표시",
   "Show package registry metadata for one package": "하나의 패키지에 대한 패키지 레지스트리 메타데이터 표시",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "테스트별 타이밍과 상세한 실패 정보를 표시합니다. 또한 통과한 사례의 `log`/`print`/`println` 출력도 표시하는데, 그렇지 않으면 실패한 사례에서만 보입니다",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "통과한 사례와 캡처한 출력을 stderr에 표시합니다. 실패와 건너뛴 사례는 항상 stderr에 표시하고, 요약과 시간 데이터는 stdout에 출력합니다",
   "Show stored OAuth status for a server": "서버의 저장된 OAuth 상태 표시",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "스킬 매니페스트의 작성자, 승인 체인, 신뢰 점수 표시",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "현재 선택된 로컬 제공자/모델과 다른 모든 로컬 런타임의 간단한 요약 표시",

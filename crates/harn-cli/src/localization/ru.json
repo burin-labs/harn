@@ -2126,7 +2126,7 @@
   "Show install status for a model (or all models)": "Показать статус установки для модели (или всех моделей)",
   "Show layered-resolution skills discovered from the filesystem": "Показать навыки с многослойным разрешением, обнаруженные в файловой системе",
   "Show package registry metadata for one package": "Показать метаданные реестра пакетов для одного пакета",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "Показать время выполнения по каждому тесту и подробные ошибки. Также выводит `log`/`print`/`println` для успешного случая, который иначе показывается только для неудачных случаев",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "Показать успешные случаи и их перехваченный вывод в stderr. Ошибки и пропущенные случаи всегда выводятся туда; сводки и данные о времени остаются в stdout",
   "Show stored OAuth status for a server": "Показать сохранённый статус OAuth для сервера",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "Показать автора, цепочку одобрений и оценки доверия для манифеста навыка",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "Показать текущий выбранный локальный провайдер/модель и краткую сводку по каждому другому локальному рантайму",
