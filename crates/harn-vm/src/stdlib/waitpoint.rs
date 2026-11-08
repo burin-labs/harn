@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, sanitize_topic_component, AnyEventLog,
-    EventLog, EventLogBackendKind, LogEvent, Topic,
+    EventLog, EventLogBackendKind, LogError, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, ErrorKind};
@@ -625,6 +625,11 @@ async fn wait_live_outside_dispatch(
     waitpoint_ids: Vec<String>,
     options: WaitpointWaitOptions,
 ) -> Result<Vec<WaitpointRecord>, VmError> {
+    enum Wake {
+        Reread,
+        Resubscribe,
+    }
+
     let clock = crate::clock_mock::active_clock().unwrap_or_else(harn_clock::RealClock::arc);
     let started = clock.monotonic_ms();
     let external_writes = match log.describe().backend {
@@ -633,43 +638,51 @@ async fn wait_live_outside_dispatch(
             true
         }
     };
-    let mut changes = SelectAll::new();
-    // Subscribe before re-reading state: a terminal update between the caller's
-    // initial read and registration must not leave it waiting for another event.
-    for id in &waitpoint_ids {
-        let topic = waitpoint_topic(id)?;
-        let cursor = log.latest(&topic).await.map_err(event_log_error)?;
-        changes.push(
-            log.clone()
-                .subscribe(&topic, cursor)
-                .await
-                .map_err(event_log_error)?,
-        );
-    }
     let waiting = async {
+        let mut changes = SelectAll::new();
+        let mut wake = Wake::Resubscribe;
         loop {
+            if matches!(wake, Wake::Resubscribe) {
+                changes = SelectAll::new();
+                // Subscribe before re-reading state, including after a lagged
+                // or closed subscription, so registration cannot lose a change.
+                for id in &waitpoint_ids {
+                    let topic = waitpoint_topic(id)?;
+                    let cursor = log.latest(&topic).await.map_err(event_log_error)?;
+                    let stream = log
+                        .clone()
+                        .subscribe(&topic, cursor)
+                        .await
+                        .map_err(event_log_error)?;
+                    changes.push(
+                        stream
+                            .map(|event| match event {
+                                Ok(_) => Ok(Wake::Reread),
+                                Err(LogError::ConsumerLagged(_)) => Ok(Wake::Resubscribe),
+                                Err(error) => Err(event_log_error(error)),
+                            })
+                            // SelectAll hides individual stream endings. Surface
+                            // each one even while other waitpoints remain open.
+                            .chain(futures::stream::once(async { Ok(Wake::Resubscribe) }))
+                            .boxed(),
+                    );
+                }
+            }
             if let Some(states) = live_waitpoint_resolution(log, &waitpoint_ids).await? {
                 return Ok(states);
             }
-            let changed = async {
-                changes
-                    .next()
-                    .await
-                    .ok_or_else(|| VmError::Runtime("waitpoint event subscription closed".into()))?
-                    .map_err(event_log_error)?;
-                Ok::<(), VmError>(())
-            };
-            if external_writes {
+            let changed = async { changes.next().await.unwrap_or(Ok(Wake::Resubscribe)) };
+            wake = if external_writes {
                 // Broadcasts belong to one log instance. Durable state can also
                 // be updated by another process, which requires a bounded OS
                 // probe until that backend provides cross-instance notification.
                 tokio::select! {
                     result = changed => result?,
-                    () = clock.sleep(StdDuration::from_millis(100)) => {},
+                    () = clock.sleep(StdDuration::from_millis(100)) => Wake::Reread,
                 }
             } else {
-                changed.await?;
-            }
+                changed.await?
+            };
         }
     };
     let Some(timeout) = options.timeout else {

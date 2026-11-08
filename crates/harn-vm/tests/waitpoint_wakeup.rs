@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use harn_clock::PausedClock;
 use harn_vm::event_log::{
-    install_active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog,
-    SqliteEventLog, Topic,
+    install_active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog, LogError,
+    LogEvent, SqliteEventLog, Topic,
 };
 use harn_vm::harness::Harness;
 
@@ -29,6 +29,94 @@ fn sqlite_log(path: &std::path::Path) -> Arc<AnyEventLog> {
     Arc::new(AnyEventLog::Sqlite(
         SqliteEventLog::open(path.to_path_buf(), 32).unwrap(),
     ))
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn lagged_and_closed_subscriptions_recover_while_other_points_remain_open() {
+    use futures::StreamExt;
+
+    harn_vm::reset_thread_local_state();
+    let log = install_memory_for_current_thread(1);
+    let (mut waiter, clock) = vm();
+    let chunk = harn_vm::compile_source(
+        r#"
+pipeline test(harness: Harness) {
+  const first = harness.runtime.waitpoint_create("overflow-first")
+  const second = harness.runtime.waitpoint_create("overflow-second")
+  const results = harness.runtime.waitpoint_wait([first, second])
+  harness.stdio.println(results[0].value)
+  harness.stdio.println(results[1].value)
+}
+"#,
+    )
+    .unwrap();
+    {
+        let registered_at = tokio::time::Instant::now();
+        let mut execution = Box::pin(waiter.execute(&chunk));
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        let topic = Topic::new("waitpoint.state.overflow-first").unwrap();
+        let state = log.read_range(&topic, None, usize::MAX).await.unwrap();
+        let payload = state.last().unwrap().1.payload.clone();
+        for queued_change in [false, true] {
+            let cursor = log.latest(&topic).await.unwrap();
+            let mut witness = log.clone().subscribe(&topic, cursor).await.unwrap();
+            if queued_change {
+                log.append(&topic, LogEvent::new("waitpoint.state", payload.clone()))
+                    .await
+                    .unwrap();
+                tokio::task::yield_now().await;
+            }
+            for _ in 0..8 {
+                log.append(&topic, LogEvent::new("waitpoint.state", payload.clone()))
+                    .await
+                    .unwrap();
+            }
+            tokio::task::yield_now().await;
+            if queued_change {
+                assert!(matches!(witness.next().await, Some(Ok(_))));
+                assert!(
+                    witness.next().await.is_none(),
+                    "the full queue loses the lag notice"
+                );
+            } else {
+                assert!(matches!(
+                    witness.next().await,
+                    Some(Err(LogError::ConsumerLagged(_)))
+                ));
+            }
+            assert!(
+                futures::poll!(execution.as_mut()).is_pending(),
+                "an open waitpoint must survive notification lag or closure"
+            );
+        }
+        let (mut producer, _) = vm();
+        let completion = harn_vm::compile_source(
+            r#"
+pipeline test(harness: Harness) {
+  harness.runtime.waitpoint_complete("overflow-second", 2)
+}
+"#,
+        )
+        .unwrap();
+        producer.execute(&completion).await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        let completion = harn_vm::compile_source(
+            r#"
+pipeline test(harness: Harness) {
+  harness.runtime.waitpoint_complete("overflow-first", 1)
+}
+"#,
+        )
+        .unwrap();
+        producer.execute(&completion).await.unwrap();
+        harn_clock::test_support::within("waitpoint subscriptions after overflow", execution)
+            .await
+            .unwrap();
+        assert_eq!(tokio::time::Instant::now(), registered_at);
+    }
+    assert_eq!(waiter.output().trim(), "1\n2");
+    assert_eq!(harn_clock::Clock::monotonic_ms(clock.as_ref()), 0);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
