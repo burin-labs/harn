@@ -190,47 +190,68 @@ const LIVE_EXTERNAL_TEST_BASELINE = [
   {rule: "ignore_attr", path: "crates/harn-builtins/src/postgres/tests/transactions.rs", count: 5},
 ]
 
-const EXACT_PATTERN_BASELINE = LITERAL_TIMEOUT_BASELINE + LIVE_EXTERNAL_TEST_BASELINE
-
 // Conformance tests that exercise real subprocesses should share the bounded
 // polling helpers from `conformance/tests/_common.harn` instead of copying
 // ad hoc loops into each fixture.
 const CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.harn"]
 
-// Conformance fixtures that are allowed to call `sleep(<literal>)` /
-// `time.sleep(<literal>)` because they exercise real subprocess I/O,
-// real socket-bound servers, or genuine wall-clock-driven scheduler
-// behavior that cannot be expressed under `harness.testing.clock_set(...)`. New
-// fixtures should drive timing through `harness.testing.clock_set(...)` /
-// `harness.testing.clock_advance(...)` and `harness.runtime.yield_now()` from the unified test clock
-// (see docs/src/dev/testing.md). Add an entry here only when there is
-// no deterministic alternative — and prefer shrinking this list over
-// growing it.
-const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
-  "conformance/tests/_common.harn",
+// Existing literal waits, pinned in both directions while their owners move
+// to injected time or acknowledged conditions. A row preserves existing debt;
+// it does not justify another wait. Files with no remaining hits have no row.
+// Mock-clock fixtures need no exception (see docs/src/dev/testing.md).
+const CONFORMANCE_SLEEP_BASELINE = [
   // The child blocks in a cancellable wait after reporting readiness; the
   // parent sends SIGTERM and polls for exit instead of waiting out its timer.
-  "conformance/tests/stdlib/signal_process_sigterm.harn",
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/stdlib/signal_process_sigterm.harn",
+    count: 1,
+  },
   // Bounded condition probes observe real child-process readiness and death.
-  "conformance/tests/mechanisms/stop_kills_what_the_worker_started.contract.harn",
-  "conformance/tests/agents/daemon_stdlib_wrappers.harn",
-  "conformance/tests/agents/worker_retriggerable.harn",
-  "conformance/tests/agents/workflow_messages.harn",
-  "conformance/tests/concurrency/deadline_catch.harn",
-  "conformance/tests/concurrency/parallel_each_as_stream.harn",
-  "conformance/tests/concurrency/parallel_race.harn",
-  "conformance/tests/scenarios/agent_loop_mcp_servers.harn",
-  "conformance/tests/scenarios/orchestrator_hot_reload_add.harn",
-  "conformance/tests/scenarios/orchestrator_hot_reload_modify_inflight.harn",
-  "conformance/tests/scenarios/orchestrator_hot_reload_remove.harn",
-  "conformance/tests/scenarios/orchestrator_pump_drain_lifecycle.harn",
-  "conformance/tests/scenarios/orchestrator_recover_stranded_envelopes.harn",
-  "conformance/tests/scenarios/orchestrator_worker_claim_expiry_requeue.harn",
-  "conformance/tests/runtime/http_proxy_passthrough.harn",
-  "conformance/tests/stdlib/hitl/hitl_pending.harn",
-  "conformance/tests/stdlib/waitpoint_fan_out.harn",
-  "conformance/tests/stdlib/waitpoints_fan_out.harn",
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/mechanisms/stop_kills_what_the_worker_started.contract.harn",
+    count: 2,
+  },
+  {rule: "conformance_sleep", path: "conformance/tests/concurrency/deadline_catch.harn", count: 1},
+  {rule: "conformance_sleep", path: "conformance/tests/concurrency/parallel_race.harn", count: 1},
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_hot_reload_add.harn",
+    count: 2,
+  },
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_hot_reload_modify_inflight.harn",
+    count: 3,
+  },
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_hot_reload_remove.harn",
+    count: 2,
+  },
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_pump_drain_lifecycle.harn",
+    count: 1,
+  },
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_recover_stranded_envelopes.harn",
+    count: 1,
+  },
+  {
+    rule: "conformance_sleep",
+    path: "conformance/tests/scenarios/orchestrator_worker_claim_expiry_requeue.harn",
+    count: 1,
+  },
+  {rule: "conformance_sleep", path: "conformance/tests/stdlib/waitpoint_fan_out.harn", count: 1},
+  {rule: "conformance_sleep", path: "conformance/tests/stdlib/waitpoints_fan_out.harn", count: 1},
 ]
+
+const EXACT_PATTERN_BASELINE = LITERAL_TIMEOUT_BASELINE
+  + LIVE_EXTERNAL_TEST_BASELINE
+  + CONFORMANCE_SLEEP_BASELINE
 
 // E2E subprocess test files where `harn_e2e_command` / `spawn_orchestrator`
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
@@ -1266,7 +1287,12 @@ pipeline main(harness: Harness, task: unknown) {
     violations = violations + 1
   }
   for row in EXACT_PATTERN_BASELINE {
-    if !test_files.any({ f -> f.rel == row.path }) {
+    const scanned = if row.rule == "conformance_sleep" {
+      harn_files
+    } else {
+      test_files
+    }
+    if !scanned.any({ f -> f.rel == row.path }) {
       harness.stdio.println("  unscanned pattern baseline: " + row.rule + ":" + row.path)
       violations = violations + 1
     }
@@ -1465,13 +1491,9 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.println("--- conformance sleep with fixed literal duration ---")
   // Fixtures that drive timing via `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`
   // auto-deflake their `sleep(...)` calls (the unified test clock advances
-  // instantly). Anything else relies on wall-clock and should either move
-  // to that pattern or be added to CONFORMANCE_REAL_TIME_ALLOWLIST with
-  // justification.
+  // instantly). Existing real-time findings have exact counts; new ones must
+  // use injected time or an acknowledged condition.
   for f in harn_files {
-    if CONFORMANCE_REAL_TIME_ALLOWLIST.contains(f.rel) {
-      continue
-    }
     // Files that install a clock mock are exempt because `sleep(...)` and
     // `harness.clock.sleep_ms(...)` advance the mock instead of suspending the runtime.
     const fixture_path = f.rel.replace(".harn", ".harness.json")
@@ -1484,19 +1506,25 @@ pipeline main(harness: Harness, task: unknown) {
       fixture_mocked = fixture.mode == "mock" && fixture.clock_at_unix_ms != nil
     }
     if has_mock_time(f.text) || fixture_mocked {
+      if pattern_baseline_count("conformance_sleep", f.rel) != nil {
+        harness.stdio.println(
+          "  ${f.rel}: mock-clock fixture has an obsolete conformance_sleep baseline",
+        )
+        violations = violations + 1
+      }
       continue
     }
-    for hit in find_hits(f.text, literal_sleep_pattern()) {
-      harness.stdio.println("  ${f.rel}:${hit.line_no}:${hit.text}")
-      harness.stdio.println(
-        "    hint: Wrap timing-sensitive logic in harness.testing.clock_set(...)/harness.testing.clock_reset(),",
+    violations = violations
+      + report_pattern(
+        harness.stdio,
+        "conformance_sleep",
+        [f],
+        { rel -> false },
+        literal_sleep_pattern(),
+        [
+          "    hint: Use an injected clock or acknowledged condition; do not add a wall-clock wait.",
+        ],
       )
-      harness.stdio.println("          or add the fixture to CONFORMANCE_REAL_TIME_ALLOWLIST in")
-      harness.stdio.println(
-        "          scripts/lint_test_patterns.harn with reviewer justification.",
-      )
-      violations = violations + 1
-    }
   }
   // -------------------------------------------------------------------------
   // Non-test wall-clock reads (#1439)
