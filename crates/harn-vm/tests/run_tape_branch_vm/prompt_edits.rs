@@ -423,7 +423,7 @@ fn retained_package_survives_deleted_original_and_preserves_prompt_edit_identity
         &dirs.workspace,
         Some(guard.scope()),
         &dirs.workspace,
-        vec![package.clone()],
+        vec![package],
     )
     .unwrap_err()
     .contains("changed since recording"));
