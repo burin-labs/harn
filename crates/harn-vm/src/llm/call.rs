@@ -558,15 +558,15 @@ fn pin_schema_retry_dispatch<'a>(
     options: Option<crate::value::DictMap>,
     bridge: Option<&'a Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<api::DeltaSender>,
-) -> impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a {
+) -> futures::future::BoxFuture<'a, Result<SchemaLoopOutcome, VmError>> {
     if let Some(policy) = opts.routing_policy.clone() {
-        futures::future::Either::Left(Box::pin(execute_routing_schema_retry_loop(
+        Box::pin(execute_routing_schema_retry_loop(
             ctx, policy, opts, options, bridge, delta_sink,
-        )))
+        ))
     } else {
-        futures::future::Either::Right(Box::pin(execute_schema_retry_loop(
+        Box::pin(execute_schema_retry_loop(
             ctx, opts, options, bridge, delta_sink,
-        )))
+        ))
     }
 }
 
