@@ -24,10 +24,9 @@ inputs:
     default: "10"
   token:
     description: >-
-      Token for api.github.com, used only to read a release asset's SHA-256
-      digest while SHA256SUMS is still unpublished. Optional; the release
-      download host needs none, but unauthenticated API requests are rate
-      limited per runner IP.
+      Token for release metadata and assets on api.github.com. Authenticated
+      bootstrap requests prefer the asset API; the token is never sent to
+      release download hosts or redirected asset hosts.
     required: false
     default: ${{ github.token }}
   cache-dir:
@@ -74,6 +73,7 @@ runs:
         HARN_BOOTSTRAP_REPOSITORY: ${{ inputs.repository }}
         HARN_BOOTSTRAP_CACHE_DIR: ${{ inputs.cache-dir }}
         HARN_BOOTSTRAP_INSTALL_DIR: ${{ inputs.install-dir }}
+        HARN_BOOTSTRAP_TOKEN: ${{ inputs.token }}
       run: >-
         sh "$GITHUB_ACTION_PATH/../../../scripts/bootstrap-harn.sh"
         resolve --github-output "$GITHUB_OUTPUT"

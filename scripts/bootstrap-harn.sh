@@ -66,19 +66,64 @@ base=https://github.com/burin-labs/harn/releases/download/v$version
 api=https://api.github.com/repos/burin-labs/harn/releases
 api_mode=0
 fetch() {
+  case "$1" in
+    https://api.github.com/*)
+      if [ -n "$HARN_EXT_BOOTSTRAP_TOKEN" ]; then
+        # Keep credentials out of process arguments and restrict header files
+        # to this private seed workspace.
+        if [ "$(printf '%s' "$HARN_EXT_BOOTSTRAP_TOKEN" | LC_ALL=C tr -d '[:cntrl:]')" != "$HARN_EXT_BOOTSTRAP_TOKEN" ]; then
+          echo 'invalid bootstrap token' >&2
+          return 1
+        fi
+        if command -v curl >/dev/null 2>&1; then
+          (umask 077; printf 'Authorization: Bearer %s\n' "$HARN_EXT_BOOTSTRAP_TOKEN" > "$work/api.headers")
+          if curl -q -fLsS --connect-timeout 15 --max-time 120 \
+            -H "@$work/api.headers" -H "Accept: $3" "$1" -o "$2"; then
+            api_status=0
+          else
+            api_status=$?
+          fi
+          rm -f "$work/api.headers"
+          return "$api_status"
+        fi
+        (umask 077; printf 'header = Authorization: Bearer %s\n' "$HARN_EXT_BOOTSTRAP_TOKEN" > "$work/api.wget")
+        # Wget custom headers survive redirects. Stop at the API response and
+        # follow an HTTPS asset redirect in a separate, unauthenticated request.
+        if wget --config="$work/api.wget" --server-response \
+          --max-redirect=0 --tries=1 --timeout=120 --header="Accept: $3" \
+          "$1" -O "$2" 2> "$work/api.response"; then
+          rm -f "$work/api.wget"
+          return 0
+        fi
+        rm -f "$work/api.wget"
+        redirect=$(awk '
+          $1 ~ /^HTTP\/[0-9.]+$/ { status = $2; location = ""; count = 0 }
+          /^[[:space:]]/ && tolower($1) == "location:" { sub(/\r$/, "", $2); location = $2; count++ }
+          END { if (status ~ /^30[12378]$/ && count == 1) print location; else exit 1 }
+        ' "$work/api.response") || { echo 'release asset API request failed' >&2; return 1; }
+        case "$redirect" in
+          https://*) ;;
+          *) echo 'release asset API returned an invalid redirect' >&2; return 1 ;;
+        esac
+        wget --no-config -q --tries=1 --timeout=120 --header="Accept: $3" "$redirect" -O "$2"
+        return
+      fi
+      ;;
+  esac
   if command -v curl >/dev/null 2>&1; then
-    curl -fLsS --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 -H "Accept: $3" "$1" -o "$2"
+    curl -q -fLsS --connect-timeout 15 --max-time 120 -H "Accept: $3" "$1" -o "$2"
   else
-    wget -q --tries=3 --timeout=120 --header="Accept: $3" "$1" -O "$2"
+    wget --no-config -q --tries=1 --timeout=120 --header="Accept: $3" "$1" -O "$2"
   fi
 }
 download() {
-  if [ "$api_mode" = 0 ] && fetch "$1" "$2" application/octet-stream; then
+  if [ "$api_mode" = 0 ] && [ -z "$HARN_EXT_BOOTSTRAP_TOKEN" ] \
+    && fetch "$1" "$2" application/octet-stream; then
     return 0
   fi
   if [ "$api_mode" = 0 ]; then
     command -v jq >/dev/null 2>&1 || { echo 'release download failed; API fallback requires jq' >&2; return 1; }
-    echo 'direct seed download failed; trying the GitHub release asset API' >&2
+    echo 'fetching bootstrap seed through the GitHub release asset API' >&2
     fetch "$api/tags/v$version" "$work/release.json" application/vnd.github+json || return 1
     api_mode=1
   fi
@@ -97,14 +142,8 @@ digest() {
   else result=$(shasum -a 256 < "$1") || return; fi
   printf '%s\n' "${result%% *}"
 }
-if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then
-  download "$base/SHA256SUMS" "$work/SHA256SUMS"
-  manifest_source=$work/SHA256SUMS
-else
-  [ -f "$cache/SHA256SUMS" ] || { echo 'offline seed manifest missing' >&2; exit 1; }
-  manifest_source=$cache/SHA256SUMS
-fi
-expected=$(awk -v asset="$asset" '
+seed_checksum() {
+  awk -v asset="$asset" '
   NF == 0 { next }
   {
     checksum = $1
@@ -116,9 +155,28 @@ expected=$(awk -v asset="$asset" '
     if (name == asset) { count++; selected = checksum }
   }
   END { if (count != 1) exit 1; print selected }
-' "$manifest_source") || { echo 'invalid seed checksum manifest' >&2; exit 1; }
+' "$1"
+}
+cached_verified=0
+if [ -f "$cache/SHA256SUMS" ] && [ -f "$cache/$asset" ]; then
+  cached_expected=$(seed_checksum "$cache/SHA256SUMS") || cached_expected=''
+  cached_expected=$(printf '%s' "$cached_expected" | tr A-F a-f)
+  if [ -n "$cached_expected" ] && [ "$(digest "$cache/$asset")" = "$cached_expected" ]; then
+    cached_verified=1
+  fi
+fi
+manifest_fetched=0
+if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ] && [ "$cached_verified" != 1 ]; then
+  download "$base/SHA256SUMS" "$work/SHA256SUMS"
+  manifest_source=$work/SHA256SUMS
+  manifest_fetched=1
+else
+  [ -f "$cache/SHA256SUMS" ] || { echo 'offline seed manifest missing' >&2; exit 1; }
+  manifest_source=$cache/SHA256SUMS
+fi
+expected=$(seed_checksum "$manifest_source") || { echo 'invalid seed checksum manifest' >&2; exit 1; }
 expected=$(printf '%s' "$expected" | tr A-F a-f)
-if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ]; then
+if [ "$manifest_fetched" = 1 ]; then
   if [ -f "$cache/SHA256SUMS" ]; then
     cmp -s "$work/SHA256SUMS" "$cache/SHA256SUMS" || { echo 'published seed checksums changed' >&2; exit 1; }
   else

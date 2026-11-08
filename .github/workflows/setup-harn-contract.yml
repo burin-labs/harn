@@ -20,8 +20,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify the stage-zero seed boundary
         run: sh scripts/tests/bootstrap_harn_seed_test.sh
+      - name: Verify real downloader authentication and redirects
+        if: runner.os == 'Linux'
+        run: python3 scripts/tests/bootstrap_harn_auth_test.py
       - name: Run deterministic setup-action tests
-        run: sh scripts/bootstrap-harn.sh --seed-command test scripts/tests/runtime_install_test.harn
+        env:
+          HARN_BOOTSTRAP_TOKEN: ${{ github.token }}
+        run: >-
+          sh scripts/bootstrap-harn.sh --seed-command test
+          scripts/tests/runtime_install_test.harn scripts/tests/setup_harn_auth_test.harn
       - name: Install a published Harn release
         id: harn
         uses: ./.github/actions/setup-harn
