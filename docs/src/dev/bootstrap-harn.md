@@ -34,6 +34,12 @@ verified GitHub release-asset digest can authorize installation; a later
 manifest must agree with that digest. Downloads become cache entries only after
 native verification succeeds. Cached archives are reverified before use.
 
+If the release download host fails, the runtime installer reads the checksum
+manifest and archive through GitHub's release asset API. API requests identify
+the bootstrap client with GitHub's required `User-Agent` header and preserve
+the supplied token. Both transports retain checksum verification and immutable
+cache metadata; an API permission denial still fails installation.
+
 After an online installation, pass `--offline` to require the cached manifest
 and archive without network access. A digest-only cache is insufficient for
 offline use. Seed bootstrap also needs its cached manifest and archive; set
