@@ -50,6 +50,7 @@ macro_rules! close_env_for_session {
 /// and nothing else: never an `in_process` grant, and never an engine
 /// variable the policy did not admit.
 pub fn session_std_command(program: impl AsRef<std::ffi::OsStr>) -> Result<Command, VmError> {
+    refuse_unconfined_replay()?;
     let program = program.as_ref();
     // A raw constructor is allowed here and only here: this is the funnel.
     let mut command = Command::new(program);
@@ -83,6 +84,7 @@ pub(in crate::stdlib::sandbox) fn xcode_compiler_query() -> Command {
 pub fn session_tokio_command(
     program: impl AsRef<std::ffi::OsStr>,
 ) -> Result<tokio::process::Command, VmError> {
+    refuse_unconfined_replay()?;
     let program = program.as_ref();
     let mut command = tokio::process::Command::new(program);
     close_env_for_session!(command, &program.to_string_lossy());
@@ -109,6 +111,7 @@ pub fn std_command_for_with_env_state(
     program: &str,
     args: &[String],
 ) -> Result<(Command, bool), VmError> {
+    super::replay::check_supported()?;
     let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let command = match active.as_ref() {
@@ -150,6 +153,7 @@ pub fn command_for_reexec(
     args: &[String],
     ruleset_fd: i32,
 ) -> Result<(Command, bool, Option<super::linux::ReexecConfinement>), VmError> {
+    super::replay::check_supported()?;
     use super::linux::{launcher_argv_with_ruleset, resolve_netns_launcher, ReexecConfinement};
 
     let resolved = crate::stdlib::process::resolve_program_path_for_spawn(program);
@@ -219,6 +223,7 @@ pub fn tokio_command_for_with_env_state(
     program: &str,
     args: &[String],
 ) -> Result<(tokio::process::Command, bool), VmError> {
+    super::replay::check_supported()?;
     let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
@@ -236,4 +241,14 @@ pub fn tokio_command_for_with_env_state(
         process_output::apply_managed_proxy_env_tokio(&mut command, proxy);
     }
     Ok((command, closed))
+}
+
+fn refuse_unconfined_replay() -> Result<(), VmError> {
+    if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+        return Err(super::sandbox_rejection(
+            "unconfined runtime command cannot enter a relocated replay filesystem namespace"
+                .into(),
+        ));
+    }
+    Ok(())
 }

@@ -191,6 +191,7 @@ fn worker_snapshot_uses_the_branch_mapped_execution_environment_root() {
             )
             .unwrap(),
             live_after_calls: 1,
+            workspace_container_root: workspace.parent().unwrap().to_path_buf(),
             workspace_root: workspace,
             state_root: branch_root.clone(),
             host_state_roots: Vec::new(),

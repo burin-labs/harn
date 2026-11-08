@@ -71,6 +71,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn relocated_live_commands_cannot_touch_recorded_absolute_paths() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -103,6 +104,124 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(isolated.workspace.join("command-marker").exists());
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_restored_script_cannot_address_its_embedded_recorded_path() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let marker = recorded.workspace.join("embedded-marker");
+    let sibling = isolated
+        .workspace
+        .parent()
+        .unwrap()
+        .join("sibling-workspace");
+    std::fs::create_dir(&sibling).unwrap();
+    let sibling_marker = sibling.join("embedded-marker");
+    let script = format!(
+        "printf recorded > '{}'\nprintf sibling > '{}'\n",
+        marker.display(),
+        sibling_marker.display()
+    );
+    std::fs::write(recorded.workspace.join("embedded.sh"), &script).unwrap();
+    std::fs::write(isolated.workspace.join("embedded.sh"), &script).unwrap();
+    let source = r#"
+import { with_llm_script } from "std/testing"
+pipeline main(harness: Harness, task: unknown) {
+  with_llm_script(harness.llm, [{text: "prefix", model: "mock"}, {text: "live", model: "mock"}], { ->
+    harness.llm.call("prefix", nil, {provider: "mock", model: "mock"})
+    harness.llm.call("live", nil, {provider: "mock", model: "mock"})
+    const result = harness.process.run({program: "sh", args: ["embedded.sh"]})
+    harness.stdio.println(result)
+  })
+}
+"#;
+    record(source, &recorded.tapes, &recorded.workspace);
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), "recorded");
+    assert_eq!(std::fs::read_to_string(&sibling_marker).unwrap(), "sibling");
+    std::fs::remove_file(&marker).unwrap();
+    std::fs::remove_file(&sibling_marker).unwrap();
+    let replay = branch(source, &recorded.tapes, &isolated.workspace, 1);
+    assert_eq!(
+        (replay.report.served_calls, replay.report.live_calls),
+        (1, 1)
+    );
+    let refusal = match replay.output {
+        Ok(output) => output,
+        Err(error) => error,
+    };
+    assert!(
+        refusal.contains("denied") || refusal.contains("permitted"),
+        "{refusal}"
+    );
+    assert!(
+        !marker.exists(),
+        "an opaque child reached the original tree"
+    );
+    assert!(
+        !sibling_marker.exists(),
+        "an opaque child reached a sibling arm"
+    );
+    assert!(
+        !isolated.workspace.join("embedded-marker").exists(),
+        "script bytes must not be edited to relocate a hidden path"
+    );
+    assert_eq!(
+        std::fs::read_to_string(isolated.workspace.join("embedded.sh")).unwrap(),
+        script
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn command_arguments_cwd_and_environment_share_the_branch_view() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    const result = harness.process.run({{program: "sh", args: ["-c", {command}], cwd: {root}, env: {{BRANCH_INPUT: {root}}}}})
+    harness.stdio.println(result)
+  }})
+}}
+"#,
+        root = quote(&recorded.workspace),
+        command = serde_json::to_string(
+            "printf '%s' \"$BRANCH_INPUT\" > projected-env; pwd > projected-cwd"
+        )
+        .unwrap()
+    );
+    record(&source, &recorded.tapes, &recorded.workspace);
+    assert!(recorded.workspace.join("projected-env").exists());
+    let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
+    replay.output.unwrap();
+    let root = isolated
+        .workspace
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string();
+    assert_eq!(
+        std::fs::read_to_string(isolated.workspace.join("projected-env")).unwrap(),
+        root
+    );
+    assert_eq!(
+        std::fs::read_to_string(isolated.workspace.join("projected-cwd"))
+            .unwrap()
+            .trim(),
+        root
+    );
+    assert_eq!(
+        (replay.report.served_calls, replay.report.live_calls),
+        (1, 1)
+    );
+}
+
 #[test]
 fn a_branch_in_another_workspace_preserves_recorded_workspace_identity() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -118,6 +237,7 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.println(answer.text)
   })
 }
+
 "#;
     let baseline = record(source, &recorded.tapes, &recorded.workspace);
     assert!(baseline.contains("live"));
@@ -135,6 +255,57 @@ pipeline main(harness: Harness, task: unknown) {
 #[test]
 fn recorded_absolute_paths_read_and_write_only_the_isolated_workspace() {
     isolated_filesystem_case(false, false);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn live_commands_keep_explicit_read_only_assets_outside_the_storage_pool() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let assets = tempfile::tempdir().unwrap();
+    let helper = assets.path().join("helper-input");
+    std::fs::write(&helper, "retained asset content").unwrap();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    const read = harness.process.run({{program: "cat", args: [{helper}]}})
+    assert(read.stdout == "retained asset content")
+    harness.stdio.println(read.stdout)
+  }})
+}}
+"#,
+        helper = quote(&helper)
+    );
+    assert!(
+        record(&source, &recorded.tapes, &recorded.workspace).contains("retained asset content")
+    );
+    let guard = start_branch(BranchPlan {
+        tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace_root: isolated.workspace.clone(),
+        workspace_container_root: isolated.workspace.parent().unwrap().to_path_buf(),
+        state_root: isolated.markers.join("asset-state"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    let output = run_at_with_read_roots(
+        &source,
+        &isolated.workspace,
+        Some(guard.scope()),
+        &isolated.workspace,
+        vec![assets.path().to_path_buf()],
+    )
+    .unwrap();
+    assert!(output.contains("retained asset content"));
+    let report = guard.finish();
+    assert_eq!((report.served_calls, report.live_calls), (1, 1));
+    assert_eq!(report.divergence, None);
 }
 
 #[cfg(unix)]
@@ -215,6 +386,7 @@ pipeline main(harness: Harness, task: unknown) {
         tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: branch_root.clone(),
+        workspace_container_root: branch_root.parent().unwrap().to_path_buf(),
         state_root: isolated.markers.join("state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

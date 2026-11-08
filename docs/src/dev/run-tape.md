@@ -15,7 +15,9 @@ Hosts declare additional durable storage directories in `TapeWorkspace.state_roo
 The recording retains those roots so a branch can isolate writes to them.
 
 `taped_command_run` wraps a host command before its policy hooks and execution.
-It records the returned value and observed workspace changes. Commands inside
+Its live callback receives the branch-projected arguments before command
+preparation, policy hooks, and execution. It records the returned value and
+observed workspace changes. Commands inside
 an agent tool dispatch belong to that dispatch's recording and are not recorded
 again. The host identifies background requests before entering the wrapper;
 command policy cannot rewrite a request's background setting.
@@ -23,7 +25,8 @@ command policy cannot rewrite a request's background setting.
 ## Branch execution
 
 `start_branch` takes the tape, the number of model calls to serve, the restored
-workspace, and a fresh durable-state root. Enter its `BranchScope` around the
+workspace, its `workspace_container_root` storage pool, and a fresh durable-state root.
+The workspace must be strictly inside that pool. Enter its `BranchScope` around the
 execution. The host must supply the workspace state from before the recording;
 the tape does not reconstruct that initial state.
 
@@ -76,10 +79,22 @@ establishes that session permission grants were checked. Older recordings stay
 inspectable but need to be recorded again for branching.
 
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
-prefix. Filesystem builtins resolve absolute paths under the recorded workspace
-into the restored workspace before applying normal permission checks. A mapped
-path that escapes through a parent component or symlink is refused. This mapping
-does not rewrite prompt text, host arguments, or command strings.
+prefix. Replay projects recorded workspace paths in served values, model-facing
+requests and results, and tool arguments into the branch's physical root.
+Request and argument comparisons use that same projection in memory; the original
+tape and its content-addressed payloads remain unchanged. Filesystem builtins
+resolve paths before normal permission checks and refuse parent-component or
+symlink escapes. `ReplayWorkspaceProjection` supplies the same name projection
+for host configuration that runs outside the VM.
+
+On Linux, local foreground commands use the existing OS-hardened sandbox with
+the branch workspace, required runtime/toolchain access, and projected explicit
+host grants. Working
+directories, arguments, and environment values use the projected root. The OS
+renderer refuses any implicit grant that would reopen the recorded workspace or
+the branch storage pool outside this arm. Ambient temporary trees, package
+configuration, and external mounts are withheld. A restored script's embedded
+absolute path is not edited: accessing the recorded tree or a peer is denied.
 
 ## Prompt source edits
 
@@ -122,13 +137,16 @@ establishes whether an edit improves model behavior.
 
 ## Refusals and limits
 
-- Live commands in a relocated workspace are refused: their embedded paths
-  require a host filesystem namespace. Workspace path mapping is not a sandbox
-  for arbitrary host tools or external processes.
+- Live commands in a relocated workspace require the enforced local Linux view
+  above. Other platforms, unconfined runtime commands, and host command adapters
+  that cannot bind that view retain their refusal. Workspace name projection
+  alone does not confine arbitrary host tools or external processes.
   A baseline recorded in an isolated workspace can replay at that same path;
   the host restores its initial contents between runs.
 - Background commands cannot be served because their process handles do not
   exist in the branch. A dispatch that starts one is marked unservable.
+  Relocated branches also refuse live background commands because the workspace
+  owner cannot retain their filesystem view through independent shutdown.
 - Overlapping dispatches cannot be served because their workspace scans and
   transcript changes do not establish a reproducible order.
 - A dispatch containing nested inference cannot be served.
@@ -183,6 +201,14 @@ acquires an exclusive operating-system file lock, verifies the seed, and restore
 the working copy before returning it for a new trial. A competing owner refuses
 before restoration. Closing a retained owner releases its lock but keeps its
 files; the product's run-retention policy owns their eventual retirement.
+
+For independent trials, use `ReplayWorkspace::fork_saved_in(&saved, parent)`.
+It acquires a shared seed-read lease while verifying and copying into new private
+storage, then owns an exclusive lease on that copy. Multiple forks can read the
+same saved seed concurrently. The original seed and working copy are unchanged;
+each fork is deleted when its owner drops unless explicitly persisted.
+Pass `path()` and `storage_parent()` as the branch workspace and container roots.
+`restore_saved` remains the in-place restart operation and excludes competing owners.
 
 Keep the handle inside the execution owner until the session and every child
 process has stopped. A frontend holding it on behalf of an independent worker

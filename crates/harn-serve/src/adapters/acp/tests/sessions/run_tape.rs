@@ -88,6 +88,7 @@ fn a_branch_reuses_the_recorded_acp_session_identity() {
             tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
             workspace_root: branch_workspace.clone(),
+            workspace_container_root: branch_workspace.parent().unwrap().to_path_buf(),
             state_root: tmp.path().join("branch-state"),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

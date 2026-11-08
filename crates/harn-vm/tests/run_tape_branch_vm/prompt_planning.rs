@@ -89,6 +89,7 @@ fn source_planning_chooses_first_consumers_and_runs_that_verified_prefix() {
         let guard = start_branch(BranchPlan {
             tape,
             workspace_root: dirs.workspace.clone(),
+            workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
             state_root: dirs.markers.join("planned-state"),
             live_after_calls: point.live_after_calls,
             host_state_roots: Vec::new(),
@@ -237,6 +238,7 @@ fn an_origin_edit_cannot_bypass_verification_with_a_later_boundary() {
     let guard = start_branch(BranchPlan {
         tape,
         workspace_root: dirs.workspace.clone(),
+        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
         state_root: dirs.markers.join("incorrect-later-boundary"),
         live_after_calls: 2,
         host_state_roots: Vec::new(),
@@ -340,6 +342,7 @@ pipeline main(harness: Harness, task: unknown) {{
             let admission = start_branch(BranchPlan {
                 tape,
                 workspace_root: dirs.workspace.clone(),
+                workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
                 state_root: dirs.markers.join("redacted-state"),
                 live_after_calls: 0,
                 host_state_roots: Vec::new(),

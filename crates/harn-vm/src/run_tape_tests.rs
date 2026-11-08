@@ -104,6 +104,7 @@ fn version_four_transcripts_remain_readable_without_claiming_lifecycle_evidence(
         tape: loaded,
         live_after_calls: 1,
         workspace_root: dir.path().to_path_buf(),
+        workspace_container_root: dir.path().parent().unwrap().to_path_buf(),
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -136,6 +137,7 @@ fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
         tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
+        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -355,6 +357,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
         tape,
         live_after_calls: 1,
         workspace_root: tmp.path().join("branch"),
+        workspace_container_root: tmp.path().to_path_buf(),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -409,6 +412,7 @@ fn a_branch_requires_an_existing_workspace_copy() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: missing.clone(),
+        workspace_container_root: tmp.path().to_path_buf(),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -474,6 +478,39 @@ fn the_request_digest_covers_every_request_setting_but_the_credential_and_sessio
     same.api_key = "another-key".to_string();
     same.session_id = Some("another-session".to_string());
     assert!(serve_llm_call(&same).unwrap().is_ok());
+}
+
+/// Relocation must preserve the request identity the recording established.
+#[test]
+fn path_projection_cannot_replace_the_recorded_request_digest() {
+    let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    {
+        let _recording = record_full(tmp.path());
+        record_llm_call(&request("first"), &result("ok", None));
+    }
+    let mut tape = EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap();
+    let mut measured = 0;
+    for record in &mut tape.records {
+        if let TapeRecordKind::LlmCall { request_digest, .. } = &mut record.kind {
+            *request_digest = "changed-digest".into();
+            measured += 1;
+        }
+    }
+    assert_eq!(measured, 1);
+    let admission = start_branch(BranchPlan {
+        tape,
+        live_after_calls: 1,
+        workspace_root: tmp.path().to_path_buf(),
+        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
+        state_root: fresh_branch_state(tmp.path()),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    });
+    assert!(admission
+        .err()
+        .expect("a changed digest must refuse before projection")
+        .contains("recorded digest"));
 }
 
 /// A field serde skips never reaches the digest by default, so each one
@@ -557,6 +594,7 @@ fn a_metadata_tape_refuses_to_branch() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
+        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -580,6 +618,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
+        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -891,6 +930,7 @@ fn a_local_task_writes_branch_state_without_a_child_vm() {
         tape: EventTape::load(&recorded.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: recorded.path().to_path_buf(),
+        workspace_container_root: recorded.path().parent().unwrap().to_path_buf(),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -945,6 +985,7 @@ fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: tmp.path().to_path_buf(),
+        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

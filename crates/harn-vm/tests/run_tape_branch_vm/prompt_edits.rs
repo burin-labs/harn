@@ -63,6 +63,7 @@ fn plan(
     BranchPlan {
         tape,
         workspace_root: workspace.to_path_buf(),
+        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         state_root: state.to_path_buf(),
         live_after_calls: k,
         host_state_roots: Vec::new(),

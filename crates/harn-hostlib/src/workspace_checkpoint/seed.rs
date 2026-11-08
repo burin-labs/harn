@@ -209,6 +209,15 @@ impl ReplayWorkspace {
         &self.workspace
     }
 
+    /// The pool containing independent working copies. Pass this as the
+    /// replay's workspace container so child grants cannot reopen a peer.
+    pub fn storage_parent(&self) -> &Path {
+        self.storage
+            .path()
+            .parent()
+            .expect("private storage has a parent")
+    }
+
     /// Captured identity carried across every successful restore.
     pub fn receipt(&self) -> &SeedReceipt {
         &self.receipt

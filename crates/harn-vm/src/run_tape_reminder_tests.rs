@@ -142,6 +142,7 @@ fn assert_retirement(kind: ReminderRetirement, case: ReplayCase) {
             tape: loaded,
             live_after_calls: 1,
             workspace_root: workspace.clone(),
+            workspace_container_root: workspace.parent().unwrap().to_path_buf(),
             state_root: fresh_branch_state(&workspace),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

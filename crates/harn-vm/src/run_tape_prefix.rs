@@ -325,11 +325,15 @@ fn serve_read_in_prefix(
         PrefixPlan::Read => {
             // The branch went live between the flag and the lookup: run it.
             let mut went_live = false;
-            let served =
-                recorded_lookup(READ_NAMESPACE, &read_key(owner, name, args), false, || {
+            let served = recorded_lookup(
+                READ_NAMESPACE,
+                &read_key(owner, name, args, true),
+                false,
+                || {
                     went_live = true;
                     Ok(None)
-                });
+                },
+            );
             if went_live {
                 return None;
             }
@@ -379,7 +383,7 @@ fn record_read_on_tape(
     let json = crate::llm::helpers::vm_value_to_json(value);
     tape.recorder.record(TapeRecordKind::CacheLookup {
         namespace: READ_NAMESPACE.to_string(),
-        key: read_key(owner, name, args),
+        key: read_key(owner, name, args, false),
         after_calls: tape.next_llm_call.load(Ordering::SeqCst),
         value: Some(
             tape.recorder
@@ -402,12 +406,17 @@ pub(crate) fn taped_random(name: &str, draw: impl Fn() -> String) -> String {
     }
 }
 
-fn read_key(owner: Owner<'_>, name: &str, args: &[VmValue]) -> String {
-    let args = serde_json::Value::Array(
+fn read_key(owner: Owner<'_>, name: &str, args: &[VmValue], recorded: bool) -> String {
+    let mut args = serde_json::Value::Array(
         args.iter()
             .map(crate::llm::helpers::vm_value_to_json)
             .collect(),
     );
+    if recorded {
+        if let Some(projection) = super::workspace::current_projection() {
+            projection.recorded_json(&mut args);
+        }
+    }
     let name = owner.map_or_else(
         || name.to_string(),
         |(capability, method)| format!("{capability:?}.{method}"),

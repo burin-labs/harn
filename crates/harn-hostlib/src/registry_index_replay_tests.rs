@@ -112,6 +112,7 @@ fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
         tape: tape.clone(),
         live_after_calls: 1,
         workspace_root: workspace.clone(),
+        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         state_root: temporary.path().join(name),
         host_state_roots: vec![],
         prompt_edits: vec![],

@@ -23,7 +23,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     tools: Option<&VmValue>,
     options: &DictMap,
 ) -> Result<VmValue, VmError> {
-    let call = match call {
+    let call = match crate::run_tape::workspace::project_value(call) {
         VmValue::Dict(call) => call,
         other => {
             return Err(VmError::Runtime(format!(
@@ -66,25 +66,48 @@ pub fn note_command_outlived_dispatch() {
 
 /// Record a foreground host command, or serve its result and workspace effects.
 /// Commands inside an agent dispatch belong to that dispatch's recording.
-pub async fn taped_command_run(
+pub async fn taped_command_run<F, Fut>(
     name: &str,
     args: &[VmValue],
     background: bool,
-    live: impl std::future::Future<Output = Result<VmValue, VmError>>,
-) -> Result<VmValue, VmError> {
+    live: F,
+) -> Result<VmValue, VmError>
+where
+    F: FnOnce(Vec<VmValue>) -> Fut,
+    Fut: std::future::Future<Output = Result<VmValue, VmError>>,
+{
+    let mut projected: Vec<_> = args
+        .iter()
+        .cloned()
+        .map(crate::run_tape::workspace::project_value)
+        .collect();
+    if let Some(branch) = crate::run_tape::state_branch().filter(|branch| branch.relocated()) {
+        if let Some(VmValue::Dict(params)) = projected.first_mut() {
+            let params = std::sync::Arc::make_mut(params);
+            params
+                .entry(crate::value::intern_key("cwd"))
+                .or_insert_with(|| VmValue::string(branch.workspace().display().to_string()));
+        }
+    }
     if background {
         crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
+        if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+            return Err(VmError::Runtime(
+                "background command cannot retain a relocated replay filesystem namespace".into(),
+            ));
+        }
         let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
         crate::run_tape::check_live_command_workspace()?;
-        return live.await;
+        return live(projected).await;
     }
     if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
         crate::run_tape::check_live_command_workspace()?;
-        return live.await;
+        return live(projected).await;
     }
     let tool = format!("process:{name}");
     let args = serde_json::Value::Array(
-        args.iter()
+        projected
+            .iter()
             .map(crate::llm::helpers::vm_value_to_json)
             .collect(),
     );
@@ -93,7 +116,7 @@ pub async fn taped_command_run(
         Taped::Live(recording) => {
             run_recorded(recording, async {
                 crate::run_tape::check_live_command_workspace()?;
-                live.await
+                live(projected).await
             })
             .await
         }

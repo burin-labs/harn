@@ -84,6 +84,7 @@ fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
     let branch = run_tape::start_branch(BranchPlan {
         tape: EventTape::load(&path).unwrap(),
         live_after_calls: 1,
+        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         workspace_root: workspace,
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),

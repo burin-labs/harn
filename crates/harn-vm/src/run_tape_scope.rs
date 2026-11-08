@@ -35,6 +35,7 @@ pub(crate) struct BranchHandle {
     protected: Vec<(PathBuf, PathBuf)>,
     recorded_workspace: Option<PathBuf>,
     workspace: PathBuf,
+    workspace_container: PathBuf,
     source_roots: Vec<super::ReplaySourceRoot>,
     event_log: OnceLock<Option<Arc<AnyEventLog>>>,
 }
@@ -51,6 +52,7 @@ impl BranchHandle {
     pub(super) fn arm(
         state: BranchState,
         state_root: PathBuf,
+        workspace_container: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
         recorded_workspace: Option<PathBuf>,
         source_roots: Vec<super::ReplaySourceRoot>,
@@ -60,6 +62,7 @@ impl BranchHandle {
         HELD.fetch_add(1, Ordering::AcqRel);
         Arc::new(Self {
             workspace: state.workspace_root.clone(),
+            workspace_container,
             recorded_workspace,
             source_roots,
             state: Mutex::new(state),
@@ -91,6 +94,28 @@ impl BranchHandle {
 
     pub(crate) fn state_root(&self) -> &Path {
         &self.state_root
+    }
+
+    pub(crate) fn recorded_workspace(&self) -> Option<&Path> {
+        self.recorded_workspace.as_deref()
+    }
+
+    pub(crate) fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
+    pub(crate) fn workspace_container(&self) -> &Path {
+        &self.workspace_container
+    }
+
+    pub(super) fn source_roots(&self) -> &[super::ReplaySourceRoot] {
+        &self.source_roots
+    }
+
+    pub(crate) fn relocated(&self) -> bool {
+        self.recorded_workspace
+            .as_ref()
+            .is_some_and(|root| root != &self.workspace)
     }
 
     pub(crate) fn runtime_store(&self, path: PathBuf) -> crate::store::SharedStore {
@@ -186,6 +211,9 @@ pub(crate) fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     let Some(branch) = state_branch() else {
         return Ok(path);
     };
+    if let Some(relative) = workspace_relative(&path, &branch.workspace) {
+        return confined_mapping(&path, &branch.workspace, relative);
+    }
     for root in &branch.source_roots {
         if let Some(relative) = workspace_relative(&path, &root.recorded) {
             return confined_mapping(&path, &root.restored, relative);
@@ -289,20 +317,10 @@ pub(super) fn workspace_relative<'a>(path: &'a Path, root: &Path) -> Option<&'a 
 }
 
 /// A shell's path literals do not pass through the VM filesystem resolver.
-/// Until a host supplies a filesystem namespace, do not execute them against
-/// a moved workspace where recorded absolute paths could reach the original.
+/// A moved workspace requires the OS-bound replay view at the shared command
+/// constructor; unsupported hosts keep refusing before a child can start.
 pub(crate) fn check_live_command_workspace() -> Result<(), VmError> {
-    if state_branch().is_some_and(|branch| {
-        branch
-            .recorded_workspace
-            .as_ref()
-            .is_some_and(|root| root != &branch.workspace)
-    }) {
-        return Err(VmError::Runtime(
-            "live commands in a relocated replay workspace require a filesystem namespace; recorded command paths cannot be safely rewritten".into(),
-        ));
-    }
-    Ok(())
+    crate::stdlib::sandbox::replay::check_supported()
 }
 
 /// The scope a host enters around the execution that branches. It is `Send`,

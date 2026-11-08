@@ -73,7 +73,7 @@ fn run(source: &str, workspace: &Path) -> Result<String, String> {
 /// confinement. These tests replay process runs rather than confine them,
 /// and hosted macOS runners refuse sandbox-exec (SIP allows unrestricted
 /// DTrace), so the default profile would reject every recorded exec there.
-fn enter_run(workspace: &Path, write_root: &Path) {
+fn enter_run(workspace: &Path, write_root: &Path, read_roots: &[PathBuf]) {
     harn_vm::stdlib::process::set_thread_execution_context(Some(
         harn_vm::orchestration::RunExecutionRecord {
             cwd: Some(workspace.display().to_string()),
@@ -83,6 +83,10 @@ fn enter_run(workspace: &Path, write_root: &Path) {
     ));
     harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
         workspace_roots: vec![write_root.display().to_string()],
+        read_only_roots: read_roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect(),
         sandbox_profile: harn_vm::orchestration::SandboxProfile::WorkspacePaths,
         ..Default::default()
     });
@@ -109,6 +113,16 @@ fn run_at(
     branch: Option<BranchScope>,
     root: &Path,
 ) -> Result<String, String> {
+    run_at_with_read_roots(source, workspace, branch, root, Vec::new())
+}
+
+fn run_at_with_read_roots(
+    source: &str,
+    workspace: &Path,
+    branch: Option<BranchScope>,
+    root: &Path,
+    read_roots: Vec<PathBuf>,
+) -> Result<String, String> {
     let source = source.to_string();
     let workspace = workspace.to_path_buf();
     let root = root.to_path_buf();
@@ -122,7 +136,7 @@ fn run_at(
         let body = async move {
             // The run's write jail is the temp root holding the workspace and
             // the markers, not the test binary's cwd.
-            enter_run(&workspace, &root);
+            enter_run(&workspace, &root, &read_roots);
             let mut vm = harn_vm::new_vm();
             harn_runtime::register_vm_stdlib(&mut vm);
             harn_vm::register_store_builtins(&mut vm, &workspace);
@@ -229,6 +243,7 @@ fn branch_with_roots(
         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
         workspace_root: workspace.to_path_buf(),
+        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
         state_root: state.clone(),
         host_state_roots,
         prompt_edits: Vec::new(),
@@ -621,6 +636,7 @@ fn a_branch_refuses_the_recordings_state_root() {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: dirs.workspace.clone(),
+        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
         state_root: recording_state(&dirs.workspace),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -638,6 +654,7 @@ fn a_branch_refuses_the_recordings_state_root() {
             tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
             workspace_root: dirs.workspace.clone(),
+            workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
             state_root: state_root.clone(),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),
@@ -859,6 +876,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
         workspace_root: dirs.workspace.clone(),
+        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -965,6 +983,7 @@ pipeline main(harness: Harness, task: unknown) {{
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
         workspace_root: dirs.workspace.clone(),
+        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -1248,6 +1267,7 @@ fn a_session_store_named_after_the_branch_starts_lands_in_the_branch() {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
         workspace_root: dirs.workspace.clone(),
+        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

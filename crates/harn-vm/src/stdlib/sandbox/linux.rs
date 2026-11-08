@@ -788,6 +788,7 @@ fn push_rule_exact(
     allowed_access: FsAccess,
     optional: bool,
 ) -> Result<(), VmError> {
+    super::replay::check_grant(&super::normalize_for_policy(&path))?;
     let file = match std::fs::File::open(&path) {
         Ok(file) => file,
         // An OPTIONAL root we cannot open is skipped, not fatal. Missing and

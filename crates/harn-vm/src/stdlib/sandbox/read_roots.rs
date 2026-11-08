@@ -29,6 +29,11 @@ use crate::orchestration::CapabilityPolicy;
 /// ([`super::check_fs_path_scope`]) and the OS sandbox profile for a confined
 /// child resolve the same roots here.
 pub(super) fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if super::replay::workspace_roots().is_some() {
+        return super::normalized_process_roots(
+            &super::replay::policy(policy.clone()).read_only_roots,
+        );
+    }
     let mut roots = normalized_declared_read_only_roots(policy);
     if super::declared_path_roots_active() {
         return roots;
