@@ -5,9 +5,37 @@ use harn_vm::orchestration::{
 use harn_vm::security::session_environment::SessionEnvironment;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
 use harn_vm::tool_annotations::SideEffectLevel;
+use harn_vm::value::VmError;
 use std::path::Path;
 
 const TOKEN: &str = "protected-gh-fixture-canary-8827";
+
+const LOGIN_PROBE: &str = r#"
+fn main(harness: Harness) {
+  const result = harness.process.run({program: "gh", args: ["api", "fixture/probe"]})
+  assert(result.success)
+  const response = json_parse(result.stdout)
+  assert(response.token == "[redacted]")
+  assert(!response.token_in_env)
+  assert(!result.stderr.contains("8827"))
+  harness.stdio.println(response.config_dir)
+}
+"#;
+
+#[derive(Debug)]
+enum ProbeFailure {
+    Sandbox(harn_vm::process_sandbox::SandboxMechanismUnavailable),
+    Runtime(String),
+}
+
+impl From<VmError> for ProbeFailure {
+    fn from(error: VmError) -> Self {
+        match error {
+            VmError::SandboxMechanismUnavailable(refusal) => Self::Sandbox(*refusal),
+            other => Self::Runtime(other.to_string()),
+        }
+    }
+}
 
 struct GithubFixture {
     _root: tempfile::TempDir,
@@ -44,7 +72,7 @@ impl GithubFixture {
         }
     }
 
-    fn run(&self, body: &str) -> Result<String, String> {
+    fn run(&self, body: &str, profile: SandboxProfile) -> Result<String, ProbeFailure> {
         let environment = SessionEnvironment::launch(
             EnvironmentPolicyKind::Granted,
             vec![GrantSpec {
@@ -69,7 +97,7 @@ impl GithubFixture {
             harn_vm::stdlib::process::set_session_environment(Some(environment));
             let runtime = harn_clock::test_support::current_thread_runtime();
             let result = runtime.block_on(harn_clock::test_support::with_local_tasks(async {
-                let chunk = harn_vm::compile_source(body)?;
+                let chunk = harn_vm::compile_source(body).map_err(ProbeFailure::Runtime)?;
                 let mut vm = harn_vm::new_vm();
                 harn_runtime::register_vm_stdlib(&mut vm);
                 push_execution_policy(CapabilityPolicy {
@@ -81,11 +109,11 @@ impl GithubFixture {
                     recursion_limit: None,
                     tool_arg_constraints: Vec::new(),
                     tool_annotations: Default::default(),
-                    sandbox_profile: SandboxProfile::Worktree,
+                    sandbox_profile: profile,
                     process_sandbox: Default::default(),
                     process_network_proxy: None,
                 });
-                let result = vm.execute(&chunk).await.map_err(|error| error.to_string());
+                let result = vm.execute(&chunk).await.map_err(ProbeFailure::from);
                 pop_execution_policy();
                 result?;
                 Ok(vm.output().to_string())
@@ -100,18 +128,30 @@ impl GithubFixture {
 #[test]
 fn foreground_run_delivers_only_a_private_login_and_redacts_before_returning() {
     let fixture = GithubFixture::new();
-    let source = r#"
-fn main(harness: Harness) {
-  const result = harness.process.run({program: "gh", args: ["api", "fixture/probe"]})
-  assert(result.success)
-  const response = json_parse(result.stdout)
-  assert(response.token == "[redacted]")
-  assert(!response.token_in_env)
-  assert(!result.stderr.contains("8827"))
-  harness.stdio.println(response.config_dir)
+    let output = fixture
+        .run(LOGIN_PROBE, SandboxProfile::WorkspacePaths)
+        .expect("foreground login delivery");
+    assert_private_login_removed(&output);
 }
-"#;
-    let output = fixture.run(source).expect("protected foreground read");
+
+#[test]
+fn worktree_foreground_run_delivers_login_or_refuses_the_measured_host_gap() {
+    let fixture = GithubFixture::new();
+    let result = fixture.run(LOGIN_PROBE, SandboxProfile::Worktree);
+    // Qualification requires actual confinement; ordinary hosted coverage must
+    // prove the exact measured refusal instead of treating it as a login read.
+    match (
+        support::sandbox_host::unavailable_default_warn_worktree_sandbox(),
+        result,
+    ) {
+        (Some(expected), Err(ProbeFailure::Sandbox(actual))) => assert_eq!(actual, expected),
+        (None, Ok(output)) => assert_private_login_removed(&output),
+        (_, Err(ProbeFailure::Runtime(message))) => panic!("unexpected probe error: {message}"),
+        (expected, result) => panic!("host expectation {expected:?}, actual result {result:?}"),
+    }
+}
+
+fn assert_private_login_removed(output: &str) {
     let directory = output.trim();
     assert!(
         !directory.is_empty(),
@@ -139,6 +179,7 @@ fn main(harness: Harness) {
   assert(refused)
 }
 "#,
+            SandboxProfile::Worktree,
         )
         .expect("structured protected-command refusal");
 }
