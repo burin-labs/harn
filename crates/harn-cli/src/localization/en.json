@@ -347,6 +347,7 @@
   "Accept a run that executes no tests": "Accept a run that executes no tests",
   "Accept a run that executes no tests.\n\nBy default a selection that matches nothing exits non-zero, because an empty run is otherwise indistinguishable from every test passing at the exit-code boundary. Set this for the rare caller that legitimately tolerates an empty selection.": "Accept a run that executes no tests.\n\nBy default a selection that matches nothing exits non-zero, because an empty run is otherwise indistinguishable from every test passing at the exit-code boundary. Set this for the rare caller that legitimately tolerates an empty selection.",
   "Accept bundles that carry no Ed25519 signature. Without this flag, an unsigned bundle is treated as a verification failure": "Accept bundles that carry no Ed25519 signature. Without this flag, an unsigned bundle is treated as a verification failure",
+  "Accept proxy connections and never answer, so a client's own bound fires": "Accept proxy connections and never answer, so a client's own bound fires",
   "Accept the model's upstream license. Required — nothing is downloaded without it (the license text is printed for review first)": "Accept the model's upstream license. Required — nothing is downloaded without it (the license text is printed for review first)",
   "Accepted for host symmetry; output is always newline-delimited JSON": "Accepted for host symmetry; output is always newline-delimited JSON",
   "Ack a leased reminder, so it is not redelivered": "Ack a leased reminder, so it is not redelivered",

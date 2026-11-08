@@ -7,6 +7,7 @@ import {
 } from "std/agent/approval_review"
 import { command_run } from "std/command"
 import { EvaluationPolicy, EvaluationQuestion } from "std/predicate"
+import { process_shell, shell_quote } from "std/runtime"
 import {
   EvaluationFixture,
   EvaluationFixtureAnswer,
@@ -14,7 +15,7 @@ import {
   with_evaluation_fixtures,
   with_llm_script,
 } from "std/testing"
-import { resolve_harn_bin } from "../_common"
+import { resolve_harn_bin, wait_for_file_content } from "../_common"
 
 // A screen answers a review only when it is confident and its most likely
 // levels compute the same outcome. Everything else reaches the reviewer: the
@@ -160,37 +161,63 @@ pipeline test(harness: Harness) {
     assert_eq(verdict.reason, "malformed")
   }
   harness.stdio.println("malformed_screen_escalates=true")
-  // Two child runs call the screen's real route, differing only in the
-  // inference boundary. A fake key and a closed proxy keep both off the
-  // network. Unbounded, the call fails in transport: an error escalates rather
-  // than approving. Under a boundary that refuses routes with unknown training
-  // terms, the screen is refused before dispatch, at no cost, and the reviewer
-  // answers.
+  // Child runs call the screen's real route with a fake key, each through a
+  // local proxy so none reaches the network. They differ in one input each:
+  //   unbounded: a closed proxy, so the call fails in transport. An error
+  //     escalates rather than approving.
+  //   stalled: a proxy that accepts and never answers, so only the screen's
+  //     1s bound ends the call. A timeout escalates rather than approving.
+  //   training_restricted: the closed proxy, plus a boundary that refuses
+  //     routes with unknown training terms. The screen is refused before
+  //     dispatch, at no cost, and the reviewer answers.
   const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const binary = resolve_harn_bin(harness, root)
   const script = path_join(root, "conformance/tests/agents/approval_reviewer_screen.harn")
+  const state_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-approval-screen-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(state_dir)
+  const pid_path = path_join(state_dir, "proxy.pid")
+  const started = process_shell(
+    harness.process,
+    shell_quote(binary) + " conformance-helper stalled-proxy " + shell_quote(state_dir)
+      + " --timeout-ms 20000 >/dev/null 2>&1 & echo $! > "
+      + shell_quote(pid_path),
+  )
+  assert(started?.success, "stalled proxy started")
+  const stalled_port = wait_for_file_content(
+    harness.clock,
+    harness.fs,
+    path_join(state_dir, "port"),
+    { text -> trim(text) == "" ? nil : trim(text) },
+  )
+  assert(stalled_port != nil, "stalled proxy never published its port")
+  const closed_proxy = "http://127.0.0.1:9"
+  const training_restricted = "{\"reach\":\"any_hosted\",\"allow_training_discounts\":false}"
   let screens = {}
-  for boundary in [
+  for arm in [
+    {name: "unbounded", proxy: closed_proxy, boundary: {}},
+    {name: "stalled", proxy: "http://127.0.0.1:" + stalled_port, boundary: {}},
     {
       name: "training_restricted",
-      value: "{\"reach\":\"any_hosted\",\"allow_training_discounts\":false}",
+      proxy: closed_proxy,
+      boundary: {HARN_INFERENCE_BOUNDARY_JSON: training_restricted},
     },
-    {name: "unbounded", value: nil},
   ] {
-    const env = {
-      HARN_EXT_APPROVAL_SCREEN_PROBE: "1",
-      OPENROUTER_API_KEY: "approval-screen-fixture-only",
-      HARN_LLM_CALLS_DISABLED: "0",
-      HARN_EGRESS_DEFAULT: "deny",
-      HTTPS_PROXY: "http://127.0.0.1:9",
-      https_proxy: "http://127.0.0.1:9",
-      NO_PROXY: "",
-    }
     const child = command_run(
       harness.tools,
       [binary, "run", script],
       {
-        env: boundary.value == nil ? env : env + {HARN_INFERENCE_BOUNDARY_JSON: boundary.value},
+        env: {
+          HARN_EXT_APPROVAL_SCREEN_PROBE: "1",
+          OPENROUTER_API_KEY: "approval-screen-fixture-only",
+          HARN_LLM_CALLS_DISABLED: "0",
+          HTTPS_PROXY: arm.proxy,
+          https_proxy: arm.proxy,
+          NO_PROXY: "",
+        }
+          + arm.boundary,
         capture: {max_inline_bytes: 65536},
       },
     )
@@ -199,10 +226,18 @@ pipeline test(harness: Harness) {
     assert_eq(decision.screen.outcome, "escalated")
     assert_eq(decision.reviewer_calls, 1)
     assert_eq(decision.approved, false)
-    screens = screens + {[boundary.name]: decision.screen}
+    screens = screens + {[arm.name]: decision.screen}
   }
+  process_shell(
+    harness.process,
+    "kill $(cat " + shell_quote(pid_path) + ") >/dev/null 2>&1 || true",
+  )
+  assert_eq(screens.unbounded.reason, "not_answered")
   assert(screens.unbounded.detail.contains("transport_failed"), screens.unbounded.detail)
   harness.stdio.println("screen_error_escalates=true")
+  assert_eq(screens.stalled.reason, "timeout")
+  assert(screens.stalled.duration_ms < 5000, to_string(screens.stalled.duration_ms))
+  harness.stdio.println("stalled_screen_escalates=true")
   assert(
     screens.training_restricted.detail.contains("authority_denied"),
     screens.training_restricted.detail,
