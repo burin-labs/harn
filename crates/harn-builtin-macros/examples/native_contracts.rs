@@ -102,6 +102,15 @@ impl Condition {
             }
         }
     }
+
+    fn attribute(&self) -> Option<TokenStream> {
+        if matches!(self, Self::Known(true)) {
+            None
+        } else {
+            let predicate = self.tokens();
+            Some(quote!(#[cfg(#predicate)]))
+        }
+    }
 }
 
 fn condition(attrs: &[Attribute], inherited: Condition) -> Condition {
@@ -342,7 +351,7 @@ fn render(declarations: &[Declaration], root: &Path) -> String {
         let definition = format_ident!("{}_DEF", name.to_string().to_uppercase());
         let attrs = &declaration.attrs;
         let docs = &declaration.docs;
-        let cfg = declaration.condition.tokens();
+        let cfg = declaration.condition.attribute();
         let source = declaration
             .source
             .strip_prefix(root)
@@ -350,7 +359,7 @@ fn render(declarations: &[Declaration], root: &Path) -> String {
             .display()
             .to_string();
         modules.push(quote! {
-            #[cfg(#cfg)]
+            #cfg
             #[doc = #source]
             mod #module {
                 #[allow(unused_imports)]
@@ -360,14 +369,13 @@ fn render(declarations: &[Declaration], root: &Path) -> String {
                 fn #name() {}
             }
         });
-        references.push(quote! { #[cfg(#cfg)] definitions.push(&#module::#definition); });
+        references.push(quote! { #cfg &#module::#definition });
     }
     let body = formatted(quote! {
         #(#modules)*
-        pub(super) fn definitions() -> Vec<&'static harn_vm_core::builtin_support::VmBuiltinDef> {
-            let mut definitions = Vec::new();
-            #(#references)*
-            definitions
+        static DEFINITIONS: &[&harn_vm_core::builtin_support::VmBuiltinDef] = &[#(#references),*];
+        pub(super) fn definitions() -> &'static [&'static harn_vm_core::builtin_support::VmBuiltinDef] {
+            DEFINITIONS
         }
         pub(super) fn force_link() { std::hint::black_box(definitions()); }
     });
