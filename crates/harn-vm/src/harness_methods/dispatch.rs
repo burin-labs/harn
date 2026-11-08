@@ -45,13 +45,14 @@ async fn call_harness_method_in_scope(
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    match handle.kind().capability_id() {
+    let result = match handle.kind().capability_id() {
         // Boxed so the untaped path keeps the frame it had before tapes.
         Some(capability) if crate::run_tape::taping() => {
             Box::pin(call_harness_method_taped(vm, handle, capability, method, args)).await
         }
         _ => call_harness_method_admitted(vm, handle, method, args).await,
-    }
+    };
+    result.map(crate::run_tape::workspace::project_value)
 }
 
 async fn call_harness_method_taped(
@@ -413,7 +414,8 @@ fn call_harness_method_sync_fast(
         Err(error) => return Some(Err(error)),
     };
     let started = crate::builtin_profile::is_enabled().then(std::time::Instant::now);
-    let result = call_harness_method_sync_fast_inner(output, runtime_effects, &handle, method, args);
+    let result = call_harness_method_sync_fast_inner(output, runtime_effects, &handle, method, args)
+        .map(|result| result.map(crate::run_tape::workspace::project_value));
     if let (Some(result), Some(capability)) = (&result, handle.kind().capability_id()) {
         if crate::run_tape::records_reads() {
             crate::run_tape::record_read(

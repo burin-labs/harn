@@ -14,7 +14,7 @@
 //!   no OS sandbox. Children run unconfined; `os_hardened` refuses and the
 //!   other confining profiles warn. See [`enforcement`].
 //!
-//! [`SandboxProfile`] sets how strictly [`CapabilityPolicy`] requires the backend:
+//! [`SandboxProfile`](crate::orchestration::SandboxProfile) sets how strictly [`CapabilityPolicy`] requires the backend:
 //!
 //! * `Unrestricted` — bypass everything (path enforcement and OS
 //!   confinement).
@@ -36,9 +36,11 @@ use std::io::{self, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+use crate::orchestration::CapabilityPolicy;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+#[cfg(test)]
+use crate::orchestration::SandboxProfile;
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
 use paths::{
@@ -114,7 +116,9 @@ pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
+pub(crate) use policy::active_sandbox_policy;
 mod policy_projection;
+pub(crate) mod replay;
 #[cfg(target_os = "linux")]
 pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
 pub use policy_projection::unix_socket_enforcement;
@@ -220,7 +224,7 @@ pub(crate) fn reset_sandbox_state() {
 harn_vm_core::stdlib_state_reset!(reset_sandbox_state);
 
 /// A workspace-root scope violation: a path that resolved outside every
-/// configured workspace root under a restricted [`SandboxProfile`].
+/// configured workspace root under a restricted [`SandboxProfile`](crate::orchestration::SandboxProfile).
 ///
 /// This is the `VmError`-free shape returned by [`check_fs_path_scope`] so
 /// that crates outside `harn-vm` (today: `harn-hostlib`) can enforce the
@@ -1099,6 +1103,7 @@ pub fn command_output(
     args: &[String],
     config: &ProcessCommandConfig,
 ) -> Result<Output, VmError> {
+    replay::check_supported()?;
     // Testbench replay mode short-circuits the spawn entirely.
     // Recording mode falls through; the duration is captured by the
     // recording handle below using the injected mock clock when one
@@ -1202,20 +1207,6 @@ fn sandbox_signal_status(output: &std::process::Output) -> bool {
 #[cfg(not(unix))]
 fn sandbox_signal_status(_output: &std::process::Output) -> bool {
     false
-}
-
-/// Returns the active capability policy and the resolved sandbox
-/// profile, or `None` if process confinement should be skipped entirely.
-///
-/// Profiles that do not confine processes produce `None`, as does the
-/// `HARN_HANDLER_SANDBOX=off` escape hatch.
-pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfile)> {
-    let policy = crate::orchestration::current_execution_policy()?;
-    let profile = policy.sandbox_profile;
-    if !profile.confines_processes() || effective_fallback(profile) == SandboxFallback::Off {
-        return None;
-    }
-    Some((crate::process_sandbox::reconcile(policy), profile))
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
@@ -1427,6 +1418,9 @@ fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
 /// from [`normalized_workspace_roots`] so the git-topology detection runs
 /// against the real project roots and never re-inspects the git dirs it adds.
 fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if let Some(roots) = replay::workspace_roots() {
+        return roots;
+    }
     if policy.workspace_roots.is_empty() {
         // An empty `policy.workspace_roots` means no explicit write-jail was
         // configured for this call. Historically this fell straight back to the

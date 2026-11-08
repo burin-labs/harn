@@ -47,6 +47,15 @@ pub(crate) async fn vm_call_completion_full(
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     crate::llm::admission::check_auxiliary(opts.budget.as_ref(), "fill-in-the-middle completion")?;
+    let projection = crate::run_tape::workspace::current_projection();
+    let projected_prefix = projection
+        .as_ref()
+        .map(|projection| projection.text(prefix));
+    let projected_suffix = projection
+        .as_ref()
+        .and_then(|projection| suffix.map(|s| projection.text(s)));
+    let prefix = projected_prefix.as_deref().unwrap_or(prefix);
+    let suffix = projected_suffix.as_deref().or(suffix);
     let request = completion_fixture_request(opts, prefix, suffix);
     if let Some(served) = crate::run_tape::serve_llm_call(&request) {
         let result = served?;

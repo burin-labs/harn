@@ -102,7 +102,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             (state.root.clone(), absolute)
         }
         None => {
-            let absolute = resolve_host_path(&path);
+            let absolute = resolve_host_path(BUILTIN, &path)?;
             let root = absolute.parent().map(Path::to_path_buf).unwrap_or_default();
             (root, absolute)
         }

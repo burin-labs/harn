@@ -26,7 +26,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let dict = raw.as_ref();
     let path = require_string(BUILTIN, dict, "path")?;
     let root = match optional_string(BUILTIN, dict, "root")? {
-        Some(root) => resolve_host_path(root),
+        Some(root) => resolve_host_path(BUILTIN, root)?,
         None => index
             .lock()
             .expect("code_index mutex poisoned")

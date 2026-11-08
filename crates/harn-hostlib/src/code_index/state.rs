@@ -887,6 +887,7 @@ impl IndexState {
         } else {
             self.root.join(p)
         };
+        let candidate = harn_vm::run_tape::workspace_path(candidate).ok()?;
         let canonical = canonicalize_existing(&candidate);
         if canonical.strip_prefix(&self.root).is_ok() {
             Some(canonical)

@@ -42,42 +42,89 @@ impl ReplayWorkspace {
     /// The prior execution and its children must have stopped before its owner
     /// releases the lease. Windows requires the original user-private parent ACL.
     pub fn restore_saved(saved: &SavedReplayWorkspace) -> Result<Self, SeedError> {
+        let parent = open_saved_storage(saved)?;
         let root = &saved.storage_root;
-        let metadata = std::fs::symlink_metadata(root)
-            .map_err(|error| io("inspect saved storage", root, error))?;
-        if !metadata.is_dir()
-            || root
-                .canonicalize()
-                .map_err(|error| io("resolve saved storage", root, error))?
-                != *root
-        {
-            return Err(SeedError::Unsupported {
-                path: root.clone(),
-                reason: "saved storage must remain at its original canonical directory",
-            });
-        }
-        #[cfg(unix)]
-        if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o077 != 0 {
-            return Err(SeedError::Unsupported {
-                path: root.clone(),
-                reason: "saved storage is no longer private to its owner",
-            });
-        }
-        let parent = open_dir(root)?;
-        let held = lease(&parent, root, false)?;
+        let held = lease(&parent, root, LeaseAccess::RestoreWorkspace)?;
         let mut workspace = Self {
             _lease: held,
             storage: storage::PrivateStorage::retained(root.clone()),
-            workspace: root.join("workspace"),
+            workspace: ReplayWorkspaceLocation::from_storage_root(root)
+                .map_err(|error| io("bind replay storage", root, error))?,
             receipt: saved.receipt.clone(),
             limits: saved.limits,
         };
         workspace.restore()?;
         Ok(workspace)
     }
+
+    /// Copy a saved seed into independently leased private storage. Shared
+    /// readers hold the source only while copying; each result owns its seed
+    /// and working copy. The parent has the privacy requirements of `capture_in`.
+    pub fn fork_saved_in(
+        saved: &SavedReplayWorkspace,
+        storage_parent: &Path,
+    ) -> Result<Self, SeedError> {
+        let parent = open_saved_storage(saved)?;
+        let _reader = lease(&parent, &saved.storage_root, LeaseAccess::ReadSeed)?;
+        require_directory(&parent, "seed")?;
+        let seed = parent
+            .open_dir("seed")
+            .map_err(|error| io("open", Path::new("seed"), error))?;
+        let destination = storage_parent
+            .canonicalize()
+            .map_err(|error| io("resolve storage parent", storage_parent, error))?;
+        if destination.starts_with(&saved.storage_root) {
+            return Err(SeedError::Unsupported {
+                path: destination,
+                reason: "branch storage must be outside the saved workspace storage",
+            });
+        }
+        let branch = Self::capture_directory_in(&seed, &destination, saved.limits)?;
+        if branch.receipt != saved.receipt {
+            return Err(SeedError::SeedChanged);
+        }
+        Ok(branch)
+    }
 }
 
-pub(super) fn lease(parent: &Dir, root: &Path, create: bool) -> Result<std::fs::File, SeedError> {
+fn open_saved_storage(saved: &SavedReplayWorkspace) -> Result<Dir, SeedError> {
+    let root = &saved.storage_root;
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| io("inspect saved storage", root, error))?;
+    if !metadata.is_dir()
+        || root
+            .canonicalize()
+            .map_err(|error| io("resolve saved storage", root, error))?
+            != *root
+    {
+        return Err(SeedError::Unsupported {
+            path: root.clone(),
+            reason: "saved storage must remain at its original canonical directory",
+        });
+    }
+    #[cfg(unix)]
+    if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o077 != 0 {
+        return Err(SeedError::Unsupported {
+            path: root.clone(),
+            reason: "saved storage is no longer private to its owner",
+        });
+    }
+    open_dir(root)
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LeaseAccess {
+    CreateWorkspace,
+    RestoreWorkspace,
+    ReadSeed,
+}
+
+pub(super) fn lease(
+    parent: &Dir,
+    root: &Path,
+    access: LeaseAccess,
+) -> Result<std::fs::File, SeedError> {
+    let create = matches!(access, LeaseAccess::CreateWorkspace);
     if !create {
         let metadata = parent
             .symlink_metadata(LEASE_FILE)
@@ -94,12 +141,16 @@ pub(super) fn lease(parent: &Dir, root: &Path, create: bool) -> Result<std::fs::
             LEASE_FILE,
             cap_std::fs::OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(!matches!(access, LeaseAccess::ReadSeed))
                 .create_new(create),
         )
         .map_err(|error| io("open workspace lease", root, error))?
         .into_std();
-    match file.try_lock() {
+    let locked = match access {
+        LeaseAccess::ReadSeed => file.try_lock_shared(),
+        LeaseAccess::CreateWorkspace | LeaseAccess::RestoreWorkspace => file.try_lock(),
+    };
+    match locked {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => Err(SeedError::InUse {
             path: root.to_path_buf(),

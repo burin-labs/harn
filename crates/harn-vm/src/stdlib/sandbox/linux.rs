@@ -747,6 +747,7 @@ fn push_rule(
     let mut pending = vec![(path, optional)];
     let mut observed = std::collections::BTreeSet::new();
     while let Some((path, optional)) = pending.pop() {
+        crate::run_tape::workspace_path(path.clone())?;
         // Snapshot aliases for the mount renderer before normalizing. They
         // expose only targets mounted from admitted handles, never host data.
         for ancestor in path.ancestors() {
@@ -788,6 +789,8 @@ fn push_rule_exact(
     allowed_access: FsAccess,
     optional: bool,
 ) -> Result<(), VmError> {
+    crate::run_tape::workspace_path(path.clone())?;
+    super::replay::check_grant(&super::normalize_for_policy(&path))?;
     let file = match std::fs::File::open(&path) {
         Ok(file) => file,
         // An OPTIONAL root we cannot open is skipped, not fatal. Missing and

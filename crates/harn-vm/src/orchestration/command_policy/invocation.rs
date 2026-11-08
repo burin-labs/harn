@@ -111,8 +111,12 @@ impl<'de> Deserialize<'de> for CommandInvocation {
 pub fn prepare_local_command_cwd(requested: Option<&str>) -> Result<PathBuf, VmError> {
     let path = match requested.filter(|path| !path.is_empty()) {
         Some(path) => crate::stdlib::process::resolve_source_relative_path(path),
-        None => crate::stdlib::process::inherited_process_cwd()?,
+        None => match crate::run_tape::state_branch().filter(|branch| branch.relocated()) {
+            Some(branch) => branch.workspace().to_path_buf(),
+            None => crate::stdlib::process::inherited_process_cwd()?,
+        },
     };
+    let path = crate::run_tape::workspace_path(path)?;
     let canonical = path
         .canonicalize()
         .map_err(|error| VmError::Runtime(format!("command cwd {}: {error}", path.display())))?;

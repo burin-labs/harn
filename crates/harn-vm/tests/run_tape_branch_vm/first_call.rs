@@ -132,7 +132,7 @@ fn first_call_branch_requires_an_observed_baseline_call() {
     let result = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 0,
-        workspace_root: dirs.workspace,
+        workspace: location(&dirs.workspace),
         state_root: dirs.markers.join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

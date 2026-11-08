@@ -1,10 +1,11 @@
-//! A private initial workspace and repeatable copies at one stable path.
+//! Private verified workspace seeds and repeatable working copies.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use cap_std::fs::{Dir, Permissions};
+use harn_vm::run_tape::ReplayWorkspaceLocation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -117,7 +118,7 @@ pub struct ReplayWorkspace {
     // Release the file lock before temporary storage is removed on Windows.
     _lease: std::fs::File,
     storage: storage::PrivateStorage,
-    workspace: PathBuf,
+    workspace: ReplayWorkspaceLocation,
     receipt: SeedReceipt,
     limits: SeedLimits,
 }
@@ -152,6 +153,14 @@ impl ReplayWorkspace {
             });
         }
         let original = open_dir(source)?;
+        Self::capture_directory_in(&original, &canonical_parent, limits)
+    }
+
+    fn capture_directory_in(
+        original: &Dir,
+        storage_parent: &Path,
+        limits: SeedLimits,
+    ) -> Result<Self, SeedError> {
         let mut builder = tempfile::Builder::new();
         builder.prefix("harn-replay-");
         #[cfg(unix)]
@@ -160,7 +169,7 @@ impl ReplayWorkspace {
         );
         let storage = storage::PrivateStorage::new(
             builder
-                .tempdir_in(&canonical_parent)
+                .tempdir_in(storage_parent)
                 .map_err(|error| io("create private storage", storage_parent, error))?,
         );
         let parent = open_dir(storage.path())?;
@@ -170,22 +179,27 @@ impl ReplayWorkspace {
         let seed = parent
             .open_dir("seed")
             .map_err(|error| io("open", Path::new("seed"), error))?;
-        let receipt = copy_and_measure(&original, Some(&seed), limits)?;
-        if copy_and_measure(&original, None, limits)? != receipt {
+        let receipt = copy_and_measure(original, Some(&seed), limits)?;
+        if copy_and_measure(original, None, limits)? != receipt {
             return Err(SeedError::SourceChanged);
         }
         parent
-            .create_dir("workspace")
+            .create_dir(ReplayWorkspaceLocation::DIRECTORY_NAME)
             .map_err(|error| io("create", Path::new("workspace"), error))?;
         let workspace_dir = parent
-            .open_dir("workspace")
+            .open_dir(ReplayWorkspaceLocation::DIRECTORY_NAME)
             .map_err(|error| io("open", Path::new("workspace"), error))?;
         if copy_and_measure(&seed, Some(&workspace_dir), limits)? != receipt {
             return Err(SeedError::SeedChanged);
         }
         Ok(Self {
-            _lease: persistent::lease(&parent, storage.path(), true)?,
-            workspace: storage.path().join("workspace"),
+            _lease: persistent::lease(
+                &parent,
+                storage.path(),
+                persistent::LeaseAccess::CreateWorkspace,
+            )?,
+            workspace: ReplayWorkspaceLocation::from_storage_root(storage.path())
+                .map_err(|error| io("bind replay storage", storage.path(), error))?,
             storage,
             receipt,
             limits,
@@ -194,7 +208,12 @@ impl ReplayWorkspace {
 
     /// Stable directory to grant to an isolated execution.
     pub fn path(&self) -> &Path {
-        &self.workspace
+        self.workspace.workspace_root()
+    }
+
+    /// The working copy and its storage pool, supplied together to replay.
+    pub fn location(&self) -> ReplayWorkspaceLocation {
+        self.workspace.clone()
     }
 
     /// Captured identity carried across every successful restore.
@@ -226,20 +245,25 @@ impl ReplayWorkspace {
         // A crashed restore may have retired the working copy or published
         // its replacement. The verified seed above makes either state recoverable.
         storage::remove_child(&parent, Path::new("previous"))?;
-        let retired = match parent.rename("workspace", &parent, "previous") {
-            Ok(()) => true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => return Err(io("retire working copy", &self.workspace, error)),
-        };
-        if let Err(error) = parent.rename(staged_name, &parent, "workspace") {
+        let retired =
+            match parent.rename(ReplayWorkspaceLocation::DIRECTORY_NAME, &parent, "previous") {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => return Err(io("retire working copy", self.path(), error)),
+            };
+        if let Err(error) = parent.rename(
+            staged_name,
+            &parent,
+            ReplayWorkspaceLocation::DIRECTORY_NAME,
+        ) {
             if retired {
                 parent
-                    .rename("previous", &parent, "workspace")
+                    .rename("previous", &parent, ReplayWorkspaceLocation::DIRECTORY_NAME)
                     .map_err(|rollback| {
-                        io("recover previous working copy", &self.workspace, rollback)
+                        io("recover previous working copy", self.path(), rollback)
                     })?;
             }
-            return Err(io("publish restored copy", &self.workspace, error));
+            return Err(io("publish restored copy", self.path(), error));
         }
         storage::remove_child(&parent, Path::new("previous"))?;
         Ok(&self.receipt)

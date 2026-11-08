@@ -22,7 +22,7 @@ use ignore::WalkBuilder;
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
-    require_string, str_value, to_agent_path,
+    require_string, resolve_host_path, str_value, to_agent_path,
 };
 use crate::tools::permissions::enforce_path_scope;
 
@@ -48,10 +48,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     let raw_path = optional_string(BUILTIN, dict, "path")?;
-    let path = raw_path
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let path = resolve_host_path(BUILTIN, raw_path.as_deref().unwrap_or("."))?;
     // The walk descends from `path`; workspace-root scope is a prefix
     // check, so guarding the root rejects an out-of-scope search before it
     // can enumerate any file beneath it.

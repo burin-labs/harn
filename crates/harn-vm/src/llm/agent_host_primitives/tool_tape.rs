@@ -46,7 +46,9 @@ async fn run_recorded(
 ) -> Result<VmValue, VmError> {
     let background = Arc::new(AtomicBool::new(false));
     let live = IN_RECORDED_DISPATCH.scope(background.clone(), live);
-    let result = crate::run_tape::capture_transcript_changes(&mut recording, live).await;
+    let result = crate::run_tape::capture_transcript_changes(&mut recording, live)
+        .await
+        .map(crate::run_tape::workspace::project_value);
     if let Some(recording) = recording {
         let outcome = if background.load(Ordering::Acquire) {
             Err("a background command outlives the recorded dispatch".to_string())
@@ -74,13 +76,18 @@ pub async fn taped_command_run(
 ) -> Result<VmValue, VmError> {
     if background {
         crate::run_tape::refuse_in_prefix(name, "a background command cannot be replayed")?;
+        if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
+            return Err(VmError::Runtime(
+                "background command cannot retain a relocated replay filesystem namespace".into(),
+            ));
+        }
         let _ = IN_RECORDED_DISPATCH.try_with(|flag| flag.store(true, Ordering::Release));
         crate::run_tape::check_live_command_workspace()?;
-        return live.await;
+        return live.await.map(crate::run_tape::workspace::project_value);
     }
     if IN_RECORDED_DISPATCH.try_with(|_| ()).is_ok() {
         crate::run_tape::check_live_command_workspace()?;
-        return live.await;
+        return live.await.map(crate::run_tape::workspace::project_value);
     }
     let tool = format!("process:{name}");
     let args = serde_json::Value::Array(
@@ -131,6 +138,9 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
 }
 
 fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -> Taped {
+    let mut logical_args = args.clone();
+    crate::run_tape::workspace::project_json(&mut logical_args);
+    let args = &logical_args;
     // Recording starts before serving, so a branch's own tape keeps what it
     // served and the effects it re-applied.
     let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);

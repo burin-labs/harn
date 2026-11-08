@@ -122,6 +122,17 @@ pub struct RunTapeHeader {
     /// The recorded run's canonical workspace.
     #[serde(default)]
     pub workspace_root: Option<PathBuf>,
+    /// Alternate recorded spellings, resolved only at physical I/O boundaries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_aliases: Vec<PathBuf>,
+    /// Earlier workspace roots, oldest first. A recorded branch retains these
+    /// names so descendants can relocate unchanged source and served data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_ancestors: Vec<PathBuf>,
+    /// Physical source locations retained by a recorded branch. Their oldest
+    /// roots remain logical names when the package moves again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_workspaces: Vec<RecordedSourceRoot>,
 }
 
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
@@ -191,10 +202,12 @@ pub fn start_recording(
     let mut header =
         TapeHeader::current(Some(crate::stdlib::clock::now_wall_ms()), None, Vec::new());
     header.version = crate::testbench::tape::TAPE_FORMAT_VERSION;
-    let workspace_root = workspace.as_ref().map(|workspace| {
-        crate::workspace_path::canonicalize_existing_ancestor(&workspace.root)
-            .unwrap_or_else(|_| workspace.root.clone())
-    });
+    let recorded = workspace::recording_workspace(workspace.as_ref())?;
+    let workspace::RecordedWorkspace {
+        root: workspace_root,
+        aliases: workspace_aliases,
+        ancestors: workspace_ancestors,
+    } = recorded;
     header.run = Some(RunTapeHeader {
         recording: level,
         effects_observed: workspace.is_some(),
@@ -212,6 +225,11 @@ pub fn start_recording(
                 .collect()
         }),
         workspace_root,
+        workspace_aliases,
+        workspace_ancestors,
+        source_workspaces: scope::state_branch()
+            .map(|branch| branch.sources().recording().to_vec())
+            .unwrap_or_default(),
     });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
     if slot.is_some() {
@@ -483,6 +501,8 @@ pub(crate) use recording::{
 // Branch replay
 // ---------------------------------------------------------------------------
 
+pub use harn_vm_core::replay_workspace::ReplayWorkspaceLocation;
+
 /// Where a branch replays from and where its workspace lives.
 #[derive(Clone, Debug)]
 pub struct BranchPlan {
@@ -494,7 +514,7 @@ pub struct BranchPlan {
     pub live_after_calls: u64,
     /// The branch's workspace, a copy of the recorded run's starting tree.
     /// Served tool calls re-apply their file effects here.
-    pub workspace_root: PathBuf,
+    pub workspace: ReplayWorkspaceLocation,
     /// Where the branch keeps its durable state: runtime store, session store
     /// and event log. It must be absent or empty, so a branch never writes
     /// into the recording's state; the prefix rebuilds it by replaying.
@@ -805,9 +825,16 @@ pub fn start_branch_with_sources(
                 let digest = request_digest.clone();
                 let result: LlmResult = serde_json::from_slice(&tape.resolve_payload(response)?)
                     .map_err(|err| format!("tape model response: {err}"))?;
+                let surface = recorded_surface(&tape, request.as_ref(), messages);
+                if surface
+                    .as_ref()
+                    .is_some_and(|surface| surface_digest(surface) != digest)
+                {
+                    return Err("recorded model request does not match its recorded digest".into());
+                }
                 calls.push(RecordedCall {
                     digest,
-                    surface: recorded_surface(&tape, request.as_ref(), messages),
+                    surface,
                     result,
                 });
             }
@@ -878,25 +905,26 @@ pub fn start_branch_with_sources(
             plan.live_after_calls
         ));
     }
-    let workspace_root = plan
-        .workspace_root
+    let declared_workspace = plan.workspace.workspace_root().to_path_buf();
+    let workspace_root = declared_workspace
         .canonicalize()
         .map_err(|error| format!("branch workspace must exist: {error}"))?;
     if !workspace_root.is_dir() {
         return Err("branch workspace must be a directory".to_string());
     }
-    let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
+    if workspace_root != declared_workspace {
+        return Err("branch workspace must remain inside its owned storage directory".into());
+    }
+    let workspace_container_root = plan.workspace.storage_pool().to_path_buf();
+    let sources = sources::ReplaySources::from_tape(&tape, source_roots, &plan.workspace)?;
+    let recorded_workspace = workspace::RecordedWorkspace::from_tape(&tape)?;
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
-        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
+        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, sources.roots())?;
     let trees: Vec<PathBuf> = protected
         .iter()
         .map(|(tree, _)| tree.clone())
-        .chain(
-            source_roots
-                .iter()
-                .flat_map(|root| [root.recorded.clone(), root.restored.clone()]),
-        )
+        .chain(sources.boundary_roots().iter().cloned())
         .collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
@@ -919,12 +947,10 @@ pub fn start_branch_with_sources(
         handle: BranchHandle::arm(
             state,
             state_root,
+            workspace_container_root,
             protected,
-            tape.header
-                .run
-                .as_ref()
-                .and_then(|run| run.workspace_root.clone()),
-            source_roots,
+            recorded_workspace,
+            sources,
         ),
     })
 }
@@ -944,6 +970,12 @@ fn recording_trees(
     let workspaces = run
         .and_then(|run| run.workspace_root.clone())
         .into_iter()
+        .chain(run.into_iter().flat_map(|run| {
+            run.workspace_ancestors
+                .iter()
+                .chain(&run.workspace_aliases)
+                .cloned()
+        }))
         .chain(std::iter::once(workspace.to_path_buf()));
     let mut trees: Vec<(PathBuf, PathBuf)> = Vec::new();
     let roots = state_roots
@@ -987,9 +1019,7 @@ fn recorded_surface(
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         })
         .collect::<Option<Vec<serde_json::Value>>>()?;
-    if !messages.is_empty() {
-        surface.insert("messages".to_string(), serde_json::Value::Array(messages));
-    }
+    surface.insert("messages".to_string(), serde_json::Value::Array(messages));
     Some(surface)
 }
 
@@ -1109,6 +1139,16 @@ pub(crate) fn serve_llm_call(
     // Keep the recorded cost and usage, flagged as served, so a branch's
     // accounting says what its prefix cost without counting it as new spend.
     let mut result = recorded.result.clone();
+    if let Some(projection) = workspace::current_projection() {
+        let text = projection.text(&result.text);
+        if text != result.text {
+            result.text = text;
+            result.text_projection = None;
+        }
+        for call in &mut result.tool_calls {
+            projection.json(call);
+        }
+    }
     result.telemetry.source = crate::llm::api::telemetry_source::BRANCH_SERVED.to_string();
     state.report.served_calls += 1;
     Some(Ok(result))
@@ -1136,6 +1176,8 @@ fn recorded_lookup(
     unknown_is_live: bool,
     live: impl FnOnce() -> Result<Option<serde_json::Value>, crate::value::VmError>,
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
+    let recorded_key = workspace::current_projection()
+        .map_or_else(|| key.to_string(), |projection| projection.text(key));
     let served = {
         let branch = current_branch();
         let mut guard = branch.as_ref().map(|branch| branch.state());
@@ -1149,7 +1191,7 @@ fn recorded_lookup(
                 let slot = (
                     state.report.served_calls,
                     namespace.to_string(),
-                    key.to_string(),
+                    recorded_key,
                 );
                 let recorded = state
                     .cache_lookups
@@ -1184,10 +1226,13 @@ fn recorded_lookup(
             _ => None,
         }
     };
-    let value = match served {
+    let mut value = match served {
         Some(value) => value,
         None => live()?,
     };
+    if let Some(value) = &mut value {
+        workspace::project_json(value);
+    }
     if let Some(tape) = process_tape().filter(|tape| tape.level == RecordingLevel::Full) {
         let payload = value.as_ref().map(|value| {
             tape.recorder
@@ -1243,7 +1288,11 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     };
     // The same tool and arguments at the same point in the run, preferring
     // the same provider id: text-format calls get fresh ids on every parse.
-    let digest = args_digest(args);
+    let mut original_args = args.clone();
+    if let Some(projection) = workspace::current_projection() {
+        projection.json(&mut original_args);
+    }
+    let digest = args_digest(&original_args);
     let candidates = state.tools.get(&call).map_or(&[][..], Vec::as_slice);
     let same_call = |entry: &PrefixTool| {
         !entry.used && entry.recorded.tool == tool && entry.recorded.args_digest == digest
@@ -1266,7 +1315,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     let recorded = &entry.recorded;
     // Running it instead would repeat its effects; nothing in a prefix runs.
     let outcome = match (&recorded.outcome, &recorded.unservable) {
-        (Some(outcome), None) => outcome.clone(),
+        (Some(outcome), None) => workspace::project_tool_result(outcome.clone()),
         (_, reason) => {
             let reason = reason
                 .clone()
@@ -1342,10 +1391,17 @@ pub(crate) use transcript::{
 #[path = "run_tape_scope.rs"]
 mod scope;
 pub use scope::BranchScope;
+#[path = "run_tape_sources.rs"]
+mod sources;
+pub use sources::RecordedSourceRoot;
+#[path = "run_tape_workspace.rs"]
+pub(crate) mod workspace;
+pub use scope::workspace_path;
 pub(crate) use scope::{
     branch_event_log, branch_path, check_live_command_workspace, current_branch, durable_path,
-    scoped_state_root, state_branch, workspace_path, BranchHandle,
+    scoped_state_root, state_branch, BranchHandle,
 };
+pub use workspace::ReplayWorkspaceIdentity;
 
 #[path = "run_tape_prefix.rs"]
 mod prefix;
