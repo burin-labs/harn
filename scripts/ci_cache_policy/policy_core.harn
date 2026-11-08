@@ -2142,6 +2142,12 @@ fn active_release_runner_errors(release_runner_policy: CiReleaseRunnerPolicy) ->
   return errors
 }
 
+/**
+ * Paid hosted runners a maintainer approved for one job, as
+ * "workflow:job:label". Release qualification runs on the larger hosted Mac.
+ */
+pub const APPROVED_PAID_RUNNERS = ["macos-nightly.yml:nextest:macos-latest-xlarge"]
+
 pub const PAID_CAPACITY_ROUTE_INPUTS = [
   "FLEET_EVACUATION",
   "PAID_LINUX_PROVIDER",
@@ -2164,7 +2170,8 @@ pub fn public_repository_runner_errors(
           ) {
           errors = errors + ["${workflow_name}:${job_name} must not request a self-hosted runner"]
         }
-        if paid_public_runner_selector(label, release_runner_policy) {
+        if paid_public_runner_selector(label, release_runner_policy)
+          && !APPROVED_PAID_RUNNERS.contains("${workflow_name}:${job_name}:${label}") {
           errors = errors
             + [
               "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
