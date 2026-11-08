@@ -127,8 +127,7 @@ fn assert_closed_child_replays(create: &str) {
     let guard = start_branch(BranchPlan {
         tape: tape.clone(),
         live_after_calls: 2,
-        workspace_root: dirs.workspace.clone(),
-        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&dirs.workspace),
         state_root: dirs.workspace.parent().unwrap().join("valid-child"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -263,8 +262,7 @@ fn assert_closed_child_replays(create: &str) {
         let guard = start_branch(BranchPlan {
             tape: changed,
             live_after_calls: 2,
-            workspace_root: dirs.workspace.clone(),
-            workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+            workspace: location(&dirs.workspace),
             state_root: dirs.workspace.parent().unwrap().join(case),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

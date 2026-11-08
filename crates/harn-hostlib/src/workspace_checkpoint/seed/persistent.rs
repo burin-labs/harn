@@ -48,7 +48,8 @@ impl ReplayWorkspace {
         let mut workspace = Self {
             _lease: held,
             storage: storage::PrivateStorage::retained(root.clone()),
-            workspace: root.join("workspace"),
+            workspace: ReplayWorkspaceLocation::from_storage_root(root)
+                .map_err(|error| io("bind replay storage", root, error))?,
             receipt: saved.receipt.clone(),
             limits: saved.limits,
         };

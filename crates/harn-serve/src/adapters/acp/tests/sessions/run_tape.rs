@@ -45,7 +45,7 @@ fn a_branch_reuses_the_recorded_acp_session_identity() {
     runtime.block_on(async {
         let tmp = tempfile::tempdir().unwrap();
         let recorded_workspace = tmp.path().join("recorded");
-        let branch_workspace = tmp.path().join("branch");
+        let branch_workspace = tmp.path().join("pool/arm/workspace");
         std::fs::create_dir_all(&recorded_workspace).unwrap();
         std::fs::create_dir_all(&branch_workspace).unwrap();
         let tapes = tmp.path().join("tapes");
@@ -87,8 +87,10 @@ fn a_branch_reuses_the_recorded_acp_session_identity() {
         let branch = start_branch(BranchPlan {
             tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
-            workspace_root: branch_workspace.clone(),
-            workspace_container_root: branch_workspace.parent().unwrap().to_path_buf(),
+            workspace: harn_vm::run_tape::ReplayWorkspaceLocation::from_storage_root(
+                branch_workspace.parent().unwrap(),
+            )
+            .unwrap(),
             state_root: tmp.path().join("branch-state"),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

@@ -24,6 +24,30 @@ mod store_changes;
 /// are process-global by design.
 use super::TEST_PROCESS_LOCK as PROCESS_LOCK;
 
+struct ReplayFixture {
+    _pool: tempfile::TempDir,
+    workspace: PathBuf,
+}
+
+impl ReplayFixture {
+    fn path(&self) -> &Path {
+        &self.workspace
+    }
+}
+
+fn replay_fixture() -> ReplayFixture {
+    let pool = tempfile::tempdir().unwrap();
+    let storage = pool.path().join("pool/arm");
+    std::fs::create_dir_all(&storage).unwrap();
+    let location = ReplayWorkspaceLocation::from_storage_root(&storage).unwrap();
+    let workspace = location.workspace_root().to_path_buf();
+    std::fs::create_dir(&workspace).unwrap();
+    ReplayFixture {
+        _pool: pool,
+        workspace,
+    }
+}
+
 fn request(text: &str) -> LlmRequestPayload {
     LlmRequestPayload {
         provider: "anthropic".to_string(),
@@ -79,7 +103,7 @@ fn record_full(dir: &Path) -> RunTapeGuard {
 #[test]
 fn version_four_transcripts_remain_readable_without_claiming_lifecycle_evidence() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let dir = tempfile::tempdir().unwrap();
+    let dir = replay_fixture();
     let guard = record_full(dir.path());
     let legacy = serde_json::json!({
         "session_id": "legacy-session",
@@ -103,8 +127,7 @@ fn version_four_transcripts_remain_readable_without_claiming_lifecycle_evidence(
     let result = start_branch(BranchPlan {
         tape: loaded,
         live_after_calls: 1,
-        workspace_root: dir.path().to_path_buf(),
-        workspace_container_root: dir.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(dir.path()),
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -130,14 +153,19 @@ impl std::ops::Deref for TestBranch {
     }
 }
 
-fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
+fn branch_location(workspace: &Path) -> ReplayWorkspaceLocation {
     std::fs::create_dir_all(workspace).unwrap();
+    let location = ReplayWorkspaceLocation::from_storage_root(workspace.parent().unwrap()).unwrap();
+    assert_eq!(location.workspace_root(), workspace.canonicalize().unwrap());
+    location
+}
+
+fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
     let state = tempfile::tempdir().unwrap();
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
-        workspace_root: workspace.to_path_buf(),
-        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
+        workspace: branch_location(workspace),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -179,8 +207,11 @@ fn record_run(dir: &Path) {
 #[test]
 fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
-    let (tape_dir, branch_ws) = (tmp.path().join("tape"), tmp.path().join("branch"));
+    let tmp = replay_fixture();
+    let (tape_dir, branch_ws) = (
+        tmp.path().join("tape"),
+        tmp.path().join("pool/arm/workspace"),
+    );
     std::fs::create_dir_all(&branch_ws).unwrap();
     record_run(&tape_dir);
 
@@ -220,7 +251,7 @@ fn a_zero_edit_branch_serves_the_prefix_and_reapplies_tool_effects() {
 #[test]
 fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD";
     let tape_dir = tmp.path().join(secret);
     std::fs::create_dir_all(&tape_dir).unwrap();
@@ -356,8 +387,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     let result = start_branch(BranchPlan {
         tape,
         live_after_calls: 1,
-        workspace_root: tmp.path().join("branch"),
-        workspace_container_root: tmp.path().to_path_buf(),
+        workspace: branch_location(tmp.path()),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -407,12 +437,11 @@ fn a_branch_requires_an_existing_workspace_copy() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     record_run(tmp.path());
-    let missing = tmp.path().join("missing-workspace");
+    let missing = tmp.path().join("workspace");
     let result = start_branch(BranchPlan {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: missing.clone(),
-        workspace_container_root: tmp.path().to_path_buf(),
+        workspace: ReplayWorkspaceLocation::from_storage_root(tmp.path()).unwrap(),
         state_root: tmp.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -426,10 +455,10 @@ fn a_branch_requires_an_existing_workspace_copy() {
 #[test]
 fn a_prefix_request_mismatch_fails_closed_and_never_goes_live() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
 
-    let branch = branch(tmp.path(), 2, &tmp.path().join("branch"));
+    let branch = branch(tmp.path(), 2, &tmp.path().join("pool/arm/workspace"));
     let error = serve_llm_call(&request("edited")).unwrap().unwrap_err();
     let message = error.to_string();
     assert!(message.contains("model call 1"), "{message}");
@@ -442,7 +471,7 @@ fn a_prefix_request_mismatch_fails_closed_and_never_goes_live() {
 #[test]
 fn the_request_digest_covers_every_request_setting_but_the_credential_and_session() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("first"), &result("ok", None));
@@ -484,7 +513,7 @@ fn the_request_digest_covers_every_request_setting_but_the_credential_and_sessio
 #[test]
 fn path_projection_cannot_replace_the_recorded_request_digest() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _recording = record_full(tmp.path());
         record_llm_call(&request("first"), &result("ok", None));
@@ -501,8 +530,7 @@ fn path_projection_cannot_replace_the_recorded_request_digest() {
     let admission = start_branch(BranchPlan {
         tape,
         live_after_calls: 1,
-        workspace_root: tmp.path().to_path_buf(),
-        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(tmp.path()),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -583,7 +611,7 @@ fn every_unserialized_request_field_is_covered_or_excluded_by_the_digest() {
 #[test]
 fn a_metadata_tape_refuses_to_branch() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = start_recording(tmp.path(), RecordingLevel::Metadata, None)
             .unwrap()
@@ -593,8 +621,7 @@ fn a_metadata_tape_refuses_to_branch() {
     let error = start_branch(BranchPlan {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: tmp.path().to_path_buf(),
-        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(tmp.path()),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -607,7 +634,7 @@ fn a_metadata_tape_refuses_to_branch() {
 #[test]
 fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = start_recording(tmp.path(), RecordingLevel::Full, None)
             .unwrap()
@@ -617,8 +644,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
     let error = start_branch(BranchPlan {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: tmp.path().to_path_buf(),
-        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(tmp.path()),
         state_root: fresh_branch_state(tmp.path()),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -634,7 +660,7 @@ fn a_tape_recorded_without_a_workspace_observer_refuses_to_branch() {
 #[test]
 fn an_unservable_prefix_tool_call_diverges_instead_of_running() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("first"), &result("calling", Some("t1")));
@@ -644,7 +670,7 @@ fn an_unservable_prefix_tool_call_diverges_instead_of_running() {
             Err("tool error has no recorded shape".to_string()),
         );
     }
-    let branch = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    let branch = branch(tmp.path(), 1, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     assert!(matches!(
         serve_tool_call("t1", "write", &serde_json::json!({})),
@@ -658,10 +684,10 @@ fn an_unservable_prefix_tool_call_diverges_instead_of_running() {
 #[test]
 fn a_run_that_ends_before_its_prefix_is_consumed_diverges() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
     // Fewer model calls than K.
-    let short = branch(tmp.path(), 2, &tmp.path().join("branch"));
+    let short = branch(tmp.path(), 2, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"}));
     let divergence = short.finish().divergence.unwrap();
@@ -671,7 +697,7 @@ fn a_run_that_ends_before_its_prefix_is_consumed_diverges() {
     );
     drop(short);
     // Every model call served, but a recorded tool call never made.
-    let skipped = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    let skipped = branch(tmp.path(), 1, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     let divergence = skipped.finish().divergence.unwrap();
     assert!(divergence.detail.contains("`write` call t1 was never made"));
@@ -680,9 +706,9 @@ fn a_run_that_ends_before_its_prefix_is_consumed_diverges() {
 #[test]
 fn an_unconsumed_prefix_cannot_start_live_inference() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
-    let skipped = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    let skipped = branch(tmp.path(), 1, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     let error = serve_llm_call(&request("second"))
         .expect("an incomplete prefix must not reach a provider")
@@ -696,7 +722,7 @@ fn an_unconsumed_prefix_cannot_start_live_inference() {
 #[test]
 fn a_tool_with_nested_inference_is_refused_before_applying_its_effects() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let args = serde_json::json!({"path": "src/t1.txt"});
     {
         let _guard = record_full(tmp.path());
@@ -705,7 +731,7 @@ fn a_tool_with_nested_inference_is_refused_before_applying_its_effects() {
         record_llm_call(&request("nested"), &result("nested result", None));
         finish_tool_call(tool, Ok(ok(serde_json::json!("done"))));
     }
-    let workspace = tmp.path().join("branch");
+    let workspace = tmp.path().join("pool/arm/workspace");
     let replay = branch(tmp.path(), 1, &workspace);
     serve_llm_call(&request("first")).unwrap().unwrap();
     assert!(matches!(
@@ -726,7 +752,7 @@ fn a_tool_with_nested_inference_is_refused_before_applying_its_effects() {
 #[test]
 fn a_prefix_refuses_effects_no_recording_serves_and_serves_recorded_reads() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     const CLOCK: &[EffectSpec] = &[EffectSpec {
         kind: EffectKind::Clock,
         access: EffectAccess::Read,
@@ -780,7 +806,7 @@ fn a_prefix_refuses_direct_host_tools_before_the_bridge_runs() {
         }
     }
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let calls = Arc::new(AtomicUsize::new(0));
     let _bridge =
         crate::stdlib::host::install_host_call_bridge(Arc::new(CountingBridge(calls.clone())));
@@ -813,7 +839,7 @@ fn a_prefix_refuses_direct_host_tools_before_the_bridge_runs() {
 #[test]
 fn a_prefix_read_the_recording_never_made_diverges() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     const RANDOM: &[EffectSpec] = &[EffectSpec {
         kind: EffectKind::Random,
         access: EffectAccess::Read,
@@ -832,7 +858,7 @@ fn a_prefix_read_the_recording_never_made_diverges() {
 fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
     use crate::store::{store_get, StoreState};
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let path = tmp.path().join(crate::runtime_paths::STORE_FILE);
     std::fs::write(&path, r#"{"memo": "recorded"}"#).unwrap();
     {
@@ -879,7 +905,7 @@ fn a_branch_store_starts_from_the_recording_and_never_writes_its_file() {
 #[test]
 fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("work"), &result("done", None));
@@ -912,7 +938,7 @@ fn a_blocking_job_and_a_thread_resolve_writes_inside_the_branch() {
 #[test]
 fn a_local_task_writes_branch_state_without_a_child_vm() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let recorded = tempfile::tempdir().unwrap();
+    let recorded = replay_fixture();
     let recording_state = crate::runtime_paths::state_root(recorded.path());
     let original = recording_state.join(crate::runtime_paths::STORE_FILE);
     std::fs::create_dir_all(&recording_state).unwrap();
@@ -929,8 +955,7 @@ fn a_local_task_writes_branch_state_without_a_child_vm() {
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&recorded.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: recorded.path().to_path_buf(),
-        workspace_container_root: recorded.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(&state.path().join("pool/arm/workspace")),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -975,7 +1000,7 @@ fn a_local_task_writes_branch_state_without_a_child_vm() {
 #[test]
 fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("work"), &result("done", None));
@@ -984,8 +1009,7 @@ fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&tmp.path().join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: tmp.path().to_path_buf(),
-        workspace_container_root: tmp.path().parent().unwrap().to_path_buf(),
+        workspace: branch_location(&state.path().join("pool/arm/workspace")),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -1028,7 +1052,7 @@ fn a_write_after_the_branch_ends_stays_out_of_the_recording() {
 #[test]
 fn a_torn_final_tape_record_loads_the_complete_ones() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
     let path = tmp.path().join(TAPE_FILE_NAME);
     let mut body = std::fs::read_to_string(&path).unwrap();
@@ -1045,7 +1069,7 @@ fn a_torn_final_tape_record_loads_the_complete_ones() {
 #[test]
 fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     let guard = start_recording(tmp.path(), RecordingLevel::Full, None)
         .unwrap()
         .unwrap();
@@ -1098,7 +1122,7 @@ fn a_model_call_attributes_its_system_prompt_to_the_renders_it_contains() {
 #[test]
 fn a_branch_replays_recorded_cache_misses_even_when_the_cache_now_hits() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         assert_eq!(cache_lookup("intent", "k1", || Ok(None)).unwrap(), None);
@@ -1124,9 +1148,9 @@ fn a_branch_replays_recorded_cache_misses_even_when_the_cache_now_hits() {
 #[test]
 fn a_prefix_tool_call_with_a_fresh_id_is_served_by_tool_and_arguments() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
-    let _branch = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    let _branch = branch(tmp.path(), 1, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     // A text-format parse names the same call `tc_7`; it must not run live.
     let args = serde_json::json!({"path": "src/t1.txt"});
@@ -1144,9 +1168,9 @@ fn a_prefix_tool_call_with_a_fresh_id_is_served_by_tool_and_arguments() {
 #[test]
 fn a_reused_tool_call_id_after_the_branch_goes_live_runs_live() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     record_run(tmp.path());
-    let _branch = branch(tmp.path(), 1, &tmp.path().join("branch"));
+    let _branch = branch(tmp.path(), 1, &tmp.path().join("pool/arm/workspace"));
     serve_llm_call(&request("first")).unwrap().unwrap();
     serve_tool_call("t1", "write", &serde_json::json!({"path": "src/t1.txt"}));
     assert!(serve_llm_call(&request("live")).is_none());
@@ -1161,7 +1185,7 @@ fn a_reused_tool_call_id_after_the_branch_goes_live_runs_live() {
 #[test]
 fn a_prefix_cache_read_is_served_only_where_the_recording_made_it() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         cache_lookup("intent", "k", || Ok(Some(serde_json::json!("v1")))).unwrap();
@@ -1290,7 +1314,7 @@ fn every_state_writing_agent_method_is_classified_for_the_prefix() {
         "the scan found no uncontracted method"
     );
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("one"), &result("a", None));
@@ -1391,7 +1415,7 @@ fn every_named_state_a_capability_method_writes_is_classified_for_the_prefix() {
 #[test]
 fn a_prefix_refuses_only_a_capability_probe_that_would_reach_the_network() {
     let _lock = PROCESS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = replay_fixture();
     {
         let _guard = record_full(tmp.path());
         record_llm_call(&request("one"), &result("a", None));

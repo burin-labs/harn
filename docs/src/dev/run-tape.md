@@ -23,9 +23,13 @@ command policy cannot rewrite a request's background setting.
 
 ## Branch execution
 
-`start_branch` takes the tape, the number of model calls to serve, the restored
-workspace, its `workspace_container_root` storage pool, and a fresh durable-state root.
-The workspace must be strictly inside that pool. Enter its `BranchScope` around the
+`start_branch` takes the tape, the number of model calls to serve, a
+`ReplayWorkspaceLocation`, and a fresh durable-state root. Pass the seed owner's
+`location()` as `BranchPlan.workspace`. The location derives both the working copy
+and its storage pool from one owned storage directory; callers cannot narrow the
+pool while keeping the same workspace. Custom owners use the layout
+`pool/storage/workspace` and `ReplayWorkspaceLocation::from_storage_root(storage)`;
+relative storage roots refuse. Enter its `BranchScope` around the
 execution. The host must supply the workspace state from before the recording;
 the tape does not reconstruct that initial state.
 
@@ -95,6 +99,12 @@ identity. The recording refuses a workspace that differs from its scope.
 Alternate root spellings are retained separately from physical ancestor roots.
 They resolve at I/O boundaries even after an alias disappears; their spelling
 in recorded prompt and tool data stays unchanged.
+
+External source packages also retain their physical history when a branch is
+recorded. Model data keeps the earliest logical root across later moves, while
+file I/O resolves every retained root to the current package. Prompt edits use the
+selected tape's own recorded template identities. Missing restored packages,
+relative retained names, and overlapping source ownership refuse before execution.
 
 On Linux, local foreground commands use the existing OS-hardened sandbox with
 the branch workspace, required runtime/toolchain access, and projected explicit
@@ -216,7 +226,7 @@ It acquires a shared seed-read lease while verifying and copying into new privat
 storage, then owns an exclusive lease on that copy. Multiple forks can read the
 same saved seed concurrently. The original seed and working copy are unchanged;
 each fork is deleted when its owner drops unless explicitly persisted.
-Pass `path()` and `storage_parent()` as the branch workspace and container roots.
+Pass `location()` as `BranchPlan.workspace`; it binds `path()` to the whole pool.
 `restore_saved` remains the in-place restart operation and excludes competing owners.
 
 Keep the handle inside the execution owner until the session and every child

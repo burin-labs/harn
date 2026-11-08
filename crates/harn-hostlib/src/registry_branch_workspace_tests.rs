@@ -156,8 +156,7 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
                     let guard = start_branch(BranchPlan {
                         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME))?,
                         live_after_calls: 1,
-                        workspace_root: workspace.path().to_path_buf(),
-                        workspace_container_root: workspace.storage_parent().to_path_buf(),
+                        workspace: workspace.location(),
                         state_root: parent.join(format!("state-{value}")),
                         host_state_roots: Vec::new(),
                         prompt_edits: Vec::new(),
@@ -208,8 +207,7 @@ fn concurrent_branches_of_one_tape_keep_grades_and_tape_bytes_independent() {
         let guard = start_branch(BranchPlan {
             tape: EventTape::load(&parent_tape.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
-            workspace_root: workspace.path().to_path_buf(),
-            workspace_container_root: workspace.storage_parent().to_path_buf(),
+            workspace: workspace.location(),
             state_root: storage.path().join(format!("descendant-{generation}")),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

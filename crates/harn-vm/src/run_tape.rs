@@ -129,6 +129,10 @@ pub struct RunTapeHeader {
     /// names so descendants can relocate unchanged source and served data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_ancestors: Vec<PathBuf>,
+    /// Physical source locations retained by a recorded branch. Their oldest
+    /// roots remain logical names when the package moves again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_workspaces: Vec<RecordedSourceRoot>,
 }
 
 static PROCESS_TAPE: RwLock<Option<Arc<ProcessTape>>> = RwLock::new(None);
@@ -223,6 +227,9 @@ pub fn start_recording(
         workspace_root,
         workspace_aliases,
         workspace_ancestors,
+        source_workspaces: scope::state_branch()
+            .map(|branch| branch.sources().recording().to_vec())
+            .unwrap_or_default(),
     });
     let mut slot = PROCESS_TAPE.write().expect("run tape lock poisoned");
     if slot.is_some() {
@@ -494,6 +501,8 @@ pub(crate) use recording::{
 // Branch replay
 // ---------------------------------------------------------------------------
 
+pub use harn_vm_core::replay_workspace::ReplayWorkspaceLocation;
+
 /// Where a branch replays from and where its workspace lives.
 #[derive(Clone, Debug)]
 pub struct BranchPlan {
@@ -505,10 +514,7 @@ pub struct BranchPlan {
     pub live_after_calls: u64,
     /// The branch's workspace, a copy of the recorded run's starting tree.
     /// Served tool calls re-apply their file effects here.
-    pub workspace_root: PathBuf,
-    /// The storage pool containing this recording's replay workspaces.
-    /// Child-process grants outside this arm may not reopen any of this pool.
-    pub workspace_container_root: PathBuf,
+    pub workspace: ReplayWorkspaceLocation,
     /// Where the branch keeps its durable state: runtime store, session store
     /// and event log. It must be absent or empty, so a branch never writes
     /// into the recording's state; the prefix rebuilds it by replaying.
@@ -899,35 +905,26 @@ pub fn start_branch_with_sources(
             plan.live_after_calls
         ));
     }
-    let workspace_root = plan
-        .workspace_root
+    let declared_workspace = plan.workspace.workspace_root().to_path_buf();
+    let workspace_root = declared_workspace
         .canonicalize()
         .map_err(|error| format!("branch workspace must exist: {error}"))?;
     if !workspace_root.is_dir() {
         return Err("branch workspace must be a directory".to_string());
     }
-    let workspace_container_root = plan
-        .workspace_container_root
-        .canonicalize()
-        .map_err(|error| format!("branch workspace container must exist: {error}"))?;
-    if workspace_root == workspace_container_root
-        || !workspace_root.starts_with(&workspace_container_root)
-    {
-        return Err("branch workspace must be strictly inside its workspace container".into());
+    if workspace_root != declared_workspace {
+        return Err("branch workspace must remain inside its owned storage directory".into());
     }
-    let source_roots = scope::validate_source_roots(source_roots, &workspace_root, &tape)?;
+    let workspace_container_root = plan.workspace.storage_pool().to_path_buf();
+    let sources = sources::ReplaySources::from_tape(&tape, source_roots, &plan.workspace)?;
     let recorded_workspace = workspace::RecordedWorkspace::from_tape(&tape)?;
     let protected = recording_trees(&tape, &workspace_root, &plan.host_state_roots);
     let (prompt_edits, edit_reports) =
-        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, &source_roots)?;
+        prompt_edits::PromptEdits::from_tape(&tape, plan.prompt_edits, sources.roots())?;
     let trees: Vec<PathBuf> = protected
         .iter()
         .map(|(tree, _)| tree.clone())
-        .chain(
-            source_roots
-                .iter()
-                .flat_map(|root| [root.recorded.clone(), root.restored.clone()]),
-        )
+        .chain(sources.boundary_roots().iter().cloned())
         .collect();
     let state_root = scope::fresh_state_root(&plan.state_root, &trees)?;
     let state = BranchState {
@@ -953,7 +950,7 @@ pub fn start_branch_with_sources(
             workspace_container_root,
             protected,
             recorded_workspace,
-            source_roots,
+            sources,
         ),
     })
 }
@@ -1143,8 +1140,11 @@ pub(crate) fn serve_llm_call(
     // accounting says what its prefix cost without counting it as new spend.
     let mut result = recorded.result.clone();
     if let Some(projection) = workspace::current_projection() {
-        result.text = projection.text(&result.text);
-        result.text_projection = None;
+        let text = projection.text(&result.text);
+        if text != result.text {
+            result.text = text;
+            result.text_projection = None;
+        }
         for call in &mut result.tool_calls {
             projection.json(call);
         }
@@ -1391,6 +1391,9 @@ pub(crate) use transcript::{
 #[path = "run_tape_scope.rs"]
 mod scope;
 pub use scope::BranchScope;
+#[path = "run_tape_sources.rs"]
+mod sources;
+pub use sources::RecordedSourceRoot;
 #[path = "run_tape_workspace.rs"]
 pub(crate) mod workspace;
 pub use scope::workspace_path;

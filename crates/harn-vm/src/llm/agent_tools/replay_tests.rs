@@ -33,8 +33,8 @@ fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
         .unwrap_or_else(|p| p.into_inner());
     crate::test_support::current_thread_runtime().block_on(async {
     let dir = tempfile::tempdir().unwrap();
-    let workspace = dir.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
+    let workspace = dir.path().join("pool/arm/workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let _bridge = crate::install_host_call_bridge(Arc::new(CapabilityBridge(calls.clone())));
     let mut entry = crate::value::DictMap::new();
@@ -84,8 +84,9 @@ fn recorded_declared_host_tools_replay_without_a_second_host_dispatch() {
     let branch = run_tape::start_branch(BranchPlan {
         tape: EventTape::load(&path).unwrap(),
         live_after_calls: 1,
-        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
-        workspace_root: workspace,
+        workspace: run_tape::ReplayWorkspaceLocation::from_storage_root(
+            workspace.parent().unwrap(),
+        ).unwrap(),
         state_root: dir.path().join("branch-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

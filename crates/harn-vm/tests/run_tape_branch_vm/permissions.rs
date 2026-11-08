@@ -138,8 +138,7 @@ fn legacy_tapes_without_session_grant_evidence_cannot_branch() {
         let admission = start_branch(BranchPlan {
             tape: legacy,
             live_after_calls: 1,
-            workspace_root: dirs.workspace.clone(),
-            workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+            workspace: location(&dirs.workspace),
             state_root: dirs.markers.join(format!("legacy-{legacy_version}")),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),

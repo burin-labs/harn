@@ -73,10 +73,10 @@ fn indexed_run(
 fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
     let temporary = tempfile::tempdir().unwrap();
     let workspace = temporary.path().join("workspace");
-    let restored = temporary.path().join("restored");
+    let restored = temporary.path().join("pool/arm/workspace");
     let outside = temporary.path().join("outside");
     for root in [&workspace, &restored, &outside] {
-        std::fs::create_dir(root).unwrap();
+        std::fs::create_dir_all(root).unwrap();
         std::fs::write(
             root.join("indexed.rs"),
             "pub const replay_index_sentinel: u32 = 1;\n",
@@ -112,8 +112,10 @@ fn a_fresh_index_rebuild_and_query_reproduce_the_recorded_prefix() {
     let plan = |name: &str| BranchPlan {
         tape: tape.clone(),
         live_after_calls: 1,
-        workspace_root: restored.clone(),
-        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
+        workspace: harn_vm::run_tape::ReplayWorkspaceLocation::from_storage_root(
+            restored.parent().unwrap(),
+        )
+        .unwrap(),
         state_root: temporary.path().join(name),
         host_state_roots: vec![],
         prompt_edits: vec![],

@@ -117,12 +117,10 @@ fn a_restored_script_cannot_address_its_embedded_recorded_path() {
     let recorded = dirs();
     let isolated = dirs();
     let marker = recorded.workspace.join("embedded-marker");
-    let sibling = isolated
-        .workspace
-        .parent()
-        .unwrap()
-        .join("sibling-workspace");
-    std::fs::create_dir(&sibling).unwrap();
+    let sibling = location(&isolated.workspace)
+        .storage_pool()
+        .join("sibling/workspace");
+    std::fs::create_dir_all(&sibling).unwrap();
     let sibling_marker = sibling.join("embedded-marker");
     let script = format!(
         "printf recorded > '{}'\nprintf sibling > '{}'\n",
@@ -318,7 +316,9 @@ fn live_file_reads_cannot_address_a_peer_in_the_storage_pool() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let recorded = dirs();
     let isolated = dirs();
-    let peer = isolated.workspace.parent().unwrap().join("peer-canary");
+    let peer = location(&isolated.workspace)
+        .storage_pool()
+        .join("peer-canary");
     std::fs::write(&peer, "peer content").unwrap();
     let source = format!(
         r#"
@@ -333,7 +333,7 @@ fn main(harness: Harness) {{
 "#,
         peer = quote(&peer)
     );
-    let reads = vec![isolated.workspace.parent().unwrap().to_path_buf()];
+    let reads = vec![location(&isolated.workspace).storage_pool().to_path_buf()];
     name_session_store(&recorded.workspace);
     let recording = start_recording(
         &recorded.tapes,
@@ -360,8 +360,7 @@ fn main(harness: Harness) {{
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: isolated.workspace.clone(),
-        workspace_container_root: isolated.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&isolated.workspace),
         state_root: isolated.markers.join("peer-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -411,8 +410,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: isolated.workspace.clone(),
-        workspace_container_root: isolated.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&isolated.workspace),
         state_root: isolated.markers.join("asset-state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -430,6 +428,67 @@ pipeline main(harness: Harness, task: unknown) {{
     let report = guard.finish();
     assert_eq!((report.served_calls, report.live_calls), (1, 1));
     assert_eq!(report.divergence, None);
+}
+
+#[test]
+fn retained_source_metadata_cannot_reopen_a_peer_workspace() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let original = recorded.markers.join("source-package");
+    let pool = location(&isolated.workspace).storage_pool().to_path_buf();
+    let peer = pool.join("peer-package");
+    for root in [&original, &peer] {
+        std::fs::create_dir(root).unwrap();
+    }
+    std::fs::write(original.join("asset"), "original source").unwrap();
+    std::fs::write(peer.join("asset"), "peer source canary").unwrap();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  with_llm_script(harness.llm, [{{text: "prefix", model: "mock"}}, {{text: "live", model: "mock"}}], {{ ->
+    harness.llm.call("prefix", nil, {{provider: "mock", model: "mock"}})
+    harness.llm.call("live", nil, {{provider: "mock", model: "mock"}})
+    harness.stdio.println(harness.fs.read_text({asset}))
+  }})
+}}
+"#,
+        asset = quote(&original.join("asset")),
+    );
+    assert!(record(&source, &recorded.tapes, &recorded.workspace).contains("original source"));
+    let mut tape = EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap();
+    tape.header.run.as_mut().unwrap().source_workspaces =
+        vec![harn_vm::run_tape::RecordedSourceRoot {
+            root: peer.canonicalize().unwrap(),
+            ancestors: vec![original.canonicalize().unwrap()],
+        }];
+    let state = isolated.markers.join("forged-source-state");
+    match start_branch(BranchPlan {
+        tape,
+        live_after_calls: 1,
+        workspace: location(&isolated.workspace),
+        state_root: state.clone(),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    }) {
+        Err(error) => {
+            assert!(error.contains("storage pool"), "{error}");
+            assert!(!state.exists());
+        }
+        Ok(guard) => {
+            let output = run_at_with_read_roots(
+                &source,
+                &isolated.workspace,
+                Some(guard.scope()),
+                &isolated.workspace,
+                vec![pool],
+            )
+            .unwrap();
+            assert!(output.contains("peer source canary"), "{output}");
+            panic!("retained source metadata exposed the peer: {output}");
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -509,8 +568,7 @@ pipeline main(harness: Harness, task: unknown) {
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: branch_root.clone(),
-        workspace_container_root: branch_root.parent().unwrap().to_path_buf(),
+        workspace: location(&branch_root),
         state_root: isolated.markers.join("state"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

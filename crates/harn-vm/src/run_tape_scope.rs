@@ -37,7 +37,7 @@ pub(crate) struct BranchHandle {
     workspace_identity: super::ReplayWorkspaceIdentity,
     workspace: PathBuf,
     workspace_container: PathBuf,
-    source_roots: Vec<super::ReplaySourceRoot>,
+    sources: super::sources::ReplaySources,
     event_log: OnceLock<Option<Arc<AnyEventLog>>>,
 }
 
@@ -56,7 +56,7 @@ impl BranchHandle {
         workspace_container: PathBuf,
         mut protected: Vec<(PathBuf, PathBuf)>,
         recorded_workspace: super::workspace::RecordedWorkspace,
-        source_roots: Vec<super::ReplaySourceRoot>,
+        sources: super::sources::ReplaySources,
     ) -> Arc<Self> {
         protected.sort_by_key(|(tree, _)| std::cmp::Reverse(tree.components().count()));
         ARMED.fetch_add(1, Ordering::AcqRel);
@@ -66,7 +66,7 @@ impl BranchHandle {
             workspace: state.workspace_root.clone(),
             workspace_container,
             recorded_workspace,
-            source_roots,
+            sources,
             state: Mutex::new(state),
             prefix: AtomicBool::new(true),
             ended: AtomicBool::new(false),
@@ -126,8 +126,8 @@ impl BranchHandle {
         &self.workspace_container
     }
 
-    pub(super) fn source_roots(&self) -> &[super::ReplaySourceRoot] {
-        &self.source_roots
+    pub(super) fn sources(&self) -> &super::sources::ReplaySources {
+        &self.sources
     }
 
     pub(crate) fn relocated(&self) -> bool {
@@ -143,7 +143,7 @@ impl BranchHandle {
     /// Resolve a physical branch asset back to the recorded source identity.
     pub(super) fn prompt_uri(&self, uri: &str) -> String {
         let path = Path::new(uri);
-        for root in &self.source_roots {
+        for root in self.sources.roots() {
             if let Some(relative) = workspace_relative(path, &root.restored) {
                 return root.recorded.join(relative).display().to_string();
             }
@@ -233,7 +233,7 @@ pub fn workspace_path(path: PathBuf) -> Result<PathBuf, VmError> {
     if let Some(relative) = workspace_relative(&path, &branch.workspace) {
         return confined_mapping(&path, &branch.workspace, relative);
     }
-    for root in &branch.source_roots {
+    for root in branch.sources.physical() {
         if let Some(relative) = workspace_relative(&path, &root.recorded) {
             return confined_mapping(&path, &root.restored, relative);
         }

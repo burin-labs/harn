@@ -9,7 +9,7 @@ fn bulk_reset_records_every_closed_session_before_replay_admission() {
         .unwrap();
     for (bulk_reset, preexisting) in [(false, false), (true, false), (true, true)] {
         crate::agent_sessions::reset_session_store();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = replay_fixture();
         let args = serde_json::json!({});
         if preexisting {
             crate::agent_sessions::open_or_create(Some("existing".to_string())).unwrap();
@@ -76,7 +76,7 @@ fn bulk_reset_records_every_closed_session_before_replay_admission() {
         if preexisting {
             crate::agent_sessions::open_or_create(Some("existing".to_string())).unwrap();
         }
-        let workspace = tmp.path().join("branch");
+        let workspace = tmp.path().join("pool/arm/workspace");
         let replay = branch(tmp.path(), 1, &workspace);
         serve_llm_call(&request("first")).unwrap().unwrap();
         let served = serve_tool_call("reset", "reset_sessions", &args);

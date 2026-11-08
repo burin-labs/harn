@@ -62,6 +62,14 @@ fn quote(value: &Path) -> String {
     serde_json::to_string(&value.display().to_string()).unwrap()
 }
 
+fn location(workspace: &Path) -> harn_vm::run_tape::ReplayWorkspaceLocation {
+    let location =
+        harn_vm::run_tape::ReplayWorkspaceLocation::from_storage_root(workspace.parent().unwrap())
+            .unwrap();
+    assert_eq!(location.workspace_root(), workspace.canonicalize().unwrap());
+    location
+}
+
 /// Every run is pointed at the recording's session store, as a host reusing
 /// its configuration would be; a branch must keep out of it on its own.
 fn run(source: &str, workspace: &Path) -> Result<String, String> {
@@ -103,7 +111,7 @@ fn run_in(source: &str, workspace: &Path, branch: Option<BranchScope>) -> Result
         source,
         workspace,
         branch,
-        workspace.parent().expect("workspace has a parent"),
+        workspace.ancestors().nth(3).expect("fixture root"),
     )
 }
 
@@ -242,8 +250,7 @@ fn branch_with_roots(
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: k,
-        workspace_root: workspace.to_path_buf(),
-        workspace_container_root: workspace.parent().unwrap().to_path_buf(),
+        workspace: location(workspace),
         state_root: state.clone(),
         host_state_roots,
         prompt_edits: Vec::new(),
@@ -319,7 +326,7 @@ struct Dirs {
 fn dirs() -> Dirs {
     let root = tempfile::tempdir().unwrap();
     let tapes = root.path().join("tapes");
-    let workspace = root.path().join("workspace");
+    let workspace = root.path().join("pool/arm/workspace");
     let markers = root.path().join("markers");
     for dir in [&tapes, &workspace, &markers] {
         std::fs::create_dir_all(dir).unwrap();
@@ -635,8 +642,7 @@ fn a_branch_refuses_the_recordings_state_root() {
     let error = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: dirs.workspace.clone(),
-        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&dirs.workspace),
         state_root: recording_state(&dirs.workspace),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -653,8 +659,7 @@ fn a_branch_refuses_the_recordings_state_root() {
         let error = start_branch(BranchPlan {
             tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
             live_after_calls: 1,
-            workspace_root: dirs.workspace.clone(),
-            workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+            workspace: location(&dirs.workspace),
             state_root: state_root.clone(),
             host_state_roots: Vec::new(),
             prompt_edits: Vec::new(),
@@ -875,8 +880,7 @@ fn state_built_before_the_branch_is_armed_stays_out_of_the_recording() {
     let plan = BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
-        workspace_root: dirs.workspace.clone(),
-        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -982,8 +986,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 2,
-        workspace_root: dirs.workspace.clone(),
-        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
@@ -1266,8 +1269,7 @@ fn a_session_store_named_after_the_branch_starts_lands_in_the_branch() {
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,
-        workspace_root: dirs.workspace.clone(),
-        workspace_container_root: dirs.workspace.parent().unwrap().to_path_buf(),
+        workspace: location(&dirs.workspace),
         state_root: state.clone(),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),

@@ -21,10 +21,16 @@ impl RecordedWorkspace {
             aliases: run.workspace_aliases.clone(),
             ancestors: run.workspace_ancestors.clone(),
         };
-        if recorded
-            .ancestors
+        recorded.validate()?;
+        Ok(recorded)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self
+            .root
             .iter()
-            .chain(recorded.aliases.iter())
+            .chain(self.ancestors.iter())
+            .chain(self.aliases.iter())
             .any(|root| {
                 !root.is_absolute()
                     || root
@@ -34,7 +40,7 @@ impl RecordedWorkspace {
         {
             return Err("recorded workspace names must be absolute normalized paths".into());
         }
-        Ok(recorded)
+        Ok(())
     }
 
     pub fn roots(&self) -> Vec<PathBuf> {
@@ -237,20 +243,12 @@ pub(crate) fn current_projection() -> Option<ReplayWorkspaceProjection> {
 }
 
 pub(super) fn for_branch(branch: &super::BranchHandle) -> ReplayWorkspaceProjection {
-    let sources: Vec<_> = branch
-        .source_roots()
-        .iter()
-        .map(|root| super::ReplaySourceRoot {
-            recorded: root.restored.clone(),
-            restored: root.recorded.clone(),
-        })
-        .collect();
     ReplayWorkspaceProjection::new(branch.workspace(), branch.logical_workspace())
         .with_ancestors(
             &branch.recorded_physical_workspaces(),
             branch.logical_workspace(),
         )
-        .with_sources(&sources)
+        .with_sources(branch.sources().logical())
 }
 
 pub(crate) fn physical_projection() -> Option<ReplayWorkspaceProjection> {
@@ -264,7 +262,7 @@ fn physical_for_branch(branch: &super::BranchHandle) -> ReplayWorkspaceProjectio
         branch.workspace(),
     )
     .with_ancestors(&branch.recorded_workspaces(), branch.workspace())
-    .with_sources(branch.source_roots())
+    .with_sources(branch.sources().physical())
 }
 
 pub(crate) fn project_json(value: &mut Value) {
