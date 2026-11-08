@@ -546,7 +546,7 @@ pub fn no_credentials_message() -> String {
     format!(
         "No LLM provider credentials found. Set one of these environment variables to an API key \
          or a harn-secret://namespace/name reference: {envs}.{keyless_hint}{more_hint} \
-         Run `harn doctor` to print every provider and the variable it reads, or read \
+         Run `harn quickstart` to configure a provider, `harn doctor` to print every provider and the variable it reads, or read \
          {PROVIDER_SETUP_DOCS_URL}. `harn models recommend` suggests a setup for this machine.",
         envs = shown_envs.join(", "),
     )

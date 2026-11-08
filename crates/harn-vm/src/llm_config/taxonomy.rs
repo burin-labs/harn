@@ -1,7 +1,5 @@
 //! Model taxonomy and provider inference: map a model id to its provider,
 //! tier, family, and lineage, plus default/auto provider selection.
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use super::*;
 
 // Model-pattern matching for forms like "claude-*", "qwen/*", "ollama:*".
@@ -79,6 +77,11 @@ pub fn default_provider() -> String {
 }
 
 fn default_provider_with_config(config: &ProvidersConfig) -> String {
+    configured_default_provider(config)
+        .unwrap_or_else(|| automatic_route_with_config(config).provider)
+}
+
+fn configured_default_provider(config: &ProvidersConfig) -> Option<String> {
     crate::stdlib::process::session_env_value("HARN_DEFAULT_PROVIDER")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("auto"))
@@ -90,17 +93,7 @@ fn default_provider_with_config(config: &ProvidersConfig) -> String {
                 .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("auto"))
                 .map(str::to_string)
         })
-        .unwrap_or_else(|| auto_select_provider(config))
 }
-
-/// Provider assumed when nothing is configured and no credentials are found.
-/// Anthropic is Harn's documented default; [`auto_select_provider`] only falls
-/// back to it after probing for a credentialed or local provider, and warns
-/// once so adopters without Anthropic credentials get a clear nudge instead of
-/// a raw auth failure.
-pub(crate) const FALLBACK_PROVIDER: &str = "anthropic";
-
-static AUTO_PROVIDER_WARNED: AtomicBool = AtomicBool::new(false);
 
 fn provider_has_credentials(name: &str, def: &ProviderDef) -> bool {
     matches!(
@@ -115,73 +108,39 @@ pub(crate) fn provider_is_local(def: &ProviderDef) -> bool {
     def.local_runtime.is_some() || matches!(def.auth_env, AuthEnv::None)
 }
 
-/// Emit a provider auto-selection notice at most once per process.
-fn warn_auto_provider_once(message: &str) {
-    if !AUTO_PROVIDER_WARNED.swap(true, Ordering::Relaxed) {
-        crate::events::log_warn("llm_config", message);
-    }
+/// The catalog's ordered automatic routes, including active configuration overlays.
+pub fn automatic_default_candidates() -> Vec<harn_provider_catalog::CatalogAutomaticDefault> {
+    harn_provider_catalog::automatic_defaults(&effective_config().provider_defaults)
 }
 
-/// Choose a provider when neither `HARN_DEFAULT_PROVIDER` nor
-/// `config.default_provider` is set. Prefers a credentialed cloud provider,
-/// then a locally-available one, and only then falls back to the documented
-/// default. Detection is portable: it reads provider `auth_env` variables and
-/// `local_runtime` metadata from the catalog — never hardcoded paths or ports.
-pub(crate) fn auto_select_provider(config: &ProvidersConfig) -> String {
-    // Well-known providers first for a stable, predictable choice; then any
-    // other configured provider (BTreeMap iteration is sorted/deterministic).
-    const PREFERRED: &[&str] = &[
-        "anthropic",
-        "openai",
-        "google",
-        "azure-openai",
-        "groq",
-        "mistral",
-        "deepseek",
-        "xai",
-        "openrouter",
-    ];
-    for name in PREFERRED {
-        if config
+/// The complete automatic route, or none when an explicit default is configured.
+pub fn automatic_default_route() -> Option<harn_provider_catalog::CatalogAutomaticDefault> {
+    let config = effective_config();
+    configured_default_provider(&config)
+        .is_none()
+        .then(|| automatic_route_with_config(&config))
+}
+
+pub(super) fn automatic_route_with_config(
+    config: &ProvidersConfig,
+) -> harn_provider_catalog::CatalogAutomaticDefault {
+    let candidates = harn_provider_catalog::automatic_defaults(&config.provider_defaults);
+    if let Some(route) = candidates.iter().find(|route| {
+        config
             .providers
-            .get(*name)
-            .is_some_and(|definition| provider_has_credentials(name, definition))
-        {
-            if *name != FALLBACK_PROVIDER {
-                warn_auto_provider_once(&format!(
-                    "no default provider configured; using '{name}' (its API key is set). \
-                     Set HARN_DEFAULT_PROVIDER or `default_provider` to silence this."
-                ));
-            }
-            return (*name).to_string();
-        }
+            .get(&route.provider)
+            .is_some_and(|definition| provider_has_credentials(&route.provider, definition))
+    }) {
+        return route.clone();
     }
-    for (name, def) in &config.providers {
-        if provider_has_credentials(name, def) {
-            warn_auto_provider_once(&format!(
-                "no default provider configured; using '{name}' (its API key is set). \
-                 Set HARN_DEFAULT_PROVIDER or `default_provider` to silence this."
-            ));
-            return name.clone();
-        }
-    }
-    // No cloud credentials: prefer something that runs locally with no key.
-    for (name, def) in &config.providers {
-        if provider_is_local(def) {
-            warn_auto_provider_once(&format!(
-                "no provider API keys found; using local provider '{name}'. \
-                 Set an API key + HARN_DEFAULT_PROVIDER to use a cloud provider."
-            ));
-            return name.clone();
-        }
-    }
-    // Nothing detected. Fall back to the documented default and say how to fix.
-    warn_auto_provider_once(&format!(
-        "no LLM provider configured and no API keys detected; defaulting to \
-         '{FALLBACK_PROVIDER}'. Set ANTHROPIC_API_KEY (or another provider's key plus \
-         HARN_DEFAULT_PROVIDER), or run a local model with `harn local launch`."
-    ));
-    FALLBACK_PROVIDER.to_string()
+    candidates.into_iter().next().unwrap_or_else(|| {
+        harn_provider_catalog::automatic_defaults(
+            &harn_provider_catalog::config::packaged_config().provider_defaults,
+        )
+        .into_iter()
+        .next()
+        .expect("the packaged catalog declares an automatic route")
+    })
 }
 
 /// Get model tier ("small", "mid", "frontier").

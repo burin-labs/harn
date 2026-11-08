@@ -132,12 +132,6 @@ impl EnvironmentPolicyConfig {
         })
     }
 
-    /// A malformed captured ceiling must reach the normal setup-error path
-    /// without first probing a provider during CLI configuration seeding.
-    pub(crate) fn bootstrap_permitted(&self) -> bool {
-        self.host_inference_boundary.is_ok() && self.host_account_attestations.is_ok()
-    }
-
     /// Resolve the configuration into a runtime [`SessionEnvironment`], snapshotting each
     /// `env:` grant against the launcher environment. Fails loudly if a named
     /// launcher variable is absent or the grant set violates the policy.

@@ -1319,7 +1319,6 @@ harn playground --llm-mock-record
 harn playground --script
 harn playground --task
 harn playground --watch
-harn playground --yes
 harn portable
 harn portable compile
 harn portable compile --entry
@@ -1629,7 +1628,6 @@ harn run --timeout
 harn run --trace
 harn run --writable-root
 harn run --write-root
-harn run --yes
 harn run -e
 harn run <positional 1>
 harn run <positional 2>

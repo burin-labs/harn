@@ -1381,6 +1381,12 @@ pub fn provider_route_default_issues(config: &ProvidersConfig) -> Vec<String> {
     };
 
     match &config.default_provider {
+        Some(provider) if provider.eq_ignore_ascii_case("auto") => {
+            if harn_provider_catalog::automatic_defaults(&config.provider_defaults).is_empty() {
+                issues
+                    .push("default_provider auto requires an automatic catalog route".to_string());
+            }
+        }
         Some(provider)
             if config
                 .provider_defaults

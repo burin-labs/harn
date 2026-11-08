@@ -260,6 +260,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/provider_catalog_sources.rs",
   // Model metadata must follow effective overlays and actual local discovery through the CLI.
   "crates/harn-cli/tests/harn_cli_e2e/model_context.rs",
+  // Provider setup and routing must cross the CLI environment/configuration boundary and HTTP transport.
+  "crates/harn-cli/tests/harn_cli_e2e/provider_initialization.rs",
   // A `to=in_process` grant must authenticate the run's own model call and
   // reach no spawned child. Only a real `harn run` with its launch-time grant
   // parsing, session install, provider auth, and process funnel proves both.

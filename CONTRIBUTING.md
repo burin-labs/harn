@@ -137,12 +137,20 @@ runs:
 
 **Fast suite**: `make test`
 
-In-process, deterministic, zero subprocess-per-test. Wall-clock budget: <2 min
-on a warm cache. Runs on every PR and when you opt into the broader local
-pre-push gate with `HARN_HOOKS_FULL_LOCAL=1 HARN_PREPUSH_FULL_TESTS=1`. The nextest
-`default` and `ci` profiles exclude the `harn-cli` integration test binaries
-(those live in `crates/harn-cli/tests/` and spawn the compiled `harn` binary as
-a subprocess).
+Runs on every PR and when you opt into the broader local pre-push gate with
+`HARN_HOOKS_FULL_LOCAL=1 HARN_PREPUSH_FULL_TESTS=1`. The nextest `default` and
+`ci` profiles run workspace unit tests, in-process CLI integration tests, and
+a selected set of CLI subprocess regressions. They exclude the rest of the
+CLI integration inventory. The exact selection lives in
+[`.config/nextest.toml`](.config/nextest.toml); compilation and test time depend
+on your platform, cache, and selected packages.
+
+For a focused change, select the owning package and test rather than compiling
+every test target. For example, this runs the lexer unit tests:
+
+```sh
+make test ARGS='-p harn-lexer --lib'
+```
 
 **Slow E2E suite**: `make test-e2e`
 
@@ -157,7 +165,13 @@ Runs on:
   GitHub-hosted Linux runner
 - Schedule: nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
 - `e2e` PR label: add the label to opt in before merge
-- Merge queue: the `e2e` job in `ci.yml` runs before a PR lands
+- Pull requests touching the CLI E2E suite, its workflow, or the ACP adapter:
+  runs automatically without the label
+- Manual dispatch of `.github/workflows/e2e.yml`
+
+The E2E workflow does not run on `merge_group`; `ci.yml` delegates this suite
+to `e2e.yml` rather than running a second copy. A change outside the watched
+paths needs the `e2e` label to exercise this tier before merge.
 
 A failing unattended run (main push or nightly) opens a deduplicated tracking
 issue, so main is never called green while its last executed slow run is red.

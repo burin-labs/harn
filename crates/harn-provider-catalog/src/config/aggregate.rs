@@ -258,6 +258,12 @@ impl ProvidersConfig {
                 current.portal = defaults.portal.clone();
                 current.portal_reasoning_effort = defaults.portal_reasoning_effort.clone();
             }
+            if defaults.automatic.is_some() {
+                current.automatic = defaults.automatic.clone();
+            }
+            if defaults.automatic_order.is_some() {
+                current.automatic_order = defaults.automatic_order;
+            }
         }
 
         if overlay.data_controls_audit.is_some() {

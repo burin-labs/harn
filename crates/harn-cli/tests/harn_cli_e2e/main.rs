@@ -119,6 +119,7 @@ mod provider_account_confirmation;
 mod provider_admission_privacy;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
+mod provider_initialization;
 mod provider_option_qualification;
 mod providers_dispatch;
 mod quickstart_env;
