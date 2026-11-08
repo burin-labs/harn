@@ -2126,7 +2126,7 @@
   "Show install status for a model (or all models)": "Show install status for a model (or all models)",
   "Show layered-resolution skills discovered from the filesystem": "Show layered-resolution skills discovered from the filesystem",
   "Show package registry metadata for one package": "Show package registry metadata for one package",
-  "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases": "Show per-test timing and detailed failures. Also prints a passing case's `log`/`print`/`println` output, which is otherwise shown only for failing cases",
+  "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout": "Show passing cases and their captured output on stderr. Failures and skips always appear there; summaries and timing data stay on stdout",
   "Show stored OAuth status for a server": "Show stored OAuth status for a server",
   "Show the author, endorsement chain, and trust scores for a skill manifest": "Show the author, endorsement chain, and trust scores for a skill manifest",
   "Show the currently-selected local provider/model and a brief summary of every other local runtime": "Show the currently-selected local provider/model and a brief summary of every other local runtime",
