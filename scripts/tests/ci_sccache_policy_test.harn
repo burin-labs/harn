@@ -20,6 +20,7 @@ import {
   HOST_BOUND_RUST_TEST_FILTER_COMMAND,
   HOST_BOUND_RUST_TEST_FILTER_SOURCE,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
+import { CiWorkflow } from "../ci_cache_policy/workflow_model.harn"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -222,6 +223,59 @@ pipeline test_e2e_uses_standard_hosted_capacity(harness: Harness, task: unknown)
       {targets: []},
     ).count
       > 0,
+  )
+}
+
+pipeline test_approved_native_runner_keeps_main_dispatch_scope(harness: Harness) {
+  const actual = read_yaml_typed(
+    harness.fs,
+    "../../.github/workflows/macos-nightly.yml",
+    schema_of(CiWorkflow),
+  )
+  assert(
+    public_repository_runner_errors({"other.yml": actual}, {targets: []}).contains(
+      "other.yml:nextest runner selection can resolve through paid token macos-latest-xlarge",
+    ),
+    "the actual workflow must exercise the approved runner",
+  )
+  assert_eq(public_repository_runner_errors({"macos-nightly.yml": actual}, {targets: []}), [])
+  for selector in [
+    "macos-latest-xlarge",
+    "$" + "{{ github.event_name == 'pull_request' && 'macos-latest-xlarge' || 'macos-latest' }}",
+    "$" + "{{ github.event_name == 'schedule' && 'macos-latest-xlarge' || 'macos-latest' }}",
+    "$"
+      + "{{ github.event_name == 'workflow_dispatch' && 'macos-latest-xlarge' || 'macos-latest' }}",
+  ] {
+    const errors = public_repository_runner_errors(
+      {"macos-nightly.yml": {jobs: {nextest: {"runs-on": selector}}}},
+      {targets: []},
+    )
+    assert(
+      errors.contains(
+        "macos-nightly.yml:nextest runner selection can resolve through paid token macos-latest-xlarge",
+      ),
+      selector,
+    )
+  }
+}
+
+pipeline test_approved_native_runner_keeps_workflow_and_job_scope(harness: Harness) {
+  const actual = read_yaml_typed(
+    harness.fs,
+    "../../.github/workflows/macos-nightly.yml",
+    schema_of(CiWorkflow),
+  )
+  const nextest = actual.jobs?.nextest ?? {}
+  assert(
+    public_repository_runner_errors({"other.yml": actual}, {targets: []}).contains(
+      "other.yml:nextest runner selection can resolve through paid token macos-latest-xlarge",
+    ),
+  )
+  assert(
+    public_repository_runner_errors({"macos-nightly.yml": {jobs: {other: nextest}}}, {targets: []})
+      .contains(
+        "macos-nightly.yml:other runner selection can resolve through paid token macos-latest-xlarge",
+      ),
   )
 }
 

@@ -2142,11 +2142,21 @@ fn active_release_runner_errors(release_runner_policy: CiReleaseRunnerPolicy) ->
   return errors
 }
 
-/**
- * Paid hosted runners a maintainer approved for one job, as
- * "workflow:job:label". Release qualification runs on the larger hosted Mac.
- */
-pub const APPROVED_PAID_RUNNERS = ["macos-nightly.yml:nextest:macos-latest-xlarge"]
+/** Hosted runner approvals bind one job to its exact event/ref selector. */
+pub const APPROVED_PAID_RUNNERS: list<{
+  workflow: string,
+  job: string,
+  runner: string,
+  selector: string,
+}> = [
+  {
+    workflow: "macos-nightly.yml",
+    job: "nextest",
+    runner: "macos-latest-xlarge",
+    selector: "$"
+      + "{{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && 'macos-latest-xlarge' || 'macos-latest' }}",
+  },
+]
 
 pub const PAID_CAPACITY_ROUTE_INPUTS = [
   "FLEET_EVACUATION",
@@ -2171,7 +2181,13 @@ pub fn public_repository_runner_errors(
           errors = errors + ["${workflow_name}:${job_name} must not request a self-hosted runner"]
         }
         if paid_public_runner_selector(label, release_runner_policy)
-          && !APPROVED_PAID_RUNNERS.contains("${workflow_name}:${job_name}:${label}") {
+          && !APPROVED_PAID_RUNNERS.any(
+            { approval ->
+              approval.workflow == workflow_name && approval.job == job_name
+                && approval.runner == label
+                && approval.selector == trim(to_string(job?.["runs-on"] ?? ""))
+            },
+          ) {
           errors = errors
             + [
               "${workflow_name}:${job_name} runner selection can resolve through paid token ${label}",
