@@ -579,7 +579,12 @@ fn push_env_if_missing(
     value: &str,
     commented: bool,
 ) {
-    if env_file_has_key(existing, key) {
+    let placeholder_exists = commented
+        && existing
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix('#'))
+            .any(|line| env_assignment_key(line) == Some(key));
+    if env_file_has_key(existing, key) || placeholder_exists {
         return;
     }
     let assignment = format!("{key}={}", shell_words::quote(value));
@@ -591,16 +596,20 @@ fn push_env_if_missing(
 }
 
 fn env_file_has_key(existing: &str, key: &str) -> bool {
-    existing.lines().any(|line| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            return false;
-        }
-        trimmed
-            .strip_prefix("export ")
-            .unwrap_or(trimmed)
-            .starts_with(&format!("{key}="))
-    })
+    existing
+        .lines()
+        .any(|line| env_assignment_key(line) == Some(key))
+}
+
+fn env_assignment_key(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    if line.starts_with('#') {
+        return None;
+    }
+    line.strip_prefix("export ")
+        .unwrap_or(line)
+        .split_once('=')
+        .map(|(key, _)| key)
 }
 
 fn providers_config_path() -> PathBuf {

@@ -63,6 +63,44 @@ fn output_text(output: &Output) -> String {
 }
 
 #[test]
+fn repeated_quickstart_preserves_an_inactive_credential_placeholder() {
+    let root = tempfile::tempdir().unwrap();
+    let output = quickstart(root.path());
+    assert!(output.status.success(), "{}", output_text(&output));
+    let environment = fs::read_to_string(root.path().join(".env")).unwrap();
+    assert_eq!(
+        environment
+            .lines()
+            .filter(|line| *line == "# ANTHROPIC_API_KEY=replace-me")
+            .count(),
+        1
+    );
+    assert!(!environment
+        .lines()
+        .any(|line| line.starts_with("ANTHROPIC_API_KEY=")));
+    let snapshots: Vec<_> = [
+        ".env",
+        ".gitignore",
+        "harn.toml",
+        "home/config/harn/providers.toml",
+    ]
+    .into_iter()
+    .map(|path| (path, fs::read(root.path().join(path)).unwrap()))
+    .collect();
+    for _ in 0..2 {
+        let output = quickstart(root.path());
+        assert!(output.status.success(), "{}", output_text(&output));
+        for (path, expected) in &snapshots {
+            assert_eq!(
+                fs::read(root.path().join(path)).unwrap().as_slice(),
+                expected.as_slice(),
+                "repeated quickstart changed {path}"
+            );
+        }
+    }
+}
+
+#[test]
 fn quickstart_protects_existing_env_and_preserves_authored_ignore_rules() {
     let root = tempfile::tempdir().unwrap();
     assert!(git(root.path(), &["init", "--quiet"]).status.success());
