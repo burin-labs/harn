@@ -163,15 +163,22 @@ establishes whether an edit improves model behavior.
 
 ## Refusals and limits
 
-- Live commands in a relocated workspace require the enforced local Linux view
-  above. Other platforms, unconfined runtime commands, and host command adapters
-  that cannot bind that view retain their refusal. Workspace name projection
-  alone does not confine arbitrary host tools or external processes.
+- Live commands in a relocated workspace require the enforced Linux view above
+  or macOS's per-child Seatbelt boundary. The macOS profile denies recorded
+  trees and the branch storage pool outside the current workspace after every
+  other grant, including filesystem aliases and Unix sockets. It pins ancestor
+  names against child renames and covers peers created after the child starts.
+  A process already inside a macOS sandbox is refused because a narrower child
+  profile cannot be applied there. Other platforms, unconfined runtime commands,
+  and host adapters that cannot enforce this boundary retain their refusal.
+  Workspace name projection alone does not confine external processes.
   A baseline recorded in an isolated workspace can replay at that same path;
   the host restores its initial contents between runs.
 - Each tool dispatch records whether it requested a command, including requests
-  refused before launch. On non-Linux hosts, admission refuses a moved replay
-  with recorded command requests after the served prefix, before any model call.
+  refused before launch. On hosts without Linux or macOS support, admission
+  refuses a moved replay with recorded command requests after the served prefix,
+  before any model call. macOS also refuses at admission when its filesystem
+  sandbox is unavailable or the calling process is already sandboxed.
   Answer-only and filesystem-only replay remain available. Served commands need
   no child process and retain their command evidence in descendant recordings.
   Linux checks the active command policy and filesystem backend at execution;

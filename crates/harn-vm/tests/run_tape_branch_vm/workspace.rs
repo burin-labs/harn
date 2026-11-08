@@ -1,5 +1,35 @@
 use super::*;
 
+#[cfg(target_os = "macos")]
+fn command_replay_refused_on_this_host(tapes: &Path, isolated: &Path) -> bool {
+    let Some(expected) = support::sandbox_host::unavailable_worktree_sandbox() else {
+        return false;
+    };
+    let state = isolated
+        .parent()
+        .unwrap()
+        .join("unavailable-command-replay");
+    let result = start_branch(BranchPlan {
+        tape: EventTape::load(&tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 1,
+        workspace: location(isolated),
+        state_root: state.clone(),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    });
+    let error = match result {
+        Ok(_) => panic!("unsupported command replay was admitted: {expected}"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("without an available macOS filesystem sandbox"),
+        "{error}"
+    );
+    assert!(!state.exists(), "refusal must precede arming the branch");
+    eprintln!("command replay refused on measured unsupported host: {expected}");
+    true
+}
+
 #[cfg(unix)]
 #[test]
 fn result_readers_report_branch_path_refusals_as_structured_errors() {
@@ -71,7 +101,7 @@ pipeline main(harness: Harness, task: unknown) {{
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn relocated_live_commands_cannot_touch_recorded_absolute_paths() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -95,6 +125,10 @@ pipeline main(harness: Harness, task: unknown) {{
     record(&source, &recorded.tapes, &recorded.workspace);
     assert!(marker.exists(), "the baseline must execute the command");
     std::fs::remove_file(&marker).unwrap();
+    #[cfg(target_os = "macos")]
+    if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
+        return;
+    }
     let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
     assert_eq!(replay.report.served_calls, 1);
     assert_eq!(replay.report.live_calls, 1);
@@ -110,7 +144,7 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(!isolated.workspace.join("command-marker").exists());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn a_restored_script_cannot_address_its_embedded_recorded_path() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -145,6 +179,10 @@ pipeline main(harness: Harness, task: unknown) {
     assert_eq!(std::fs::read_to_string(&sibling_marker).unwrap(), "sibling");
     std::fs::remove_file(&marker).unwrap();
     std::fs::remove_file(&sibling_marker).unwrap();
+    #[cfg(target_os = "macos")]
+    if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
+        return;
+    }
     let replay = branch(source, &recorded.tapes, &isolated.workspace, 1);
     assert_eq!(
         (replay.report.served_calls, replay.report.live_calls),
@@ -176,7 +214,7 @@ pipeline main(harness: Harness, task: unknown) {
     );
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn command_cwd_relocates_without_rewriting_arguments_or_environment() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -202,6 +240,10 @@ pipeline main(harness: Harness, task: unknown) {{
     );
     record(&source, &recorded.tapes, &recorded.workspace);
     assert!(recorded.workspace.join("projected-env").exists());
+    #[cfg(target_os = "macos")]
+    if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
+        return;
+    }
     let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
     replay.output.unwrap();
     let root = isolated
@@ -311,7 +353,7 @@ fn main(harness: Harness) {{
     );
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn a_removed_nested_alias_keeps_its_child_read_denial_in_the_branch() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -358,6 +400,10 @@ fn main(harness: Harness) {{
     assert_eq!(recording.error(), None);
     drop(recording);
     std::fs::remove_file(direct_alias).unwrap();
+    #[cfg(target_os = "macos")]
+    if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
+        return;
+    }
     for (case, denied) in [("read-control", false), ("read-denied", true)] {
         let target = isolated.workspace.join("readonly/data");
         std::fs::write(&target, "private canary").unwrap();
@@ -475,7 +521,7 @@ fn main(harness: Harness) {{
     assert_eq!(std::fs::read_to_string(peer).unwrap(), "peer content");
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn live_commands_keep_explicit_read_only_assets_outside_the_storage_pool() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -502,6 +548,10 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(
         record(&source, &recorded.tapes, &recorded.workspace).contains("retained asset content")
     );
+    #[cfg(target_os = "macos")]
+    if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
+        return;
+    }
     let guard = start_branch(BranchPlan {
         tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
         live_after_calls: 1,

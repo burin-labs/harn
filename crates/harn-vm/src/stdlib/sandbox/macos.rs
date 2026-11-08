@@ -30,12 +30,27 @@ use crate::value::VmError;
 mod nested;
 mod parent_environment;
 pub(super) mod private_temp;
+mod replay;
 mod self_confinement;
 pub(super) mod swiftpm;
 mod swiftpm_toolset;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
+
+pub(super) fn check_replay_supported() -> Result<(), VmError> {
+    if nested::process_is_sandboxed() {
+        return Err(super::sandbox_rejection(
+            "cannot replay commands in a moved workspace inside an inherited macOS sandbox; its isolated filesystem boundary cannot be applied".into(),
+        ));
+    }
+    if !Backend::filesystem_available() {
+        return Err(super::sandbox_rejection(
+            "cannot replay commands in a moved workspace without an available macOS filesystem sandbox".into(),
+        ));
+    }
+    Ok(())
+}
 
 pub(super) struct Backend;
 
@@ -151,6 +166,9 @@ fn wrap_with_sandbox_exec(
         );
     }
     parent_environment::protect(profile)?;
+    if super::replay::boundary().is_some() {
+        check_replay_supported()?;
+    }
     match nested::nesting(policy) {
         nested::Nesting::NotNested => {}
         // Already confined at least as strictly: macOS would refuse a second
@@ -559,6 +577,7 @@ fn render_profile_with_extra_read_roots(
             ));
         }
     }
+    replay::append_boundary(&mut profile);
     profile
 }
 

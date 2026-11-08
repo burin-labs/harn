@@ -848,6 +848,8 @@ What children get differs by platform:
   each case. Narrowing beyond those probed axes is enforced only by Harn's
   in-process checks; recovering per-command profiles needs a spawn broker
   outside the confined process (harn#9215).
+  Moved replay commands always refuse an inherited sandbox: sampled parent
+  probes cannot establish their complete original-and-peer workspace boundary.
 - **Linux** confines with Landlock, whose domains stack, so a command's own
   ruleset still narrows it further. Landlock confines only the calling thread
   and threads it starts later, so Harn refuses to confine a process that
