@@ -1061,6 +1061,30 @@ fn floor_rm_inside_root_absolute_is_allowed_but_outside_is_blocked() {
 }
 
 #[test]
+fn floor_blocks_absolute_deletes_of_a_root_or_its_ancestors() {
+    // Spelling the root absolutely must not dodge the in-place wipe rule, and
+    // a root that is the home directory makes home itself the protected path.
+    for (cmd, root) in [
+        ("rm -rf /home/dev/project", ROOT),
+        ("rm -rf /home/dev/project/", ROOT),
+        ("rm -rf /home/dev", ROOT),
+        ("rm -rf /home", ROOT),
+        ("rm -rf /home/dev", "/home/dev"),
+        ("rm -rf -- /home/dev/", "/home/dev"),
+        ("find /home/dev -delete", "/home/dev"),
+    ] {
+        assert!(
+            cat_reason(cmd, &[root]).is_some(),
+            "expected catastrophic: {cmd} with root {root}"
+        );
+    }
+    assert!(
+        cat_reason("rm -rf /home/dev/scratch/build", &["/home/dev"]).is_none(),
+        "a delete strictly inside a home root stays allowed"
+    );
+}
+
+#[test]
 fn floor_blocks_quoting_and_chaining_adversarial_forms() {
     for cmd in [
         "git \"reset\" --hard",
