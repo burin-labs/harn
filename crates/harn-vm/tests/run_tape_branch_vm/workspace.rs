@@ -96,12 +96,11 @@ pipeline main(harness: Harness, task: unknown) {{
     let replay = branch(&source, &recorded.tapes, &isolated.workspace, 1);
     assert_eq!(replay.report.served_calls, 1);
     assert_eq!(replay.report.live_calls, 1);
-    assert!(replay
+    replay
         .output
-        .unwrap_err()
-        .contains("require a filesystem namespace"));
+        .expect("a relocated branch must execute in its own filesystem view");
     assert!(!marker.exists());
-    assert!(!isolated.workspace.join("command-marker").exists());
+    assert!(isolated.workspace.join("command-marker").exists());
 }
 
 #[test]

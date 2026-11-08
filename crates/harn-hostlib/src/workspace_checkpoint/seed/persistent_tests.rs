@@ -37,6 +37,56 @@ struct Invocation {
 }
 
 #[test]
+fn concurrent_saved_branches_grade_only_their_own_edits() {
+    run_isolated(
+        "concurrent_saved_branches_grade_only_their_own_edits",
+        concurrent_saved_branches_case,
+    );
+}
+
+fn concurrent_saved_branches_case() {
+    let source = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("value"), "seed").unwrap();
+    let mut captured =
+        ReplayWorkspace::capture_in(source.path(), storage.path(), SeedLimits::default()).unwrap();
+    let saved = captured.persist();
+    drop(captured);
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    let (grade_tx, grade_rx) = std::sync::mpsc::sync_channel(0);
+    let left_saved = saved.clone();
+    let left = std::thread::spawn(move || {
+        let branch = ReplayWorkspace::restore_saved(&left_saved).unwrap();
+        fs::write(branch.path().join("value"), "left").unwrap();
+        ready_tx.send(()).unwrap();
+        grade_rx.recv().unwrap();
+        (
+            branch.path().to_path_buf(),
+            fs::read_to_string(branch.path().join("value")).unwrap(),
+        )
+    });
+    ready_rx.recv().unwrap();
+    let right = ReplayWorkspace::restore_saved(&saved);
+    if let Ok(branch) = &right {
+        fs::write(branch.path().join("value"), "right").unwrap();
+    }
+    grade_tx.send(()).unwrap();
+    let (left_root, left_grade) = left.join().unwrap();
+    let right = right.expect("a second branch must restore while the first is still running");
+    assert_ne!(left_root, right.path());
+    assert_eq!(left_grade, "left");
+    assert_eq!(
+        fs::read_to_string(right.path().join("value")).unwrap(),
+        "right"
+    );
+    assert_eq!(
+        fs::read_to_string(saved.storage_path().join("workspace/value")).unwrap(),
+        "seed"
+    );
+}
+
+#[test]
 fn saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners() {
     run_isolated(
         "saved_workspace_restarts_in_a_new_process_and_excludes_competing_owners",
