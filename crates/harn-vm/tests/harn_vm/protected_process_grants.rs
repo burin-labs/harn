@@ -135,6 +135,30 @@ fn foreground_run_delivers_only_a_private_login_and_redacts_before_returning() {
 }
 
 #[test]
+fn caller_removals_cannot_undo_the_protected_login_environment() {
+    let fixture = GithubFixture::new();
+    let output = fixture
+        .run(
+            r#"
+fn main(harness: Harness) {
+  const result = harness.process.run({
+    program: "gh", args: ["api", "fixture/probe"],
+    env_remove: ["GH_CONFIG_DIR", "GIT_CONFIG_COUNT", "GH_PAGER", "GIT_PAGER"]
+  })
+  assert(result.success)
+  const response = json_parse(result.stdout)
+  assert(response.token == "[redacted]")
+  assert(!response.token_in_env)
+  harness.stdio.println(response.config_dir)
+}
+"#,
+            SandboxProfile::WorkspacePaths,
+        )
+        .expect("caller removals preserve the protected environment");
+    assert_private_login_removed(&output);
+}
+
+#[test]
 fn worktree_foreground_run_delivers_login_or_refuses_the_measured_host_gap() {
     let fixture = GithubFixture::new();
     let result = fixture.run(LOGIN_PROBE, SandboxProfile::Worktree);
