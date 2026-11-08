@@ -74,6 +74,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let step_judge_attempts = 0
     let step_judge_unavailable_count = 0
     let last_turn_parse_dropped = false
+    let last_turn_output_limited = false
     let consecutive_text_only = 0
     let turns_since_progress = 0
     let turns_since_loop_progress = 0
@@ -280,6 +281,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         if len(tool_calls) > 0 {
           terminal_assessment = nil
         }
+        // Read after auto-continue settled: a turn still cut off here keeps the
+        // terminal from sealing as natural.
+        last_turn_output_limited = __autocontinue_toolless_truncated(llm_result, len(tool_calls))
         __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls)
         const parse_feedback = __agent_loop_record_parse_feedback(
           harness,
@@ -1106,6 +1110,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           suspend_result: suspend_result,
           terminal_error: terminal_error,
           last_turn_parse_dropped: last_turn_parse_dropped,
+          last_turn_output_limited: last_turn_output_limited,
           stall_state: stall_state,
           successful_tools_seen: successful_tools_seen,
           rejected_tools_seen: rejected_tools_seen,

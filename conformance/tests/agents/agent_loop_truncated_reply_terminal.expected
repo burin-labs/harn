@@ -1,0 +1,3 @@
+exhausted status=budget_exhausted kind=policy_budget reason=output_limit acp=max_tokens
+normal status=done kind=natural reason=natural acp=end_turn
+recovered status=done kind=natural reason=natural acp=end_turn
