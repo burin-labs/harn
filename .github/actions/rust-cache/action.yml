@@ -298,11 +298,14 @@ runs:
     # instead of only as a slow compile. A key whose toolchain or environment
     # hash moved restores nothing until a main refresh writes the new
     # generation; that miss read as nothing for a day (harn CLI builds at 12 to
-    # 19 minutes instead of 0 to 9). Reports only; never fails the job.
+    # 19 minutes instead of 0 to 9). A miss also names its writer's state: a
+    # disabled writer turns that miss into days. Reports only; never fails the job.
     - name: Report the Rust cache restore
       if: inputs.persistent-target != 'true'
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
+        CACHE_INPUT_KEY: ${{ inputs.shared-key }}
         CACHE_SHARED_KEY: ${{ steps.cache-paths.outputs.shared-key }}
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         CACHE_PATHS: ${{ steps.cache-paths.outputs.paths }}
@@ -323,6 +326,8 @@ runs:
         line="HARN_RUST_CACHE key=$CACHE_SHARED_KEY restore=$restore target_mib=$((target_kib / 1024))"
         echo "$line"
         if [[ "$restore" == none ]]; then
+          writers="$(./scripts/ci/rust_cache_writer_state.sh "$CACHE_INPUT_KEY" | paste -sd ';' -)"
+          line="$line writers=\"$writers\""
           echo "::warning::$line: nothing restored, this job compiles cold"
         fi
         printf -- '- Rust cache `%s`: restore %s, %s MiB of target\n' "$CACHE_SHARED_KEY" "$restore" "$((target_kib / 1024))" >> "$GITHUB_STEP_SUMMARY"
