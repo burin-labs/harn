@@ -184,6 +184,7 @@ fn job_tools(
       returns: {type: "object"},
     },
   )
+  const blocked = harness.runtime.channel("worker-until-stopped", 1)
   // Keeps the worker RUNNING while the parent probes and stops it. A worker
   // that parks instead is suspended, and a suspension checkpoints its session,
   // which reclaims its handles for an entirely legitimate reason. The contract
@@ -194,9 +195,8 @@ fn job_tools(
     "Wait for the worker to be stopped.",
     {
       handler: { _args ->
-        while !is_cancelled() {
-          harness.runtime.yield_now()
-        }
+        // No sender can release this cancellation point before the stop.
+        harness.runtime.receive(blocked)
         return "still working"
       },
       parameters: {},

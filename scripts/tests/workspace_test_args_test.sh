@@ -53,7 +53,14 @@ case "$*" in
     printf '%s\n' "$*" > "$LISTED_TESTS"
     jq -n --arg status "${MATCH_STATUS:-matches}" '{"test-count": 1, "rust-suites": {fixture: {status: "listed", "package-name": "fixture", "binary-name": "fixture", testcases: {case: {ignored: false, "filter-match": {status: $status}}}}, excluded: {status: "skipped"}}}'
     ;;
-  'nextest run '*) printf '%s\n' "$*" > "$RAN_TESTS" ;;
+  'nextest run '*)
+    printf '%s\n' "$*" > "$RAN_TESTS"
+    if [[ "${OMIT_JUNIT:-}" != 1 ]]; then
+      mkdir -p "$PWD/target/nextest/ci"
+      printf '<testsuites tests="1"><testsuite><testcase name="fixture" time="0.01"/></testsuite></testsuites>\n' > "$PWD/target/nextest/ci/junit.xml"
+    fi
+    exit "${RUN_EXIT:-0}"
+    ;;
   *) exit 9 ;;
 esac
 SH
@@ -91,6 +98,7 @@ if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" missing > "$
 fi
 FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-unit:3/3 > "$scratch/log"
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
+cmp "$scratch/repo/target/nextest/ci/junit.xml" "$RUNNER_TEMP/harn-nextest-junit.xml"
 grep -q 'eligible=1' "$scratch/log"
 grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --lib --partition count:3/3 --no-tests pass' "$scratch/ran"
 FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-integration > "$scratch/log"
@@ -144,6 +152,9 @@ fi
 [[ ! -e "$scratch/ran" ]]
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "mismatch"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log"
+grep -q 'testcase name="fixture"' "$RUNNER_TEMP/harn-nextest-junit.xml"
+archive_target=$(sed -n 's/.*--target-dir-remap \([^ ]*\).*/\1/p' "$scratch/ran")
+[[ -n "$archive_target" && ! -e "$archive_target" ]]
 grep -Fq -- "--archive-file $scratch/tests.tar.zst --workspace-remap $scratch/repo" "$scratch/listed"
 grep -q -- '--cargo-metadata .*/target/nextest/cargo-metadata.json' "$scratch/ran"
 grep -q -- '--binaries-metadata .*/target/nextest/binaries-metadata.json' "$scratch/ran"
@@ -152,6 +163,15 @@ grep -q -- '--no-tests fail' "$scratch/ran"
 if grep -Eq -- '--locked|--partition|--archive-file' "$scratch/ran"; then
   echo 'Archive replay rebuilt, partitioned, or unpacked the archive twice' >&2; exit 1
 fi
+status=0
+RUN_EXIT=37 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log" 2>&1 || status=$?
+[[ "$status" == 37 ]]
+grep -q 'testcase name="fixture"' "$RUNNER_TEMP/harn-nextest-junit.xml"
+if OMIT_JUNIT=1 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log" 2>&1; then
+  echo 'A successful run without fresh timing evidence was accepted' >&2; exit 1
+fi
+grep -q 'Nextest timing report missing:' "$scratch/log"
+[[ ! -e "$RUNNER_TEMP/harn-nextest-junit.xml" ]]
 rm "$scratch/ran"
 if MATCH_STATUS=mismatch GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log" 2>&1; then
   echo 'An empty archive selection was accepted' >&2; exit 1

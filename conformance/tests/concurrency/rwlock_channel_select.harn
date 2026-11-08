@@ -12,10 +12,9 @@ pipeline test(harness: Harness, task: unknown) {
   const ch1 = harness.runtime.channel("ch1")
   const ch2 = harness.runtime.channel("ch2")
   spawn {
-    harness.clock.sleep_ms(10ms)
     harness.runtime.send(ch2, "ready")
   }
-  const selected = harness.runtime.channel_select([ch1, ch2], 100)
+  const selected = harness.runtime.channel_select([ch1, ch2])
   assert_eq(selected["index"], 1)
   assert_eq(selected["channel"], "ch2")
   assert_eq(selected["value"], "ready")

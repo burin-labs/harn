@@ -19,6 +19,11 @@
 # <name>` reports the inherited entries as "override for default profile".)
 
 [profile.default]
+# Keep the result summary and anomalies; captured details appear once on failure.
+success-output = "never"
+failure-output = "final"
+status-level = "slow"
+final-status-level = "flaky"
 # Fast suite. Excludes the subprocess-spawning `harn-cli` integration tests
 # except for the small required subset below. Those cases cover dynamic JSON
 # normalizers and lazy manifest-hook demand through the shipped binary; the
@@ -39,14 +44,17 @@ leak-timeout = { period = "10s", result = "fail" }
 # need more time must opt in via an override below.
 fail-fast = false
 
+[profile.default.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
+
 # CI profile is stricter: one warning at 30s, hard kill at 120s.
 # Inherits the same default-filter as the default profile (fast suite only).
 [profile.ci]
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
 leak-timeout = { period = "10s", result = "fail" }
 fail-fast = false
-failure-output = "immediate-final"
-success-output = "never"
 
 # Required release proof keeps CI's inventory and budgets, and requires actual
 # process confinement in the product checks instead of accepting host refusal.
@@ -69,8 +77,6 @@ default-filter = "package(harn-cli) and kind(test)"
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
 leak-timeout = { period = "15s", result = "pass" }
 fail-fast = false
-failure-output = "immediate-final"
-success-output = "never"
 
 # Flake-detection profile: zero retries, no fail-fast, tighter slow-test
 # threshold. Used by the flake-detection CI workflow which runs touched
@@ -80,8 +86,6 @@ retries = 0
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
 leak-timeout = { period = "10s", result = "fail" }
 fail-fast = false
-failure-output = "immediate-final"
-success-output = "never"
 
 # ---------------------------------------------------------------------------
 # Leaked-handle detection
