@@ -1,0 +1,9 @@
+unset_caps=16384,32768,16384
+unset_cap_continuation_raised=true
+unset_cap_identical_resend=true
+explicit_caps=4096,8192
+explicit_cap_identical_resend=true
+preamble_caps=16384,32768
+preamble_truncation_continued=true
+ceiling_caps=32768,32768
+ceiling_cap_identical_resend=true

@@ -428,7 +428,11 @@ async fn acp_session_prompt_reports_max_tokens_from_provider_signal() {
     harn_clock::test_support::with_local_tasks(async {
             let body = "harness.llm.mock_clear()\n\
                             harness.llm.mock_enqueue({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
+                            harness.llm.mock_enqueue({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
+                            harness.llm.mock_enqueue({text: \"truncated\", stop_reason: \"max_tokens\"})\n\
                             agent_loop(harness, \"hello\", nil, {provider: \"mock\"})";
+            // The truncation must outlast every auto-continue attempt to
+            // surface as the prompt's stop reason.
             let result = run_acp_agent_loop_prompt(body).await;
             assert_eq!(result["stopReason"], "max_tokens");
         }).await;
