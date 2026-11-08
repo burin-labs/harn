@@ -347,6 +347,31 @@ fn cli_accepts_hook_policy_environment() {
 }
 
 #[test]
+fn cli_accepts_ci_tooling_environment() {
+    let output = run_harn_e2e(
+        &["--version"],
+        &[
+            ("HARN_CLI_AOT_GEN_BIN", "harn-cli-aot-gen"),
+            ("HARN_CLI_ARTIFACT_BRANCH", "main"),
+            ("HARN_CLI_ARTIFACT_COMMIT_WINDOW", "30"),
+            ("HARN_ENUM_COMPILER_ARCHIVE_STAGE", "1"),
+            ("HARN_LSP_INSTALL_ATTEMPTS", "3"),
+            ("HARN_PERSISTENT_TARGET_MAX_GIB", "80"),
+            ("HARN_PERSISTENT_TARGET_MIN_FREE_GIB", "60"),
+            ("HARN_PERSISTENT_TARGET_ROOT", "/host/target"),
+            ("HARN_RATE_LIMIT_MAX_WAIT_SECONDS", "3900"),
+            ("HARN_RATE_LIMIT_EXHAUSTED_PERCENT", "5"),
+            ("HARN_WARM_ARTIFACT_MAX_BYTES", "1048576"),
+            ("HARN_WARM_BUILD_HEADROOM_BYTES", "1048576"),
+            ("HARN_WASM_PACK", "wasm-pack"),
+        ],
+    );
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    assert!(output.stdout.starts_with("harn "), "{}", output.stdout);
+    assert!(output.stderr.is_empty(), "{}", output.stderr);
+}
+
+#[test]
 fn cli_accepts_target_cache_collector_environment() {
     let output = run_harn_e2e(
         &["--version"],

@@ -1,2 +1,2 @@
-Accept the hooks' no-local-build switch and validation-base override when starting Harn,
-so they no longer abort hook checks.
+Accept Harn-owned hook and CI tooling settings when starting Harn, including persistent-target cache limits,
+so inherited build settings no longer abort checks or release smoke tests.
