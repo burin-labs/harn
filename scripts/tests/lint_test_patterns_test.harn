@@ -359,6 +359,10 @@ TokioCommand::new(
 @test
 pipeline test_shell_spawn_literal_ratchet(harness: Harness, task: unknown) {
   assert_eq(
+    shell_spawn_literal_baseline("crates/harn-cli/tests/harn_cli_e2e/quickstart_env.rs"),
+    1,
+  )
+  assert_eq(
     shell_spawn_literal_baseline(
       "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs",
     ),
