@@ -1271,11 +1271,11 @@ fn final_visible_text_preserves_authored_separators_between_text_blocks() {
 #[test]
 fn iteration_cap_maps_to_max_turn_requests() {
     assert_eq!(
-        canonical_acp_stop_reason("budget_exhausted", 5, 5, None),
+        canonical_acp_stop_reason("budget_exhausted", "", 5, 5, None),
         "max_turn_requests"
     );
     assert_eq!(
-        canonical_acp_stop_reason("budget_exhausted", 6, 5, Some("end_turn")),
+        canonical_acp_stop_reason("budget_exhausted", "", 6, 5, Some("end_turn")),
         "max_turn_requests"
     );
 }
@@ -1286,7 +1286,7 @@ fn other_budget_paths_also_map_to_max_turn_requests() {
     // they share the canonical ACP reason even when iterations are
     // below the cap.
     assert_eq!(
-        canonical_acp_stop_reason("budget_exhausted", 2, 50, Some("end_turn")),
+        canonical_acp_stop_reason("budget_exhausted", "", 2, 50, Some("end_turn")),
         "max_turn_requests"
     );
 }
@@ -1294,17 +1294,17 @@ fn other_budget_paths_also_map_to_max_turn_requests() {
 #[test]
 fn provider_max_tokens_promoted_when_loop_clean() {
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("max_tokens")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("max_tokens")),
         "max_tokens"
     );
     // OpenAI flavor.
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("length")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("length")),
         "max_tokens"
     );
     // Case-insensitive on the provider value.
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("MAX_TOKENS")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("MAX_TOKENS")),
         "max_tokens"
     );
 }
@@ -1324,7 +1324,7 @@ fn provider_stop_reason_normalization_is_shared_with_transcripts() {
 #[test]
 fn anthropic_refusal_stop_reason_maps_to_refusal() {
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("refusal")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("refusal")),
         "refusal"
     );
 }
@@ -1332,15 +1332,15 @@ fn anthropic_refusal_stop_reason_maps_to_refusal() {
 #[test]
 fn natural_completion_maps_to_end_turn() {
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("end_turn")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("end_turn")),
         "end_turn"
     );
-    assert_eq!(canonical_acp_stop_reason("", 1, 50, None), "end_turn");
+    assert_eq!(canonical_acp_stop_reason("", "", 1, 50, None), "end_turn");
     // Anthropic `tool_use` is normal mid-turn behavior; if it
     // somehow surfaced as the last call's stop_reason (loop ended
     // before the next turn ran), it still represents a clean stop.
     assert_eq!(
-        canonical_acp_stop_reason("done", 1, 50, Some("tool_use")),
+        canonical_acp_stop_reason("done", "", 1, 50, Some("tool_use")),
         "end_turn"
     );
 }
@@ -1350,11 +1350,11 @@ fn budget_exhausted_overrides_provider_signal() {
     // The loop ran out of budget before the model could refuse or
     // truncate again, so loop-level cap wins.
     assert_eq!(
-        canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("max_tokens")),
+        canonical_acp_stop_reason("budget_exhausted", "", 50, 50, Some("max_tokens")),
         "max_turn_requests"
     );
     assert_eq!(
-        canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("refusal")),
+        canonical_acp_stop_reason("budget_exhausted", "", 50, 50, Some("refusal")),
         "max_turn_requests"
     );
 }

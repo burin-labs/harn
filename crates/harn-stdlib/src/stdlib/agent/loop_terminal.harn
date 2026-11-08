@@ -602,6 +602,32 @@ pub fn __agent_loop_terminal_boundary(
   // never checked, and that is the exact shape in which a silently-skipped gate
   // reads as a satisfied one.
   let declared_artifacts = nil
+  // A reply the provider cut off at its output limit, after auto-continue
+  // could not finish it, is not the model choosing to stop. Sealing it as
+  // natural would report a half-written answer as completed work.
+  if (state?.last_turn_output_limited ?? false)
+    && __agent_loop_terminal_seals_natural(
+      final_status,
+      stop_reason,
+      terminal_error,
+      state.suspend_result,
+    ) {
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "loop_control_decision",
+      {
+        iteration: state.iteration,
+        action: "output_limit",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: "output_limit",
+        status: "budget_exhausted",
+      },
+    )
+    final_status = "budget_exhausted"
+    stop_reason = "output_limit"
+  }
   if __agent_loop_terminal_seals_natural(
     final_status,
     stop_reason,
