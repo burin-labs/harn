@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+use futures::stream::SelectAll;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
@@ -11,7 +13,7 @@ use uuid::Uuid;
 
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, sanitize_topic_component, AnyEventLog,
-    EventLog, LogEvent, Topic,
+    EventLog, EventLogBackendKind, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, ErrorKind};
@@ -506,7 +508,7 @@ async fn waitpoint_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> 
             return Err(VmError::Runtime(format!(
                 "waitpoint.create: expected string id or dict, got {}",
                 other.type_name()
-            )))
+            )));
         }
     };
     let metadata = options
@@ -623,30 +625,97 @@ async fn wait_live_outside_dispatch(
     waitpoint_ids: Vec<String>,
     options: WaitpointWaitOptions,
 ) -> Result<Vec<WaitpointRecord>, VmError> {
-    let deadline = options.timeout.map(|timeout| InstantLike::now() + timeout);
-    loop {
-        let states = load_waitpoint_states(log, &waitpoint_ids).await?;
-        if states
-            .iter()
-            .all(|record| record.status == WaitpointStatus::Completed)
-        {
-            return Ok(states);
+    let clock = crate::clock_mock::active_clock().unwrap_or_else(harn_clock::RealClock::arc);
+    let started = clock.monotonic_ms();
+    let external_writes = match log.describe().backend {
+        EventLogBackendKind::Memory => false,
+        EventLogBackendKind::File | EventLogBackendKind::Sqlite | EventLogBackendKind::Postgres => {
+            true
         }
-        if let Some(cancelled) = states
-            .iter()
-            .find(|record| record.status == WaitpointStatus::Cancelled)
-        {
-            return Err(waitpoint_cancelled_error(
-                "",
-                &[cancelled.id.clone()],
-                cancelled.reason.as_deref(),
-            ));
-        }
-        if deadline.is_some_and(|deadline| InstantLike::now() >= deadline) {
-            return Err(waitpoint_timeout_error(""));
-        }
-        tokio::time::sleep(StdDuration::from_millis(100)).await;
+    };
+    let mut changes = SelectAll::new();
+    // Subscribe before re-reading state: a terminal update between the caller's
+    // initial read and registration must not leave it waiting for another event.
+    for id in &waitpoint_ids {
+        let topic = waitpoint_topic(id)?;
+        let cursor = log.latest(&topic).await.map_err(event_log_error)?;
+        changes.push(
+            log.clone()
+                .subscribe(&topic, cursor)
+                .await
+                .map_err(event_log_error)?,
+        );
     }
+    let waiting = async {
+        loop {
+            if let Some(states) = live_waitpoint_resolution(log, &waitpoint_ids).await? {
+                return Ok(states);
+            }
+            let changed = async {
+                changes
+                    .next()
+                    .await
+                    .ok_or_else(|| VmError::Runtime("waitpoint event subscription closed".into()))?
+                    .map_err(event_log_error)?;
+                Ok::<(), VmError>(())
+            };
+            if external_writes {
+                // Broadcasts belong to one log instance. Durable state can also
+                // be updated by another process, which requires a bounded OS
+                // probe until that backend provides cross-instance notification.
+                tokio::select! {
+                    result = changed => result?,
+                    () = clock.sleep(StdDuration::from_millis(100)) => {},
+                }
+            } else {
+                changed.await?;
+            }
+        }
+    };
+    let Some(timeout) = options.timeout else {
+        return waiting.await;
+    };
+    let expired = async {
+        let elapsed = harn_clock::elapsed_ms(clock.monotonic_ms(), started);
+        clock
+            .sleep(timeout.saturating_sub(StdDuration::from_millis(elapsed)))
+            .await;
+    };
+    tokio::select! {
+        biased;
+        result = waiting => result,
+        () = expired => live_waitpoint_resolution(log, &waitpoint_ids)
+            .await?
+            .ok_or_else(|| waitpoint_timeout_error("")),
+    }
+}
+
+async fn live_waitpoint_resolution(
+    log: &Arc<AnyEventLog>,
+    ids: &[String],
+) -> Result<Option<Vec<WaitpointRecord>>, VmError> {
+    let states = load_waitpoint_states(log, ids).await?;
+    if states
+        .iter()
+        .all(|record| record.status == WaitpointStatus::Completed)
+    {
+        return Ok(Some(states));
+    }
+    if let Some(cancelled) = states
+        .iter()
+        .find(|record| record.status == WaitpointStatus::Cancelled)
+    {
+        return Err(waitpoint_cancelled_error(
+            "",
+            &[cancelled.id.clone()],
+            cancelled.reason.as_deref(),
+        ));
+    }
+    Ok(None)
+}
+
+fn event_log_error(error: crate::event_log::LogError) -> VmError {
+    VmError::Runtime(format!("waitpoint: {error}"))
 }
 
 async fn resolve_existing_waiter(
@@ -1199,14 +1268,6 @@ fn vm_string(value: &VmValue) -> Option<&str> {
     match value {
         VmValue::String(text) => Some(text.as_ref()),
         _ => None,
-    }
-}
-
-struct InstantLike;
-
-impl InstantLike {
-    fn now() -> OffsetDateTime {
-        OffsetDateTime::now_utc()
     }
 }
 

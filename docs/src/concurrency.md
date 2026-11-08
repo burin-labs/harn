@@ -765,6 +765,21 @@ harness.stdio.log(first.ok)          // true
 harness.stdio.log(second.timed_out) // true
 ```
 
+## Durable waitpoints
+
+`harness.runtime.waitpoint_wait(point, {timeout: duration})` waits for a
+waitpoint to complete. A list resolves when every point completes and returns
+records in input order. Already completed points resolve immediately.
+Cancellation raises `WaitpointCancelledError`; expiry raises
+`WaitpointTimeoutError`. Pending in-process calls use the calling Harness's
+clock for timeouts.
+
+Changes written through the same event-log instance notify a pending caller
+without waiting for a polling interval. Memory-backed waits use notifications
+only. Durable backends also check stored state periodically, because another
+process can write through an independent log instance. At expiry, the caller
+checks stored state again before reporting a timeout.
+
 ## Deadline
 
 Set a timeout on a block of work:
