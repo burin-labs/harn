@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {observerContext,readConsumerContextDecision,readConsumerParentProduct,readConsumerRepairDecision, observerRefusal } from '../lib/consumer-observer.mjs';
+import {observerContext,readConsumerContextDecision,readConsumerParentProduct,readConsumerRepairDecision, observerReadRefusal, observerRefusal } from '../lib/consumer-observer.mjs';
 import {readConsumerDeadline,readConsumerRecoveryDecision} from '../lib/consumer-observer-window.mjs';
 
 async function main(){
@@ -60,6 +60,7 @@ async function main(){
 }
 
 main().catch(error=>{
+  console.log(JSON.stringify(observerReadRefusal(error, 'context_product_unmeasured')));
   const {line} = observerRefusal(error, 'context_product_unmeasured');
   console.error(`::error::${line}`);
   process.exitCode=1;
