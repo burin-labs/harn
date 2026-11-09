@@ -45,7 +45,7 @@ pub(crate) use dialect::{DialectContract, StreamProtocol};
 pub(crate) use errors::{
     classify_llm_error, classify_provider_stream_error, classify_vm_llm_error, err_for_non_success,
     err_for_non_success_with_dialect, parse_retry_after_value, provider_http_error,
-    retry_after_header, LlmErrorInfo,
+    retry_after_header, LlmErrorInfo, CREDENTIAL_SCOPE_FIELD, CREDENTIAL_SCOPE_KEY,
 };
 /// The closed LLM-outcome vocabularies carried on the ACP prompt-error
 /// envelope. Public so the protocol-artifact generator can project them into

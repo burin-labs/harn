@@ -1356,7 +1356,11 @@ impl LlmCallAdmission {
     /// Admit one provider request. A key this provider already rejected in
     /// this process is refused here, before any wait or dispatch.
     pub(crate) async fn acquire(&self) -> Result<RateLimitPermit, crate::value::VmError> {
-        rejected_keys::refuse_rejected_key(&self.provider, self.api_key_id.as_deref())?;
+        rejected_keys::refuse_rejected_key(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+        )?;
         acquire_permit_for(
             &self.provider,
             &self.model,
@@ -1371,7 +1375,12 @@ impl LlmCallAdmission {
     /// Record the provider's verdict on the presented key once a request this
     /// admission let through has finished.
     pub(crate) fn observe_outcome<T>(&self, outcome: &Result<T, crate::value::VmError>) {
-        rejected_keys::observe_key_outcome(&self.provider, self.api_key_id.as_deref(), outcome);
+        rejected_keys::observe_key_outcome(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+            outcome,
+        );
     }
 }
 

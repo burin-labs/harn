@@ -148,6 +148,11 @@ fn rejected_key_is_refused_locally_until_its_retry_window_passes() {
         assert_auth_failure(&first);
         assert!(field(&first, "attempt_count").is_none(), "a real rejection");
         assert_eq!(
+            field(&first, "credential_scope").map(|v| v.display()),
+            Some("key".to_string()),
+            "a 401 rejects the key itself"
+        );
+        assert_eq!(
             sent(),
             ["Bearer key-a"],
             "first call reaches the provider once"
@@ -188,6 +193,91 @@ fn rejected_key_is_refused_locally_until_its_retry_window_passes() {
         assert_eq!(served.text, "served");
         assert_eq!(sent().len(), 3, "the key is sent again after the window");
         assert_eq!(sent()[2], "Bearer key-a");
+    });
+}
+
+/// Answers 403 to requests for `forbidden-model` and serves every other model,
+/// recording each request's model.
+fn model_access_stub(seen: Arc<Mutex<Vec<String>>>) -> LlmStub {
+    spawn_llm_stub_many("model access", 4, move |_, stream| {
+        let (_, request) = ollama_openai_compat::read_http_request(stream);
+        let model = request["model"].as_str().unwrap_or_default().to_string();
+        let (status, body) = if model == "forbidden-model" {
+            (
+                "403 Forbidden",
+                json!({"error":{"message":"Project does not have access to model forbidden-model",
+                    "type":"permission_error"}})
+                .to_string(),
+            )
+        } else {
+            (
+                "200 OK",
+                json!({"id":"served", "model":model,
+                    "choices":[{"index":0, "message":{"role":"assistant", "content":"served"},
+                        "finish_reason":"stop"}],
+                    "usage":{"prompt_tokens":3, "completion_tokens":1}})
+                .to_string(),
+            )
+        };
+        seen.lock().unwrap().push(model);
+        write!(stream, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    })
+}
+
+#[test]
+fn a_model_access_refusal_blocks_only_that_model_for_the_key() {
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
+    crate::reset_thread_local_state();
+    let _cleanup = Cleanup;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let server = model_access_stub(seen.clone());
+        install(server.addr(), crate::llm_config::AuthEnv::None);
+        let on_model = |model: &str| LlmCallOptions {
+            model: model.into(),
+            ..options("model-scoped-key")
+        };
+        let sent = || seen.lock().unwrap().clone();
+
+        let forbidden = vm_call_llm_full(&on_model("forbidden-model"))
+            .await
+            .unwrap_err();
+        assert_auth_failure(&forbidden);
+        assert_eq!(
+            field(&forbidden, "credential_scope").map(|v| v.display()),
+            Some("request".to_string()),
+            "a 403 without key-rejection wording names the request: {forbidden}"
+        );
+
+        let fallback = vm_call_llm_full(&on_model("allowed-model")).await.unwrap();
+        assert_eq!(fallback.text, "served");
+        assert_eq!(
+            sent(),
+            ["forbidden-model", "allowed-model"],
+            "the same key on another model is sent and served"
+        );
+
+        let repeat = vm_call_llm_full(&on_model("forbidden-model"))
+            .await
+            .unwrap_err();
+        assert_auth_failure(&repeat);
+        assert_eq!(
+            field(&repeat, "attempt_count").and_then(|v| v.as_int()),
+            Some(0)
+        );
+        assert!(
+            repeat
+                .to_string()
+                .contains("already rejected this API key for 'forbidden-model'"),
+            "{repeat}"
+        );
+        assert_eq!(sent().len(), 2, "the refused model is not re-sent");
     });
 }
 
