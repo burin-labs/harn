@@ -25,6 +25,14 @@ fn restore_os_environment(command: &mut Command) {
 }
 
 fn quickstart(root: &Path) -> Output {
+    quickstart_with(
+        root,
+        &["--provider", "anthropic", "--model", "claude-sonnet-4"],
+        &[],
+    )
+}
+
+fn quickstart_with(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
     let mut command = harn_e2e_command();
     command.env_clear();
     restore_os_environment(&mut command);
@@ -42,14 +50,9 @@ fn quickstart(root: &Path) -> Output {
         .env("http_proxy", "http://127.0.0.1:0")
         .env("NO_PROXY", "")
         .env("no_proxy", "")
-        .args([
-            "quickstart",
-            "--non-interactive",
-            "--provider",
-            "anthropic",
-            "--model",
-            "claude-sonnet-4",
-        ])
+        .envs(envs.iter().copied())
+        .args(["quickstart", "--non-interactive"])
+        .args(args)
         .output()
         .unwrap()
 }
@@ -304,5 +307,169 @@ fn quickstart_refuses_symlink_destinations_without_replacing_authored_files() {
             .file_type()
             .is_symlink());
         assert!(!root.path().join("harn.toml").exists());
+    }
+}
+
+fn assert_refused_without_writes(root: &Path, output: &Output, expected: &str) {
+    let text = output_text(output);
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains(expected), "{text}");
+    assert!(!text.contains("Configured provider="), "{text}");
+    for name in [".env", ".gitignore", "home/config/harn/providers.toml"] {
+        assert!(!root.join(name).exists(), "created {name} after refusal");
+    }
+}
+
+fn manifest(root: &Path) -> toml::Value {
+    toml::from_str(&fs::read_to_string(root.join("harn.toml")).unwrap()).unwrap()
+}
+
+#[test]
+fn quickstart_refuses_an_unknown_provider_before_discovery() {
+    for (provider, expected, suggests) in [
+        ("open-ai", "unknown model provider 'open-ai'", true),
+        (
+            "zz-unrelated",
+            "unknown model provider 'zz-unrelated'",
+            false,
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let output = quickstart_with(root.path(), &["--provider", provider], &[]);
+        assert_refused_without_writes(root.path(), &output, expected);
+        let text = output_text(&output);
+        assert_eq!(text.contains("did you mean openai?"), suggests, "{text}");
+        assert!(output.stdout.is_empty(), "{text}");
+        assert!(!root.path().join("harn.toml").exists());
+    }
+}
+
+#[test]
+fn quickstart_saves_only_a_route_the_catalog_lets_the_provider_serve() {
+    let root = tempfile::tempdir().unwrap();
+    let output = quickstart_with(
+        root.path(),
+        &["--provider", "anthropic", "--model", "ollama-gemma4"],
+        &[],
+    );
+    assert_refused_without_writes(root.path(), &output, "provider 'ollama'");
+    assert!(!root.path().join("harn.toml").exists());
+
+    for (provider, model, saved_id) in [
+        ("ollama", "ollama-gemma4", "gemma4:26b"),
+        (
+            "anthropic",
+            "private-deployment-model",
+            "private-deployment-model",
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let output = quickstart_with(
+            root.path(),
+            &["--provider", provider, "--model", model],
+            &[],
+        );
+        assert!(output.status.success(), "{}", output_text(&output));
+        let llm = &manifest(root.path())["llm"];
+        assert_eq!(llm["default_provider"].as_str(), Some(provider));
+        assert_eq!(
+            llm["aliases"]["quickstart"]["provider"].as_str(),
+            Some(provider)
+        );
+        assert_eq!(llm["aliases"]["quickstart"]["id"].as_str(), Some(saved_id));
+    }
+}
+
+#[test]
+fn quickstart_reports_only_a_found_credential_as_set() {
+    let credential_line = |output: &Output, provider: &str| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find(|line| line.split_whitespace().next() == Some(provider))
+            .map(str::to_string)
+            .unwrap_or_else(|| panic!("no {provider} credential row: {}", output_text(output)))
+    };
+    // Vertex discovers platform credentials later, so with none present its
+    // row must say deferred, never set.
+    let empty = tempfile::tempdir().unwrap();
+    let output = quickstart_with(
+        empty.path(),
+        &["--provider", "vertex", "--model", "vertex/gemini-2.5-flash"],
+        &[],
+    );
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(credential_line(&output, "vertex").contains(" deferred "));
+
+    let args = ["--provider", "anthropic", "--model", "claude-sonnet-5-5"];
+    let present = tempfile::tempdir().unwrap();
+    let output = quickstart_with(
+        present.path(),
+        &args,
+        &[("ANTHROPIC_API_KEY", "synthetic-presence-fixture")],
+    );
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(credential_line(&output, "anthropic").contains(" set "));
+    assert!(!output_text(&output).contains("synthetic-presence-fixture"));
+}
+
+#[test]
+fn rerunning_quickstart_reports_the_kept_route_instead_of_the_request() {
+    let root = tempfile::tempdir().unwrap();
+    let anthropic = ["--provider", "anthropic", "--model", "claude-sonnet-5-5"];
+    let first = quickstart_with(root.path(), &anthropic, &[]);
+    assert!(first.status.success(), "{}", output_text(&first));
+    let second = quickstart_with(
+        root.path(),
+        &["--provider", "openai", "--model", "gpt-5.5"],
+        &[],
+    );
+    let text = output_text(&second);
+    assert!(second.status.success(), "{text}");
+    assert!(
+        text.contains(
+            "Kept existing configuration; requested provider=openai model=gpt-5.5 was not saved"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("Configured provider="), "{text}");
+    assert_eq!(
+        manifest(root.path())["llm"]["default_provider"].as_str(),
+        Some("anthropic")
+    );
+    let overlay = fs::read_to_string(root.path().join("home/config/harn/providers.toml")).unwrap();
+    assert!(
+        overlay.contains("default_provider = \"anthropic\""),
+        "{overlay}"
+    );
+    let environment = fs::read_to_string(root.path().join(".env")).unwrap();
+    assert!(
+        environment.contains("HARN_LLM_PROVIDER=anthropic"),
+        "{environment}"
+    );
+
+    let same = quickstart_with(root.path(), &anthropic, &[]);
+    assert!(
+        output_text(&same).contains("Configured provider=anthropic model=claude-sonnet-5-5"),
+        "{}",
+        output_text(&same)
+    );
+}
+
+#[test]
+fn quickstart_refuses_an_existing_manifest_llm_section_the_loader_rejects() {
+    for invalid in [
+        "[llm]\ndefault_provider = 7\n",
+        "[llm.aliases]\nexample = 7\n",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("harn.toml");
+        fs::write(&path, invalid).unwrap();
+        let output = quickstart(root.path());
+        let expected = format!(
+            "{} [llm] is not valid provider configuration",
+            path.display()
+        );
+        assert_refused_without_writes(root.path(), &output, &expected);
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
     }
 }

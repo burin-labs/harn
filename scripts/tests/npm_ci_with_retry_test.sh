@@ -35,6 +35,16 @@ case "${FAKE_NPM_MODE}" in
     echo 'npm error lifecycle script failed its test' >&2
     exit 19
     ;;
+  postinstall-once|postinstall-always)
+    if [[ "$FAKE_NPM_MODE" == postinstall-always || "$count" -eq 1 ]]; then
+      echo 'npm error code 1' >&2
+      echo 'npm error path /fixture/node_modules/tree-sitter-cli' >&2
+      echo 'npm error command sh -c node install.js' >&2
+      echo 'npm error Download failed' >&2
+      printf 'npm error status: %s\n' "$FAKE_NPM_HTTP_STATUS" >&2
+      exit 1
+    fi
+    ;;
 esac
 printf 'npm %s\n' "$*"
 EOF
@@ -65,6 +75,7 @@ run_case() {
   mkdir -p "$state"
   local status=0
   PATH="$tmp_root/bin:$PATH" FAKE_NPM_STATE="$state" FAKE_NPM_MODE="$mode" \
+    FAKE_NPM_HTTP_STATUS="${5:-}" \
     "$repo_root/scripts/npm_ci_with_retry.sh" "$tmp_root/package" \
     >"$state/output" 2>&1 || status=$?
   [[ "$status" -eq "$expected_status" ]] || {
@@ -90,5 +101,18 @@ run_case transient-always transient-always 18 4
 run_case deterministic deterministic 19 1
 [[ ! -e "$tmp_root/deterministic/sleeps" ]]
 [[ ! -e "$tmp_root/transient-once/tee-invocations" ]]
+
+# The real tree-sitter install hook exits with npm's generic code 1 and puts
+# its HTTP status on a separate line, rather than emitting "HTTP 504".
+for status in 504 429 500 503 599; do
+  run_case "postinstall-$status" postinstall-once 0 2 "$status"
+  [[ "$(<"$tmp_root/postinstall-$status/sleeps")" == 5 ]]
+done
+run_case postinstall-exhausted postinstall-always 1 4 504
+[[ "$(paste -sd, "$tmp_root/postinstall-exhausted/sleeps")" == "5,20,60" ]]
+for status in 400 401 403 404 5040 '504-test-assertion'; do
+  run_case "postinstall-$status" postinstall-always 1 1 "$status"
+  [[ ! -e "$tmp_root/postinstall-$status/sleeps" ]]
+done
 
 echo "npm ci bounded retry tests passed"

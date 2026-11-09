@@ -2799,9 +2799,7 @@
   "{} -> runtime cache": "{0} -> 런타임 캐시",
   "{} agent={} action={} outcome={} tier={} trace_id={} approver={}": "{0} agent={1} action={2} outcome={3} tier={4} trace_id={5} approver={6}",
   "{} ladder={} persona={} first_correct={}/{} artifacts={}": "{0} ladder={1} persona={2} first_correct={3}/{4} artifacts={5}",
-  "{} missing": "{0} 누락됨",
   "{} passed, {failed} failed, {} skipped": "{0} 통과, {failed} 실패, {1} 건 건너뜀",
-  "{} set": "{0} 설정됨",
   "{} status={} version={}": "{0} status={1} version={2}",
   "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}": "{0} total={1} success_rate={2:.2}% mean_cost_usd={3} tiers={4} outcomes={5}",
   "{} via {}: {}": "{0}을(를) {1} 경유: {2}",
@@ -2810,5 +2808,10 @@
   "{}: no repairable diagnostics found": "{0}: 복구 가능한 진단 항목을 찾지 못했습니다",
   "{}: nothing to stop": "{0}: 중지할 항목이 없습니다",
   "{}: {} changed={} ledger={}": "{0}: {1} changed={2} ledger={3}",
-  "{}: {} repairable diagnostic(s)": "{0}: 복구 가능한 진단 항목 {1}개"
+  "{}: {} repairable diagnostic(s)": "{0}: 복구 가능한 진단 항목 {1}개",
+  "deferred": "보류",
+  "needs approval": "승인 필요",
+  "incomplete": "불완전",
+  "not required": "필요 없음",
+  "Kept existing configuration; requested provider={} model={} was not saved": "기존 구성을 유지했습니다. 요청한 provider={0} model={1}은(는) 저장되지 않았습니다"
 }

@@ -682,15 +682,20 @@ hook_write_push_commits() (
   sort -u "$census_dir/commits" > "$output"
 )
 
+# A shallow clone (cloud sessions clone shallow) can hold origin/main yet share
+# no reachable merge base with HEAD, so each candidate falls through rather than
+# failing the hook silently under `set -e`. The oldest local commit is then the
+# clone point: a conservative base that still covers every local commit.
 hook_push_base() {
-  upstream=$(hook_resolved_upstream)
-  if [ -n "$upstream" ]; then
-    git merge-base HEAD "$upstream"
-  elif git rev-parse --verify origin/main >/dev/null 2>&1; then
-    git merge-base HEAD origin/main
-  else
-    git rev-list --max-parents=0 HEAD | tail -n 1
-  fi
+  for candidate in $(hook_resolved_upstream) origin/main; do
+    if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null 2>&1 && \
+       base=$(git merge-base HEAD "$candidate" 2>/dev/null); then
+      printf '%s\n' "$base"
+      return 0
+    fi
+  done
+  echo "note: no merge base with the upstream or origin/main (shallow clone?); validating from the oldest local commit" >&2
+  git rev-list --max-parents=0 HEAD | tail -n 1
 }
 
 hook_validation_base() {

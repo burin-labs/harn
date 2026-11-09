@@ -6,12 +6,12 @@
 
 #![expect(
     deprecated,
-    reason = "rmcp 3.1 resolves stable MRTR inputs through its deprecated direct-request handler types"
+    reason = "rmcp resolves stable MRTR inputs through its deprecated direct-request handler types"
 )]
 
 use super::*;
 use rmcp::model::{
-    CallToolRequestParams, ClientCapabilities, ClientInfo, ClientNotification, ClientRequest,
+    CallToolRequestParams, ClientCapabilities, ClientConfig, ClientNotification, ClientRequest,
     CreateMessageRequestParams, CreateMessageResult, CustomNotification, CustomRequest,
     ElicitRequestParams, ElicitResult, ElicitationCapability, ErrorCode, ErrorData as McpError,
     FormElicitationCapability, GetPromptRequestParams, Implementation, ListRootsResult,
@@ -210,7 +210,7 @@ impl ClientHandler for HarnSdkClientHandler {
         );
     }
 
-    fn get_info(&self) -> ClientInfo {
+    fn get_info(&self) -> ClientConfig {
         let mut capabilities = ClientCapabilities::default();
         capabilities.elicitation = Some(
             ElicitationCapability::new()
@@ -223,7 +223,7 @@ impl ClientHandler for HarnSdkClientHandler {
             .extensions
             .get_or_insert_default()
             .insert(TASKS_EXTENSION_ID.to_string(), Default::default());
-        ClientInfo::new(
+        ClientConfig::new(
             capabilities,
             Implementation::new("harn", env!("CARGO_PKG_VERSION")),
         )

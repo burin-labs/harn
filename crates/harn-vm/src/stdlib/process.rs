@@ -277,14 +277,21 @@ pub(crate) fn read_script_env_value(name: &str) -> Option<String> {
                 "environment read {name:?} refused by {policy} policy; \
                  use a granted policy with an in-process environment grant"
             );
-            crate::events::log_warn_meta(
-                "environment_policy.read_refused",
-                &message,
-                BTreeMap::from([
-                    ("name".into(), serde_json::json!(name)),
-                    ("policy".into(), serde_json::json!(policy)),
-                ]),
-            );
+            let metadata = BTreeMap::from([
+                ("name".into(), serde_json::json!(name)),
+                ("policy".into(), serde_json::json!(policy)),
+            ]);
+            // A name the process does not have would read nil under any policy,
+            // so the refusal withheld nothing. Warn only when it hid a value.
+            if crate::test_env::env_var_seamed(name).is_some() {
+                crate::events::log_warn_meta("environment_policy.read_refused", &message, metadata);
+            } else {
+                crate::events::log_debug_meta(
+                    "environment_policy.read_refused",
+                    &message,
+                    metadata,
+                );
+            }
             None
         }
     }

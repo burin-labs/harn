@@ -7,7 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 awk '/      - name: Require every candidate job to pass/{found=1} found && /        run: \|/{body=1;next} body && /^  [^ ]/{exit} body && /^      - /{exit} body{print substr($0,11)}' \
   "$root/.github/workflows/build-release-binaries.yml" > "$tmp/verdict.sh"
 [[ -s "$tmp/verdict.sh" ]] || { echo 'missing aggregate verdict' >&2; exit 1; }
-results='{"setup":{"result":"success"},"source-security":{"result":"success"},"source-ci":{"result":"success"},"prepare_cli_aot":{"result":"success"},"build":{"result":"success"},"collect_candidate_manifest":{"result":"success"},"release-residual-audit":{"result":"success"},"release-smoke":{"result":"success"}}'
+results='{"setup":{"result":"success","outputs":{"should_build_binaries":"false"}},"source-security":{"result":"success"},"source-ci":{"result":"success"},"prepare_cli_aot":{"result":"success"},"build":{"result":"success"},"collect_candidate_manifest":{"result":"success"},"release-residual-audit":{"result":"success"},"release-smoke":{"result":"success"}}'
 sha=1111111111111111111111111111111111111111
 export NATIVE_RESULT=success EVENT_NAME=push
 for mode in candidate none; do
@@ -70,5 +70,38 @@ done
 # Ordinary PRs build no archives and dispatch no consumer.
 env SETUP_RESULT=success BUILD_MODE=none CANDIDATE_PURPOSE=none \
   REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
+  bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
+# Every positive selection requires preparation and builds even when candidate
+# security is intentionally skipped. Run the actual workflow verdict body.
+build_results='{"setup":{"result":"success","outputs":{"should_build_binaries":"true"}},"source-security":{"result":"skipped"},"source-ci":{"result":"success"},"prepare_cli_aot":{"result":"success"},"build":{"result":"success"}}'
+for mode in benchmark warm none; do
+  env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=none \
+    REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$build_results" \
+    bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
+  for gate in source-ci prepare_cli_aot build; do
+    for result in failure cancelled skipped missing; do
+      refused_results="$(jq --arg gate "$gate" --arg result "$result" \
+        'if $result == "missing" then del(.[$gate]) else .[$gate].result = $result end' <<< "$build_results")"
+      if env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=none \
+        REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$refused_results" \
+        bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
+        echo "accepted selected $mode with $result $gate"; exit 1
+      fi
+      grep -Fq 'A selected release build did not succeed' "$tmp/result.log"
+    done
+  done
+  for selection in missing invalid; do
+    selected_results="$(jq --arg selection "$selection" \
+      'if $selection == "missing" then del(.setup.outputs.should_build_binaries) else .setup.outputs.should_build_binaries = $selection end' <<< "$build_results")"
+    if env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=none \
+      REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$selected_results" \
+      bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
+      echo "accepted unmeasured $mode selection $selection"; exit 1
+    fi
+  done
+done
+unselected_results="$(jq '.setup.outputs.should_build_binaries = "false" | .["source-ci"].result = "skipped" | .prepare_cli_aot.result = "skipped" | .build.result = "skipped"' <<< "$build_results")"
+env SETUP_RESULT=success BUILD_MODE=warm CANDIDATE_PURPOSE=none \
+  REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$unselected_results" \
   bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
 echo 'release_consumer_candidate_verdict_test: ok'

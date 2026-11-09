@@ -110,7 +110,11 @@ pub const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
 pub const RELEASE_BUILD_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
 
-pub const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
+pub const RELEASE_PREPARE_IF =
+  "!cancelled() && needs.setup.result == 'success' && needs.source-ci.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'"
+
+pub const RELEASE_BUILD_IF =
+  "!cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'"
 
 pub const RELEASE_AOT_STANDARD_OUTPUT = "needs.setup.outputs.cli_aot_standard_runner"
 
@@ -908,6 +912,12 @@ pub fn release_warm_cache_concurrency_errors(workflow: CiWorkflow?) -> list<stri
       + ["${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for manual warms"]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
+  if trim(workflow?.jobs?.prepare_cli_aot?.if ?? "") != RELEASE_PREPARE_IF {
+    errors = errors
+      + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot must run selected builds across skipped ancestors only after source qualification succeeds",
+      ]
+  }
   if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {
     errors = errors
       + ["${RELEASE_BINARY_WORKFLOW}:build must instantiate only after setup selects a real build"]

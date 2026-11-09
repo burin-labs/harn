@@ -174,10 +174,6 @@ impl TestPlan {
                         let path = junit_temp_path(cwd, "pytest");
                         argv.push(format!("--junitxml={}", path.display()));
                         junit_path = Some(path);
-                        if let Some(f) = filter {
-                            argv.push("-k".into());
-                            argv.push(f.into());
-                        }
                     }
                     Ecosystem::Pnpm | Ecosystem::Yarn | Ecosystem::Npm => {
                         // Vitest is the most common JS runner that respects
@@ -188,38 +184,31 @@ impl TestPlan {
                         argv.push("--reporter=junit".into());
                         argv.push(format!("--outputFile={}", path.display()));
                         junit_path = Some(path);
-                        if let Some(f) = filter {
-                            argv.push("-t".into());
-                            argv.push(f.into());
-                        }
                     }
-                    Ecosystem::Cargo => {
-                        if let Some(f) = filter {
-                            argv.push(f.into());
-                        }
-                    }
-                    Ecosystem::Go => {
-                        if let Some(f) = filter {
-                            argv.push("-run".into());
-                            argv.push(f.into());
-                        }
-                    }
-                    Ecosystem::Swift => {
-                        if let Some(f) = filter {
-                            argv.push("--filter".into());
-                            argv.push(f.into());
-                        }
-                    }
-                    _ => {
-                        if let Some(f) = filter {
-                            argv.push(f.into());
-                        }
-                    }
+                    _ => {}
+                }
+                if let Some(filter) = filter {
+                    argv.extend(filter_argv(*eco, filter));
                 }
                 Ok((argv, junit_path))
             }
         }
     }
+}
+
+/// How each runner selects tests by name. Gradle and Maven read a bare
+/// positional as a task or lifecycle phase, so they need their own flags.
+fn filter_argv(eco: Ecosystem, filter: &str) -> Vec<String> {
+    let flag = match eco {
+        Ecosystem::Pip | Ecosystem::Uv | Ecosystem::Poetry => "-k",
+        Ecosystem::Pnpm | Ecosystem::Yarn | Ecosystem::Npm => "-t",
+        Ecosystem::Go => "-run",
+        Ecosystem::Swift | Ecosystem::Composer | Ecosystem::Dotnet => "--filter",
+        Ecosystem::Gradle => "--tests",
+        Ecosystem::Maven => return vec![format!("-Dtest={filter}")],
+        Ecosystem::Cargo | Ecosystem::Bundler => return vec![filter.to_string()],
+    };
+    vec![flag.to_string(), filter.to_string()]
 }
 
 fn base_test_argv(eco: Ecosystem) -> Vec<String> {
@@ -255,4 +244,21 @@ fn junit_temp_path(cwd: &Path, prefix: &str) -> PathBuf {
         .join(harn_vm::runtime_paths::HOSTLIB_TESTS_DIR);
     let _ = std::fs::create_dir_all(&target_dir);
     target_dir.join(format!("{prefix}-{pid}-{seq}.xml"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_filters_use_each_runners_selection_flag() {
+        for (eco, expected) in [
+            (Ecosystem::Gradle, "--tests Foo"),
+            (Ecosystem::Maven, "-Dtest=Foo"),
+            (Ecosystem::Go, "-run Foo"),
+            (Ecosystem::Cargo, "Foo"),
+        ] {
+            assert_eq!(filter_argv(eco, "Foo").join(" "), expected);
+        }
+    }
 }

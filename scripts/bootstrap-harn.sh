@@ -2,6 +2,7 @@
 # Stage zero only: fetch one pinned, verified seed; Harn owns runtime installation.
 set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+bootstrap_user_agent=harn-bootstrap
 export HARN_EXT_BOOTSTRAP_TOKEN="${HARN_BOOTSTRAP_TOKEN:-${HARN_EXT_BOOTSTRAP_TOKEN:-}}"
 export HARN_EXT_BOOTSTRAP_OFFLINE="${HARN_BOOTSTRAP_OFFLINE:-${HARN_EXT_BOOTSTRAP_OFFLINE:-0}}"
 export HARN_BOOTSTRAP_REPOSITORY="${HARN_BOOTSTRAP_REPOSITORY:-burin-labs/harn}"
@@ -77,7 +78,7 @@ fetch() {
         fi
         if command -v curl >/dev/null 2>&1; then
           (umask 077; printf 'Authorization: Bearer %s\n' "$HARN_EXT_BOOTSTRAP_TOKEN" > "$work/api.headers")
-          if curl -q -fLsS --connect-timeout 15 --max-time 120 \
+          if curl -q -fLsS --user-agent "$bootstrap_user_agent" --connect-timeout 15 --max-time 120 \
             -H "@$work/api.headers" -H "Accept: $3" "$1" -o "$2"; then
             api_status=0
           else
@@ -89,7 +90,7 @@ fetch() {
         (umask 077; printf 'header = Authorization: Bearer %s\n' "$HARN_EXT_BOOTSTRAP_TOKEN" > "$work/api.wget")
         # Wget custom headers survive redirects. Stop at the API response and
         # follow an HTTPS asset redirect in a separate, unauthenticated request.
-        if wget --config="$work/api.wget" --server-response \
+        if wget --config="$work/api.wget" --user-agent="$bootstrap_user_agent" --server-response \
           --max-redirect=0 --tries=1 --timeout=120 --header="Accept: $3" \
           "$1" -O "$2" 2> "$work/api.response"; then
           rm -f "$work/api.wget"
@@ -105,15 +106,15 @@ fetch() {
           https://*) ;;
           *) echo 'release asset API returned an invalid redirect' >&2; return 1 ;;
         esac
-        wget --no-config -q --tries=1 --timeout=120 --header="Accept: $3" "$redirect" -O "$2"
+        wget --no-config -q --user-agent="$bootstrap_user_agent" --tries=1 --timeout=120 --header="Accept: $3" "$redirect" -O "$2"
         return
       fi
       ;;
   esac
   if command -v curl >/dev/null 2>&1; then
-    curl -q -fLsS --connect-timeout 15 --max-time 120 -H "Accept: $3" "$1" -o "$2"
+    curl -q -fLsS --user-agent "$bootstrap_user_agent" --connect-timeout 15 --max-time 120 -H "Accept: $3" "$1" -o "$2"
   else
-    wget --no-config -q --tries=1 --timeout=120 --header="Accept: $3" "$1" -O "$2"
+    wget --no-config -q --user-agent="$bootstrap_user_agent" --tries=1 --timeout=120 --header="Accept: $3" "$1" -O "$2"
   fi
 }
 download() {

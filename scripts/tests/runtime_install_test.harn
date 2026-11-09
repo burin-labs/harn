@@ -390,6 +390,14 @@ pipeline release_api_fallback_identifies_its_client_and_preserves_authentication
     assert_eq(len(calls), 3)
     assert_eq(calls[1].url, metadata_url)
     assert_eq(calls[2].url, checksum_url)
+    for call in calls {
+      assert_eq(
+        call.headers["user-agent"],
+        "harn-bootstrap",
+        "release request must identify its client",
+      )
+    }
+    assert_eq(calls[0].headers.authorization, nil, "API token reached the public release host")
     for call in [calls[1], calls[2]] {
       assert(trim(call.headers["user-agent"] ?? "") != "", "GitHub requires User-Agent")
       assert_eq(
@@ -529,6 +537,13 @@ pipeline cold_archive_api_fallback_keeps_native_checksum_verification(
       },
     )
     assert_eq(calls[len(calls) - 1].url, archive_api)
+    for call in calls {
+      assert_eq(
+        call.headers["user-agent"],
+        "harn-bootstrap",
+        "archive request must identify its client",
+      )
+    }
     assert_missing(harness.fs, f.plan.archive_path)
     assert_missing(harness.fs, f.request.install_dir)
   }
