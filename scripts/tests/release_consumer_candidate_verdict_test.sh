@@ -53,10 +53,22 @@ for mode in candidate none; do
     echo "accepted release with no rehearsal identity in $mode"; exit 1
   fi
 done
-# Source qualification and ordinary PRs intentionally dispatch no consumer.
-for mode in candidate none; do
-  env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=source \
-    REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
-    bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
+# Every source candidate needs a measured consumer pass before promotion.
+for consumer in skipped failure cancelled '' success; do
+  for source in '' "$sha"; do
+    status=0
+    env SETUP_RESULT=success BUILD_MODE=candidate CANDIDATE_PURPOSE=source \
+      REHEARSAL_SOURCE_SHA="$source" CONSUMER_RESULT="$consumer" RESULTS="$results" \
+      bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1 || status=$?
+    if [[ "$consumer" == success && "$source" == "$sha" ]]; then
+      [[ "$status" == 0 ]] || { cat "$tmp/result.log"; exit 1; }
+    else
+      [[ "$status" != 0 ]] || { echo "accepted source candidate with consumer=${consumer:-missing} source=${source:-missing}"; exit 1; }
+    fi
+  done
 done
+# Ordinary PRs build no archives and dispatch no consumer.
+env SETUP_RESULT=success BUILD_MODE=none CANDIDATE_PURPOSE=none \
+  REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
+  bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
 echo 'release_consumer_candidate_verdict_test: ok'

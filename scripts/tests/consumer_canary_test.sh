@@ -959,10 +959,9 @@ for (const incomplete of ['failure', 'cancelled', 'skipped', 'pending', undefine
   assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:'success'}, 'push', 'release', incomplete ?? null), false);
   assert.equal(admitted('none', 'skipped', 'skipped', 'success', 'a'.repeat(40), false, {result:'skipped'}, 'push', 'source', incomplete), true);
   assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}), false);
-  // A scheduled release candidate earns native proof like any other; only a
-  // non-release source candidate rehearses without it.
+  // Every archive candidate earns native proof before consumer execution.
   assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}, 'schedule'), false);
-  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}, 'schedule', 'source'), true);
+  assert.equal(admitted('candidate', 'success', 'success', 'success', 'a'.repeat(40), false, {result:incomplete}, 'schedule', 'source'), false);
 }
 assert.equal(admitted('none', 'skipped', 'skipped'), true);
 assert.equal(admitted('none', 'skipped', 'skipped', 'failure'), false);

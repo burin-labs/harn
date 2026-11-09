@@ -146,9 +146,12 @@ Follow the runs for the commit you named in
    digests, and publication metadata. Keep its exact run ID with the release.
    The manifest carries the notes rendered from `changelog.d/`, or the existing
    `## vX.Y.Z` section when `CHANGELOG.md` has one.
-3. `promote-release.yml` runs when you dispatch it. A candidate has no consumer
-   rehearsal, so promotion runs the existing rehearsal workflow against the exact
-   archives and requires its measured pass before publication. That authenticated
+3. The candidate runs the consumer rehearsal against its exact archives after
+   native qualification and release smoke pass. A candidate cannot finish green
+   without that measured consumer pass. `promote-release.yml` runs when you
+   dispatch it and reauthenticates the candidate's rehearsal binding before
+   publication. Earlier retained archives without a rehearsal use the same
+   observer at promotion. That authenticated
    rehearsal waits for its producer's run ID and attempt, verifies the
    exact-source archive before installing it, and runs every required product
    check. It reads `Pairs-with: consumer#N` trailers from every commit

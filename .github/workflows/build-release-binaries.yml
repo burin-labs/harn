@@ -13,8 +13,8 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Build release 
 #      audit lanes and release smoke) on those same files. The run is green only
 #      when the files it built passed every check. A separate promotion workflow
 #      publishes exactly these files, and only on request; nothing here creates a
-#      tag, a GitHub release, or a container. The consumer rehearsal belongs to
-#      promotion, so a checkpoint does not spend one.
+#      tag, a GitHub release, or a container. It qualifies the archives against
+#      the consumer before promotion reauthenticates the recorded proof.
 #
 #      The macOS smoke runs on a trusted host whose runner group admits this
 #      workflow only on refs/heads/main, so a candidate built on any other ref
@@ -259,6 +259,7 @@ jobs:
             printf '\nSource candidate decision: %s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_STEP_SUMMARY"
             REF="$GITHUB_SHA"
             CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+            REHEARSAL_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             SHOULD_BUILD_BINARIES=true
             SHOULD_PACKAGE_ARCHIVES=true
@@ -1844,8 +1845,7 @@ jobs:
       !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.rehearsal_source_sha != '' &&
       (needs.setup.outputs.build_mode != 'candidate' ||
       (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success' &&
-      needs.release-smoke.result == 'success' &&
-      (needs.setup.outputs.candidate_purpose != 'release' || needs.native-qualification.result == 'success')))
+      needs.release-smoke.result == 'success' && needs.native-qualification.result == 'success'))
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
@@ -1925,7 +1925,7 @@ jobs:
             echo "::error::Consumer release rehearsal at $REHEARSAL_SOURCE_SHA finished ${CONSUMER_RESULT:-missing}; publication refused."
             exit 1
           fi
-          if [[ "$CANDIDATE_PURPOSE" == release &&
+          if [[ ( "$BUILD_MODE" == candidate || "$CANDIDATE_PURPOSE" == release ) &&
                 ( -z "$REHEARSAL_SOURCE_SHA" || "$CONSUMER_RESULT" != success ) ]]; then
             echo "::error::Release has no successful exact-source consumer rehearsal; publication refused."
             exit 1

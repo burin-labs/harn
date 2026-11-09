@@ -138,8 +138,8 @@ resolve release_merge_group EVENT_NAME=merge_group REF_NAME=gh-readonly-queue/ma
    "$(output release_merge_group candidate_purpose)" == none ]] \
   || fail "a version merge group built or rehearsed something"
 
-# An explicit main source build is the full candidate producer, with no
-# rehearsal: promotion measures that if the candidate is ever published.
+# A source candidate qualifies its exact archives against the consumer before
+# promotion starts.
 resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
 [[ "$(output source build_mode)" == candidate &&
    "$(output source candidate_purpose)" == source &&
@@ -149,8 +149,8 @@ resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
 [[ "$(matrix_targets source)" == "$(matrix_targets warm)" &&
    "$(matrix_targets source)" == "aarch64-apple-darwin,aarch64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu" ]] \
   || fail "source candidate does not cover the full matrix: $(matrix_targets source)"
-[[ -z "$(output source rehearsal_source_sha)" ]] \
-  || fail "a checkpoint candidate requested a consumer rehearsal"
+[[ "$(output source rehearsal_source_sha)" == "$(output source candidate_source_sha)" ]] \
+  || fail "a source candidate omitted its exact-source consumer rehearsal"
 [[ "$(output source source_candidate_decision | jq -er '.accepted and .reason == "accepted"')" == true ]] \
   || fail "actual source resolver did not emit its typed admission receipt"
 

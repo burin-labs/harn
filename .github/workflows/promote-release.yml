@@ -221,7 +221,8 @@ jobs:
           elif [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
             echo "::notice::Original observer remains unmeasured; exact completed-child authorization is required."
           else
-            # Checkpoint candidates carry no rehearsal, so promotion measures it.
+            # New candidates carry a rehearsal. Earlier retained archives may
+            # need their first measurement through this same observer.
             consumer="$(release_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA")"
             echo "Consumer release rehearsal run=$candidate_run source=$HEAD_SHA verdict=$consumer"
             if jq -e '.count == 0' <<< "$consumer" >/dev/null; then
