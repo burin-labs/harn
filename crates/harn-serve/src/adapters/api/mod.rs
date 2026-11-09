@@ -1224,20 +1224,27 @@ fn parse_json_body(body: &Bytes) -> Result<Value, serde_json::Error> {
     serde_json::from_slice(body)
 }
 
+/// The published `PaginatedList` shape.
 fn list_response<T: Serialize>(data: Vec<T>) -> Value {
+    page_response(data, false)
+}
+
+/// A list cut to the caller's `limit` says so, so a truncated page never
+/// reads as the complete list.
+fn limited_list_response(mut data: Vec<Value>, limit: Option<usize>) -> Value {
+    let has_more = limit.is_some_and(|limit| data.len() > limit);
+    if let Some(limit) = limit {
+        data.truncate(limit);
+    }
+    page_response(data, has_more)
+}
+
+fn page_response<T: Serialize>(data: Vec<T>, has_more: bool) -> Value {
     json!({
         "object": "list",
         "data": data,
-        "has_more": false,
-        "next_cursor": null
+        "page": { "has_more": has_more, "next_cursor": null },
     })
-}
-
-fn limit_values(mut values: Vec<Value>, limit: Option<usize>) -> Vec<Value> {
-    if let Some(limit) = limit {
-        values.truncate(limit);
-    }
-    values
 }
 
 fn api_error(status: StatusCode, code: &str, message: &str) -> Response {
