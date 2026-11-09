@@ -210,9 +210,8 @@ struct HandleEntry {
     /// on the finalized command result instead of observing it indirectly
     /// through the session inbox.
     result_txs: Vec<std::sync::mpsc::SyncSender<VmValue>>,
-    /// Signalled when a `wait_command` wait has registered its result channel,
-    /// so a test can act once the wait is in place instead of after a delay.
-    wait_txs: Vec<std::sync::mpsc::SyncSender<()>>,
+    /// Signalled once a `wait_command` wait registers its result channel.
+    waits: Vec<std::sync::mpsc::SyncSender<()>>,
     /// Opaque verification snapshot binding provided by the caller.
     snapshot_binding: Option<harn_vm::value::DictMap>,
     /// Spawn-time lease tag surfaced by `list_handles` (loop owns transitions).
@@ -508,7 +507,7 @@ pub(crate) fn spawn_long_running_with_options(
                 output_feed: output_feed.clone(),
                 completion_tx: None,
                 result_txs: Vec::new(),
-                wait_txs: Vec::new(),
+                waits: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
                 lease: options.lease,
                 command_display: command_display.clone(),
@@ -1191,9 +1190,7 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> BackgroundW
         }
         let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
         entry.result_txs.push(tx);
-        for waiting in entry.wait_txs.drain(..) {
-            let _ = waiting.try_send(());
-        }
+        entry.waits.drain(..).for_each(|tx| drop(tx.try_send(())));
         rx
     };
     // Wait in short slices so a stop or deadline on the calling turn ends the
@@ -1350,16 +1347,14 @@ pub fn register_completion_notifier(handle_id: &str) -> Option<std::sync::mpsc::
     Some(rx)
 }
 
-/// Register a notifier that fires once a `wait_command` wait on `handle_id` has
-/// registered for its result. `None` means the handle is not live. A test hook
-/// in the shape of [`register_completion_notifier`]: a caller that must act
-/// while the wait is in place awaits this instead of sleeping.
+/// Test hook: fires once a `wait_command` wait on `handle_id` has registered for
+/// its result, so a caller can act while the wait is in place. `None`: not live.
 pub fn register_wait_notifier(handle_id: &str) -> Option<std::sync::mpsc::Receiver<()>> {
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
     let mut store = HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned");
-    store.entries.get_mut(handle_id)?.wait_txs.push(tx);
+    store.entries.get_mut(handle_id)?.waits.push(tx);
     Some(rx)
 }
 
