@@ -377,7 +377,7 @@ fn provider_has_builtin_model_namespace(config: &ProvidersConfig, provider: &str
     is_builtin && !is_proxy
 }
 
-fn provider_suggestions(config: &ProvidersConfig, requested: &str) -> Vec<String> {
+pub(super) fn provider_suggestions(config: &ProvidersConfig, requested: &str) -> Vec<String> {
     nearest_names(
         requested,
         config

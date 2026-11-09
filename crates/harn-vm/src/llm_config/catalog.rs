@@ -938,7 +938,7 @@ pub fn default_model_for_provider(provider: &str) -> Result<String, ModelResolut
         return Err(ModelResolutionError::UnknownProvider {
             provider: provider.to_string(),
             catalog_version: MODEL_CATALOG_VERSION.to_string(),
-            suggestions: Vec::new(),
+            suggestions: super::resolution::provider_suggestions(&config, provider),
         });
     }
     // A provider's default model is its own authored `runtime` entry. Which

@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{merge_env_file, FileAction, ProviderSelection};
+use super::{env_assigns_other_value, merge_env_file, FileAction, ProviderSelection};
 
 pub(super) struct EnvironmentPlan {
+    /// The file already routes to a different provider or model, which
+    /// quickstart preserves instead of the selection.
+    pub(super) keeps_other_route: bool,
     path: PathBuf,
     content: String,
     status: &'static str,
@@ -26,6 +29,12 @@ pub(super) fn prepare(
     let existing_text = std::str::from_utf8(existing.as_deref().unwrap_or_default())
         .map_err(|_| format!("{} is not UTF-8", path.display()))?;
     let content = merge_env_file(existing_text, selection);
+    let keeps_other_route = [
+        ("HARN_LLM_PROVIDER", &selection.provider),
+        ("HARN_LLM_MODEL", &selection.model),
+    ]
+    .into_iter()
+    .any(|(key, value)| env_assigns_other_value(existing_text, key, value));
     let status = if existing.is_none() {
         "create"
     } else if content == existing_text && permissions_are_private(path)? {
@@ -53,6 +62,7 @@ pub(super) fn prepare(
         Some(ignore)
     };
     Ok(EnvironmentPlan {
+        keeps_other_route,
         path: path.to_path_buf(),
         content,
         status,

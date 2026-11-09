@@ -2799,9 +2799,7 @@
   "{} -> runtime cache": "{0} -> runtime cache",
   "{} agent={} action={} outcome={} tier={} trace_id={} approver={}": "{0} agent={1} action={2} outcome={3} tier={4} trace_id={5} approver={6}",
   "{} ladder={} persona={} first_correct={}/{} artifacts={}": "{0} ladder={1} persona={2} first_correct={3}/{4} artifacts={5}",
-  "{} missing": "{0} が不足",
   "{} passed, {failed} failed, {} skipped": "{0} は合格、{failed} は不合格、{1} はスキップ",
-  "{} set": "{0} を設定",
   "{} status={} version={}": "{0} status={1} version={2}",
   "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}": "{0} total={1} success_rate={2:.2}% mean_cost_usd={3} tiers={4} outcomes={5}",
   "{} via {}: {}": "{0} を {1} 経由で: {2}",
@@ -2810,5 +2808,10 @@
   "{}: no repairable diagnostics found": "{0}: 修復可能な診断が見つかりませんでした",
   "{}: nothing to stop": "{0}: 停止するものはありません",
   "{}: {} changed={} ledger={}": "{0}: {1} changed={2} ledger={3}",
-  "{}: {} repairable diagnostic(s)": "{0}: 修復可能な診断 {1} 件"
+  "{}: {} repairable diagnostic(s)": "{0}: 修復可能な診断 {1} 件",
+  "deferred": "保留",
+  "needs approval": "承認が必要",
+  "incomplete": "不完全",
+  "not required": "不要",
+  "Kept existing configuration; requested provider={} model={} was not saved": "既存の設定を保持しました。要求された provider={0} model={1} は保存されていません"
 }

@@ -2799,9 +2799,7 @@
   "{} -> runtime cache": "{0} -> Laufzeit-Cache",
   "{} agent={} action={} outcome={} tier={} trace_id={} approver={}": "{0} agent={1} action={2} outcome={3} tier={4} trace_id={5} approver={6}",
   "{} ladder={} persona={} first_correct={}/{} artifacts={}": "{0} ladder={1} persona={2} first_correct={3}/{4} artifacts={5}",
-  "{} missing": "{0} fehlt",
   "{} passed, {failed} failed, {} skipped": "{0} bestanden, {failed} fehlgeschlagen, {1} übersprungen",
-  "{} set": "{0} gesetzt",
   "{} status={} version={}": "{0} status={1} version={2}",
   "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}": "{0} total={1} success_rate={2:.2}% mean_cost_usd={3} tiers={4} outcomes={5}",
   "{} via {}: {}": "{0} über {1}: {2}",
@@ -2810,5 +2808,10 @@
   "{}: no repairable diagnostics found": "{0}: keine reparierbaren Diagnosen gefunden",
   "{}: nothing to stop": "{0}: nichts zu stoppen",
   "{}: {} changed={} ledger={}": "{0}: {1} changed={2} ledger={3}",
-  "{}: {} repairable diagnostic(s)": "{0}: {1} reparierbare Diagnose(n)"
+  "{}: {} repairable diagnostic(s)": "{0}: {1} reparierbare Diagnose(n)",
+  "deferred": "zurückgestellt",
+  "needs approval": "Freigabe erforderlich",
+  "incomplete": "unvollständig",
+  "not required": "nicht erforderlich",
+  "Kept existing configuration; requested provider={} model={} was not saved": "Bestehende Konfiguration beibehalten; angeforderte provider={0} model={1} wurde nicht gespeichert"
 }
