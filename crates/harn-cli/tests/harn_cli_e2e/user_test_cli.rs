@@ -69,6 +69,8 @@ fn typed_skip_stops_assertions_and_can_fail_a_complete_suite_policy() {
     }
 }
 
+#[path = "user_test_cli/nested_callback.rs"]
+mod nested_callback;
 #[path = "user_test_cli/operator_grants.rs"]
 mod operator_grants;
 #[path = "user_test_cli/parent_secrets.rs"]

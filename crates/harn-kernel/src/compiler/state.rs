@@ -1146,11 +1146,7 @@ impl Compiler {
     pub(super) fn compile_scoped_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
-        if stmts.is_empty() {
-            self.chunk.emit(Op::Nil, self.line);
-        } else {
-            self.compile_block(stmts)?;
-        }
+        self.compile_block(stmts)?;
         self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         Ok(())
@@ -1318,6 +1314,10 @@ impl Compiler {
     }
 
     pub(super) fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
+        if stmts.is_empty() {
+            self.chunk.emit(Op::Nil, self.line);
+            return Ok(());
+        }
         self.record_monomorphic_var_bindings(stmts);
         let callable_declarations = stmts
             .iter()
@@ -1410,14 +1410,7 @@ impl Compiler {
     pub(super) fn compile_match_body(&mut self, body: &[SNode]) -> Result<(), CompileError> {
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
-        if body.is_empty() {
-            self.chunk.emit(Op::Nil, self.line);
-        } else {
-            self.compile_block(body)?;
-            if !Self::produces_value(&body.last().unwrap().node) {
-                self.chunk.emit(Op::Nil, self.line);
-            }
-        }
+        self.compile_block(body)?;
         self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         Ok(())

@@ -248,6 +248,19 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: r#"{"enabled":true,"value":11}"#,
     },
     PureCase {
+        id: "empty-callback-preserves-pending-arguments",
+        source: r"
+            fn keep(value: int, ignored: nil) -> int { return value }
+            fn inspect(input: int) -> list<int> {
+              const empty = fn(_) {}
+              return [keep(input, empty(nil)), keep(input + 1, empty(nil))]
+            }
+        ",
+        entry: "inspect",
+        input_json: "41",
+        expected_json: "[41,42]",
+    },
+    PureCase {
         id: "recursive-and-sibling-functions",
         source: r"
             fn fib(n: int) -> int {
