@@ -134,8 +134,8 @@ Follow the runs for the commit you named in
    after this admission and runs beside the artifact builds; publication still
    requires it. The four-hour checkpoint in `scripts/ci/green_checkpoint.sh`
    requests these source candidates at main's tip, and a maintainer can request one
-   at any main commit. They run no consumer rehearsal. Pushes to main only warm
-   caches, whatever version they declare, and pull requests and merge groups
+   at any main commit. They qualify the consumer before promotion. Pushes to main
+   only warm caches, whatever version they declare, and pull requests and merge groups
    build nothing. A successful candidate's archives stay available for 30 days.
    Candidate admission also requires the canonical dependency advisory scan at
    that exact source before expensive builds start. It checks both enabled
@@ -146,9 +146,12 @@ Follow the runs for the commit you named in
    digests, and publication metadata. Keep its exact run ID with the release.
    The manifest carries the notes rendered from `changelog.d/`, or the existing
    `## vX.Y.Z` section when `CHANGELOG.md` has one.
-3. `promote-release.yml` runs when you dispatch it. A candidate has no consumer
-   rehearsal, so promotion runs the existing rehearsal workflow against the exact
-   archives and requires its measured pass before publication. That authenticated
+3. The candidate runs the consumer rehearsal against its exact archives after
+   native qualification and release smoke pass. A candidate cannot finish green
+   without that measured consumer pass. `promote-release.yml` runs when you
+   dispatch it and reauthenticates the candidate's rehearsal binding before
+   publication. Earlier retained archives without a rehearsal use the same
+   observer at promotion. That authenticated
    rehearsal waits for its producer's run ID and attempt, verifies the
    exact-source archive before installing it, and runs every required product
    check. It reads `Pairs-with: consumer#N` trailers from every commit
@@ -159,7 +162,8 @@ Follow the runs for the commit you named in
    is stable. Two distinct pairings refuse and name both pulls. A paired pull
    already merged into the consumer's default branch rehearses that branch and
    logs `decision=rehearse_default`; a pull closed without merging refuses.
-   A passing rehearsal uploads `consumer-rehearsal-binding-<attempt>`, which
+   A passing release rehearsal must retain `consumer-rehearsal-binding-<attempt>`;
+   an unavailable manifest or consumer revision fails its recorder. The binding
    records the source SHA, producer run, candidate manifest digest, consumer
    run, rehearsed pull, and a digest of the consumer revision it tested.
    Promotion checks the version as [above](#publish-a-release), waits for

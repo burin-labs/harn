@@ -280,28 +280,32 @@ canary_record() {
 # the consumer revision its run checked out. Promotion re-reads each one and
 # refuses by name when any moved. This file is public, so the consumer
 # revision is recorded as its sha256 and the consumer run only by its id,
-# which the canary already prints. Anything short of a measured pass of a
-# release producer writes no binding, and promotion refuses its absence.
+# which the canary already prints. A requested release pass must retain its
+# binding; ordinary records and failed consumers keep their diagnostic output.
 canary_bind() {
   local repo=$1 run_id=$2 head=$3 source=${SOURCE_REVISION:-}
   local producer=${CANARY_RELEASE_PRODUCER_RUN_ID:-} attempt=${CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:-}
   local paired=${CANARY_PAIRED_PULL:-} declared=${CANARY_DECLARED_PULL:-} manifest='' head_digest
-  if [[ "${CANARY_VERDICT:-}" != pass || ! "$head" =~ ^[0-9a-f]{40}$ || ! "$source" =~ ^[0-9a-f]{40}$
+  if [[ "${CANARY_VERDICT:-}" != pass || -z "$producer$attempt" ]]; then
+    echo "CONSUMER_CANARY binding=unrecorded reason=not_a_measured_release_pass"
+    return 0
+  fi
+  if [[ ! "$head" =~ ^[0-9a-f]{40}$ || ! "$source" =~ ^[0-9a-f]{40}$
         || ! "$run_id" =~ ^[1-9][0-9]*$ || ! "$producer" =~ ^[1-9][0-9]*$ || ! "$attempt" =~ ^[1-9][0-9]*$
         || ! "$paired" =~ ^([1-9][0-9]*)?$ || ! "$declared" =~ ^([1-9][0-9]*)?$
         || ! "${GITHUB_REPOSITORY:-}" =~ ^[^/]+/[^/]+$ ]]; then
-    echo "CONSUMER_CANARY binding=unrecorded reason=not_a_measured_release_pass"
-    return 0
+    echo "::error::CONSUMER_CANARY binding=unrecorded reason=binding_identity_unmeasured"
+    return 1
   fi
   canary_api --optional manifest candidate_manifest_unread "$GITHUB_REPOSITORY" \
     "repos/$GITHUB_REPOSITORY/actions/runs/$producer/artifacts?name=candidate-manifest-$source" \
     --jq '[.artifacts[] | select(.expired == false) | .digest] | if length == 1 then .[0] else "" end' || manifest=''
   if [[ ! "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    echo "CONSUMER_CANARY binding=unrecorded reason=candidate_manifest_unmeasured"
-    return 0
+    echo "::error::CONSUMER_CANARY binding=unrecorded reason=candidate_manifest_unmeasured"
+    return 1
   fi
   head_digest=$(sha256_text_hex "$head") || head_digest=''
-  [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 0; }
+  [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 1; }
   jq -n --arg source "$source" --arg producer "$producer" --argjson attempt "$attempt" \
     --arg manifest "$manifest" --arg run "$run_id" --arg head "$head_digest" \
     --arg paired "$paired" --arg declared "$declared" \
@@ -309,8 +313,8 @@ canary_bind() {
       producer_run:$producer,producer_attempt:$attempt,manifest_digest:$manifest,
       consumer_run:$run,consumer_head_sha256:$head,
       consumer_pull:(if $paired == "" then null else $paired end),
-      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}' > "$CANARY_BINDING_FILE"
-  echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT"
+      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}' > "$CANARY_BINDING_FILE" || return 1
+  echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT" || return 1
   echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-$paired}${paired:-default}"
 }
 
