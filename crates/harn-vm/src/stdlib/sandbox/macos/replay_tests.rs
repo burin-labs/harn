@@ -57,6 +57,7 @@ attempt('original_socket', lambda: connect(original))
 attempt('future_socket', lambda: connect(future))
 attempt('branch_write', lambda: (workspace / 'branch-file').write_text('branch only'))
 attempt('branch_read', lambda: (workspace / 'branch-file').read_text())
+attempt('branch_socket', lambda: connect(workspace))
 print(json.dumps(results), flush=True)
 "#;
 
@@ -134,6 +135,7 @@ fn run_matrix(confined: bool) {
     std::fs::create_dir_all(&future).unwrap();
     std::fs::write(future.join("canary"), "future canary").unwrap();
     let future_socket = UnixListener::bind(future.join("ipc.sock")).unwrap();
+    let branch_socket = UnixListener::bind(workspace.join("ipc.sock")).unwrap();
     child
         .0
         .stdin
@@ -156,7 +158,7 @@ fn run_matrix(confined: bool) {
     let results: std::collections::BTreeMap<String, bool> = serde_json::from_str(&output).unwrap();
     assert_eq!(
         results.len(),
-        25,
+        26,
         "every operation must report a result: {results:?}"
     );
     for (name, allowed) in results {
@@ -175,7 +177,7 @@ fn run_matrix(confined: bool) {
         std::fs::read_to_string(future.join("canary")).unwrap(),
         "future canary"
     );
-    drop((original_socket, future_socket));
+    drop((original_socket, future_socket, branch_socket));
 }
 
 #[test]
