@@ -55,6 +55,31 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+thread_local! {
+    /// The bridge this thread's memo was filled through. Subtasks of different
+    /// sessions share runtime worker threads, and each carries its own
+    /// session's bridge, so an entry is only readable by calls through the same
+    /// bridge. A `Weak` keeps the allocation, and so the address, from being
+    /// reused while it is held, without keeping a finished session's bridge
+    /// alive.
+    static MEMO_OWNER: RefCell<Option<std::sync::Weak<dyn super::HostCallBridge>>> =
+        const { RefCell::new(None) };
+}
+
+/// Drop this thread's memo when it was filled through a different bridge.
+pub(crate) fn claim_for(bridge: &std::sync::Arc<dyn super::HostCallBridge>) {
+    let owned = MEMO_OWNER.with(|owner| {
+        owner
+            .borrow()
+            .as_ref()
+            .is_some_and(|owner| std::ptr::addr_eq(owner.as_ptr(), std::sync::Arc::as_ptr(bridge)))
+    });
+    if !owned {
+        reset_local();
+        MEMO_OWNER.with(|owner| *owner.borrow_mut() = Some(std::sync::Arc::downgrade(bridge)));
+    }
+}
+
 fn current_epoch() -> u64 {
     TURN_EPOCH.load(Ordering::Acquire)
 }

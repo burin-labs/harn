@@ -132,6 +132,11 @@ pub struct AmbientExecutionScope {
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
     host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
+    /// The embedder's `host_call` bridge. It is installed on the thread that
+    /// runs the session, so a subtask polled on a runtime worker thread must
+    /// carry it, or every host operation it calls falls through to the
+    /// built-in fallbacks.
+    host_call_bridge: Option<std::sync::Arc<dyn crate::stdlib::host::HostCallBridge>>,
     /// Scoped observation sinks follow all work started inside the capture
     /// closure, including delegated agents. A child may layer its own sink on
     /// top without losing the outer capture when no narrower sink is present.
@@ -239,6 +244,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            host_call_bridge: clone_via_swap(crate::stdlib::host::swap_host_call_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
             event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
@@ -316,6 +322,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            host_call_bridge: clone_via_swap(crate::stdlib::host::swap_host_call_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
             event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
@@ -404,6 +411,10 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
+        swap_slot(
+            &mut self.host_call_bridge,
+            crate::stdlib::host::swap_host_call_bridge,
+        );
         swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
         swap_slot(
             &mut self.event_transport,
