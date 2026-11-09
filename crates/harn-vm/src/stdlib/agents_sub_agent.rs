@@ -263,18 +263,16 @@ fn resolve_sub_agent_policies(
     let allowed_tools =
         parse_string_list(parser.raw("allowed_tools"), "sub_agent_run.allowed_tools")?;
     let requested_policy = sub_agent_requested_policy(parser.raw("policy"), &allowed_tools)?;
-    // The worker carrier is the ambient policy the child's loop enters under,
-    // not the child's own budget. The child's `agent_loop` entry receives
-    // `requested_policy` as `options.policy` and applies its `recursion_limit`
-    // while consuming the descent. Intersecting that limit into the carrier
-    // too spends it one level early: `recursion_limit: 0` ("run, but delegate
-    // no further") becomes a parent at zero, and the child is refused before
-    // its loop starts.
-    let carrier_request = requested_policy.clone().map(|policy| CapabilityPolicy {
-        recursion_limit: None,
-        ..policy
-    });
-    let worker_policy = agents_workers::resolve_inherited_worker_policy(carrier_request)?;
+    // The worker carrier is the parent's policy, which the child's loop enters
+    // under. The child's own policy is not part of it: the child's
+    // `agent_loop` receives `requested_policy` as `options.policy`, applies its
+    // `recursion_limit` while consuming the descent, and intersects its tool
+    // and capability ceilings at every tool dispatch, the same way a top-level
+    // loop does. Folding it into the carrier applies it a level early. A
+    // `recursion_limit: 0` ("run, but delegate no further") became a parent at
+    // zero, and a tool-scoped `capabilities` ceiling gated the loop's own
+    // runtime calls; either one refused the child before its first model call.
+    let worker_policy = agents_workers::resolve_inherited_worker_policy(None)?;
     parser.allow("carry");
     let carry_policy = agents_workers::parse_worker_carry_policy(request)?;
     let execution = agents_workers::parse_worker_execution_profile(parser.raw("execution"))?;

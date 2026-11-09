@@ -978,12 +978,13 @@ async fn background_sub_agent_consumes_nested_depth_once_on_the_real_builtin_pat
     crate::llm::mock::reset_llm_mock_state();
 }
 
-/// A child asking for `recursion_limit: 0` means "run, but delegate no
-/// further". The background worker must not spend that request before the
-/// child's own loop entry does: the carrier keeps the parent's remaining
-/// budget, and the child's descent applies the requested cap.
+/// A leaf child (`recursion_limit: 0`, a tool-scoped capability ceiling) must
+/// run its own loop. The background worker must not apply the child's policy
+/// before the child's loop does: the carrier keeps the parent's policy, the
+/// child's descent applies the requested cap, and the requested ceiling gates
+/// the child's tool calls rather than the loop's own runtime calls.
 #[tokio::test(flavor = "current_thread")]
-async fn background_sub_agent_with_zero_recursion_limit_still_runs_its_own_loop() {
+async fn background_leaf_sub_agent_runs_its_own_loop() {
     use std::rc::Rc;
 
     use crate::events::{add_event_sink, reset_event_sinks, CollectorSink};
@@ -1010,7 +1011,18 @@ async fn background_sub_agent_with_zero_recursion_limit_still_runs_its_own_loop(
         ("background", VmValue::Bool(true)),
         (
             "policy",
-            vm_dict(vec![("recursion_limit", VmValue::Int(0))]),
+            vm_dict(vec![
+                ("recursion_limit", VmValue::Int(0)),
+                ("tools", VmValue::strings(["look", "edit"])),
+                ("side_effect_level", vm_string("workspace_write")),
+                (
+                    "capabilities",
+                    vm_dict(vec![(
+                        "workspace",
+                        VmValue::strings(["read_text", "write_text"]),
+                    )]),
+                ),
+            ]),
         ),
         (
             "options",
@@ -1022,7 +1034,7 @@ async fn background_sub_agent_with_zero_recursion_limit_still_runs_its_own_loop(
         ),
     ]);
 
-    tokio::task::LocalSet::new()
+    let waited = tokio::task::LocalSet::new()
         .run_until(async {
             let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
@@ -1033,9 +1045,16 @@ async fn background_sub_agent_with_zero_recursion_limit_still_runs_its_own_loop(
                 .expect("background sub-agent must spawn");
             super::super::wait_agent_builtin(wait_ctx, vec![worker])
                 .await
-                .expect("background sub-agent must reach a terminal state");
+                .expect("background sub-agent must reach a terminal state")
         })
         .await;
+    let waited = crate::llm::helpers::vm_value_to_json(&waited);
+    assert_eq!(waited["status"], serde_json::json!("completed"), "{waited}");
+    assert_eq!(
+        waited["result"]["status"],
+        serde_json::json!("done"),
+        "{waited}"
+    );
 
     let descents: Vec<_> = events
         .logs
