@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(
             summary(ShellDialect::Posix, "make lint&&make test"),
             Some(vec![
-                ("".into(), vec![words(&["make", "lint"])]),
+                (String::new(), vec![words(&["make", "lint"])]),
                 ("&&".into(), vec![words(&["make", "test"])]),
             ])
         );
@@ -324,11 +324,17 @@ mod tests {
     fn quoted_operators_stay_argument_text() {
         assert_eq!(
             summary(ShellDialect::Posix, "echo \"a && b; c | d\""),
-            Some(vec![("".into(), vec![words(&["echo", "a && b; c | d"])])])
+            Some(vec![(
+                String::new(),
+                vec![words(&["echo", "a && b; c | d"])]
+            )])
         );
         assert_eq!(
             summary(ShellDialect::PowerShell, "Write-Output 'a && b'"),
-            Some(vec![("".into(), vec![words(&["Write-Output", "a && b"])])])
+            Some(vec![(
+                String::new(),
+                vec![words(&["Write-Output", "a && b"])]
+            )])
         );
     }
 
@@ -337,7 +343,7 @@ mod tests {
         assert_eq!(
             summary(ShellDialect::Posix, "a; b || X=1 c 2>&1 | tail -5\nd & e"),
             Some(vec![
-                ("".into(), vec![words(&["a"])]),
+                (String::new(), vec![words(&["a"])]),
                 (";".into(), vec![words(&["b"])]),
                 (
                     "||".into(),
@@ -354,7 +360,7 @@ mod tests {
         assert_eq!(
             summary(ShellDialect::Posix, "make lint || make test 2>&1"),
             Some(vec![
-                ("".into(), vec![words(&["make", "lint"])]),
+                (String::new(), vec![words(&["make", "lint"])]),
                 ("||".into(), vec![words(&["make", "test", "2>&1"])]),
             ])
         );
@@ -365,7 +371,7 @@ mod tests {
         assert_eq!(
             summary(ShellDialect::Posix, "cd sub && (make; true)"),
             Some(vec![
-                ("".into(), vec![words(&["cd", "sub"])]),
+                (String::new(), vec![words(&["cd", "sub"])]),
                 ("&&".into(), vec![vec!["<(make; true)>".to_string()]]),
             ])
         );
@@ -379,7 +385,7 @@ mod tests {
                 "npm ci && npm test || echo fail; dotnet test | Select-Object -Last 5"
             ),
             Some(vec![
-                ("".into(), vec![words(&["npm", "ci"])]),
+                (String::new(), vec![words(&["npm", "ci"])]),
                 ("&&".into(), vec![words(&["npm", "test"])]),
                 ("||".into(), vec![words(&["echo", "fail"])]),
                 (
