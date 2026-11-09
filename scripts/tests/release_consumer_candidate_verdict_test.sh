@@ -59,4 +59,35 @@ for mode in candidate none; do
     REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
     bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
 done
+# A selected warm must execute its preparation and builds even when candidate
+# security is intentionally skipped. Run the actual workflow verdict body.
+warm_results='{"setup":{"result":"success","outputs":{"should_build_binaries":"true"}},"source-security":{"result":"skipped"},"source-ci":{"result":"success"},"prepare_cli_aot":{"result":"success"},"build":{"result":"success"}}'
+env SETUP_RESULT=success BUILD_MODE=warm CANDIDATE_PURPOSE=none \
+  REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$warm_results" \
+  bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1
+for gate in source-ci prepare_cli_aot build; do
+  for result in failure cancelled skipped missing; do
+    refused_results="$(jq --arg gate "$gate" --arg result "$result" \
+      'if $result == "missing" then del(.[$gate]) else .[$gate].result = $result end' <<< "$warm_results")"
+    if env SETUP_RESULT=success BUILD_MODE=warm CANDIDATE_PURPOSE=none \
+      REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$refused_results" \
+      bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
+      echo "accepted selected warm with $result $gate"; exit 1
+    fi
+    grep -Fq 'A selected warm job did not succeed' "$tmp/result.log"
+  done
+done
+for selection in false missing invalid; do
+  selected_results="$(jq --arg selection "$selection" \
+    'if $selection == "missing" then del(.setup.outputs.should_build_binaries) else .setup.outputs.should_build_binaries = $selection end | .["source-ci"].result = "skipped" | .prepare_cli_aot.result = "skipped" | .build.result = "skipped"' <<< "$warm_results")"
+  status=0
+  env SETUP_RESULT=success BUILD_MODE=warm CANDIDATE_PURPOSE=none \
+    REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$selected_results" \
+    bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1 || status=$?
+  if [[ "$selection" == false ]]; then
+    [[ "$status" == 0 ]] || { cat "$tmp/result.log"; exit 1; }
+  else
+    [[ "$status" != 0 ]] || { echo "accepted unmeasured warm selection $selection"; exit 1; }
+  fi
+done
 echo 'release_consumer_candidate_verdict_test: ok'

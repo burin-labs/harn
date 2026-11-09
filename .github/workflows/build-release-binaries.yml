@@ -442,9 +442,9 @@ jobs:
   prepare_cli_aot:
     name: Prepare CLI AOT payload
     needs: [setup, source-ci]
-    # Match build's top-level condition so a warm-cache build is never skipped
-    # merely because this release/benchmark payload job had no work to do.
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    # Warm runs intentionally skip security; override inherited skip propagation.
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.source-ci.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # The generator compiles the complete Rust workspace and sits on every
     # shipping target's critical path. Public-repository release work always
     # uses the standard free runner selected by the release policy.
@@ -544,10 +544,9 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    # prepare_cli_aot skips its work on warm-cache-only events; `needs` on a
-    # job whose steps were skipped is satisfied, so warm-cache runs still build.
     needs: [setup, prepare_cli_aot]
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
     # only the same target from an older real warm. Candidates, benchmarks,
@@ -1929,6 +1928,18 @@ jobs:
                 ( -z "$REHEARSAL_SOURCE_SHA" || "$CONSUMER_RESULT" != success ) ]]; then
             echo "::error::Release has no successful exact-source consumer rehearsal; publication refused."
             exit 1
+          fi
+          if [[ "$BUILD_MODE" == warm ]]; then
+            if ! jq -e '
+              .setup.outputs.should_build_binaries as $selected |
+              . as $jobs |
+              $selected == "false" or
+              ($selected == "true" and
+                all(["source-ci", "prepare_cli_aot", "build"][]; $jobs[.].result == "success"))
+            ' <<<"$RESULTS" >/dev/null; then
+              echo "::error::A selected warm job did not succeed or warm selection is unproven: $RESULTS"
+              exit 1
+            fi
           fi
           if [[ "$BUILD_MODE" != candidate ]]; then
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."

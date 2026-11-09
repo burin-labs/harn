@@ -1383,6 +1383,40 @@ pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_out
   )
 }
 
+pipeline test_release_warm_build_admission_preserves_status_and_prerequisite_guards(
+  harness: Harness,
+) {
+  const workflow = release_binary_workflow(harness.fs)
+  assert_eq(release_warm_cache_concurrency_errors(workflow), [])
+  for job in ["prepare_cli_aot", "build"] {
+    const prerequisite = if job == "build" {
+      "prepare_cli_aot"
+    } else {
+      "source-ci"
+    }
+    const condition = workflow.jobs[job].if
+    const refusal = if job == "build" {
+      "build-release-binaries.yml:build must instantiate only after setup selects a real build"
+    } else {
+      "build-release-binaries.yml:prepare_cli_aot must run selected builds across skipped ancestors only after source qualification succeeds"
+    }
+    for clause in [
+      "!cancelled() && ",
+      "needs.setup.result == 'success' && ",
+      "needs.${prerequisite}.result == 'success' && ",
+      " && needs.setup.outputs.should_build_binaries == 'true'",
+    ] {
+      assert(condition.contains(clause))
+      let invalid = workflow
+      invalid.jobs[job].if = condition.replace(clause, "")
+      assert(release_warm_cache_concurrency_errors(invalid).contains(refusal))
+    }
+    let implicit_success = workflow
+    implicit_success.jobs[job].if = "needs.setup.outputs.should_build_binaries == 'true'"
+    assert(release_warm_cache_concurrency_errors(implicit_success).contains(refusal))
+  }
+}
+
 pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
   harness: Harness,
   task: unknown,
