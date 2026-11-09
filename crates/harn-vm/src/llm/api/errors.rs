@@ -345,7 +345,60 @@ pub(crate) fn provider_http_error(
         retry_after.as_deref(),
         provider_token_quota_snapshot(headers),
     );
+    let error = with_credential_scope(error, reason, status, body);
     with_managed_allowance_message(error, reason, body)
+}
+
+/// Field naming what an `auth_failure` refused: the key itself (`"key"`) or
+/// only this request's model or feature (`"request"`).
+pub(crate) const CREDENTIAL_SCOPE_FIELD: &str = "credential_scope";
+pub(crate) const CREDENTIAL_SCOPE_KEY: &str = "key";
+
+/// Provider wording for a 403 that rejects the key rather than one model,
+/// feature, or organization setting the key lacks.
+const KEY_REJECTION_PHRASES: &[&str] = &[
+    "invalid_api_key",
+    "invalid api key",
+    "invalid x-api-key",
+    "incorrect api key",
+    "api key not valid",
+    "api_key_invalid",
+    "revoked api key",
+    "api key revoked",
+    "api key has been revoked",
+];
+
+/// A 401 rejects the credential. A 403 usually refuses one model or feature
+/// the key lacks, so it names the key only when the body says the key itself
+/// is invalid or revoked.
+fn with_credential_scope(
+    error: VmError,
+    reason: LlmErrorReason,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> VmError {
+    use crate::value::VmDictExt;
+    if reason != LlmErrorReason::AuthFailure {
+        return error;
+    }
+    let VmError::Thrown(VmValue::Dict(fields)) = error else {
+        return error;
+    };
+    let body_lower = body.to_lowercase();
+    let key_rejected = status == reqwest::StatusCode::UNAUTHORIZED
+        || KEY_REJECTION_PHRASES
+            .iter()
+            .any(|phrase| body_lower.contains(phrase));
+    let mut fields = (*fields).clone();
+    fields.put_str(
+        CREDENTIAL_SCOPE_FIELD,
+        if key_rejected {
+            CREDENTIAL_SCOPE_KEY
+        } else {
+            "request"
+        },
+    );
+    VmError::Thrown(VmValue::dict(fields))
 }
 
 /// Build a tagged, provider-prefixed error message from a non-2xx HTTP

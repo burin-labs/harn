@@ -5,5 +5,12 @@
     "expression": "\"SystemRoot\"",
     "owner": "Windows command resolver",
     "evidence": "Operating-system executable location, not an agent policy switch."
+  },
+  {
+    "scope": "runner-environment-constants",
+    "file": "crates/harn-vm/src/llm/api/transport_stub_tests/rejected_key.rs",
+    "expression": "\"REJECTED_KEY_TEST_API_KEY\"",
+    "owner": "Rejected-key transport-stub fixture",
+    "evidence": "Synthetic credential environment name in the cfg(test) transport module; the regression sets its value to exercise provider admission, not a shipping policy switch."
   }
 ]

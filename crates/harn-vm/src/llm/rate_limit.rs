@@ -1,7 +1,7 @@
 //! Route-aware sliding-window rate limiter for outbound LLM requests.
 //!
 //! Proactively throttles requests to stay within configured per-minute request
-//! and token limits. When a bucket is full, `acquire_permit_for_llm_call`
+//! and token limits. When a bucket is full, `LlmCallAdmission::acquire`
 //! yields to the Harn mockable clock, allowing other spawn_local tasks and
 //! parallel pipelines to run.
 //!
@@ -1220,6 +1220,7 @@ fn zero_dispatch_circuit_open(
 }
 
 mod network_recovery;
+mod rejected_keys;
 pub(crate) use network_recovery::await_network_breaker_for_llm_call;
 #[cfg(test)]
 pub(crate) use network_recovery::check_network_breaker_for_llm_call;
@@ -1227,6 +1228,8 @@ pub(crate) use network_recovery::check_network_breaker_for_llm_call;
 use network_recovery::network_breaker_admission;
 pub(crate) use network_recovery::swap_prompt_probe_owner;
 pub use network_recovery::{begin_interactive_prompt, InteractivePromptGuard};
+#[cfg(test)]
+pub(crate) use rejected_keys::REJECTED_KEY_RETRY_AFTER;
 
 /// Feed a terminal unproductive completion (a served turn that delivered no
 /// content, reasoning, or tool call — the zero-token empty completion or the
@@ -1303,6 +1306,7 @@ pub(crate) fn observe_network_outcome_for_llm_call(
 /// Wait until all provider/model buckets allow this LLM request, then record it.
 /// The returned permit must be held until the provider call finishes so
 /// concurrency limits cover in-flight calls rather than just launch rate.
+#[cfg(test)]
 pub(crate) async fn acquire_permit_for_llm_call(
     opts: &super::api::LlmCallOptions,
 ) -> Result<RateLimitPermit, crate::value::VmError> {
@@ -1318,6 +1322,8 @@ pub(crate) struct LlmCallAdmission {
     consumer_id: Option<String>,
     session_id: Option<String>,
     reroute_on_timeout: bool,
+    /// Fingerprint of the presented key; `None` when the call presents none.
+    api_key_id: Option<String>,
 }
 
 impl LlmCallAdmission {
@@ -1343,11 +1349,19 @@ impl LlmCallAdmission {
                 .or_else(|| opts.session_id.clone()),
             session_id: opts.session_id.clone(),
             reroute_on_timeout: opts.rate_limit_reroute_on_timeout,
+            api_key_id: rejected_keys::key_id(&opts.api_key),
         }
     }
 
+    /// Admit one provider request. A key this provider already rejected in
+    /// this process is refused here, before any wait or dispatch.
     pub(crate) async fn acquire(&self) -> Result<RateLimitPermit, crate::value::VmError> {
-        acquire_permit_for(
+        rejected_keys::refuse_rejected_key(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+        )?;
+        let permit = acquire_permit_for(
             &self.provider,
             &self.model,
             self.request,
@@ -1355,12 +1369,31 @@ impl LlmCallAdmission {
             self.session_id.as_deref(),
             self.reroute_on_timeout,
         )
-        .await
+        .await?;
+        // A sibling can receive an auth refusal while this call waits for admission.
+        rejected_keys::refuse_rejected_key(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+        )?;
+        Ok(permit)
+    }
+
+    /// Record the provider's verdict on the presented key once a request this
+    /// admission let through has finished.
+    pub(crate) fn observe_outcome<T>(&self, outcome: &Result<T, crate::value::VmError>) {
+        rejected_keys::observe_key_outcome(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+            outcome,
+        );
     }
 }
 
 /// Reset all rate limiter state. Used between test runs.
 pub(crate) fn reset_rate_limit_state() {
+    rejected_keys::reset();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
     registry.limiters.clear();
     registry.initialized_from_config = false;
