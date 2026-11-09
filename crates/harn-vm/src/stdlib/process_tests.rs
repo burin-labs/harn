@@ -20,13 +20,19 @@ fn refused_script_read_emits_names_only_to_embedded_event_sink() {
     ));
     let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
     crate::events::add_event_sink(sink.clone());
+    let env = crate::test_env::test_env_guard();
+    env.set("SETTINGS_OVERLAY", "withheld");
 
-    let result = env_impl(&[VmValue::string("SETTINGS_OVERLAY")], &mut String::new()).unwrap();
+    let withheld = env_impl(&[VmValue::string("SETTINGS_OVERLAY")], &mut String::new()).unwrap();
+    // An unset name loses nothing to the refusal, so it stays out of warnings.
+    let unset = env_impl(&[VmValue::string("UNSET_OVERLAY")], &mut String::new()).unwrap();
     crate::reset_thread_local_state();
+    drop(env);
 
-    assert!(matches!(result, VmValue::Nil));
+    assert!(matches!(withheld, VmValue::Nil));
+    assert!(matches!(unset, VmValue::Nil));
     let logs = sink.logs.borrow();
-    assert_eq!(logs.len(), 1);
+    assert_eq!(logs.len(), 2);
     assert_eq!(logs[0].level, crate::events::EventLevel::Warn);
     assert_eq!(logs[0].category, "environment_policy.read_refused");
     assert_eq!(
@@ -36,6 +42,8 @@ fn refused_script_read_emits_names_only_to_embedded_event_sink() {
             ("policy".into(), serde_json::json!("granted")),
         ])
     );
+    assert_eq!(logs[1].level, crate::events::EventLevel::Debug);
+    assert_eq!(logs[1].metadata["name"], serde_json::json!("UNSET_OVERLAY"));
 }
 
 #[test]
