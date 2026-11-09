@@ -8,6 +8,8 @@
 use super::*;
 
 const WAIT_TIMEOUT_MS: u64 = 30_000;
+/// Generous bound on each awaited event; reached only when the event never comes.
+const EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn harn_string_literal(value: &str) -> String {
     format!("\"{}\"", harn_lexer::escape_string_literal(value))
@@ -108,6 +110,14 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         let pid = child.pid;
         std::fs::write(&handle_path, &child.handle_id).expect("write handle id");
         assert!(is_running(pid), "background child should be running");
+        let wait_registered =
+            harn_hostlib::tools::long_running::register_wait_notifier(&child.handle_id)
+                .expect("live handle");
+        let reaped =
+            harn_hostlib::tools::long_running::register_result_notifier(&child.handle_id)
+                .expect("live handle");
+        let mut wait_in_place =
+            tokio::task::spawn_blocking(move || wait_registered.recv_timeout(EVENT_TIMEOUT));
         let prompted_at = Instant::now();
         request_tx
             .send(serde_json::json!({
@@ -121,30 +131,28 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
             }))
             .expect("send session/prompt");
 
-        // Wait until the turn has entered the wait.
-        let mut entered = false;
+        // Serve the host until the wait has registered for its result, so the
+        // stop arrives while the turn is parked inside the wait.
         let mut early = serde_json::Value::Null;
-        for _ in 0..500 {
-            if std::fs::read_to_string(&marker).is_ok_and(|text| text.contains("WAITING")) {
-                entered = true;
-                break;
-            }
-            while let Ok(line) = response_rx.try_recv() {
-                let message: serde_json::Value =
-                    serde_json::from_str(&line).expect("ACP JSON line");
-                if message["method"] == "host/capabilities" {
-                    reply_empty_result(&request_tx, &message);
-                } else if message["method"] == "host/call" {
-                    reply_unavailable(&request_tx, &message);
-                } else if message["id"] == 3 {
-                    early = message.clone();
+        loop {
+            tokio::select! {
+                registered = &mut wait_in_place => {
+                    registered.expect("wait notifier task").unwrap_or_else(|_| {
+                        panic!("the turn never reached wait_command; prompt: {early}")
+                    });
+                    break;
+                }
+                message = recv_json(&mut response_rx) => {
+                    if message["method"] == "host/capabilities" {
+                        reply_empty_result(&request_tx, &message);
+                    } else if message["method"] == "host/call" {
+                        reply_unavailable(&request_tx, &message);
+                    } else if message["id"] == 3 {
+                        early = message.clone();
+                    }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(entered, "the turn never reached wait_command; prompt: {early}");
-        // Let the turn park inside the wait before the stop arrives.
-        tokio::time::sleep(Duration::from_millis(300)).await;
 
         let cancelled_at = Instant::now();
         request_tx
@@ -177,10 +185,12 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         // turn against the wait's 30s budget, not only the time after the send.
         let turn_took = prompted_at.elapsed();
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while is_running(pid) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        // The handle publishes its terminal result once its waiter has reaped
+        // the killed child.
+        let reaped = tokio::task::spawn_blocking(move || reaped.recv_timeout(EVENT_TIMEOUT))
+            .await
+            .expect("reap notifier task");
+        assert!(reaped.is_ok(), "the waited child never reached a terminal result");
         let child_alive = is_running(pid);
         let marker_text = std::fs::read_to_string(&marker).unwrap_or_default();
 
