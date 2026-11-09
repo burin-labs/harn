@@ -1,0 +1,23 @@
+import { shell_command_shape } from "std/command"
+
+fn describe(source: string, shell: string = "sh") -> string {
+  const shape = shell_command_shape(source, shell)
+  let parts = []
+  for segment in shape.segments {
+    let stages = []
+    for stage in segment.stages {
+      stages = stages + [stage.kind + ":" + join(stage.words, " ")]
+    }
+    parts = parts + ["[" + segment.operator + "] " + join(stages, " | ")]
+  }
+  return shape.status + " " + shape.dialect + " " + json_stringify(parts)
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(describe("make lint&&make test"))
+  harness.stdio.println(describe("echo \"a && b\""))
+  harness.stdio.println(describe("cargo test 2>&1 | tail -5; echo done"))
+  harness.stdio.println(describe("npm ci && npm test || exit 1", "pwsh"))
+  harness.stdio.println(describe("echo \"open"))
+  harness.stdio.println(describe("dir && echo ok", "cmd"))
+}

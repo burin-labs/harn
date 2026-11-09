@@ -13,12 +13,14 @@
 /// not an executable command (fork-bomb grammar and tracked-file redirects).
 use std::path::Path;
 
+mod command_shape;
 mod find_delete;
 mod project_delete;
 mod semantic_shell;
 mod shell;
 mod tracked_writes;
 
+pub(crate) use command_shape::shell_command_shape;
 use project_delete::argv_deletes_project;
 pub(super) use semantic_shell::{
     analyze_argv, analyze_shell, analyze_shell_dialect, xargs_child_argv, ShellAnalysis,
