@@ -53,9 +53,39 @@ pub fn session_std_command(program: impl AsRef<std::ffi::OsStr>) -> Result<Comma
     refuse_unconfined_replay()?;
     let program = program.as_ref();
     // A raw constructor is allowed here and only here: this is the funnel.
-    let mut command = Command::new(program);
+    let mut command = Command::new(session_program(program)?);
     close_env_for_session!(command, &program.to_string_lossy());
     Ok(command)
+}
+
+/// The executable a session command for `program` runs. On macOS a bare `git`
+/// that would reach Apple's `xcrun` shim runs the selected developer Git
+/// instead; see [`super::developer_git`]. The session environment for the
+/// command is still chosen by the name the caller asked for.
+fn session_program(
+    program: &std::ffi::OsStr,
+) -> Result<std::borrow::Cow<'_, std::ffi::OsStr>, VmError> {
+    #[cfg(target_os = "macos")]
+    if program == "git" {
+        let env =
+            crate::stdlib::process::session_closed_env_for_command("git", std::iter::empty())?;
+        let read = |key: &str| match &env {
+            Some(env) => env
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| std::ffi::OsString::from(value)),
+            None => std::env::var_os(key),
+        };
+        if let Some(git) = super::developer_git::redirect(
+            program,
+            read("PATH").as_deref(),
+            read("DEVELOPER_DIR").as_deref(),
+            super::developer_git::INSTALLED,
+        ) {
+            return Ok(std::borrow::Cow::Owned(git.into_os_string()));
+        }
+    }
+    Ok(std::borrow::Cow::Borrowed(program))
 }
 
 /// Resolve native compiler metadata while composing workspace launch defaults.
@@ -86,7 +116,7 @@ pub fn session_tokio_command(
 ) -> Result<tokio::process::Command, VmError> {
     refuse_unconfined_replay()?;
     let program = program.as_ref();
-    let mut command = tokio::process::Command::new(program);
+    let mut command = tokio::process::Command::new(session_program(program)?);
     close_env_for_session!(command, &program.to_string_lossy());
     Ok(command)
 }

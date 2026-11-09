@@ -64,6 +64,7 @@ pub use command_for::{
     session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
     tokio_command_for, tokio_command_for_with_env_state,
 };
+mod developer_git;
 pub mod enforcement;
 use enforcement::ensure_spawn_enforceable;
 #[cfg(all(test, target_os = "linux"))]
