@@ -1190,7 +1190,7 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> BackgroundW
         }
         let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
         entry.result_txs.push(tx);
-        entry.waits.drain(..).for_each(|tx| drop(tx.try_send(())));
+        entry.waits.drain(..).for_each(|tx| _ = tx.try_send(()));
         rx
     };
     // Wait in short slices so a stop or deadline on the calling turn ends the
