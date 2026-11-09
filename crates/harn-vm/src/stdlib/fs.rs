@@ -1057,7 +1057,7 @@ fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     exposure = "pure",
     sig = "glob_match(pattern: string, candidate: string) -> bool",
     category = "fs",
-    doc = "Match a workspace-relative path against a glob with the slash-aware semantics capability policy uses for path-keyed tool argument patterns: `*`, `?` and `[...]` stay within one path segment, `**` crosses directories, `{a,b}` alternates, and a candidate equal to the pattern always matches."
+    doc = "Match a workspace-relative path against a glob with the slash-aware semantics capability policy uses for path-keyed tool argument patterns: `*` and `?` stay within one path segment, `**` crosses directories, `{a,b}` alternates, and a candidate equal to the pattern always matches."
 )]
 fn glob_match_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pattern = args.first().map(VmValue::display).unwrap_or_default();

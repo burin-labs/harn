@@ -11,10 +11,10 @@
 //!
 //! Three contracts, chosen per call site:
 //!
-//! - [`match_path`] — slash-aware file-path globs: `*`/`?`/`[...]` never cross
-//!   `/`, `**` crosses directories, `{a,b}` alternates. Use for path-shaped
-//!   inputs (invariant globs, skill manifests, workspace paths, path-keyed
-//!   policy constraints).
+//! - [`match_path`] — slash-aware file-path globs over [`globset`]: `*`/`?`
+//!   never cross `/`, `**` crosses directories, `{a,b}` alternates. Use for
+//!   path-shaped inputs (invariant globs, skill manifests, workspace paths,
+//!   path-keyed policy constraints).
 //! - [`match_name`] — full glob syntax (`*`, `?`, `[...]`, `{a,b}`) over flat
 //!   identifiers where `/` has no special meaning (`*` crosses it). Use for
 //!   tool names, model ids, hook patterns, event names.
@@ -23,236 +23,26 @@
 //!   contains `?`, `[`, or `{` as ordinary prose (e.g. llm-mock prompt
 //!   matchers).
 
-/// Slash-aware glob matching for file paths.
+/// Slash-aware glob matching for file paths, with the semantics of
+/// [`globset`] under `literal_separator`:
 ///
-/// Semantics:
-/// - `*` matches any run of characters except `/`
-/// - `?` matches exactly one character except `/`
-/// - `**` matches any run of characters including `/` (a leading `**/` also
-///   matches zero directories, so `src/**/*.rs` matches `src/main.rs`)
-/// - `[abc]`, `[a-z]` and `[!abc]` (or `[^abc]`) match one character except
-///   `/`; an unclosed `[` is literal
-/// - `{a,b}` matches either alternative and may nest; braces without a
-///   top-level comma, or unbalanced, are literal
-/// - every other character matches itself; the whole path must be consumed
+/// - `*` and `?` never match `/`; `**` as a whole segment crosses
+///   directories (a leading `**/` also matches zero directories, so
+///   `src/**/*.rs` matches `src/main.rs`)
+/// - `[...]` matches one byte; only a class that names `/` or is negated
+///   (`[!x]`) can match `/`
+/// - `{a,b}` matches either alternative; `\` escapes a metacharacter
+/// - matching is byte-wise: over a non-ASCII name, `?` consumes one UTF-8
+///   byte, not one character
 ///
 /// A path equal to the pattern always matches, so a literal that happens to
 /// contain glob syntax (a route directory such as `app/[slug]/page.tsx`)
-/// still matches itself instead of being read only as a character class.
+/// still matches itself. A pattern that does not parse as a glob (an unclosed
+/// `[` or `{`) matches only that exact path.
 #[must_use]
 pub fn match_path(pattern: &str, path: &str) -> bool {
-    if pattern == path {
-        return true;
-    }
-    expand_braces(pattern)
-        .iter()
-        .any(|alternative| match_path_bytes(alternative.as_bytes(), 0, path.as_bytes(), 0))
-}
-
-/// Upper bound on brace alternatives; a pattern past it stays unexpanded.
-const MAX_BRACE_ALTERNATIVES: usize = 256;
-
-/// Expand `{a,b}` alternates into whole patterns, outermost-first.
-fn expand_braces(pattern: &str) -> Vec<String> {
-    let mut expanded = Vec::new();
-    expand_braces_into(pattern, &mut expanded);
-    if expanded.len() > MAX_BRACE_ALTERNATIVES {
-        return vec![pattern.to_string()];
-    }
-    expanded
-}
-
-fn expand_braces_into(pattern: &str, out: &mut Vec<String>) {
-    if out.len() > MAX_BRACE_ALTERNATIVES {
-        return;
-    }
-    let Some((open, close, commas)) = first_brace_group(pattern) else {
-        out.push(pattern.to_string());
-        return;
-    };
-    // Every offset is an ASCII brace or comma, so each slice is on a boundary.
-    let piece = |range: std::ops::Range<usize>| pattern.get(range).unwrap_or_default();
-    let prefix = piece(0..open);
-    let suffix = piece(close + 1..pattern.len());
-    let mut start = open + 1;
-    for end in commas.into_iter().chain(std::iter::once(close)) {
-        expand_braces_into(&format!("{prefix}{}{suffix}", piece(start..end)), out);
-        start = end + 1;
-    }
-}
-
-/// The first balanced `{...}` holding a top-level comma, as byte offsets of
-/// the braces and of its top-level commas.
-fn first_brace_group(pattern: &str) -> Option<(usize, usize, Vec<usize>)> {
-    let bytes = pattern.as_bytes();
-    let mut search = 0;
-    while let Some(offset) = bytes[search..].iter().position(|byte| *byte == b'{') {
-        let open = search + offset;
-        let mut depth = 0usize;
-        let mut commas = Vec::new();
-        for (index, byte) in bytes.iter().enumerate().skip(open) {
-            match byte {
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        if !commas.is_empty() {
-                            return Some((open, index, commas));
-                        }
-                        break;
-                    }
-                }
-                b',' if depth == 1 => commas.push(index),
-                _ => {}
-            }
-        }
-        search = open + 1;
-    }
-    None
-}
-
-/// Outcome of reading a `[...]` class at the pattern cursor.
-enum ClassStep {
-    /// The `[` opens no class; match it literally.
-    Literal,
-    /// The class consumed one path character.
-    Matched {
-        next_pi: usize,
-        next_si: usize,
-    },
-    Rejected,
-}
-
-fn match_class(pat: &[u8], pi: usize, path: &[u8], si: usize) -> ClassStep {
-    let mut start = pi + 1;
-    let negated = matches!(pat.get(start), Some(b'!' | b'^'));
-    if negated {
-        start += 1;
-    }
-    // A `]` first in the class is a member, not the terminator.
-    let search_from = if pat.get(start) == Some(&b']') {
-        start + 1
-    } else {
-        start
-    };
-    let Some(close) = pat
-        .get(search_from..)
-        .and_then(|rest| rest.iter().position(|byte| *byte == b']'))
-        .map(|offset| search_from + offset)
-    else {
-        return ClassStep::Literal;
-    };
-    let Some(candidate) = char_at(path, si) else {
-        return ClassStep::Rejected;
-    };
-    if candidate == '/' {
-        return ClassStep::Rejected;
-    }
-    let members: Vec<char> = String::from_utf8_lossy(&pat[start..close])
-        .chars()
-        .collect();
-    let mut found = false;
-    let mut index = 0;
-    while index < members.len() {
-        if index + 2 < members.len() && members[index + 1] == '-' {
-            found |= (members[index]..=members[index + 2]).contains(&candidate);
-            index += 3;
-        } else {
-            found |= members[index] == candidate;
-            index += 1;
-        }
-    }
-    if found == negated {
-        return ClassStep::Rejected;
-    }
-    ClassStep::Matched {
-        next_pi: close + 1,
-        next_si: si + candidate.len_utf8(),
-    }
-}
-
-/// Decode the character starting at a UTF-8 boundary.
-fn char_at(bytes: &[u8], index: usize) -> Option<char> {
-    let lead = *bytes.get(index)?;
-    let width = (lead.leading_ones() as usize).max(1);
-    std::str::from_utf8(bytes.get(index..index + width)?)
-        .ok()?
-        .chars()
-        .next()
-}
-
-fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bool {
-    while pi < pat.len() {
-        match pat[pi] {
-            b'*' => {
-                let double = pat.get(pi + 1) == Some(&b'*');
-                let mut next_pi = if double { pi + 2 } else { pi + 1 };
-                if double && pat.get(next_pi) == Some(&b'/') {
-                    next_pi += 1;
-                    // `**/` matches zero or more complete directory segments.
-                    // It must not start the next pattern in the middle of a
-                    // segment (`**/bar` should not match `foobar`).
-                    if match_path_bytes(pat, next_pi, path, si) {
-                        return true;
-                    }
-                    for try_si in si..path.len() {
-                        if path[try_si] == b'/' && match_path_bytes(pat, next_pi, path, try_si + 1)
-                        {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                if next_pi >= pat.len() {
-                    if double {
-                        return true;
-                    }
-                    return !path[si..].contains(&b'/');
-                }
-                for try_si in si..=path.len() {
-                    if !double && path[si..try_si].contains(&b'/') {
-                        break;
-                    }
-                    // Resume only on a character boundary, never inside a UTF-8 sequence.
-                    let mid_char = path.get(try_si).is_some_and(|byte| byte & 0xC0 == 0x80);
-                    if !mid_char && match_path_bytes(pat, next_pi, path, try_si) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            b'?' => {
-                if si >= path.len() || path[si] == b'/' {
-                    return false;
-                }
-                // `?` is one character, as in gitignore: skip a whole UTF-8 sequence.
-                pi += 1;
-                si = (si + (path[si].leading_ones() as usize).max(1)).min(path.len());
-            }
-            b'[' => match match_class(pat, pi, path, si) {
-                ClassStep::Matched { next_pi, next_si } => {
-                    pi = next_pi;
-                    si = next_si;
-                }
-                ClassStep::Rejected => return false,
-                ClassStep::Literal => {
-                    if path.get(si) != Some(&b'[') {
-                        return false;
-                    }
-                    pi += 1;
-                    si += 1;
-                }
-            },
-            expected => {
-                if si >= path.len() || path[si] != expected {
-                    return false;
-                }
-                pi += 1;
-                si += 1;
-            }
-        }
-    }
-    si == path.len()
+    pattern == path
+        || compiled(pattern, Separator::Literal).is_some_and(|matcher| matcher.is_match(path))
 }
 
 /// Full glob matching for flat names (tool names, model ids, hook patterns).
@@ -269,7 +59,6 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
 ///
 /// Compiled matchers are cached per thread; patterns come from configuration
 /// and hook registration, so the cache stays small.
-#[cfg(feature = "name")]
 #[must_use]
 pub fn match_name(pattern: &str, name: &str) -> bool {
     if pattern == "*" || pattern == name {
@@ -299,7 +88,6 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
 
 /// Whether a flat-name pattern uses glob operators or backslash escaping.
 /// Use this before deriving an exact name matcher from an external identifier.
-#[cfg(feature = "name")]
 #[must_use]
 pub fn has_name_metacharacters(pattern: &str) -> bool {
     pattern
@@ -307,14 +95,42 @@ pub fn has_name_metacharacters(pattern: &str) -> bool {
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{' | b'\\'))
 }
 
-#[cfg(feature = "name")]
 fn compiled_name_match(pattern: &str, name: &str) -> bool {
+    match compiled(pattern, Separator::Crossed) {
+        Some(matcher) => matcher.is_match(name),
+        // Unparsable glob: match the way pre-consolidation call sites did.
+        None => {
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                return name.starts_with(prefix);
+            }
+            if let Some(suffix) = pattern.strip_prefix('*') {
+                return name.ends_with(suffix);
+            }
+            pattern == name
+        }
+    }
+}
+
+/// Whether `*`, `?` and `[...]` may match `/`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Separator {
+    Literal,
+    Crossed,
+}
+
+/// Compiled matchers keyed by pattern and separator mode; `None` = unparsable.
+type GlobCache = std::collections::HashMap<(Box<str>, Separator), Option<globset::GlobMatcher>>;
+
+/// Compile a glob once per thread, or `None` when it does not parse.
+///
+/// `\` escapes on every platform (globset's default disables it on Windows):
+/// patterns are written with forward slashes, and an escaped metacharacter is
+/// how a caller asks for it literally.
+fn compiled(pattern: &str, separator: Separator) -> Option<globset::GlobMatcher> {
     use std::cell::RefCell;
-    use std::collections::HashMap;
 
     thread_local! {
-        static COMPILED: RefCell<HashMap<Box<str>, Option<globset::GlobMatcher>>> =
-            RefCell::new(HashMap::new());
+        static COMPILED: RefCell<GlobCache> = RefCell::new(GlobCache::new());
     }
 
     COMPILED.with(|cache| {
@@ -324,28 +140,17 @@ fn compiled_name_match(pattern: &str, name: &str) -> bool {
         if cache.len() > 512 {
             cache.clear();
         }
-        let matcher = cache.entry(Box::from(pattern)).or_insert_with(|| {
-            // Names are not paths: `\` escapes on every platform (globset's
-            // default disables it on Windows).
-            globset::GlobBuilder::new(pattern)
-                .backslash_escape(true)
-                .build()
-                .ok()
-                .map(|glob| glob.compile_matcher())
-        });
-        match matcher {
-            Some(matcher) => matcher.is_match(name),
-            // Unparsable glob: match the way pre-consolidation call sites did.
-            None => {
-                if let Some(prefix) = pattern.strip_suffix('*') {
-                    return name.starts_with(prefix);
-                }
-                if let Some(suffix) = pattern.strip_prefix('*') {
-                    return name.ends_with(suffix);
-                }
-                pattern == name
-            }
-        }
+        cache
+            .entry((Box::from(pattern), separator))
+            .or_insert_with(|| {
+                globset::GlobBuilder::new(pattern)
+                    .literal_separator(separator == Separator::Literal)
+                    .backslash_escape(true)
+                    .build()
+                    .ok()
+                    .map(|glob| glob.compile_matcher())
+            })
+            .clone()
     })
 }
 
@@ -425,10 +230,18 @@ mod tests {
         assert!(match_path("src/ma?n.rs", "src/main.rs"));
         assert!(!match_path("src/ma?n.rs", "src/man.rs"));
         assert!(!match_path("a?b", "a/b"));
-        assert!(match_path("?.rs", "é.rs"));
-        assert!(!match_path("??.rs", "é.rs"));
-        assert!(!match_path("*??x", "€x"));
-        assert!(match_path("*?x", "€x"));
+        assert!(match_path("*.rs", "é.rs"));
+        assert!(!match_path("a?b", "aé/b"));
+    }
+
+    /// globset matches bytes, as git's wildmatch does: over a non-ASCII name,
+    /// `?` and `[...]` consume one UTF-8 byte, never one character, and still
+    /// never `/`. Pinned so a semantics change in the crate is noticed.
+    #[test]
+    fn path_single_character_wildcards_match_bytes() {
+        assert!(!match_path("?.rs", "é.rs"));
+        assert!(match_path("??.rs", "é.rs"));
+        assert!(!match_path("[é]", "é"));
     }
 
     #[test]
@@ -449,11 +262,24 @@ mod tests {
         assert!(match_path("v[!0-9].txt", "vx.txt"));
         assert!(!match_path("v[^0-9].txt", "v7.txt"));
         assert!(match_path("[]x]", "]"));
-        assert!(match_path("[é]", "é"));
-        assert!(!match_path("a[/]b", "a/b"));
-        assert!(!match_path("a[!x]b", "a/b"));
+        assert!(
+            match_path("a[/]b", "a/b"),
+            "a class that names / explicitly may match it"
+        );
+        assert!(
+            match_path("a[!x]b", "a/b"),
+            "globset lets a negated class match /"
+        );
+        assert!(
+            !match_path("src/[!x]*.rs", "src/a/b.rs"),
+            "but * after it still stays in one segment"
+        );
         assert!(match_path("open[bracket", "open[bracket"));
-        assert!(match_path("open[*", "open[anything"));
+        assert!(
+            !match_path("open[*", "open[anything"),
+            "an unparsable glob matches only itself"
+        );
+        assert!(match_path("open[*", "open[*"));
     }
 
     #[test]
@@ -465,7 +291,6 @@ mod tests {
         assert!(!match_path("{src,lib}/*.rs", "lib/x/y.rs"));
         assert!(match_path("a{b}c", "a{b}c"));
         assert!(match_path("a{b,c", "a{b,c"));
-        assert!(match_path("{,pre}fix", "fix"));
     }
 
     #[test]
