@@ -631,9 +631,19 @@ fn path_escapes_root(target: &str, roots: &[String]) -> bool {
         if roots.is_empty() {
             return true;
         }
+        // A root spelled absolutely, or any ancestor of one, wipes the whole
+        // workspace in place. When the root is the home directory this is
+        // what makes home itself a protected path.
+        let wipes_a_root = roots.iter().any(|root| {
+            let root = strip_trailing_slashes(root);
+            root == cleaned || root.starts_with(&format!("{cleaned}/"))
+        });
+        if wipes_a_root {
+            return true;
+        }
         return !roots.iter().any(|root| {
             let root = strip_trailing_slashes(root);
-            cleaned == root || cleaned.starts_with(&format!("{root}/"))
+            cleaned.starts_with(&format!("{root}/"))
         });
     }
     relative_path_escapes(cleaned)
