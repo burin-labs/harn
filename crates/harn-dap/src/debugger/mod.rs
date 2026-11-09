@@ -246,8 +246,11 @@ impl Debugger {
                 .expect("checked above")
                 .debug_stack_frames_with_sources();
             let fallback_source_path = self.source_path.clone();
+            // The VM lists frames outermost first; DAP wants the current
+            // (innermost) frame first, with id 1 — the id `restartFrame` maps.
             vm_frames
                 .into_iter()
+                .rev()
                 .enumerate()
                 .map(|(i, (name, line, source_path))| {
                     let frame_source_path = source_path.or_else(|| fallback_source_path.clone());
@@ -476,7 +479,7 @@ impl Debugger {
             .and_then(|a| a.get("frameId"))
             .and_then(|v| v.as_i64())
             .unwrap_or(1);
-        // Map DAP frame_id (1-based, innermost=N) onto our VM frames.
+        // DAP frame ids are 1-based, innermost first.
         // When we don't have a matching frame, fall back to the
         // top frame's current line.
         let line = self.current_line as u32;
