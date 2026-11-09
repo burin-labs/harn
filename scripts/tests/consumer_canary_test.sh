@@ -557,16 +557,18 @@ printf '%s\n' "$consumer_revision" > "$scratch/run-head"
 jq -n '{total_count:1,artifacts:[{name:"candidate-manifest-0123456789abcdef0123456789abcdef01234567",
   expired:false,digest:("sha256:"+("b"*64))}]}' > "$scratch/manifest-artifacts"
 bind() {
+  local status=0
   rm -f "$scratch/binding.json"
   : > "$scratch/gho"
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host CANARY_RECORD_RUN=42 \
     SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 CANARY_RELEASE_PRODUCER_RUN_ID=900 \
     CANARY_RELEASE_PRODUCER_RUN_ATTEMPT=1 CANARY_VERDICT=pass CANARY_PAIRED_PULL=7 CANARY_DECLARED_PULL=7 \
     CANARY_BINDING_FILE="$scratch/binding.json" GITHUB_OUTPUT="$scratch/gho" "$@" \
-    bash "$root/scripts/ci/consumer_canary.sh" --record > "$scratch/out" 2>&1
+    bash "$root/scripts/ci/consumer_canary.sh" --record > "$scratch/out" 2>&1 || status=$?
   if grep -qE "widget-host|$consumer_revision" "$scratch/out"; then
     echo 'binding output names the consumer or its revision' >&2; exit 1
   fi
+  return "$status"
 }
 bind env
 jq -e --arg head "$(printf '%s' "$consumer_revision" | shasum -a 256 | cut -d' ' -f1)" '
@@ -579,17 +581,39 @@ grep -qx "binding=$scratch/binding.json" "$scratch/gho"
 if grep -q "$consumer_revision" "$scratch/binding.json"; then
   echo 'the public binding recorded the consumer revision itself' >&2; exit 1
 fi
-for unbound in CANARY_VERDICT=fail CANARY_VERDICT= CANARY_RELEASE_PRODUCER_RUN_ID= CANARY_RECORD_RUN=; do
+for unbound in CANARY_VERDICT=fail CANARY_VERDICT=; do
   bind env "$unbound"
   if [[ -e "$scratch/binding.json" ]] || grep -q '^binding=' "$scratch/gho"; then
     echo "an unmeasured pass ($unbound) wrote a binding" >&2; exit 1
   fi
   grep -q 'binding=unrecorded' "$scratch/out"
 done
-echo '{"total_count":0,"artifacts":[]}' > "$scratch/manifest-artifacts"
-bind env
+bind env CANARY_RELEASE_PRODUCER_RUN_ID= CANARY_RELEASE_PRODUCER_RUN_ATTEMPT=
 [[ ! -e "$scratch/binding.json" ]]
-grep -q 'binding=unrecorded reason=candidate_manifest_unmeasured' "$scratch/out"
+grep -q 'binding=unrecorded' "$scratch/out"
+binding_refuses() {
+  local reason=$1
+  shift
+  if bind env "$@"; then
+    echo "accepted requested release pass without $reason" >&2; exit 1
+  fi
+  [[ ! -e "$scratch/binding.json" ]]
+  if grep -q '^binding=' "$scratch/gho"; then
+    echo 'refused binding still advertised an output' >&2; exit 1
+  fi
+  grep -q "reason=$reason" "$scratch/out"
+}
+for invalid in CANARY_RELEASE_PRODUCER_RUN_ID= CANARY_RELEASE_PRODUCER_RUN_ATTEMPT= CANARY_RECORD_RUN= SOURCE_REVISION= CANARY_PAIRED_PULL=invalid; do
+  binding_refuses binding_identity_unmeasured "$invalid"
+done
+printf '\n' > "$scratch/run-head"
+binding_refuses binding_identity_unmeasured
+printf '%s\n' "$consumer_revision" > "$scratch/run-head"
+mv "$scratch/manifest-artifacts" "$scratch/manifest-artifacts.saved"
+binding_refuses candidate_manifest_unmeasured
+mv "$scratch/manifest-artifacts.saved" "$scratch/manifest-artifacts"
+echo '{"total_count":0,"artifacts":[]}' > "$scratch/manifest-artifacts"
+binding_refuses candidate_manifest_unmeasured
 
 # A pairing it cannot honour fails by name instead of rehearsing the default.
 echo "open someone/fork fix-flag" > "$scratch/pull"

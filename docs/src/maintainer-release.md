@@ -134,8 +134,8 @@ Follow the runs for the commit you named in
    after this admission and runs beside the artifact builds; publication still
    requires it. The four-hour checkpoint in `scripts/ci/green_checkpoint.sh`
    requests these source candidates at main's tip, and a maintainer can request one
-   at any main commit. They run no consumer rehearsal. Pushes to main only warm
-   caches, whatever version they declare, and pull requests and merge groups
+   at any main commit. They qualify the consumer before promotion. Pushes to main
+   only warm caches, whatever version they declare, and pull requests and merge groups
    build nothing. A successful candidate's archives stay available for 30 days.
    Candidate admission also requires the canonical dependency advisory scan at
    that exact source before expensive builds start. It checks both enabled
@@ -162,7 +162,8 @@ Follow the runs for the commit you named in
    is stable. Two distinct pairings refuse and name both pulls. A paired pull
    already merged into the consumer's default branch rehearses that branch and
    logs `decision=rehearse_default`; a pull closed without merging refuses.
-   A passing rehearsal uploads `consumer-rehearsal-binding-<attempt>`, which
+   A passing release rehearsal must retain `consumer-rehearsal-binding-<attempt>`;
+   an unavailable manifest or consumer revision fails its recorder. The binding
    records the source SHA, producer run, candidate manifest digest, consumer
    run, rehearsed pull, and a digest of the consumer revision it tested.
    Promotion checks the version as [above](#publish-a-release), waits for
