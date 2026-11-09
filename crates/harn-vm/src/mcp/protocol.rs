@@ -24,8 +24,8 @@ pub(crate) fn normalize_input_requests(
             .map(|(key, _)| key.clone())
             .collect();
         for key in keys {
-            // rmcp 3.1's URL payload requires a legacy ID. Keep stable URL
-            // absence intact while retaining the SDK's request/meta framing.
+            // The SDK normalizes an absent legacy ID to an empty string. Keep
+            // stable URL absence intact with the SDK's request/meta framing.
             let request: rmcp::model::Request<
                 rmcp::model::ElicitationCreateRequestMethod,
                 StableUrlInput,

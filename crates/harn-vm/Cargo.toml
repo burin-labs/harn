@@ -19,11 +19,10 @@ path = "src/bin/harn_test_echo_env.rs"
 ignored = ["md-5", "aws-smithy-types"]
 
 [package.metadata.harn.package_verify]
-# The MCP elicitation adapter reads rmcp's ordered-schema extension. The field
-# exists in 3.1.4 but not in 3.1.0 or 3.2.0, so publication must prove the
-# packaged crate at this minimum and at Cargo's latest admitted resolution.
+# The MCP elicitation adapter reads rmcp's ordered-schema extension. Publication
+# proves that contract at the minimum and at Cargo's latest admitted resolution.
 dependency_contracts = [
-    { name = "rmcp", minimum = "3.1.4" },
+    { name = "rmcp", minimum = "3.9.0" },
     # No minimum: the Smithy constraint is a ceiling, not a floor. Pinning a
     # floor here is a treadmill, because the other AWS crates in the same
     # published graph raise their own floors independently — `aws-config`
@@ -143,7 +142,7 @@ rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
 reqwest = { workspace = true, features = ["form", "json", "multipart", "stream"] }
 eventsource-stream = "0.2"
-rmcp = { version = "=3.1.4", default-features = false, features = ["client", "transport-child-process"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["client", "transport-child-process"] }
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 # `websocket_connect` passes its own platform-verifier connector, so the
