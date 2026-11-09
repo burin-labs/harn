@@ -480,7 +480,6 @@ async fn vm_call_llm_full_inner_request(
         if super::trigger_predicate::lookup_cached_result(request).is_none() {
             consume_served_mock(request);
             super::trigger_predicate::note_result(request, &served);
-            observed.record_provider_dispatch();
             observed.inference_speed().finish_local(&mut served);
         }
         request.emit_reminder_lifecycle();
