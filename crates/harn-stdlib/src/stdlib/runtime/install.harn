@@ -6,6 +6,8 @@ import { compare_release } from "std/semver"
  */
 const XZ_FIRST_RELEASE = "0.10.179"
 
+const GITHUB_REQUEST_HEADERS: dict<string, string> = {"user-agent": "harn-bootstrap"}
+
 /** Default retry budget while release assets are still publishing. */
 pub const DEFAULT_ATTEMPTS: int = 12
 
@@ -97,7 +99,7 @@ fn publish_immutable(fs: HarnessFs, path: string, text: string) {
 }
 
 fn release_headers(request: RuntimeInstallRequest, accept: string) -> dict<string, string> {
-  const headers = {accept: accept, "user-agent": "harn-bootstrap"}
+  const headers = GITHUB_REQUEST_HEADERS + {accept: accept}
   if (request.token ?? "") != "" {
     return headers + {authorization: "Bearer ${request.token ?? ""}"}
   }
@@ -155,7 +157,7 @@ fn expected_checksum(
     require checksum != nil, "SHA256SUMS has no runtime asset"
     return {checksum: checksum, source: "SHA256SUMS"}
   }
-  const options = {timeout_ms: 60000}
+  const options = {timeout_ms: 60000, headers: GITHUB_REQUEST_HEADERS}
   const pin = path_join(dirname(metadata), asset + ".sha256")
   const attempts = request.attempts ?? DEFAULT_ATTEMPTS
   const delay_ms = request.delay_ms ?? DEFAULT_DELAY_MS
@@ -349,6 +351,7 @@ pub fn install_runtime(harness: Harness, request: RuntimeInstallRequest) -> Runt
   const verified = expected_checksum(harness, selected, metadata, base, asset)
   const checksum = verified.checksum
   const options = {
+    headers: GITHUB_REQUEST_HEADERS,
     retry: {
       max: request.attempts ?? DEFAULT_ATTEMPTS,
       backoff_ms: request.delay_ms ?? DEFAULT_DELAY_MS,
