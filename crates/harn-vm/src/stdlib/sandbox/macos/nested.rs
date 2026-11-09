@@ -96,7 +96,7 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
     // Every credential path is a read-deny root, so probing the denials covers
     // the credential stores the policy must not read.
     for dir in super::super::process_sandbox_read_deny_roots(policy) {
-        if dir.exists() && !outer_denies("file-read-data", Some(&dir)) {
+        if observed_existing_path(&dir) && !outer_denies("file-read-data", Some(&dir)) {
             return Nesting::Unenforceable(Narrowing::Read(dir));
         }
     }
@@ -110,7 +110,7 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
         if !covered(&denied, &writable) {
             continue;
         }
-        let renamable = !denied.exists()
+        let renamable = !observed_existing_path(&denied)
             || denied
                 .ancestors()
                 .take_while(|path| covered(path, &writable))
@@ -120,6 +120,26 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
         }
     }
     Nesting::Inherit
+}
+
+fn observed_existing_path(path: &Path) -> bool {
+    if path.exists() {
+        return true;
+    }
+    // A read denial also hides metadata. A directory entry can still prove a
+    // regular file or directory exists without trusting an absent-path probe.
+    let Some((parent, name)) = path.parent().zip(path.file_name()) else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        entry.file_name().as_os_str() == name
+            && entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_file() || kind.is_dir())
+    })
 }
 
 /// Record a refusal: the narrowing the outer sandbox would not enforce.
