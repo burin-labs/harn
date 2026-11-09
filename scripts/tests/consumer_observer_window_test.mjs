@@ -10,6 +10,16 @@ import {consumerDeadlineReceipt,legacyConsumerObservationPolicy as consumerObser
 import {observerDeclarationName,observerDeclarationStep,observerPublicationWitness} from '../lib/consumer-observer.mjs';
 import {archiveJson} from './fixtures/artifact_archive.mjs';
 
+test('the actual decision reader returns a safe structured refusal with a failing exit',()=>{
+  const entry=fileURLToPath(new URL('../ci/consumer-observer-read-decision.mjs',import.meta.url));
+  const run=spawnSync(process.execPath,[entry,'--invalid'],{encoding:'utf8',env:{PATH:process.env.PATH,
+    GH_TOKEN:'private-fixture-token',CANARY_REPOSITORY:'private/fixture-repository'}});
+  assert.equal(run.status,1);
+  assert.deepEqual(JSON.parse(run.stdout),{schema:'harn.consumer_observer.read_refusal.v1',
+    reason:'parent_selection_unproven',retryable:false,retry_after_seconds:0});
+  assert.doesNotMatch(run.stdout+run.stderr,/private-fixture-token|fixture-repository/);
+});
+
 test('the actual deadline reader authenticates real archives and original producer steps before recovery evidence',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-observer-deadline-reader-'));
   try{
@@ -81,7 +91,13 @@ test('the actual deadline reader authenticates real archives and original produc
       {jobs:[{...job,steps:[declared,observed,{...published,conclusion:'skipped'}]}]},
       {jobs:[{...job,steps:[observed,published]},
         {id:702,conclusion:'success',steps:[declared]}]}]){
-      const bad=execute(change);assert.equal(bad.status,1,bad.stdout);assert.equal(bad.stdout,'');
+      const bad=execute(change);assert.equal(bad.status,1,bad.stdout);
+      const refusal=JSON.parse(bad.stdout);
+      assert.equal(refusal.schema,'harn.consumer_observer.read_refusal.v1');
+      assert.match(refusal.reason,/^[a-z_]+$/);
+      assert.equal(refusal.retryable,false);
+      assert.equal(refusal.retry_after_seconds,0);
+      assert.doesNotMatch(bad.stdout,/context|parent_run_id|source_revision/);
     }
   }finally{fs.rmSync(scratch,{recursive:true});}
 });
