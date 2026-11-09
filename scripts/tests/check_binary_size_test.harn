@@ -6,6 +6,7 @@ import { with_temp_dir } from "std/testing"
 // attribution, report formatting, and release-workflow default drift. The
 // build/bloat paths shell out and are covered by behavior-parity runs.
 import "../check_binary_size.harn"
+import { RELEASE_PREPARE_IF } from "../ci_cache_policy/policy_core.harn"
 import "../release_binary_size_policy.harn"
 
 fn gha_expression(body: string) -> string {
@@ -784,7 +785,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   const aot_condition =
     "needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
   assert_eq(workflow.jobs.prepare_cli_aot.needs, ["setup", "source-ci"])
-  assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
+  assert_eq(workflow.jobs.prepare_cli_aot.if, RELEASE_PREPARE_IF)
   assert_eq(checkout.if, aot_condition)
   assert_eq(generator.if, aot_condition)
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")

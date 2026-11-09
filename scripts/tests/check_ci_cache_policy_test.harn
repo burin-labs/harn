@@ -1,4 +1,5 @@
 import { read_json_result, read_yaml } from "std/fs"
+import { schema_string } from "std/schema"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -1388,13 +1389,16 @@ pipeline test_release_warm_build_admission_preserves_status_and_prerequisite_gua
 ) {
   const workflow = release_binary_workflow(harness.fs)
   assert_eq(release_warm_cache_concurrency_errors(workflow), [])
+  const jobs = workflow.jobs ?? {}
+  assert_eq(jobs["prepare_cli_aot"]?.needs, ["setup", "source-ci"])
+  assert_eq(jobs["build"]?.needs, ["setup", "prepare_cli_aot"])
   for job in ["prepare_cli_aot", "build"] {
     const prerequisite = if job == "build" {
       "prepare_cli_aot"
     } else {
       "source-ci"
     }
-    const condition = workflow.jobs[job].if
+    const condition = schema_expect(jobs[job]?.if, schema_string())
     const refusal = if job == "build" {
       "build-release-binaries.yml:build must instantiate only after setup selects a real build"
     } else {
@@ -1407,11 +1411,11 @@ pipeline test_release_warm_build_admission_preserves_status_and_prerequisite_gua
       " && needs.setup.outputs.should_build_binaries == 'true'",
     ] {
       assert(condition.contains(clause))
-      let invalid = workflow
+      let invalid = {...workflow, jobs: {...jobs}}
       invalid.jobs[job].if = condition.replace(clause, "")
       assert(release_warm_cache_concurrency_errors(invalid).contains(refusal))
     }
-    let implicit_success = workflow
+    let implicit_success = {...workflow, jobs: {...jobs}}
     implicit_success.jobs[job].if = "needs.setup.outputs.should_build_binaries == 'true'"
     assert(release_warm_cache_concurrency_errors(implicit_success).contains(refusal))
   }
