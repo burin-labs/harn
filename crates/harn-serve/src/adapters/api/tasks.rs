@@ -282,10 +282,10 @@ pub(super) async fn list_tasks(
         store.list_tasks(query.session_id.as_deref(), query.workspace_id.as_deref())
     });
     match tasks {
-        Ok(tasks) => Json(list_response(limit_values(
+        Ok(tasks) => Json(limited_list_response(
             tasks.iter().map(TaskRecord::resource).collect(),
             query.limit,
-        )))
+        ))
         .into_response(),
         Err(_) => task_store::unavailable_response(),
     }

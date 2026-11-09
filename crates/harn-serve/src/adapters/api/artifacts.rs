@@ -122,7 +122,7 @@ pub(super) async fn list_artifacts(
         .filter(|artifact| artifact_matches_query(artifact, &query))
         .cloned()
         .collect();
-    Json(list_response(limit_values(artifacts, query.limit))).into_response()
+    Json(limited_list_response(artifacts, query.limit)).into_response()
 }
 
 pub(super) async fn register_artifact(State(state): State<ApiState>, body: Bytes) -> Response {

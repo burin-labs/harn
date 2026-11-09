@@ -457,7 +457,7 @@ jobs:
       issues: write
       id-token: write
       attestations: write
-    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@b7e805dbc176a8503341df00cb75a58174c52e24
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
     with:
       source-revision: ${{ needs.plan.outputs.source_sha }}
       policy: false
@@ -473,7 +473,7 @@ jobs:
       contents: read
       actions: read
       attestations: read
-    uses: burin-labs/.github/.github/workflows/promote-release.yml@b7e805dbc176a8503341df00cb75a58174c52e24
+    uses: burin-labs/.github/.github/workflows/promote-release.yml@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
     with:
       sha: ${{ needs.plan.outputs.source_sha }}
       run-id: ${{ needs.plan.outputs.run_id }}
@@ -498,7 +498,7 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.promote.result == 'success' && needs.plan.outputs.standalone_harn != 'true' && !inputs.inspect_publication_only }}
     permissions:
       contents: read
-    uses: burin-labs/.github/.github/workflows/repin.yml@b7e805dbc176a8503341df00cb75a58174c52e24
+    uses: burin-labs/.github/.github/workflows/repin.yml@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
     with:
       released-repository: ${{ github.repository }}
       tag: ${{ needs.promote.outputs.tag }}

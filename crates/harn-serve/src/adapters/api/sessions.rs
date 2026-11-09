@@ -881,7 +881,7 @@ pub(super) async fn list_session_messages(
         }
         Err(_) => return task_store::unavailable_response(),
     };
-    Json(list_response(limit_values(messages, query.limit))).into_response()
+    Json(limited_list_response(messages, query.limit)).into_response()
 }
 
 pub(super) async fn append_session_message(
@@ -946,13 +946,13 @@ pub(super) async fn list_session_tasks(
         .ready_task_store()
         .and_then(|store| store.list_tasks(Some(&session_id), None))
     {
-        Ok(tasks) => Json(list_response(limit_values(
+        Ok(tasks) => Json(limited_list_response(
             tasks
                 .iter()
                 .map(harn_session_store::task::TaskRecord::resource)
                 .collect(),
             query.limit,
-        )))
+        ))
         .into_response(),
         Err(_) => task_store::unavailable_response(),
     }

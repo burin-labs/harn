@@ -10,7 +10,7 @@ pub(super) async fn list_permission_requests(
     Query(query): Query<ListQuery>,
 ) -> Response {
     let inner = state.inner.lock().expect("api state poisoned");
-    Json(list_response(limit_values(
+    Json(limited_list_response(
         inner
             .permissions
             .values()
@@ -24,7 +24,7 @@ pub(super) async fn list_permission_requests(
             .map(|permission| permission.public.clone())
             .collect(),
         query.limit,
-    )))
+    ))
     .into_response()
 }
 
@@ -34,7 +34,7 @@ pub(super) async fn list_task_permission_requests(
     Query(query): Query<ListQuery>,
 ) -> Response {
     let inner = state.inner.lock().expect("api state poisoned");
-    Json(list_response(limit_values(
+    Json(limited_list_response(
         inner
             .permissions
             .values()
@@ -44,7 +44,7 @@ pub(super) async fn list_task_permission_requests(
             .map(|permission| permission.public.clone())
             .collect(),
         query.limit,
-    )))
+    ))
     .into_response()
 }
 
