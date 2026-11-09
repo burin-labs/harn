@@ -69,12 +69,16 @@ fn a_queued_request_rechecks_the_key_after_its_sibling_is_rejected() {
             result = &mut first => panic!("first request ended before its response body: {result:?}"),
         }
         assert_eq!(*seen.lock().unwrap(), ["Bearer key-a"]);
+        let admission = crate::llm::rate_limit::LlmCallAdmission::from_options(&opts);
+        let mut queued_admission = Box::pin(async { admission.acquire().await.map(drop) });
+        assert!(futures::poll!(&mut queued_admission).is_pending());
         let mut second = Box::pin(vm_call_llm_full(&opts));
         assert!(futures::poll!(&mut second).is_pending(), "the sibling holds the only permit");
         assert_eq!(crate::llm::rate_limit::provider_request_usage(PROVIDER), 1);
         release.release();
-        let (first, second) = tokio::join!(first, second);
+        let (first, queued_admission, second) = tokio::join!(first, queued_admission, second);
         assert_auth_failure(&first.unwrap_err());
+        assert_refused_locally(&queued_admission.unwrap_err());
         assert_refused_locally(&second.unwrap_err());
         assert_eq!(*seen.lock().unwrap(), ["Bearer key-a"], "the queued key was never re-sent");
 
