@@ -4,20 +4,24 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfil
 use crate::VmError;
 
 pub(super) struct FilesystemBoundary {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub recorded: Vec<std::path::PathBuf>,
     pub workspace: std::path::PathBuf,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub container: std::path::PathBuf,
 }
 
 pub(super) fn boundary() -> Option<FilesystemBoundary> {
     let branch = crate::run_tape::state_branch()?;
     branch.relocated().then(|| FilesystemBoundary {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         recorded: branch
             .recorded_process_roots()
             .into_iter()
             .filter(|root| root.as_path() != branch.workspace())
             .collect(),
         workspace: branch.workspace().to_path_buf(),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         container: branch.workspace_container().to_path_buf(),
     })
 }
