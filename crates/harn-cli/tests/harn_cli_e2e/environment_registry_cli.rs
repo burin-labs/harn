@@ -73,17 +73,11 @@ fn main(harness: Harness) {
             stderr
                 .matches("environment read \"SETTINGS_OVERLAY\" refused")
                 .count(),
-            if refused { 2 } else { 0 },
+            if refused && set { 2 } else { 0 },
             "{policy}: {stderr}",
         );
         assert!(!stderr.contains("LC_MESSAGES"), "{stderr}");
-        assert_eq!(
-            stderr
-                .matches("environment read \"lc_messages\" refused")
-                .count(),
-            usize::from(policy != "inherited" && !cfg!(windows)),
-            "{policy}: {stderr}",
-        );
+        assert!(!stderr.contains("lc_messages"), "{policy}: {stderr}");
         assert!(!stderr.contains(sentinel), "{stderr}");
         assert!(!stderr.contains("visible"), "{stderr}");
     }
