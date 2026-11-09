@@ -978,6 +978,115 @@ async fn background_sub_agent_consumes_nested_depth_once_on_the_real_builtin_pat
     crate::llm::mock::reset_llm_mock_state();
 }
 
+/// A leaf child (`recursion_limit: 0`, a tool-scoped capability ceiling) must
+/// run its own loop. The background worker must not apply the child's policy
+/// before the child's loop does: the carrier keeps the parent's policy, the
+/// child's descent applies the requested cap, and the requested ceiling gates
+/// the child's tool calls rather than the loop's own runtime calls.
+#[tokio::test(flavor = "current_thread")]
+async fn background_leaf_sub_agent_runs_its_own_loop() {
+    use std::rc::Rc;
+
+    use crate::events::{add_event_sink, reset_event_sinks, CollectorSink};
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+    };
+
+    clear_execution_policy_stacks();
+    reset_event_sinks();
+    reset_worker_registry();
+    crate::agent_sessions::reset_session_store();
+    crate::llm::mock::reset_llm_mock_state();
+    push_execution_policy(CapabilityPolicy {
+        recursion_limit: Some(3),
+        ..Default::default()
+    });
+    let events = Rc::new(CollectorSink::new());
+    add_event_sink(events.clone());
+
+    let request = vm_dict(vec![
+        ("_type", vm_string("sub_agent_request")),
+        ("name", vm_string("leaf-child")),
+        ("task", vm_string("summarize")),
+        ("background", VmValue::Bool(true)),
+        (
+            "policy",
+            vm_dict(vec![
+                ("recursion_limit", VmValue::Int(0)),
+                ("tools", VmValue::strings(["look", "edit"])),
+                ("side_effect_level", vm_string("workspace_write")),
+                (
+                    "capabilities",
+                    vm_dict(vec![(
+                        "workspace",
+                        VmValue::strings(["read_text", "write_text"]),
+                    )]),
+                ),
+            ]),
+        ),
+        (
+            "options",
+            vm_dict(vec![
+                ("provider", vm_string("mock")),
+                ("model", vm_string("mock")),
+                ("max_iterations", VmValue::Int(1)),
+            ]),
+        ),
+    ]);
+
+    let waited = tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+            let wait_ctx = ctx.child_ctx();
+            let worker = super::super::sub_agent_run_builtin(ctx, vec![request])
+                .await
+                .expect("background sub-agent must spawn");
+            super::super::wait_agent_builtin(wait_ctx, vec![worker])
+                .await
+                .expect("background sub-agent must reach a terminal state")
+        })
+        .await;
+    let waited = crate::llm::helpers::vm_value_to_json(&waited);
+    assert_eq!(waited["status"], serde_json::json!("completed"), "{waited}");
+    assert_eq!(
+        waited["result"]["status"],
+        serde_json::json!("done"),
+        "{waited}"
+    );
+
+    let descents: Vec<_> = events
+        .logs
+        .borrow()
+        .iter()
+        .filter(|event| event.category == "policy.nested_execution_descent")
+        .cloned()
+        .collect();
+    assert_eq!(descents.len(), 1, "one child launch must emit one descent");
+    assert_eq!(
+        descents[0].metadata["rejected"],
+        serde_json::json!(false),
+        "a leaf child must be admitted to its own loop"
+    );
+    assert_eq!(
+        descents[0].metadata["parent_recursion_limit"],
+        serde_json::json!(3)
+    );
+    assert_eq!(
+        descents[0].metadata["child_recursion_limit"],
+        serde_json::json!(0),
+        "the requested cap still forbids the child from delegating further"
+    );
+
+    pop_execution_policy();
+    clear_execution_policy_stacks();
+    reset_event_sinks();
+    reset_worker_registry();
+    crate::agent_sessions::reset_session_store();
+    crate::llm::mock::reset_llm_mock_state();
+}
+
 #[test]
 fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
     crate::orchestration::push_execution_policy(CapabilityPolicy {
