@@ -49,9 +49,9 @@ fn append_boundary_for(profile: &mut String, boundary: &super::super::replay::Fi
 mod tests;
 
 fn deny(profile: &mut String, filter: &str) {
+    super::append_read_denial(profile, filter);
     profile.push_str(&format!(
-        "(deny file-read* file-write* {filter})\n\
-         (deny file-read-metadata {filter})\n\
+        "(deny file-write* {filter})\n\
          (deny network-bind network-inbound network-outbound {filter})\n",
     ));
 }

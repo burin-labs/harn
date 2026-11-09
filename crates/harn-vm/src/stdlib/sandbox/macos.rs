@@ -524,10 +524,8 @@ fn render_profile_with_extra_read_roots(
     // competed with presets instead of beating them would never fire on the
     // paths it exists for.
     //
-    // `file-read*` covers metadata as well as data, so this also narrows the
-    // global `(allow file-read-metadata)` at the top of the profile. Without
-    // that, a denied path's existence and size would still leak to a child that
-    // cannot open it.
+    // Metadata has its own global grant, so append_read_denial names that
+    // operation explicitly as well as denying the read family.
     //
     // A read deny alone does not hold inside a writable root: the child could
     // rename the denied path, or any directory above it, and read it under the
@@ -538,9 +536,9 @@ fn render_profile_with_extra_read_roots(
     for root in read_deny_roots {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
             let escaped = sandbox_profile_escape(&path);
+            append_read_denial(&mut profile, &format!("(subpath \"{escaped}\")"));
             profile.push_str(&format!(
-                "(deny file-read* (subpath \"{escaped}\"))\n\
-                 (deny file-write-unlink (subpath \"{escaped}\"))\n"
+                "(deny file-write-unlink (subpath \"{escaped}\"))\n"
             ));
             pinned_ancestors.extend(
                 std::path::Path::new(&path)
@@ -579,6 +577,13 @@ fn render_profile_with_extra_read_roots(
     }
     replay::append_boundary(&mut profile);
     profile
+}
+
+fn append_read_denial(profile: &mut String, filter: &str) {
+    // An operation-specific metadata grant outranks a wildcard read denial.
+    profile.push_str(&format!(
+        "(deny file-read* {filter})\n(deny file-read-metadata {filter})\n"
+    ));
 }
 
 fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
