@@ -389,12 +389,14 @@ mod input_order_tests {
         }});
         let mut legacy = stable.clone();
         legacy["params"]["elicitationId"] = serde_json::json!("legacy-id");
-        assert!(
-            serde_json::from_value::<rmcp::model::InputRequests>(
-                serde_json::json!({"stable":stable})
-            )
-            .is_err(),
-            "the pinned SDK cannot represent absent legacy URL identity"
+        let sdk_requests = serde_json::from_value::<rmcp::model::InputRequests>(
+            serde_json::json!({"stable":stable}),
+        )
+        .expect("the SDK accepts an absent legacy URL identity");
+        let sdk_projection = serde_json::to_value(sdk_requests).unwrap();
+        assert_eq!(
+            sdk_projection["stable"]["params"]["elicitationId"], "",
+            "the SDK round trip replaces an absent legacy URL identity"
         );
         let normalized =
             normalize_input_requests(serde_json::json!({"stable":stable,"legacy":legacy})).unwrap();
