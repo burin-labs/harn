@@ -1361,7 +1361,7 @@ impl LlmCallAdmission {
             &self.model,
             self.api_key_id.as_deref(),
         )?;
-        acquire_permit_for(
+        let permit = acquire_permit_for(
             &self.provider,
             &self.model,
             self.request,
@@ -1369,7 +1369,14 @@ impl LlmCallAdmission {
             self.session_id.as_deref(),
             self.reroute_on_timeout,
         )
-        .await
+        .await?;
+        // A sibling can receive an auth refusal while this call waits for admission.
+        rejected_keys::refuse_rejected_key(
+            &self.provider,
+            &self.model,
+            self.api_key_id.as_deref(),
+        )?;
+        Ok(permit)
     }
 
     /// Record the provider's verdict on the presented key once a request this

@@ -10,6 +10,8 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod admission_edges;
+
 const PROVIDER: &str = "rejected-key";
 const KEY_ENV: &str = "REJECTED_KEY_TEST_API_KEY";
 
@@ -24,6 +26,17 @@ impl Drop for Cleanup {
 /// Answers 401 to every request unless `accept` is set, and records each
 /// request's `Authorization` header.
 fn auth_stub(seen: Arc<Mutex<Vec<String>>>, accept: Arc<AtomicBool>) -> LlmStub {
+    gated_auth_stub(seen, accept, None)
+}
+
+fn gated_auth_stub(
+    seen: Arc<Mutex<Vec<String>>>,
+    accept: Arc<AtomicBool>,
+    mut first_body_gate: Option<(
+        tokio::sync::oneshot::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    )>,
+) -> LlmStub {
     spawn_llm_stub_many("rejected key", 6, move |_, stream| {
         let (headers, _) = ollama_openai_compat::read_http_request(stream);
         assert!(headers.starts_with("POST /chat/completions "), "{headers}");
@@ -53,7 +66,16 @@ fn auth_stub(seen: Arc<Mutex<Vec<String>>>, accept: Arc<AtomicBool>) -> LlmStub 
                 .to_string(),
             )
         };
-        write!(stream, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+        write!(stream, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len()).unwrap();
+        stream.flush().unwrap();
+        if let Some((received, release)) = first_body_gate.take() {
+            assert!(received.send(()).is_ok());
+            release.recv().unwrap();
+            // An assertion failure can cancel the client before the body gate opens.
+            let _ = stream.write_all(body.as_bytes());
+        } else {
+            stream.write_all(body.as_bytes()).unwrap();
+        }
     })
 }
 
@@ -198,14 +220,14 @@ fn rejected_key_is_refused_locally_until_its_retry_window_passes() {
 
 /// Answers 403 to requests for `forbidden-model` and serves every other model,
 /// recording each request's model.
-fn model_access_stub(seen: Arc<Mutex<Vec<String>>>) -> LlmStub {
+fn model_access_stub(seen: Arc<Mutex<Vec<String>>>, message: &'static str) -> LlmStub {
     spawn_llm_stub_many("model access", 4, move |_, stream| {
         let (_, request) = ollama_openai_compat::read_http_request(stream);
         let model = request["model"].as_str().unwrap_or_default().to_string();
         let (status, body) = if model == "forbidden-model" {
             (
                 "403 Forbidden",
-                json!({"error":{"message":"Project does not have access to model forbidden-model",
+                json!({"error":{"message":message,
                     "type":"permission_error"}})
                 .to_string(),
             )
@@ -226,6 +248,10 @@ fn model_access_stub(seen: Arc<Mutex<Vec<String>>>) -> LlmStub {
 
 #[test]
 fn a_model_access_refusal_blocks_only_that_model_for_the_key() {
+    assert_model_access_refusal("Project does not have access to model forbidden-model");
+}
+
+fn assert_model_access_refusal(message: &'static str) {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
@@ -237,7 +263,7 @@ fn a_model_access_refusal_blocks_only_that_model_for_the_key() {
         .unwrap();
     runtime.block_on(async {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let server = model_access_stub(seen.clone());
+        let server = model_access_stub(seen.clone(), message);
         install(server.addr(), crate::llm_config::AuthEnv::None);
         let on_model = |model: &str| LlmCallOptions {
             model: model.into(),

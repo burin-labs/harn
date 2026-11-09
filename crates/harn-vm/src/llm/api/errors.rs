@@ -364,7 +364,9 @@ const KEY_REJECTION_PHRASES: &[&str] = &[
     "api key not valid",
     "api_key_invalid",
     "authentication_error",
-    "revoked",
+    "revoked api key",
+    "api key revoked",
+    "api key has been revoked",
 ];
 
 /// A 401 rejects the credential. A 403 usually refuses one model or feature
