@@ -1,9 +1,11 @@
 import "std/agents"
 import { with_llm_script } from "std/testing"
 
-// A background child's own policy is enforced by the child's loop, not by the
-// worker carrier. The leaf child here still runs its loop (the scripted turn
-// reaches it) and still has its tool ceiling enforced at dispatch.
+/**
+ * A background child's own policy is enforced by the child's loop, not by the
+ * worker carrier. The leaf child that uses these tools still runs its loop (the
+ * scripted turn reaches it) and still has its tool ceiling enforced at dispatch.
+ */
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(
