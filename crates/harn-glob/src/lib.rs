@@ -103,12 +103,16 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
 /// historical prefix/suffix/equality behavior shared by the pre-consolidation
 /// call sites, so an unclosed `[` never panics or silently rejects.
 ///
+/// A name equal to the pattern always matches, so a literal that happens to
+/// contain glob syntax (a route directory such as `app/[slug]/page.tsx`)
+/// still matches itself instead of being read only as a character class.
+///
 /// Compiled matchers are cached per thread; patterns come from configuration
 /// and hook registration, so the cache stays small.
 #[cfg(feature = "name")]
 #[must_use]
 pub fn match_name(pattern: &str, name: &str) -> bool {
-    if pattern == "*" {
+    if pattern == "*" || pattern == name {
         return true;
     }
     if !has_name_metacharacters(pattern) {
@@ -338,6 +342,17 @@ mod tests {
         assert!(match_name("gpt-{4o,5}", "gpt-4o"));
         assert!(match_name("gpt-{4o,5}", "gpt-5"));
         assert!(!match_name("gpt-{4o,5}", "gpt-4.1"));
+    }
+
+    #[test]
+    fn name_literal_with_glob_syntax_matches_itself() {
+        // Route directories such as `[slug]` are literal path segments; the
+        // class reading still applies to every other name.
+        assert!(match_name("app/[slug]/page.tsx", "app/[slug]/page.tsx"));
+        assert!(match_name("app/[slug]/page.tsx", "app/s/page.tsx"));
+        assert!(!match_name("app/[slug]/page.tsx", "app/x/page.tsx"));
+        assert!(match_name("src/{a,b}.ts", "src/{a,b}.ts"));
+        assert!(match_name("src/{a,b}.ts", "src/b.ts"));
     }
 
     #[test]

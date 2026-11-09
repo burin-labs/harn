@@ -1,0 +1,15 @@
+// `glob_match` is the matcher capability policy applies to tool argument
+// patterns, so a script can predict which paths a scoped write grant admits.
+pipeline test(harness: Harness, task: unknown) {
+  harness.stdio.log(glob_match("src/**/*.ts", "src/a/b/c.ts"))
+  harness.stdio.log(glob_match("src/**/*.ts", "lib/a.ts"))
+  harness.stdio.log(glob_match("src/*.ts", "src/a.ts"))
+  harness.stdio.log(glob_match("src/{a,b}.ts", "src/b.ts"))
+  harness.stdio.log(glob_match("src/{a,b}.ts", "src/c.ts"))
+  harness.stdio.log(glob_match("src/ma?n.rs", "src/main.rs"))
+  harness.stdio.log(glob_match("app/[slug]/page.tsx", "app/[slug]/page.tsx"))
+  harness.stdio.log(glob_match("app/[slug]/page.tsx", "app/other/page.tsx"))
+  harness.stdio.log(glob_match("Model.swift", "Sources/App/Model.swift"))
+  harness.stdio.log(glob_match("**/Model.swift", "Sources/App/Model.swift"))
+  harness.stdio.log(glob_match("*", ""))
+}
