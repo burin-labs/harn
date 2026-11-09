@@ -23,7 +23,7 @@
 # count   28  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
-# count   11  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
+# count   10  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   26  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   16  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
@@ -237,7 +237,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_w
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt
-crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_current_worker
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_effective_llm_options
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_enable_equivalent_failover
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_llm_overrides
