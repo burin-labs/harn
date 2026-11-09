@@ -530,6 +530,9 @@ fn live_commands_keep_explicit_read_only_assets_outside_the_storage_pool() {
     let assets = tempfile::tempdir().unwrap();
     let helper = assets.path().join("helper-input");
     std::fs::write(&helper, "retained asset content").unwrap();
+    let pool = location(&isolated.workspace).storage_pool().to_path_buf();
+    let peer = pool.join("granted-peer-input");
+    std::fs::write(&peer, "peer storage canary").unwrap();
     let source = format!(
         r#"
 import {{ with_llm_script }} from "std/testing"
@@ -540,14 +543,20 @@ pipeline main(harness: Harness, task: unknown) {{
     const read = harness.process.run({{program: "cat", args: [{helper}]}})
     assert(read.stdout == "retained asset content")
     harness.stdio.println(read.stdout)
+    const peer = harness.process.run({{program: "cat", args: [{peer}]}})
+    harness.stdio.println(json_stringify(peer))
   }})
 }}
 "#,
-        helper = quote(&helper)
+        helper = quote(&helper),
+        peer = quote(&peer),
     );
-    assert!(
-        record(&source, &recorded.tapes, &recorded.workspace).contains("retained asset content")
-    );
+    let baseline = record(&source, &recorded.tapes, &recorded.workspace);
+    assert!(baseline.contains("retained asset content"));
+    let baseline_peer: serde_json::Value =
+        serde_json::from_str(baseline.lines().last().unwrap()).unwrap();
+    assert_eq!(baseline_peer["success"], true, "{baseline_peer}");
+    assert_eq!(baseline_peer["stdout"], "peer storage canary");
     #[cfg(target_os = "macos")]
     if command_replay_refused_on_this_host(&recorded.tapes, &isolated.workspace) {
         return;
@@ -566,10 +575,24 @@ pipeline main(harness: Harness, task: unknown) {{
         &isolated.workspace,
         Some(guard.scope()),
         &isolated.workspace,
-        vec![assets.path().to_path_buf()],
+        if cfg!(target_os = "macos") {
+            // The real renderer must narrow a grant that would expose this peer.
+            vec![assets.path().to_path_buf(), pool]
+        } else {
+            vec![assets.path().to_path_buf()]
+        },
     )
     .unwrap();
     assert!(output.contains("retained asset content"));
+    let denied_peer: serde_json::Value =
+        serde_json::from_str(output.lines().last().unwrap()).unwrap();
+    assert_eq!(denied_peer["success"], false, "{denied_peer}");
+    assert_ne!(denied_peer["status"].as_i64().unwrap(), 0, "{denied_peer}");
+    assert_eq!(denied_peer["stdout"], "", "{denied_peer}");
+    assert_eq!(
+        std::fs::read_to_string(peer).unwrap(),
+        "peer storage canary"
+    );
     let report = guard.finish();
     assert_eq!((report.served_calls, report.live_calls), (1, 1));
     assert_eq!(report.divergence, None);
