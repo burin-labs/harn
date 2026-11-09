@@ -71,12 +71,7 @@ impl Debugger {
                 }
             }
         }
-        // Breakpoints replaced for this file — hit counts from the prior
-        // set would be attached to now-stale ids, so drop them. Hit
-        // counts on breakpoints in other files survive.
-        let live_ids: Vec<i64> = self.breakpoints.iter().map(|bp| bp.id).collect();
-        self.bp_hit_counts.retain(|id, _| live_ids.contains(id));
-        self.armed_breakpoints.retain(|id, _| live_ids.contains(id));
+        self.drop_stale_breakpoint_state();
 
         if let Some(vm) = &mut self.vm {
             // Push per-file breakpoint sets so the VM can match
@@ -110,7 +105,11 @@ impl Debugger {
             seq,
             msg.seq,
             "setBreakpoints",
-            Some(json!({ "breakpoints": self.breakpoints })),
+            // DAP answers one entry per requested breakpoint, in order, so
+            // only this source's set — never other files' breakpoints.
+            Some(json!({ "breakpoints": self.breakpoints.iter().filter(|bp| {
+                bp.source.as_ref().and_then(|s| s.path.as_ref()) == request_path.as_ref()
+            }).collect::<Vec<_>>() })),
         )]
     }
 
@@ -152,9 +151,7 @@ impl Debugger {
         if let Some(vm) = &mut self.vm {
             vm.set_function_breakpoints(names);
         }
-        // Hit counts from the prior set belong to now-stale ids; drop
-        // them so a fresh edit starts counting over.
-        self.bp_hit_counts.clear();
+        self.drop_stale_breakpoint_state();
 
         let seq = self.next_seq();
         let verified: Vec<_> = self
@@ -289,7 +286,8 @@ impl Debugger {
     }
 
     /// Transition idle -> running. Snapshots breakpoint conditions and
-    /// resets per-run state. Caller sets the appropriate `step_mode` and
+    /// resets per-stop state; hit counts and trigger arming persist for the
+    /// whole session. Caller sets the appropriate `step_mode` and
     /// VM step flag separately. Returns nothing -- actual stepping happens
     /// later when `main` polls `step_running_vm` between message drains.
     pub(crate) fn enter_running(&mut self) {
@@ -300,14 +298,21 @@ impl Debugger {
             .collect();
         self.var_refs.clear();
         self.next_var_ref = 100;
-        // Fresh run → fresh hit counts, so hitCondition and logpoint
-        // counters start over for every debug session.
-        self.bp_hit_counts.clear();
-        // Fresh run → triggered BPs disarm again; the chain has to
-        // re-build from scratch each session so a prior run's
-        // trigger doesn't unfairly arm this run's dependent BP.
-        self.armed_breakpoints.clear();
         self.running = self.vm.is_some();
+    }
+
+    /// Replacing a breakpoint set allocates fresh ids, so hit counts and
+    /// trigger arming keyed by a replaced id are stale. Line and function
+    /// breakpoints share one id space; state for every live id survives.
+    fn drop_stale_breakpoint_state(&mut self) {
+        let live_ids: Vec<i64> = self
+            .breakpoints
+            .iter()
+            .map(|bp| bp.id)
+            .chain(self.function_breakpoints.iter().map(|fb| fb.id))
+            .collect();
+        self.bp_hit_counts.retain(|id, _| live_ids.contains(id));
+        self.armed_breakpoints.retain(|id, _| live_ids.contains(id));
     }
 }
 

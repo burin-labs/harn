@@ -142,6 +142,10 @@ impl Debugger {
     pub(crate) fn handle_configuration_done(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let seq = self.next_seq();
         let response = DapResponse::success(seq, msg.seq, "configurationDone", None);
+        // The session's first run: hit counts and trigger arming start over
+        // here only, never on a later continue or step.
+        self.bp_hit_counts.clear();
+        self.armed_breakpoints.clear();
         self.enter_running();
         // Emit a progressStart event so the IDE shows "Running..." while
         // the VM works through its first step batch. We end the progress
