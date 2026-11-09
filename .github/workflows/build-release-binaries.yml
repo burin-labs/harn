@@ -87,6 +87,17 @@ on:
           - standard
           - fast
         default: policy
+      benchmark_windows_lto:
+        description: 'Temporary Windows-only cold dist comparison; other build modes retain policy.'
+        required: false
+        type: choice
+        options: [fat, thin]
+        default: fat
+      benchmark_windows_baseline_run:
+        description: 'Successful fat baseline run with this exact policy and source; required for thin.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -635,6 +646,15 @@ jobs:
         with:
           name: harn-cli-aot-payload
           path: crates/harn-cli/generated
+          run-id: ${{ needs.setup.outputs.build_mode == 'benchmark' && runner.os == 'Windows' && inputs.benchmark_windows_baseline_run || '' }}
+
+      - name: Download the Windows comparison baseline
+        if: runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_windows_baseline_run != ''
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: windows-lto-comparison
+          run-id: ${{ inputs.benchmark_windows_baseline_run }}
+          path: ${{ runner.temp }}/harn-windows-lto-baseline
 
       - name: Restore release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
@@ -642,6 +662,45 @@ jobs:
         with:
           name: harn-release-license-notices
           path: dist/release-notices
+
+      - name: Admit the cold Windows comparison
+        if: runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark'
+        shell: pwsh
+        env:
+          REQUESTED_SOURCE: ${{ needs.setup.outputs.ref }}
+          REQUESTED_PROFILE: ${{ inputs.runner_profile }}
+          REQUESTED_LTO: ${{ inputs.benchmark_windows_lto }}
+          BASELINE_RUN: ${{ inputs.benchmark_windows_baseline_run }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_PROFILE -ne 'standard' -or $env:HARN_BUILD_REVISION -ne $env:REQUESTED_SOURCE -or $env:HARN_REQUIRE_CLI_AOT -ne '1') { throw 'Comparison requires the standard runner, exact source and AOT.' }
+          if ($env:REQUESTED_LTO -notin @('fat', 'thin')) { throw 'Unknown LTO selection.' }
+          if (($env:REQUESTED_LTO -eq 'thin' -and $env:BASELINE_RUN -notmatch '^[1-9][0-9]*$') -or ($env:REQUESTED_LTO -eq 'fat' -and $env:BASELINE_RUN)) { throw 'Thin requires one fat baseline; fat cannot consume a baseline.' }
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $processors = @(Get-CimInstance Win32_Processor)
+          $hostIdentity = [ordered]@{logicalCpus=[int]$computer.NumberOfLogicalProcessors; physicalTotalBytes=[long]$computer.TotalPhysicalMemory; cpuModels=@($processors | ForEach-Object { $_.Name.Trim() })}
+          if ($hostIdentity.logicalCpus -ne 4 -or $hostIdentity.physicalTotalBytes -le 0 -or $hostIdentity.cpuModels.Count -lt 1) { throw 'Host identity is unmeasured or outside the free four-CPU cohort.' }
+          $aot = @(Get-ChildItem -LiteralPath 'crates/harn-cli/generated' -File -Recurse | Sort-Object FullName | ForEach-Object { [ordered]@{name=[IO.Path]::GetRelativePath((Resolve-Path 'crates/harn-cli/generated').Path, $_.FullName); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          if ($aot.Count -lt 1) { throw 'AOT payload is empty.' }
+          $identity = [ordered]@{schema='harn.windows_lto_ab.v1'; run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT; policy=$env:GITHUB_SHA; source=$env:HARN_BUILD_REVISION; lto=$env:REQUESTED_LTO; codegenUnits=1; profile='dist'; aot='1'; aotFiles=$aot; compilerCache='disabled'; cargoOutput='fresh'; host=$hostIdentity}
+          if ($env:BASELINE_RUN) {
+            $baselineRoot = Join-Path $env:RUNNER_TEMP 'harn-windows-lto-baseline'
+            $baseline = Get-Content -Raw -LiteralPath (Join-Path $baselineRoot 'result.json') | ConvertFrom-Json
+            if ($baseline.schema -ne $identity.schema -or $baseline.run -ne $env:BASELINE_RUN -or $baseline.policy -ne $identity.policy -or $baseline.source -ne $identity.source -or $baseline.lto -ne 'fat' -or $baseline.codegenUnits -ne 1 -or $baseline.aot -ne '1' -or $baseline.profile -ne 'dist' -or $baseline.compilerCache -ne 'disabled' -or $baseline.cargoOutput -ne 'fresh' -or $baseline.buildStatus -ne 0) { throw 'Baseline is not the exact successful fat/source/policy comparison.' }
+            if (($baseline.host | ConvertTo-Json -Depth 8 -Compress) -ne ($hostIdentity | ConvertTo-Json -Depth 8 -Compress)) { throw 'Host hardware differs from the baseline; no build was started.' }
+            if (($baseline.aotFiles | ConvertTo-Json -Depth 8 -Compress) -ne ($aot | ConvertTo-Json -Depth 8 -Compress)) { throw 'AOT payload differs from the baseline.' }
+            $baselineBinary = Join-Path $baselineRoot 'harn.exe'
+            if ((Get-FileHash -LiteralPath $baselineBinary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $baseline.binarySha256 -or (Get-Item -LiteralPath $baselineBinary).Length -ne $baseline.binaryBytes) { throw 'Baseline executable identity differs from its receipt.' }
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'harn-windows-lto-ab'
+          if (Test-Path -LiteralPath $root) { throw 'Comparison output already exists.' }
+          $target = Join-Path $root 'target'
+          $report = Join-Path $root 'report'
+          New-Item -ItemType Directory -Path $target, $report | Out-Null
+          if (@(Get-ChildItem -LiteralPath $target -Force).Count -ne 0) { throw 'Cargo output is not empty.' }
+          $identity | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $report 'identity.json')
+          @("CARGO_TARGET_DIR=$target", 'RUSTC_WRAPPER=', 'RUSTC_WORKSPACE_WRAPPER=', "CARGO_PROFILE_DIST_LTO=$($env:REQUESTED_LTO)", 'CARGO_PROFILE_DIST_CODEGEN_UNITS=1') | Add-Content -LiteralPath $env:GITHUB_ENV
 
       # Compiler-cache backends are policy data (sccache_backend):
       #   sticky  — Blacksmith sticky disk; hosted runners fall back to local
@@ -658,7 +717,7 @@ jobs:
       # evicted the merge queue's shared CLI cache. A Blacksmith sticky disk
       # is outside that budget, but its local fallback is not.
       - uses: ./.github/actions/sccache
-        if: matrix.sccache_backend == 'sticky'
+        if: matrix.sccache_backend == 'sticky' && !(runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark')
         continue-on-error: true
         with:
           cache-key: release-${{ matrix.target }}
@@ -669,7 +728,7 @@ jobs:
           cache-size: "1G"
 
       - uses: ./.github/actions/sccache
-        if: matrix.sccache_backend == 'local'
+        if: matrix.sccache_backend == 'local' && !(runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark')
         continue-on-error: true
         with:
           cache-key: release-${{ matrix.target }}
@@ -677,7 +736,7 @@ jobs:
           cache-size: "1G"
 
       - uses: ./.github/actions/sccache-install
-        if: matrix.sccache_backend == 'install'
+        if: matrix.sccache_backend == 'install' && !(runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark')
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
         # events with "Bad credentials" when api.github.com gates the release
@@ -685,7 +744,7 @@ jobs:
         continue-on-error: true
 
       - name: Configure Cargo to use sccache
-        if: matrix.sccache_backend == 'install' && env.SCCACHE_PATH != ''
+        if: matrix.sccache_backend == 'install' && env.SCCACHE_PATH != '' && !(runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark')
         shell: bash
         run: |
           set -euo pipefail
@@ -703,6 +762,7 @@ jobs:
       # restore only.
       - uses: ./.github/actions/rust-cache
         id: rust-cache
+        if: runner.os != 'Windows' || needs.setup.outputs.build_mode != 'benchmark'
         # Cache restore/save is a release latency optimization, not a release
         # precondition. The Windows cache backend has had transient misses and
         # auth/setup failures before the build step; fall back to a cold build
@@ -722,6 +782,7 @@ jobs:
           save: ${{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}
 
       - name: Summarize cache mode
+        if: runner.os != 'Windows' || needs.setup.outputs.build_mode != 'benchmark'
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
@@ -850,6 +911,8 @@ jobs:
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
+          HARN_RELEASE_BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
+          HARN_WINDOWS_AB_LTO: ${{ inputs.benchmark_windows_lto }}
         run: |
           set -euo pipefail
           start=$SECONDS
@@ -864,7 +927,28 @@ jobs:
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
           # per target instead of three times.
-          cargo build --locked --profile dist -p harn-cli --bin harn --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
+          if [[ "$RUNNER_OS" == Windows && "$HARN_RELEASE_BUILD_MODE" == benchmark ]]; then
+            test "$CARGO_PROFILE_DIST_LTO" = "$HARN_WINDOWS_AB_LTO"
+            test "$CARGO_PROFILE_DIST_CODEGEN_UNITS" = 1
+            test -z "${RUSTC_WRAPPER:-}${RUSTC_WORKSPACE_WRAPPER:-}"
+            target="$(cygpath -u "$CARGO_TARGET_DIR")"
+            test "$target" = "$(cygpath -u "$RUNNER_TEMP")/harn-windows-lto-ab/target"
+            test -d "$target"
+            test ! -e "$target/$HARN_RELEASE_TARGET/dist"
+            report="$(cygpath -u "$RUNNER_TEMP")/harn-windows-lto-ab/report"
+            date -u +%Y-%m-%dT%H:%M:%SZ > "$report/build-start.txt"
+            build_status=0
+            cargo build --locked --profile dist -p harn-cli --bin harn --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET" --timings || build_status=$?
+            date -u +%Y-%m-%dT%H:%M:%SZ > "$report/build-end.txt"
+            printf '%s\n' "$build_status" > "$report/build-status.txt"
+            if [[ -s "$(cygpath -u "$CARGO_TARGET_DIR")/cargo-timings/cargo-timing.html" ]]; then
+              cp "$(cygpath -u "$CARGO_TARGET_DIR")/cargo-timings/cargo-timing.html" "$report/cargo-timing.html"
+            fi
+            if ((build_status != 0)); then exit "$build_status"; fi
+            test -s "$report/cargo-timing.html"
+          else
+            cargo build --locked --profile dist -p harn-cli --bin harn --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
+          fi
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
             cargo build --locked --profile dist -p harn-cli --bin harn-container-probe --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
           fi
@@ -886,6 +970,75 @@ jobs:
             echo "| Cargo profile | dist |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Measure Windows binaries and paired warm startup
+        if: runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark' && steps.build.outcome == 'success'
+        shell: pwsh
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_SECONDS: ${{ steps.build.outputs.duration_seconds }}
+          EXPECTED_VERSION: ${{ needs.setup.outputs.version }}
+          BASELINE_RUN: ${{ inputs.benchmark_windows_baseline_run }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          function Measure-Version([string]$Binary) {
+            $process = [Diagnostics.Process]::new()
+            try {
+              $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+              $process.StartInfo.FileName = $Binary
+              $process.StartInfo.ArgumentList.Add('--version')
+              $process.StartInfo.UseShellExecute = $false
+              $process.StartInfo.RedirectStandardOutput = $true
+              $process.StartInfo.RedirectStandardError = $true
+              $watch = [Diagnostics.Stopwatch]::StartNew()
+              if (-not $process.Start()) { throw 'Executable did not start.' }
+              $stdout = $process.StandardOutput.ReadToEndAsync()
+              $stderr = $process.StandardError.ReadToEndAsync()
+              if (-not $process.WaitForExit(30000)) { $process.Kill($true); $process.WaitForExit(); throw 'Startup probe timed out.' }
+              $watch.Stop()
+              $version = $stdout.GetAwaiter().GetResult().Trim()
+              $errorText = $stderr.GetAwaiter().GetResult()
+              if ($process.ExitCode -ne 0 -or $version -ne "harn $($env:EXPECTED_VERSION)" -or $errorText.Trim()) { throw 'Version probe failed or executed the wrong binary.' }
+              if ($watch.Elapsed.TotalMilliseconds -le 0) { throw 'Startup duration is unmeasured.' }
+              return $watch.Elapsed.TotalMilliseconds
+            } finally { $process.Dispose() }
+          }
+          $report = Join-Path $env:RUNNER_TEMP 'harn-windows-lto-ab/report'
+          $identity = Get-Content -Raw -LiteralPath (Join-Path $report 'identity.json') | ConvertFrom-Json -AsHashtable
+          if ($env:CARGO_PROFILE_DIST_LTO -ne $identity.lto -or $env:CARGO_PROFILE_DIST_CODEGEN_UNITS -ne '1' -or $env:RUSTC_WRAPPER -or $env:RUSTC_WORKSPACE_WRAPPER) { throw 'The measured build environment changed.' }
+          $binary = Join-Path $env:CARGO_TARGET_DIR "$($env:BUILD_TARGET)/dist/harn.exe"
+          $captured = Join-Path $report 'harn.exe'
+          Copy-Item -LiteralPath $binary -Destination $captured
+          $identity.binarySha256 = (Get-FileHash -LiteralPath $captured -Algorithm SHA256).Hash.ToLowerInvariant()
+          $identity.binaryBytes = (Get-Item -LiteralPath $captured).Length
+          $identity.buildSeconds = [double]$env:BUILD_SECONDS
+          $identity.buildStatus = [int](Get-Content -Raw -LiteralPath (Join-Path $report 'build-status.txt'))
+          if ($identity.buildStatus -ne 0 -or $identity.buildSeconds -le 0 -or $identity.binaryBytes -le 0) { throw 'Build evidence is unmeasured.' }
+          $baselineBinary = if ($env:BASELINE_RUN) { Join-Path $env:RUNNER_TEMP 'harn-windows-lto-baseline/harn.exe' } else { $null }
+          for ($index = 0; $index -lt 5; $index++) { $null = Measure-Version $captured; if ($baselineBinary) { $null = Measure-Version $baselineBinary } }
+          $samples = @()
+          for ($index = 0; $index -lt 30; $index++) {
+            if ($baselineBinary) {
+              if ($index % 2 -eq 0) { $fat = Measure-Version $baselineBinary; $thin = Measure-Version $captured } else { $thin = Measure-Version $captured; $fat = Measure-Version $baselineBinary }
+              $samples += [ordered]@{index=$index; fatFirst=($index % 2 -eq 0); fatMilliseconds=$fat; thinMilliseconds=$thin}
+            } else { $samples += [ordered]@{index=$index; milliseconds=(Measure-Version $captured)} }
+          }
+          if ($samples.Count -ne 30) { throw 'Startup census is incomplete.' }
+          $identity.startupCommand = '--version'
+          $identity.startupWarmups = 5
+          $identity.baselineRun = $env:BASELINE_RUN
+          $identity.startupSamples = $samples
+          $identity | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath (Join-Path $report 'result.json')
+
+      - name: Preserve Windows comparison evidence
+        if: always() && runner.os == 'Windows' && needs.setup.outputs.build_mode == 'benchmark'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-lto-comparison
+          path: ${{ runner.temp }}/harn-windows-lto-ab/report
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Enforce portable Linux glibc floor
         if: matrix.glibc_max != null
         shell: bash
@@ -900,7 +1053,7 @@ jobs:
           done
 
       - name: Summarize sccache stats
-        if: always()
+        if: always() && (runner.os != 'Windows' || needs.setup.outputs.build_mode != 'benchmark')
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
