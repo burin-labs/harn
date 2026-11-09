@@ -1,5 +1,7 @@
-// `glob_match` is the matcher capability policy applies to tool argument
-// patterns, so a script can predict which paths a scoped write grant admits.
+/**
+ * `glob_match` is the matcher capability policy applies to tool argument
+ * patterns, so a script can predict which paths a scoped write grant admits.
+ */
 pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(glob_match("src/**/*.ts", "src/a/b/c.ts"))
   harness.stdio.log(glob_match("src/**/*.ts", "lib/a.ts"))
