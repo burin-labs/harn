@@ -59,6 +59,7 @@ fn a_queued_request_rechecks_the_key_after_its_sibling_is_rejected() {
         let mut release = ReleaseBody(Some(release_tx));
         install(server.addr(), crate::llm_config::AuthEnv::None);
         crate::llm::rate_limit::set_rate_limits(PROVIDER, crate::llm_config::RateLimitsDef {
+            rpm: Some(1000),
             concurrency: Some(1),
             ..Default::default()
         });
