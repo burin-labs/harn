@@ -143,52 +143,24 @@ fn build_argv(
     let pkgs = packages.to_vec();
     let pkgs_some = !pkgs.is_empty();
     Some(match (eco, op) {
-        (Cargo, Add) if pkgs_some => prepend("cargo", &["add"], &pkgs),
+        (Cargo, Add) if pkgs_some => add("cargo", &["add"], &["--dev"], dev, &pkgs),
         (Cargo, Remove) if pkgs_some => prepend("cargo", &["remove"], &pkgs),
         (Cargo, Install | Refresh) => vec!["cargo".into(), "fetch".into()],
-        (Cargo, Update) => {
-            let mut argv = vec!["cargo".into(), "update".into()];
-            for p in &pkgs {
-                argv.push("-p".into());
-                argv.push(p.clone());
-            }
-            argv
-        }
-        (Npm, Add | Install) if pkgs_some => {
-            let mut argv = vec!["npm".into(), "install".into()];
-            if dev {
-                argv.push("--save-dev".into());
-            }
-            argv.extend(pkgs);
-            argv
-        }
+        (Cargo, Update) => each_package("cargo", &["update"], "-p", &pkgs),
+        (Npm, Add | Install) if pkgs_some => add("npm", &["install"], &["--save-dev"], dev, &pkgs),
         (Npm, Install) => vec!["npm".into(), "install".into()],
         (Npm, Remove) if pkgs_some => prepend("npm", &["uninstall"], &pkgs),
-        (Npm, Update) => prepend_or_default("npm", &["update"], &pkgs),
+        (Npm, Update) => prepend("npm", &["update"], &pkgs),
         (Npm, Refresh) => vec!["npm".into(), "ci".into()],
-        (Pnpm, Add | Install) if pkgs_some => {
-            let mut argv = vec!["pnpm".into(), "add".into()];
-            if dev {
-                argv.push("--save-dev".into());
-            }
-            argv.extend(pkgs);
-            argv
-        }
+        (Pnpm, Add | Install) if pkgs_some => add("pnpm", &["add"], &["--save-dev"], dev, &pkgs),
         (Pnpm, Install) => vec!["pnpm".into(), "install".into()],
         (Pnpm, Remove) if pkgs_some => prepend("pnpm", &["remove"], &pkgs),
-        (Pnpm, Update) => prepend_or_default("pnpm", &["update"], &pkgs),
+        (Pnpm, Update) => prepend("pnpm", &["update"], &pkgs),
         (Pnpm, Refresh) => vec!["pnpm".into(), "install".into(), "--frozen-lockfile".into()],
-        (Yarn, Add | Install) if pkgs_some => {
-            let mut argv = vec!["yarn".into(), "add".into()];
-            if dev {
-                argv.push("--dev".into());
-            }
-            argv.extend(pkgs);
-            argv
-        }
+        (Yarn, Add | Install) if pkgs_some => add("yarn", &["add"], &["--dev"], dev, &pkgs),
         (Yarn, Install) => vec!["yarn".into(), "install".into()],
         (Yarn, Remove) if pkgs_some => prepend("yarn", &["remove"], &pkgs),
-        (Yarn, Update) => prepend_or_default("yarn", &["upgrade"], &pkgs),
+        (Yarn, Update) => prepend("yarn", &["upgrade"], &pkgs),
         (Yarn, Refresh) => vec!["yarn".into(), "install".into(), "--frozen-lockfile".into()],
         (Pip, Add | Install) if pkgs_some => prepend("python", &["-m", "pip", "install"], &pkgs),
         (Pip, Install) => vec![
@@ -200,9 +172,7 @@ fn build_argv(
             ".".into(),
         ],
         (Pip, Remove) if pkgs_some => prepend("python", &["-m", "pip", "uninstall", "-y"], &pkgs),
-        (Pip, Update) => {
-            prepend_or_default("python", &["-m", "pip", "install", "--upgrade"], &pkgs)
-        }
+        (Pip, Update) => prepend("python", &["-m", "pip", "install", "--upgrade"], &pkgs),
         (Pip, Refresh) => vec![
             "python".into(),
             "-m".into(),
@@ -211,38 +181,38 @@ fn build_argv(
             "-r".into(),
             "requirements.txt".into(),
         ],
-        (Uv, Add) if pkgs_some => prepend("uv", &["add"], &pkgs),
+        (Uv, Add) if pkgs_some => add("uv", &["add"], &["--dev"], dev, &pkgs),
         (Uv, Install | Refresh) => vec!["uv".into(), "sync".into()],
         (Uv, Remove) if pkgs_some => prepend("uv", &["remove"], &pkgs),
-        (Uv, Update) => prepend_or_default("uv", &["sync", "--upgrade"], &pkgs),
-        (Poetry, Add) if pkgs_some => {
-            let mut argv = vec!["poetry".into(), "add".into()];
-            if dev {
-                argv.push("--group".into());
-                argv.push("dev".into());
-            }
-            argv.extend(pkgs);
-            argv
-        }
+        // `uv sync` takes no package positionals; it upgrades named ones by flag.
+        (Uv, Update) if pkgs_some => each_package("uv", &["sync"], "--upgrade-package", &pkgs),
+        (Uv, Update) => vec!["uv".into(), "sync".into(), "--upgrade".into()],
+        (Poetry, Add) if pkgs_some => add("poetry", &["add"], &["--group", "dev"], dev, &pkgs),
         (Poetry, Install | Refresh) => vec!["poetry".into(), "install".into()],
         (Poetry, Remove) if pkgs_some => prepend("poetry", &["remove"], &pkgs),
-        (Poetry, Update) => prepend_or_default("poetry", &["update"], &pkgs),
+        (Poetry, Update) => prepend("poetry", &["update"], &pkgs),
         (Go, Add) if pkgs_some => prepend("go", &["get"], &pkgs),
         (Go, Install | Refresh) => vec!["go".into(), "mod".into(), "download".into()],
-        (Go, Update) => prepend_or_default("go", &["get", "-u"], &pkgs),
-        (Go, Remove) if pkgs_some => prepend("go", &["mod", "tidy"], &[]),
-        (Swift, Install | Add | Refresh) => {
+        (Go, Update) => prepend("go", &["get", "-u"], &pkgs),
+        // `go mod tidy` keeps a module the code still imports; `@none` removes it.
+        (Go, Remove) if pkgs_some => {
+            let pkgs: Vec<_> = pkgs.iter().map(|p| format!("{p}@none")).collect();
+            prepend("go", &["get"], &pkgs)
+        }
+        (Swift, Install | Refresh) => {
             vec!["swift".into(), "package".into(), "resolve".into()]
         }
         (Swift, Update) => vec!["swift".into(), "package".into(), "update".into()],
         (Bundler, Install | Refresh) => vec!["bundle".into(), "install".into()],
-        (Bundler, Add) if pkgs_some => prepend("bundle", &["add"], &pkgs),
+        (Bundler, Add) if pkgs_some => {
+            add("bundle", &["add"], &["--group", "development"], dev, &pkgs)
+        }
         (Bundler, Remove) if pkgs_some => prepend("bundle", &["remove"], &pkgs),
-        (Bundler, Update) => prepend_or_default("bundle", &["update"], &pkgs),
+        (Bundler, Update) => prepend("bundle", &["update"], &pkgs),
         (Composer, Install | Refresh) => vec!["composer".into(), "install".into()],
-        (Composer, Add) if pkgs_some => prepend("composer", &["require"], &pkgs),
+        (Composer, Add) if pkgs_some => add("composer", &["require"], &["--dev"], dev, &pkgs),
         (Composer, Remove) if pkgs_some => prepend("composer", &["remove"], &pkgs),
-        (Composer, Update) => prepend_or_default("composer", &["update"], &pkgs),
+        (Composer, Update) => prepend("composer", &["update"], &pkgs),
         (Gradle, Install | Refresh) => vec![
             "./gradlew".into(),
             "build".into(),
@@ -263,14 +233,29 @@ fn prepend(program: &str, flags: &[&str], packages: &[String]) -> Vec<String> {
     argv
 }
 
-fn prepend_or_default(program: &str, flags: &[&str], packages: &[String]) -> Vec<String> {
-    if packages.is_empty() {
-        let mut argv = vec![program.to_string()];
-        argv.extend(flags.iter().map(|s| s.to_string()));
-        argv
-    } else {
-        prepend(program, flags, packages)
+/// `program flags [dev_flags] packages`, with `dev_flags` only for a dev dependency.
+fn add(
+    program: &str,
+    flags: &[&str],
+    dev_flags: &[&str],
+    dev: bool,
+    packages: &[String],
+) -> Vec<String> {
+    let flags: Vec<&str> = flags
+        .iter()
+        .chain(dev_flags.iter().filter(|_| dev))
+        .copied()
+        .collect();
+    prepend(program, &flags, packages)
+}
+
+/// `program flags` followed by `flag package` for each package.
+fn each_package(program: &str, flags: &[&str], flag: &str, packages: &[String]) -> Vec<String> {
+    let mut argv = prepend(program, flags, &[]);
+    for package in packages {
+        argv.extend([flag.to_string(), package.clone()]);
     }
+    argv
 }
 
 #[cfg(test)]
@@ -278,44 +263,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn npm_install_dev_emits_save_dev_flag() {
-        let argv = build_argv(
-            Ecosystem::Npm,
-            Operation::Install,
-            &["lodash".to_string()],
-            true,
-        )
-        .unwrap();
-        assert_eq!(argv, vec!["npm", "install", "--save-dev", "lodash"]);
-    }
-
-    #[test]
-    fn cargo_refresh_uses_fetch() {
-        let argv = build_argv(Ecosystem::Cargo, Operation::Refresh, &[], false).unwrap();
-        assert_eq!(argv, vec!["cargo", "fetch"]);
-    }
-
-    #[test]
-    fn poetry_add_dev_uses_group_dev() {
-        let argv = build_argv(
-            Ecosystem::Poetry,
-            Operation::Add,
-            &["pytest".to_string()],
-            true,
-        )
-        .unwrap();
-        assert_eq!(argv, vec!["poetry", "add", "--group", "dev", "pytest"]);
-    }
-
-    #[test]
-    fn unsupported_pair_returns_none() {
-        // Gradle does not have a portable CLI mapping for adding dependencies.
-        assert!(build_argv(
-            Ecosystem::Gradle,
-            Operation::Add,
-            &["junit".to_string()],
-            false
-        )
-        .is_none());
+    fn package_operations_map_to_each_managers_own_spelling() {
+        use Ecosystem::*;
+        use Operation::*;
+        let pkg = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        for (eco, op, packages, dev, expected) in [
+            (
+                Npm,
+                Install,
+                pkg(&["lodash"]),
+                true,
+                "npm install --save-dev lodash",
+            ),
+            (Cargo, Refresh, pkg(&[]), false, "cargo fetch"),
+            (Cargo, Add, pkg(&["serde"]), true, "cargo add --dev serde"),
+            (
+                Cargo,
+                Update,
+                pkg(&["a", "b"]),
+                false,
+                "cargo update -p a -p b",
+            ),
+            (
+                Poetry,
+                Add,
+                pkg(&["pytest"]),
+                true,
+                "poetry add --group dev pytest",
+            ),
+            (Uv, Add, pkg(&["pytest"]), true, "uv add --dev pytest"),
+            (
+                Uv,
+                Update,
+                pkg(&["httpx"]),
+                false,
+                "uv sync --upgrade-package httpx",
+            ),
+            (Uv, Update, pkg(&[]), false, "uv sync --upgrade"),
+            (
+                Go,
+                Remove,
+                pkg(&["example.com/m"]),
+                false,
+                "go get example.com/m@none",
+            ),
+            (
+                Composer,
+                Add,
+                pkg(&["phpunit/phpunit"]),
+                true,
+                "composer require --dev phpunit/phpunit",
+            ),
+            (
+                Bundler,
+                Add,
+                pkg(&["rspec"]),
+                true,
+                "bundle add --group development rspec",
+            ),
+        ] {
+            let argv = build_argv(eco, op, &packages, dev).unwrap();
+            assert_eq!(argv.join(" "), expected);
+        }
+        // No portable CLI adds these dependencies, so the tool refuses instead
+        // of running an unrelated command that exits 0.
+        assert!(build_argv(Gradle, Add, &pkg(&["junit"]), false).is_none());
+        assert!(build_argv(Swift, Add, &pkg(&["swift-log"]), false).is_none());
     }
 }

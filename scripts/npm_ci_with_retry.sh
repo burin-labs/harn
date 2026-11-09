@@ -31,7 +31,7 @@ while :; do
   # immutable dependencies. Three bounded, increasing waits cover a sustained
   # release-asset edge reset without turning a persistent outage into a loop.
   if [[ "$attempt" -gt "${#retry_delays[@]}" ]] || ! grep -Eiq \
-    'ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED|HTTP (429|5[0-9][0-9])' \
+    'ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED|HTTP (429|5[0-9][0-9])|^npm error status:[[:space:]]*(429|5[0-9][0-9])([[:space:]]|$)' \
     "$log_file"; then
     exit "$status"
   fi
