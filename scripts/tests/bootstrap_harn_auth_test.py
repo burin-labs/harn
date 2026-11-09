@@ -45,6 +45,8 @@ class SeedTransportTests(unittest.TestCase):
         self.fail_direct = False
         self.deny_api = False
         self.fail_all = False
+        self.require_user_agent = False
+        self.empty_default_agent = False
         self.port = 0
         owner = self
 
@@ -54,7 +56,11 @@ class SeedTransportTests(unittest.TestCase):
 
             def do_GET(self):
                 authenticated = self.headers.get("Authorization") == f"Bearer {TOKEN}"
-                owner.requests.append((self.path, authenticated, "Authorization" in self.headers))
+                agent = self.headers.get("User-Agent")
+                owner.requests.append((self.path, authenticated, "Authorization" in self.headers, agent))
+                if owner.require_user_agent and not agent:
+                    self.send_error(403, "User-Agent required")
+                    return
                 api = self.path.startswith("/repos/burin-labs/harn/releases/")
                 direct = self.path.startswith("/burin-labs/harn/releases/download/")
                 if owner.fail_all or (owner.fail_direct and direct):
@@ -126,8 +132,12 @@ class SeedTransportTests(unittest.TestCase):
         uname.write_text('#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
         uname.chmod(0o755)
         # Preserve production URLs until the real downloader executes. The
-        # fixture changes only the endpoint and TLS trust, not header policy.
+        # fixture changes only the endpoint and TLS trust. One regression also
+        # clears the downloader's default agent so production must supply it.
         wrapper = tools / mode
+        extra = ["--insecure", "--noproxy", "*"] if mode == "curl" else ["--no-check-certificate", "--no-proxy"]
+        if self.empty_default_agent:
+            extra += ["--user-agent", ""]
         wrapper.write_text(
             f"#!{sys.executable}\n"
             "import os, sys\n"
@@ -141,7 +151,7 @@ class SeedTransportTests(unittest.TestCase):
             "for index, argument in enumerate(arguments):\n"
             "    if argument.startswith(('https://api.github.com/', 'https://github.com/')):\n"
             f"        arguments[index] = 'https://127.0.0.1:{self.port}' + urlsplit(argument).path\n"
-            f"extra = {(['--insecure', '--noproxy', '*'] if mode == 'curl' else ['--no-check-certificate', '--no-proxy'])!r}\n"
+            f"extra = {extra!r}\n"
             f"os.execv({shutil.which(mode)!r}, [{mode!r}] + extra + arguments)\n"
         )
         wrapper.chmod(0o755)
@@ -189,6 +199,27 @@ class SeedTransportTests(unittest.TestCase):
                 self.assert_seed(self.run_seed(mode, authenticated=True))
                 self.assertEqual(self.requests, [], "verified cache contacted the network")
                 self.fail_all = False
+
+    def test_every_origin_gets_an_agent_without_downloader_defaults(self):
+        self.require_user_agent = True
+        self.empty_default_agent = True
+        modes = list(self.modes())
+        self.assertTrue(modes, "no downloader was exercised")
+        for mode in modes:
+            for authenticated, fail_direct in [(False, False), (False, True), (True, True)]:
+                with self.subTest(mode=mode, authenticated=authenticated, fail_direct=fail_direct):
+                    shutil.rmtree(self.root / mode / "cache", ignore_errors=True)
+                    self.requests.clear()
+                    self.fail_direct = fail_direct
+                    self.assert_seed(self.run_seed(mode, authenticated=authenticated))
+                    self.assertGreater(len(self.requests), 0, "header check measured no requests")
+                    self.assertTrue(all(row[3] == "harn-bootstrap" for row in self.requests))
+                    if fail_direct:
+                        self.assertTrue(any(row[0].startswith("/repos/") for row in self.requests))
+                        self.assertTrue(any(row[0].startswith("/cdn/") for row in self.requests))
+                    else:
+                        self.assertTrue(all(row[0].startswith("/burin-labs/") for row in self.requests))
+                    self.assertTrue(all(not row[2] for row in self.requests if not row[0].startswith("/repos/")))
 
     def test_anonymous_failover_uses_one_direct_attempt(self):
         self.fail_direct = True
