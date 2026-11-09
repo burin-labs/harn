@@ -18,8 +18,17 @@ async fn send_completion_request(
     opts: &LlmCallOptions,
     request: reqwest::RequestBuilder,
 ) -> Result<serde_json::Value, VmError> {
-    let _permit = crate::llm::rate_limit::acquire_permit_for_llm_call(opts).await?;
-    let provider = &opts.provider;
+    let admission = crate::llm::rate_limit::LlmCallAdmission::from_options(opts);
+    let _permit = admission.acquire().await?;
+    let outcome = send_admitted_completion_request(&opts.provider, request).await;
+    admission.observe_outcome(&outcome);
+    outcome
+}
+
+async fn send_admitted_completion_request(
+    provider: &str,
+    request: reqwest::RequestBuilder,
+) -> Result<serde_json::Value, VmError> {
     let response = request
         .send()
         .await

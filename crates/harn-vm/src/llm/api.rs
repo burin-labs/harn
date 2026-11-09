@@ -638,6 +638,7 @@ async fn dispatch_provider_request(
     let outcome =
         super::inference_speed::scope(meter.clone(), Box::pin(vm_call_llm_api(request, delta_tx)))
             .await;
+    observed.observe_provider_outcome(&outcome);
     if let Some(tee) = text_tee {
         // The tee drains once the adapter drops its sender; a sender an
         // adapter leaked must not hold the call open.
