@@ -23,10 +23,11 @@ fn a_branch_prefix_does_not_recharge_its_recorded_retry_history() {
     recorded.attempts = ProviderAttempts {
         total: 3,
         other: 2,
-        completed_retry_usage: vec![LlmUsage::unknown_attempts(2)],
+        completed_retry_usage: vec![LlmUsage::unknown_attempt(), LlmUsage::unknown_attempt()],
         ..Default::default()
     };
     assert_eq!(recorded.usage().provider_call_count, Some(3));
+    assert_eq!(recorded.usage().usage_unknown_calls, 2);
     recorded.telemetry.source = telemetry_source::BRANCH_SERVED.into();
     let usage = recorded.usage();
     assert_eq!(usage.provider_call_count, Some(0));
