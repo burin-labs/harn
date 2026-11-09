@@ -2799,9 +2799,7 @@
   "{} -> runtime cache": "{0} -> 运行时缓存",
   "{} agent={} action={} outcome={} tier={} trace_id={} approver={}": "{0} agent={1} action={2} outcome={3} tier={4} trace_id={5} approver={6}",
   "{} ladder={} persona={} first_correct={}/{} artifacts={}": "{0} ladder={1} persona={2} first_correct={3}/{4} artifacts={5}",
-  "{} missing": "{0} 缺失",
   "{} passed, {failed} failed, {} skipped": "{0} 通过，{failed} 失败，{1} 跳过",
-  "{} set": "{0} 已设置",
   "{} status={} version={}": "{0} status={1} version={2}",
   "{} total={} success_rate={:.2}% mean_cost_usd={} tiers={} outcomes={}": "{0} total={1} success_rate={2:.2}% mean_cost_usd={3} tiers={4} outcomes={5}",
   "{} via {}: {}": "{0} 通过 {1}：{2}",
@@ -2810,5 +2808,10 @@
   "{}: no repairable diagnostics found": "{0}：未找到可修复的诊断信息",
   "{}: nothing to stop": "{0}：没有可停止的内容",
   "{}: {} changed={} ledger={}": "{0}: {1} changed={2} ledger={3}",
-  "{}: {} repairable diagnostic(s)": "{0}：{1} 个可修复诊断"
+  "{}: {} repairable diagnostic(s)": "{0}：{1} 个可修复诊断",
+  "deferred": "延迟",
+  "needs approval": "需要批准",
+  "incomplete": "不完整",
+  "not required": "不需要",
+  "Kept existing configuration; requested provider={} model={} was not saved": "已保留现有配置；请求的 provider={0} model={1} 未保存"
 }
