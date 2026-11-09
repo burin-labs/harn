@@ -674,13 +674,14 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
+          if ($env:REQUESTED_SOURCE -notmatch '^[0-9a-f]{40}$' -or $env:HARN_BUILD_REVISION -notmatch '^[0-9a-f]{40}$' -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Source or policy identity is unmeasured.' }
           if ($env:REQUESTED_PROFILE -ne 'standard' -or $env:HARN_BUILD_REVISION -ne $env:REQUESTED_SOURCE -or $env:HARN_REQUIRE_CLI_AOT -ne '1') { throw 'Comparison requires the standard runner, exact source and AOT.' }
           if ($env:REQUESTED_LTO -notin @('fat', 'thin')) { throw 'Unknown LTO selection.' }
           if (($env:REQUESTED_LTO -eq 'thin' -and $env:BASELINE_RUN -notmatch '^[1-9][0-9]*$') -or ($env:REQUESTED_LTO -eq 'fat' -and $env:BASELINE_RUN)) { throw 'Thin requires one fat baseline; fat cannot consume a baseline.' }
           $computer = Get-CimInstance Win32_ComputerSystem
           $processors = @(Get-CimInstance Win32_Processor)
           $hostIdentity = [ordered]@{logicalCpus=[int]$computer.NumberOfLogicalProcessors; physicalTotalBytes=[long]$computer.TotalPhysicalMemory; cpuModels=@($processors | ForEach-Object { $_.Name.Trim() })}
-          if ($hostIdentity.logicalCpus -ne 4 -or $hostIdentity.physicalTotalBytes -le 0 -or $hostIdentity.cpuModels.Count -lt 1) { throw 'Host identity is unmeasured or outside the free four-CPU cohort.' }
+          if ($hostIdentity.logicalCpus -ne 4 -or $hostIdentity.physicalTotalBytes -le 0 -or $hostIdentity.cpuModels.Count -lt 1 -or @($hostIdentity.cpuModels | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { throw 'Host identity is unmeasured or outside the free four-CPU cohort.' }
           $aot = @(Get-ChildItem -LiteralPath 'crates/harn-cli/generated' -File -Recurse | Sort-Object FullName | ForEach-Object { [ordered]@{name=[IO.Path]::GetRelativePath((Resolve-Path 'crates/harn-cli/generated').Path, $_.FullName); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
           if ($aot.Count -lt 1) { throw 'AOT payload is empty.' }
           $identity = [ordered]@{schema='harn.windows_lto_ab.v1'; run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT; policy=$env:GITHUB_SHA; source=$env:HARN_BUILD_REVISION; lto=$env:REQUESTED_LTO; codegenUnits=1; profile='dist'; aot='1'; aotFiles=$aot; compilerCache='disabled'; cargoOutput='fresh'; host=$hostIdentity}
