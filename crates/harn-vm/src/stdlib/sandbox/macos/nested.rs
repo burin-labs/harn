@@ -96,7 +96,7 @@ pub(super) fn nesting(policy: &CapabilityPolicy) -> Nesting {
     // Every credential path is a read-deny root, so probing the denials covers
     // the credential stores the policy must not read.
     for dir in super::super::process_sandbox_read_deny_roots(policy) {
-        if observed_existing_path(&dir) && !outer_denies("file-read-data", Some(&dir)) {
+        if !outer_denies("file-read-data", Some(&dir)) {
             return Nesting::Unenforceable(Narrowing::Read(dir));
         }
     }
