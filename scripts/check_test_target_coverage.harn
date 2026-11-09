@@ -98,6 +98,12 @@ const UNLINTED_HARN_ROOTS: list<UnlintedRoot> = [
       "Agent-loop input embedded by the native HTTP publication test, which executes the tool and asserts private history, provider wire data and conservative admission.",
   },
   {
+    root: "crates/harn-vm/src/llm/api/transport_stub_tests/rejected_key",
+    kind: "fixture_input",
+    reason:
+      "The Rust transport-stub regression embeds this classifier-then-agent-loop source and asserts that admission refuses a rejected key before another request.",
+  },
+  {
     root: "crates/harn-cli/assets/evals",
     kind: "unlinted_backlog",
     reason:
