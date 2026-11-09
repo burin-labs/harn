@@ -11,6 +11,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "compaction_policy"),
     ("agent", "compaction_run"),
     ("agent", "current_id"),
+    ("agent", "current_worker"),
     ("agent", "daemon_resume"),
     ("agent", "daemon_spawn"),
     ("agent", "daemon_stop"),

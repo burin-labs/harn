@@ -1126,6 +1126,31 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(VmValue::list(workers))
 }
 
+/// A worker's loop reads its own record (for example, to notice that it was
+/// suspended) under whatever effect ceiling it inherited from the tool call
+/// that started it. That ceiling bounds what the worker's model may do and
+/// usually grants no worker capability, so the read cannot go through
+/// `worker_list`, which observes every delegated worker. Reading the caller's
+/// own record is loop bookkeeping, authorized like `current_id` by the
+/// ability to run the model at all.
+#[harn_builtin(
+    exposure = "harness.agent.current_worker",
+    effects = ["state.read@const=current-worker"],
+    effects_authorized_by = "llm.call",
+    sig = "__cap_agent_current_worker() -> dict?",
+    category = "agent.worker",
+    doc = "Return the summary of the delegated worker running the current code, or nil outside a worker."
+)]
+fn current_worker_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(worker_id) = crate::runtime_context::current_worker_id() else {
+        return Ok(VmValue::Nil);
+    };
+    match active_worker_registry().get(&worker_id) {
+        Some(state) => worker_summary(&state.lock()),
+        None => Ok(VmValue::Nil),
+    }
+}
+
 #[harn_builtin(
     exposure = "runtime_internal",
     sig = "__host_resume_conditions_parse(conditions?: any) -> any",
