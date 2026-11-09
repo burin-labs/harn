@@ -25,6 +25,7 @@ set -eu
 REPO="burin-labs/harn"
 RELEASES_URL="https://github.com/${REPO}/releases"
 API_URL="https://api.github.com/repos/${REPO}/releases"
+INSTALLER_USER_AGENT=harn-install
 
 bold=""
 dim=""
@@ -73,9 +74,9 @@ download_to() {
   url="$1"
   dest="$2"
   if [ "$DOWNLOADER" = "curl" ]; then
-    curl --fail --silent --show-error --location --output "$dest" "$url"
+    curl --fail --silent --show-error --location --user-agent "$INSTALLER_USER_AGENT" --output "$dest" "$url"
   else
-    wget --quiet --output-document="$dest" "$url"
+    wget --quiet --user-agent "$INSTALLER_USER_AGENT" --output-document="$dest" "$url"
   fi
 }
 
@@ -113,13 +114,21 @@ VERSION="${HARN_VERSION:-}"
 if [ -z "$VERSION" ]; then
   info "Resolving latest release..."
   if [ "$DOWNLOADER" = "curl" ]; then
-    VERSION="$(curl --silent --location --head --write-out '%{url_effective}' \
-      --output /dev/null "${RELEASES_URL}/latest" 2>/dev/null | sed 's#.*/tag/##')"
+    latest_location="$(curl --fail --silent --location --head --user-agent "$INSTALLER_USER_AGENT" \
+      --write-out '%{url_effective}' --output /dev/null "${RELEASES_URL}/latest" 2>/dev/null)" \
+      || latest_location=''
   else
-    VERSION="$(wget --quiet --max-redirect=5 --server-response --spider \
-      "${API_URL}/latest" 2>&1 | grep -i '^  *location:' | tail -1 \
-      | sed 's#.*/tag/##' | tr -d '\r')"
+    latest_headers="$(wget --quiet --user-agent "$INSTALLER_USER_AGENT" --max-redirect=5 \
+      --server-response --spider "${RELEASES_URL}/latest" 2>&1)" || latest_headers=''
+    latest_location="$(printf '%s\n' "$latest_headers" | awk '
+      tolower($1) == "location:" { location = $2 }
+      END { sub(/\r$/, "", location); print location }
+    ')"
   fi
+  case "$latest_location" in
+    "$RELEASES_URL"/tag/v[0-9]*) VERSION="${latest_location##*/}" ;;
+    *) VERSION='' ;;
+  esac
   if [ -z "$VERSION" ]; then
     # Fall back to the JSON API.
     tmp_json="$(mktemp)"
