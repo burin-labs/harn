@@ -442,9 +442,9 @@ jobs:
   prepare_cli_aot:
     name: Prepare CLI AOT payload
     needs: [setup, source-ci]
-    # Match build's top-level condition so a warm-cache build is never skipped
-    # merely because this release/benchmark payload job had no work to do.
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    # Warm runs intentionally skip security; override inherited skip propagation.
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.source-ci.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # The generator compiles the complete Rust workspace and sits on every
     # shipping target's critical path. Public-repository release work always
     # uses the standard free runner selected by the release policy.
@@ -544,10 +544,9 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    # prepare_cli_aot skips its work on warm-cache-only events; `needs` on a
-    # job whose steps were skipped is satisfied, so warm-cache runs still build.
     needs: [setup, prepare_cli_aot]
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
     # only the same target from an older real warm. Candidates, benchmarks,
@@ -1897,8 +1896,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # One check for the whole candidate. A run with nothing to build passes as soon
-  # as setup says so. On a candidate it is the verdict that promotion reads.
+  # Selected builds require measured work; only explicit no-ops pass without it.
+  # On a candidate this is the verdict that promotion reads.
   candidate-verdict:
     name: Release candidate verdict
     needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
@@ -1931,6 +1930,16 @@ jobs:
             exit 1
           fi
           if [[ "$BUILD_MODE" != candidate ]]; then
+            if ! jq -e '
+              .setup.outputs.should_build_binaries as $selected |
+              . as $jobs |
+              $selected == "false" or
+              ($selected == "true" and
+                all(["source-ci", "prepare_cli_aot", "build"][]; $jobs[.].result == "success"))
+            ' <<<"$RESULTS" >/dev/null; then
+              echo "::error::A selected release build did not succeed or build selection is unproven: $RESULTS"
+              exit 1
+            fi
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi
