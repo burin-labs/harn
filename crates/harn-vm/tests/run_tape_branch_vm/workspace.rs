@@ -555,6 +555,8 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(baseline.contains("retained asset content"));
     let baseline_peer: serde_json::Value =
         serde_json::from_str(baseline.lines().last().unwrap()).unwrap();
+    assert_eq!(baseline_peer["status"], "completed", "{baseline_peer}");
+    assert_eq!(baseline_peer["exit_code"], 0, "{baseline_peer}");
     assert_eq!(baseline_peer["success"], true, "{baseline_peer}");
     assert_eq!(baseline_peer["stdout"], "peer storage canary");
     #[cfg(target_os = "macos")]
@@ -586,8 +588,13 @@ pipeline main(harness: Harness, task: unknown) {{
     assert!(output.contains("retained asset content"));
     let denied_peer: serde_json::Value =
         serde_json::from_str(output.lines().last().unwrap()).unwrap();
+    assert_eq!(denied_peer["status"], "completed", "{denied_peer}");
     assert_eq!(denied_peer["success"], false, "{denied_peer}");
-    assert_ne!(denied_peer["status"].as_i64().unwrap(), 0, "{denied_peer}");
+    assert_ne!(
+        denied_peer["exit_code"].as_i64().unwrap(),
+        0,
+        "{denied_peer}"
+    );
     assert_eq!(denied_peer["stdout"], "", "{denied_peer}");
     assert_eq!(
         std::fs::read_to_string(peer).unwrap(),
