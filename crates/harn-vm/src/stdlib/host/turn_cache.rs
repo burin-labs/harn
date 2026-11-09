@@ -67,17 +67,16 @@ thread_local! {
 }
 
 /// Drop this thread's memo when it was filled through a different bridge.
+/// Entries stored before any bridge read them, as an embedder seeding its
+/// turn does, belong to the first bridge that reads them.
 pub(crate) fn claim_for(bridge: &std::sync::Arc<dyn super::HostCallBridge>) {
-    let owned = MEMO_OWNER.with(|owner| {
-        owner
-            .borrow()
-            .as_ref()
-            .is_some_and(|owner| std::ptr::addr_eq(owner.as_ptr(), std::sync::Arc::as_ptr(bridge)))
-    });
-    if !owned {
-        reset_local();
-        MEMO_OWNER.with(|owner| *owner.borrow_mut() = Some(std::sync::Arc::downgrade(bridge)));
+    let owner = MEMO_OWNER.with(|owner| owner.borrow().as_ref().map(std::sync::Weak::as_ptr));
+    match owner {
+        Some(owner) if std::ptr::addr_eq(owner, std::sync::Arc::as_ptr(bridge)) => return,
+        Some(_) => reset_local(),
+        None => {}
     }
+    MEMO_OWNER.with(|owner| *owner.borrow_mut() = Some(std::sync::Arc::downgrade(bridge)));
 }
 
 fn current_epoch() -> u64 {
@@ -344,6 +343,7 @@ pub(crate) fn reset() {
 pub(crate) fn reset_local() {
     TURN_STABLE_HOST_CACHE.with(|cache| cache.borrow_mut().clear());
     metadata_snapshot::reset_local();
+    MEMO_OWNER.with(|owner| *owner.borrow_mut() = None);
 }
 
 /// Serializes tests that bump [`TURN_EPOCH`] against tests that rely on a memo
