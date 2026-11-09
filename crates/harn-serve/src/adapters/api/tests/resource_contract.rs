@@ -374,3 +374,27 @@ async fn session_workspace_is_resolved_before_any_creation_effect() {
     );
     assert!(!root.path().join("task-preparation.txt").exists());
 }
+
+#[test]
+fn list_pages_carry_the_published_shape_and_report_truncation() {
+    let specification: Value = harn_vm::yaml::from_str(OPENAPI_YAML).unwrap();
+    let rows = || vec![json!({"id": "a"}), json!({"id": "b"})];
+    for (page, has_more, len) in [
+        (limited_list_response(rows(), Some(1)), true, 1),
+        (limited_list_response(rows(), Some(2)), false, 2),
+        (limited_list_response(rows(), None), false, 2),
+        (list_response(rows()), false, 2),
+    ] {
+        for field in specification["components"]["schemas"]["PaginatedList"]["required"]
+            .as_array()
+            .unwrap()
+        {
+            assert!(
+                page.get(field.as_str().unwrap()).is_some(),
+                "missing {field}: {page}"
+            );
+        }
+        assert_eq!(page["page"]["has_more"], has_more, "{page}");
+        assert_eq!(page["data"].as_array().unwrap().len(), len, "{page}");
+    }
+}
