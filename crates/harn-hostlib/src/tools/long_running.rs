@@ -1189,11 +1189,23 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> BackgroundW
         entry.result_txs.push(tx);
         rx
     };
-    match rx.recv_timeout(timeout) {
-        Ok(result) => BackgroundWaitOutcome::Completed(result),
-        Err(_) => current_wait_outcome(handle_id),
+    // Wait in short slices so a stop or deadline on the calling turn ends the
+    // wait instead of holding it for the caller's whole budget. The child
+    // stays owned by its handle; the session's cancel path reaps it.
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(remaining.min(WAIT_INTERRUPT_POLL)) {
+            Ok(result) => return BackgroundWaitOutcome::Completed(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                if !remaining.is_zero() && !harn_vm::op_interrupt::requested() => {}
+            Err(_) => return current_wait_outcome(handle_id),
+        }
     }
 }
+
+/// How often a direct result wait re-checks the calling turn's interrupt.
+const WAIT_INTERRUPT_POLL: Duration = Duration::from_millis(20);
 
 /// Atomically consume feedback for one long-running handle while leaving all
 /// other session entries in their original order with their original sequence.

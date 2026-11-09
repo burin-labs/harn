@@ -129,7 +129,7 @@ impl HostlibCapability for ToolsCapability {
             "read_command_output",
             read_command_output::handle,
         );
-        registry.register_fn(
+        registry.register_interruptible_fn(
             "tools",
             wait_command::NAME,
             "wait_command",
