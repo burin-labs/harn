@@ -30,12 +30,27 @@ use crate::value::VmError;
 mod nested;
 mod parent_environment;
 pub(super) mod private_temp;
+mod replay;
 mod self_confinement;
 pub(super) mod swiftpm;
 mod swiftpm_toolset;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
+
+pub(super) fn check_replay_supported() -> Result<(), VmError> {
+    if nested::process_is_sandboxed() {
+        return Err(super::sandbox_rejection(
+            "cannot replay commands in a moved workspace inside an inherited macOS sandbox; its isolated filesystem boundary cannot be applied".into(),
+        ));
+    }
+    if !Backend::filesystem_available() {
+        return Err(super::sandbox_rejection(
+            "cannot replay commands in a moved workspace without an available macOS filesystem sandbox".into(),
+        ));
+    }
+    Ok(())
+}
 
 pub(super) struct Backend;
 
@@ -151,6 +166,9 @@ fn wrap_with_sandbox_exec(
         );
     }
     parent_environment::protect(profile)?;
+    if super::replay::boundary().is_some() {
+        check_replay_supported()?;
+    }
     match nested::nesting(policy) {
         nested::Nesting::NotNested => {}
         // Already confined at least as strictly: macOS would refuse a second
@@ -506,10 +524,8 @@ fn render_profile_with_extra_read_roots(
     // competed with presets instead of beating them would never fire on the
     // paths it exists for.
     //
-    // `file-read*` covers metadata as well as data, so this also narrows the
-    // global `(allow file-read-metadata)` at the top of the profile. Without
-    // that, a denied path's existence and size would still leak to a child that
-    // cannot open it.
+    // Metadata has its own global grant, so append_read_denial names that
+    // operation explicitly as well as denying the read family.
     //
     // A read deny alone does not hold inside a writable root: the child could
     // rename the denied path, or any directory above it, and read it under the
@@ -520,9 +536,9 @@ fn render_profile_with_extra_read_roots(
     for root in read_deny_roots {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
             let escaped = sandbox_profile_escape(&path);
+            append_read_denial(&mut profile, &format!("(subpath \"{escaped}\")"));
             profile.push_str(&format!(
-                "(deny file-read* (subpath \"{escaped}\"))\n\
-                 (deny file-write-unlink (subpath \"{escaped}\"))\n"
+                "(deny file-write-unlink (subpath \"{escaped}\"))\n"
             ));
             pinned_ancestors.extend(
                 std::path::Path::new(&path)
@@ -559,7 +575,15 @@ fn render_profile_with_extra_read_roots(
             ));
         }
     }
+    replay::append_boundary(&mut profile);
     profile
+}
+
+fn append_read_denial(profile: &mut String, filter: &str) {
+    // An operation-specific metadata grant outranks a wildcard read denial.
+    profile.push_str(&format!(
+        "(deny file-read* {filter})\n(deny file-read-metadata {filter})\n"
+    ));
 }
 
 fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {

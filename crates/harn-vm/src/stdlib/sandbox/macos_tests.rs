@@ -1285,6 +1285,9 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
     std::fs::create_dir_all(&secrets).expect("secrets dir");
     let denied_file = secrets.join("id_ed25519");
     std::fs::write(&denied_file, "NOT-A-REAL-KEY\n").expect("dummy key");
+    let alias = home_path.join("secrets-alias");
+    std::os::unix::fs::symlink(&secrets, &alias).expect("alias denied directory");
+    let alias_file = alias.join("id_ed25519");
 
     // The control, deliberately inside the SAME granted root.
     let allowed_file = home_path.join("readable.txt");
@@ -1304,6 +1307,13 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
             .output()
             .expect("run read probe")
     };
+    let metadata = |profile: &str, path: &std::path::Path| {
+        Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", profile, "--", "/usr/bin/stat", "-f", "%z"])
+            .arg(path)
+            .output()
+            .expect("run metadata probe")
+    };
 
     // Control first: the grant works, so a later refusal is attributable.
     let control = read(&with_denial, &allowed_file);
@@ -1313,12 +1323,26 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
              below proves nothing: {}",
         String::from_utf8_lossy(&control.stderr)
     );
+    let control_metadata = metadata(&with_denial, &allowed_file);
+    assert!(control_metadata.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&control_metadata.stdout).trim(),
+        "9"
+    );
 
     let denied = read(&with_denial, &denied_file);
     assert!(
         !denied.status.success(),
         "a denied file must be refused even though its parent root is granted; it was read: {}",
         String::from_utf8_lossy(&denied.stdout)
+    );
+    let denied_metadata = metadata(&with_denial, &denied_file);
+    let denied_alias_metadata = metadata(&with_denial, &alias_file);
+    assert!(
+        !denied_metadata.status.success() && !denied_alias_metadata.status.success(),
+        "a denied file's metadata must also be refused through either path: direct={:?}, alias={:?}",
+        String::from_utf8_lossy(&denied_metadata.stdout),
+        String::from_utf8_lossy(&denied_alias_metadata.stdout),
     );
 
     // Revert the fix: same policy, same files, denial removed. If this does
@@ -1332,5 +1356,17 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
         "with the denial removed the same file must become readable, which is what proves \
              the refusal was the denylist and not an unrelated accident: {}",
         String::from_utf8_lossy(&ungated.stderr)
+    );
+    let ungated_metadata = metadata(&without_denial, &denied_file);
+    assert!(ungated_metadata.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&ungated_metadata.stdout).trim(),
+        "15"
+    );
+    let ungated_alias_metadata = metadata(&without_denial, &alias_file);
+    assert!(ungated_alias_metadata.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&ungated_alias_metadata.stdout).trim(),
+        "15"
     );
 }
