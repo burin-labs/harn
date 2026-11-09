@@ -20,6 +20,9 @@ pipeline test_workspace_bootstrap_receives_authenticated_bounded_setup_policy(ha
     yaml_parse(harness.fs.read_text("../../.github/workflows/ci.yml")),
     schema_of(WorkspaceWorkflow),
   )
+  const attempts = action.inputs["max-attempts"]?.default
+  const delay = action.inputs["retry-delay-seconds"]?.default
+  assert(attempts != nil && delay != nil, "the owning retry defaults must be measured")
   let measured = 0
   for (_, job) in iter(workflow.jobs) {
     for step in job.steps ?? [] {
@@ -27,11 +30,8 @@ pipeline test_workspace_bootstrap_receives_authenticated_bounded_setup_policy(ha
         measured = measured + 1
         const environment = step.env ?? {}
         assert_eq(environment["HARN_BOOTSTRAP_TOKEN"], r"${{ github.token }}")
-        assert_eq(environment["HARN_BOOTSTRAP_MAX_ATTEMPTS"], action.inputs["max-attempts"].default)
-        assert_eq(
-          environment["HARN_BOOTSTRAP_RETRY_DELAY_SECONDS"],
-          action.inputs["retry-delay-seconds"].default,
-        )
+        assert_eq(environment["HARN_BOOTSTRAP_MAX_ATTEMPTS"], attempts)
+        assert_eq(environment["HARN_BOOTSTRAP_RETRY_DELAY_SECONDS"], delay)
       }
     }
   }
