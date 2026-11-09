@@ -323,6 +323,37 @@ fn test_multiline_string_escaped_dollar_before_interpolation() {
 }
 
 #[test]
+fn test_multiline_interpolation_keeps_spacing_and_newlines_around_expressions() {
+    let expr = |name: &str| StringSegment::Expression(name.into(), 0, 0);
+    let lex = |src: &str| match Lexer::new(src).tokenize().unwrap().remove(0).kind {
+        TokenKind::InterpolatedString(segs) => segs
+            .into_iter()
+            .map(|seg| match seg {
+                StringSegment::Expression(e, _, _) => StringSegment::Expression(e, 0, 0),
+                literal => literal,
+            })
+            .collect::<Vec<_>>(),
+        other => panic!("expected interpolated string, got {other:?}"),
+    };
+    assert_eq!(
+        lex("\"\"\"\n  Hello ${name} and welcome\n  \"\"\""),
+        vec![
+            StringSegment::Literal("Hello ".into()),
+            expr("name"),
+            StringSegment::Literal(" and welcome".into())
+        ]
+    );
+    assert_eq!(
+        lex("\"\"\"\n  ${a} ${b}\n  \"\"\""),
+        vec![expr("a"), StringSegment::Literal(" ".into()), expr("b")]
+    );
+    assert_eq!(
+        lex("\"\"\"\n  first\n  ${x}\n  \"\"\""),
+        vec![StringSegment::Literal("first\n".into()), expr("x")]
+    );
+}
+
+#[test]
 fn test_multiline_string_escaped_dollar_without_interpolation() {
     let mut lexer = Lexer::new("\"\"\"\n  hi \\${VAR}\n\"\"\"");
     let tokens = lexer.tokenize().unwrap();
