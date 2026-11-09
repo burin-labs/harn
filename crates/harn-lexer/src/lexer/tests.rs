@@ -351,6 +351,7 @@ fn test_multiline_interpolation_keeps_spacing_and_newlines_around_expressions() 
         lex("\"\"\"\n  first\n  ${x}\n  \"\"\""),
         vec![StringSegment::Literal("first\n".into()), expr("x")]
     );
+    assert_eq!(lex("\"\"\"\n${x}\n  \"\"\""), vec![expr("x")]);
 }
 
 #[test]

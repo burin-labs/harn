@@ -1047,7 +1047,7 @@ fn char_count(text: &str) -> usize {
 }
 /// Dedent a multi-line string body, interpolated or not: drop the common
 /// leading indent (spaces/tabs) of its non-blank lines, blank whitespace-only
-/// lines, and drop the trailing newline before the closing quotes. Indent is
+/// lines (so the closing quotes' indentation is never content), and drop the trailing newline before the closing quotes. Indent is
 /// judged per source line, so literal text after `${...}` continues its line
 /// and keeps its spacing; a line that starts with `${...}` has no indent.
 fn dedent_segments(segments: Vec<StringSegment>) -> Vec<StringSegment> {
@@ -1082,7 +1082,7 @@ fn dedent_segments(segments: Vec<StringSegment>) -> Vec<StringSegment> {
     if let Some(indent) = lines.iter().filter_map(|line| indent_of(line)).min() {
         for line in &mut lines {
             match indent_of(line) {
-                None if indent > 0 => line.clear(),
+                None => line.clear(),
                 Some(_) if indent > 0 => {
                     if let Some(StringSegment::Literal(text)) = line.first_mut() {
                         // Indent is ASCII space/tab, so this is a char boundary.
