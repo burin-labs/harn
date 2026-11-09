@@ -363,7 +363,6 @@ const KEY_REJECTION_PHRASES: &[&str] = &[
     "incorrect api key",
     "api key not valid",
     "api_key_invalid",
-    "authentication_error",
     "revoked api key",
     "api key revoked",
     "api key has been revoked",

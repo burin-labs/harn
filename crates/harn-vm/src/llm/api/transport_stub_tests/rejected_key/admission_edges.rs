@@ -2,7 +2,18 @@ use super::*;
 
 #[test]
 fn revoked_model_access_does_not_reject_the_key_for_other_models() {
-    assert_model_access_refusal("Access to model forbidden-model has been revoked");
+    assert_model_access_refusal(
+        "Access to model forbidden-model has been revoked",
+        "permission_error",
+    );
+}
+
+#[test]
+fn generic_auth_error_does_not_reject_the_key_for_other_models() {
+    assert_model_access_refusal(
+        "Project does not have access to model forbidden-model",
+        "authentication_error",
+    );
 }
 
 #[test]
@@ -18,7 +29,11 @@ fn explicitly_revoked_api_key_blocks_other_models() {
         .unwrap();
     runtime.block_on(async {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let server = model_access_stub(seen.clone(), "This API key has been revoked");
+        let server = model_access_stub(
+            seen.clone(),
+            "This API key has been revoked",
+            "permission_error",
+        );
         install(server.addr(), crate::llm_config::AuthEnv::None);
         let mut opts = options("revoked-key");
         opts.model = "forbidden-model".into();

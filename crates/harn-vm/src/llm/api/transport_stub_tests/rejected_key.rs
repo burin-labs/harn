@@ -220,7 +220,11 @@ fn rejected_key_is_refused_locally_until_its_retry_window_passes() {
 
 /// Answers 403 to requests for `forbidden-model` and serves every other model,
 /// recording each request's model.
-fn model_access_stub(seen: Arc<Mutex<Vec<String>>>, message: &'static str) -> LlmStub {
+fn model_access_stub(
+    seen: Arc<Mutex<Vec<String>>>,
+    message: &'static str,
+    error_type: &'static str,
+) -> LlmStub {
     spawn_llm_stub_many("model access", 4, move |_, stream| {
         let (_, request) = ollama_openai_compat::read_http_request(stream);
         let model = request["model"].as_str().unwrap_or_default().to_string();
@@ -228,7 +232,7 @@ fn model_access_stub(seen: Arc<Mutex<Vec<String>>>, message: &'static str) -> Ll
             (
                 "403 Forbidden",
                 json!({"error":{"message":message,
-                    "type":"permission_error"}})
+                    "type":error_type}})
                 .to_string(),
             )
         } else {
@@ -248,10 +252,13 @@ fn model_access_stub(seen: Arc<Mutex<Vec<String>>>, message: &'static str) -> Ll
 
 #[test]
 fn a_model_access_refusal_blocks_only_that_model_for_the_key() {
-    assert_model_access_refusal("Project does not have access to model forbidden-model");
+    assert_model_access_refusal(
+        "Project does not have access to model forbidden-model",
+        "permission_error",
+    );
 }
 
-fn assert_model_access_refusal(message: &'static str) {
+fn assert_model_access_refusal(message: &'static str, error_type: &'static str) {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
@@ -263,7 +270,7 @@ fn assert_model_access_refusal(message: &'static str) {
         .unwrap();
     runtime.block_on(async {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let server = model_access_stub(seen.clone(), message);
+        let server = model_access_stub(seen.clone(), message, error_type);
         install(server.addr(), crate::llm_config::AuthEnv::None);
         let on_model = |model: &str| LlmCallOptions {
             model: model.into(),
