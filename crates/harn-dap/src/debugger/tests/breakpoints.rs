@@ -166,11 +166,12 @@ fn test_triggered_breakpoint_skipped_until_trigger_fires() {
         "dep must arm after trigger fires"
     );
 
-    // And stay armed even after enter_running would reset hit counts
-    // within the same run — as long as armed_breakpoints retains its
-    // record. enter_running itself clears armed; that's by design.
+    // A Continue or step re-enters running; arming lasts the whole session.
     dbg.enter_running();
-    assert!(!dbg.armed_breakpoints.contains_key(&dep_id), "reset on run");
+    assert!(
+        dbg.armed_breakpoints.contains_key(&dep_id),
+        "armed across resume"
+    );
 }
 
 #[test]
@@ -223,6 +224,14 @@ fn test_set_function_breakpoints_replaces_prior_list_and_clears_hit_counts() {
     if let Some(fb) = dbg.function_breakpoints.first() {
         dbg.bp_hit_counts.insert(fb.id, 7);
     }
+    // A line breakpoint shares the id space; its count must survive.
+    dbg.handle_message(make_request(
+        3,
+        "setBreakpoints",
+        Some(json!({ "source": {"path": "a.harn"}, "breakpoints": [{"line": 4}] })),
+    ));
+    let line_id = dbg.breakpoints[0].id;
+    dbg.bp_hit_counts.insert(line_id, 3);
     dbg.handle_message(make_request(
         2,
         "setFunctionBreakpoints",
@@ -230,10 +239,34 @@ fn test_set_function_breakpoints_replaces_prior_list_and_clears_hit_counts() {
     ));
     assert_eq!(dbg.function_breakpoints.len(), 1);
     assert_eq!(dbg.function_breakpoints[0].name, "gamma");
-    assert!(
-        dbg.bp_hit_counts.is_empty(),
-        "hit counts must reset on edit"
+    assert_eq!(
+        dbg.bp_hit_counts.keys().copied().collect::<Vec<_>>(),
+        vec![line_id],
+        "function edits drop only stale function-breakpoint counts"
     );
+}
+
+#[test]
+fn test_set_breakpoints_answers_only_the_requested_source() {
+    let mut dbg = Debugger::new();
+    let set = |dbg: &mut Debugger, seq, path: &str, lines: &[i64]| {
+        let bps: Vec<_> = lines.iter().map(|line| json!({ "line": line })).collect();
+        dbg.handle_message(make_request(
+            seq,
+            "setBreakpoints",
+            Some(json!({ "source": {"path": path}, "breakpoints": bps })),
+        ))
+    };
+    set(&mut dbg, 1, "a.harn", &[5, 10]);
+    let responses = set(&mut dbg, 2, "b.harn", &[3, 7]);
+    let body = responses[0].body.as_ref().expect("body");
+    let lines: Vec<_> = body["breakpoints"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|bp| bp["line"].as_i64().unwrap())
+        .collect();
+    assert_eq!(lines, vec![3, 7]);
 }
 
 #[test]

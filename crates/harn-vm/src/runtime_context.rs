@@ -75,6 +75,14 @@ pub(crate) fn current_agent_run_ref() -> Option<crate::agent_events::AgentRunRef
     Some(crate::agent_events::AgentRunRef { session_id, run_id })
 }
 
+/// The delegated worker running the current code, if any. Same resolution as
+/// the `worker_id` field of [`runtime_context_value`].
+pub(crate) fn current_worker_id() -> Option<String> {
+    current_overlay().worker_id.or_else(|| {
+        crate::orchestration::current_mutation_session().and_then(|session| session.worker_id)
+    })
+}
+
 pub fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let overlay = current_overlay();
     let mutation = crate::orchestration::current_mutation_session();

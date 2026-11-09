@@ -73,6 +73,8 @@ runs:
         HARN_BOOTSTRAP_REPOSITORY: ${{ inputs.repository }}
         HARN_BOOTSTRAP_CACHE_DIR: ${{ inputs.cache-dir }}
         HARN_BOOTSTRAP_INSTALL_DIR: ${{ inputs.install-dir }}
+        HARN_BOOTSTRAP_MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        HARN_BOOTSTRAP_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
         HARN_BOOTSTRAP_TOKEN: ${{ inputs.token }}
       run: >-
         sh "$GITHUB_ACTION_PATH/../../../scripts/bootstrap-harn.sh"

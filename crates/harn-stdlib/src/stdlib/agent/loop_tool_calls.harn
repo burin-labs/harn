@@ -685,7 +685,7 @@ pub fn __agent_loop_await_resumption(
   parsed: dict,
   opts: any,
 ) {
-  const worker = __agent_loop_current_worker(agent, runtime)
+  const worker = __agent_loop_current_worker(agent)
   if worker == nil {
     return __agent_loop_await_resumption_top_level(agent, session, iteration, call, parsed, opts)
   }

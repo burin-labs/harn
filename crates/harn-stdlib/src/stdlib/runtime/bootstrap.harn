@@ -1,5 +1,11 @@
 import { help_requested, parse_typed, parser, render_help } from "std/cli/argparse"
-import { RuntimeInstallRequest, install_runtime, runtime_plan } from "./install.harn"
+import {
+  DEFAULT_ATTEMPTS,
+  DEFAULT_DELAY_MS,
+  RuntimeInstallRequest,
+  install_runtime,
+  runtime_plan,
+} from "./install.harn"
 
 type BootstrapOptions = {
   mode?: string,
@@ -41,6 +47,16 @@ fn arguments() {
 
 fn setting(env: HarnessEnv, name: string, explicit: string? = nil) -> string {
   return trim(explicit ?? env.get("HARN_BOOTSTRAP_" + name) ?? "")
+}
+
+fn optional_int(env: HarnessEnv, name: string) -> int? {
+  const raw = setting(env, name)
+  if raw == "" {
+    return nil
+  }
+  const value = to_int(raw)
+  require value != nil, "invalid HARN_BOOTSTRAP_" + name
+  return value
 }
 
 fn output(fs: HarnessFs, path: string, name: string, value: string) {
@@ -133,6 +149,8 @@ fn resolve_request(harness: Harness, cli: BootstrapOptions) -> RuntimeInstallReq
       path_join(cache, "installs", version, target)
     },
   )
+  const attempts = cli.max_attempts ?? optional_int(harness.env, "MAX_ATTEMPTS")
+  const delay_seconds = cli.retry_delay_seconds ?? optional_int(harness.env, "RETRY_DELAY_SECONDS")
   const request: RuntimeInstallRequest = {
     version: version,
     target: target,
@@ -141,10 +159,12 @@ fn resolve_request(harness: Harness, cli: BootstrapOptions) -> RuntimeInstallReq
     install_dir: install_dir,
     installer: harness.env.get("HARN_EXT_BOOTSTRAP_INSTALLER") ?? "harn",
     token: harness.env.get("HARN_EXT_BOOTSTRAP_TOKEN") ?? "",
-    attempts: cli.max_attempts ?? to_int(harness.env.get("HARN_BOOTSTRAP_MAX_ATTEMPTS") ?? "12"),
-    delay_ms: (cli.retry_delay_seconds
-        ?? to_int(harness.env.get("HARN_BOOTSTRAP_RETRY_DELAY_SECONDS") ?? "10"))
-      * 1000,
+    attempts: attempts ?? DEFAULT_ATTEMPTS,
+    delay_ms: if delay_seconds == nil {
+      DEFAULT_DELAY_MS
+    } else {
+      delay_seconds * 1000
+    },
     offline: cli.offline
       || ["1", "true"].contains(harness.env.get("HARN_EXT_BOOTSTRAP_OFFLINE") ?? ""),
   }

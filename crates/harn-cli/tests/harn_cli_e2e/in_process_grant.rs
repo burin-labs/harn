@@ -3,8 +3,8 @@
 //!
 //! One real `harn run` per case against a local provider that answers only
 //! when the bearer is the granted credential. The script makes a model call,
-//! then runs `env` as a child and reports, by name only, whether the
-//! credential's variable reached it. The session-scoped grant is the control:
+//! then runs a child that reports only whether the exact credential reached
+//! its own environment. The session-scoped grant is the control:
 //! the same child sees the variable there, so the in-process result is the
 //! grant's audience and not a child that sees nothing.
 
@@ -20,6 +20,36 @@ const LAUNCHER_VAR: &str = "PROBE_LAUNCHER_PROVIDER_SECRET";
 const EXPOSED_VAR: &str = "PROBE_PROVIDER_KEY";
 const CREDENTIAL: &str = "probe-credential-value";
 
+#[test]
+#[ignore = "private child entrypoint exercised by the provider grant controls"]
+fn credential_child_probe() {
+    let credential = std::env::var(EXPOSED_VAR).ok();
+    println!("child_sees_{EXPOSED_VAR}={}", credential.is_some());
+    println!(
+        "child_sees_credential_value={}",
+        credential.as_deref() == Some(CREDENTIAL)
+    );
+}
+
+#[test]
+fn child_probe_distinguishes_a_wrong_value_from_the_granted_credential() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "in_process_grant::credential_child_probe",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env(EXPOSED_VAR, "different-fixture-value")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(&format!("child_sees_{EXPOSED_VAR}=true")));
+    assert!(stdout.contains("child_sees_credential_value=false"));
+    assert!(!stdout.contains("different-fixture-value"));
+}
+
 struct Case {
     authorized_calls: usize,
     stdout: String,
@@ -32,11 +62,11 @@ async fn run_case(grant_suffix: &'static str) -> Case {
 }
 
 async fn run_case_with_source(grant_suffix: &'static str, parent_store: bool) -> Case {
-    run_case_with_owner(grant_suffix, parent_store, false).await
+    run_case_with_owner(Some(grant_suffix), parent_store, false).await
 }
 
 async fn run_case_with_owner(
-    grant_suffix: &'static str,
+    grant_suffix: Option<&'static str>,
     parent_store: bool,
     contained: bool,
 ) -> Case {
@@ -129,15 +159,22 @@ context_window = 8192
     )
     .unwrap();
     let script = root.path().join("probe.harn");
+    let probe_executable =
+        serde_json::to_string(std::env::current_exe().unwrap().to_str().unwrap()).unwrap();
+    let provider_call = if grant_suffix.is_some() {
+        r#"harness.llm.call("hi", nil, {provider: "probe", model: "probe-model"})
+  harness.stdio.log("llm_call=completed")"#
+    } else {
+        ""
+    };
     std::fs::write(
         &script,
         format!(
             r#"fn main(harness: Harness) {{
-  harness.llm.call("hi", nil, {{provider: "probe", model: "probe-model"}})
-  harness.stdio.log("llm_call=completed")
-  const child = harness.process.exec("env").stdout
-  harness.stdio.log("child_sees_{EXPOSED_VAR}=" + to_string(child.contains("{EXPOSED_VAR}=")))
-  harness.stdio.log("child_sees_credential_value=" + to_string(child.contains("{CREDENTIAL}")))
+  {provider_call}
+  const child = harness.process.exec({probe_executable}, "--exact", "in_process_grant::credential_child_probe", "--ignored", "--nocapture")
+  assert_eq(child.exit_code, 0)
+  harness.stdio.log(child.stdout)
 }}
 "#
         ),
@@ -149,7 +186,13 @@ context_window = 8192
     } else {
         format!("env:{LAUNCHER_VAR}")
     };
-    let grant = format!("probe={source},expose={EXPOSED_VAR}{grant_suffix}");
+    let mut arguments = vec!["run".to_string()];
+    if let Some(suffix) = grant_suffix {
+        arguments.extend([
+            "--grant".to_string(),
+            format!("probe={source},expose={EXPOSED_VAR}{suffix}"),
+        ]);
+    }
     let output = if parent_store {
         use harn_vm::secrets::{
             MemorySecretProvider, ParentSecretHandoff, SecretId, PARENT_SECRET_HANDOFF_OPTION,
@@ -170,7 +213,7 @@ context_window = 8192
             .env("HARN_PROVIDERS_CONFIG", path.join("providers.toml"))
             // A received store must bypass ambient backend construction entirely.
             .env("HARN_SECRET_PROVIDERS", "must-not-be-consulted")
-            .args(["run".to_string(), "--grant".into(), grant])
+            .args(&arguments)
             .arg(path.join("probe.harn"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -212,7 +255,7 @@ context_window = 8192
                 .env_remove("HARN_LLM_CALLS_DISABLED")
                 .env(LAUNCHER_VAR, CREDENTIAL)
                 .env_remove(EXPOSED_VAR)
-                .args(["run", "--grant", &grant])
+                .args(&arguments)
                 .arg(path.join("probe.harn"))
                 .output()
                 .unwrap()
@@ -320,7 +363,7 @@ fn contained_parent_guardian_fixture() {
 #[cfg(all(unix, feature = "hostlib"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parent_store_authenticates_through_real_owner_death_containment() {
-    let case = run_case_with_owner(",to=in_process", true, true).await;
+    let case = run_case_with_owner(Some(",to=in_process"), true, true).await;
     assert_eq!(case.authorized_calls, 1, "{}", case.stdout);
     assert!(
         case.stdout.contains("llm_call=completed"),
@@ -420,5 +463,22 @@ async fn parent_store_session_grant_is_the_positive_child_exposure_control() {
     assert!(
         case.raw_child_environment_contains_credential == Some(false),
         "an explicit grandchild grant must not put the credential in the CLI environment"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_parent_secret_without_a_grant_reaches_no_child() {
+    let case = run_case_with_owner(None, true, false).await;
+    assert_eq!(case.authorized_calls, 0, "{}", case.stdout);
+    assert!(
+        case.stdout
+            .contains(&format!("child_sees_{EXPOSED_VAR}=false")),
+        "{}",
+        case.stdout
+    );
+    assert!(
+        case.stdout.contains("child_sees_credential_value=false"),
+        "{}",
+        case.stdout
     );
 }

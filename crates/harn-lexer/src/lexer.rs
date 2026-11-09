@@ -662,30 +662,7 @@ impl<'src> Lexer<'src> {
                         if !value.is_empty() {
                             segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                         }
-                        // Strip the common indent across all literal segments together so
-                        // interpolation boundaries don't produce uneven dedenting.
-                        let full_text: String = segments
-                            .iter()
-                            .map(|seg| match seg {
-                                StringSegment::Literal(s) => s.as_str(),
-                                _ => "",
-                            })
-                            .collect();
-                        let indent = common_indent(&full_text);
-                        let segments = if indent > 0 {
-                            let stripped_segments = segments
-                                .into_iter()
-                                .map(|seg| match seg {
-                                    StringSegment::Literal(s) => {
-                                        StringSegment::Literal(strip_indent(&s, indent))
-                                    }
-                                    other => other,
-                                })
-                                .collect();
-                            strip_trailing_newline_segments(stripped_segments)
-                        } else {
-                            strip_trailing_newline_segments(segments)
-                        };
+                        let segments = dedent_segments(segments);
                         let mut span = Span::with_offsets(
                             start_byte,
                             self.byte_pos(),
@@ -698,7 +675,13 @@ impl<'src> Lexer<'src> {
                             span,
                         ));
                     }
-                    let stripped = strip_common_indent(&value);
+                    let stripped: String = dedent_segments(vec![StringSegment::Literal(value)])
+                        .into_iter()
+                        .map(|seg| match seg {
+                            StringSegment::Literal(text) => text,
+                            _ => unreachable!("dedent never invents an expression"),
+                        })
+                        .collect();
                     let mut span =
                         Span::with_offsets(start_byte, self.byte_pos(), start.line, start.column);
                     span.end_line = self.line;
@@ -1062,75 +1045,71 @@ fn char_count(text: &str) -> usize {
         text.chars().count()
     }
 }
-/// Strip common leading whitespace from multi-line strings.
-fn strip_common_indent(text: &str) -> String {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let content_lines: Vec<&&str> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
-
-    if content_lines.is_empty() {
-        return text.to_string();
-    }
-
-    let min_indent = content_lines
-        .iter()
-        .map(|line| line.chars().take_while(|c| *c == ' ' || *c == '\t').count())
-        .min()
-        .unwrap_or(0);
-
-    if min_indent == 0 {
-        return text.strip_suffix('\n').unwrap_or(text).to_string();
-    }
-
-    #[expect(
-        clippy::string_slice,
-        reason = "skip counts leading ASCII space/tab chars, so it is a char-boundary byte offset"
-    )]
-    let stripped: String = lines
-        .iter()
-        .map(|line| {
-            if line.trim().is_empty() {
-                ""
-            } else {
-                let skip = min_indent.min(line.len());
-                &line[skip..]
+/// Dedent a multi-line string body, interpolated or not: drop the common
+/// leading indent (spaces/tabs) of its non-blank lines, blank whitespace-only
+/// lines (so the closing quotes' indentation is never content), and drop the trailing newline before the closing quotes. Indent is
+/// judged per source line, so literal text after `${...}` continues its line
+/// and keeps its spacing; a line that starts with `${...}` has no indent.
+fn dedent_segments(segments: Vec<StringSegment>) -> Vec<StringSegment> {
+    let mut lines: Vec<Vec<StringSegment>> = vec![Vec::new()];
+    for seg in segments {
+        match seg {
+            StringSegment::Literal(text) => {
+                for (i, part) in text.split('\n').enumerate() {
+                    if i > 0 {
+                        lines.push(Vec::new());
+                    }
+                    if !part.is_empty() {
+                        lines
+                            .last_mut()
+                            .expect("non-empty")
+                            .push(StringSegment::Literal(part.into()));
+                    }
+                }
             }
-        })
-        .collect::<Vec<&str>>()
-        .join("\n");
-
-    stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
-}
-
-/// Compute the common leading indent (spaces/tabs) across non-empty lines.
-fn common_indent(text: &str) -> usize {
-    text.split('\n')
-        .filter(|l| !l.trim().is_empty())
-        .map(|line| line.chars().take_while(|c| *c == ' ' || *c == '\t').count())
-        .min()
-        .unwrap_or(0)
-}
-
-/// Strip up to `n` leading whitespace characters from each line and remove trailing newline.
-fn strip_indent(text: &str, n: usize) -> String {
-    let lines: Vec<&str> = text.split('\n').collect();
-    #[expect(
-        clippy::string_slice,
-        reason = "skip counts leading ASCII space/tab chars, so it is a char-boundary byte offset"
-    )]
-    let stripped: String = lines
-        .iter()
-        .map(|line| {
-            if line.trim().is_empty() {
-                ""
-            } else {
-                let ws = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
-                let skip = n.min(ws);
-                &line[skip..]
+            expr => lines.last_mut().expect("non-empty").push(expr),
+        }
+    }
+    // Leading indent of a non-blank line; `None` for a blank one.
+    let indent_of = |line: &[StringSegment]| match line {
+        [] => None,
+        [StringSegment::Literal(text)] if text.trim().is_empty() => None,
+        [StringSegment::Literal(text), ..] => {
+            Some(text.chars().take_while(|c| *c == ' ' || *c == '\t').count())
+        }
+        _ => Some(0),
+    };
+    if let Some(indent) = lines.iter().filter_map(|line| indent_of(line)).min() {
+        for line in &mut lines {
+            match indent_of(line) {
+                None => line.clear(),
+                Some(_) if indent > 0 => {
+                    if let Some(StringSegment::Literal(text)) = line.first_mut() {
+                        // Indent is ASCII space/tab, so this is a char boundary.
+                        text.drain(..indent.min(text.len()));
+                    }
+                }
+                _ => {}
             }
-        })
-        .collect::<Vec<&str>>()
-        .join("\n");
-    stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
+        }
+        if lines.len() > 1 && lines.last().is_some_and(Vec::is_empty) {
+            lines.pop();
+        }
+    }
+    let mut out: Vec<StringSegment> = Vec::new();
+    for (i, line) in lines.into_iter().enumerate() {
+        let newline = (i > 0).then(|| StringSegment::Literal("\n".into()));
+        for seg in newline.into_iter().chain(line) {
+            match (out.last_mut(), seg) {
+                (Some(StringSegment::Literal(prev)), StringSegment::Literal(text)) => {
+                    prev.push_str(&text);
+                }
+                (_, StringSegment::Literal(text)) if text.is_empty() => {}
+                (_, seg) => out.push(seg),
+            }
+        }
+    }
+    out
 }
 
 /// Escape `value` so it round-trips as the body of a double-quoted Harn
@@ -1161,14 +1140,5 @@ pub fn escape_string_literal(value: &str) -> String {
 
 /// Remove a trailing-newline-only literal segment (for multiline strings
 /// where the last segment before `"""` is just whitespace).
-fn strip_trailing_newline_segments(mut segments: Vec<StringSegment>) -> Vec<StringSegment> {
-    if let Some(StringSegment::Literal(s)) = segments.last() {
-        if s.trim().is_empty() {
-            segments.pop();
-        }
-    }
-    segments
-}
-
 #[cfg(test)]
 mod tests;

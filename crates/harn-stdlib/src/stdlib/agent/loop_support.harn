@@ -531,18 +531,17 @@ pub fn __agent_loop_finish_run(
   return __agent_loop_failed_outcome(agent, session, state, unwrap_err(run))
 }
 
-pub fn __agent_loop_current_worker(agents: HarnessAgent, runtime: HarnessRuntime) {
-  const ctx = runtime.context()
-  const worker_id = ctx?.worker_id
-  if type_of(worker_id) != "string" || worker_id == "" {
-    return nil
-  }
-  for worker in list_agents(agents) {
-    if worker?.id == worker_id {
-      return worker
-    }
-  }
-  return nil
+/**
+ * The worker record of the loop's own worker, or nil outside a worker. This is
+ * loop bookkeeping, so it reads only the caller's own record: listing every
+ * delegated worker would need a worker capability that the tool ceiling a
+ * worker inherits does not grant.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __agent_loop_current_worker(agent: HarnessAgent) -> dict? {
+  return agent.current_worker()
 }
 
 pub fn __agent_loop_suspend_reminder_body(reason: string) {
@@ -566,7 +565,7 @@ pub fn __agent_loop_suspend_checkpoint(
   session: dict,
   iteration: int,
 ) {
-  const worker = __agent_loop_current_worker(agent, runtime)
+  const worker = __agent_loop_current_worker(agent)
   if worker == nil || worker?.status != "suspended" {
     return nil
   }

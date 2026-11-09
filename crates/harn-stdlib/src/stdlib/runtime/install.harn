@@ -6,6 +6,11 @@ import { compare_release } from "std/semver"
  */
 const XZ_FIRST_RELEASE = "0.10.179"
 
+/** Default retry budget while release assets are still publishing. */
+pub const DEFAULT_ATTEMPTS: int = 12
+
+pub const DEFAULT_DELAY_MS: int = 10000
+
 pub type RuntimeInstallRequest = {
   version: string,
   target: string,
@@ -152,9 +157,10 @@ fn expected_checksum(
   }
   const options = {timeout_ms: 60000}
   const pin = path_join(dirname(metadata), asset + ".sha256")
-  const attempts = request.attempts ?? 12
+  const attempts = request.attempts ?? DEFAULT_ATTEMPTS
+  const delay_ms = request.delay_ms ?? DEFAULT_DELAY_MS
   let last_failure = ""
-  require attempts > 0 && (request.delay_ms ?? 10000) >= 0, "invalid runtime retry budget"
+  require attempts > 0 && delay_ms >= 0, "invalid runtime retry budget"
   for attempt in range(0, attempts) {
     const manifest = try {
       const response = harness.net.request("GET", base + "SHA256SUMS", options)
@@ -215,7 +221,7 @@ fn expected_checksum(
     }
     last_failure = "${unwrap_err(manifest)}; ${unwrap_err(api_verification)}"
     if attempt + 1 < attempts {
-      harness.clock.sleep_ms(request.delay_ms ?? 10000)
+      harness.clock.sleep_ms(delay_ms)
     }
   }
   throw "no runtime verification source after " + to_string(attempts) + " attempts: " + last_failure
@@ -343,7 +349,10 @@ pub fn install_runtime(harness: Harness, request: RuntimeInstallRequest) -> Runt
   const verified = expected_checksum(harness, selected, metadata, base, asset)
   const checksum = verified.checksum
   const options = {
-    retry: {max: request.attempts ?? 12, backoff_ms: request.delay_ms ?? 10000},
+    retry: {
+      max: request.attempts ?? DEFAULT_ATTEMPTS,
+      backoff_ms: request.delay_ms ?? DEFAULT_DELAY_MS,
+    },
     timeout_ms: 60000,
     max_response_bytes: 1073741824,
   }

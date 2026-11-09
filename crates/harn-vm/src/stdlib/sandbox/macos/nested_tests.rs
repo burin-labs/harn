@@ -316,6 +316,34 @@ fn an_outer_sandbox_must_pin_a_denial_inside_a_writable_root() {
     );
 }
 
+#[test]
+fn an_outer_metadata_denial_cannot_substitute_for_a_read_denial() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let nested = run_nested(
+        "stdlib::sandbox::macos::nested::tests::an_outer_metadata_denial_cannot_substitute_for_a_read_denial",
+        Case::DenyInside,
+        |policy, exe| {
+            harn_profile(policy, exe)
+                .lines()
+                .filter(|line| !line.starts_with("(deny file-read* "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        },
+    );
+    if nested.refused_on_unsupported_host() {
+        return;
+    }
+    assert_eq!(nested.report["spawned"], false, "{}", nested.report);
+    let error = nested.report["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("reads of") && error.contains(DENIED_FILE),
+        "{error}"
+    );
+    assert!(!nested.inside_written && !nested.outside_written);
+}
+
 /// A denied path that does not exist yet cannot be measured against the outer
 /// sandbox, which answers "denied" for every absent path. The spawn is refused
 /// even under Harn's own pinned profile, rather than inherited on an answer

@@ -135,6 +135,25 @@ download() {
   case "$id" in ''|0|*[!0-9]*) echo 'invalid release asset ID' >&2; return 1;; esac
   fetch "$api/assets/$id" "$2" application/octet-stream
 }
+# The caller's HARN_BOOTSTRAP_MAX_ATTEMPTS budget covers the seed too, so a
+# transient release-host error is retried as often as the runtime install is.
+# Unset means one attempt; this script carries no default of its own.
+attempts=${HARN_BOOTSTRAP_MAX_ATTEMPTS:-1}
+delay=${HARN_BOOTSTRAP_RETRY_DELAY_SECONDS:-0}
+case "$attempts" in ''|*[!0-9]*|0) echo 'invalid HARN_BOOTSTRAP_MAX_ATTEMPTS' >&2; exit 1;; esac
+case "$delay" in ''|*[!0-9]*) echo 'invalid HARN_BOOTSTRAP_RETRY_DELAY_SECONDS' >&2; exit 1;; esac
+download_with_retry() {
+  attempt=1
+  until download "$1" "$2"; do
+    if [ "$attempt" -ge "$attempts" ]; then
+      echo "seed download failed after $attempts attempt(s): ${1##*/}" >&2
+      return 1
+    fi
+    echo "seed download failed (attempt $attempt/$attempts); retrying in ${delay}s" >&2
+    attempt=$((attempt + 1))
+    sleep "$delay"
+  done
+}
 digest() {
   # Hash standard input: with a file name, sha256sum escapes a Windows path and
   # prefixes the digest with a backslash.
@@ -167,7 +186,7 @@ if [ -f "$cache/SHA256SUMS" ] && [ -f "$cache/$asset" ]; then
 fi
 manifest_fetched=0
 if [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ] && [ "$cached_verified" != 1 ]; then
-  download "$base/SHA256SUMS" "$work/SHA256SUMS"
+  download_with_retry "$base/SHA256SUMS" "$work/SHA256SUMS"
   manifest_source=$work/SHA256SUMS
   manifest_fetched=1
 else
@@ -195,7 +214,7 @@ downloaded=0
 if [ -f "$cache/$asset" ]; then cp "$cache/$asset" "$work/$asset"; actual=$(digest "$work/$asset"); fi
 if [ "$actual" != "$expected" ]; then
   [ "$HARN_EXT_BOOTSTRAP_OFFLINE" != 1 ] || { echo 'offline seed archive unavailable or corrupt' >&2; exit 1; }
-  download "$base/$asset" "$work/$asset"
+  download_with_retry "$base/$asset" "$work/$asset"
   actual=$(digest "$work/$asset")
   downloaded=1
 fi
