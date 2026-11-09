@@ -444,6 +444,7 @@ const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &LIST_DIR_BUILTIN_DEF,
     &MKDIR_BUILTIN_DEF,
     &PATH_JOIN_BUILTIN_DEF,
+    &GLOB_MATCH_BUILTIN_DEF,
     &COPY_FILE_BUILTIN_DEF,
     &TEMP_DIR_BUILTIN_DEF,
     &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
@@ -1049,6 +1050,20 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::string(harn_kernel::pure::join_path_segments(
         args.iter().map(VmValue::display),
+    )))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "glob_match(pattern: string, candidate: string) -> bool",
+    category = "fs",
+    doc = "Match a candidate against a glob with the semantics capability policy uses for tool argument patterns: `*` and `?` also match `/`, `[...]` and `{a,b}` are supported, and a candidate equal to the pattern always matches."
+)]
+fn glob_match_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let pattern = args.first().map(VmValue::display).unwrap_or_default();
+    let candidate = args.get(1).map(VmValue::display).unwrap_or_default();
+    Ok(VmValue::Bool(crate::orchestration::glob_match(
+        &pattern, &candidate,
     )))
 }
 
