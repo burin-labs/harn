@@ -134,6 +134,7 @@ impl BranchHandle {
         relocated(&self.workspace, &self.recorded_workspace, &self.sources)
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn recorded_process_roots(&self) -> Vec<PathBuf> {
         let mut roots = self.recorded_workspaces();
         roots.extend(

@@ -16,6 +16,9 @@ use harn_vm::run_tape::{
 use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
 use harn_vm::value::VmError;
 
+#[cfg(target_os = "macos")]
+mod support;
+
 /// Recording and branch replay are process-global.
 static SERIAL: Mutex<()> = Mutex::new(());
 

@@ -3,24 +3,33 @@
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::VmError;
 
-fn roots() -> Option<(Vec<std::path::PathBuf>, std::path::PathBuf)> {
+pub(super) struct FilesystemBoundary {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub recorded: Vec<std::path::PathBuf>,
+    pub workspace: std::path::PathBuf,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub container: std::path::PathBuf,
+}
+
+pub(super) fn boundary() -> Option<FilesystemBoundary> {
     let branch = crate::run_tape::state_branch()?;
-    branch.relocated().then(|| {
-        (
-            branch
-                .recorded_process_roots()
-                .into_iter()
-                .filter(|root| root.as_path() != branch.workspace())
-                .collect(),
-            branch.workspace().to_path_buf(),
-        )
+    branch.relocated().then(|| FilesystemBoundary {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        recorded: branch
+            .recorded_process_roots()
+            .into_iter()
+            .filter(|root| root.as_path() != branch.workspace())
+            .collect(),
+        workspace: branch.workspace().to_path_buf(),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        container: branch.workspace_container().to_path_buf(),
     })
 }
 
 /// Narrow the existing child policy. Explicit host grants are projected;
 /// ambient mounts, package configuration and shared temporary trees are not.
 pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
-    let Some((_, workspace)) = roots() else {
+    let Some(FilesystemBoundary { workspace, .. }) = boundary() else {
         return policy;
     };
     policy.sandbox_profile = SandboxProfile::OsHardened;
@@ -75,20 +84,20 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
 
 /// Admission has no active command policy yet; check platform support only.
 pub(crate) fn check_platform_supported() -> Result<(), VmError> {
-    if !cfg!(target_os = "linux") {
+    if !cfg!(any(target_os = "linux", target_os = "macos")) {
         return Err(super::sandbox_rejection(
             "cannot replay commands in a moved workspace on this host; an enforced filesystem namespace is required".into(),
         ));
     }
+    #[cfg(target_os = "macos")]
+    super::macos::check_replay_supported()?;
     Ok(())
 }
 
 pub(crate) fn check_supported() -> Result<(), VmError> {
-    if roots().is_none() {
+    if boundary().is_none() {
         return Ok(());
     }
-    // Other renderers retain the refusal until their complete grant set is
-    // checked and the opaque-child negative control proves confinement.
     check_platform_supported()?;
     if super::active_sandbox_policy().is_none() || !super::active_backend_filesystem_available() {
         return Err(super::sandbox_rejection(
@@ -104,14 +113,17 @@ pub(crate) fn check_supported() -> Result<(), VmError> {
 /// stay outside the view, including ones created after this child starts.
 #[cfg(target_os = "linux")]
 pub(super) fn check_grant(path: &std::path::Path) -> Result<(), VmError> {
-    let Some((recorded, workspace)) = roots() else {
+    let Some(FilesystemBoundary {
+        recorded,
+        workspace,
+        container,
+    }) = boundary()
+    else {
         return Ok(());
     };
-    let branch = crate::run_tape::state_branch().expect("relocated branch");
-    let container = branch.workspace_container();
     let overlaps = |a: &std::path::Path, b: &std::path::Path| a.starts_with(b) || b.starts_with(a);
     if recorded.iter().any(|recorded| overlaps(path, recorded))
-        || (!path.starts_with(&workspace) && overlaps(path, container))
+        || (!path.starts_with(&workspace) && overlaps(path, &container))
     {
         return Err(super::sandbox_rejection(format!(
             "replay filesystem namespace cannot admit grant '{}' outside its isolated workspace",
@@ -122,11 +134,11 @@ pub(super) fn check_grant(path: &std::path::Path) -> Result<(), VmError> {
 }
 
 pub(super) fn workspace_roots() -> Option<Vec<std::path::PathBuf>> {
-    roots().map(|(_, workspace)| vec![workspace])
+    boundary().map(|boundary| vec![boundary.workspace])
 }
 
 pub(super) fn bind_command_cwd(command: &mut std::process::Command) -> Result<(), VmError> {
-    let Some((_, workspace)) = roots() else {
+    let Some(FilesystemBoundary { workspace, .. }) = boundary() else {
         return Ok(());
     };
     let cwd = command

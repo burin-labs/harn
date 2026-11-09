@@ -166,7 +166,7 @@ fn main(harness: Harness) {
         .1
         .as_deref()
         .is_some_and(|reason| reason.contains("background")));
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let isolated = super::dirs();
         let error = match start_branch(plan(tape, &isolated.workspace, 0)) {
@@ -299,7 +299,7 @@ fn moved_served_commands_keep_their_evidence_in_descendant_tapes() {
         effects,
         [Some(harn_vm::testbench::tape::CommandEffect::Requested)]
     );
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let descendant = dirs();
         let error = match start_branch(plan(tape, &descendant.workspace, 0)) {
@@ -313,7 +313,7 @@ fn moved_served_commands_keep_their_evidence_in_descendant_tapes() {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[test]
 fn moved_recorded_live_commands_refuse_before_arming_or_running_a_model() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
@@ -361,7 +361,7 @@ fn moved_recorded_live_commands_refuse_before_arming_or_running_a_model() {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[test]
 fn a_new_live_command_still_reaches_the_runtime_refusal() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
