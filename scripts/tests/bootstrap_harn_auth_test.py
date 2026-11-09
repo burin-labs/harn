@@ -47,6 +47,8 @@ class SeedTransportTests(unittest.TestCase):
         self.fail_all = False
         self.require_user_agent = False
         self.empty_default_agent = False
+        self.api_failures_remaining = 0
+        self.require_api_auth = False
         self.port = 0
         owner = self
 
@@ -63,6 +65,13 @@ class SeedTransportTests(unittest.TestCase):
                     return
                 api = self.path.startswith("/repos/burin-labs/harn/releases/")
                 direct = self.path.startswith("/burin-labs/harn/releases/download/")
+                if api and owner.require_api_auth and not authenticated:
+                    self.send_error(403)
+                    return
+                if api and owner.api_failures_remaining:
+                    owner.api_failures_remaining -= 1
+                    self.send_error(503)
+                    return
                 if owner.fail_all or (owner.fail_direct and direct):
                     self.send_error(503)
                     return
@@ -124,7 +133,7 @@ class SeedTransportTests(unittest.TestCase):
         tools.mkdir(parents=True, exist_ok=True)
         for name in ["sh", "mkdir", "mktemp", "dirname", "cat", "grep", "tr", "sort",
                      "head", "rm", "awk", "cmp", "cp", "ln", "mv", "tar", "chmod",
-                     "sha256sum", "shasum", "jq", "xz", "gzip"]:
+                     "sha256sum", "shasum", "jq", "xz", "gzip", "sleep"]:
             executable = shutil.which(name)
             if executable and not (tools / name).exists():
                 (tools / name).symlink_to(executable)
@@ -157,7 +166,7 @@ class SeedTransportTests(unittest.TestCase):
         wrapper.chmod(0o755)
         return tools
 
-    def run_seed(self, mode, authenticated=False, token=None):
+    def run_seed(self, mode, authenticated=False, token=None, attempts=1):
         environment = {
             "PATH": str(self.tools(mode)),
             "HOME": str(self.root / "home"),
@@ -165,6 +174,8 @@ class SeedTransportTests(unittest.TestCase):
             "HARN_EXT_BOOTSTRAP_SEED_CACHE": str(self.root / mode / "cache"),
             "HARN_EXT_BOOTSTRAP_SEED_VERSION": "9.8.7",
             "HARN_BOOTSTRAP_TOKEN": token if token is not None else TOKEN if authenticated else "",
+            "HARN_BOOTSTRAP_MAX_ATTEMPTS": str(attempts),
+            "HARN_BOOTSTRAP_RETRY_DELAY_SECONDS": "0",
         }
         result = subprocess.run(
             ["/bin/sh", str(BOOTSTRAP), "--seed-command", "--version"],
@@ -220,6 +231,34 @@ class SeedTransportTests(unittest.TestCase):
                     else:
                         self.assertTrue(all(row[0].startswith("/burin-labs/") for row in self.requests))
                     self.assertTrue(all(not row[2] for row in self.requests if not row[0].startswith("/repos/")))
+
+    def test_authenticated_retry_reaches_seed_without_anonymous_fallback(self):
+        self.fail_direct = True
+        self.require_api_auth = True
+        modes = list(self.modes())
+        self.assertTrue(modes, "no downloader was exercised")
+        for mode in modes:
+            with self.subTest(mode=mode):
+                denied = self.run_seed(mode, attempts=2)
+                self.assertNotEqual(denied.returncode, 0)
+                self.assertEqual(sum(row[0].startswith("/repos/") for row in self.requests), 2)
+                self.assertNotIn(b"seed-reached", denied.stdout)
+                self.requests.clear()
+                self.api_failures_remaining = 1
+                exhausted = self.run_seed(mode, authenticated=True)
+                self.assertNotEqual(exhausted.returncode, 0)
+                self.assertEqual(len(self.requests), 1)
+                self.assertFalse((self.cache(mode) / ASSET).exists())
+                self.requests.clear()
+                self.api_failures_remaining = 1
+                self.assert_seed(self.run_seed(mode, authenticated=True, attempts=2))
+                api = [row for row in self.requests if row[0].startswith("/repos/")]
+                other = [row for row in self.requests if not row[0].startswith("/repos/")]
+                self.assertEqual(len(api), 4)
+                self.assertTrue(all(row[1] for row in api))
+                self.assertEqual(len(other), 2)
+                self.assertTrue(all(row[0].startswith("/cdn/") and not row[2] for row in other))
+                self.requests.clear()
 
     def test_anonymous_failover_uses_one_direct_attempt(self):
         self.fail_direct = True
