@@ -161,10 +161,17 @@ fn run_matrix(confined: bool) {
         26,
         "every operation must report a result: {results:?}"
     );
-    for (name, allowed) in results {
+    let mut unexpected = std::collections::BTreeMap::new();
+    for (name, allowed) in &results {
         let expected = !confined || name.starts_with("branch_");
-        assert_eq!(allowed, expected, "{name}, confined={confined}: {stderr}");
+        if *allowed != expected {
+            unexpected.insert(name, allowed);
+        }
     }
+    assert!(
+        unexpected.is_empty(),
+        "confined={confined}, unexpected={unexpected:?}, observed={results:?}: {stderr}"
+    );
     assert_eq!(
         std::fs::read_to_string(original.join("canary")).unwrap(),
         "original canary"

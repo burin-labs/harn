@@ -51,6 +51,7 @@ mod tests;
 fn deny(profile: &mut String, filter: &str) {
     profile.push_str(&format!(
         "(deny file-read* file-write* {filter})\n\
+         (deny file-read-metadata {filter})\n\
          (deny network-bind network-inbound network-outbound {filter})\n",
     ));
 }
