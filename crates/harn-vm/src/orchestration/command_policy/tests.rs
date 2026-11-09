@@ -1062,8 +1062,7 @@ fn floor_rm_inside_root_absolute_is_allowed_but_outside_is_blocked() {
 
 #[test]
 fn floor_blocks_absolute_deletes_of_a_root_or_its_ancestors() {
-    // Spelling the root absolutely must not dodge the in-place wipe rule, and
-    // a root that is the home directory makes home itself the protected path.
+    // An absolute spelling of a root (or of home as a root) is still a wipe.
     for (cmd, root) in [
         ("rm -rf /home/dev/project", ROOT),
         ("rm -rf /home/dev/project/", ROOT),
