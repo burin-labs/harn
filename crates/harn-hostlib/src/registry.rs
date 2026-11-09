@@ -283,10 +283,27 @@ impl BuiltinRegistry {
     /// Register a builtin that can wait on an external process. It runs off
     /// the VM's thread under a [`HostCallContext`], so its caller can stop it
     /// and see its progress while it waits.
-    #[cfg(feature = "ast")]
     pub(crate) fn register_interruptible(&mut self, builtin: RegisteredBuiltin) {
         self.interruptible_builtins.insert(builtin.name);
         self.register(builtin);
+    }
+
+    /// [`register_interruptible`](Self::register_interruptible) for a plain
+    /// handler function.
+    pub(crate) fn register_interruptible_fn(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+    ) {
+        let handler: SyncHandler = Arc::new(runner);
+        self.register_interruptible(RegisteredBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
     }
 
     fn command_preparer(&self, name: &str) -> Option<CommandPreparer> {

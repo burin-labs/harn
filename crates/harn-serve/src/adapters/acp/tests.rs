@@ -1129,6 +1129,8 @@ mod sessions;
 #[cfg(feature = "hostlib")]
 mod staged_writes;
 mod stop_controls;
+#[cfg(all(feature = "hostlib", unix))]
+mod stop_during_wait;
 mod tool_call_cancellation;
 #[cfg(feature = "hostlib")]
 mod workspace_checkpoint;
