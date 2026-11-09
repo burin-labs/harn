@@ -9,6 +9,141 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.193
+
+### Breaking
+
+- Moved replay now refuses recorded live commands on unsupported hosts before
+  calling a model. Answer-only, filesystem-only, and fully served command prefixes
+  remain available. New full recordings measure command requests inside every
+  tool dispatch; older tapes remain inspectable and require re-recording to branch.
+
+  Migration: record a new full tape before branching on this runtime. Rust producers
+  of `TapeRecordKind::ToolCall` must supply `command_effect: Some(CommandEffect::None)`
+  when command requests were measured and none occurred, or
+  `Some(CommandEffect::Requested)` when the dispatch reached the command capability.
+  Missing evidence is unmeasured and cannot authorize branching.
+
+### Added
+
+- Add the pure `glob_match(pattern, candidate)` builtin, the same matcher capability
+  policy applies to tool argument patterns, so scripts can report which paths a
+  scoped write grant admits. A candidate equal to its pattern now always matches,
+  so a scoped write to a literal path such as `app/[slug]/page.tsx` is admitted.
+- Moved replay workspaces can run foreground commands on macOS under a per-child
+  filesystem boundary that excludes recorded trees and other replay arms. Calls
+  from an inherited sandbox remain refused.
+  Replay and ordinary read denials also refuse file metadata through direct and
+  symlinked paths, even when the process profile grants metadata globally.
+
+### Changed
+
+- Record DeepInfra's November 15 Ling 3.1 Flash retirement and announced DeepSeek V4.1 Flash 1017 redirect
+  without changing historical model identity, pricing, or the separate OpenRouter route.
+- Path globs (`glob_match`, path-keyed tool argument constraints, invariant and
+  skill globs) now match through `globset` with a literal separator instead of a
+  hand-written matcher. `*` and `?` still never cross `/`. Matching is byte-wise
+  as in git's wildmatch, so over a non-ASCII name `?` consumes one UTF-8 byte. A
+  negated class such as `[!x]` can match `/`, and a pattern that does not parse,
+  such as an unclosed `[`, matches only that exact path.
+- Path-keyed tool argument constraints now match slash-aware, like a shell or
+  `.gitignore`: a key the tool declares in `arg_schema.path_params` is resolved to
+  its workspace-relative spelling, `*`, `?` and `[...]` stay within one segment,
+  and `**` crosses directories. `src/*` no longer admits `src/nested/a.rs` (write
+  `src/**`), `src/**` no longer admits `src/../outside.rs`, and an array path
+  argument is admitted only when every entry is. Non-path keys such as a command
+  keep flat-name matching. `glob_match` uses the same path matcher, and path globs
+  across Harn gain `[...]` classes and `{a,b}` alternates.
+
+### Fixed
+
+- Foreground `harness.process.run` calls now use the same protected command-bound
+  login and output redaction as foreground tool commands. The check-state launcher
+  grants only the GitHub token, verifies runtime compatibility before an API read,
+  and refuses unsupported scripted GitHub CLI wrappers instead of measuring no checks.
+- Empty callbacks now return `nil` without consuming arguments from an enclosing call,
+  preventing later callback dispatch from panicking when calls are nested.
+- Agents API list responses carry the `page` object the OpenAPI
+  `PaginatedList` schema requires, and a list cut by `limit` reports
+  `page.has_more` instead of reading as complete.
+- A background `sub_agent_run` now runs its own loop under its parent's policy and
+  applies its own `policy` the way any `agent_loop` does: the recursion cap at loop
+  entry and the tool and capability ceilings at each tool dispatch. The worker
+  carrier used to fold the child's policy in first, so a leaf child
+  (`recursion_limit: 0`) was refused with `nested execution budget exhausted
+  before sub_agent_run`, and a tool-scoped capability ceiling refused the loop's
+  own runtime calls before its first model call.
+- Authenticate bootstrap release API requests when a token is provided, including
+  the setup action's resolve step. Reuse verified seed archives without network
+  access and avoid forwarding credentials to release download or redirected hosts.
+- Retry the stage-zero seed download within the configured
+  `HARN_BOOTSTRAP_MAX_ATTEMPTS` budget, so a transient release-host error no
+  longer fails `setup-harn` while it resolves a release. The action now passes
+  `max-attempts` and `retry-delay-seconds` to that step too, and an invalid
+  budget is an error instead of a silent fallback to the default.
+- Bootstrap installs identify every GitHub release request, including seed downloads and redirects, so an empty default
+  User-Agent cannot cause a 403 refusal. Runtime downloads keep API credentials scoped to the API host.
+- **Release qualification reports structured consumer read failures.** Failed
+  authorization reads retain their public refusal reason and HTTP diagnostics
+  without exposing private consumer details or changing the failing exit status.
+- A refused `harness.env` read warns only when the process has the variable, so the
+  refusal hid a value. Reading a name the process does not have now logs at debug,
+  which keeps hosts that grant every variable they set from reporting a warning
+  for each optional setting a script probes.
+- Host test and package tools: libtest rows ignored with a reason count as
+  skipped, a root-level `test_*.py` selects pytest, Gradle and Maven test
+  filters use `--tests` and `-Dtest=`, `uv` update names packages with
+  `--upgrade-package`, Go removal uses `@none`, Swift `add` reports that it is
+  unsupported instead of resolving, and `dev: true` reaches Cargo, uv,
+  Composer and Bundler.
+- The Unix installer now falls back to release metadata when latest-release redirects fail or do not identify a tag.
+  Every installer download and discovery request explicitly identifies the Harn installer.
+- **Multi-line string interpolation.** An indented `"""` string keeps the
+  spacing and newlines next to `${...}`: `Hello ${name} and welcome` no longer
+  loses the space after the name, and `${a} ${b}` no longer collapses to `ab`.
+- **Compile-time folding.** A negative list index counts from the end, and
+  `round(x, digits)` shares the runtime's implementation, so `@test` case
+  arguments match what the same expression returns at runtime.
+- **Debugger.** Hit counts and triggered breakpoints persist across Continue
+  and steps, `setBreakpoints` answers only the requested file, and the stack
+  trace lists the current frame first, matching `restartFrame`.
+- Retry npm install-hook HTTP throttling and server errors within the existing bounded dependency-download budget,
+  while preserving immediate package-failure refusal.
+- `harn quickstart` refuses an unknown provider before discovery and suggests
+  the nearest catalog spelling, refuses a model alias the catalog assigns to a
+  different provider, and validates an existing `harn.toml` `[llm]` section
+  before writing anything. Its credential table reports deferred discovery as
+  `deferred` instead of `set`, and a rerun that keeps existing configuration
+  says the requested route was not saved.
+- Recover public runtime installation through GitHub's release asset API when
+  direct downloads fail. Identify the bootstrap client on API requests while
+  retaining authentication and checksum verification for cached installations.
+- A workspace seed capture no longer fails with "workspace changed while capturing its seed" when
+  Harn's own runtime state, such as `.harn/` stores and `.harn-runs/`, is written during the capture.
+  `ReplayWorkspace::capture_excluding` also skips paths the host names as its own state.
+- Use shared workflow and action revisions with authenticated Harn bootstrap so policy checks can use the release asset API
+  when direct release downloads fail.
+- **Waitpoint wake-ups (#11209).** Pending in-process calls wake on local state changes
+  and use the calling Harness's clock for timeouts. Durable waits retain checks
+  for writes from other processes and recheck stored completion before expiry.
+- A delegated worker started from inside a tool call now runs its loop under that
+  tool's capability ceiling even when the ceiling grants no worker capability. The
+  loop used to find its own worker record by listing every delegated worker, which
+  the ceiling refused (`harness.agent.worker_list exceeds the active effect
+  ceiling`) before the worker's first model call. It now reads only its own record
+  through the new `harness.agent.current_worker()`, authorized like
+  `harness.agent.current_id()`. Listing workers still needs a worker capability.
+- Supply authenticated, bounded runtime bootstrap policy to direct workspace test jobs before they execute their test inventory.
+
+### Security
+
+- Update the MCP SDK to address OAuth address validation and unbounded HTTP response and tool-schema buffering
+  (RUSTSEC-2026-0457, RUSTSEC-2026-0461, and RUSTSEC-2026-0462).
+- The never-approvable command floor now blocks `rm -rf` and `find -delete` of a
+  workspace root spelled as an absolute path, or of any ancestor of a root.
+  Before, `rm -rf /abs/project` read as a path inside the workspace and was
+  allowed; with the home directory as the root, so was `rm -rf /home/<user>`.
+
 ## v0.10.192
 
 ### Breaking
