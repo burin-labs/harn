@@ -9,7 +9,7 @@
 use harn_mcp_compat::fake_client::{post_mcp, stable_headers, stable_meta, stable_request};
 use harn_mcp_compat::fixtures::{load_named, WireFixtureKind};
 use harn_mcp_compat::generic_server_harness;
-use rmcp::model::{ClientCapabilities, ClientInfo, Implementation, ProtocolVersion};
+use rmcp::model::{ClientCapabilities, ClientConfig, Implementation, ProtocolVersion};
 use rmcp::service::{ClientLifecycleMode, ClientServiceExt};
 use rmcp::transport::StreamableHttpClientTransport;
 use serde_json::json;
@@ -18,7 +18,7 @@ use serde_json::json;
 async fn official_sdk_discovers_and_calls_generic_server() {
     let server = generic_server_harness::spawn().await;
     let transport = StreamableHttpClientTransport::from_uri(server.base_url.clone());
-    let client_info = ClientInfo::new(
+    let client_info = ClientConfig::new(
         ClientCapabilities::default(),
         Implementation::new("harn-rmcp-interop", env!("CARGO_PKG_VERSION")),
     )

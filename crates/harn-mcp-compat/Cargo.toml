@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi
 
 [dev-dependencies]
 harn-modules = { path = "../harn-modules", version = "=0.10.193", features = ["bundled-stdlib"] }
-rmcp = { version = "3.1.0", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.9.0", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 
 [lints]
 workspace = true
