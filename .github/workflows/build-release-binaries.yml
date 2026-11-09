@@ -1896,8 +1896,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # One check for the whole candidate. A run with nothing to build passes as soon
-  # as setup says so. On a candidate it is the verdict that promotion reads.
+  # Selected builds require measured work; only explicit no-ops pass without it.
+  # On a candidate this is the verdict that promotion reads.
   candidate-verdict:
     name: Release candidate verdict
     needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
@@ -1929,7 +1929,7 @@ jobs:
             echo "::error::Release has no successful exact-source consumer rehearsal; publication refused."
             exit 1
           fi
-          if [[ "$BUILD_MODE" == warm ]]; then
+          if [[ "$BUILD_MODE" != candidate ]]; then
             if ! jq -e '
               .setup.outputs.should_build_binaries as $selected |
               . as $jobs |
@@ -1937,11 +1937,9 @@ jobs:
               ($selected == "true" and
                 all(["source-ci", "prepare_cli_aot", "build"][]; $jobs[.].result == "success"))
             ' <<<"$RESULTS" >/dev/null; then
-              echo "::error::A selected warm job did not succeed or warm selection is unproven: $RESULTS"
+              echo "::error::A selected release build did not succeed or build selection is unproven: $RESULTS"
               exit 1
             fi
-          fi
-          if [[ "$BUILD_MODE" != candidate ]]; then
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi
