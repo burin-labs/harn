@@ -91,7 +91,7 @@ on:
         description: 'Temporary Windows-only cold dist comparison; other build modes retain policy.'
         required: false
         type: choice
-        options: [fat, thin]
+        options: [fat, thin, paired]
         default: fat
       benchmark_windows_baseline_run:
         description: 'Successful fat baseline run with this exact policy and source; required for thin.'
@@ -558,7 +558,7 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: [setup, prepare_cli_aot]
     if: >-
-      !cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
+      !cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true' && !(needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_windows_lto == 'paired')
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
     # only the same target from an older real warm. Candidates, benchmarks,
@@ -1738,6 +1738,151 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+  windows-pair:
+    name: Compare cold Windows LTO on one worker
+    needs: [setup, prepare_cli_aot]
+    if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_windows_lto == 'paired'
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      CARGO_INCREMENTAL: '0'
+      HARN_BUILD_REVISION: '68936f174d6f839dd4b7347682db7bc1593cedeb'
+      HARN_REQUIRE_CLI_AOT: '1'
+      RUSTC_WRAPPER: ''
+      RUSTC_WORKSPACE_WRAPPER: ''
+      CARGO_PROFILE_DIST_CODEGEN_UNITS: '1'
+      HARN_RUSTC_FRONTEND_THREADS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: '68936f174d6f839dd4b7347682db7bc1593cedeb'
+          persist-credentials: false
+      - name: Record identity before admission
+        shell: pwsh
+        env:
+          REQUESTED_SOURCE: ${{ needs.setup.outputs.ref }}
+          REQUESTED_PROFILE: ${{ inputs.runner_profile }}
+          REQUESTED_TARGETS: ${{ inputs.targets }}
+          BASELINE_RUN: ${{ inputs.benchmark_windows_baseline_run }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'harn-windows-lto-pair'
+          if (Test-Path -LiteralPath $root) { throw 'Comparison root already exists.' }
+          New-Item -ItemType Directory -Path (Join-Path $root 'report') | Out-Null
+          $identity = [ordered]@{schema='harn.windows_lto_pair.v1'; run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT; policy=$env:GITHUB_SHA; source=$env:HARN_BUILD_REVISION; host=$null; admitted=$false}
+          $receipt = Join-Path $root 'report/identity.json'
+          $identity | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $receipt
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $processors = @(Get-CimInstance Win32_Processor)
+          $identity.host = [ordered]@{logicalCpus=[int]$computer.NumberOfLogicalProcessors; physicalTotalBytes=[long]$computer.TotalPhysicalMemory; cpuModels=@($processors | ForEach-Object { $_.Name.Trim() })}
+          $identity | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $receipt
+          if ($env:REQUESTED_SOURCE -ne $env:HARN_BUILD_REVISION -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$' -or $env:REQUESTED_PROFILE -ne 'standard' -or $env:REQUESTED_TARGETS -ne 'x86_64-pc-windows-msvc' -or $env:BASELINE_RUN -ne '42702918261') { throw 'Comparison source, profile, target or AOT baseline differs.' }
+          if ($identity.host.logicalCpus -ne 4 -or $identity.host.physicalTotalBytes -le 0 -or $identity.host.cpuModels.Count -lt 1 -or @($identity.host.cpuModels | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count) { throw 'Four-CPU host identity is unmeasured.' }
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:HARN_BUILD_REVISION) { throw 'Checked-out source differs.' }
+          $identity.admitted = $true
+          $identity | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $receipt
+      - name: Download the qualified AOT payload
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli-aot-payload
+          run-id: '42702918261'
+          path: crates/harn-cli/generated
+      - name: Install repository Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Fetch dependencies before either measured build
+        shell: bash
+        run: cargo fetch --locked --target x86_64-pc-windows-msvc
+      - name: Build both cold variants and measure paired startup
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $root = Join-Path $env:RUNNER_TEMP 'harn-windows-lto-pair'
+          $report = Join-Path $root 'report'
+          $identity = Get-Content -Raw -LiteralPath (Join-Path $report 'identity.json') | ConvertFrom-Json
+          if ($identity.admitted -ne $true -or $identity.source -ne $env:HARN_BUILD_REVISION -or $identity.policy -ne $env:GITHUB_SHA) { throw 'Successful admission is absent.' }
+          function AotIdentity {
+            $base = (Resolve-Path 'crates/harn-cli/generated').Path
+            return @(Get-ChildItem -LiteralPath $base -File -Recurse | Sort-Object FullName | ForEach-Object { [ordered]@{name=[IO.Path]::GetRelativePath($base, $_.FullName); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          }
+          $aot = @(AotIdentity)
+          if ($aot.Count -lt 1) { throw 'AOT payload is empty.' }
+          $aot | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $report 'aot.json')
+          $arms = @()
+          foreach ($variant in @('fat', 'thin')) {
+            $target = Join-Path $root "target-$variant"
+            if (Test-Path -LiteralPath $target) { throw 'Cargo output is not cold.' }
+            if ((& git rev-parse HEAD).Trim() -ne $identity.source -or $LASTEXITCODE -ne 0 -or $env:RUSTC_WRAPPER -or $env:RUSTC_WORKSPACE_WRAPPER -or $env:CARGO_PROFILE_DIST_CODEGEN_UNITS -ne '1') { throw 'Build inputs changed.' }
+            if ((@(AotIdentity) | ConvertTo-Json -Depth 8 -Compress) -ne ($aot | ConvertTo-Json -Depth 8 -Compress)) { throw 'AOT inputs changed.' }
+            $env:CARGO_TARGET_DIR = $target
+            $env:CARGO_PROFILE_DIST_LTO = $variant
+            $armReport = Join-Path $report $variant
+            New-Item -ItemType Directory -Path $armReport | Out-Null
+            $started = [DateTimeOffset]::UtcNow
+            $started.ToString('o') | Set-Content -LiteralPath (Join-Path $armReport 'build-start.txt')
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            & cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib --target x86_64-pc-windows-msvc --timings
+            $status = $LASTEXITCODE
+            $clock.Stop()
+            [DateTimeOffset]::UtcNow.ToString('o') | Set-Content -LiteralPath (Join-Path $armReport 'build-end.txt')
+            $status | Set-Content -LiteralPath (Join-Path $armReport 'build-status.txt')
+            $timing = Join-Path $target 'cargo-timings/cargo-timing.html'
+            if (Test-Path -LiteralPath $timing) { Copy-Item -LiteralPath $timing -Destination (Join-Path $armReport 'cargo-timing.html') }
+            if ($status -ne 0) { throw "Cargo $variant failed with $status." }
+            $binary = Join-Path $target 'x86_64-pc-windows-msvc/dist/harn.exe'
+            if ((Get-Item -LiteralPath $binary).Length -le 0 -or (Get-Item -LiteralPath $timing).Length -le 0) { throw 'Executable or Cargo timing is empty.' }
+            $captured = Join-Path $armReport 'harn.exe'
+            Copy-Item -LiteralPath $binary -Destination $captured
+            $arms += [ordered]@{lto=$variant; codegenUnits=1; profile='dist'; aot='1'; compilerCache='disabled'; cargoOutput='fresh'; buildStatus=$status; buildSeconds=$clock.Elapsed.TotalSeconds; binaryBytes=(Get-Item -LiteralPath $captured).Length; binarySha256=(Get-FileHash -LiteralPath $captured -Algorithm SHA256).Hash.ToLowerInvariant()}
+            $arms | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $report 'arms.json')
+            $actualTarget = Get-Item -LiteralPath $target
+            if (($actualTarget.Attributes -band [IO.FileAttributes]::ReparsePoint) -or (Resolve-Path -LiteralPath $target).Path -ne [IO.Path]::GetFullPath((Join-Path $root "target-$variant"))) { throw 'Target cleanup identity changed.' }
+            Remove-Item -LiteralPath $target -Recurse -Force
+          }
+          if ($arms.Count -ne 2 -or $arms[0].lto -ne 'fat' -or $arms[1].lto -ne 'thin') { throw 'Build census is incomplete.' }
+          function VersionTime([string]$Binary) {
+            $info = [Diagnostics.ProcessStartInfo]::new($Binary)
+            $info.ArgumentList.Add('--version')
+            $info.UseShellExecute = $false
+            $info.RedirectStandardOutput = $true
+            $info.RedirectStandardError = $true
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $info
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            try {
+              if (-not $process.Start()) { throw 'Version process did not start.' }
+              $output = $process.StandardOutput.ReadToEndAsync()
+              $errorOutput = $process.StandardError.ReadToEndAsync()
+              if (-not $process.WaitForExit(30000)) { $process.Kill($true); $process.WaitForExit(); throw 'Version process timed out.' }
+              $clock.Stop()
+              if ($process.ExitCode -ne 0 -or $output.GetAwaiter().GetResult().Trim() -ne 'harn 0.10.193' -or $errorOutput.GetAwaiter().GetResult().Trim() -or $clock.Elapsed.TotalMilliseconds -le 0) { throw 'Version process result is invalid.' }
+              return $clock.Elapsed.TotalMilliseconds
+            } finally { $process.Dispose() }
+          }
+          $fat = Join-Path $report 'fat/harn.exe'
+          $thin = Join-Path $report 'thin/harn.exe'
+          for ($i=0; $i -lt 5; $i++) { $null = VersionTime $fat; $null = VersionTime $thin }
+          $samples = @()
+          for ($i=0; $i -lt 30; $i++) {
+            if ($i % 2 -eq 0) { $a=VersionTime $fat; $b=VersionTime $thin } else { $b=VersionTime $thin; $a=VersionTime $fat }
+            $samples += [ordered]@{index=$i; fatFirst=($i % 2 -eq 0); fatMilliseconds=$a; thinMilliseconds=$b}
+          }
+          if ($samples.Count -ne 30) { throw 'Startup census is incomplete.' }
+          [ordered]@{identity=$identity; aotFiles=$aot; arms=$arms; startupCommand='--version'; startupWarmups=5; startupSamples=$samples} | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $report 'result.json')
+      - name: Preserve paired comparison evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-lto-pair
+          path: ${{ runner.temp }}/harn-windows-lto-pair/report
+          if-no-files-found: error
+          retention-days: 7
+
   # Assemble the release from the candidate archives: SHA256SUMS,
   # release-assets.json, and the release notes, built here from the same bytes
   # rather than at publication time, then the candidate manifest that records
@@ -2054,7 +2199,7 @@ jobs:
   # On a candidate this is the verdict that promotion reads.
   candidate-verdict:
     name: Release candidate verdict
-    needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
+    needs: [setup, source-security, source-ci, prepare_cli_aot, build, windows-pair, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -2063,6 +2208,7 @@ jobs:
         env:
           SETUP_RESULT: ${{ needs.setup.result }}
           BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
+          WINDOWS_PAIR_SELECTED: ${{ needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_windows_lto == 'paired' }}
           CANDIDATE_PURPOSE: ${{ needs.setup.outputs.candidate_purpose }}
           REHEARSAL_SOURCE_SHA: ${{ needs.setup.outputs.rehearsal_source_sha }}
           CONSUMER_RESULT: ${{ needs.consumer-rehearsal.result }}
@@ -2084,12 +2230,14 @@ jobs:
             exit 1
           fi
           if [[ "$BUILD_MODE" != candidate ]]; then
-            if ! jq -e '
+            selected_build=build
+            if [[ "$WINDOWS_PAIR_SELECTED" == true ]]; then selected_build=windows-pair; fi
+            if ! jq -e --arg build "$selected_build" '
               .setup.outputs.should_build_binaries as $selected |
               . as $jobs |
               $selected == "false" or
               ($selected == "true" and
-                all(["source-ci", "prepare_cli_aot", "build"][]; $jobs[.].result == "success"))
+                all(["source-ci", "prepare_cli_aot", $build][]; $jobs[.].result == "success"))
             ' <<<"$RESULTS" >/dev/null; then
               echo "::error::A selected release build did not succeed or build selection is unproven: $RESULTS"
               exit 1
