@@ -2630,7 +2630,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check CI latency policy
-        uses: burin-labs/.github/.github/actions/ci-latency-policy@b7e805dbc176a8503341df00cb75a58174c52e24
+        uses: burin-labs/.github/.github/actions/ci-latency-policy@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
         with:
           baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           github-token: ${{ github.token }}
@@ -2662,12 +2662,12 @@ jobs:
       - name: Check Dependabot config
         # Always-on delivery-policy gate owned by burin-labs/.github. Harn's
         # family-membership deepening stays in `make check-dependabot-groups`.
-        uses: burin-labs/.github/.github/actions/check-dependabot-config@b7e805dbc176a8503341df00cb75a58174c52e24
+        uses: burin-labs/.github/.github/actions/check-dependabot-config@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
       - name: Check hosted runner labels
         # Always-on org gate: reject the floating latest-Ubuntu label, which
         # GitHub moves to a new image without a commit here. Router code that
         # emits labels at run time is pinned by the CI cache policy tests.
-        uses: burin-labs/.github/.github/actions/hosted-runner-labels@b7e805dbc176a8503341df00cb75a58174c52e24
+        uses: burin-labs/.github/.github/actions/hosted-runner-labels@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
         with:
           harn-version: 0.10.133
       # Keep the required hygiene gate deterministic. Online audits such as

@@ -380,6 +380,7 @@
     "friction_record",
     "from_xml",
     "glob",
+    "glob_match",
     "group_by",
     "gzip_decode",
     "gzip_encode",

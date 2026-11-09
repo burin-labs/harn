@@ -112,9 +112,9 @@ fn detect_python_test_command(root: &Path, commands: &mut BTreeMap<String, Strin
         if !should_include(candidate) || !candidate.ends_with(".py") {
             continue;
         }
-        let lower = candidate.to_ascii_lowercase();
+        // A leading slash lets root-level `tests/` and `test_*.py` match too.
+        let lower = format!("/{}", candidate.to_ascii_lowercase());
         if !(lower.contains("/tests/")
-            || lower.starts_with("tests/")
             || lower.contains("/test_")
             || lower.ends_with("_test.py")
             || lower.contains("conftest.py"))
@@ -502,6 +502,15 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn root_level_pytest_file_selects_the_python_runner() {
+        let tmp = tempdir().unwrap();
+        fs::write(tmp.path().join("pyproject.toml"), "[project]\nname='x'\n").unwrap();
+        fs::write(tmp.path().join("test_app.py"), "def test_ok(): pass\n").unwrap();
+        let cmds = detect_test_commands(tmp.path());
+        assert!(cmds.contains_key("python -m pytest"), "{cmds:?}");
+    }
 
     #[test]
     fn detects_cargo_via_marker() {
