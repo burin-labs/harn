@@ -8,6 +8,9 @@ use crate::orchestration::{
 
 use super::*;
 
+#[path = "ceiling_tests.rs"]
+mod ceiling_tests;
+
 fn vm_string(value: &str) -> VmValue {
     VmValue::string(value)
 }
