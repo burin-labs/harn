@@ -52,6 +52,14 @@ if [ "${HARN_SEED_TEST_API_FALLBACK:-0}" = 1 ]; then
     *) exit 1 ;;
   esac
 fi
+if [ -n "${HARN_SEED_TEST_OUTAGES:-}" ]; then
+  # Simulate a release host that answers 5xx for its first N downloads, with
+  # the release API down for the whole outage.
+  case "$url" in https://api.github.com/*) exit 22 ;; esac
+  served=$(cat "$HARN_SEED_TEST_OUTAGES.count" 2>/dev/null || echo 0)
+  printf '%s\n' "$((served + 1))" > "$HARN_SEED_TEST_OUTAGES.count"
+  [ "$served" -ge "$(cat "$HARN_SEED_TEST_OUTAGES")" ] || exit 22
+fi
 [ "${HARN_SEED_TEST_INTERRUPT:-0}" != 1 ] || [ "${url##*/}" = SHA256SUMS ] || {
   printf '%s' partial > "$output"
   exit 1
@@ -159,6 +167,24 @@ if PATH="$tools:$PATH" XDG_CACHE_HOME="$scratch/cache-home" \
   exit 1
 fi
 test ! -e "$cache/harn-x86_64-unknown-linux-gnu.tar.xz"
+
+# A transient release-host outage is retried within the configured budget and
+# fails once that budget is spent.
+export HARN_SEED_TEST_OUTAGES="$scratch/outages"
+printf '%s\n' 1 > "$HARN_SEED_TEST_OUTAGES"
+rm -rf "$scratch/cache-home" "$HARN_SEED_TEST_OUTAGES.count"
+if HARN_BOOTSTRAP_MAX_ATTEMPTS=1 run_seed > "$scratch/outage.stdout" 2> "$scratch/outage.stderr"; then
+  echo 'seed download unexpectedly survived an outage with one attempt' >&2
+  exit 1
+fi
+grep -F 'seed download failed after 1 attempt(s): SHA256SUMS' "$scratch/outage.stderr" >/dev/null
+rm -rf "$scratch/cache-home" "$HARN_SEED_TEST_OUTAGES.count"
+HARN_BOOTSTRAP_MAX_ATTEMPTS=2 HARN_BOOTSTRAP_RETRY_DELAY_SECONDS=0 run_seed > /dev/null 2> "$scratch/outage.stderr"
+grep -F 'seed download failed (attempt 1/2); retrying in 0s' "$scratch/outage.stderr" >/dev/null
+cmp "$fixture/SHA256SUMS" "$cache/SHA256SUMS"
+[ "$(cat "$HARN_SEED_TEST_OUTAGES.count")" = 3 ]
+unset HARN_SEED_TEST_OUTAGES
+echo 'Seed outage retry: one-attempt failure and two-attempt recovery passed.'
 
 if command -v jq >/dev/null 2>&1; then
   rm -rf "$scratch/cache-home"
