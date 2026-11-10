@@ -195,6 +195,10 @@ provider = "anthropic"
 id = "claude-fable-5-1"
 provider = "anthropic"
 
+[aliases.fable52]
+id = "claude-fable-5-2"
+provider = "anthropic"
+
 [aliases.frontier]
 id = "claude-sonnet-5-5"
 provider = "anthropic"
@@ -2256,6 +2260,37 @@ cache_write_per_mtok = 12.5
 input_per_mtok = 10.0
 output_per_mtok = 50.0
 
+[models."anthropic/claude-fable-5.2"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "streaming",
+    "prompt_caching",
+    "thinking",
+]
+context_window = 1000000
+name = "Claude Fable 5.2 (via OpenRouter)"
+open_weight = false
+operations = ["text_generation"]
+provider = "openrouter"
+released = "2026-11-09"
+served_variant = "openrouter"
+strengths = [
+    "reasoning",
+    "coding",
+    "long_context",
+    "agentic",
+]
+tier = "frontier"
+
+[models."anthropic/claude-fable-5.2".pricing]
+cache_read_per_mtok = 0.2
+cache_write_1h_per_mtok = 16.0
+cache_write_per_mtok = 10.0
+input_per_mtok = 8.0
+output_per_mtok = 40.0
+
 [models."anthropic/claude-haiku-4-5"]
 capabilities = [
     "tools",
@@ -3236,6 +3271,35 @@ output_per_mtok = 50.0
 [models.claude-fable-5-1.pricing.hosted_tool_fees.web_search]
 per_1k_calls = 10.0
 source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool"
+
+[models.claude-fable-5-2]
+capabilities = [
+    "tools",
+    "vision",
+    "streaming",
+    "prompt_caching",
+    "thinking",
+]
+context_window = 1000000
+name = "Claude Fable 5.2"
+open_weight = false
+operations = ["text_generation"]
+provider = "anthropic"
+released = "2026-11-09"
+strengths = [
+    "reasoning",
+    "coding",
+    "long_context",
+    "agentic",
+]
+tier = "frontier"
+
+[models.claude-fable-5-2.pricing]
+cache_read_per_mtok = 0.2
+cache_write_1h_per_mtok = 16.0
+cache_write_per_mtok = 10.0
+input_per_mtok = 8.0
+output_per_mtok = 40.0
 
 [models.claude-haiku-4-5-20251001]
 capabilities = [

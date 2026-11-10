@@ -38,6 +38,8 @@ mod cache_accounting_tests;
 #[cfg(test)]
 mod display_name_tests;
 #[cfg(test)]
+mod fable_registration_tests;
+#[cfg(test)]
 mod local_runtime_tests;
 #[cfg(test)]
 mod portable_option_tests;

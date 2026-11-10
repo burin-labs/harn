@@ -12,6 +12,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 
 | Provider | Model pattern | Version min | Thinking | Reasoning excludes | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|
+| `anthropic` | `claude-fable-5-2` | `any; extends` | `adaptive,effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-haiku-4-5*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-haiku-5-5 \| claude-sonnet-5-5 \| claude-opus-5-5 \| anthropic/claude-haiku-5-5 \| anthropic/claude-sonnet-5-5 \| anthropic/claude-opus-5-5 \| anthropic/claude-haiku-5.5 \| anthropic/claude-sonnet-5.5 \| anthropic/claude-opus-5.5` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-fable-5-1* \| claude-mythos-5-1* \| anthropic/claude-fable-5-1* \| anthropic/claude-fable-5.1* \| anthropic/claude-mythos-5-1* \| anthropic/claude-mythos-5.1*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -244,6 +245,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o1*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/o3*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/o4*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `anthropic/claude-fable-5.2` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openrouter/typesafe/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -435,6 +437,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-3-opus-20240229` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-fable-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-fable-5-1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-fable-5-2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-haiku-4-5-20251001` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-haiku-5-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-opus-4-1-20250805` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -634,6 +637,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `aion-labs/aion-3.5-mini` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-fable-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-fable-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-fable-5.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-haiku-5.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-opus-4.8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
