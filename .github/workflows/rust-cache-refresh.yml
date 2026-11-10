@@ -137,6 +137,14 @@ jobs:
           path: ${{ runner.temp }}/workspace-target-archive.json
           if-no-files-found: error
           retention-days: 7
+      # The macOS nightly saves one generation per source and nothing reads an
+      # older one, so retire them here, on the persistent ref's frequent
+      # schedule, before admission measures the space this save needs.
+      - name: Retire superseded macOS workspace generations
+        if: github.ref == 'refs/heads/main' && matrix.cache_key == 'workspace-tests'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/prune_ci_cache_generations.sh --workspace-macos-generations
       # Admission must preserve the current generation until its replacement
       # has actually uploaded. A successful build does not certify a save:
       # headroom refusal or upload failure must leave the old cache available.
