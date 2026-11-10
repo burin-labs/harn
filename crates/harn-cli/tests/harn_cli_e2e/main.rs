@@ -21,6 +21,10 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[path = "../../build_support/build_revision.rs"]
+#[allow(dead_code)]
+mod build_revision;
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod acp_confinement_cli;
 mod acp_registry_manifest;

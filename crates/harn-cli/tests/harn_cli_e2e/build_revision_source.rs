@@ -2,9 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-#[path = "../../build_support/build_revision.rs"]
-#[allow(dead_code)]
-mod build_revision;
+use super::build_revision;
 
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -69,13 +67,12 @@ fn source_crate(root: &Path) {
     )
     .unwrap();
     let owner = Path::new(env!("CARGO_MANIFEST_DIR")).join("build_support/build_revision.rs");
-    fs::write(
-        root.join("build.rs"),
-        format!(
+    // The Rust path attribute needs a quoted, escaped literal rather than Display.
+    #[allow(clippy::unnecessary_debug_formatting)]
+    let build_script = format!(
         "#[path = {owner:?}]\n#[allow(dead_code)]\nmod owner;\nfn main() {{ owner::emit(); }}\n"
-    ),
-    )
-    .unwrap();
+    );
+    fs::write(root.join("build.rs"), build_script).unwrap();
     fs::write(
         root.join("src/lib.rs"),
         "pub const REVISION: &str = env!(\"HARN_BUILD_REVISION\");\n",
