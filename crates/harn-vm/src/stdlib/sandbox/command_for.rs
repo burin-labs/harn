@@ -76,11 +76,9 @@ fn session_program(
                 .map(|(_, value)| std::ffi::OsString::from(value)),
             None => std::env::var_os(key),
         };
-        if let Some(git) = super::developer_git::redirect(
-            program,
+        if let Some(git) = super::developer_git::cached_redirect(
             read("PATH").as_deref(),
             read("DEVELOPER_DIR").as_deref(),
-            super::developer_git::INSTALLED,
         ) {
             return Ok(std::borrow::Cow::Owned(git.into_os_string()));
         }
