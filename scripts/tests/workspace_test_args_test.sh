@@ -57,7 +57,10 @@ case "$*" in
     printf '%s\n' "$*" > "$RAN_TESTS"
     if [[ "${OMIT_JUNIT:-}" != 1 ]]; then
       mkdir -p "$PWD/target/nextest/ci"
-      printf '<testsuites tests="1"><testsuite><testcase name="fixture" time="0.01"/></testsuite></testsuites>\n' > "$PWD/target/nextest/ci/junit.xml"
+      printf '%s\n' '<testsuites tests="2"><testsuite>' \
+        '<testcase name="fixture" classname="fixture" timestamp="t" time="0.01"/>' \
+        '<testcase name="slow_fixture" classname="fixture" timestamp="t" time="7.50"/>' \
+        '</testsuite></testsuites>' > "$PWD/target/nextest/ci/junit.xml"
     fi
     exit "${RUN_EXIT:-0}"
     ;;
@@ -87,7 +90,7 @@ jq -n --arg missing "${FAKE_MISSING_NODE:-false}" '{
 SH
 chmod +x "$scratch/bin/cargo"
 export PATH="$scratch/bin:$PATH" RAN_TESTS="$scratch/ran" LISTED_TESTS="$scratch/listed"
-export RUNNER_TEMP="$scratch"
+export RUNNER_TEMP="$scratch" GITHUB_STEP_SUMMARY="$scratch/summary"
 features=$(FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" harn-vm)
 [[ "$features" == 'harn-vm/default,harn-vm/otel' ]]
 if FAKE_VM_METADATA=1 FAKE_MISSING_NODE=true bash "$root/scripts/ci/workspace_features.sh" harn-vm > "$scratch/log" 2>&1; then
@@ -153,6 +156,10 @@ fi
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "mismatch"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log"
 grep -q 'testcase name="fixture"' "$RUNNER_TEMP/harn-nextest-junit.xml"
+# The slowest cases are named in the log and the job summary, slowest first.
+[[ "$(grep -A1 '^Slowest test cases:$' "$scratch/log" | tail -n 1)" == '        7.50s  fixture slow_fixture' ]]
+grep -Fq '0.01s  fixture fixture' "$scratch/log"
+grep -Fq '7.50s  fixture slow_fixture' "$GITHUB_STEP_SUMMARY"
 archive_target=$(sed -n 's/.*--target-dir-remap \([^ ]*\).*/\1/p' "$scratch/ran")
 [[ -n "$archive_target" && ! -e "$archive_target" ]]
 grep -Fq -- "--archive-file $scratch/tests.tar.zst --workspace-remap $scratch/repo" "$scratch/listed"
