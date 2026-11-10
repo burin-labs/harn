@@ -52,10 +52,26 @@ fn main(harness: Harness) {{
     let recorded = record(&source, &dirs.tapes, &dirs.workspace);
     assert!(recorded.contains("refs/heads/main"), "{recorded}");
     let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
-    let commands = tape.records.iter().filter(|record| {
-        matches!(&record.kind, TapeRecordKind::ToolCall { tool, unservable: None, .. } if tool.starts_with("process:"))
-    }).count();
-    assert_eq!(commands, 2, "both real Git commands must be recorded");
+    let requests: Vec<serde_json::Value> = tape
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TapeRecordKind::ToolCall {
+                tool,
+                unservable: None,
+                request,
+                ..
+            } if tool.starts_with("process:") => Some(match request {
+                Some(TapePayload::Inline { text, .. }) => serde_json::from_str(text).unwrap(),
+                other => panic!("{tool} must keep its request inline: {other:?}"),
+            }),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 2, "both real Git commands must be recorded");
+    let argv = |request: &serde_json::Value| request[0]["argv"].as_array().unwrap()[..2].to_vec();
+    assert_eq!(argv(&requests[0]), ["git", "status"], "{requests:?}");
+    assert_eq!(argv(&requests[1]), ["git", "ls-remote"], "{requests:?}");
     std::fs::remove_dir_all(dirs.workspace.join(".git")).unwrap();
     let replay = branch(&source, &dirs.tapes, &dirs.workspace, 1);
     let output = replay

@@ -347,6 +347,11 @@ pub enum TapeRecordKind {
         /// Missing means unmeasured, not that the dispatch requested no command.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command_effect: Option<CommandEffect>,
+        /// A host command's request, for reading the tape. A model tool's
+        /// result carries its arguments; a host command's result does not, and
+        /// `args_digest` alone cannot say what ran. Serving never reads it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<TapePayload>,
     },
     /// Completed typed evaluation, including its exact request and receipt.
     DecisionEvaluation {

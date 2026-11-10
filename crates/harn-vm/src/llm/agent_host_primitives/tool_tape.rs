@@ -101,7 +101,7 @@ pub async fn taped_command_run(
             .map(crate::llm::helpers::vm_value_to_json)
             .collect(),
     );
-    match begin_with("", &tool, &args, false) {
+    match begin_with("", &tool, &args, Caller::HostCommand) {
         Taped::Served(result) => result,
         Taped::Live(recording) => {
             run_recorded(recording, run_command(name, background, live)).await
@@ -158,16 +158,26 @@ fn begin(call: &DictMap, tools: Option<&VmValue>) -> Taped {
             SideEffectLevel::ReadOnly | SideEffectLevel::NetworkRead
         )
     });
-    begin_with(&id, &name, &args, read_only)
+    begin_with(&id, &name, &args, Caller::Tool { read_only })
 }
 
-fn begin_with(id: &str, name: &str, args: &serde_json::Value, read_only: bool) -> Taped {
+/// Who is dispatching: the model through a tool, or the script running a host command.
+enum Caller {
+    Tool { read_only: bool },
+    HostCommand,
+}
+
+fn begin_with(id: &str, name: &str, args: &serde_json::Value, caller: Caller) -> Taped {
     let mut logical_args = args.clone();
     crate::run_tape::workspace::project_json(&mut logical_args);
     let args = &logical_args;
     // Recording starts before serving, so a branch's own tape keeps what it
     // served and the effects it re-applied.
-    let recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
+    let read_only = matches!(caller, Caller::Tool { read_only: true });
+    let mut recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
+    if let (Some(recording), Caller::HostCommand) = (recording.as_mut(), caller) {
+        recording.request = Some(Box::new(args.clone()));
+    }
     match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
         ToolServe::Served(recorded, changes, store_changes, command_effect) => {

@@ -851,6 +851,7 @@ pub fn start_branch_with_sources(
                 transcript_changes,
                 store_changes,
                 command_effect,
+                request: _,
             } => {
                 let command_effect = command_effect.ok_or_else(|| {
                     "this tape did not measure command effects; re-record it to branch".to_string()
