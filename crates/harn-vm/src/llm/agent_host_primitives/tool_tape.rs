@@ -176,7 +176,7 @@ fn begin_with(id: &str, name: &str, args: &serde_json::Value, caller: Caller) ->
     let read_only = matches!(caller, Caller::Tool { read_only: true });
     let mut recording = crate::run_tape::begin_tool_call(id, name, args, read_only);
     if let (Some(recording), Caller::HostCommand) = (recording.as_mut(), caller) {
-        recording.request = Some(Box::new(args.clone()));
+        recording.request = Some(Box::new(readable_command_request(args)));
     }
     match crate::run_tape::serve_tool_call(id, name, args) {
         ToolServe::Live => Taped::Live(recording),
@@ -199,6 +199,31 @@ fn begin_with(id: &str, name: &str, args: &serde_json::Value, caller: Caller) ->
             Taped::Served(Err(error))
         }
     }
+}
+
+/// What a tape keeps of a host command's request for a reader. An `env` map
+/// becomes its sorted variable names: a value can be a credential under any
+/// name, and the redaction policy recognizes credentials by name only for some
+/// spellings. The rest passes through the shared redaction policy here rather
+/// than in the recorder. The recorder marks a tape it had to redact as unable
+/// to branch, because served bytes would differ, and serving never reads this
+/// request; the args digest still covers the unredacted request.
+fn readable_command_request(args: &serde_json::Value) -> serde_json::Value {
+    let mut request = args.clone();
+    if let serde_json::Value::Array(items) = &mut request {
+        for item in items {
+            let Some(params) = item.as_object_mut() else {
+                continue;
+            };
+            if let Some(serde_json::Value::Object(env)) = params.get("env") {
+                let mut names: Vec<String> = env.keys().cloned().collect();
+                names.sort();
+                params.insert("env".to_string(), names.into());
+            }
+        }
+    }
+    crate::redact::current_policy().redact_json_in_place(&mut request);
+    request
 }
 
 /// Project a dispatch result onto the tape's recorded shape. Errors with no

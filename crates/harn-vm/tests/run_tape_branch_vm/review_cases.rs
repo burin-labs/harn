@@ -85,6 +85,64 @@ fn main(harness: Harness) {{
     assert!(!dirs.workspace.join(".git").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_recorded_command_request_keeps_no_credentials_and_still_serves() {
+    const ENV_SECRET: &str = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY01";
+    const ARGV_SECRET: &str = "argvSecretValue0123456789";
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let dirs = dirs();
+    let source = format!(
+        r#"
+import {{ with_llm_script }} from "std/testing"
+fn main(harness: Harness) {{
+  const result = harness.process.run({{program: "sh", args: ["-c", "printf ran", "sh", "--token={ARGV_SECRET}"], cwd: {root}, env: {{AWS_SECRET_ACCESS_KEY: "{ENV_SECRET}", PLAIN_SETTING: "plain"}}}})
+  harness.stdio.println(result.stdout)
+  with_llm_script(harness.llm, [{{text: "first"}}, {{text: "second"}}], {{ ->
+    harness.stdio.println(harness.llm.call("first", nil, {{provider: "mock", model: "mock"}}).text)
+    harness.stdio.println(harness.llm.call("second", nil, {{provider: "mock", model: "mock"}}).text)
+  }})
+}}
+"#,
+        root = quote(&dirs.workspace),
+    );
+    let recorded = record(&source, &dirs.tapes, &dirs.workspace);
+    assert!(recorded.starts_with("ran"), "{recorded}");
+    let tape_text = std::fs::read_to_string(dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let tape = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let requests: Vec<String> = tape
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TapeRecordKind::ToolCall {
+                tool,
+                request: Some(TapePayload::Inline { text, .. }),
+                ..
+            } if tool.starts_with("process:") => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 1, "{tape_text}");
+    let request: serde_json::Value = serde_json::from_str(&requests[0]).unwrap();
+    // The env keeps its names and drops every value, whatever the name.
+    assert_eq!(
+        request[0]["env"],
+        serde_json::json!(["AWS_SECRET_ACCESS_KEY", "PLAIN_SETTING"]),
+        "{request}"
+    );
+    // A credential in argv goes through the shared redaction policy.
+    assert!(requests[0].contains("printf ran"), "{request}");
+    assert!(!requests[0].contains(ARGV_SECRET), "{request}");
+    for secret in [ENV_SECRET, ARGV_SECRET] {
+        assert!(!tape_text.contains(secret), "{secret} reached the tape");
+    }
+
+    let replay = branch(&source, &dirs.tapes, &dirs.workspace, 1);
+    assert_eq!(replay.output.expect("the command is served"), recorded);
+    assert_eq!(replay.report.served_tool_calls, 1);
+    assert_eq!(replay.report.divergence, None);
+}
+
 #[test]
 fn a_served_dispatch_preserves_a_closed_child_transcript() {
     assert_closed_child_replays("harness.agent.open(\"ephemeral-review-child\")");
