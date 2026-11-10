@@ -67,17 +67,13 @@ warm_phase security-tests "$artifact_root/security.jsonl" \
 # differently from the --workspace graph: the rest shares resolve host libc
 # with extra_traits, so jobserver, cc and everything above them miss. Warmed
 # only by that graph, each rest share recompiled 124 dependencies and 54
-# workspace crates (about eight minutes) after an exact cache hit. One
-# partition per group: the index splits execution, not compilation. Tooling is
-# left out: its share is short and not the floor, and each warmed graph costs
-# about 0.4 GiB of compressed cache under the repository's storage ceiling.
-partition_graphs=()
-for partition in rest:1/4 vm-unit:1/3 vm-integration cli-unit cli-integration; do
-  group=${partition%%:*}
-  warm_phase "partition-$group" "$artifact_root/partition-$group.jsonl" \
-    bash scripts/ci/run_workspace_tests.sh --no-run "$partition"
-  partition_graphs+=(--partition "$artifact_root/partition-$group.jsonl")
-done
+# workspace crates (about eight minutes) after an exact cache hit. Only the
+# rest selection is warmed: each warmed graph adds about 0.5 GiB of compressed
+# cache, and the repository's storage ceiling admits one. The index splits
+# execution, not compilation, so one partition warms all four rest shares.
+warm_phase partition-rest "$artifact_root/partition-rest.jsonl" \
+  bash scripts/ci/run_workspace_tests.sh --no-run rest:1/4
+partition_graphs=(--partition "$artifact_root/partition-rest.jsonl")
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
 

@@ -1120,10 +1120,11 @@ jobs:
   # previously added 260 seconds after its 402-second security build
   # (run 38886757958). With package-scoped builds there is no shared compile
   # to justify that serial dependency. Each leg restores the same read-only
-  # cache and compiles only its group. The main cache writer warms each
-  # group's own selection (all but tooling), whose dependency features differ from the whole
-  # workspace's, so a leg compiles its test harnesses and changed crates
-  # rather than every dependency above the first differing feature. The kill
+  # cache and compiles only its group. The main cache writer also warms the
+  # rest group's own selection, whose dependency features differ from the
+  # whole workspace's, so a rest leg compiles its test harnesses and changed
+  # crates rather than every dependency above the first differing feature.
+  # The other groups still compile their own feature graph. The kill
   # switch retains the complete archive-mode suite instead of these shares.
   #
   # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
