@@ -61,6 +61,9 @@ case "$*" in
         '<testcase name="fixture" classname="fixture" timestamp="t" time="0.01"/>' \
         '<testcase name="slow_fixture" classname="fixture" timestamp="t" time="7.50"/>' \
         '</testsuite></testsuites>' > "$PWD/target/nextest/ci/junit.xml"
+      if [[ "${REORDER_JUNIT:-}" == 1 ]]; then
+        sed -i.bak 's/<testcase name="\([^"]*\)" classname="\([^"]*\)"/<testcase classname="\2" name="\1"/' "$PWD/target/nextest/ci/junit.xml"
+      fi
     fi
     exit "${RUN_EXIT:-0}"
     ;;
@@ -160,6 +163,12 @@ grep -q 'testcase name="fixture"' "$RUNNER_TEMP/harn-nextest-junit.xml"
 [[ "$(grep -A1 '^Slowest test cases:$' "$scratch/log" | tail -n 1)" == '        7.50s  fixture slow_fixture' ]]
 grep -Fq '0.01s  fixture fixture' "$scratch/log"
 grep -Fq '7.50s  fixture slow_fixture' "$GITHUB_STEP_SUMMARY"
+# A report whose cases no longer parse warns instead of silently ranking nothing.
+REORDER_JUNIT=1 GITHUB_WORKSPACE="$scratch/repo" bash "$root/scripts/ci/run_workspace_tests.sh" all "$scratch/tests.tar.zst" > "$scratch/log" 2>&1
+grep -Fq '::warning::Slowest test cases:' "$scratch/log"
+if grep -q '^Slowest test cases:$' "$scratch/log"; then
+  echo 'An unparsed JUnit report still printed a ranking' >&2; exit 1
+fi
 archive_target=$(sed -n 's/.*--target-dir-remap \([^ ]*\).*/\1/p' "$scratch/ran")
 [[ -n "$archive_target" && ! -e "$archive_target" ]]
 grep -Fq -- "--archive-file $scratch/tests.tar.zst --workspace-remap $scratch/repo" "$scratch/listed"

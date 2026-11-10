@@ -106,7 +106,13 @@ report_slowest() {
   local slowest
   slowest=$(sed -n 's/.*<testcase name="\([^"]*\)" classname="\([^"]*\)".* time="\([0-9.]*\)".*/\3\t\2 \1/p' "$1" \
     | sort -t "$(printf '\t')" -k1,1nr | head -n 15 | awk -F '\t' '{ printf "    %8.2fs  %s\n", $1, $2 }')
-  [[ -n "$slowest" ]] || return 0
+  if [[ -z "$slowest" ]]; then
+    # A report with cases that parses to none means the attribute shape moved.
+    if grep -q '<testcase ' "$1"; then
+      echo "::warning::Slowest test cases: $1 has test cases but none parsed; the nextest JUnit attribute order changed" >&2
+    fi
+    return 0
+  fi
   printf 'Slowest test cases:\n%s\n' "$slowest"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf '### Slowest test cases\n\n%s\n' "$slowest" >> "$GITHUB_STEP_SUMMARY" || true
