@@ -202,10 +202,10 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
     schema_of(CacheSourceManifest),
   )
   assert_eq(parsed.package.metadata.harn.source, "sourcehash")
-  assert_eq(parsed.package.metadata.harn.artifact_retention, "harn.workspace_artifact_retention.v1")
+  assert_eq(parsed.package.metadata.harn.artifact_retention, "harn.workspace_artifact_retention.v2")
   assert_eq(parsed.workspace, {})
   const families: list<{key: string, retention: string?}> = [
-    {key: "workspace-tests", retention: "harn.workspace_artifact_retention.v1"},
+    {key: "workspace-tests", retention: "harn.workspace_artifact_retention.v2"},
     {key: "harn-ci-cli", retention: "harn.workspace_artifact_retention.v1"},
     {key: "package-audit", retention: "harn.package_cache_layout.v2"},
   ]

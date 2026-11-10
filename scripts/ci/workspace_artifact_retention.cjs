@@ -189,6 +189,8 @@ function qualifyGraph(ctx, text, name, role) {
   requireValue(missing.length === 0, `${name} missing ${missing.length} test targets: ${missing.join(', ')}`);
   if (role === 'cli') {
     requireValue(count > 0 && cli.size === 0 && nativeLibraries > 0, `${name} missing CLI targets: ${[...cli.keys()].join(', ')}; Native libraries=${nativeLibraries}`);
+  } else if (role === 'partition') {
+    requireValue(count > 0, `${name} compiled no workspace artifacts`);
   } else {
     requireValue(count > 0 && nativeUnits > 0, `${name} did not measure current Native executables`);
   }
@@ -203,10 +205,14 @@ function measuredSize(value) {
   return fs.readdirSync(value).reduce((sum, child) => sum + measuredSize(path.join(value, child)), 0);
 }
 
-function planRetention(metadata, workspaceText, securityText) {
+// Each test share's graph resolves its own dependency features, so its
+// workspace libraries carry hashes the --workspace graph never produces.
+// Retention keeps them; the share then compiles only its test harnesses.
+function planRetention(metadata, workspaceText, securityText, partitionTexts = []) {
   const ctx = context(metadata);
   return planGraphs(ctx,[qualifyGraph(ctx, workspaceText, 'workspace-tests', 'workspace'),
-    qualifyGraph(ctx, securityText, 'security-tests', 'security')]);
+    qualifyGraph(ctx, securityText, 'security-tests', 'security'),
+    ...partitionTexts.map((text, index) => qualifyGraph(ctx, text, `partition-${index + 1}`, 'partition'))]);
 }
 
 function planCliRetention(metadata, text) {
@@ -250,6 +256,7 @@ function planGraphs(ctx, graphs) {
     workspace_artifacts:graphs.find(g => g.role === 'workspace')?.count || 0,
     security_artifacts:graphs.find(g => g.role === 'security')?.count || 0,
     cli_artifacts:graphs.find(g => g.role === 'cli')?.count || 0,
+    partition_artifacts:graphs.filter(g => g.role === 'partition').map(g => g.count),
     workspace_native_unit_artifacts:graphs.find(g => g.role === 'workspace')?.nativeUnits || 0,
     security_native_unit_artifacts:graphs.find(g => g.role === 'security')?.nativeUnits || 0,
     protected_dependency_files:new Set(graphs.flatMap(g => [...g.dependencyFiles])).size,
@@ -281,12 +288,17 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   let plan;
   try {
-    requireValue(args.length === 4 || args.length === 5 && args[4] === '--apply',
-      'usage: metadata.json workspace.jsonl security.jsonl report.json [--apply]; or --cli metadata.json cli.jsonl report.json [--apply]');
+    const apply = args[4] === '--apply';
+    const partitions = args.slice(apply ? 5 : 4);
+    requireValue(args.length >= 4 && partitions.length % 2 === 0
+      && partitions.every((value, index) => index % 2 === 1 || value === '--partition')
+      && (args[0] !== '--cli' || partitions.length === 0),
+    'usage: metadata.json workspace.jsonl security.jsonl report.json [--apply] [--partition graph.jsonl]...; or --cli metadata.json cli.jsonl report.json [--apply]');
     const metadata = JSON.parse(fs.readFileSync(args[args[0] === '--cli' ? 1 : 0], 'utf8'));
     plan = args[0] === '--cli' ? planCliRetention(metadata,fs.readFileSync(args[2],'utf8'))
-      : planRetention(metadata,fs.readFileSync(args[1],'utf8'),fs.readFileSync(args[2],'utf8'));
-    if (args[4] === '--apply') plan = applyRetention(plan);
+      : planRetention(metadata,fs.readFileSync(args[1],'utf8'),fs.readFileSync(args[2],'utf8'),
+        partitions.filter((_, index) => index % 2 === 1).map(file => fs.readFileSync(file,'utf8')));
+    if (apply) plan = applyRetention(plan);
     fs.writeFileSync(args[3], `${JSON.stringify(plan, null, 2)}\n`);
     console.log(JSON.stringify({...plan, removed:plan.removed.length}));
   } catch (error) {

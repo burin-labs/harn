@@ -8,8 +8,16 @@
 #
 # `tooling` runs independently of the security producer and compiles its share.
 # Every narrowed package selection explicitly preserves workspace features.
+#
+# `--no-run <partition>` compiles exactly what that partition would execute and
+# prints Cargo's JSON records instead of running tests. The cache writer warms
+# each group through it: a narrowed selection resolves different third-party
+# features than `--workspace`, so every dependency hash differs and a cache
+# warmed only by `--workspace` cannot serve these shares.
 set -euo pipefail
 tooling_packages=(harn-fmt harn-lsp harn-package)
+no_run=
+if [[ "${1:-}" == --no-run ]]; then no_run=1; shift; fi
 partition=${1:?partition or all required}
 [[ "$partition" =~ ^(all|tooling|vm-unit:[1-3]/3|vm-integration|cli-unit|cli-integration|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
@@ -34,6 +42,7 @@ is_tooling() {
 extracted=
 if [[ -n "${2:-}" ]]; then
   [[ "$partition" == all ]] || { echo 'Archive mode runs the whole suite' >&2; exit 1; }
+  [[ -z "$no_run" ]] || { echo 'Archive mode has nothing to compile' >&2; exit 1; }
   selected=archive
   args+=(--archive-file "$2" --workspace-remap "${GITHUB_WORKSPACE:?workspace remap required}")
 else
@@ -96,6 +105,9 @@ else
     if [[ "$group" == tooling || "$group" == vm-integration || "$group" == cli-* ]]; then partition=all; else partition="count:${partition#*:}"; fi
   fi
   args+=(--locked "${packages[@]}")
+  if [[ -n "$no_run" ]]; then
+    exec cargo-nextest nextest run "${args[@]}" --no-run --cargo-message-format json-render-diagnostics
+  fi
 fi
 census=$(mktemp)
 junit_source=

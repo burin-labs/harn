@@ -153,8 +153,9 @@ runs:
           fs.mkdirSync(path.join(keyRoot, 'src'), { recursive: true });
           // Advance the generation for the new retention policy while keeping
           // the existing OS/toolchain restore prefix available to consumers.
+          // workspace-tests v2 also retains each test share's own graph.
           const policies = {
-            'workspace-tests': 'harn.workspace_artifact_retention.v1',
+            'workspace-tests': 'harn.workspace_artifact_retention.v2',
             'harn-ci-cli': 'harn.workspace_artifact_retention.v1',
             'package-audit': 'harn.package_cache_layout.v2',
           };

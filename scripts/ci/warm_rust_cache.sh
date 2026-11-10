@@ -61,6 +61,21 @@ warm_phase security-tests "$artifact_root/security.jsonl" \
   --cargo-message-format json-render-diagnostics \
   --features "$security_features" --profile ci --no-run \
   -E '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
+# Warm every test share's own graph through the command the share runs. A
+# share selects part of the workspace, so Cargo resolves different features
+# for its third-party dependencies, and every unit above them hashes
+# differently from the --workspace graph: the rest shares resolve host libc
+# with extra_traits, so jobserver, cc and everything above them miss. Warmed
+# only by that graph, each rest share recompiled 124 dependencies and 54
+# workspace crates (about eight minutes) after an exact cache hit. One
+# partition per group: the index splits execution, not compilation.
+partition_graphs=()
+for partition in tooling rest:1/4 vm-unit:1/3 vm-integration cli-unit cli-integration; do
+  group=${partition%%:*}
+  warm_phase "partition-$group" "$artifact_root/partition-$group.jsonl" \
+    bash scripts/ci/run_workspace_tests.sh --no-run "$partition"
+  partition_graphs+=(--partition "$artifact_root/partition-$group.jsonl")
+done
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
 
@@ -73,7 +88,7 @@ target_dir="$(jq -er '.target_directory' "$artifact_root/metadata.json")"
 before_kib="$(du -sk "$target_dir" | cut -f1)"
 node "$(dirname "${BASH_SOURCE[0]}")/workspace_artifact_retention.cjs" \
   "$artifact_root/metadata.json" "$artifact_root/workspace.jsonl" \
-  "$artifact_root/security.jsonl" "$artifact_root/retention.json" --apply
+  "$artifact_root/security.jsonl" "$artifact_root/retention.json" --apply "${partition_graphs[@]}"
 native_count="$(find "$target_dir/debug/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -name 'harn_vm-*' | wc -l | tr -d ' ')"
 if [[ ! "$native_count" =~ ^[1-9][0-9]*$ ]]; then
   echo 'workspace cache: Native test executables were not observed; refusing to publish' >&2
