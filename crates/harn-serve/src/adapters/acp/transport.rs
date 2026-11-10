@@ -641,6 +641,7 @@ impl RouterLane {
             || controls.preempt_active_live_client_operation(&msg, output)
             || controls.preempt_active_tool_call_cancel(&msg, output)
             || controls.preempt_active_session_inputs(&msg, output)
+            || controls.preempt_active_session_remind(&msg, output).await
             || controls.apply_budget_rearm_with_output(&msg, output)
         {
             return None;

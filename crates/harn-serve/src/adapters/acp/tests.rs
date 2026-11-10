@@ -1103,6 +1103,7 @@ mod canonical_fork;
 mod commands;
 mod config_values;
 mod conservative_admission;
+mod daemon_wake;
 mod embedder_host_responder;
 mod emit_response;
 mod event_log_barrier;

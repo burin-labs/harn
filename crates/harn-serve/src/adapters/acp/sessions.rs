@@ -282,6 +282,61 @@ impl ConcurrentSessionControls {
         true
     }
 
+    /// Queue a `session/remind` on a session whose prompt is running.
+    ///
+    /// The dispatcher is busy with that prompt until it returns, and a daemon
+    /// loop's prompt returns only when the session stops, so a reminder left to
+    /// the dispatcher could never wake an idle daemon. The live session's
+    /// injection state is the same queue the dispatcher would push to.
+    pub(super) async fn preempt_active_session_remind(
+        &self,
+        message: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
+        if message.get("method").and_then(serde_json::Value::as_str) != Some("session/remind") {
+            return false;
+        }
+        let id = message
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let session_id = message
+            .pointer("/params/sessionId")
+            .and_then(serde_json::Value::as_str);
+        let Some(control) = self.active_control(session_id) else {
+            return false;
+        };
+        if !self.authenticated.load(Ordering::SeqCst) {
+            // The notification form is dropped, as the dispatcher drops it.
+            if !id.is_null() {
+                send_routed_error(
+                    output,
+                    &id,
+                    ACP_AUTH_REQUIRED_CODE,
+                    "Authentication is required",
+                );
+            }
+            return true;
+        }
+        let params = message.get("params").cloned().unwrap_or_default();
+        match control
+            .inject_state
+            .push_queued_session_remind_from_params(&params)
+            .await
+        {
+            Ok(reminder_id) if !id.is_null() => output.write_line(
+                &serde_json::json!({"jsonrpc":"2.0", "id":id, "result":{"reminderId":reminder_id}})
+                    .to_string(),
+            ),
+            Ok(_) => {}
+            Err(error) if !id.is_null() => {
+                send_routed_error(output, &id, -32602, &format!("session/remind: {error}"));
+            }
+            Err(_) => {}
+        }
+        true
+    }
+
     pub(super) fn active_control(
         &self,
         session_id: Option<&str>,
