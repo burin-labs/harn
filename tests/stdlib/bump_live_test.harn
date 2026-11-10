@@ -668,6 +668,45 @@ pipeline test_apply_version_reports_refresh_failure(harness: Harness) {
   harness.fs.delete(root)
 }
 
+pipeline test_failed_bump_commands_retain_both_streams_past_inline_capture(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  const script = path_join(fixture.root, "late_failure.py")
+  harness.fs.write_text(
+    script,
+    """
+import sys
+sys.stdout.write("stdout progress\\n" * 12000)
+sys.stderr.write("stderr progress\\n" * 12000)
+sys.stdout.write("FAILED stdout-final-gate\\n")
+sys.stderr.write("FAILED stderr-final-gate\\n")
+sys.exit(7)
+""",
+  )
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    unreachable_remote(),
+    {
+      repo_dir: fixture.root,
+      version_file: path_join(fixture.root, ".harn-version"),
+      refresh_command: "python3 '${script}'",
+      validation_command: "python3 '${script}'",
+    },
+    harness.fs,
+  )
+  const validation = adapter.run_validation()
+  assert(!validation.ok)
+  assert_eq(validation.steps[0].ok, false)
+  const refresh = adapter.apply_version("v1.0.2", "")
+  assert(!refresh.ok)
+  for detail in [validation.detail, refresh.detail] {
+    assert(contains(detail, "FAILED stdout-final-gate"), "late stdout failure was lost")
+    assert(contains(detail, "FAILED stderr-final-gate"), "late stderr failure was lost")
+    assert(len(detail) < 25000, "failure evidence must precede the outer capture ceiling")
+  }
+  harness.fs.delete(fixture.root)
+}
+
 pipeline test_apply_version_passes_declared_environment_to_refresh_child(harness: Harness) {
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-bump-live-" + harness.random.uuid())
   harness.fs.mkdir(root)
