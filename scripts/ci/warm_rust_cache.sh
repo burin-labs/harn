@@ -68,9 +68,11 @@ warm_phase security-tests "$artifact_root/security.jsonl" \
 # with extra_traits, so jobserver, cc and everything above them miss. Warmed
 # only by that graph, each rest share recompiled 124 dependencies and 54
 # workspace crates (about eight minutes) after an exact cache hit. One
-# partition per group: the index splits execution, not compilation.
+# partition per group: the index splits execution, not compilation. Tooling is
+# left out: its share is short and not the floor, and each warmed graph costs
+# about 0.4 GiB of compressed cache under the repository's storage ceiling.
 partition_graphs=()
-for partition in tooling rest:1/4 vm-unit:1/3 vm-integration cli-unit cli-integration; do
+for partition in rest:1/4 vm-unit:1/3 vm-integration cli-unit cli-integration; do
   group=${partition%%:*}
   warm_phase "partition-$group" "$artifact_root/partition-$group.jsonl" \
     bash scripts/ci/run_workspace_tests.sh --no-run "$partition"
