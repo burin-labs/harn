@@ -595,7 +595,7 @@ impl LlmUsage {
     /// A terminal that made no provider request at all.
     ///
     /// Distinct from `known_zero_attempt`, which is one real request that cost
-    /// nothing (a cache or replay hit). Here nothing was dispatched, so the
+    /// nothing (a provider-side cache hit). Here nothing was dispatched, so the
     /// cost is exactly zero, there is no unpriced attempt to bound, and the
     /// physical request count is a measured zero rather than an assumed one.
     /// Pre-dispatch budget refusals and admission denials terminate here.
@@ -678,6 +678,9 @@ impl LlmUsage {
     }
 
     pub(crate) fn from_result(result: &LlmResult) -> Self {
+        if result.telemetry.source == super::api::telemetry_source::BRANCH_SERVED {
+            return Self::no_provider_request();
+        }
         let component_usage_known = result.input_tokens > 0
             || result.output_tokens > 0
             || result.telemetry.server_prompt_tokens.is_some()
@@ -1451,3 +1454,6 @@ fn reported_usage_from_envelope(envelope: &Value) -> ReportedTokenUsage {
 #[cfg(test)]
 #[path = "usage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod replay_tests;

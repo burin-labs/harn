@@ -208,6 +208,117 @@ fn offthread_recorded_replay_preserves_stream_capture_without_provider_quota() {
     assert_cache_or_replay_bypass(true, true);
 }
 
+struct NoToolEffects;
+
+impl crate::run_tape::ToolEffectObserver for NoToolEffects {
+    fn begin(&self, _root: &std::path::Path, _call_id: &str) {}
+
+    fn end(&self, _root: &std::path::Path, _call_id: &str) -> crate::run_tape::EffectScan {
+        crate::run_tape::EffectScan {
+            changes: Vec::new(),
+            incomplete: false,
+        }
+    }
+}
+
+#[test]
+fn inline_and_offthread_full_tape_prefixes_have_measured_zero_physical_usage() {
+    use crate::llm::provider_dispatch::{with_provider_dispatch_ledger, ProviderDispatchLedger};
+    use crate::run_tape::{BranchPlan, RecordingLevel, ReplayWorkspaceLocation, TapeWorkspace};
+
+    let _process = crate::run_tape::TEST_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
+    crate::reset_thread_local_state();
+    let _cleanup = Cleanup;
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    let recording = dir.path().join("recording");
+    runtime().block_on(async {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let server = chat_stub(requests.clone(), true, None);
+        install_openai_stub_provider(PROVIDER, server.addr());
+        limits(PROVIDER);
+        let mut opts = options(PROVIDER);
+        opts.stream = true;
+        let tape = crate::run_tape::start_recording(
+            &recording,
+            RecordingLevel::Full,
+            Some(TapeWorkspace {
+                root: source,
+                observer: Box::new(NoToolEffects),
+                state_roots: Vec::new(),
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        let live_dispatches = ProviderDispatchLedger::default();
+        let (first, _) =
+            with_provider_dispatch_ledger(live_dispatches.clone(), call(&opts, false)).await;
+        assert_eq!(
+            live_dispatches.observed(),
+            1,
+            "the dispatch instrument reached a real HTTP request"
+        );
+        assert_eq!(first.usage().provider_call_count, Some(1));
+        assert!(first.input_tokens > 0 && first.output_tokens > 0);
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(tape.error(), None);
+        drop(tape);
+        for (index, offthread) in [false, true].into_iter().enumerate() {
+            let storage = dir.path().join(format!("branch-{index}"));
+            std::fs::create_dir_all(storage.join("workspace")).unwrap();
+            let branch = crate::run_tape::start_branch(BranchPlan {
+                tape: crate::testbench::tape::EventTape::load(&recording.join("run.tape")).unwrap(),
+                live_after_calls: 1,
+                workspace: ReplayWorkspaceLocation::from_storage_root(&storage).unwrap(),
+                state_root: dir.path().join(format!("state-{index}")),
+                host_state_roots: Vec::new(),
+                prompt_edits: Vec::new(),
+            })
+            .unwrap();
+            let scope = branch.scope().enter();
+            let dispatches = ProviderDispatchLedger::default();
+            let (served, deltas) =
+                with_provider_dispatch_ledger(dispatches.clone(), call(&opts, offthread)).await;
+            assert_eq!(served.text, first.text);
+            assert_eq!(deltas.concat(), first.text);
+            assert_eq!(
+                (served.input_tokens, served.output_tokens),
+                (first.input_tokens, first.output_tokens)
+            );
+            assert_eq!(
+                dispatches.observed(),
+                0,
+                "a recorded prefix dispatches no request"
+            );
+            let usage = served.usage();
+            assert_eq!(usage.provider_call_count, Some(0));
+            assert_eq!(usage.cost_usd, Some(0.0));
+            assert_eq!(
+                (
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.unpriced_calls,
+                    usage.usage_unknown_calls
+                ),
+                (0, 0, 0, 0)
+            );
+            assert_eq!(requests.load(Ordering::SeqCst), 1);
+            assert_eq!(provider_request_usage(PROVIDER), 1);
+            let report = branch.finish();
+            assert_eq!((report.served_calls, report.live_calls), (1, 0));
+            assert!(report.divergence.is_none());
+            drop(scope);
+            drop(branch);
+        }
+    });
+}
+
 #[test]
 fn inline_and_offthread_mock_and_fake_calls_do_not_consume_provider_quota() {
     let _env = env_guard();
