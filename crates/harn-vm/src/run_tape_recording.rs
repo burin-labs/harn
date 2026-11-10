@@ -24,6 +24,8 @@ pub(crate) struct ToolCallRecording {
     pub(crate) transcript_changes: Vec<TranscriptChange>,
     pub(crate) store_changes: Vec<crate::store::StoreChange>,
     pub(crate) command_effect: CommandEffect,
+    /// Set for a host command, whose result does not carry its request.
+    pub(crate) request: Option<Box<serde_json::Value>>,
     unservable: Option<String>,
 }
 
@@ -72,6 +74,7 @@ pub(crate) fn begin_tool_call(
         transcript_changes: Vec::new(),
         store_changes: Vec::new(),
         command_effect: CommandEffect::None,
+        request: None,
         unservable: None,
     })
 }
@@ -132,6 +135,7 @@ pub(crate) fn finish_tool_call(
         transcript_changes,
         store_changes,
         command_effect,
+        request,
         unservable,
     } = recording;
     let recorder = &tape.recorder;
@@ -229,6 +233,9 @@ pub(crate) fn finish_tool_call(
             serde_json::to_vec(&store_changes).expect("runtime store changes serialize"),
         )
     });
+    let request = request
+        .filter(|_| full)
+        .map(|request| recorder.payload_from_bytes(crate::canonical_json::to_vec(&request)));
     recorder.record(TapeRecordKind::ToolCall {
         call_id,
         tool,
@@ -240,5 +247,6 @@ pub(crate) fn finish_tool_call(
         transcript_changes: if full { transcript_changes } else { Vec::new() },
         store_changes,
         command_effect: Some(command_effect),
+        request,
     });
 }
