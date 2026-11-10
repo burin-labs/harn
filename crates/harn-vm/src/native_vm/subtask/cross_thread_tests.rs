@@ -181,3 +181,100 @@ fn subtask_inherits_the_active_secret_provider_across_threads() {
 
     assert_eq!(observed.as_deref(), Some("parent-session-secrets"));
 }
+
+/// Answers every host operation with its own name.
+struct NamedBridge(&'static str);
+
+impl crate::stdlib::host::HostCallBridge for NamedBridge {
+    fn dispatch<'a>(
+        &'a self,
+        _capability: &'a str,
+        _operation: &'a str,
+        _params: &'a crate::value::DictMap,
+    ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
+        crate::stdlib::host::host_call_ready(Ok(Some(crate::value::VmValue::string(self.0))))
+    }
+}
+
+/// Run one worker-placed branch that dispatches `capability.operation` through
+/// the canonical `host_call` path, and report its thread and answer.
+async fn host_call_in_branch(
+    capability: &'static str,
+    operation: &'static str,
+) -> (ThreadId, String) {
+    let mut set = tokio::task::JoinSet::new();
+    spawn_into(
+        &mut set,
+        prepare(Arc::new(PoolRegistry::default()), async move {
+            let answer = crate::stdlib::host::dispatch_host_operation(
+                capability,
+                operation,
+                &crate::value::DictMap::new(),
+            )
+            .await
+            .map(|value| value.display())
+            .unwrap_or_else(|error| format!("error: {error}"));
+            (std::thread::current().id(), answer)
+        }),
+    );
+    set.join_next()
+        .await
+        .expect("one branch")
+        .expect("branch joins")
+}
+
+/// An embedder installs its `host_call` bridge on the thread that runs the
+/// session. A `parallel settle` branch on a worker thread used to find no
+/// bridge there, so a host operation without a built-in fallback threw
+/// `unsupported operation` and one with a fallback silently used it.
+#[test]
+fn subtask_reaches_the_parents_host_call_bridge_across_threads() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("multi-thread runtime");
+
+    let (parent_thread, branch_thread, answer) =
+        runtime.block_on(scope_placement(SubtaskPlacement::Worker, async {
+            let _bridge =
+                crate::stdlib::host::install_host_call_bridge(Arc::new(NamedBridge("session")));
+            let (thread, answer) = host_call_in_branch("project", "compute_content_hash").await;
+            (std::thread::current().id(), thread, answer)
+        }));
+
+    assert_ne!(
+        branch_thread, parent_thread,
+        "the branch never left the parent's thread"
+    );
+    assert_eq!(answer, "session");
+}
+
+/// Branches of different sessions share worker threads. The thread's memo of
+/// turn-stable host reads must never answer one session with another's value.
+#[test]
+fn a_worker_thread_memo_never_answers_another_sessions_bridge() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("multi-thread runtime");
+
+    let answers = runtime.block_on(scope_placement(SubtaskPlacement::Worker, async {
+        let _first = crate::stdlib::host::install_host_call_bridge(Arc::new(NamedBridge("first")));
+        let (first_thread, first) = host_call_in_branch("runtime", "pipeline_input").await;
+        // A second session's bridge, installed before this turn began: swap it
+        // in without opening a new turn.
+        let first_bridge =
+            crate::stdlib::host::swap_host_call_bridge(Some(Arc::new(NamedBridge("second"))));
+        let (second_thread, second) = host_call_in_branch("runtime", "pipeline_input").await;
+        crate::stdlib::host::swap_host_call_bridge(first_bridge);
+        assert_eq!(
+            first_thread, second_thread,
+            "both branches must share the one worker"
+        );
+        (first, second)
+    }));
+
+    assert_eq!(answers, ("first".to_string(), "second".to_string()));
+}

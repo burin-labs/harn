@@ -706,6 +706,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/stdlib/host/turn_cache.rs"
+statics = ["MEMO_OWNER"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/stdlib/host/turn_cache/metadata_snapshot.rs"
 statics = ["METADATA_SNAPSHOTS"]
 category = "thread_private"
