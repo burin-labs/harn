@@ -32,6 +32,18 @@ case "$*" in
   *sort_by*workflows/ci.yml/runs*|*workflows/ci.yml/runs*sort_by*) printf '71\n' ;;
   *workflows/ci.yml/runs*) cat "$FIXTURE/runs" ;;
   *workflows/macos-nightly.yml/runs*)
+    count=0
+    [[ ! -f "$FIXTURE/native-census-reads" ]] || count=$(cat "$FIXTURE/native-census-reads")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$FIXTURE/native-census-reads"
+    if (( count <= ${FAKE_NATIVE_CENSUS_FAILURES:-0} )); then
+      if [[ ${FAKE_NATIVE_CENSUS_KIND:-changing} == api ]]; then
+        echo 'gh: Server Error (HTTP 502): fixture census interruption' >&2
+        exit 1
+      fi
+      jq -c '[.[0], (.[0] | .total_count += 1 | .workflow_runs = [])]' "$FIXTURE/native-runs"
+      exit 0
+    fi
     if [[ ${FAKE_NATIVE_DISCOVERY:-false} == true && ! -f "$FIXTURE/discovery-read" ]]; then
       touch "$FIXTURE/discovery-read"
       printf '[{"total_count":0,"workflow_runs":[]}]\n'
@@ -140,13 +152,43 @@ WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_DISCOVERY=true NATIVE_QUALIFICATION_STATUS_
   bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/discovery-log"
 [[ $(cat "$scratch/discovery-waits") == 5 ]]
 jq -e '.verdict == "success" and .source_sha == "1111111111111111111111111111111111111111" and .pending_count == 0 and .failed_count == 0' "$scratch/native-status.json" >/dev/null
+for kind in changing api; do
+  rm -f "$scratch/native-census-reads"
+  : > "$scratch/discovery-waits"
+  WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_CENSUS_FAILURES=1 FAKE_NATIVE_CENSUS_KIND=$kind \
+    NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+    bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/census-$kind-log"
+  [[ $(cat "$scratch/native-census-reads") == 2 ]]
+  [[ $(cat "$scratch/discovery-waits") == 5 ]]
+  jq -e '.verdict == "success" and (.platforms|length) == 1 and .pending_count == 0 and .failed_count == 0' "$scratch/native-status.json" >/dev/null
+  rm -f "$scratch/native-census-reads"
+  : > "$scratch/discovery-waits"
+  if WAIT_FOR_FULL_SUITE=false FAKE_NATIVE_CENSUS_FAILURES=1 FAKE_NATIVE_CENSUS_KIND=$kind \
+    NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+    bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/census-immediate-$kind-log"; then
+    echo 'Unreadable native census passed without waiting' >&2; exit 1
+  fi
+  [[ $(cat "$scratch/native-census-reads") == 1 && ! -s "$scratch/discovery-waits" ]]
+  jq -e '.verdict == "unmeasured" and .platforms[0].stage == "macos:runs" and .pending_count == null and .failed_count == null' "$scratch/native-status.json" >/dev/null
+done
+rm -f "$scratch/native-census-reads"
+: > "$scratch/discovery-waits"
+if WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_CENSUS_FAILURES=25 NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+  bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/census-exhausted-log"; then
+  echo 'Persistently changing native census passed qualification' >&2; exit 1
+fi
+[[ $(cat "$scratch/native-census-reads") == 25 ]]
+[[ $(wc -l < "$scratch/discovery-waits" | tr -d ' ') == 24 ]]
+jq -e '.verdict == "unmeasured" and .platforms[0].stage == "macos:runs" and .pending_count == null and .next_action == "retry-read"' "$scratch/native-status.json" >/dev/null
+rm -f "$scratch/native-census-reads"
 : > "$scratch/discovery-waits"
 jq '.[0].workflow_runs=[] | .[0].total_count=0' "$scratch/good-native/native-runs" > "$scratch/native-runs"
-if WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+if WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_CENSUS_FAILURES=1 NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
   bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/missing-discovery-log"; then
   echo 'Unreported native qualification passed admission' >&2; exit 1
 fi
 [[ $(wc -l < "$scratch/discovery-waits" | tr -d ' ') == 24 ]]
+[[ $(cat "$scratch/native-census-reads") == 25 ]]
 jq -e '.verdict == "failure" and .pending_count == 1 and .failed_count == 0 and .platforms[0].status == "missing"' "$scratch/native-status.json" >/dev/null
 cp "$scratch/good-native/native-runs" "$scratch/native-runs"
 jq '.conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/native-run"
