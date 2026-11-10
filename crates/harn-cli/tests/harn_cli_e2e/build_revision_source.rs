@@ -116,12 +116,13 @@ fn cargo_run(consumer: &Path, target: &Path, override_revision: Option<&str>) ->
 #[test]
 pub(super) fn unconfigured_cargo_build_attests_its_dependency_and_tracks_git_head() {
     let temp = tempfile::tempdir().unwrap();
-    let source = temp.path().join("source");
+    let source_repo = temp.path().join("source");
+    let source = source_repo.join("crates/harn-cli");
     let consumer = temp.path().join("consumer");
     let target = temp.path().join("target");
     source_crate(&source);
-    git(&source, &["init", "--quiet"]);
-    let source_head = commit(&source);
+    git(&source_repo, &["init", "--quiet"]);
+    let source_head = commit(&source_repo);
     fs::create_dir_all(consumer.join("src")).unwrap();
     consumer_manifest(&consumer, &source);
     fs::write(
@@ -138,8 +139,8 @@ pub(super) fn unconfigured_cargo_build_attests_its_dependency_and_tracks_git_hea
         source_head
     );
 
-    git(&source, &["pack-refs", "--all"]);
-    let next_head = commit(&source);
+    git(&source_repo, &["pack-refs", "--all"]);
+    let next_head = commit(&source_repo);
     assert_ne!(next_head, source_head);
     let output = cargo_run(&consumer, &target, None);
     assert_eq!(
@@ -175,6 +176,11 @@ pub(super) fn packaged_source_identity_does_not_inherit_an_unrelated_git_checkou
     assert!(
         build_revision::derive(&package).is_err(),
         "an outer checkout is not crate provenance"
+    );
+    commit(temp.path());
+    assert!(
+        build_revision::derive(&package).is_err(),
+        "a tracked vendored crate must not borrow an unrelated checkout's revision"
     );
     let revision = "a".repeat(40);
     let metadata = package.join(".cargo_vcs_info.json");

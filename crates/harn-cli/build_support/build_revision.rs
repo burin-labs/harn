@@ -68,7 +68,17 @@ pub fn derive(manifest_dir: &Path) -> Result<SourceRevision, String> {
         Err(error) => return Err(format!("cannot read Cargo source metadata: {error}")),
     }
 
-    // An unpacked crate inside another checkout must not inherit its host's identity.
+    // A vendored crate must not inherit an enclosing consumer checkout's identity.
+    let manifest_dir = manifest_dir
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve crate source: {error}"))?;
+    let root = PathBuf::from(git_text(&manifest_dir, &["rev-parse", "--show-toplevel"])?)
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve Git source root: {error}"))?;
+    if manifest_dir != root && manifest_dir != root.join("crates/harn-cli") {
+        return Err("crate is outside the Harn Git source layout".to_owned());
+    }
+    let manifest_dir = manifest_dir.as_path();
     git_text(
         manifest_dir,
         &["ls-files", "--error-unmatch", "--", "Cargo.toml"],
@@ -97,7 +107,6 @@ pub fn derive(manifest_dir: &Path) -> Result<SourceRevision, String> {
     if packed.is_file() {
         watched_paths.push(packed);
     }
-    let root = PathBuf::from(git_text(manifest_dir, &["rev-parse", "--show-toplevel"])?);
     if root.join(".git").is_file() {
         watched_paths.push(root.join(".git"));
     }
