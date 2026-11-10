@@ -310,6 +310,14 @@ fn scanner_discovery_schema_matches_the_full_scan_projection() {
         full["$defs"]["TestLayoutDiscovery"],
         discovery["$defs"]["TestLayoutDiscovery"]
     );
+    assert_eq!(
+        full["$defs"]["TestCommand"],
+        discovery["$defs"]["TestCommand"]
+    );
+    assert_eq!(
+        full["$defs"]["TestInvocation"],
+        discovery["$defs"]["TestInvocation"]
+    );
     let request_defs: Vec<serde_json::Value> =
         ["scan_project", "scan_incremental", "discover_test_commands"]
             .iter()
@@ -354,6 +362,58 @@ fn scanner_layout_profiles_are_validated_at_the_capability_boundary() {
         serde_json::json!({"root": root.path().to_str().unwrap(), "layout_profiles": [shell]});
     let response = (scanner.handler)(&[harn_vm::json_to_vm_value(&request)]).unwrap();
     assert_response_schema("scanner", "discover_test_commands", &response);
+}
+
+#[test]
+fn scanner_exposes_nested_verifier_as_literal_invocation_and_cwd() {
+    let registry = collect_into_registry(ScannerCapability);
+    let scanner = registry
+        .find("hostlib_scanner_discover_test_commands")
+        .unwrap();
+    let root = TempDir::new().unwrap();
+    let package = root.path().join("packages/space; name");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("package.json"),
+        r#"{"packageManager":"npm@10.0.0","scripts":{"test":"echo ok"}}"#,
+    )
+    .unwrap();
+    let request = serde_json::json!({"root": root.path().to_str().unwrap()});
+    let response = (scanner.handler)(&[harn_vm::json_to_vm_value(&request)]).unwrap();
+    assert_response_schema("scanner", "discover_test_commands", &response);
+    let json = harn_vm::llm::vm_value_to_json(&response);
+    assert_eq!(json["state"], "complete");
+    assert_eq!(json["preferred"], 0);
+    assert_eq!(
+        json["commands"][0],
+        serde_json::json!({
+            "cwd": "packages/space; name",
+            "invocation": {"mode": "argv", "program": "npm", "args": ["test"]},
+            "label": "echo ok (packages/space; name)"
+        })
+    );
+    let schema: serde_json::Value = serde_json::from_str(
+        schemas::lookup(
+            "scanner",
+            "discover_test_commands",
+            schemas::SchemaKind::Response,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    assert!(validator.is_valid(&json));
+    let mut missing_executable = json;
+    missing_executable["commands"][0]["invocation"]["program"] = serde_json::json!("");
+    assert!(!validator.is_valid(&missing_executable));
+    let canonical =
+        harn_vm::schema::canonicalize_json_schema(&harn_vm::json_to_vm_value(&schema)).unwrap();
+    assert!(harn_vm::schema::validate_value_against_canonical_schema(
+        &harn_vm::json_to_vm_value(&missing_executable),
+        &canonical,
+        true,
+    )
+    .is_err());
 }
 
 #[test]

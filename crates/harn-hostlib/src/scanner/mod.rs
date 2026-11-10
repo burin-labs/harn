@@ -57,8 +57,9 @@ pub(crate) fn strip_ambient_git_env(cmd: &mut Command) {
 pub use git::GitCapabilities;
 pub use layout::{TestLayoutDiscovery, TestLayoutProfile};
 pub use result::{
-    DependencyEdge, FileRecord, FolderRecord, LanguageStat, ProjectMetadata, ScanDelta, ScanResult,
-    SubProject, SymbolKind, SymbolRecord, TestCommandDiscovery,
+    DependencyEdge, DiscoveredTestCommand, FileRecord, FolderRecord, LanguageStat, ProjectMetadata,
+    ScanDelta, ScanResult, SubProject, SymbolKind, SymbolRecord, TestCommandDiscovery,
+    TestCommandInvocation,
 };
 
 const SCAN_PROJECT_BUILTIN: &str = "hostlib_scanner_scan_project";
@@ -882,17 +883,12 @@ fn test_discovery_to_value(discovery: &TestCommandDiscovery) -> VmValue {
             layout,
         } => build_dict([
             ("state", str_value("complete")),
-            (
-                "commands",
-                build_dict(
-                    commands
-                        .iter()
-                        .map(|(key, value)| (key.clone(), str_value(value))),
-                ),
-            ),
+            ("commands", list_of(commands, test_command_to_value)),
             (
                 "preferred",
-                preferred.as_deref().map(str_value).unwrap_or(VmValue::Nil),
+                preferred
+                    .map(|index| VmValue::Int(index as i64))
+                    .unwrap_or(VmValue::Nil),
             ),
             ("layout", test_layout_to_value(layout)),
         ]),
@@ -901,6 +897,28 @@ fn test_discovery_to_value(discovery: &TestCommandDiscovery) -> VmValue {
             ("detail", str_value(detail)),
         ]),
     }
+}
+
+fn test_command_to_value(command: &DiscoveredTestCommand) -> VmValue {
+    let invocation = match &command.invocation {
+        TestCommandInvocation::Argv { program, args } => build_dict([
+            ("mode", str_value("argv")),
+            ("program", str_value(program)),
+            (
+                "args",
+                VmValue::list(args.iter().map(|value| str_value(value)).collect()),
+            ),
+        ]),
+        TestCommandInvocation::Shell { command } => build_dict([
+            ("mode", str_value("shell")),
+            ("command", str_value(command)),
+        ]),
+    };
+    build_dict([
+        ("cwd", str_value(&command.cwd)),
+        ("invocation", invocation),
+        ("label", str_value(&command.label)),
+    ])
 }
 
 fn test_layout_to_value(layout: &TestLayoutDiscovery) -> VmValue {

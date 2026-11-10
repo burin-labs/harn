@@ -9,5 +9,8 @@
 
   Migration: replace `project.test_commands` and
   `project.detected_test_command` with `project.test_command_discovery`.
-  When `state` is `complete`, read `commands`, nullable `preferred`, and `layout`;
+  When `state` is `complete`, read the command list, nullable preferred index,
+  and layout. Each command supplies a project-relative working directory and
+  either a literal program and arguments or shell text; pass the directory
+  separately to the process.
   when it is `unavailable`, report `detail` and do not treat it as empty.

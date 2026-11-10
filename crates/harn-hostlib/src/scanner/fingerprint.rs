@@ -405,16 +405,40 @@ fn append_test_commands(output: &mut String, project: &ProjectMetadata) {
         return;
     }
     output.push_str("## Test commands\n");
-    if let Some(command) = preferred.as_deref().filter(|command| !command.is_empty()) {
-        output.push_str(&format!("- Preferred: `{command}`\n"));
+    if let Some(command) = preferred.and_then(|index| commands.get(index)) {
+        output.push_str(&format!(
+            "- Preferred: {}\n",
+            describe_test_command(command)
+        ));
     }
-    for (command, description) in commands.iter().take(5) {
-        if Some(command.as_str()) == preferred.as_deref() {
+    for (index, command) in commands.iter().enumerate().take(5) {
+        if Some(index) == *preferred {
             continue;
         }
-        output.push_str(&format!("- `{command}` — {description}\n"));
+        output.push_str(&format!(
+            "- {} — {}\n",
+            describe_test_command(command),
+            command.label
+        ));
     }
     output.push('\n');
+}
+
+fn describe_test_command(command: &super::result::DiscoveredTestCommand) -> String {
+    let invocation = match &command.invocation {
+        super::result::TestCommandInvocation::Argv { program, args } => serde_json::to_string(
+            &std::iter::once(program)
+                .chain(args.iter())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default(),
+        super::result::TestCommandInvocation::Shell { command } => command.clone(),
+    };
+    if command.cwd == "." {
+        format!("`{invocation}`")
+    } else {
+        format!("`{invocation}` in `{}`", command.cwd)
+    }
 }
 
 fn test_helper_signatures(root: &Path, files: &[FileRecord]) -> Vec<String> {
@@ -604,8 +628,15 @@ mod tests {
                 percentage: 100.0,
             }],
             test_command_discovery: TestCommandDiscovery::Complete {
-                commands: BTreeMap::from([("pnpm test".into(), "package script".into())]),
-                preferred: Some("pnpm test".into()),
+                commands: vec![super::super::result::DiscoveredTestCommand {
+                    cwd: ".".into(),
+                    invocation: super::super::result::TestCommandInvocation::Argv {
+                        program: "pnpm".into(),
+                        args: vec!["test".into()],
+                    },
+                    label: "package script".into(),
+                }],
+                preferred: Some(0),
                 layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
             },
             code_patterns: vec!["Express routes".into()],
@@ -656,7 +687,7 @@ mod tests {
             "## Test recipe\n- Framework: vitest\n- Helpers: createTestUser()",
             "## Key signatures\n- fn fetchUser(id: string) [users.ts, refs:4]",
             "## Import graph (most-referenced modules)\n- shared/http (imported by 2 files)",
-            "## Test commands\n- Preferred: `pnpm test`",
+            "## Test commands\n- Preferred: `[\"pnpm\",\"test\"]`",
             "## Code patterns\n- Express routes",
             "## Test helpers\n- `export function createTestUser(name: string)`",
             "## Dependencies\n- `vitest`",

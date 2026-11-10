@@ -27,10 +27,14 @@ impl PackageManager {
     }
 
     /// Invoke a named script, rather than a manager's similarly named builtin.
-    pub(crate) fn script_command(self, script: &str) -> String {
+    pub(crate) fn script_argv(self, script: &str) -> Vec<String> {
         match (self, script) {
-            (Self::Npm | Self::Pnpm, "test") => format!("{} test", self.name()),
-            _ => format!("{} run {}", self.name(), shell_words::quote(script)),
+            (Self::Npm | Self::Pnpm, "test") => vec![self.name().to_string(), "test".to_string()],
+            _ => vec![
+                self.name().to_string(),
+                "run".to_string(),
+                script.to_string(),
+            ],
         }
     }
 }
@@ -183,8 +187,20 @@ fn read_manifest(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Script {
-    pub command: String,
+    /// Literal executable and arguments selected for this script.
+    pub argv: Vec<String>,
     pub body: String,
+}
+
+impl Script {
+    /// Project the invocation as POSIX shell text for existing text consumers.
+    pub fn command(&self) -> String {
+        self.argv
+            .iter()
+            .map(|arg| shell_words::quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// One normalized package-script inventory for all scanner projections.
@@ -206,7 +222,7 @@ fn resolve_scripts(
             Ok((
                 name.clone(),
                 Script {
-                    command: manager.script_command(name),
+                    argv: manager.script_argv(name),
                     body: body.to_string(),
                 },
             ))
@@ -405,12 +421,28 @@ mod tests {
             let manager = select_manager(root.path(), root.path(), manifest.as_object().unwrap())
                 .unwrap()
                 .unwrap();
-            assert_eq!(manager.script_command("test"), expected);
+            let script = Script {
+                argv: manager.script_argv("test"),
+                body: String::new(),
+            };
+            assert_eq!(script.command(), expected);
         }
         assert_eq!(
             select_manager(root.path(), root.path(), json!({}).as_object().unwrap()).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn script_invocation_preserves_literal_arguments() {
+        let name = "test:some 'quoted'; value";
+        let argv = PackageManager::Npm.script_argv(name);
+        assert_eq!(argv, ["npm", "run", name]);
+        let script = Script {
+            argv: argv.clone(),
+            body: String::new(),
+        };
+        assert_eq!(shell_words::split(&script.command()).unwrap(), argv);
     }
 
     #[test]

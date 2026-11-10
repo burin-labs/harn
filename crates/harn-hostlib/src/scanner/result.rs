@@ -166,34 +166,156 @@ pub struct LanguageStat {
     pub percentage: f64,
 }
 
+/// A discovered verifier invocation.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TestCommandInvocation {
+    /// Execute an executable and its literal arguments.
+    Argv {
+        /// Executable name or path.
+        #[serde(deserialize_with = "nonempty_program")]
+        program: String,
+        /// Literal arguments, excluding the executable.
+        args: Vec<String>,
+    },
+    /// Execute a shell command.
+    Shell {
+        /// Command text interpreted by the selected shell.
+        #[serde(deserialize_with = "nonempty_command")]
+        command: String,
+    },
+}
+
+/// A discovered verifier and the directory in which it applies.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveredTestCommand {
+    /// Project-relative directory, with `.` denoting the project root.
+    #[serde(deserialize_with = "relative_cwd")]
+    pub cwd: String,
+    /// Executable invocation, independent of the working directory.
+    pub invocation: TestCommandInvocation,
+    /// Human-readable description of the candidate.
+    pub label: String,
+}
+
+fn nonempty_program<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let program = String::deserialize(deserializer)?;
+    if program.is_empty() {
+        return Err(serde::de::Error::custom(
+            "verifier argv must name an executable",
+        ));
+    }
+    Ok(program)
+}
+
+fn nonempty_command<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let command = String::deserialize(deserializer)?;
+    if command.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "verifier command must not be empty",
+        ));
+    }
+    Ok(command)
+}
+
+fn relative_cwd<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::path::{Component, Path};
+    let cwd = String::deserialize(deserializer)?;
+    let path = Path::new(&cwd);
+    if cwd.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(serde::de::Error::custom(
+            "verifier cwd must be project-relative",
+        ));
+    }
+    Ok(cwd)
+}
+
 /// The scanner either observed a complete set of test candidates or could not
 /// read enough of the project to make that claim.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TestCommandDiscovery {
-    /// The search completed. An empty map means no candidates were found.
+    /// The search completed. An empty list means no candidates were found.
     Complete {
-        /// Candidate command to human-readable label.
-        commands: std::collections::BTreeMap<String, String>,
-        /// Preferred candidate, when there is one.
-        #[serde(deserialize_with = "required_nullable")]
-        preferred: Option<String>,
+        /// Candidates with their own invocation and working directory.
+        commands: Vec<DiscoveredTestCommand>,
+        /// Index of the preferred candidate, when there is one.
+        preferred: Option<usize>,
         /// Catalog-shaped bare test layouts, or why no layout was selected.
         layout: super::layout::TestLayoutDiscovery,
     },
     /// Discovery could not establish a complete result.
     Unavailable {
         /// A bounded explanation of the failed observation.
+        detail: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum UncheckedTestCommandDiscovery {
+    Complete {
+        commands: Vec<DiscoveredTestCommand>,
+        #[serde(deserialize_with = "required_nullable")]
+        preferred: Option<usize>,
+        layout: super::layout::TestLayoutDiscovery,
+    },
+    Unavailable {
         #[serde(deserialize_with = "nonempty_detail")]
         detail: String,
     },
 }
 
-fn required_nullable<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+impl<'de> Deserialize<'de> for TestCommandDiscovery {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match UncheckedTestCommandDiscovery::deserialize(deserializer)? {
+            UncheckedTestCommandDiscovery::Complete {
+                commands,
+                preferred,
+                layout,
+            } => {
+                if preferred.is_some_and(|index| index >= commands.len()) {
+                    return Err(serde::de::Error::custom(
+                        "preferred verifier index is out of range",
+                    ));
+                }
+                Ok(Self::Complete {
+                    commands,
+                    preferred,
+                    layout,
+                })
+            }
+            UncheckedTestCommandDiscovery::Unavailable { detail } => {
+                Ok(Self::Unavailable { detail })
+            }
+        }
+    }
+}
+
+fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
 {
-    Option::<String>::deserialize(deserializer)
+    Option::<T>::deserialize(deserializer)
 }
 
 fn nonempty_detail<'de, D>(deserializer: D) -> Result<String, D::Error>

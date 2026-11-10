@@ -85,7 +85,7 @@ mod tests {
                 root_path: root.to_string(),
                 languages: Vec::new(),
                 test_command_discovery: TestCommandDiscovery::Complete {
-                    commands: BTreeMap::new(),
+                    commands: Vec::new(),
                     preferred: None,
                     layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
                 },

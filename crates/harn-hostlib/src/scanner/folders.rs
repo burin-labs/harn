@@ -266,7 +266,7 @@ mod tests {
             Path::new("/repo/proj"),
             &files,
             TestCommandDiscovery::Complete {
-                commands: BTreeMap::new(),
+                commands: Vec::new(),
                 preferred: None,
                 layout: super::super::layout::TestLayoutDiscovery::Unconfigured,
             },

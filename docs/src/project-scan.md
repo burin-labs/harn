@@ -62,7 +62,7 @@ Normalization rules:
 literal target declarations without evaluating Make or expanding variables.
 Multi-target rules contribute each declared target; assignments and `define`
 bodies do not create targets. Test-shaped targets contribute their generated
-commands to the scanner's `test_command_discovery.commands` map. The config tier exposes all
+commands to the scanner's `test_command_discovery.commands` list. The config tier exposes all
 literal names in `makefile_targets` and build/test invocations in `build_commands`.
 
 `makefile_parse(text)` exposes the same parser to source-facing adapters. Each
@@ -73,8 +73,11 @@ not evidence that a command ran or passed. Variable-generated targets and
 pattern rules are not resolved by this static parser.
 
 The scanner's `test_command_discovery` is a tagged result. `complete` carries
-the discovered `commands`, nullable `preferred` command, and `layout`; an empty
-map means the search completed without command candidates. Hosts may pass
+the discovered `commands`, nullable `preferred` index, and `layout`; an empty
+list means the search completed without command candidates. Each command has a
+project-relative `cwd`, a label, and an invocation: either a literal `program`
+and `args`, or a shell `command`. Run it with the working directory separate from the invocation;
+do not interpolate the directory into shell text. Hosts may pass
 `layout_profiles` containing language identifiers, extensions, and test-file
 patterns to the full, incremental, or fresh scan. The layout result distinguishes
 unconfigured conventions, no matching files, one language with its relative
@@ -83,7 +86,7 @@ command or evidence that tests passed. For multiple languages, discovery keeps
 only the root package script or Make target named `test`; if
 none are declared, it returns `unavailable` rather than inferring a partial
 suite. `unavailable` carries a short `detail`
-instead of a command map when the search could not inspect a relevant path.
+instead of a command list when the search could not inspect a relevant path.
 Candidates describe possible commands, not proof that a command ran or passed.
 Use `harness.scanner.discover_test_commands({root: path})` when only this
 fresh result is needed; it does not build the full index or write a snapshot.

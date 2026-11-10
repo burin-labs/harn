@@ -137,14 +137,14 @@ pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> Wo
     let mut info = classify_path(path, workspace_root, false);
     if info.kind == WorkspacePathKind::Invalid
         || unsupported_workspace_root(workspace_root)
-        || (is_absolute_path_syntax(path.trim()) && !Path::new(path.trim()).is_absolute())
+        || (is_absolute_path_syntax(path) && !Path::new(path).is_absolute())
     {
         return info;
     }
     let Some(root) = workspace_root else {
         return info;
     };
-    let input = Path::new(path.trim());
+    let input = Path::new(path);
     let target = if input.is_absolute() {
         input.to_path_buf()
     } else {
@@ -217,14 +217,13 @@ fn classify_path(
     recover_workspace_drift: bool,
 ) -> WorkspacePathInfo {
     let input = path.to_string();
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
+    if path.is_empty() {
         return invalid_info(input, String::new(), "path is empty");
     }
-    if trimmed.contains('\0') {
-        return invalid_info(input, to_posix(trimmed), "path contains NUL bytes");
+    if path.contains('\0') {
+        return invalid_info(input, to_posix(path), "path contains NUL bytes");
     }
-    let serialized = to_posix(trimmed);
+    let serialized = to_posix(path);
     if crate::windows_path::is_opaque_device_path(&serialized) {
         return invalid_info(
             input,
@@ -233,9 +232,9 @@ fn classify_path(
         );
     }
 
-    let normalized_input = normalize_lexical(trimmed);
+    let normalized_input = normalize_lexical(path);
     let unsupported_root = unsupported_workspace_root(workspace_root);
-    if unsupported_root && !is_absolute_path_syntax(trimmed) {
+    if unsupported_root && !is_absolute_path_syntax(path) {
         return invalid_info(
             input,
             normalized_input,
@@ -250,7 +249,7 @@ fn classify_path(
         .map(|root| normalize_host_path(root))
         .filter(|root| !root.is_empty());
 
-    if !is_absolute_path_syntax(trimmed) {
+    if !is_absolute_path_syntax(path) {
         let workspace_path = normalized_input;
         if escapes_workspace(&workspace_path) {
             let host_path = root_path.as_ref().map(|root| {
@@ -295,7 +294,7 @@ fn classify_path(
         }
 
         if let Some(root_path) = root_path.as_ref().filter(|_| recover_workspace_drift) {
-            if let Some(recovered) = recover_root_drift(trimmed, root_path) {
+            if let Some(recovered) = recover_root_drift(path, root_path) {
                 return WorkspacePathInfo {
                     input,
                     kind: WorkspacePathKind::WorkspaceRelative,
@@ -556,6 +555,37 @@ mod tests {
         assert_eq!(
             info.host_path.as_deref(),
             Some(normalize_host_path(&dir.path().join("src/main.rs")).as_str())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_and_permission_paths_keep_literal_spaces() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["name", "name ", " name", " "] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+            let workspace = classify_workspace_path(name, Some(dir.path()));
+            let permission = classify_permission_path(name, Some(dir.path()));
+            let expected = normalize_host_path(&dir.path().join(name));
+            let physical =
+                normalize_host_path(&std::fs::canonicalize(dir.path().join(name)).unwrap());
+            assert_eq!(workspace.workspace_path.as_deref(), Some(name));
+            assert_eq!(permission.workspace_path.as_deref(), Some(name));
+            assert_eq!(workspace.host_path.as_deref(), Some(expected.as_str()));
+            assert_eq!(permission.host_path.as_deref(), Some(physical.as_str()));
+        }
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("outside ")).unwrap();
+        let escaped = classify_permission_path("outside ", Some(dir.path()));
+        assert_eq!(escaped.kind, WorkspacePathKind::HostAbsolute);
+        assert!(escaped.workspace_path.is_none());
+        assert_eq!(
+            escaped.host_path.as_deref(),
+            Some(normalize_host_path(&std::fs::canonicalize(outside.path()).unwrap()).as_str())
+        );
+        assert_eq!(
+            classify_permission_path("", Some(dir.path())).kind,
+            WorkspacePathKind::Invalid
         );
     }
 

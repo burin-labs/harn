@@ -279,7 +279,7 @@ impl ProjectEvidence {
                 resolved
                     .scripts
                     .into_iter()
-                    .map(|(name, script)| (name, VmValue::string(script.command)))
+                    .map(|(name, script)| (name, VmValue::string(script.command())))
                     .collect::<harn_vm_core::value::DictMap>(),
                 VmValue::Nil,
             ),
@@ -749,7 +749,7 @@ pub(super) fn scan_exact_directory(
                     if let Some(scripts) = &scripts {
                         for name in ["build", "test"] {
                             if let Some(script) = scripts.get(name) {
-                                push_unique(&mut build_commands, script.command.clone());
+                                push_unique(&mut build_commands, script.command());
                             }
                         }
                     }
@@ -782,7 +782,7 @@ fn apply_config_tier(
         }
         for key in ["build", "test", "lint", "dev", "start"] {
             if let Some(script) = scripts.get(key) {
-                push_unique(build_commands, script.command.clone());
+                push_unique(build_commands, script.command());
             }
         }
     }

@@ -17,12 +17,81 @@ use std::fs;
 use std::path::Path;
 
 use harn_hostlib::scanner::{
-    discover_test_commands, scan_incremental, scan_project, scan_project_with_git, FileRecord,
-    GitCapabilities, ProjectMetadata, ScanProjectOptions, ScanResult, SymbolKind,
-    TestCommandDiscovery, TestLayoutDiscovery, TestLayoutProfile,
+    discover_test_commands, scan_incremental, scan_project, scan_project_with_git,
+    DiscoveredTestCommand, FileRecord, GitCapabilities, ProjectMetadata, ScanProjectOptions,
+    ScanResult, SymbolKind, TestCommandDiscovery, TestCommandInvocation, TestLayoutDiscovery,
+    TestLayoutProfile,
 };
 use harn_vm::ignore_policy::IgnorePolicy;
 use tempfile::tempdir;
+
+#[test]
+fn nested_package_verifiers_keep_literal_working_directories() {
+    let fixture = tempdir().unwrap();
+    for name in ["space child", "name;touch witness"] {
+        write(
+            fixture.path(),
+            &format!("packages/{name}/package.json"),
+            r#"{"packageManager":"npm@10.0.0","scripts":{"test":"echo ok","test: odd;name":"echo named"}}"#,
+        );
+    }
+
+    let discovery = discover_test_commands(fixture.path(), false, IgnorePolicy::Project, &[]);
+    let value = serde_json::to_value(discovery).expect("scanner response must serialize");
+    assert_eq!(value["state"], "complete");
+    let commands = value["commands"]
+        .as_array()
+        .expect("each verifier must carry its own invocation and working directory");
+    assert_eq!(commands.len(), 4);
+    for name in ["space child", "name;touch witness"] {
+        let cwd = format!("packages/{name}");
+        let candidate = commands
+            .iter()
+            .find(|command| {
+                command["cwd"] == cwd
+                    && command["invocation"]["args"] == serde_json::json!(["test"])
+            })
+            .expect("each literal package directory must be represented");
+        assert_eq!(candidate["invocation"]["mode"], "argv");
+        assert_eq!(candidate["invocation"]["program"], "npm");
+        assert_eq!(candidate["invocation"]["args"], serde_json::json!(["test"]));
+        let named = commands.iter().find(|command| {
+            command["cwd"] == cwd
+                && command["invocation"]["args"] == serde_json::json!(["run", "test: odd;name"])
+        });
+        assert!(
+            named.is_some(),
+            "the script name must remain one literal argument"
+        );
+    }
+}
+
+#[test]
+fn literal_script_punctuation_is_not_scored_as_a_shell_operator() {
+    let fixture = tempdir().unwrap();
+    write(
+        fixture.path(),
+        "package.json",
+        r#"{"packageManager":"npm@10.0.0","scripts":{"test:a;unit":"echo a","test:z":"echo z"}}"#,
+    );
+    let discovery = discover_test_commands(fixture.path(), false, IgnorePolicy::Project, &[]);
+    let TestCommandDiscovery::Complete {
+        commands,
+        preferred: Some(index),
+        ..
+    } = discovery
+    else {
+        panic!("the package scripts must be discovered and ranked");
+    };
+    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        commands[index].invocation,
+        TestCommandInvocation::Argv {
+            program: "npm".into(),
+            args: vec!["run".into(), "test:a;unit".into()]
+        }
+    );
+}
 
 #[cfg(unix)]
 #[test]
@@ -152,9 +221,34 @@ fn write(root: &Path, rel: &str, content: &str) {
     fs::write(&path, content).unwrap();
 }
 
-fn test_commands(project: &ProjectMetadata) -> &BTreeMap<String, String> {
+fn command_text(candidate: &DiscoveredTestCommand) -> String {
+    let command = match &candidate.invocation {
+        TestCommandInvocation::Argv { program, args } => std::iter::once(program)
+            .chain(args.iter())
+            .map(|arg| shell_words::quote(arg))
+            .collect::<Vec<_>>()
+            .join(" "),
+        TestCommandInvocation::Shell { command } => command.clone(),
+    };
+    if candidate.cwd == "." {
+        command
+    } else {
+        format!("cd {} && {command}", candidate.cwd)
+    }
+}
+
+fn contains_command(commands: &[DiscoveredTestCommand], expected: &str) -> bool {
+    commands
+        .iter()
+        .any(|candidate| command_text(candidate) == expected)
+}
+
+fn test_commands(project: &ProjectMetadata) -> BTreeMap<String, String> {
     match &project.test_command_discovery {
-        TestCommandDiscovery::Complete { commands, .. } => commands,
+        TestCommandDiscovery::Complete { commands, .. } => commands
+            .iter()
+            .map(|candidate| (command_text(candidate), candidate.label.clone()))
+            .collect(),
         TestCommandDiscovery::Unavailable { detail } => {
             panic!("test discovery unavailable: {detail}")
         }
@@ -237,7 +331,7 @@ fn catalog_layout_discovery_distinguishes_source_tests_and_ambiguity() {
     let declared = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
     assert!(matches!(declared, TestCommandDiscovery::Complete {
         commands, layout: TestLayoutDiscovery::Ambiguous { languages }, ..
-    } if commands.len() == 1 && commands.contains_key("make test") && languages.iter().map(String::as_str).collect::<Vec<_>>() == vec!["python", "shell"]));
+    } if commands.len() == 1 && contains_command(&commands, "make test") && languages.iter().map(String::as_str).collect::<Vec<_>>() == vec!["python", "shell"]));
     fs::remove_file(tmp.path().join("Makefile")).unwrap();
     write(
         tmp.path(),
@@ -277,7 +371,7 @@ fn catalog_layout_discovery_distinguishes_source_tests_and_ambiguity() {
     let package_test = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &profiles);
     assert!(
         matches!(package_test, TestCommandDiscovery::Complete { commands, .. }
-        if commands.len() == 1 && commands.contains_key("npm test"))
+        if commands.len() == 1 && contains_command(&commands, "npm test"))
     );
 }
 
@@ -291,7 +385,7 @@ fn discovery_only_matches_full_scan_and_rechecks_without_a_snapshot() {
     );
     let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
     assert!(
-        matches!(&discovery, TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest"))
+        matches!(&discovery, TestCommandDiscovery::Complete { commands, .. } if contains_command(commands, "python -m pytest"))
     );
     assert!(!tmp
         .path()
@@ -330,7 +424,7 @@ fn discovery_reports_an_unreadable_git_index_instead_of_a_false_empty_search() {
     let before = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
     assert!(
         matches!(before, TestCommandDiscovery::Complete { commands, .. }
-        if commands.contains_key("python -m pytest"))
+        if contains_command(&commands, "python -m pytest"))
     );
     let opts = ScanProjectOptions {
         include_git_history: false,
@@ -361,7 +455,7 @@ fn discovery_reports_an_unreadable_git_index_instead_of_a_false_empty_search() {
     fs::write(tmp.path().join(".git/index"), index).unwrap();
     let recovered = scan_incremental(&full_failed.snapshot_token, None, opts);
     assert!(
-        matches!(recovered.result.project.test_command_discovery, TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest"))
+        matches!(recovered.result.project.test_command_discovery, TestCommandDiscovery::Complete { commands, .. } if contains_command(&commands, "python -m pytest"))
     );
 }
 
@@ -395,7 +489,7 @@ fn discovery_only_finds_a_git_tracked_test_matched_by_ignore() {
     let discovery = discover_test_commands(tmp.path(), false, IgnorePolicy::Project, &[]);
     assert!(matches!(
         discovery,
-        TestCommandDiscovery::Complete { commands, .. } if commands.contains_key("python -m pytest")
+        TestCommandDiscovery::Complete { commands, .. } if contains_command(&commands, "python -m pytest")
     ));
 }
 
@@ -842,6 +936,29 @@ fn discovery_status_is_required_in_the_serialized_project() {
     empty_detail["test_command_discovery"] =
         serde_json::json!({"state": "unavailable", "detail": "  "});
     assert!(serde_json::from_value::<ProjectMetadata>(empty_detail).is_err());
+    let mut valid_command = project.clone();
+    valid_command["test_command_discovery"]["commands"] = serde_json::json!([
+        {"cwd": "packages/space child", "invocation": {"mode": "argv", "program": "npm", "args": ["test"]}, "label": "test"}
+    ]);
+    valid_command["test_command_discovery"]["preferred"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ProjectMetadata>(valid_command.clone()).is_ok());
+    let mut escaped = valid_command.clone();
+    escaped["test_command_discovery"]["commands"][0]["cwd"] = serde_json::json!("../outside");
+    assert!(serde_json::from_value::<ProjectMetadata>(escaped).is_err());
+    let mut absolute = valid_command.clone();
+    absolute["test_command_discovery"]["commands"][0]["cwd"] = serde_json::json!("/outside");
+    assert!(serde_json::from_value::<ProjectMetadata>(absolute).is_err());
+    let mut empty_executable = valid_command.clone();
+    empty_executable["test_command_discovery"]["commands"][0]["invocation"]["program"] =
+        serde_json::json!("");
+    assert!(serde_json::from_value::<ProjectMetadata>(empty_executable).is_err());
+    let mut empty_argument = valid_command.clone();
+    empty_argument["test_command_discovery"]["commands"][0]["invocation"]["args"] =
+        serde_json::json!([""]);
+    assert!(serde_json::from_value::<ProjectMetadata>(empty_argument).is_ok());
+    let mut invalid_preferred = valid_command.clone();
+    invalid_preferred["test_command_discovery"]["preferred"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<ProjectMetadata>(invalid_preferred).is_err());
     project
         .as_object_mut()
         .unwrap()
@@ -1085,9 +1202,10 @@ fn scan_project_emits_full_result_shape() {
     assert!(test_commands(&result.project).contains_key("npm test"));
     let detected = match &result.project.test_command_discovery {
         TestCommandDiscovery::Complete {
-            preferred: Some(command),
+            commands,
+            preferred: Some(index),
             ..
-        } => command.as_str(),
+        } => command_text(&commands[*index]),
         _ => panic!("a test command should be detected"),
     };
     assert!(!detected.is_empty());

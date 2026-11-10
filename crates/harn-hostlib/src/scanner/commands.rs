@@ -11,7 +11,65 @@ use crate::scanner::discover::DiscoverOptions;
 use crate::scanner::discover::DiscoveredFile;
 use crate::scanner::extensions::{is_excluded_dir, should_include};
 use crate::scanner::layout::{LayoutCollector, TestLayoutDiscovery, TestLayoutProfile};
-use crate::scanner::result::{FileRecord, SymbolKind, TestCommandDiscovery};
+use crate::scanner::result::{
+    DiscoveredTestCommand, FileRecord, SymbolKind, TestCommandDiscovery, TestCommandInvocation,
+};
+
+#[derive(Default)]
+struct TestCommands(BTreeMap<(String, TestCommandInvocation), String>);
+
+impl TestCommands {
+    fn insert(&mut self, command: String, label: String) {
+        self.0.insert(
+            (".".to_string(), TestCommandInvocation::Shell { command }),
+            label,
+        );
+    }
+
+    fn insert_argv(&mut self, cwd: String, argv: Vec<String>, label: String) {
+        let (program, args) = argv
+            .split_first()
+            .expect("package invocation has a program");
+        self.0.insert(
+            (
+                cwd,
+                TestCommandInvocation::Argv {
+                    program: program.clone(),
+                    args: args.to_vec(),
+                },
+            ),
+            label,
+        );
+    }
+
+    fn remove(&mut self, command: &str) {
+        self.0.remove(&(
+            ".".to_string(),
+            TestCommandInvocation::Shell {
+                command: command.to_string(),
+            },
+        ));
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.0.extend(other.0);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn finish(self) -> Vec<DiscoveredTestCommand> {
+        self.0
+            .into_iter()
+            .map(|((cwd, invocation), label)| DiscoveredTestCommand {
+                cwd,
+                invocation,
+                label,
+            })
+            .collect()
+    }
+}
 
 /// Walk the project root looking for test/build manifest files and return a
 /// complete set of candidates, or an unavailable observation.
@@ -39,15 +97,15 @@ fn collect_test_commands(
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
     profiles: &[TestLayoutProfile],
-) -> Result<(BTreeMap<String, String>, TestLayoutDiscovery), String> {
-    let mut commands: BTreeMap<String, String> = BTreeMap::new();
-    let mut declared_tests: BTreeMap<String, String> = BTreeMap::new();
+) -> Result<(Vec<DiscoveredTestCommand>, TestLayoutDiscovery), String> {
+    let mut commands = TestCommands::default();
+    let mut declared_tests = TestCommands::default();
     let mut layouts = LayoutCollector::new(profiles);
 
     scan_package_json(root, root, None, &mut commands, &mut declared_tests)?;
     scan_monorepo_packages(root, &mut commands)?;
     detect_language_test_commands(root, options, discovered, &mut commands, &mut layouts)?;
-    let mut make_tests = BTreeMap::new();
+    let mut make_tests = TestCommands::default();
     detect_makefile_targets(root, &mut make_tests, &mut declared_tests)?;
     commands.extend(make_tests);
 
@@ -60,13 +118,10 @@ fn collect_test_commands(
         // explicitly declared by the project and do not invent a partial suite.
         commands = declared_tests;
     }
-    Ok((commands, layout))
+    Ok((commands.finish(), layout))
 }
 
-fn scan_monorepo_packages(
-    root: &Path,
-    commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+fn scan_monorepo_packages(root: &Path, commands: &mut TestCommands) -> Result<(), String> {
     for subdir in ["packages", "apps", "services"] {
         let dir = root.join(subdir);
         let entries = match fs::read_dir(&dir) {
@@ -87,7 +142,7 @@ fn scan_monorepo_packages(
                     &path,
                     Some(format!("{subdir}/{name}")),
                     commands,
-                    &mut BTreeMap::new(),
+                    &mut TestCommands::default(),
                 )?;
             }
         }
@@ -99,7 +154,7 @@ fn detect_language_test_commands(
     root: &Path,
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
-    commands: &mut BTreeMap<String, String>,
+    commands: &mut TestCommands,
     layouts: &mut LayoutCollector<'_>,
 ) -> Result<(), String> {
     const MARKERS: &[(&str, &str, &str)] = &[
@@ -148,7 +203,7 @@ fn detect_file_test_commands(
     root: &Path,
     options: DiscoverOptions,
     discovered: &[DiscoveredFile],
-    commands: &mut BTreeMap<String, String>,
+    commands: &mut TestCommands,
     layouts: &mut LayoutCollector<'_>,
 ) -> Result<(), String> {
     let pyproject = root.join("pyproject.toml");
@@ -251,7 +306,7 @@ fn inspect_python_candidate(
     has_pyproject: bool,
     preferred_command: &str,
     preferred_label: &str,
-    commands: &mut BTreeMap<String, String>,
+    commands: &mut TestCommands,
 ) -> Result<bool, String> {
     if !should_include(candidate) || !candidate.ends_with(".py") {
         return Ok(false);
@@ -373,10 +428,7 @@ fn read_optional(path: &Path) -> Result<Option<String>, String> {
     }
 }
 
-fn detect_dart_test_command(
-    root: &Path,
-    commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+fn detect_dart_test_command(root: &Path, commands: &mut TestCommands) -> Result<(), String> {
     let pubspec = root.join("pubspec.yaml");
     let content = match read_optional(&pubspec)? {
         Some(c) => c,
@@ -393,10 +445,7 @@ fn detect_dart_test_command(
     Ok(())
 }
 
-fn detect_dotnet_test_command(
-    root: &Path,
-    commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+fn detect_dotnet_test_command(root: &Path, commands: &mut TestCommands) -> Result<(), String> {
     let entries = fs::read_dir(root).map_err(|_| unavailable("read", root))?;
     for entry in entries {
         let entry = entry.map_err(|_| unavailable("read", root))?;
@@ -410,10 +459,7 @@ fn detect_dotnet_test_command(
     Ok(())
 }
 
-fn detect_ruby_test_command(
-    root: &Path,
-    commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+fn detect_ruby_test_command(root: &Path, commands: &mut TestCommands) -> Result<(), String> {
     let gemfile = root.join("Gemfile");
     if let Some(content) = read_optional(&gemfile)? {
         if content.contains("rspec") {
@@ -426,10 +472,7 @@ fn detect_ruby_test_command(
     Ok(())
 }
 
-fn detect_php_test_command(
-    root: &Path,
-    commands: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+fn detect_php_test_command(root: &Path, commands: &mut TestCommands) -> Result<(), String> {
     let composer = root.join("composer.json");
     if !try_exists(&composer)? {
         return Ok(());
@@ -447,8 +490,8 @@ fn detect_php_test_command(
 
 fn detect_makefile_targets(
     root: &Path,
-    commands: &mut BTreeMap<String, String>,
-    declared_tests: &mut BTreeMap<String, String>,
+    commands: &mut TestCommands,
+    declared_tests: &mut TestCommands,
 ) -> Result<(), String> {
     let Some((filename, content)) =
         harn_makefile::read_default(root).map_err(|_| unavailable("read a makefile in", root))?
@@ -471,8 +514,8 @@ fn scan_package_json(
     root: &Path,
     dir: &Path,
     prefix: Option<String>,
-    commands: &mut BTreeMap<String, String>,
-    declared_tests: &mut BTreeMap<String, String>,
+    commands: &mut TestCommands,
+    declared_tests: &mut TestCommands,
 ) -> Result<(), String> {
     use harn_vm::package_scripts::{Discovery, SelectionError};
     let package = match harn_vm::package_scripts::discover(root, dir) {
@@ -506,17 +549,14 @@ fn scan_package_json(
         {
             continue;
         }
-        let command = value.command;
-        let runner = match prefix.as_deref() {
-            Some(p) => format!("cd {p} && {command}"),
-            None => command,
-        };
+        let cwd = prefix.as_deref().unwrap_or(".").to_string();
+        let argv = value.argv;
         let cmd_text = value.body;
         let label = format!("{cmd_text}{label_suffix}");
         if name == "test" {
-            declared_tests.insert(runner.clone(), label.clone());
+            declared_tests.insert_argv(cwd.clone(), argv.clone(), label.clone());
         }
-        commands.insert(runner, label);
+        commands.insert_argv(cwd, argv, label);
     }
     Ok(())
 }
@@ -679,46 +719,40 @@ fn extract_paginated_response_snippet(content: &str) -> Option<String> {
 
 // MARK: - Preferred test command selection (matches `TestPatternResolver`).
 
-/// Pick the most-actionable test command from a project's
-/// `(command -> label)` map. Returns `None` if no shell-like command was
-/// found.
-pub fn select_preferred_test_command(commands: &BTreeMap<String, String>) -> Option<String> {
-    preferred_test_commands(commands).into_iter().next()
-}
-
-fn preferred_test_commands(commands: &BTreeMap<String, String>) -> Vec<String> {
-    let mut normalized = normalized_test_commands(commands);
-    let mut keys: Vec<String> = normalized.keys().cloned().collect();
-    keys.sort_by(|a, b| {
-        let la = preference_score(a);
-        let lb = preference_score(b);
-        if la != lb {
-            return lb.cmp(&la);
-        }
-        a.cmp(b)
+/// Pick the most-actionable candidate without flattening its execution fields.
+pub fn select_preferred_test_command(commands: &[DiscoveredTestCommand]) -> Option<usize> {
+    let mut candidates: Vec<(usize, i32)> = commands
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            let (invocation, shell) = match &candidate.invocation {
+                TestCommandInvocation::Argv { program, args } if !program.is_empty() => (
+                    std::iter::once(program.as_str())
+                        .chain(args.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    false,
+                ),
+                TestCommandInvocation::Shell { command } if looks_like_shell_command(command) => {
+                    (command.clone(), true)
+                }
+                _ => return None,
+            };
+            let directory_penalty = if candidate.cwd == "." { 0 } else { 10 };
+            Some((
+                index,
+                preference_score(&invocation, shell) - directory_penalty,
+            ))
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| commands[a.0].cmp(&commands[b.0]))
     });
-    normalized.clear();
-    keys
+    candidates.first().map(|(index, _)| *index)
 }
 
-fn normalized_test_commands(commands: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    if commands.is_empty() {
-        return BTreeMap::new();
-    }
-    let mut out = BTreeMap::new();
-    for (key, value) in commands {
-        if looks_like_shell_command(key) {
-            out.insert(key.clone(), value.clone());
-            continue;
-        }
-        if looks_like_shell_command(value) {
-            out.insert(value.clone(), key.clone());
-        }
-    }
-    out
-}
-
-fn preference_score(command: &str) -> i32 {
+fn preference_score(command: &str, shell: bool) -> i32 {
     let lower = command.to_ascii_lowercase();
     let mut score = 0;
     if lower.contains("integration") || lower.contains("e2e") {
@@ -727,7 +761,7 @@ fn preference_score(command: &str) -> i32 {
     if lower.starts_with("uv run ") {
         score += 30;
     }
-    if lower.contains("&&") || lower.contains("||") || lower.contains(';') {
+    if shell && (lower.contains("&&") || lower.contains("||") || lower.contains(';')) {
         score -= 10;
     }
     if lower.contains(" test ") || lower.ends_with(" test") || lower.starts_with("test ") {
@@ -793,19 +827,26 @@ mod tests {
         else {
             panic!("test discovery should complete");
         };
-        assert!(cmds.contains_key("cargo test"));
+        assert!(cmds.iter().any(|candidate| matches!(
+            &candidate.invocation,
+            TestCommandInvocation::Shell { command } if command == "cargo test"
+        )));
     }
 
     #[test]
     fn prefers_uv_over_plain_test() {
-        let mut cmds = BTreeMap::new();
+        let mut cmds = TestCommands::default();
         cmds.insert("cargo test".to_string(), "label".to_string());
         cmds.insert(
             "uv run --with pytest pytest".to_string(),
             "label".to_string(),
         );
+        let cmds = cmds.finish();
         let preferred = select_preferred_test_command(&cmds).unwrap();
-        assert_eq!(preferred, "uv run --with pytest pytest");
+        assert!(matches!(
+            &cmds[preferred].invocation,
+            TestCommandInvocation::Shell { command } if command == "uv run --with pytest pytest"
+        ));
     }
 
     #[test]
@@ -824,17 +865,21 @@ mod tests {
             serde_json::to_string_pretty(&pkg).unwrap(),
         )
         .unwrap();
-        let mut cmds = BTreeMap::new();
+        let mut cmds = TestCommands::default();
         scan_package_json(
             tmp.path(),
             tmp.path(),
             None,
             &mut cmds,
-            &mut BTreeMap::new(),
+            &mut TestCommands::default(),
         )
         .unwrap();
-        assert!(cmds.contains_key("npm test"));
-        assert!(cmds.contains_key("npm run lint"));
-        assert!(!cmds.contains_key("npm run build"));
+        let cmds = cmds.finish();
+        assert!(cmds.iter().any(|candidate| matches!(&candidate.invocation,
+            TestCommandInvocation::Argv { program, args } if program == "npm" && args == &["test"])));
+        assert!(cmds.iter().any(|candidate| matches!(&candidate.invocation,
+            TestCommandInvocation::Argv { program, args } if program == "npm" && args == &["run", "lint"])));
+        assert!(!cmds.iter().any(|candidate| matches!(&candidate.invocation,
+            TestCommandInvocation::Argv { program, args } if program == "npm" && args == &["run", "build"])));
     }
 }

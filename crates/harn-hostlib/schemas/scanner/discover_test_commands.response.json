@@ -8,8 +8,8 @@
       "type": "object",
       "properties": {
         "state": { "const": "complete" },
-        "commands": { "type": "object", "additionalProperties": { "type": "string" } },
-        "preferred": { "type": ["string", "null"] },
+        "commands": { "type": "array", "items": { "$ref": "#/$defs/TestCommand" } },
+        "preferred": { "type": ["integer", "null"], "minimum": 0 },
         "layout": { "$ref": "#/$defs/TestLayoutDiscovery" }
       },
       "required": ["state", "commands", "preferred", "layout"],
@@ -26,6 +26,22 @@
     }
   ],
   "$defs": {
+    "TestCommand": {
+      "type": "object",
+      "properties": {
+        "cwd": { "type": "string", "minLength": 1 },
+        "invocation": { "$ref": "#/$defs/TestInvocation" },
+        "label": { "type": "string" }
+      },
+      "required": ["cwd", "invocation", "label"],
+      "additionalProperties": false
+    },
+    "TestInvocation": {
+      "oneOf": [
+        { "type": "object", "properties": { "mode": { "const": "argv" }, "program": { "type": "string", "minLength": 1 }, "args": { "type": "array", "items": { "type": "string" } } }, "required": ["mode", "program", "args"], "additionalProperties": false },
+        { "type": "object", "properties": { "mode": { "const": "shell" }, "command": { "type": "string", "minLength": 1 } }, "required": ["mode", "command"], "additionalProperties": false }
+      ]
+    },
     "TestLayoutDiscovery": {
       "oneOf": [
         { "type": "object", "properties": { "state": { "const": "unconfigured" } }, "required": ["state"], "additionalProperties": false },
