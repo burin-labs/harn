@@ -1,0 +1,6 @@
+measured posix ["[] command:make lint","[&&] command:make test"]
+measured posix ["[] command:echo a && b"]
+measured posix ["[] command:cargo test 2>&1 | command:tail -5","[;] command:echo done"]
+measured powershell ["[] command:npm ci","[&&] command:npm test","[||] command:exit 1"]
+unmeasured posix []
+unmeasured cmd []

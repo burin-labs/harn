@@ -1459,6 +1459,7 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
 }
 
 mod catastrophic;
+pub(crate) use catastrophic::shell_command_shape;
 mod hook_depth;
 mod invocation;
 use invocation::prepared_command_context;

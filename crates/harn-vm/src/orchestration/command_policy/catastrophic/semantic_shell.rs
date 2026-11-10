@@ -288,7 +288,7 @@ fn visit_powershell_command(
     });
 }
 
-fn lex_powershell_words(command: &str) -> (Vec<String>, Vec<bool>, bool) {
+pub(super) fn lex_powershell_words(command: &str) -> (Vec<String>, Vec<bool>, bool) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
         None,

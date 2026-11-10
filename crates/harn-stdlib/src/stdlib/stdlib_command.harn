@@ -41,6 +41,41 @@ pub fn command_sequence_plan(source: string, cwd: string = "") -> CommandSequenc
   return __command_sequence_plan(source, cwd)
 }
 
+/**
+ * One pipeline stage of a shell line. A `command` stage is a simple command,
+ * possibly with redirects, and `words` is its unquoted argv text. A `compound`
+ * stage (subshell, block, control flow) carries only its `text`.
+ */
+pub type ShellCommandStage = {kind: "command" | "compound", text: string, words: list<string>}
+
+/**
+ * One chain member: a pipeline of stages and the operator joining it to the
+ * member before it: `""` for the first, otherwise `&&`, `||`, `;`, `&` or a
+ * newline.
+ */
+pub type ShellCommandSegment = {operator: string, stages: list<ShellCommandStage>}
+
+/** An unmeasured line never reads as a single simple command. */
+pub type ShellCommandShape = {
+  status: "measured" | "unmeasured",
+  dialect: string,
+  segments: list<ShellCommandSegment>,
+}
+
+/**
+ * Read the operator structure of a shell line for the named shell (`sh`,
+ * `bash`, `zsh`, `pwsh`, `powershell`), with the same grammars the command
+ * policy uses. Quoted operators remain argument text. Unparseable lines, empty
+ * lines, unknown shells and `cmd` are unmeasured, with no segments. This never
+ * runs commands and grants no execution authority.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_command_shape(source: string, shell: string = "sh") -> ShellCommandShape {
+  return __shell_command_shape(source, shell)
+}
+
 /** One output-match, exit, or timeout event for a background command. */
 pub type CommandOutputMatch = {
   status: "matched" | "exited" | "timed_out",
