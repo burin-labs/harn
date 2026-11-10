@@ -9,6 +9,54 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.195
+
+### Breaking
+
+- Run tapes now keep a host command's request on its `process:` tool-call record, so a reader can
+  say what ran. Before this, only a digest of the arguments was recorded. An `env` map is kept as its
+  sorted variable names, never its values, and the rest of the request passes through the shared
+  redaction policy. Branch serving still matches by digest and never reads the request, so a
+  redacted request does not stop a tape from branching.
+
+  Migration: Rust code that constructs `TapeRecordKind::ToolCall` adds `request: None`, and an
+  exhaustive pattern on it adds `request: _` or `..`.
+
+### Added
+
+- **Workspace test runs name their slowest cases.** Every CI workspace test run
+  prints its 15 slowest test cases, slowest first, in the job log and step
+  summary, read from the nextest JUnit report it already keeps.
+- Add Claude Fable 5.2 on Anthropic and OpenRouter, with the `fable52` alias,
+  current pricing, and measured tool, reasoning, vision, and structured-output
+  controls. Existing aliases and automatic defaults remain unchanged.
+- `std/command` adds `shell_command_shape(source, shell)`, which reads a shell
+  line's operator structure with the grammars the command policy already uses:
+  each chain member, the operator joining it (`&&`, `||`, `;`, `&`, newline), and
+  its pipeline stages with unquoted words. Quoted operators stay argument text.
+  POSIX shells and PowerShell are measured; unparseable lines, unknown shells and
+  `cmd` are reported as unmeasured with no segments.
+
+### Fixed
+
+- An ACP `session/remind` sent while a session's prompt is running now reaches that prompt. The
+  server answered it only after the prompt returned, so an `interrupt_immediate` reminder could never
+  wake a daemon agent loop idle inside its prompt, whose prompt returns only when the session stops.
+- A `host_call` inside a `parallel`, `parallel each` or `parallel settle` branch now reaches the
+  embedder's host. Branches run on runtime worker threads, which did not carry the host-call bridge,
+  so host operations fell back to built-in defaults or failed as unsupported.
+- Keep answers served from a recorded branch prefix out of physical provider usage.
+  Their original response and retry history remain inspectable, while the live ledger
+  reports zero new requests, tokens and spend for the served prefix.
+- **Runtime Git calls on macOS no longer pay the `xcrun` shim's lookup.** A
+  confined server could not reach the shim's per-user cache, so every `git`
+  the runtime ran for workspace checkpoints, scans and git tools looked up the
+  toolchain again, about 0.7 s each and several seconds before a checkpointed
+  prompt started. Session commands now run the selected developer Git
+  (`DEVELOPER_DIR`, then `xcode-select`'s link, Command Line Tools, Xcode)
+  whenever a PATH search would reach `/usr/bin/git`. A Git placed ahead of the
+  shim on PATH still runs.
+
 ## v0.10.194
 
 ### Changed

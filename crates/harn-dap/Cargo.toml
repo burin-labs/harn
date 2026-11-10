@@ -21,19 +21,19 @@ default = ["standalone"]
 standalone = ["dep:harn-stdlib"]
 
 [dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.195", optional = true }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.196", optional = true }
 arcstr = { version = "1", features = ["serde", "std"] }
-harn-modules = { path = "../harn-modules", version = "=0.10.195" }
-harn-parser = { path = "../harn-parser", version = "=0.10.195" }
-harn-vm = { path = "../harn-vm", version = "=0.10.195", default-features = false }
-harn-runtime = { path = "../harn-runtime", version = "=0.10.195" }
+harn-modules = { path = "../harn-modules", version = "=0.10.196" }
+harn-parser = { path = "../harn-parser", version = "=0.10.196" }
+harn-vm = { path = "../harn-vm", version = "=0.10.196", default-features = false }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.196" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 url = "2"
 
 [dev-dependencies]
-harn-modules = { path = "../harn-modules", version = "=0.10.195", features = ["bundled-stdlib"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.196", features = ["bundled-stdlib"] }
 serde_json = "1"
 tempfile = "3"
 

@@ -26,14 +26,14 @@ vm-bench-internals = ["harn-vm/vm-bench-internals"]
 vm-test-support = ["harn-vm/vm-test-support"]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.195" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.195" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.195" }
-harn-vm-core = { path = "../harn-vm-core", version = "=0.10.195" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.196" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.196" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.196" }
+harn-vm-core = { path = "../harn-vm-core", version = "=0.10.196" }
 
 [dev-dependencies]
-harn-runtime = { path = "../harn-runtime", version = "=0.10.195", default-features = false }
-harn-vm = { path = "../harn-vm", version = "=0.10.195", default-features = false }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.196", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.196", default-features = false }
 
 [lints]
 workspace = true
