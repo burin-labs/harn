@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Census the eligible suite before allowing an empty individual partition.
 #
-# Native and CLI unit shares build only the library test harness. Separate
-# shares build integration and binary targets, which need the ordinary library.
-# The remaining packages do not compile either large package's test harnesses.
-# All narrowed groups retain the workspace-resolved feature set.
+# A share's filterset says which tests it executes. On the whole-workspace
+# selection every share compiles that same selection, the graph the cache
+# writer warms: a narrower selection makes Cargo resolve different features for
+# third-party dependencies, so every unit above them misses the cache and the
+# share recompiles them after an exact hit. Affected-crate selections already
+# miss the cache and still compile only their group's packages, with the
+# workspace-resolved feature set.
 #
-# `tooling` runs independently of the security producer and compiles its share.
-# Every narrowed package selection explicitly preserves workspace features.
+# --print-selection <partition> prints the Cargo selection a share compiles,
+# one argument per line, for the unit graph guard.
 set -euo pipefail
 tooling_packages=(harn-fmt harn-lsp harn-package)
+print_selection=
+if [[ "${1:-}" == --print-selection ]]; then print_selection=1; shift; fi
 partition=${1:?partition or all required}
 [[ "$partition" =~ ^(all|tooling|vm-unit:[1-3]/3|vm-integration|cli-unit|cli-integration|rest:[1-4]/4)$ ]] || { echo 'Invalid workspace test partition' >&2; exit 1; }
 group=${partition%%:*}
@@ -18,10 +23,18 @@ harn=(env "HARN_EXT_BOOTSTRAP_INSTALLER=${HARN_BIN:-${HARN_EXT_BOOTSTRAP_INSTALL
   "$script_dir/../bootstrap-harn.sh" --seed-command run --standalone --no-sandbox)
 host_bound_filter=$(bash "$script_dir/host_bound_rust_test_filter.sh")
 filter="not (${host_bound_filter})"
-if [[ "$group" == tooling ]]; then
-  tooling_filter=$(printf ' or package(%s)' "${tooling_packages[@]}")
-  filter+=" and (${tooling_filter# or })"
-fi
+tooling_filter=$(printf ' or package(=%s)' "${tooling_packages[@]}")
+tooling_filter=${tooling_filter# or }
+# Unit shares run the library harness; integration shares run test and binary
+# targets. The union of all groups is the whole suite.
+case "$group" in
+  vm-unit) filter+=' and (package(=harn-vm) and kind(lib))' ;;
+  vm-integration) filter+=' and (package(=harn-vm) and (kind(test) or kind(bin)))' ;;
+  cli-unit) filter+=' and (package(=harn-cli) and kind(lib))' ;;
+  cli-integration) filter+=' and (package(=harn-cli) and (kind(test) or kind(bin)))' ;;
+  tooling) filter+=" and (${tooling_filter})" ;;
+  rest) filter+=" and not (package(=harn-vm) or package(=harn-cli) or ${tooling_filter})" ;;
+esac
 args=(--profile ci -E "$filter")
 if [[ -n "${RUNNER_TEMP:-}" ]]; then
   rm -f "$RUNNER_TEMP/harn-nextest-junit.xml"
@@ -34,37 +47,24 @@ is_tooling() {
 extracted=
 if [[ -n "${2:-}" ]]; then
   [[ "$partition" == all ]] || { echo 'Archive mode runs the whole suite' >&2; exit 1; }
+  [[ -z "$print_selection" ]] || { echo 'Archive mode compiles nothing' >&2; exit 1; }
   selected=archive
   args+=(--archive-file "$2" --workspace-remap "${GITHUB_WORKSPACE:?workspace remap required}")
 else
   selected=$(bash "$script_dir/workspace_test_args.sh")
   read -ra packages <<< "$selected"
-  if [[ "$group" != all ]]; then
+  if [[ "$group" != all && "$selected" != --workspace ]]; then
     grouped=()
-    if [[ "$selected" == --workspace ]]; then
+    for ((i = 0; i < ${#packages[@]}; i += 2)); do
+      [[ "${packages[$i]}" == -p ]] || { echo "Unexpected package selection: $selected" >&2; exit 1; }
+      name=${packages[$((i + 1))]}
       case "$group" in
-        vm-unit|vm-integration) grouped=(-p harn-vm) ;;
-        cli-unit|cli-integration) grouped=(-p harn-cli) ;;
-        tooling)
-          for name in "${tooling_packages[@]}"; do grouped+=(-p "$name"); done
-          ;;
-        rest)
-          grouped=(--workspace --exclude harn-vm --exclude harn-cli)
-          for name in "${tooling_packages[@]}"; do grouped+=(--exclude "$name"); done
-          ;;
+        vm-unit|vm-integration) [[ "$name" == harn-vm ]] && grouped+=(-p "$name") ;;
+        cli-unit|cli-integration) [[ "$name" == harn-cli ]] && grouped+=(-p "$name") ;;
+        rest) [[ "$name" != harn-vm && "$name" != harn-cli ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
+        tooling) is_tooling "$name" && grouped+=(-p "$name") ;;
       esac
-    else
-      for ((i = 0; i < ${#packages[@]}; i += 2)); do
-        [[ "${packages[$i]}" == -p ]] || { echo "Unexpected package selection: $selected" >&2; exit 1; }
-        name=${packages[$((i + 1))]}
-        case "$group" in
-          vm-unit|vm-integration) [[ "$name" == harn-vm ]] && grouped+=(-p "$name") ;;
-          cli-unit|cli-integration) [[ "$name" == harn-cli ]] && grouped+=(-p "$name") ;;
-          rest) [[ "$name" != harn-vm && "$name" != harn-cli ]] && ! is_tooling "$name" && grouped+=(-p "$name") ;;
-          tooling) is_tooling "$name" && grouped+=(-p "$name") ;;
-        esac
-      done
-    fi
+    done
     if ((${#grouped[@]} == 0)); then
       echo "Workspace tests: packages=$selected group=$group selects nothing; partition=$partition skipped"
       if [[ -n "${RUNNER_TEMP:-}" ]]; then
@@ -74,15 +74,11 @@ else
       fi
       exit 0
     fi
-    if [[ "$group" == rest && "$selected" == --workspace ]]; then
-      feature_packages=(--workspace-except harn-vm harn-cli "${tooling_packages[@]}")
-    else
-      feature_packages=()
-      for ((i = 1; i < ${#grouped[@]}; i += 2)); do feature_packages+=("${grouped[$i]}"); done
-      # The CLI directly depends on Native; preserve Native's workspace feature
-      # selection as well as the CLI's own features.
-      [[ "$group" != cli-* ]] || feature_packages+=(harn-vm)
-    fi
+    feature_packages=()
+    for ((i = 1; i < ${#grouped[@]}; i += 2)); do feature_packages+=("${grouped[$i]}"); done
+    # The CLI directly depends on Native; preserve Native's workspace feature
+    # selection as well as the CLI's own features.
+    [[ "$group" != cli-* ]] || feature_packages+=(harn-vm)
     features=$(bash "$script_dir/workspace_features.sh" "${feature_packages[@]}")
     [[ -z "$features" ]] || grouped+=(--features "$features")
     case "$group" in
@@ -93,7 +89,15 @@ else
     esac
     packages=("${grouped[@]}")
     selected="${packages[*]}"
-    if [[ "$group" == tooling || "$group" == vm-integration || "$group" == cli-* ]]; then partition=all; else partition="count:${partition#*:}"; fi
+  fi
+  if [[ "$group" == tooling || "$group" == vm-integration || "$group" == cli-* ]]; then
+    partition=all
+  elif [[ "$group" != all ]]; then
+    partition="count:${partition#*:}"
+  fi
+  if [[ -n "$print_selection" ]]; then
+    printf '%s\n' --locked "${packages[@]}"
+    exit 0
   fi
   args+=(--locked "${packages[@]}")
 fi
