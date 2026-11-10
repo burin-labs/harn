@@ -489,6 +489,11 @@ impl ObservedAttemptToken {
         self.rate_limit.acquire().await
     }
 
+    /// Report the provider's answer to a request this attempt admitted.
+    pub(super) fn observe_provider_outcome<T>(&self, outcome: &Result<T, crate::value::VmError>) {
+        self.rate_limit.observe_outcome(outcome);
+    }
+
     /// Record one physical provider dispatch.
     ///
     /// The call-scoped ledger is the measurement; the agent session's own

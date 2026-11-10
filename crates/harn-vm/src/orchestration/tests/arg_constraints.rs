@@ -74,7 +74,7 @@ fn arg_constraint_prefers_declared_path_param_annotations() {
     let policy = CapabilityPolicy {
         tool_arg_constraints: vec![ToolArgConstraint {
             tool: "edit".to_string(),
-            arg_patterns: vec!["tests/*".to_string()],
+            arg_patterns: vec!["tests/**".to_string()],
             arg_key: None,
         }],
         tool_annotations,
@@ -202,5 +202,155 @@ fn arg_constraint_skips_when_no_path_key_present_in_call() {
     assert!(
         result.is_ok(),
         "no path arg → constraint should skip, got: {result:?}"
+    );
+}
+
+fn path_keyed_policy(tool: &str, arg_key: &str, patterns: &[&str]) -> CapabilityPolicy {
+    let mut tool_annotations = std::collections::BTreeMap::new();
+    tool_annotations.insert(
+        tool.to_string(),
+        crate::tool_annotations::ToolAnnotations {
+            kind: crate::tool_annotations::ToolKind::Edit,
+            arg_schema: crate::tool_annotations::ToolArgSchema {
+                path_params: vec!["path".to_string(), "paths".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    CapabilityPolicy {
+        tool_arg_constraints: vec![ToolArgConstraint {
+            tool: tool.to_string(),
+            arg_patterns: patterns.iter().map(|pattern| pattern.to_string()).collect(),
+            arg_key: Some(arg_key.to_string()),
+        }],
+        tool_annotations,
+        ..Default::default()
+    }
+}
+
+fn admits(policy: &CapabilityPolicy, tool: &str, args: serde_json::Value) -> bool {
+    enforce_tool_arg_constraints(policy, tool, &args).is_ok()
+}
+
+#[test]
+fn path_keyed_single_star_stays_within_one_directory() {
+    let policy = path_keyed_policy("edit", "path", &["src/*"]);
+    assert!(admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "src/a.rs"})
+    ));
+    assert!(
+        !admits(
+            &policy,
+            "edit",
+            serde_json::json!({"path": "src/nested/a.rs"})
+        ),
+        "a path-keyed `*` must not cross `/`"
+    );
+    let recursive = path_keyed_policy("edit", "path", &["src/**"]);
+    assert!(admits(
+        &recursive,
+        "edit",
+        serde_json::json!({"path": "src/nested/a.rs"})
+    ));
+}
+
+#[test]
+fn non_path_key_keeps_flat_name_matching() {
+    let policy = CapabilityPolicy {
+        tool_arg_constraints: vec![ToolArgConstraint {
+            tool: "exec".to_string(),
+            arg_patterns: vec!["cargo *".to_string()],
+            arg_key: Some("command".to_string()),
+        }],
+        ..path_keyed_policy("exec", "command", &[])
+    };
+    assert!(
+        admits(
+            &policy,
+            "exec",
+            serde_json::json!({"command": "cargo test --manifest-path crates/a/Cargo.toml"})
+        ),
+        "a command pattern's `*` still crosses `/`"
+    );
+}
+
+#[test]
+fn path_keyed_values_are_matched_on_their_workspace_spelling() {
+    let policy = path_keyed_policy("edit", "path", &["src/**"]);
+    assert!(admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "./src/a.rs"})
+    ));
+    assert!(admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "src//nested/./a.rs"})
+    ));
+    assert!(
+        !admits(
+            &policy,
+            "edit",
+            serde_json::json!({"path": "src/../outside.rs"})
+        ),
+        "`..` must not walk out of the granted subtree"
+    );
+    assert!(
+        !admits(
+            &policy,
+            "edit",
+            serde_json::json!({"path": "src/../../escape.rs"})
+        ),
+        "a path escaping the workspace is admitted by no pattern"
+    );
+    let everything = path_keyed_policy("edit", "path", &["**"]);
+    assert!(
+        !admits(
+            &everything,
+            "edit",
+            serde_json::json!({"path": "../escape.rs"})
+        ),
+        "`**` means the whole workspace, not the host"
+    );
+}
+
+#[test]
+fn path_keyed_patterns_support_alternates_and_literal_brackets() {
+    let policy = path_keyed_policy("edit", "path", &["src/{a,b}.rs", "app/[slug]/page.tsx"]);
+    assert!(admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "src/b.rs"})
+    ));
+    assert!(!admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "src/c.rs"})
+    ));
+    assert!(admits(
+        &policy,
+        "edit",
+        serde_json::json!({"path": "app/[slug]/page.tsx"})
+    ));
+}
+
+#[test]
+fn path_keyed_array_is_admitted_only_when_every_entry_is() {
+    let policy = path_keyed_policy("run_codemod", "paths", &["src/**"]);
+    assert!(admits(
+        &policy,
+        "run_codemod",
+        serde_json::json!({"paths": ["src/a.rs", "src/b/c.rs"]})
+    ));
+    assert!(
+        !admits(
+            &policy,
+            "run_codemod",
+            serde_json::json!({"paths": ["src/a.rs", "lib/b.rs"]})
+        ),
+        "one out-of-scope entry rejects the whole call"
     );
 }

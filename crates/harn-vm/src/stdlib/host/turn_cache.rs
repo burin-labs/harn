@@ -55,6 +55,30 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+thread_local! {
+    /// The bridge this thread's memo was filled through. Subtasks of different
+    /// sessions share runtime worker threads, and each carries its own
+    /// session's bridge, so an entry is only readable by calls through the same
+    /// bridge. A `Weak` keeps the allocation, and so the address, from being
+    /// reused while it is held, without keeping a finished session's bridge
+    /// alive.
+    static MEMO_OWNER: RefCell<Option<std::sync::Weak<dyn super::HostCallBridge>>> =
+        const { RefCell::new(None) };
+}
+
+/// Drop this thread's memo when it was filled through a different bridge.
+/// Entries stored before any bridge read them, as an embedder seeding its
+/// turn does, belong to the first bridge that reads them.
+pub(crate) fn claim_for(bridge: &std::sync::Arc<dyn super::HostCallBridge>) {
+    let owner = MEMO_OWNER.with(|owner| owner.borrow().as_ref().map(std::sync::Weak::as_ptr));
+    match owner {
+        Some(owner) if std::ptr::addr_eq(owner, std::sync::Arc::as_ptr(bridge)) => return,
+        Some(_) => reset_local(),
+        None => {}
+    }
+    MEMO_OWNER.with(|owner| *owner.borrow_mut() = Some(std::sync::Arc::downgrade(bridge)));
+}
+
 fn current_epoch() -> u64 {
     TURN_EPOCH.load(Ordering::Acquire)
 }
@@ -319,6 +343,7 @@ pub(crate) fn reset() {
 pub(crate) fn reset_local() {
     TURN_STABLE_HOST_CACHE.with(|cache| cache.borrow_mut().clear());
     metadata_snapshot::reset_local();
+    MEMO_OWNER.with(|owner| *owner.borrow_mut() = None);
 }
 
 /// Serializes tests that bump [`TURN_EPOCH`] against tests that rely on a memo

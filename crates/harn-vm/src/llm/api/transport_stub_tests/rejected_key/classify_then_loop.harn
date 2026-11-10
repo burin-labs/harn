@@ -1,0 +1,34 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+pipeline main(harness: Harness, task: unknown) {
+  // The Rust test substitutes `true` or `false` for this marker.
+  const classify_first = __CLASSIFY_FIRST__
+  let classifier = nil
+  if classify_first {
+    const envelope = harness.llm.call_structured_result(
+      "Classify the request.",
+      {type: "object", properties: {kind: {type: "string"}}, required: ["kind"]},
+      {provider: "rejected-key", model: "rejected-key-model", max_tokens: 32, stream: false},
+    )
+    classifier = {ok: envelope.ok, error_category: envelope.error_category}
+  }
+  const session = harness.agent.open()
+  const opts: AgentSpec = {
+    provider: "rejected-key",
+    model: "rejected-key-model",
+    session_id: session,
+    max_iterations: 2,
+    final_wrapup: false,
+    max_tokens: 32,
+    stream: false,
+  }
+  let outcome = nil
+  try {
+    const result = agent_loop(harness, "Do the task.", nil, opts)
+    outcome = {returned: true, status: result?.status, stop_reason: result?.stop_reason, error: result?.error}
+  } catch (error) {
+    outcome = {returned: false, error: error}
+  }
+  harness.stdio.log(json_stringify({classifier: classifier, loop: outcome}))
+}

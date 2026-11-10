@@ -370,6 +370,52 @@ fn real_background_hard_timeout_reaps_detached_descendant() {
     assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "detached child survived");
 }
 
+/// A stopped turn's wait ends on its interrupt instead of sitting out the
+/// caller's budget, and leaves the child to its handle for the cancel path.
+#[test]
+fn real_wait_command_returns_when_the_callers_interrupt_fires() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    let session_id = format!("test-wait-interrupt-{}", std::process::id());
+    let _session = harn_vm::agent_sessions::enter_current_session(session_id);
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    request.put_bool("background", true);
+    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let handle_id = require_str(&started, "handle_id");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flip = Arc::clone(&cancel);
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        flip.store(true, Ordering::SeqCst);
+    });
+    let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
+    let mut wait = dict_map();
+    wait.insert("handle_id".into(), vm_string(&handle_id));
+    wait.put_int("timeout_ms", 30_000);
+    let waited_from = Instant::now();
+    let result = require_dict(call("hostlib_tools_wait_command", wait).unwrap());
+    let waited = waited_from.elapsed();
+    stopper.join().unwrap();
+
+    assert!(
+        waited < Duration::from_secs(2),
+        "wait_command ignored the interrupt for {waited:?}"
+    );
+    assert_eq!(require_str(&result, "status"), "running");
+
+    let mut cancel_request = dict_map();
+    cancel_request.insert("handle_id".into(), vm_string(&handle_id));
+    cancel_request.put_int("wait_result_ms", 5_000);
+    let cancelled = require_dict(call("hostlib_tools_cancel_handle", cancel_request).unwrap());
+    assert!(
+        require_bool(&cancelled, "cancelled"),
+        "the child outlived its handle"
+    );
+}
+
 #[test]
 fn real_wait_command_completes_background_after_fifo_release() {
     let session_id = format!(

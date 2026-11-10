@@ -11,9 +11,10 @@
 //!
 //! Three contracts, chosen per call site:
 //!
-//! - [`match_path`] — slash-aware file-path globs: `*`/`?` never cross `/`,
-//!   `**` crosses directories. Use for path-shaped inputs (invariant globs,
-//!   skill manifests, workspace paths).
+//! - [`match_path`] — slash-aware file-path globs over [`globset`]: `*`/`?`
+//!   never cross `/`, `**` crosses directories, `{a,b}` alternates. Use for
+//!   path-shaped inputs (invariant globs, skill manifests, workspace paths,
+//!   path-keyed policy constraints).
 //! - [`match_name`] — full glob syntax (`*`, `?`, `[...]`, `{a,b}`) over flat
 //!   identifiers where `/` has no special meaning (`*` crosses it). Use for
 //!   tool names, model ids, hook patterns, event names.
@@ -22,77 +23,26 @@
 //!   contains `?`, `[`, or `{` as ordinary prose (e.g. llm-mock prompt
 //!   matchers).
 
-/// Slash-aware glob matching for file paths.
+/// Slash-aware glob matching for file paths, with the semantics of
+/// [`globset`] under `literal_separator`:
 ///
-/// Semantics:
-/// - `*` matches any run of characters except `/`
-/// - `?` matches exactly one character except `/`
-/// - `**` matches any run of characters including `/` (a leading `**/` also
-///   matches zero directories, so `src/**/*.rs` matches `src/main.rs`)
-/// - every other character matches itself; the whole path must be consumed
+/// - `*` and `?` never match `/`; `**` as a whole segment crosses
+///   directories (a leading `**/` also matches zero directories, so
+///   `src/**/*.rs` matches `src/main.rs`)
+/// - `[...]` matches one byte; only a class that names `/` or is negated
+///   (`[!x]`) can match `/`
+/// - `{a,b}` matches either alternative; `\` escapes a metacharacter
+/// - matching is byte-wise: over a non-ASCII name, `?` consumes one UTF-8
+///   byte, not one character
+///
+/// A path equal to the pattern always matches, so a literal that happens to
+/// contain glob syntax (a route directory such as `app/[slug]/page.tsx`)
+/// still matches itself. A pattern that does not parse as a glob (an unclosed
+/// `[` or `{`) matches only that exact path.
 #[must_use]
 pub fn match_path(pattern: &str, path: &str) -> bool {
-    match_path_bytes(pattern.as_bytes(), 0, path.as_bytes(), 0)
-}
-
-fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bool {
-    while pi < pat.len() {
-        match pat[pi] {
-            b'*' => {
-                let double = pat.get(pi + 1) == Some(&b'*');
-                let mut next_pi = if double { pi + 2 } else { pi + 1 };
-                if double && pat.get(next_pi) == Some(&b'/') {
-                    next_pi += 1;
-                    // `**/` matches zero or more complete directory segments.
-                    // It must not start the next pattern in the middle of a
-                    // segment (`**/bar` should not match `foobar`).
-                    if match_path_bytes(pat, next_pi, path, si) {
-                        return true;
-                    }
-                    for try_si in si..path.len() {
-                        if path[try_si] == b'/' && match_path_bytes(pat, next_pi, path, try_si + 1)
-                        {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                if next_pi >= pat.len() {
-                    if double {
-                        return true;
-                    }
-                    return !path[si..].contains(&b'/');
-                }
-                for try_si in si..=path.len() {
-                    if !double && path[si..try_si].contains(&b'/') {
-                        break;
-                    }
-                    // Resume only on a character boundary, never inside a UTF-8 sequence.
-                    let mid_char = path.get(try_si).is_some_and(|byte| byte & 0xC0 == 0x80);
-                    if !mid_char && match_path_bytes(pat, next_pi, path, try_si) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            b'?' => {
-                if si >= path.len() || path[si] == b'/' {
-                    return false;
-                }
-                // `?` is one character, as in gitignore: skip a whole UTF-8 sequence.
-                pi += 1;
-                si = (si + (path[si].leading_ones() as usize).max(1)).min(path.len());
-            }
-            expected => {
-                if si >= path.len() || path[si] != expected {
-                    return false;
-                }
-                pi += 1;
-                si += 1;
-            }
-        }
-    }
-    si == path.len()
+    pattern == path
+        || compiled(pattern, Separator::Literal).is_some_and(|matcher| matcher.is_match(path))
 }
 
 /// Full glob matching for flat names (tool names, model ids, hook patterns).
@@ -103,12 +53,15 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
 /// historical prefix/suffix/equality behavior shared by the pre-consolidation
 /// call sites, so an unclosed `[` never panics or silently rejects.
 ///
+/// A name equal to the pattern always matches, so a literal that happens to
+/// contain glob syntax (a route directory such as `app/[slug]/page.tsx`)
+/// still matches itself instead of being read only as a character class.
+///
 /// Compiled matchers are cached per thread; patterns come from configuration
 /// and hook registration, so the cache stays small.
-#[cfg(feature = "name")]
 #[must_use]
 pub fn match_name(pattern: &str, name: &str) -> bool {
-    if pattern == "*" {
+    if pattern == "*" || pattern == name {
         return true;
     }
     if !has_name_metacharacters(pattern) {
@@ -135,7 +88,6 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
 
 /// Whether a flat-name pattern uses glob operators or backslash escaping.
 /// Use this before deriving an exact name matcher from an external identifier.
-#[cfg(feature = "name")]
 #[must_use]
 pub fn has_name_metacharacters(pattern: &str) -> bool {
     pattern
@@ -143,14 +95,42 @@ pub fn has_name_metacharacters(pattern: &str) -> bool {
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{' | b'\\'))
 }
 
-#[cfg(feature = "name")]
 fn compiled_name_match(pattern: &str, name: &str) -> bool {
+    match compiled(pattern, Separator::Crossed) {
+        Some(matcher) => matcher.is_match(name),
+        // Unparsable glob: match the way pre-consolidation call sites did.
+        None => {
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                return name.starts_with(prefix);
+            }
+            if let Some(suffix) = pattern.strip_prefix('*') {
+                return name.ends_with(suffix);
+            }
+            pattern == name
+        }
+    }
+}
+
+/// Whether `*`, `?` and `[...]` may match `/`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Separator {
+    Literal,
+    Crossed,
+}
+
+/// Compiled matchers keyed by pattern and separator mode; `None` = unparsable.
+type GlobCache = std::collections::HashMap<(Box<str>, Separator), Option<globset::GlobMatcher>>;
+
+/// Compile a glob once per thread, or `None` when it does not parse.
+///
+/// `\` escapes on every platform (globset's default disables it on Windows):
+/// patterns are written with forward slashes, and an escaped metacharacter is
+/// how a caller asks for it literally.
+fn compiled(pattern: &str, separator: Separator) -> Option<globset::GlobMatcher> {
     use std::cell::RefCell;
-    use std::collections::HashMap;
 
     thread_local! {
-        static COMPILED: RefCell<HashMap<Box<str>, Option<globset::GlobMatcher>>> =
-            RefCell::new(HashMap::new());
+        static COMPILED: RefCell<GlobCache> = RefCell::new(GlobCache::new());
     }
 
     COMPILED.with(|cache| {
@@ -160,28 +140,17 @@ fn compiled_name_match(pattern: &str, name: &str) -> bool {
         if cache.len() > 512 {
             cache.clear();
         }
-        let matcher = cache.entry(Box::from(pattern)).or_insert_with(|| {
-            // Names are not paths: `\` escapes on every platform (globset's
-            // default disables it on Windows).
-            globset::GlobBuilder::new(pattern)
-                .backslash_escape(true)
-                .build()
-                .ok()
-                .map(|glob| glob.compile_matcher())
-        });
-        match matcher {
-            Some(matcher) => matcher.is_match(name),
-            // Unparsable glob: match the way pre-consolidation call sites did.
-            None => {
-                if let Some(prefix) = pattern.strip_suffix('*') {
-                    return name.starts_with(prefix);
-                }
-                if let Some(suffix) = pattern.strip_prefix('*') {
-                    return name.ends_with(suffix);
-                }
-                pattern == name
-            }
-        }
+        cache
+            .entry((Box::from(pattern), separator))
+            .or_insert_with(|| {
+                globset::GlobBuilder::new(pattern)
+                    .literal_separator(separator == Separator::Literal)
+                    .backslash_escape(true)
+                    .build()
+                    .ok()
+                    .map(|glob| glob.compile_matcher())
+            })
+            .clone()
     })
 }
 
@@ -261,10 +230,18 @@ mod tests {
         assert!(match_path("src/ma?n.rs", "src/main.rs"));
         assert!(!match_path("src/ma?n.rs", "src/man.rs"));
         assert!(!match_path("a?b", "a/b"));
-        assert!(match_path("?.rs", "é.rs"));
-        assert!(!match_path("??.rs", "é.rs"));
-        assert!(!match_path("*??x", "€x"));
-        assert!(match_path("*?x", "€x"));
+        assert!(match_path("*.rs", "é.rs"));
+        assert!(!match_path("a?b", "aé/b"));
+    }
+
+    /// globset matches bytes, as git's wildmatch does: over a non-ASCII name,
+    /// `?` and `[...]` consume one UTF-8 byte, never one character, and still
+    /// never `/`. Pinned so a semantics change in the crate is noticed.
+    #[test]
+    fn path_single_character_wildcards_match_bytes() {
+        assert!(!match_path("?.rs", "é.rs"));
+        assert!(match_path("??.rs", "é.rs"));
+        assert!(!match_path("[é]", "é"));
     }
 
     #[test]
@@ -275,6 +252,53 @@ mod tests {
         assert!(match_path("src/**", "src/anything"));
         assert!(match_path("", ""));
         assert!(!match_path("", "x"));
+    }
+
+    #[test]
+    fn path_classes_match_one_character_within_a_segment() {
+        assert!(match_path("src/[ab].rs", "src/b.rs"));
+        assert!(!match_path("src/[ab].rs", "src/c.rs"));
+        assert!(match_path("v[0-9].txt", "v7.txt"));
+        assert!(match_path("v[!0-9].txt", "vx.txt"));
+        assert!(!match_path("v[^0-9].txt", "v7.txt"));
+        assert!(match_path("[]x]", "]"));
+        assert!(
+            match_path("a[/]b", "a/b"),
+            "a class that names / explicitly may match it"
+        );
+        assert!(
+            match_path("a[!x]b", "a/b"),
+            "globset lets a negated class match /"
+        );
+        assert!(
+            !match_path("src/[!x]*.rs", "src/a/b.rs"),
+            "but * after it still stays in one segment"
+        );
+        assert!(match_path("open[bracket", "open[bracket"));
+        assert!(
+            !match_path("open[*", "open[anything"),
+            "an unparsable glob matches only itself"
+        );
+        assert!(match_path("open[*", "open[*"));
+    }
+
+    #[test]
+    fn path_brace_alternates_expand_like_a_shell() {
+        assert!(match_path("src/{a,b}.ts", "src/b.ts"));
+        assert!(!match_path("src/{a,b}.ts", "src/c.ts"));
+        assert!(match_path("{src,lib}/**/*.rs", "lib/x/y.rs"));
+        assert!(match_path("x.{a,{b,c}}", "x.c"));
+        assert!(!match_path("{src,lib}/*.rs", "lib/x/y.rs"));
+        assert!(match_path("a{b}c", "a{b}c"));
+        assert!(match_path("a{b,c", "a{b,c"));
+    }
+
+    #[test]
+    fn path_literal_with_glob_syntax_matches_itself() {
+        assert!(match_path("app/[slug]/page.tsx", "app/[slug]/page.tsx"));
+        assert!(!match_path("app/[slug]/page.tsx", "app/other/page.tsx"));
+        assert!(match_path("app/[slug]/page.tsx", "app/s/page.tsx"));
+        assert!(match_path("odd/{a,b}.txt", "odd/{a,b}.txt"));
     }
 
     // --- match_name: ported from hooks, llm_config, capabilities,
@@ -338,6 +362,17 @@ mod tests {
         assert!(match_name("gpt-{4o,5}", "gpt-4o"));
         assert!(match_name("gpt-{4o,5}", "gpt-5"));
         assert!(!match_name("gpt-{4o,5}", "gpt-4.1"));
+    }
+
+    #[test]
+    fn name_literal_with_glob_syntax_matches_itself() {
+        // Route directories such as `[slug]` are literal path segments; the
+        // class reading still applies to every other name.
+        assert!(match_name("app/[slug]/page.tsx", "app/[slug]/page.tsx"));
+        assert!(match_name("app/[slug]/page.tsx", "app/s/page.tsx"));
+        assert!(!match_name("app/[slug]/page.tsx", "app/x/page.tsx"));
+        assert!(match_name("src/{a,b}.ts", "src/{a,b}.ts"));
+        assert!(match_name("src/{a,b}.ts", "src/b.ts"));
     }
 
     #[test]

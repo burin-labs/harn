@@ -42,6 +42,7 @@ pub(super) async fn dispatch_cached(
     ctx: Option<&AsyncBuiltinCtx>,
 ) -> Result<Option<VmValue>, VmError> {
     let caller = ctx.and_then(AsyncBuiltinCtx::host_call_site);
+    turn_cache::claim_for(&bridge);
     if capability == "project" && operation == "metadata_get" {
         return turn_cache::cached_metadata_or(params, |params: DictMap| async move {
             let trace = HostRequestTrace::new(caller, &params);
@@ -151,6 +152,15 @@ impl Drop for HostCallBridgeGuard {
         let previous = self.previous.take();
         HOST_CALL_BRIDGE.with(|slot| *slot.borrow_mut() = previous);
     }
+}
+
+/// Exchange this thread's bridge without opening a new turn. The ambient
+/// execution scope uses it to carry a session's bridge onto whichever thread
+/// polls one of that session's subtasks.
+pub(crate) fn swap_host_call_bridge(
+    bridge: Option<Arc<dyn HostCallBridge>>,
+) -> Option<Arc<dyn HostCallBridge>> {
+    HOST_CALL_BRIDGE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), bridge))
 }
 
 /// Remove the current thread's bridge. Idempotent.

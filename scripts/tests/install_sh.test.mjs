@@ -45,21 +45,56 @@ function fixture(target, invalid, existing = false, badChecksum = false, invalid
     const checksums = join(root, 'SHA256SUMS');
     writeFileSync(checksums, `${badChecksum ? '0'.repeat(64) : digest}  harn-${triple}.tar.xz\n`);
     writeFileSync(join(paths.shim, 'uname'), '#!/bin/sh\ncase "$1" in -s) echo "$FIXTURE_OS";; -m) echo "$FIXTURE_ARCH";; *) exit 1;; esac\n', { mode: 0o755 });
-    // Only the two exact download URLs are accepted. No network-capable command
-    // is reached, while the real installer still verifies the real tar digest.
-    writeFileSync(join(paths.shim, 'curl'), `#!/bin/sh
+    const downloader = options.downloader ?? 'curl';
+    // No network-capable command is reached. The real installer still verifies
+    // the real archive digest and installs its payload and license material.
+    writeFileSync(join(paths.shim, downloader), `#!/bin/sh
 dest=""
-while [ "$#" -gt 1 ]; do
-  if [ "$1" = "--output" ]; then dest="$2"; shift; fi
+url=""
+agent=""
+method=GET
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output|--output-document) shift; dest="$1";;
+    --output-document=*) dest="\${1#*=}";;
+    --user-agent) shift; agent="$1";;
+    --user-agent=*) agent="\${1#*=}";;
+    --head|--spider) method=HEAD;;
+    https://*) url="$1";;
+  esac
   shift
 done
-printf '%s\\n' "$1" >> "$FIXTURE_REQUESTS"
-case "$1" in
+printf '%s|%s|%s\\n' "$method" "$url" "$agent" >> "$FIXTURE_REQUESTS"
+${options.requireIdentity ? 'test "$agent" = harn-install || exit 22' : ''}
+case "$url" in
+  https://github.com/burin-labs/harn/releases/latest)
+    case "$FIXTURE_LATEST" in
+      fallback|failed-api) printf '%s' "$url"; exit 22;;
+      unchanged) printf '%s' "$url";;
+      redirect)
+        if test "$FIXTURE_DOWNLOADER" = curl; then
+          printf '%s/tag/v0.10.999' "https://github.com/burin-labs/harn/releases"
+        else
+          printf '  Location: https://github.com/burin-labs/harn/releases/tag/v0.10.999\\r\\n' >&2
+        fi;;
+      *) exit 91;;
+    esac;;
+  https://api.github.com/repos/burin-labs/harn/releases/latest)
+    test "$method" = GET || exit 91
+    test "$FIXTURE_LATEST" != failed-api || exit 22
+    printf '%s\\n' '{"tag_name":"v0.10.999"}' > "$dest";;
   "$FIXTURE_BASE/harn-$FIXTURE_TARGET.tar.xz") /bin/cp "$FIXTURE_ARCHIVE" "$dest";;
   "$FIXTURE_BASE/SHA256SUMS") /bin/cp "$FIXTURE_CHECKSUMS" "$dest";;
   *) exit 91;;
 esac
 `, { mode: 0o755 });
+    if (downloader === 'wget') {
+      // Hide the host's curl so the installer actually selects its wget path.
+      for (const tool of ['awk', 'grep', 'head', 'install', 'ln', 'mkdir', 'mktemp', 'rm', 'sed', 'sort', 'tar', 'tr', 'xz', 'sha256sum', 'shasum']) {
+        const found = spawnSync('/usr/bin/which', [tool], { encoding: 'utf8' });
+        if (found.status === 0) symlinkSync(found.stdout.trim(), join(paths.shim, tool));
+      }
+    }
     const oldBinary = Buffer.from('previous installed binary\n');
     if (existing) {
       mkdirSync(join(destination, 'harn-licenses'), { recursive: true });
@@ -93,16 +128,32 @@ esac
     const result = spawnSync('/bin/sh', [installer], {
       encoding: 'utf8', timeout: 15_000,
       env: {
-        PATH: `${pathEntry === 'installed' ? `${destination}:` : ''}${paths.shim}:/usr/bin:/bin`, HOME: paths.home, TMPDIR: paths.tmp,
-        [installVariable]: destination, HARN_VERSION: 'v0.10.999', HARN_NO_MODIFY_PATH: noModifyPath ? '1' : '0',
+        PATH: `${pathEntry === 'installed' ? `${destination}:` : ''}${paths.shim}${downloader === 'wget' ? '' : ':/usr/bin:/bin'}`, HOME: paths.home, TMPDIR: paths.tmp,
+        [installVariable]: destination, HARN_VERSION: options.latest ? '' : 'v0.10.999', HARN_NO_MODIFY_PATH: noModifyPath ? '1' : '0',
         FIXTURE_OS: os, FIXTURE_ARCH: arch, FIXTURE_TARGET: triple,
+        FIXTURE_LATEST: options.latest ?? '', FIXTURE_DOWNLOADER: downloader,
         FIXTURE_ARCHIVE: archive, FIXTURE_CHECKSUMS: checksums, FIXTURE_REQUESTS: requests,
         FIXTURE_BASE: 'https://github.com/burin-labs/harn/releases/download/v0.10.999',
       },
     });
     assert.equal(result.error, undefined);
-    assert.equal(readFileSync(requests, 'utf8').trim().split('\n').length, 2);
+    const calls = readFileSync(requests, 'utf8').trim().split('\n').map(line => line.split('|'));
+    const expectedCalls = !options.latest ? 2 : options.latest === 'redirect' ? 3 : options.latest === 'failed-api' ? 2 : 4;
+    assert.equal(calls.length, expectedCalls, result.stderr);
+    if (options.requireIdentity) assert.ok(calls.every(call => call[2] === 'harn-install'));
+    if (options.latest) {
+      assert.deepEqual(calls[0].slice(0, 2), ['HEAD', 'https://github.com/burin-labs/harn/releases/latest']);
+      if (options.latest !== 'redirect') {
+        assert.deepEqual(calls[1].slice(0, 2), ['GET', 'https://api.github.com/repos/burin-labs/harn/releases/latest']);
+      }
+    }
     assert.deepEqual(readdirSync(paths.tmp), [], 'download/extraction directory must be removed');
+    if (options.latest === 'failed-api') {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /could not determine latest release tag/);
+      assert.equal(existsSync(destination), false, 'failed discovery must not create an installation');
+      return result;
+    }
     if (invalid || badChecksum || invalidDestination) {
       assert.notEqual(result.status, 0, 'invalid payload or destination must refuse');
       if (invalidDestination) assert.match(result.stderr, /must (not be a symbolic link|be a regular file|point to)/);
@@ -141,6 +192,21 @@ esac
     }
     return { ...result, destination };
   } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+test('real installer falls back to the release API after a failed latest redirect', () => {
+  fixture(targets[3], undefined, false, false, undefined, { latest: 'fallback' });
+});
+
+for (const downloader of ['curl', 'wget']) {
+  test(`real installer identifies ${downloader} archive and checksum requests`, () => {
+    fixture(targets[3], undefined, false, false, undefined, { downloader, requireIdentity: true });
+  });
+  for (const latest of ['redirect', 'fallback', 'unchanged', 'failed-api']) {
+    test(`real installer selects ${downloader} latest discovery with ${latest}`, () => {
+      fixture(targets[3], undefined, false, false, undefined, { downloader, latest, requireIdentity: true });
+    });
+  }
 }
 
 for (const installVariable of ['HARN_INSTALL_DIR', 'XDG_BIN_DIR']) {

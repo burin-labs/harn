@@ -1,6 +1,42 @@
 type SetupStep = {id?: string, env?: dict<string, string>}
 
-type SetupAction = {runs: {steps: list<SetupStep>}}
+type SetupInput = {default?: string}
+
+type SetupAction = {inputs: dict<string, SetupInput>, runs: {steps: list<SetupStep>}}
+
+type WorkspaceStep = {run?: string, env?: dict<string, string>}
+
+type WorkspaceJob = {steps?: list<WorkspaceStep>}
+
+type WorkspaceWorkflow = {jobs: dict<string, WorkspaceJob>}
+
+@test
+pipeline test_workspace_bootstrap_receives_authenticated_bounded_setup_policy(harness: Harness) {
+  const action = schema_expect(
+    yaml_parse(harness.fs.read_text("../../.github/actions/setup-harn/action.yml")),
+    schema_of(SetupAction),
+  )
+  const workflow = schema_expect(
+    yaml_parse(harness.fs.read_text("../../.github/workflows/ci.yml")),
+    schema_of(WorkspaceWorkflow),
+  )
+  const attempts = action.inputs["max-attempts"]?.default
+  const delay = action.inputs["retry-delay-seconds"]?.default
+  assert(attempts != nil && delay != nil, "the owning retry defaults must be measured")
+  let measured = 0
+  for (_, job) in iter(workflow.jobs) {
+    for step in job.steps ?? [] {
+      if (step.run ?? "").contains("scripts/ci/run_workspace_tests.sh") {
+        measured = measured + 1
+        const environment = step.env ?? {}
+        assert_eq(environment["HARN_BOOTSTRAP_TOKEN"], r"${{ github.token }}")
+        assert_eq(environment["HARN_BOOTSTRAP_MAX_ATTEMPTS"], attempts)
+        assert_eq(environment["HARN_BOOTSTRAP_RETRY_DELAY_SECONDS"], delay)
+      }
+    }
+  }
+  assert_eq(measured, 2, "the narrowed and archive workspace callers must both be measured")
+}
 
 @test
 pipeline test_setup_action_supplies_token_to_resolve_and_install(harness: Harness) {

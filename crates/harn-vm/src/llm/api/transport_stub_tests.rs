@@ -25,6 +25,7 @@ mod gemini_generate_content;
 mod inference_boundary_tests;
 mod metered_redirects;
 mod ollama_openai_compat;
+mod rejected_key;
 pub(crate) use ollama_openai_compat::read_http_request;
 mod terminal_usage;
 

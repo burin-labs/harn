@@ -444,6 +444,7 @@ const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &LIST_DIR_BUILTIN_DEF,
     &MKDIR_BUILTIN_DEF,
     &PATH_JOIN_BUILTIN_DEF,
+    &GLOB_MATCH_BUILTIN_DEF,
     &COPY_FILE_BUILTIN_DEF,
     &TEMP_DIR_BUILTIN_DEF,
     &WORKSPACE_TEMP_DIR_BUILTIN_DEF,
@@ -1050,6 +1051,18 @@ fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::string(harn_kernel::pure::join_path_segments(
         args.iter().map(VmValue::display),
     )))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    sig = "glob_match(pattern: string, candidate: string) -> bool",
+    category = "fs",
+    doc = "Match a workspace-relative path against a glob with the slash-aware semantics capability policy uses for path-keyed tool argument patterns: `*` and `?` stay within one path segment, `**` crosses directories, `{a,b}` alternates, and a candidate equal to the pattern always matches."
+)]
+fn glob_match_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let pattern = args.first().map(VmValue::display).unwrap_or_default();
+    let candidate = args.get(1).map(VmValue::display).unwrap_or_default();
+    Ok(VmValue::Bool(harn_glob::match_path(&pattern, &candidate)))
 }
 
 #[harn_builtin(

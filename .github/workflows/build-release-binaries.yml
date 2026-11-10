@@ -13,8 +13,8 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Build release 
 #      audit lanes and release smoke) on those same files. The run is green only
 #      when the files it built passed every check. A separate promotion workflow
 #      publishes exactly these files, and only on request; nothing here creates a
-#      tag, a GitHub release, or a container. The consumer rehearsal belongs to
-#      promotion, so a checkpoint does not spend one.
+#      tag, a GitHub release, or a container. It qualifies the archives against
+#      the consumer before promotion reauthenticates the recorded proof.
 #
 #      The macOS smoke runs on a trusted host whose runner group admits this
 #      workflow only on refs/heads/main, so a candidate built on any other ref
@@ -259,6 +259,7 @@ jobs:
             printf '\nSource candidate decision: %s\n' "$(cat "$SOURCE_DECISION")" >> "$GITHUB_STEP_SUMMARY"
             REF="$GITHUB_SHA"
             CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
+            REHEARSAL_SOURCE_SHA="$CANDIDATE_SOURCE_SHA"
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             SHOULD_BUILD_BINARIES=true
             SHOULD_PACKAGE_ARCHIVES=true
@@ -394,7 +395,7 @@ jobs:
       issues: write
       id-token: write
       attestations: write
-    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@b7e805dbc176a8503341df00cb75a58174c52e24
+    uses: burin-labs/.github/.github/workflows/dependency-security-proof.yml@f5e66608d43b316d2fecdb1a6ec561a7a6a05c26
     with:
       source-revision: ${{ needs.setup.outputs.candidate_source_sha }}
       policy: false
@@ -442,9 +443,9 @@ jobs:
   prepare_cli_aot:
     name: Prepare CLI AOT payload
     needs: [setup, source-ci]
-    # Match build's top-level condition so a warm-cache build is never skipped
-    # merely because this release/benchmark payload job had no work to do.
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    # Warm runs intentionally skip security; override inherited skip propagation.
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.source-ci.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # The generator compiles the complete Rust workspace and sits on every
     # shipping target's critical path. Public-repository release work always
     # uses the standard free runner selected by the release policy.
@@ -544,10 +545,9 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    # prepare_cli_aot skips its work on warm-cache-only events; `needs` on a
-    # job whose steps were skipped is satisfied, so warm-cache runs still build.
     needs: [setup, prepare_cli_aot]
-    if: needs.setup.outputs.should_build_binaries == 'true'
+    if: >-
+      !cancelled() && needs.setup.result == 'success' && needs.prepare_cli_aot.result == 'success' && needs.setup.outputs.should_build_binaries == 'true'
     # Setup-only branch pushes never instantiate this matrix and therefore
     # cannot enter or cancel these lanes. A newer real main-branch warm replaces
     # only the same target from an older real warm. Candidates, benchmarks,
@@ -1724,7 +1724,7 @@ jobs:
       # The schema's owner validates the manifest here, so a bad manifest fails
       # the run that wrote it rather than the promotion that reads it.
       - name: Validate the candidate manifest
-        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@b7e805dbc176a8503341df00cb75a58174c52e24
+        uses: burin-labs/.github/.github/actions/validate-candidate-manifest@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
         with:
           manifest: ${{ steps.manifest.outputs.manifest }}
           repository: ${{ github.repository }}
@@ -1844,8 +1844,7 @@ jobs:
       !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.rehearsal_source_sha != '' &&
       (needs.setup.outputs.build_mode != 'candidate' ||
       (needs.build.result == 'success' && needs.collect_candidate_manifest.result == 'success' &&
-      needs.release-smoke.result == 'success' &&
-      (needs.setup.outputs.candidate_purpose != 'release' || needs.native-qualification.result == 'success')))
+      needs.release-smoke.result == 'success' && needs.native-qualification.result == 'success'))
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
@@ -1897,8 +1896,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # One check for the whole candidate. A run with nothing to build passes as soon
-  # as setup says so. On a candidate it is the verdict that promotion reads.
+  # Selected builds require measured work; only explicit no-ops pass without it.
+  # On a candidate this is the verdict that promotion reads.
   candidate-verdict:
     name: Release candidate verdict
     needs: [setup, source-security, source-ci, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal, native-qualification]
@@ -1925,12 +1924,22 @@ jobs:
             echo "::error::Consumer release rehearsal at $REHEARSAL_SOURCE_SHA finished ${CONSUMER_RESULT:-missing}; publication refused."
             exit 1
           fi
-          if [[ "$CANDIDATE_PURPOSE" == release &&
+          if [[ ( "$BUILD_MODE" == candidate || "$CANDIDATE_PURPOSE" == release ) &&
                 ( -z "$REHEARSAL_SOURCE_SHA" || "$CONSUMER_RESULT" != success ) ]]; then
             echo "::error::Release has no successful exact-source consumer rehearsal; publication refused."
             exit 1
           fi
           if [[ "$BUILD_MODE" != candidate ]]; then
+            if ! jq -e '
+              .setup.outputs.should_build_binaries as $selected |
+              . as $jobs |
+              $selected == "false" or
+              ($selected == "true" and
+                all(["source-ci", "prepare_cli_aot", "build"][]; $jobs[.].result == "success"))
+            ' <<<"$RESULTS" >/dev/null; then
+              echo "::error::A selected release build did not succeed or build selection is unproven: $RESULTS"
+              exit 1
+            fi
             echo "This run builds no candidate (build mode ${BUILD_MODE:-unset})."
             exit 0
           fi

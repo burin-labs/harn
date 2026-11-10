@@ -16,7 +16,7 @@ impl Drop for ChildGuard {
     }
 }
 
-const PROBE: &str = r#"from pathlib import Path
+const PROBE: &str = r"from pathlib import Path
 import json
 import os
 import socket
@@ -59,7 +59,7 @@ attempt('branch_write', lambda: (workspace / 'branch-file').write_text('branch o
 attempt('branch_read', lambda: (workspace / 'branch-file').read_text())
 attempt('branch_socket', lambda: connect(workspace))
 print(json.dumps(results), flush=True)
-"#;
+";
 
 fn run_matrix(confined: bool) {
     let temp = tempfile::tempdir_in("/tmp").unwrap();

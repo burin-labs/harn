@@ -4131,118 +4131,106 @@ mod declaration_0426 {
     )]
     fn command_sequence_plan_impl() {}
 }
-#[doc = "crates/harn-vm/src/stdlib/command_plan.rs"]
-mod declaration_0427 {
-    #[allow(unused_imports)]
-    use harn_builtin_meta::*;
-    #[harn_builtin_macros::harn_builtin_metadata(
-        exposure = "pure",
-        sig = "__shell_command_shape(source: string, shell: string) -> {status: \"measured\" | \"unmeasured\", dialect: string, segments: list<{operator: string, stages: list<{kind: \"command\" | \"compound\", text: string, words: list<string>}>}>}",
-        category = "runtime",
-        doc = "Internal structural shell-line observation for std/command. Does not execute commands."
-    )]
-    fn shell_command_shape_impl() {}
-}
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0428 {
+mod declaration_0427 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_scope_id" , effects = ["state.read@const=execution-scope"] , sig = "shared_scope_id(scope?: any, options?: dict) -> string" , kind = "async" , category = "concurrency" , doc = "Resolve a shared-state scope identifier.")]
     fn shared_scope_id_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0429 {
+mod declaration_0428 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_cell" , effects = ["state.mutate@const=shared-state"] , sig = "shared_cell(options_or_key?: any, initial?: any) -> any" , kind = "async" , category = "concurrency" , doc = "Open or create a scoped shared cell.")]
     fn shared_cell_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0430 {
+mod declaration_0429 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_get" , effects = ["state.read@arg0"] , sig = "shared_get(handle: any) -> any" , kind = "async" , category = "concurrency" , doc = "Read a shared cell value.")]
     fn shared_get_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0431 {
+mod declaration_0430 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_snapshot" , effects = ["state.read@arg0"] , sig = "shared_snapshot(handle: any) -> any" , kind = "async" , category = "concurrency" , doc = "Return a shared cell snapshot.")]
     fn shared_snapshot_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0432 {
+mod declaration_0431 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_set" , effects = ["state.write@arg0"] , sig = "shared_set(handle: any, value: any) -> nil" , kind = "async" , category = "concurrency" , doc = "Set a shared cell value.")]
     fn shared_set_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0433 {
+mod declaration_0432 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_cas" , effects = ["state.mutate@arg0"] , sig = "shared_cas(handle: any, expected: any, value: any) -> bool" , kind = "async" , category = "concurrency" , doc = "Compare and swap a shared cell value.")]
     fn shared_cas_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0434 {
+mod declaration_0433 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map" , effects = ["state.mutate@const=shared-state"] , sig = "shared_map(options_or_key?: any, initial?: any) -> any" , kind = "async" , category = "concurrency" , doc = "Open or create a scoped shared map.")]
     fn shared_map_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0435 {
+mod declaration_0434 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_get" , effects = ["state.read@arg0"] , sig = "shared_map_get(handle: any, key: any, default?: any) -> any" , kind = "async" , category = "concurrency" , doc = "Read a shared map entry.")]
     fn shared_map_get_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0436 {
+mod declaration_0435 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_snapshot" , effects = ["state.read@arg0"] , sig = "shared_map_snapshot(handle: any, key: any) -> any" , kind = "async" , category = "concurrency" , doc = "Return a shared map entry snapshot.")]
     fn shared_map_snapshot_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0437 {
+mod declaration_0436 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_entries" , effects = ["state.read@arg0"] , sig = "shared_map_entries(handle: any) -> list" , kind = "async" , category = "concurrency" , doc = "Return all shared map entries.")]
     fn shared_map_entries_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0438 {
+mod declaration_0437 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_set" , effects = ["state.write@arg0"] , sig = "shared_map_set(handle: any, key: any, value: any) -> nil" , kind = "async" , category = "concurrency" , doc = "Set a shared map entry.")]
     fn shared_map_set_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0439 {
+mod declaration_0438 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_delete" , effects = ["state.mutate@arg0"] , sig = "shared_map_delete(handle: any, key: any) -> nil" , kind = "async" , category = "concurrency" , doc = "Delete a shared map entry.")]
     fn shared_map_delete_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0440 {
+mod declaration_0439 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_map_cas" , effects = ["state.mutate@arg0"] , sig = "shared_map_cas(handle: any, key: any, expected: any, value: any) -> bool" , kind = "async" , category = "concurrency" , doc = "Compare and swap a shared map entry.")]
     fn shared_map_cas_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency/shared.rs"]
-mod declaration_0441 {
+mod declaration_0440 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.shared_metrics" , effects = ["state.read@const=shared-state"] , sig = "shared_metrics(handle?: any) -> dict" , kind = "async" , category = "concurrency" , doc = "Return shared-state runtime metrics.")]
     fn shared_metrics_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0442 {
+mod declaration_0441 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4255,154 +4243,154 @@ mod declaration_0442 {
     fn sync_mutex_acquire_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0443 {
+mod declaration_0442 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.sync_semaphore_acquire" , effects = ["state.mutate@arg0"] , sig = "sync_semaphore_acquire(key?: string, capacity?: int, permits?: int, timeout_ms?: int) -> any" , kind = "async" , category = "concurrency" , doc = "Acquire permits from a named semaphore.")]
     fn sync_semaphore_acquire_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0444 {
+mod declaration_0443 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.sync_gate_acquire" , effects = ["state.mutate@arg0"] , sig = "sync_gate_acquire(key?: string, limit?: int, timeout_ms?: int) -> any" , kind = "async" , category = "concurrency" , doc = "Acquire one permit from a named gate.")]
     fn sync_gate_acquire_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0445 {
+mod declaration_0444 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.sync_rwlock_acquire" , effects = ["state.mutate@arg0"] , sig = "sync_rwlock_acquire(key?: string, mode?: string, timeout_ms?: int) -> any" , kind = "async" , category = "concurrency" , doc = "Acquire a read or write permit from a named read-write lock.")]
     fn sync_rwlock_acquire_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0446 {
+mod declaration_0445 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.sync_release" , effects = ["state.mutate@arg0"] , sig = "sync_release(permit: any) -> bool" , category = "concurrency" , doc = "Release a synchronization permit.")]
     fn sync_release_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0447 {
+mod declaration_0446 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.sync_metrics" , effects = ["state.read@arg0"] , sig = "sync_metrics(kind?: string, key?: string) -> dict" , kind = "async" , category = "concurrency" , doc = "Return synchronization runtime metrics.")]
     fn sync_metrics_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0448 {
+mod declaration_0447 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_open" , effects = ["state.mutate@arg0"] , sig = "mailbox_open(options_or_name?: any, capacity?: int) -> any" , kind = "async" , category = "concurrency" , doc = "Open or create a scoped mailbox.")]
     fn mailbox_open_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0449 {
+mod declaration_0448 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_lookup" , effects = ["state.read@arg0"] , sig = "mailbox_lookup(target: any) -> any" , kind = "async" , category = "concurrency" , doc = "Look up a scoped mailbox handle.")]
     fn mailbox_lookup_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0450 {
+mod declaration_0449 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_send" , effects = ["state.write@arg0"] , sig = "mailbox_send(target: any, value: any) -> bool" , kind = "async" , category = "concurrency" , doc = "Send a value to a mailbox.")]
     fn mailbox_send_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0451 {
+mod declaration_0450 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_try_receive" , effects = ["state.mutate@arg0"] , sig = "mailbox_try_receive(target: any) -> any" , kind = "async" , category = "concurrency" , doc = "Try to receive one mailbox value without blocking.")]
     fn mailbox_try_receive_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0452 {
+mod declaration_0451 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_receive" , effects = ["state.observe@arg0" , "state.mutate@arg0"] , sig = "mailbox_receive(target: any) -> any" , kind = "async" , category = "concurrency" , doc = "Receive one mailbox value.")]
     fn mailbox_receive_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0453 {
+mod declaration_0452 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_close" , effects = ["state.mutate@arg0"] , sig = "mailbox_close(target: any) -> nil" , kind = "async" , category = "concurrency" , doc = "Close a scoped mailbox.")]
     fn mailbox_close_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0454 {
+mod declaration_0453 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.mailbox_metrics" , effects = ["state.read@arg0"] , sig = "mailbox_metrics(target: any) -> dict" , kind = "async" , category = "concurrency" , doc = "Return metrics for a scoped mailbox.")]
     fn mailbox_metrics_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0455 {
+mod declaration_0454 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.channel" , effects = ["state.mutate@const=channels"] , sig = "channel(name?: string, capacity?: int) -> any" , category = "concurrency" , doc = "Create an in-memory channel.")]
     fn channel_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0456 {
+mod declaration_0455 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.close_channel" , effects = ["state.mutate@arg0"] , sig = "close_channel(channel: any) -> nil" , category = "concurrency" , doc = "Mark a channel closed.")]
     fn close_channel_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0457 {
+mod declaration_0456 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.channel_is_closed" , effects = ["state.read@arg0"] , sig = "channel_is_closed(channel: any) -> bool" , category = "concurrency" , doc = "Return true if the channel has been marked closed.")]
     fn channel_is_closed_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0458 {
+mod declaration_0457 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.try_receive" , effects = ["state.mutate@arg0"] , sig = "try_receive(channel: any) -> any" , category = "concurrency" , doc = "Try to receive one channel value without blocking.")]
     fn try_receive_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0459 {
+mod declaration_0458 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.atomic" , effects = ["state.mutate@const=atomics"] , sig = "atomic(initial?: any) -> any" , category = "concurrency" , doc = "Create an atomic integer handle.")]
     fn atomic_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0460 {
+mod declaration_0459 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.atomic_get" , effects = ["state.read@arg0"] , sig = "atomic_get(handle: any) -> int" , category = "concurrency" , doc = "Read an atomic integer value.")]
     fn atomic_get_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0461 {
+mod declaration_0460 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.atomic_set" , effects = ["state.write@arg0"] , sig = "atomic_set(handle: any, value: int) -> int" , category = "concurrency" , doc = "Set an atomic integer and return the previous value.")]
     fn atomic_set_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0462 {
+mod declaration_0461 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.atomic_add" , effects = ["state.mutate@arg0"] , sig = "atomic_add(handle: any, delta: int) -> int" , category = "concurrency" , doc = "Add to an atomic integer and return the previous value.")]
     fn atomic_add_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0463 {
+mod declaration_0462 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.atomic_cas" , effects = ["state.mutate@arg0"] , sig = "atomic_cas(handle: any, expected: int, value: int) -> bool" , category = "concurrency" , doc = "Compare and swap an atomic integer.")]
     fn atomic_cas_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0464 {
+mod declaration_0463 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4415,126 +4403,126 @@ mod declaration_0464 {
     fn sleep_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0465 {
+mod declaration_0464 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.yield_now" , effects = ["clock.observe@const=scheduler"] , sig = "yield_now() -> nil" , kind = "async" , category = "concurrency" , doc = "Yield cooperatively to other scheduled tasks.")]
     fn yield_now_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0466 {
+mod declaration_0465 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.send" , effects = ["state.write@arg0"] , sig = "send(channel: any, value: any) -> bool" , kind = "async" , category = "concurrency" , doc = "Send a value to a channel.")]
     fn send_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0467 {
+mod declaration_0466 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.receive" , effects = ["state.observe@arg0" , "state.mutate@arg0"] , sig = "receive(channel: any) -> any" , kind = "async" , category = "concurrency" , doc = "Receive one value from a channel.")]
     fn receive_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0468 {
+mod declaration_0467 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.select" , effects = ["state.observe@dynamic" , "state.mutate@dynamic"] , sig = "select(...channels: any) -> dict" , kind = "async" , category = "concurrency" , doc = "Wait until one of the provided channels yields a value.")]
     fn select_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0469 {
+mod declaration_0468 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.select_timeout" , effects = ["clock.observe@const=monotonic" , "state.observe@dynamic"] , sig = "__select_timeout(channels: list, timeout: any) -> dict" , kind = "async" , category = "concurrency" , doc = "Select from a channel list with a timeout.")]
     fn select_timeout_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0470 {
+mod declaration_0469 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.select_try" , effects = ["state.mutate@dynamic"] , sig = "__select_try(channels: list) -> dict" , kind = "async" , category = "concurrency" , doc = "Select from a channel list without blocking.")]
     fn select_try_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0471 {
+mod declaration_0470 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.select_list" , effects = ["state.mutate@dynamic"] , sig = "__select_list(channels: list) -> dict" , kind = "async" , category = "concurrency" , doc = "Wait until one channel in a list yields a value.")]
     fn select_list_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0472 {
+mod declaration_0471 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.channel_select" , effects = ["state.observe@dynamic" , "state.mutate@dynamic"] , sig = "channel_select(channels: list, timeout_ms?: int) -> dict" , kind = "async" , category = "concurrency" , doc = "Select over a list of channels with an optional timeout.")]
     fn channel_select_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0473 {
+mod declaration_0472 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.timer_start" , effects = ["clock.read@const=monotonic"] , sig = "timer_start(name?: string) -> dict" , category = "concurrency" , doc = "Start a named timer and return its handle.")]
     fn timer_start_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0474 {
+mod declaration_0473 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.circuit_breaker" , effects = ["state.mutate@const=circuits"] , sig = "circuit_breaker(name: string, threshold?: int, reset_ms?: int) -> nil" , kind = "async" , category = "concurrency" , doc = "Create or reset a named circuit breaker.")]
     fn circuit_breaker_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0475 {
+mod declaration_0474 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.circuit_check" , effects = ["state.read@arg0" , "clock.read@const=monotonic"] , sig = "circuit_check(name: string) -> string" , kind = "async" , category = "concurrency" , doc = "Return the state of a named circuit breaker.")]
     fn circuit_check_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0476 {
+mod declaration_0475 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.circuit_record_success" , effects = ["state.mutate@arg0"] , sig = "circuit_record_success(name: string) -> nil" , kind = "async" , category = "concurrency" , doc = "Record a successful call for a named circuit breaker.")]
     fn circuit_record_success_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0477 {
+mod declaration_0476 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.circuit_record_failure" , effects = ["state.mutate@arg0" , "clock.read@const=monotonic"] , sig = "circuit_record_failure(name: string) -> bool" , kind = "async" , category = "concurrency" , doc = "Record a failed call and return whether the circuit opened.")]
     fn circuit_record_failure_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0478 {
+mod declaration_0477 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.circuit_reset" , effects = ["state.mutate@arg0"] , sig = "circuit_reset(name: string) -> nil" , kind = "async" , category = "concurrency" , doc = "Reset a named circuit breaker to closed.")]
     fn circuit_reset_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/concurrency.rs"]
-mod declaration_0479 {
+mod declaration_0478 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.timer_end" , effects = ["clock.read@const=monotonic" , "state.mutate@arg0"] , sig = "timer_end(timer: any) -> int" , category = "concurrency" , doc = "End a timer, print elapsed milliseconds, and return the elapsed time.")]
     fn timer_end_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/connectors.rs"]
-mod declaration_0480 {
+mod declaration_0479 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.net.connector_call" , effects = ["network.mutate@dynamic"] , sig = "connector_call(provider: string, method: string, params?: dict) -> any" , kind = "async" , category = "connectors")]
     fn connector_call_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/connectors.rs"]
-mod declaration_0481 {
+mod declaration_0480 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.metrics_inc" , effects = ["observability.write@arg0"] , sig_expr = BuiltinSignature :: variadic ("metrics_inc" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "connectors")]
     fn metrics_inc_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/connectors.rs"]
-mod declaration_0482 {
+mod declaration_0481 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4546,7 +4534,7 @@ mod declaration_0482 {
     fn connector_shared_verify_jwt_inline_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/consent.rs"]
-mod declaration_0483 {
+mod declaration_0482 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4557,7 +4545,7 @@ mod declaration_0483 {
     fn consent_decision_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0484 {
+mod declaration_0483 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4568,7 +4556,7 @@ mod declaration_0484 {
     fn base64_encode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0485 {
+mod declaration_0484 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4579,14 +4567,14 @@ mod declaration_0485 {
     fn base64_decode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0486 {
+mod declaration_0485 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , aliases = ["bytes_to_base64url"] , sig = "base64url_encode(input: string | bytes) -> string" , category = "crypto")]
     fn base64url_encode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0487 {
+mod declaration_0486 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4597,7 +4585,7 @@ mod declaration_0487 {
     fn base64url_decode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0488 {
+mod declaration_0487 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4608,7 +4596,7 @@ mod declaration_0488 {
     fn sha256_base64url_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0489 {
+mod declaration_0488 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4619,7 +4607,7 @@ mod declaration_0489 {
     fn crypto_random_bytes_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0490 {
+mod declaration_0489 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4630,7 +4618,7 @@ mod declaration_0490 {
     fn base32_encode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0491 {
+mod declaration_0490 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4641,21 +4629,21 @@ mod declaration_0491 {
     fn base32_decode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0492 {
+mod declaration_0491 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_HEX_ENCODE , category = "crypto")]
     fn hex_encode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0493 {
+mod declaration_0492 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_HEX_DECODE , category = "crypto")]
     fn hex_decode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0494 {
+mod declaration_0493 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4666,14 +4654,14 @@ mod declaration_0494 {
     fn hash_value_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0495 {
+mod declaration_0494 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_SHA256 , category = "crypto")]
     fn sha256_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0496 {
+mod declaration_0495 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4684,7 +4672,7 @@ mod declaration_0496 {
     fn sha224_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0497 {
+mod declaration_0496 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4695,7 +4683,7 @@ mod declaration_0497 {
     fn sha384_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0498 {
+mod declaration_0497 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4706,7 +4694,7 @@ mod declaration_0498 {
     fn sha512_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0499 {
+mod declaration_0498 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4717,7 +4705,7 @@ mod declaration_0499 {
     fn sha512_256_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0500 {
+mod declaration_0499 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4728,7 +4716,7 @@ mod declaration_0500 {
     fn md5_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0501 {
+mod declaration_0500 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4739,7 +4727,7 @@ mod declaration_0501 {
     fn sha256_hex_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0502 {
+mod declaration_0501 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4750,7 +4738,7 @@ mod declaration_0502 {
     fn hmac_sha256_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0503 {
+mod declaration_0502 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4761,7 +4749,7 @@ mod declaration_0503 {
     fn hmac_sha256_base64_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0504 {
+mod declaration_0503 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4772,7 +4760,7 @@ mod declaration_0504 {
     fn hmac_sha1_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0505 {
+mod declaration_0504 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4783,7 +4771,7 @@ mod declaration_0505 {
     fn jwt_sign_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0506 {
+mod declaration_0505 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4794,7 +4782,7 @@ mod declaration_0506 {
     fn signed_url_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0507 {
+mod declaration_0506 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4805,7 +4793,7 @@ mod declaration_0507 {
     fn verify_signed_url_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0508 {
+mod declaration_0507 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4816,7 +4804,7 @@ mod declaration_0508 {
     fn aws_sigv4_headers_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0509 {
+mod declaration_0508 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4827,7 +4815,7 @@ mod declaration_0509 {
     fn constant_time_eq_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0510 {
+mod declaration_0509 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4838,7 +4826,7 @@ mod declaration_0510 {
     fn url_encode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0511 {
+mod declaration_0510 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4849,7 +4837,7 @@ mod declaration_0511 {
     fn url_decode_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0512 {
+mod declaration_0511 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4860,7 +4848,7 @@ mod declaration_0512 {
     fn sha3_256_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0513 {
+mod declaration_0512 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4871,7 +4859,7 @@ mod declaration_0513 {
     fn sha3_512_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0514 {
+mod declaration_0513 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4882,14 +4870,14 @@ mod declaration_0514 {
     fn blake3_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0515 {
+mod declaration_0514 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.random.ed25519_keypair" , effects = ["random.read@const=os"] , sig = "ed25519_keypair() -> dict" , category = "crypto")]
     fn ed25519_keypair_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0516 {
+mod declaration_0515 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4900,7 +4888,7 @@ mod declaration_0516 {
     fn ed25519_sign_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0517 {
+mod declaration_0516 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4911,14 +4899,14 @@ mod declaration_0517 {
     fn ed25519_verify_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0518 {
+mod declaration_0517 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.random.x25519_keypair" , effects = ["random.read@const=os"] , sig = "x25519_keypair() -> dict" , category = "crypto")]
     fn x25519_keypair_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0519 {
+mod declaration_0518 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4929,7 +4917,7 @@ mod declaration_0519 {
     fn x25519_agree_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/crypto.rs"]
-mod declaration_0520 {
+mod declaration_0519 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4940,7 +4928,7 @@ mod declaration_0520 {
     fn jwt_verify_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0521 {
+mod declaration_0520 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4951,7 +4939,7 @@ mod declaration_0521 {
     fn date_now_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0522 {
+mod declaration_0521 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4962,7 +4950,7 @@ mod declaration_0522 {
     fn date_now_iso_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0523 {
+mod declaration_0522 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4973,7 +4961,7 @@ mod declaration_0523 {
     fn date_format_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0524 {
+mod declaration_0523 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4984,7 +4972,7 @@ mod declaration_0524 {
     fn date_parse_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0525 {
+mod declaration_0524 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -4995,7 +4983,7 @@ mod declaration_0525 {
     fn date_in_zone_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0526 {
+mod declaration_0525 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5006,7 +4994,7 @@ mod declaration_0526 {
     fn date_to_zone_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0527 {
+mod declaration_0526 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5017,7 +5005,7 @@ mod declaration_0527 {
     fn date_from_components_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0528 {
+mod declaration_0527 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5028,7 +5016,7 @@ mod declaration_0528 {
     fn duration_ms_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0529 {
+mod declaration_0528 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5039,7 +5027,7 @@ mod declaration_0529 {
     fn duration_seconds_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0530 {
+mod declaration_0529 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5050,7 +5038,7 @@ mod declaration_0530 {
     fn duration_minutes_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0531 {
+mod declaration_0530 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5061,7 +5049,7 @@ mod declaration_0531 {
     fn duration_hours_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0532 {
+mod declaration_0531 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5072,7 +5060,7 @@ mod declaration_0532 {
     fn duration_days_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0533 {
+mod declaration_0532 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5083,7 +5071,7 @@ mod declaration_0533 {
     fn date_add_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0534 {
+mod declaration_0533 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5094,7 +5082,7 @@ mod declaration_0534 {
     fn date_diff_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0535 {
+mod declaration_0534 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5105,7 +5093,7 @@ mod declaration_0535 {
     fn duration_to_seconds_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0536 {
+mod declaration_0535 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5116,7 +5104,7 @@ mod declaration_0536 {
     fn duration_to_human_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0537 {
+mod declaration_0536 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5127,7 +5115,7 @@ mod declaration_0537 {
     fn weekday_name_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/datetime.rs"]
-mod declaration_0538 {
+mod declaration_0537 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5138,7 +5126,7 @@ mod declaration_0538 {
     fn month_name_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/files.rs"]
-mod declaration_0539 {
+mod declaration_0538 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5151,7 +5139,7 @@ mod declaration_0539 {
     fn files_upload_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/conditional_replace.rs"]
-mod declaration_0540 {
+mod declaration_0539 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5163,7 +5151,7 @@ mod declaration_0540 {
     fn replace_file_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/conditional_replace.rs"]
-mod declaration_0541 {
+mod declaration_0540 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5175,7 +5163,7 @@ mod declaration_0541 {
     fn replace_file_result_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/conditional_replace.rs"]
-mod declaration_0542 {
+mod declaration_0541 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5187,7 +5175,7 @@ mod declaration_0542 {
     fn replace_file_bytes_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/conditional_replace.rs"]
-mod declaration_0543 {
+mod declaration_0542 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5199,7 +5187,7 @@ mod declaration_0543 {
     fn replace_file_bytes_result_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/find_evidence.rs"]
-mod declaration_0544 {
+mod declaration_0543 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5211,7 +5199,7 @@ mod declaration_0544 {
     fn find_evidence_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/find_text.rs"]
-mod declaration_0545 {
+mod declaration_0544 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5223,7 +5211,7 @@ mod declaration_0545 {
     fn find_text_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/line_page.rs"]
-mod declaration_0546 {
+mod declaration_0545 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5235,7 +5223,7 @@ mod declaration_0546 {
     fn read_lines_page_result_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/line_page.rs"]
-mod declaration_0547 {
+mod declaration_0546 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5247,7 +5235,7 @@ mod declaration_0547 {
     fn read_lines_append_page_result_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs/metadata.rs"]
-mod declaration_0548 {
+mod declaration_0547 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5259,7 +5247,7 @@ mod declaration_0548 {
     fn stat_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0549 {
+mod declaration_0548 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5271,7 +5259,7 @@ mod declaration_0549 {
     fn read_file_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0550 {
+mod declaration_0549 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5283,7 +5271,7 @@ mod declaration_0550 {
     fn read_file_result_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0551 {
+mod declaration_0550 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5295,7 +5283,7 @@ mod declaration_0551 {
     fn read_file_bytes_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0552 {
+mod declaration_0551 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5307,7 +5295,7 @@ mod declaration_0552 {
     fn write_file_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0553 {
+mod declaration_0552 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5319,7 +5307,7 @@ mod declaration_0553 {
     fn write_file_bytes_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0554 {
+mod declaration_0553 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5331,7 +5319,7 @@ mod declaration_0554 {
     fn file_exists_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0555 {
+mod declaration_0554 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5343,7 +5331,7 @@ mod declaration_0555 {
     fn path_status_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0556 {
+mod declaration_0555 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5355,7 +5343,7 @@ mod declaration_0556 {
     fn delete_file_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0557 {
+mod declaration_0556 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5367,7 +5355,7 @@ mod declaration_0557 {
     fn append_file_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0558 {
+mod declaration_0557 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5379,7 +5367,7 @@ mod declaration_0558 {
     fn append_file_locked_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0559 {
+mod declaration_0558 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5391,7 +5379,7 @@ mod declaration_0559 {
     fn list_dir_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0560 {
+mod declaration_0559 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -5403,11 +5391,23 @@ mod declaration_0560 {
     fn mkdir_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
-mod declaration_0561 {
+mod declaration_0560 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_PATH_JOIN , category = "fs" , doc = "Join path segments in Harn's target-independent forward-slash form.")]
     fn path_join_builtin() {}
+}
+#[doc = "crates/harn-vm/src/stdlib/fs.rs"]
+mod declaration_0561 {
+    #[allow(unused_imports)]
+    use harn_builtin_meta::*;
+    #[harn_builtin_macros::harn_builtin_metadata(
+        exposure = "pure",
+        sig = "glob_match(pattern: string, candidate: string) -> bool",
+        category = "fs",
+        doc = "Match a workspace-relative path against a glob with the slash-aware semantics capability policy uses for path-keyed tool argument patterns: `*` and `?` stay within one path segment, `**` crosses directories, `{a,b}` alternates, and a candidate equal to the pattern always matches."
+    )]
+    fn glob_match_builtin() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/fs.rs"]
 mod declaration_0562 {
@@ -12918,141 +12918,141 @@ static DEFINITIONS: &[&harn_vm_core::builtin_support::VmBuiltinDef] = &[
     &declaration_0424::DICT_FROM_PAIRS_IMPL_DEF,
     &declaration_0425::METHOD_MUTATE_IMPL_DEF,
     &declaration_0426::COMMAND_SEQUENCE_PLAN_IMPL_DEF,
-    &declaration_0427::SHELL_COMMAND_SHAPE_IMPL_DEF,
-    &declaration_0428::SHARED_SCOPE_ID_BUILTIN_DEF,
-    &declaration_0429::SHARED_CELL_BUILTIN_DEF,
-    &declaration_0430::SHARED_GET_BUILTIN_DEF,
-    &declaration_0431::SHARED_SNAPSHOT_BUILTIN_DEF,
-    &declaration_0432::SHARED_SET_BUILTIN_DEF,
-    &declaration_0433::SHARED_CAS_BUILTIN_DEF,
-    &declaration_0434::SHARED_MAP_BUILTIN_DEF,
-    &declaration_0435::SHARED_MAP_GET_BUILTIN_DEF,
-    &declaration_0436::SHARED_MAP_SNAPSHOT_BUILTIN_DEF,
-    &declaration_0437::SHARED_MAP_ENTRIES_BUILTIN_DEF,
-    &declaration_0438::SHARED_MAP_SET_BUILTIN_DEF,
-    &declaration_0439::SHARED_MAP_DELETE_BUILTIN_DEF,
-    &declaration_0440::SHARED_MAP_CAS_BUILTIN_DEF,
-    &declaration_0441::SHARED_METRICS_BUILTIN_DEF,
-    &declaration_0442::SYNC_MUTEX_ACQUIRE_BUILTIN_DEF,
-    &declaration_0443::SYNC_SEMAPHORE_ACQUIRE_BUILTIN_DEF,
-    &declaration_0444::SYNC_GATE_ACQUIRE_BUILTIN_DEF,
-    &declaration_0445::SYNC_RWLOCK_ACQUIRE_BUILTIN_DEF,
-    &declaration_0446::SYNC_RELEASE_BUILTIN_DEF,
-    &declaration_0447::SYNC_METRICS_BUILTIN_DEF,
-    &declaration_0448::MAILBOX_OPEN_BUILTIN_DEF,
-    &declaration_0449::MAILBOX_LOOKUP_BUILTIN_DEF,
-    &declaration_0450::MAILBOX_SEND_BUILTIN_DEF,
-    &declaration_0451::MAILBOX_TRY_RECEIVE_BUILTIN_DEF,
-    &declaration_0452::MAILBOX_RECEIVE_BUILTIN_DEF,
-    &declaration_0453::MAILBOX_CLOSE_BUILTIN_DEF,
-    &declaration_0454::MAILBOX_METRICS_BUILTIN_DEF,
-    &declaration_0455::CHANNEL_BUILTIN_DEF,
-    &declaration_0456::CLOSE_CHANNEL_BUILTIN_DEF,
-    &declaration_0457::CHANNEL_IS_CLOSED_BUILTIN_DEF,
-    &declaration_0458::TRY_RECEIVE_BUILTIN_DEF,
-    &declaration_0459::ATOMIC_BUILTIN_DEF,
-    &declaration_0460::ATOMIC_GET_BUILTIN_DEF,
-    &declaration_0461::ATOMIC_SET_BUILTIN_DEF,
-    &declaration_0462::ATOMIC_ADD_BUILTIN_DEF,
-    &declaration_0463::ATOMIC_CAS_BUILTIN_DEF,
-    &declaration_0464::SLEEP_BUILTIN_DEF,
-    &declaration_0465::YIELD_NOW_BUILTIN_DEF,
-    &declaration_0466::SEND_BUILTIN_DEF,
-    &declaration_0467::RECEIVE_BUILTIN_DEF,
-    &declaration_0468::SELECT_BUILTIN_DEF,
-    &declaration_0469::SELECT_TIMEOUT_BUILTIN_DEF,
-    &declaration_0470::SELECT_TRY_BUILTIN_DEF,
-    &declaration_0471::SELECT_LIST_BUILTIN_DEF,
-    &declaration_0472::CHANNEL_SELECT_BUILTIN_DEF,
-    &declaration_0473::TIMER_START_BUILTIN_DEF,
-    &declaration_0474::CIRCUIT_BREAKER_BUILTIN_DEF,
-    &declaration_0475::CIRCUIT_CHECK_BUILTIN_DEF,
-    &declaration_0476::CIRCUIT_RECORD_SUCCESS_BUILTIN_DEF,
-    &declaration_0477::CIRCUIT_RECORD_FAILURE_BUILTIN_DEF,
-    &declaration_0478::CIRCUIT_RESET_BUILTIN_DEF,
-    &declaration_0479::TIMER_END_BUILTIN_DEF,
-    &declaration_0480::CONNECTOR_CALL_IMPL_DEF,
-    &declaration_0481::METRICS_INC_IMPL_DEF,
-    &declaration_0482::CONNECTOR_SHARED_VERIFY_JWT_INLINE_IMPL_DEF,
-    &declaration_0483::CONSENT_DECISION_IMPL_DEF,
-    &declaration_0484::BASE64_ENCODE_IMPL_DEF,
-    &declaration_0485::BASE64_DECODE_IMPL_DEF,
-    &declaration_0486::BASE64URL_ENCODE_IMPL_DEF,
-    &declaration_0487::BASE64URL_DECODE_IMPL_DEF,
-    &declaration_0488::SHA256_BASE64URL_IMPL_DEF,
-    &declaration_0489::CRYPTO_RANDOM_BYTES_IMPL_DEF,
-    &declaration_0490::BASE32_ENCODE_IMPL_DEF,
-    &declaration_0491::BASE32_DECODE_IMPL_DEF,
-    &declaration_0492::HEX_ENCODE_IMPL_DEF,
-    &declaration_0493::HEX_DECODE_IMPL_DEF,
-    &declaration_0494::HASH_VALUE_IMPL_DEF,
-    &declaration_0495::SHA256_IMPL_DEF,
-    &declaration_0496::SHA224_IMPL_DEF,
-    &declaration_0497::SHA384_IMPL_DEF,
-    &declaration_0498::SHA512_IMPL_DEF,
-    &declaration_0499::SHA512_256_IMPL_DEF,
-    &declaration_0500::MD5_IMPL_DEF,
-    &declaration_0501::SHA256_HEX_IMPL_DEF,
-    &declaration_0502::HMAC_SHA256_IMPL_DEF,
-    &declaration_0503::HMAC_SHA256_BASE64_IMPL_DEF,
-    &declaration_0504::HMAC_SHA1_IMPL_DEF,
-    &declaration_0505::JWT_SIGN_IMPL_DEF,
-    &declaration_0506::SIGNED_URL_IMPL_DEF,
-    &declaration_0507::VERIFY_SIGNED_URL_IMPL_DEF,
-    &declaration_0508::AWS_SIGV4_HEADERS_IMPL_DEF,
-    &declaration_0509::CONSTANT_TIME_EQ_IMPL_DEF,
-    &declaration_0510::URL_ENCODE_IMPL_DEF,
-    &declaration_0511::URL_DECODE_IMPL_DEF,
-    &declaration_0512::SHA3_256_IMPL_DEF,
-    &declaration_0513::SHA3_512_IMPL_DEF,
-    &declaration_0514::BLAKE3_IMPL_DEF,
-    &declaration_0515::ED25519_KEYPAIR_IMPL_DEF,
-    &declaration_0516::ED25519_SIGN_IMPL_DEF,
-    &declaration_0517::ED25519_VERIFY_IMPL_DEF,
-    &declaration_0518::X25519_KEYPAIR_IMPL_DEF,
-    &declaration_0519::X25519_AGREE_IMPL_DEF,
-    &declaration_0520::JWT_VERIFY_IMPL_DEF,
-    &declaration_0521::DATE_NOW_IMPL_DEF,
-    &declaration_0522::DATE_NOW_ISO_IMPL_DEF,
-    &declaration_0523::DATE_FORMAT_IMPL_DEF,
-    &declaration_0524::DATE_PARSE_IMPL_DEF,
-    &declaration_0525::DATE_IN_ZONE_IMPL_DEF,
-    &declaration_0526::DATE_TO_ZONE_IMPL_DEF,
-    &declaration_0527::DATE_FROM_COMPONENTS_IMPL_DEF,
-    &declaration_0528::DURATION_MS_IMPL_DEF,
-    &declaration_0529::DURATION_SECONDS_IMPL_DEF,
-    &declaration_0530::DURATION_MINUTES_IMPL_DEF,
-    &declaration_0531::DURATION_HOURS_IMPL_DEF,
-    &declaration_0532::DURATION_DAYS_IMPL_DEF,
-    &declaration_0533::DATE_ADD_IMPL_DEF,
-    &declaration_0534::DATE_DIFF_IMPL_DEF,
-    &declaration_0535::DURATION_TO_SECONDS_IMPL_DEF,
-    &declaration_0536::DURATION_TO_HUMAN_IMPL_DEF,
-    &declaration_0537::WEEKDAY_NAME_IMPL_DEF,
-    &declaration_0538::MONTH_NAME_IMPL_DEF,
-    &declaration_0539::FILES_UPLOAD_BUILTIN_DEF,
-    &declaration_0540::REPLACE_FILE_BUILTIN_DEF,
-    &declaration_0541::REPLACE_FILE_RESULT_BUILTIN_DEF,
-    &declaration_0542::REPLACE_FILE_BYTES_BUILTIN_DEF,
-    &declaration_0543::REPLACE_FILE_BYTES_RESULT_BUILTIN_DEF,
-    &declaration_0544::FIND_EVIDENCE_BUILTIN_DEF,
-    &declaration_0545::FIND_TEXT_BUILTIN_DEF,
-    &declaration_0546::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
-    &declaration_0547::READ_LINES_APPEND_PAGE_RESULT_BUILTIN_DEF,
-    &declaration_0548::STAT_BUILTIN_DEF,
-    &declaration_0549::READ_FILE_BUILTIN_DEF,
-    &declaration_0550::READ_FILE_RESULT_BUILTIN_DEF,
-    &declaration_0551::READ_FILE_BYTES_BUILTIN_DEF,
-    &declaration_0552::WRITE_FILE_BUILTIN_DEF,
-    &declaration_0553::WRITE_FILE_BYTES_BUILTIN_DEF,
-    &declaration_0554::FILE_EXISTS_BUILTIN_DEF,
-    &declaration_0555::PATH_STATUS_BUILTIN_DEF,
-    &declaration_0556::DELETE_FILE_BUILTIN_DEF,
-    &declaration_0557::APPEND_FILE_BUILTIN_DEF,
-    &declaration_0558::APPEND_FILE_LOCKED_BUILTIN_DEF,
-    &declaration_0559::LIST_DIR_BUILTIN_DEF,
-    &declaration_0560::MKDIR_BUILTIN_DEF,
-    &declaration_0561::PATH_JOIN_BUILTIN_DEF,
+    &declaration_0427::SHARED_SCOPE_ID_BUILTIN_DEF,
+    &declaration_0428::SHARED_CELL_BUILTIN_DEF,
+    &declaration_0429::SHARED_GET_BUILTIN_DEF,
+    &declaration_0430::SHARED_SNAPSHOT_BUILTIN_DEF,
+    &declaration_0431::SHARED_SET_BUILTIN_DEF,
+    &declaration_0432::SHARED_CAS_BUILTIN_DEF,
+    &declaration_0433::SHARED_MAP_BUILTIN_DEF,
+    &declaration_0434::SHARED_MAP_GET_BUILTIN_DEF,
+    &declaration_0435::SHARED_MAP_SNAPSHOT_BUILTIN_DEF,
+    &declaration_0436::SHARED_MAP_ENTRIES_BUILTIN_DEF,
+    &declaration_0437::SHARED_MAP_SET_BUILTIN_DEF,
+    &declaration_0438::SHARED_MAP_DELETE_BUILTIN_DEF,
+    &declaration_0439::SHARED_MAP_CAS_BUILTIN_DEF,
+    &declaration_0440::SHARED_METRICS_BUILTIN_DEF,
+    &declaration_0441::SYNC_MUTEX_ACQUIRE_BUILTIN_DEF,
+    &declaration_0442::SYNC_SEMAPHORE_ACQUIRE_BUILTIN_DEF,
+    &declaration_0443::SYNC_GATE_ACQUIRE_BUILTIN_DEF,
+    &declaration_0444::SYNC_RWLOCK_ACQUIRE_BUILTIN_DEF,
+    &declaration_0445::SYNC_RELEASE_BUILTIN_DEF,
+    &declaration_0446::SYNC_METRICS_BUILTIN_DEF,
+    &declaration_0447::MAILBOX_OPEN_BUILTIN_DEF,
+    &declaration_0448::MAILBOX_LOOKUP_BUILTIN_DEF,
+    &declaration_0449::MAILBOX_SEND_BUILTIN_DEF,
+    &declaration_0450::MAILBOX_TRY_RECEIVE_BUILTIN_DEF,
+    &declaration_0451::MAILBOX_RECEIVE_BUILTIN_DEF,
+    &declaration_0452::MAILBOX_CLOSE_BUILTIN_DEF,
+    &declaration_0453::MAILBOX_METRICS_BUILTIN_DEF,
+    &declaration_0454::CHANNEL_BUILTIN_DEF,
+    &declaration_0455::CLOSE_CHANNEL_BUILTIN_DEF,
+    &declaration_0456::CHANNEL_IS_CLOSED_BUILTIN_DEF,
+    &declaration_0457::TRY_RECEIVE_BUILTIN_DEF,
+    &declaration_0458::ATOMIC_BUILTIN_DEF,
+    &declaration_0459::ATOMIC_GET_BUILTIN_DEF,
+    &declaration_0460::ATOMIC_SET_BUILTIN_DEF,
+    &declaration_0461::ATOMIC_ADD_BUILTIN_DEF,
+    &declaration_0462::ATOMIC_CAS_BUILTIN_DEF,
+    &declaration_0463::SLEEP_BUILTIN_DEF,
+    &declaration_0464::YIELD_NOW_BUILTIN_DEF,
+    &declaration_0465::SEND_BUILTIN_DEF,
+    &declaration_0466::RECEIVE_BUILTIN_DEF,
+    &declaration_0467::SELECT_BUILTIN_DEF,
+    &declaration_0468::SELECT_TIMEOUT_BUILTIN_DEF,
+    &declaration_0469::SELECT_TRY_BUILTIN_DEF,
+    &declaration_0470::SELECT_LIST_BUILTIN_DEF,
+    &declaration_0471::CHANNEL_SELECT_BUILTIN_DEF,
+    &declaration_0472::TIMER_START_BUILTIN_DEF,
+    &declaration_0473::CIRCUIT_BREAKER_BUILTIN_DEF,
+    &declaration_0474::CIRCUIT_CHECK_BUILTIN_DEF,
+    &declaration_0475::CIRCUIT_RECORD_SUCCESS_BUILTIN_DEF,
+    &declaration_0476::CIRCUIT_RECORD_FAILURE_BUILTIN_DEF,
+    &declaration_0477::CIRCUIT_RESET_BUILTIN_DEF,
+    &declaration_0478::TIMER_END_BUILTIN_DEF,
+    &declaration_0479::CONNECTOR_CALL_IMPL_DEF,
+    &declaration_0480::METRICS_INC_IMPL_DEF,
+    &declaration_0481::CONNECTOR_SHARED_VERIFY_JWT_INLINE_IMPL_DEF,
+    &declaration_0482::CONSENT_DECISION_IMPL_DEF,
+    &declaration_0483::BASE64_ENCODE_IMPL_DEF,
+    &declaration_0484::BASE64_DECODE_IMPL_DEF,
+    &declaration_0485::BASE64URL_ENCODE_IMPL_DEF,
+    &declaration_0486::BASE64URL_DECODE_IMPL_DEF,
+    &declaration_0487::SHA256_BASE64URL_IMPL_DEF,
+    &declaration_0488::CRYPTO_RANDOM_BYTES_IMPL_DEF,
+    &declaration_0489::BASE32_ENCODE_IMPL_DEF,
+    &declaration_0490::BASE32_DECODE_IMPL_DEF,
+    &declaration_0491::HEX_ENCODE_IMPL_DEF,
+    &declaration_0492::HEX_DECODE_IMPL_DEF,
+    &declaration_0493::HASH_VALUE_IMPL_DEF,
+    &declaration_0494::SHA256_IMPL_DEF,
+    &declaration_0495::SHA224_IMPL_DEF,
+    &declaration_0496::SHA384_IMPL_DEF,
+    &declaration_0497::SHA512_IMPL_DEF,
+    &declaration_0498::SHA512_256_IMPL_DEF,
+    &declaration_0499::MD5_IMPL_DEF,
+    &declaration_0500::SHA256_HEX_IMPL_DEF,
+    &declaration_0501::HMAC_SHA256_IMPL_DEF,
+    &declaration_0502::HMAC_SHA256_BASE64_IMPL_DEF,
+    &declaration_0503::HMAC_SHA1_IMPL_DEF,
+    &declaration_0504::JWT_SIGN_IMPL_DEF,
+    &declaration_0505::SIGNED_URL_IMPL_DEF,
+    &declaration_0506::VERIFY_SIGNED_URL_IMPL_DEF,
+    &declaration_0507::AWS_SIGV4_HEADERS_IMPL_DEF,
+    &declaration_0508::CONSTANT_TIME_EQ_IMPL_DEF,
+    &declaration_0509::URL_ENCODE_IMPL_DEF,
+    &declaration_0510::URL_DECODE_IMPL_DEF,
+    &declaration_0511::SHA3_256_IMPL_DEF,
+    &declaration_0512::SHA3_512_IMPL_DEF,
+    &declaration_0513::BLAKE3_IMPL_DEF,
+    &declaration_0514::ED25519_KEYPAIR_IMPL_DEF,
+    &declaration_0515::ED25519_SIGN_IMPL_DEF,
+    &declaration_0516::ED25519_VERIFY_IMPL_DEF,
+    &declaration_0517::X25519_KEYPAIR_IMPL_DEF,
+    &declaration_0518::X25519_AGREE_IMPL_DEF,
+    &declaration_0519::JWT_VERIFY_IMPL_DEF,
+    &declaration_0520::DATE_NOW_IMPL_DEF,
+    &declaration_0521::DATE_NOW_ISO_IMPL_DEF,
+    &declaration_0522::DATE_FORMAT_IMPL_DEF,
+    &declaration_0523::DATE_PARSE_IMPL_DEF,
+    &declaration_0524::DATE_IN_ZONE_IMPL_DEF,
+    &declaration_0525::DATE_TO_ZONE_IMPL_DEF,
+    &declaration_0526::DATE_FROM_COMPONENTS_IMPL_DEF,
+    &declaration_0527::DURATION_MS_IMPL_DEF,
+    &declaration_0528::DURATION_SECONDS_IMPL_DEF,
+    &declaration_0529::DURATION_MINUTES_IMPL_DEF,
+    &declaration_0530::DURATION_HOURS_IMPL_DEF,
+    &declaration_0531::DURATION_DAYS_IMPL_DEF,
+    &declaration_0532::DATE_ADD_IMPL_DEF,
+    &declaration_0533::DATE_DIFF_IMPL_DEF,
+    &declaration_0534::DURATION_TO_SECONDS_IMPL_DEF,
+    &declaration_0535::DURATION_TO_HUMAN_IMPL_DEF,
+    &declaration_0536::WEEKDAY_NAME_IMPL_DEF,
+    &declaration_0537::MONTH_NAME_IMPL_DEF,
+    &declaration_0538::FILES_UPLOAD_BUILTIN_DEF,
+    &declaration_0539::REPLACE_FILE_BUILTIN_DEF,
+    &declaration_0540::REPLACE_FILE_RESULT_BUILTIN_DEF,
+    &declaration_0541::REPLACE_FILE_BYTES_BUILTIN_DEF,
+    &declaration_0542::REPLACE_FILE_BYTES_RESULT_BUILTIN_DEF,
+    &declaration_0543::FIND_EVIDENCE_BUILTIN_DEF,
+    &declaration_0544::FIND_TEXT_BUILTIN_DEF,
+    &declaration_0545::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
+    &declaration_0546::READ_LINES_APPEND_PAGE_RESULT_BUILTIN_DEF,
+    &declaration_0547::STAT_BUILTIN_DEF,
+    &declaration_0548::READ_FILE_BUILTIN_DEF,
+    &declaration_0549::READ_FILE_RESULT_BUILTIN_DEF,
+    &declaration_0550::READ_FILE_BYTES_BUILTIN_DEF,
+    &declaration_0551::WRITE_FILE_BUILTIN_DEF,
+    &declaration_0552::WRITE_FILE_BYTES_BUILTIN_DEF,
+    &declaration_0553::FILE_EXISTS_BUILTIN_DEF,
+    &declaration_0554::PATH_STATUS_BUILTIN_DEF,
+    &declaration_0555::DELETE_FILE_BUILTIN_DEF,
+    &declaration_0556::APPEND_FILE_BUILTIN_DEF,
+    &declaration_0557::APPEND_FILE_LOCKED_BUILTIN_DEF,
+    &declaration_0558::LIST_DIR_BUILTIN_DEF,
+    &declaration_0559::MKDIR_BUILTIN_DEF,
+    &declaration_0560::PATH_JOIN_BUILTIN_DEF,
+    &declaration_0561::GLOB_MATCH_BUILTIN_DEF,
     &declaration_0562::COPY_FILE_BUILTIN_DEF,
     &declaration_0563::TEMP_DIR_BUILTIN_DEF,
     &declaration_0564::WORKSPACE_TEMP_DIR_BUILTIN_DEF,

@@ -18,12 +18,11 @@ pub(crate) fn parse_cargo_libtest(stdout: &str) -> Vec<TestRecord> {
         let Some((name, tail)) = body.split_once(" ... ") else {
             continue;
         };
-        let status = match tail.trim() {
+        // The status word may carry a suffix: `ok (0.01s)`, `ignored, slow`.
+        let status = match tail.trim().split([' ', ',']).next().unwrap_or_default() {
             "ok" => Status::Passed,
             "FAILED" => Status::Failed,
             "ignored" | "skipped" => Status::Skipped,
-            _ if tail.starts_with("ok") => Status::Passed,
-            _ if tail.starts_with("FAILED") => Status::Failed,
             _ => continue,
         };
         out.push(TestRecord::new(name.trim(), status));
@@ -95,9 +94,10 @@ mod tests {
 
     #[test]
     fn parses_cargo_libtest_pass_and_fail() {
-        let output = "running 3 tests\ntest mod_a::passes ... ok\ntest mod_a::fails ... FAILED\ntest mod_b::skipped ... ignored\n\nfailures:\n\n---- mod_a::fails stdout ----\nassertion `left == right` failed\n  left: 1\n  right: 2\n\nfailures:\n    mod_a::fails\n\ntest result: FAILED. 1 passed; 1 failed; 1 ignored\n";
+        let output = "running 4 tests\ntest mod_a::passes ... ok\ntest mod_a::fails ... FAILED\ntest mod_b::skipped ... ignored\ntest mod_b::slow ... ignored, needs network\n\nfailures:\n\n---- mod_a::fails stdout ----\nassertion `left == right` failed\n  left: 1\n  right: 2\n\nfailures:\n    mod_a::fails\n\ntest result: FAILED. 1 passed; 1 failed; 2 ignored\n";
         let records = parse_cargo_libtest(output);
-        assert_eq!(records.len(), 3);
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[3].status, Status::Skipped);
         let failure = records
             .iter()
             .find(|record| record.name == "mod_a::fails")

@@ -3,6 +3,8 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use harn_vm::llm::ProviderCredentialStatus;
+
 use crate::cli::QuickstartArgs;
 use crate::commands::hardware::{self, GpuKind};
 use crate::commands::local_readiness;
@@ -16,6 +18,7 @@ struct ProviderChoice {
     model: String,
     auth_envs: Vec<String>,
     auth_available: bool,
+    credential: ProviderCredentialStatus,
 }
 
 impl ProviderChoice {
@@ -25,6 +28,20 @@ impl ProviderChoice {
 
     fn primary_auth_env(&self) -> Option<&str> {
         self.auth_envs.first().map(String::as_str)
+    }
+
+    /// Plain words for the typed credential status. Deferred platform
+    /// discovery is usable but has not found a credential, so it is never "set".
+    fn credential_label(&self) -> String {
+        crate::localization::translate(match self.credential {
+            ProviderCredentialStatus::Ok => "set",
+            ProviderCredentialStatus::Missing => "missing",
+            ProviderCredentialStatus::NotRequired => "not required",
+            ProviderCredentialStatus::Deferred => "deferred",
+            ProviderCredentialStatus::NeedsUserApproval => "needs approval",
+            ProviderCredentialStatus::RegionUnconfigured
+            | ProviderCredentialStatus::CredentialsUnconfigured => "incomplete",
+        })
     }
 }
 
@@ -80,6 +97,9 @@ pub(crate) async fn run_quickstart(args: &QuickstartArgs) -> Result<(), String> 
         providers_toml: providers_config_path(),
         cwd,
     };
+    if let Some(provider) = args.provider.as_deref() {
+        check_route(provider, args.model.as_deref())?;
+    }
 
     let ollama = probe_ollama(args.model.as_deref()).await;
     let disk = detect_disk_space(&paths.cwd);
@@ -93,10 +113,29 @@ pub(crate) async fn run_quickstart(args: &QuickstartArgs) -> Result<(), String> 
     } else {
         choose_non_interactive(args, &choices, &ollama)?
     };
+    check_route(&selection.provider, Some(&selection.model))?;
 
-    let actions = write_quickstart_files(&paths, &selection)?;
-    print_completion(&selection, &actions);
+    let (actions, saved) = write_quickstart_files(&paths, &selection)?;
+    print_completion(&selection, &actions, saved);
     Ok(())
+}
+
+/// Refuse a provider the catalog does not know, or a model the catalog
+/// assigns to a different provider, through the resolver dispatch uses.
+/// Without a model only the provider name is checked: a missing default is
+/// answered later by an explicit model or a prompt.
+fn check_route(provider: &str, model: Option<&str>) -> Result<(), String> {
+    let provider = provider.trim();
+    let result = match model.map(str::trim).filter(|model| !model.is_empty()) {
+        Some(model) => harn_vm::llm_config::resolve_model_request(model, Some(provider)).map(drop),
+        None => match harn_vm::llm_config::default_model_for_provider(provider) {
+            Err(error @ harn_vm::llm_config::ModelResolutionError::UnknownProvider { .. }) => {
+                Err(error)
+            }
+            _ => Ok(()),
+        },
+    };
+    result.map_err(|error| error.to_string())
 }
 
 async fn probe_ollama(model: Option<&str>) -> OllamaProbe {
@@ -149,13 +188,18 @@ fn provider_choice(
 ) -> Option<ProviderChoice> {
     let def = harn_vm::llm_config::provider_config(name)?;
     let auth_envs = harn_vm::llm_config::auth_env_names(&def.auth_env);
-    let auth_available = harn_vm::llm::provider_auth_status(name).available;
+    // An explicit model is offered only by the providers the catalog lets serve it.
+    if let Some(model) = model {
+        check_route(name, Some(model)).ok()?;
+    }
+    let auth = harn_vm::llm::provider_auth_status(name);
     let model = default_model_for_choice(name, model, ollama)?;
     Some(ProviderChoice {
         name: name.to_string(),
         model,
         auth_envs,
-        auth_available,
+        auth_available: auth.available,
+        credential: auth.credential_status,
     })
 }
 
@@ -205,16 +249,12 @@ fn requested_choice<'a>(
     choices
         .iter()
         .find(|choice| choice.name == provider)
-        .ok_or_else(|| {
-            if harn_vm::llm_config::provider_config(provider).is_some() {
-                match harn_vm::llm_config::default_model_for_provider(provider) {
-                    Err(error) => error.to_string(),
-                    Ok(_) => format!("provider '{provider}' is unavailable"),
-                }
-            } else {
-                format!("unknown provider '{provider}'")
-            }
-        })
+        .ok_or_else(
+            || match harn_vm::llm_config::default_model_for_provider(provider) {
+                Err(error) => error.to_string(),
+                Ok(_) => format!("provider '{provider}' is unavailable"),
+            },
+        )
 }
 
 fn choose_non_interactive(
@@ -344,7 +384,9 @@ fn selection_from_choice(choice: &ProviderChoice, api_key: Option<String>) -> Pr
 fn preferred_choice_index(choices: &[ProviderChoice], ollama: &OllamaProbe) -> Option<usize> {
     choices
         .iter()
-        .position(|choice| !choice.auth_envs.is_empty() && choice.auth_available)
+        .position(|choice| {
+            !choice.auth_envs.is_empty() && choice.credential == ProviderCredentialStatus::Ok
+        })
         .or_else(|| {
             ollama
                 .reachable
@@ -384,28 +426,55 @@ fn read_line(prompt_label: &str) -> Result<String, String> {
     }
 }
 
+/// Write every destination, then report whether all of them now record the
+/// selection. A destination that keeps an existing different route makes the
+/// selection unsaved.
 fn write_quickstart_files(
     paths: &QuickstartPaths,
     selection: &ProviderSelection,
-) -> Result<Vec<FileAction>, String> {
-    validate_existing_harn_toml(&paths.harn_toml)?;
+) -> Result<(Vec<FileAction>, bool), String> {
+    let manifest = read_existing_harn_toml(&paths.harn_toml)?;
     validate_existing_providers_toml(&paths.providers_toml)?;
     let environment = env_file::prepare(&paths.cwd, &paths.env_file, selection)?;
+    let env_saved = !environment.keeps_other_route;
     let mut actions = environment.write()?;
     actions.push(write_providers_toml(&paths.providers_toml, selection)?);
-    actions.push(write_or_update_harn_toml(paths, selection)?);
-    Ok(actions)
+    let (manifest_action, manifest_saved) = write_or_update_harn_toml(paths, manifest, selection)?;
+    actions.push(manifest_action);
+    Ok((actions, env_saved && manifest_saved))
 }
 
-fn validate_existing_harn_toml(path: &Path) -> Result<(), String> {
+/// An existing project manifest is read as text plus whether it has `[llm]`.
+/// That section is decoded through the package manifest's own provider schema
+/// so quickstart refuses, before any write, a manifest the loader would reject.
+struct ExistingManifest {
+    content: String,
+    has_llm: bool,
+}
+
+fn read_existing_harn_toml(path: &Path) -> Result<Option<ExistingManifest>, String> {
     if !path.exists() {
-        return Ok(());
+        return Ok(None);
     }
-    let existing = std::fs::read_to_string(path)
+    let content = std::fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    toml::from_str::<toml::Value>(&existing)
-        .map(|_| ())
-        .map_err(|error| format!("{} is not valid TOML: {error}", path.display()))
+    let parsed = toml::from_str::<toml::Value>(&content)
+        .map_err(|error| format!("{} is not valid TOML: {error}", path.display()))?;
+    let has_llm = match parsed.get("llm") {
+        None => false,
+        Some(llm) => {
+            llm.clone()
+                .try_into::<harn_vm::llm_config::ProvidersConfig>()
+                .map_err(|error| {
+                    format!(
+                        "{} [llm] is not valid provider configuration: {error}",
+                        path.display()
+                    )
+                })?;
+            true
+        }
+    };
+    Ok(Some(ExistingManifest { content, has_llm }))
 }
 
 fn validate_existing_providers_toml(path: &Path) -> Result<(), String> {
@@ -445,50 +514,52 @@ fn write_providers_toml(path: &Path, selection: &ProviderSelection) -> Result<Fi
 
 fn write_or_update_harn_toml(
     paths: &QuickstartPaths,
+    existing: Option<ExistingManifest>,
     selection: &ProviderSelection,
-) -> Result<FileAction, String> {
+) -> Result<(FileAction, bool), String> {
     let path = &paths.harn_toml;
-    if !path.exists() {
-        let project_name = paths
-            .cwd
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("harn-project");
-        let content = render_new_harn_toml(project_name, selection);
-        harn_vm::atomic_io::atomic_write(path, content.as_bytes())
-            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-        return Ok(FileAction {
-            path: path.clone(),
-            status: "create",
-            detail: "starter project manifest".to_string(),
-        });
-    }
-
-    let existing = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let parsed = toml::from_str::<toml::Value>(&existing)
-        .map_err(|error| format!("{} is not valid TOML: {error}", path.display()))?;
-    if parsed.get("llm").is_some() {
-        return Ok(FileAction {
-            path: path.clone(),
-            status: "skip",
-            detail: "already has [llm] config".to_string(),
-        });
-    }
-
-    let mut content = existing;
-    if !content.ends_with('\n') {
-        content.push('\n');
-    }
-    content.push('\n');
-    content.push_str(&render_harn_llm_section(selection));
+    let llm_section = render_harn_llm_section(selection);
+    let (content, status, detail) = match existing {
+        None => {
+            let project_name = paths
+                .cwd
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("harn-project");
+            (
+                render_new_harn_toml(project_name, &llm_section),
+                "create",
+                "starter project manifest",
+            )
+        }
+        Some(existing) if existing.has_llm => {
+            // A rerun with the same selection finds its own section verbatim.
+            let saved = existing.content.contains(&llm_section);
+            let action = FileAction {
+                path: path.clone(),
+                status: "skip",
+                detail: "already has [llm] config".to_string(),
+            };
+            return Ok((action, saved));
+        }
+        Some(existing) => {
+            let mut content = existing.content;
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push('\n');
+            content.push_str(&llm_section);
+            (content, "update", "added [llm] defaults")
+        }
+    };
     harn_vm::atomic_io::atomic_write(path, content.as_bytes())
-        .map_err(|error| format!("failed to update {}: {error}", path.display()))?;
-    Ok(FileAction {
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    let action = FileAction {
         path: path.clone(),
-        status: "update",
-        detail: "added [llm] defaults".to_string(),
-    })
+        status,
+        detail: detail.to_string(),
+    };
+    Ok((action, true))
 }
 
 fn render_providers_toml(selection: &ProviderSelection) -> String {
@@ -504,15 +575,14 @@ fn render_providers_toml(selection: &ProviderSelection) -> String {
     )
 }
 
-fn render_new_harn_toml(project_name: &str, selection: &ProviderSelection) -> String {
+fn render_new_harn_toml(project_name: &str, llm_section: &str) -> String {
     format!(
         "[package]\n\
          name = {}\n\
          version = \"0.1.0\"\n\n\
          [dependencies]\n\n\
-         {}",
+         {llm_section}",
         toml_quote(project_name),
-        render_harn_llm_section(selection)
     )
 }
 
@@ -618,6 +688,17 @@ fn env_file_has_key(existing: &str, key: &str) -> bool {
         .any(|line| env_assignment_key(line) == Some(key))
 }
 
+/// Whether `existing` assigns `key` a value other than `value`.
+fn env_assigns_other_value(existing: &str, key: &str, value: &str) -> bool {
+    existing.lines().any(|line| {
+        env_assignment_key(line) == Some(key)
+            && line
+                .split_once('=')
+                .and_then(|(_, raw)| shell_words::split(raw).ok())
+                != Some(vec![value.to_string()])
+    })
+}
+
 fn env_assignment_key(line: &str) -> Option<&str> {
     let line = line.trim_start();
     if line.starts_with('#') {
@@ -662,30 +743,31 @@ fn print_probe_report(
     println!();
     println!("{}", crate::localization::formatted!("Credentials:"));
     for choice in choices.iter().filter(|choice| !choice.auth_envs.is_empty()) {
-        let status = if choice.auth_available {
-            "set"
-        } else {
-            "missing"
-        };
         println!(
             "  {:<12} {:<8} {}",
             choice.name,
-            crate::localization::translate(status),
+            choice.credential_label(),
             choice.auth_envs.join(", ")
         );
     }
 }
 
-fn print_completion(selection: &ProviderSelection, actions: &[FileAction]) {
+fn print_completion(selection: &ProviderSelection, actions: &[FileAction], saved: bool) {
     println!();
-    println!(
-        "{}",
+    let headline = if saved {
         crate::localization::formatted!(
             "Configured provider={} model={}",
             selection.provider,
             selection.model
         )
-    );
+    } else {
+        crate::localization::formatted!(
+            "Kept existing configuration; requested provider={} model={} was not saved",
+            selection.provider,
+            selection.model
+        )
+    };
+    println!("{headline}");
     for action in actions {
         println!(
             "  {:<6} {:<52} {}",
@@ -703,10 +785,12 @@ fn print_completion(selection: &ProviderSelection, actions: &[FileAction]) {
 fn format_choice(choice: &ProviderChoice, ollama: &OllamaProbe) -> String {
     let auth = if choice.auth_envs.is_empty() {
         crate::localization::formatted!("no API key required")
-    } else if choice.auth_available {
-        crate::localization::formatted!("{} set", choice.auth_envs.join("/"))
     } else {
-        crate::localization::formatted!("{} missing", choice.auth_envs.join("/"))
+        format!(
+            "{} {}",
+            choice.auth_envs.join("/"),
+            choice.credential_label()
+        )
     };
     let extra = if choice.name == "ollama" {
         if ollama.reachable {
@@ -860,12 +944,14 @@ mod tests {
                 model: "llama3.2".to_string(),
                 auth_envs: Vec::new(),
                 auth_available: true,
+                credential: ProviderCredentialStatus::NotRequired,
             },
             ProviderChoice {
                 name: "anthropic".to_string(),
                 model: "claude-sonnet-4-20250514".to_string(),
                 auth_envs: vec!["ANTHROPIC_API_KEY".to_string()],
                 auth_available: true,
+                credential: ProviderCredentialStatus::Ok,
             },
         ];
         let args = QuickstartArgs {
@@ -895,18 +981,21 @@ mod tests {
                 model: "devstral-small-2".to_string(),
                 auth_envs: Vec::new(),
                 auth_available: true,
+                credential: ProviderCredentialStatus::NotRequired,
             },
             ProviderChoice {
                 name: "anthropic".to_string(),
                 model: "claude-sonnet-4-20250514".to_string(),
                 auth_envs: vec!["ANTHROPIC_API_KEY".to_string()],
                 auth_available: false,
+                credential: ProviderCredentialStatus::Missing,
             },
             ProviderChoice {
                 name: "local".to_string(),
                 model: "gpt-4o".to_string(),
                 auth_envs: Vec::new(),
                 auth_available: true,
+                credential: ProviderCredentialStatus::NotRequired,
             },
         ];
         let args = QuickstartArgs {

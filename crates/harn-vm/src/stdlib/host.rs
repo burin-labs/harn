@@ -25,6 +25,7 @@ pub mod trace;
 // when probing host_call outside the stdlib builtin (harn#5190).
 pub mod turn_cache;
 
+pub(crate) use bridge::swap_host_call_bridge;
 use bridge::HOST_CALL_BRIDGE;
 pub use bridge::{
     clear_host_call_bridge, dispatch_host_call_bridge, host_call_ready, install_host_call_bridge,

@@ -210,6 +210,8 @@ struct HandleEntry {
     /// on the finalized command result instead of observing it indirectly
     /// through the session inbox.
     result_txs: Vec<std::sync::mpsc::SyncSender<VmValue>>,
+    /// Signalled once a `wait_command` wait registers its result channel.
+    waits: Vec<std::sync::mpsc::SyncSender<()>>,
     /// Opaque verification snapshot binding provided by the caller.
     snapshot_binding: Option<harn_vm::value::DictMap>,
     /// Spawn-time lease tag surfaced by `list_handles` (loop owns transitions).
@@ -505,6 +507,7 @@ pub(crate) fn spawn_long_running_with_options(
                 output_feed: output_feed.clone(),
                 completion_tx: None,
                 result_txs: Vec::new(),
+                waits: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
                 lease: options.lease,
                 command_display: command_display.clone(),
@@ -1187,13 +1190,26 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> BackgroundW
         }
         let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
         entry.result_txs.push(tx);
+        entry.waits.drain(..).for_each(|tx| _ = tx.try_send(()));
         rx
     };
-    match rx.recv_timeout(timeout) {
-        Ok(result) => BackgroundWaitOutcome::Completed(result),
-        Err(_) => current_wait_outcome(handle_id),
+    // Wait in short slices so a stop or deadline on the calling turn ends the
+    // wait instead of holding it for the caller's whole budget. The child
+    // stays owned by its handle; the session's cancel path reaps it.
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(remaining.min(WAIT_INTERRUPT_POLL)) {
+            Ok(result) => return BackgroundWaitOutcome::Completed(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                if !remaining.is_zero() && !harn_vm::op_interrupt::requested() => {}
+            Err(_) => return current_wait_outcome(handle_id),
+        }
     }
 }
+
+/// How often a direct result wait re-checks the calling turn's interrupt.
+const WAIT_INTERRUPT_POLL: Duration = Duration::from_millis(20);
 
 /// Atomically consume feedback for one long-running handle while leaving all
 /// other session entries in their original order with their original sequence.
@@ -1328,6 +1344,17 @@ pub fn register_completion_notifier(handle_id: &str) -> Option<std::sync::mpsc::
         let entry = store.entries.get_mut(handle_id)?;
         entry.completion_tx = Some(tx);
     }
+    Some(rx)
+}
+
+/// Test hook: fires once a `wait_command` wait on `handle_id` has registered for
+/// its result, so a caller can act while the wait is in place. `None`: not live.
+pub fn register_wait_notifier(handle_id: &str) -> Option<std::sync::mpsc::Receiver<()>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let mut store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    store.entries.get_mut(handle_id)?.waits.push(tx);
     Some(rx)
 }
 

@@ -266,11 +266,12 @@ impl LlmResult {
     pub(crate) fn usage(&self) -> crate::llm::usage::LlmUsage {
         let current = crate::llm::usage::LlmUsage::from_result(self);
         let attempts = &self.attempts;
-        if attempts.total <= 1
-            && attempts.completed_retry_usage.is_empty()
-            && attempts.rate_limited == 0
-            && attempts.empty_completion == 0
-            && attempts.other == 0
+        if current.provider_call_count == Some(0)
+            || (attempts.total <= 1
+                && attempts.completed_retry_usage.is_empty()
+                && attempts.rate_limited == 0
+                && attempts.empty_completion == 0
+                && attempts.other == 0)
         {
             return current;
         }
