@@ -99,6 +99,25 @@ else
 fi
 census=$(mktemp)
 junit_source=
+# The CI profile prints only slow and failing cases, so name the slowest cases
+# of every run from the JUnit report. Without it a ranking of test cost sees
+# only the cases that crossed the slow threshold.
+report_slowest() {
+  local slowest
+  slowest=$(sed -n 's/.*<testcase name="\([^"]*\)" classname="\([^"]*\)".* time="\([0-9.]*\)".*/\3\t\2 \1/p' "$1" \
+    | sort -t "$(printf '\t')" -k1,1nr | head -n 15 | awk -F '\t' '{ printf "    %8.2fs  %s\n", $1, $2 }')
+  if [[ -z "$slowest" ]]; then
+    # A report with cases that parses to none means the attribute shape moved.
+    if grep -q '<testcase ' "$1"; then
+      echo "::warning::Slowest test cases: $1 has test cases but none parsed; the nextest JUnit attribute order changed" >&2
+    fi
+    return 0
+  fi
+  printf 'Slowest test cases:\n%s\n' "$slowest"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '### Slowest test cases\n\n%s\n' "$slowest" >> "$GITHUB_STEP_SUMMARY" || true
+  fi
+}
 preserve_results() {
   local status=$?
   if [[ -n "$junit_source" && -n "${RUNNER_TEMP:-}" ]]; then
@@ -106,6 +125,7 @@ preserve_results() {
       if ! cp "$junit_source" "$RUNNER_TEMP/harn-nextest-junit.xml"; then
         [[ "$status" != 0 ]] || status=1
       fi
+      report_slowest "$junit_source" || true
     else
       echo "Nextest timing report missing: $junit_source" >&2
       [[ "$status" != 0 ]] || status=1
