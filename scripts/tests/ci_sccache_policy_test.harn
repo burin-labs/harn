@@ -1440,7 +1440,10 @@ pipeline test_rejects_a_cache_summary_guard_that_names_one_tier(harness: Harness
 
 pipeline test_hosted_ceiling_reserves_the_main_cache_save() {
   assert_eq(producer_cache_save_reserve_minutes(), 12)
-  assert_eq(producer_hosted_ceiling_minutes(), 6 + 2 + 24 + 26 + producer_cache_save_reserve_minutes())
+  assert_eq(
+    producer_hosted_ceiling_minutes(),
+    6 + 2 + 24 + 26 + producer_cache_save_reserve_minutes(),
+  )
 }
 
 @test
