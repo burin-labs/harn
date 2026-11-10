@@ -21,6 +21,10 @@ mod test_util;
 #[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
+#[path = "../../build_support/build_revision.rs"]
+#[allow(dead_code)]
+mod build_revision;
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod acp_confinement_cli;
 mod acp_registry_manifest;
@@ -29,6 +33,7 @@ mod agent_run_command_argv_coercion;
 mod artifact_manifest_schema;
 mod attributed_decl_cli;
 mod bubblewrap_fallback_e2e;
+mod build_revision_source;
 mod cache_dir_cli;
 mod canon_dispatch;
 mod check_fmt_json_cli;

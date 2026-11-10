@@ -6,9 +6,7 @@
 
 use std::process::Command;
 
-#[path = "../../build_support/build_revision.rs"]
-#[allow(dead_code)]
-mod build_revision;
+use super::build_revision;
 
 #[test]
 fn version_dispatch_renders_banner_with_version() {
