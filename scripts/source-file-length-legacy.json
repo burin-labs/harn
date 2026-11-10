@@ -13,7 +13,6 @@
     "crates/harn-vm/src/session_bundle.rs",
     "crates/harn-vm/src/stdlib/agent_sessions.rs",
     "crates/harn-vm/src/stdlib/pool/mod.rs",
-    "crates/harn-vm/src/stdlib/sandbox/mod.rs",
     "crates/harn-vm/src/triggers/registry.rs",
     "crates/harn-vm/src/triggers/test_util/mod.rs"
   ]

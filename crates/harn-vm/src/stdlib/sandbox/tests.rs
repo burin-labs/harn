@@ -443,10 +443,10 @@ fn scoped_walk_refuses_junction_intermediate_component() {
               or snapped to a char boundary"
 )]
 fn scoped_walk_forbids_raw_path_filesystem_calls() {
-    let src = include_str!("mod.rs");
+    let src = include_str!("scoped_fs.rs");
     let locked_append_src = include_str!("locked_append.rs");
     let replace_src = include_str!("replace.rs");
-    // The tests live in a sibling module, so `mod.rs` is production-only.
+    // The scoped walk lives in `scoped_fs.rs`, which holds no tests.
     let production = src;
 
     // Return the `{ ... }` body of the first function whose signature line

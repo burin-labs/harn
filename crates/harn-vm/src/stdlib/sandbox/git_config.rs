@@ -142,11 +142,7 @@ fn trusted_git_executable(workspaces: &[PathBuf]) -> Option<PathBuf> {
     // Apple's /usr/bin/git is an xcrun shim. Use an installed system-owned
     // binary directly so host discovery doesn't warm the workspace cache.
     let installed = if cfg!(target_os = "macos") {
-        &[
-            "/var/db/xcode_select_link/usr/bin/git",
-            "/Library/Developer/CommandLineTools/usr/bin/git",
-            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
-        ][..]
+        super::developer_git::INSTALLED
     } else {
         &[]
     };
