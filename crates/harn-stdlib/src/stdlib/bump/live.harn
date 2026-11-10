@@ -25,7 +25,7 @@ import {
   BumpPrUpsert,
   BumpRevisionRelation,
 } from "std/bump/runtime"
-import { command_run } from "std/command"
+import { CommandResult, command_output_tail, command_run } from "std/command"
 import { poll_until } from "std/poll"
 import { is_v_semver, strip_v } from "std/semver"
 
@@ -109,8 +109,42 @@ fn __git(tools: HarnessTools, repo_dir: string, argv: list<string>) {
   return command_run(tools, ["git", "-C", repo_dir] + argv)
 }
 
-fn __shell(tools: HarnessTools, repo_dir: string, command: string, environment: dict) {
+fn __shell(
+  tools: HarnessTools,
+  repo_dir: string,
+  command: string,
+  environment: dict,
+) -> CommandResult {
   return command_run(tools, {mode: "shell", command: command, cwd: repo_dir, env: environment})
+}
+
+fn __failure_detail(tools: HarnessTools, result: CommandResult?) -> string {
+  if result == nil {
+    return "command result unavailable"
+  }
+  let parts: list<string> = []
+  for stream in [
+    {name: "stderr", inline: result.stderr, truncated: result?.stderr_truncated ?? false},
+    {name: "stdout", inline: result.stdout, truncated: result?.stdout_truncated ?? false},
+  ] {
+    const tail = try {
+      command_output_tail(tools, result, {source: stream.name, length: 4096})
+    } catch (_error) {
+      nil
+    }
+    if tail != nil && tail.eof {
+      parts.push(trim(tail.content))
+    } else {
+      const inline = if len(stream.inline) > 4096 {
+        substring(stream.inline, len(stream.inline) - 4096)
+      } else {
+        stream.inline
+      }
+      const notice = stream.truncated ? "${stream.name} truncated; artifact tail unavailable\n" : ""
+      parts.push(notice + trim(inline))
+    }
+  }
+  return trim(join(parts, "\n"))
 }
 
 fn __lines(text: string?) -> list<string> {
@@ -270,7 +304,7 @@ fn __apply_version(
     } else if refresh_ok {
       "refresh ok"
     } else {
-      trim((refresh?.stderr ?? "") + (refresh?.stdout ?? ""))
+      __failure_detail(tools, refresh)
     },
   }
 }
@@ -570,7 +604,7 @@ pub fn live_bump_adapter(
         detail: if ok {
           "validation passed"
         } else {
-          trim((result.stderr ?? "") + (result.stdout ?? ""))
+          __failure_detail(tools, result)
         },
       }
     },
