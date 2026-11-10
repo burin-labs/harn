@@ -62,18 +62,35 @@ fn text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     source.get(node.byte_range()).unwrap_or_default()
 }
 
-/// The separator written between two top-level statements.
-fn separator(source: &str, previous: Node<'_>, next: Node<'_>) -> &'static str {
-    let gap = source
-        .get(previous.end_byte()..next.start_byte())
-        .unwrap_or_default();
-    if gap.contains(';') {
-        ";"
-    } else if gap.contains('&') {
-        "&"
-    } else {
-        "\n"
+/// The separator that ends `previous`: the first `;` or `&` token the grammar
+/// parsed between the two statements, or a newline when there is none. Comment
+/// text in that gap is never a separator, so `a # ; note` then `b` is a
+/// newline and `a & # ; note` then `b` is a background `&`.
+fn separator(root: Node<'_>, source: &str, previous: Node<'_>, next: Node<'_>) -> &'static str {
+    first_separator_token(root, source, previous.end_byte(), next.start_byte()).unwrap_or("\n")
+}
+
+fn first_separator_token(
+    node: Node<'_>,
+    source: &str,
+    start: usize,
+    end: usize,
+) -> Option<&'static str> {
+    if node.kind() == "comment" || node.end_byte() <= start || node.start_byte() >= end {
+        return None;
     }
+    if node.child_count() == 0 {
+        return match text(node, source).trim() {
+            ";" => Some(";"),
+            "&" => Some("&"),
+            _ => None,
+        };
+    }
+    let mut cursor = node.walk();
+    let found = node
+        .children(&mut cursor)
+        .find_map(|child| first_separator_token(child, source, start, end));
+    found
 }
 
 fn posix_shape(source: &str) -> Option<Vec<ShellShapeSegment>> {
@@ -86,7 +103,7 @@ fn posix_shape(source: &str) -> Option<Vec<ShellShapeSegment>> {
         if child.kind() == "comment" {
             continue;
         }
-        let operator = previous.map_or("", |previous| separator(source, previous, child));
+        let operator = previous.map_or("", |previous| separator(root, source, previous, child));
         posix_flatten(child, operator, source, &mut segments)?;
         previous = Some(child);
     }
@@ -204,12 +221,13 @@ fn posix_stage(node: Node<'_>, source: &str) -> Option<ShellShapeStage> {
 
 fn powershell_shape(source: &str) -> Option<Vec<ShellShapeSegment>> {
     let tree = parse(harn_grammars::powershell(), source)?;
+    let root = tree.root_node();
     let mut segments = Vec::new();
     let mut previous: Option<Node<'_>> = None;
     let mut statements = Vec::new();
-    collect_powershell_statements(tree.root_node(), &mut statements);
+    collect_powershell_statements(root, &mut statements);
     for statement in statements {
-        let operator = previous.map_or("", |previous| separator(source, previous, statement));
+        let operator = previous.map_or("", |previous| separator(root, source, previous, statement));
         if statement.kind() == "pipeline" {
             let mut pending = operator;
             let mut cursor = statement.walk();
@@ -397,6 +415,33 @@ mod tests {
                 ),
             ])
         );
+    }
+
+    fn operators(dialect: ShellDialect, source: &str) -> Option<Vec<String>> {
+        summary(dialect, source)
+            .map(|segments| segments.into_iter().map(|(operator, _)| operator).collect())
+    }
+
+    #[test]
+    fn comment_text_is_never_a_separator() {
+        let cases = [
+            (ShellDialect::Posix, "echo a # ; comment\necho b", "\n"),
+            (ShellDialect::Posix, "echo a # & comment\necho b", "\n"),
+            (ShellDialect::Posix, "echo a & # ; comment\necho b", "&"),
+            (ShellDialect::Posix, "echo a ; # & comment\necho b", ";"),
+            (ShellDialect::PowerShell, "echo a # ; comment\necho b", "\n"),
+            (ShellDialect::PowerShell, "echo a # & comment\necho b", "\n"),
+            (ShellDialect::PowerShell, "echo a\n<# ; #>\necho b", "\n"),
+            (ShellDialect::PowerShell, "echo a\n<# & #>\necho b", "\n"),
+            (ShellDialect::PowerShell, "echo a; # & comment\necho b", ";"),
+        ];
+        for (dialect, source, separator) in cases {
+            assert_eq!(
+                operators(dialect, source),
+                Some(vec![String::new(), separator.to_string()]),
+                "{dialect:?} {source:?}"
+            );
+        }
     }
 
     #[test]
