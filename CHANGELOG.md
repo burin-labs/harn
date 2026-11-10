@@ -9,6 +9,33 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.194
+
+### Changed
+
+- **CI.** Move shared workflow pins forward to the verified release-asset downloader (#11260).
+
+### Fixed
+
+- **Release candidates qualify downstream compatibility before promotion.**
+  Candidate builds now require their exact consumer rehearsal after native
+  qualification. Promotion rechecks the recorded source, archives and consumer
+  binding before publishing them. A passing release rehearsal fails if its
+  manifest or consumer revision cannot be measured and bound.
+- **A rejected API key is not sent again by the same process.** After a provider
+  rejects a key (401, or a 403 whose body says the key is invalid or revoked),
+  later calls to that provider with the same key fail locally with the same
+  `auth` / `auth_failure` classification and `attempt_count: 0`, instead of
+  paying another round trip for the same answer. Any other 403, such as a key
+  without access to one model, blocks only that model, so a fallback to a model
+  the key can use is still sent. Provider HTTP auth errors now carry
+  `credential_scope: "key" | "request"`. A different key is always sent, and a
+  refused key or model is tried again after five minutes.
+- Run selected release builds across intentionally skipped candidate-only checks, and refuse a successful verdict
+  when a warm or benchmark's required builds did not run.
+- `session/cancel` now ends a turn that is waiting in `tools.wait_command`. The wait used to block
+  the session thread, so the cancel went unread until the wait timed out.
+
 ## v0.10.193
 
 ### Breaking
