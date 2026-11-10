@@ -197,7 +197,7 @@ per_commit_family_selector='
   | .id
 '
 
-usage_modes="--retain-qualified-generation <identity-file> [--dry-run] | --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes> [--replacing v0-rust-{workspace-tests|package-audit|harn-ci-cli}-]"
+usage_modes="--retain-qualified-generation <identity-file> [--dry-run] | --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --harn-check-cache-family-prefix harn-check-cache-v<N>-<family>-<os>-<arch>- | --workspace-macos-generations | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit|harn-ci-cli}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes> [--replacing v0-rust-{workspace-tests|package-audit|harn-ci-cli}-]"
 
 case "$mode" in
   --retain-qualified-generation)
@@ -261,6 +261,29 @@ case "$mode" in
       exit 64
     fi
     selector="$per_commit_family_selector"
+    ;;
+  --workspace-macos-generations)
+    # The macOS nightly writes one generation per source and its restore key
+    # names that source, so a newer generation leaves every older one
+    # unreachable to the hosted jobs that read this cache. Owned-runner
+    # dispatches build in their persistent target and never restore it.
+    if [[ -n "${2:-}" ]]; then
+      echo "usage: $0 --workspace-macos-generations" >&2
+      exit 64
+    fi
+    family_prefix="v0-rust-workspace-macos-"
+    selector='
+      [.[].actions_caches[]
+        | select(
+            .ref == "refs/heads/main"
+            and (.key | test("^v0-rust-workspace-macos-[0-9a-f]{64}-Darwin-[A-Za-z0-9_]+-[0-9a-f]{8}-[0-9a-f]{8}$"))
+          )
+      ]
+      | sort_by(.created_at, .id)
+      | reverse
+      | .[1:][]
+      | .id
+    '
     ;;
   --all-release-families)
     if [[ -n "${2:-}" ]]; then

@@ -34,6 +34,11 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
     # different family sharing the prefix up to the family name), a
     # pull-request entry, and a hand-written key without a commit suffix.
     printf '%s\n' '[{"actions_caches":[{"id":60,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":61,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-2222222222222222222222222222222222222222","created_at":"2026-01-02T00:00:00Z"},{"id":62,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-scripts-Linux-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":63,"ref":"refs/pull/9/merge","key":"harn-check-cache-v1-audit-Linux-X64-3333333333333333333333333333333333333333","created_at":"2026-01-03T00:00:00Z"},{"id":64,"ref":"refs/heads/main","key":"harn-check-cache-v1-audit-Linux-X64-manual","created_at":"2026-01-04T00:00:00Z"}]}]'
+  elif [[ "${MOCK_MACOS_WORKSPACE:-0}" == "1" ]]; then
+    # Three main generations, a pull-request entry, and a hand-written key.
+    m=v0-rust-workspace-macos
+    printf '[{"actions_caches":[{"id":70,"ref":"refs/heads/main","key":"%s-%s-Darwin-arm64-34d9fecb-161466b8","created_at":"2026-01-01T00:00:00Z"},{"id":71,"ref":"refs/heads/main","key":"%s-%s-Darwin-arm64-34d9fecb-161466b8","created_at":"2026-01-02T00:00:00Z"},{"id":72,"ref":"refs/heads/main","key":"%s-%s-Darwin-arm64-34d9fecb-161466b8","created_at":"2026-01-03T00:00:00Z"},{"id":73,"ref":"refs/pull/9/merge","key":"%s-%s-Darwin-arm64-34d9fecb-161466b8","created_at":"2026-01-04T00:00:00Z"},{"id":74,"ref":"refs/heads/main","key":"%s-manual","created_at":"2026-01-01T00:00:00Z"}]}]\n' \
+      "$m" "$(printf 'a%.0s' {1..64})" "$m" "$(printf 'b%.0s' {1..64})" "$m" "$(printf 'c%.0s' {1..64})" "$m" "$(printf 'd%.0s' {1..64})" "$m"
   elif [[ "${MOCK_LOCAL_SCCACHE:-0}" == "1" ]]; then
     printf '%s\n' '[{"actions_caches":[{"id":40,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":41,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-2222222222222222222222222222222222222222","created_at":"2026-01-02T00:00:00Z"},{"id":42,"ref":"refs/pull/9/merge","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-3333333333333333333333333333333333333333","created_at":"2026-01-03T00:00:00Z"},{"id":43,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-aarch64-apple-darwin-macOS-ARM64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":44,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-manual","created_at":"2026-01-04T00:00:00Z"}]}]'
   elif [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
@@ -114,6 +119,18 @@ if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/invalid-local-sccache-prune-gh.log" \
 fi
 grep -q -- '--local-sccache-family-prefix' "$tmp/invalid-local-sccache-prune.err"
 test ! -s "$tmp/invalid-local-sccache-prune-gh.log"
+
+# Keep only the newest main macOS workspace generation; leave pull-request and
+# hand-written entries alone.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/macos-workspace-prune-gh.log" \
+  MOCK_MACOS_WORKSPACE=1 GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --workspace-macos-generations
+cat >"$tmp/expected-macos-workspace-prune-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 71 --repo burin-labs/harn
+cache delete 70 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-macos-workspace-prune-gh.log" "$tmp/macos-workspace-prune-gh.log"
 
 # Keep exactly the newest main generation of one Harn check-cache family. The
 # audit-scripts entry shares the `audit` prefix text but its key does not end
