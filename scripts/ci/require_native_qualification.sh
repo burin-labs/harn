@@ -61,6 +61,10 @@ require_native_platform() {
           and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end
         | map(select(.display_title == ("Native qualification " + $source))) end
     ' <<< "$pages"); then
+      if [[ ${WAIT_FOR_FULL_SUITE:-false} == true && $discovery -lt 24 ]]; then
+        sleep 5
+        continue
+      fi
       native_qualification_unmeasured "$name:runs"
       return 1
     fi
