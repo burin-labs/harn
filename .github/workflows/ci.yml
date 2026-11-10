@@ -960,7 +960,7 @@ jobs:
     # sequence for nothing: 230-310s of CLI before 283-372s of test build.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
-    # number: it is the sum of the hosted step budgets below (24 + 26), plus
+    # number: it is the sum of the hosted step budgets below (2 + 24 + 26), plus
     # six minutes of setup and cache restore, plus a twelve-minute reserve for
     # this job's main-branch cache save. The save is a post step, so before the
     # reserve existed it ran inside whatever margin the tests happened to leave;
@@ -972,7 +972,7 @@ jobs:
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     #
     runs-on: ${{ 'ubuntu-24.04' }}
-    timeout-minutes: ${{ 68 }}
+    timeout-minutes: ${{ 70 }}
     # Only main may write the shared build cache.
     permissions:
       contents: read
@@ -1036,6 +1036,12 @@ jobs:
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: nextest@0.9.132
+      # Every test share compiles the graph the cache writer warms. A share
+      # whose selection resolves different dependency features recompiles them
+      # and everything above them after an exact cache hit.
+      - name: Check test shares compile the cached graph
+        timeout-minutes: 2
+        run: bash scripts/ci/check_test_share_unit_graphs.sh
       # Compile only the security packages. All eleven ordinary test shares
       # compile and execute independently in rust-test-partitions.
       - name: Build security test archive
@@ -1118,9 +1124,11 @@ jobs:
 
   # Nine complete test shares run beside the security producer. Tooling
   # previously added 260 seconds after its 402-second security build
-  # (run 38886757958). With package-scoped builds there is no shared compile
-  # to justify that serial dependency. Each leg restores the same read-only
-  # cache and compiles only its group. The kill switch retains the complete
+  # (run 38886757958). Each leg restores the same read-only cache, compiles
+  # the whole-workspace graph the cache writer warmed, so only workspace test
+  # harnesses link, and executes only its group's tests. A package-scoped
+  # selection resolved different dependency features and recompiled 25 to 178
+  # crates per leg after an exact hit. The kill switch retains the complete
   # archive-mode suite instead of these shares.
   #
   # Ceiling: 6 setup + 24 compile (the security archive's budget, the same

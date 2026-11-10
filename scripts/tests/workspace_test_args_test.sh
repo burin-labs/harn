@@ -106,33 +106,25 @@ FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_t
 jq -e '.["rust-suites"].fixture.testcases.case["filter-match"].status == "matches"' "$RUNNER_TEMP/harn-nextest-inventory.json" > /dev/null
 cmp "$scratch/repo/target/nextest/ci/junit.xml" "$RUNNER_TEMP/harn-nextest-junit.xml"
 grep -q 'eligible=1' "$scratch/log"
-grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --lib --partition count:3/3 --no-tests pass' "$scratch/ran"
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" vm-integration > "$scratch/log"
-grep -Fq -- '--locked -p harn-vm --features harn-vm/default,harn-vm/otel --test * --bins --no-tests fail' "$scratch/ran"
-if grep -Eq -- '--lib|--partition|--tests' "$scratch/ran"; then
-  echo 'Native integration tests also selected or partitioned the unit harness' >&2; exit 1
-fi
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" rest:1/4 > "$scratch/log"
-grep -q -- '--locked --workspace --exclude harn-vm --exclude harn-cli --exclude harn-fmt --exclude harn-lsp --exclude harn-package --features harn-serve/default,harn-serve/hostlib-full --partition count:1/4 --no-tests pass' "$scratch/ran"
-if FAKE_VM_METADATA=1 bash "$root/scripts/ci/workspace_features.sh" --workspace-except absent > "$scratch/log" 2>&1; then
-  echo 'An unmeasured excluded workspace member was accepted' >&2; exit 1
-fi
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" cli-unit > "$scratch/log"
-grep -Fq -- '--locked -p harn-cli --features harn-cli/default,harn-cli/hostlib,harn-vm/default,harn-vm/otel --lib --no-tests fail' "$scratch/ran"
-if grep -Eq -- '--test|--bins|--partition' "$scratch/ran"; then
-  echo 'CLI unit tests selected additional targets or a partition' >&2; exit 1
-fi
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" cli-integration > "$scratch/log"
-grep -Fq -- '--locked -p harn-cli --features harn-cli/default,harn-cli/hostlib,harn-vm/default,harn-vm/otel --test * --bins --no-tests fail' "$scratch/ran"
-if grep -Eq -- '--lib|--partition|--tests' "$scratch/ran"; then
-  echo 'CLI integration tests also selected or partitioned the unit harness' >&2; exit 1
-fi
-# The producer compiles only its three tooling packages, with workspace features.
-FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" tooling > "$scratch/log"
-grep -q -- 'and (package(harn-fmt) or package(harn-lsp) or package(harn-package)) --locked -p harn-fmt -p harn-lsp -p harn-package --no-tests fail' "$scratch/ran"
-if grep -Eq -- '--exclude|--partition' "$scratch/ran"; then
-  echo 'The tooling producer share excluded or partitioned a selected package' >&2; exit 1
-fi
+# On the whole workspace every share compiles the cache writer's selection and
+# narrows only the tests it executes.
+expect_share() {
+  local partition=$1 owned=$2 tail=$3
+  FAKE_VM_METADATA=1 GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" "$partition" > "$scratch/log"
+  grep -Fq -- "and ${owned} --locked --workspace ${tail}" "$scratch/ran" || {
+    echo "Share $partition did not compile the whole workspace or own its tests: $(cat "$scratch/ran")" >&2; exit 1
+  }
+  if grep -Eq -- ' -p |--exclude|--features|--lib|--bins|--test ' "$scratch/ran"; then
+    echo "Share $partition narrowed its compiled selection" >&2; exit 1
+  fi
+  [[ "$(GITHUB_EVENT_NAME=push bash "$root/scripts/ci/run_workspace_tests.sh" --print-selection "$partition" | tr '\n' ' ')" == '--locked --workspace ' ]]
+}
+expect_share vm-unit:3/3 '(package(=harn-vm) and kind(lib))' '--partition count:3/3 --no-tests pass'
+expect_share vm-integration '(package(=harn-vm) and (kind(test) or kind(bin)))' '--no-tests fail'
+expect_share cli-unit '(package(=harn-cli) and kind(lib))' '--no-tests fail'
+expect_share cli-integration '(package(=harn-cli) and (kind(test) or kind(bin)))' '--no-tests fail'
+expect_share tooling '(package(=harn-fmt) or package(=harn-lsp) or package(=harn-package))' '--no-tests fail'
+expect_share rest:1/4 'not (package(=harn-vm) or package(=harn-cli) or package(=harn-fmt) or package(=harn-lsp) or package(=harn-package))' '--partition count:1/4 --no-tests pass'
 # An affected selection without harn-vm leaves the vm group nothing to build.
 jq -n --arg base "$base" '{pull_request: {base: {sha: $base}}}' > "$scratch/event"
 rm "$scratch/ran"

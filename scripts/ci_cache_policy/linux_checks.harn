@@ -59,6 +59,8 @@ const CLI_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
 
 /** `rust-check-inputs` builds security and the optional fallback archive. */
 const TEST_PRODUCER_STEP_BUDGETS: list<StepBudget> = [
+  // Resolution only; 11s on 4 cores with an empty Cargo home downloading every crate.
+  {name: "Check test shares compile the cached graph", minutes: 2, cold_seconds: 11},
   // 720s cold on 8 vCPU; the free 4 vCPU rung (harn#9370) takes the owned
   // rung's 24 minutes for the same reason as the CLI build above.
   {name: "Build security test archive", minutes: 24, cold_seconds: 720},
