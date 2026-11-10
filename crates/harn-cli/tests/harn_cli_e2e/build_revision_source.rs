@@ -58,11 +58,16 @@ fn dependency_version(name: &str) -> String {
 
 fn source_crate(root: &Path) {
     fs::create_dir_all(root.join("src")).unwrap();
-    fs::write(root.join("Cargo.toml"), format!(
-        "[package]\nname='provenance-fixture'\nversion='0.0.0'\nedition='2021'\n\
-         [workspace]\n[build-dependencies]\nserde={{version='={}',features=['derive']}}\nserde_json='={}'\n",
-        dependency_version("serde"), dependency_version("serde_json"),
-    )).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        format!(
+            "[package]\nname='provenance-fixture'\nversion='0.0.0'\nedition='2021'\n\
+         [build-dependencies]\nserde={{version='={}',features=['derive']}}\nserde_json='={}'\n",
+            dependency_version("serde"),
+            dependency_version("serde_json"),
+        ),
+    )
+    .unwrap();
     let owner = Path::new(env!("CARGO_MANIFEST_DIR")).join("build_support/build_revision.rs");
     fs::write(
         root.join("build.rs"),
