@@ -35,7 +35,7 @@ pub fn emit() {
             }
         }
     };
-    println!("cargo:rustc-env={BUILD_REVISION_ENV}={}", revision);
+    println!("cargo:rustc-env={BUILD_REVISION_ENV}={revision}");
     let raw_freshness = std::env::var(BUILD_FRESHNESS_ENV).ok();
     let freshness = normalize(raw_freshness.as_deref())
         .unwrap_or_else(|message| panic!("{BUILD_FRESHNESS_ENV} {message}"));
