@@ -1,6 +1,8 @@
 //! Symlink-safe file effects and conditional replacement inside sandbox scopes.
 
 use super::*;
+#[cfg(unix)]
+use std::io::Write as _;
 
 /// Apply one recorded file effect beneath the branch-owned workspace root.
 #[cfg(any(unix, windows))]
