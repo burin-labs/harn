@@ -3,6 +3,52 @@
 # fragments in crates/harn-vm/src/llm/capability_sources/ instead.
 
 # --- source: catalog model registrations ---
+[[provider.anthropic]]
+allowed_tool_choice_modes = [
+    "auto",
+    "none",
+]
+anthropic_beta_features = ["thinking-binding-controls-2026-08-01"]
+audio = false
+computer_use_style = "native_anthropic_toolset"
+defer_loading = false
+extends = true
+files_api_supported = false
+frequency_penalty_supported = false
+interleaved_thinking_supported = true
+model_match = "claude-fable-5-2"
+native_tools = true
+pdf = false
+preferred_tool_format = "native"
+presence_penalty_supported = false
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+seed_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+temperature_supported = false
+thinking_block_style = "thinking_blocks"
+thinking_modes = [
+    "adaptive",
+    "effort",
+]
+tool_search = []
+top_k_supported = false
+top_p_supported = false
+video = false
+vision = true
+vision_supported = true
+
 [[provider.openai]]
 extends = true
 model_match = "gpt-6.1-terra"
@@ -28,6 +74,51 @@ structured_output_mode = "native_json"
 temperature_supported = false
 thinking_modes = ["effort"]
 top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+allowed_tool_choice_modes = [
+    "auto",
+    "none",
+]
+anthropic_beta_features = []
+audio = false
+cache_breakpoint_style = "top_level"
+computer_use_style = "function"
+defer_loading = false
+extends = true
+files_api_supported = false
+frequency_penalty_supported = false
+interleaved_thinking_supported = true
+model_match = "anthropic/claude-fable-5.2"
+native_tools = true
+pdf = false
+preferred_tool_format = "native"
+presence_penalty_supported = false
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openrouter"
+seed_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+temperature_supported = false
+thinking_block_style = "none"
+thinking_modes = ["effort"]
+tool_search = []
+top_k_supported = false
+top_p_supported = false
+video = false
+vision = true
 vision_supported = true
 
 [[provider.openrouter]]

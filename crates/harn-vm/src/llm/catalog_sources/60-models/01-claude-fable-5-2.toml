@@ -1,0 +1,70 @@
+# Claude Fable 5.2, released 2026-11-09. Primary facts:
+# https://platform.claude.com/docs/en/models/fable-5-2/overview
+# https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
+# https://openrouter.ai/anthropic/claude-fable-5.2
+# Live synthetic probes 2026-11-10: direct and OpenRouter text, native tool
+# result round trips, strict JSON, red/blue vision controls and streaming.
+# Direct cache replay read 1427 tokens; five documented effort levels accepted.
+# Both routes reject forced tools; direct rejects sampling, assistant prefill,
+# disabled thinking and thinking budgets; OpenRouter rejects reasoning off.
+# New signed thinking blocks belong to the 5.2 family: preserve the full prefix.
+# Covered-model access requires 30-day retention unless Anthropic authorizes ZDR.
+# Direct new computer toolset returned a namespaced screenshot call; no OS action executed.
+# OpenRouter require_parameters rejected seed and both penalties (404).
+# Published max output is 128000 tokens; the current catalog has no output-limit field.
+# No benchmarks, premium service tier or automatic default changes are claimed.
+[models."claude-fable-5-2"]
+name = "Claude Fable 5.2"
+provider = "anthropic"
+context_window = 1000000
+released = "2026-11-09"
+open_weight = false
+operations = ["text_generation"]
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 10.00, cache_write_1h_per_mtok = 16.00 }
+tier = "frontier"
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+
+[models."claude-fable-5-2".registration]
+aliases = ["fable52"]
+
+[models."claude-fable-5-2".registration.request]
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto", "none"]
+prompt_caching = true
+vision = true
+vision_supported = true
+# Do not inherit unverified multimodal/file/tool-search claims from the family.
+audio = false
+pdf = false
+video = false
+files_api_supported = false
+tool_search = []
+defer_loading = false
+computer_use_style = "native_anthropic_toolset"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+reasoning_none_supported = false
+interleaved_thinking_supported = true
+supports_assistant_prefill = false
+temperature_supported = false
+top_p_supported = false
+top_k_supported = false
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+thinking_block_style = "thinking_blocks"
+anthropic_beta_features = ["thinking-binding-controls-2026-08-01"]
+
+# Canonical dotted slug succeeded live; the public model list's [1m] spelling
+# is not needed by the Chat Completions endpoint. Keep gateway wire controls
+# separate from the direct Messages API rather than forwarding thinking fields.
+[models."claude-fable-5-2".registration.routes."anthropic/claude-fable-5.2"]
+provider = "openrouter"
+model = { name = "Claude Fable 5.2 (via OpenRouter)", api_dialect = "openai_chat", served_variant = "openrouter" }
+request = { computer_use_style = "function", thinking_modes = ["effort"], reasoning_wire_format = "openrouter", anthropic_beta_features = [], thinking_block_style = "none", cache_breakpoint_style = "top_level" }
