@@ -2,6 +2,8 @@
 macro_rules! required_pr_e2e_cases {
     ($consumer:ident) => {
         $consumer! {
+            build_revision_source::unconfigured_cargo_build_attests_its_dependency_and_tracks_git_head,
+            build_revision_source::packaged_source_identity_does_not_inherit_an_unrelated_git_checkout,
             #[cfg(target_os = "macos")]
             scoped_ssh_agent::exact_agent_grant_signs_without_exposing_keys_or_other_sockets,
             provider_account_confirmation::gemini_confirmation_requires_billing_and_contributor_sharing_off,
