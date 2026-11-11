@@ -9,6 +9,18 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.196
+
+### Fixed
+
+- The CLI now derives its compiled source revision from its own Git checkout or published-crate metadata,
+  including when another product links it without a build wrapper. An explicit revision override remains supported;
+  unavailable provenance produces an empty revision and a build warning instead of borrowing an unrelated checkout.
+- Runtime bump failure receipts now retain bounded stdout and stderr tails from the full command artifacts,
+  so a failed refresh or validation gate remains visible after verbose progress exceeds inline capture limits.
+- Release qualification retries unreadable or changing workflow inventories within
+  the existing discovery budget when waiting for native proof.
+
 ## v0.10.195
 
 ### Breaking
