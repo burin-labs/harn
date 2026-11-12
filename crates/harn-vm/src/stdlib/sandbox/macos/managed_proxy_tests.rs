@@ -21,10 +21,19 @@ fn loopback_grant_keeps_listeners_without_bypassing_a_managed_proxy() {
     let listeners: Vec<TcpListener> = (0..3)
         .map(|_| TcpListener::bind("127.0.0.1:0").unwrap())
         .collect();
-    let addresses: Vec<SocketAddr> = listeners
+    let mut addresses: Vec<SocketAddr> = listeners
         .iter()
         .map(|listener| listener.local_addr().unwrap())
         .collect();
+    let ipv6_listeners: Vec<TcpListener> = addresses[..2]
+        .iter()
+        .map(|address| TcpListener::bind(("::1", address.port())).unwrap())
+        .collect();
+    addresses.extend(
+        ipv6_listeners
+            .iter()
+            .map(|listener| listener.local_addr().unwrap()),
+    );
     for address in &addresses {
         TcpStream::connect(address)
             .expect("every measured endpoint is reachable without confinement");
@@ -42,13 +51,13 @@ fn loopback_grant_keeps_listeners_without_bypassing_a_managed_proxy() {
         ..Default::default()
     };
     for (proxy, expected) in [
-        (None, vec![true, true, true]),
+        (None, vec![true, true, true, true, true]),
         (
             Some(crate::orchestration::ProcessNetworkProxy {
                 http_port: addresses[0].port(),
                 socks_port: addresses[1].port(),
             }),
-            vec![true, true, false],
+            vec![true, true, false, false, false],
         ),
     ] {
         policy.process_network_proxy = proxy;
