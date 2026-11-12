@@ -187,6 +187,9 @@ struct AgentHostSession {
     resumed_iterations: usize,
     daemon_watch_state: BTreeMap<String, u64>,
     daemon_idle_backoff_ms: u64,
+    /// `agent_loop(options.daemon)`: the loop idles between replies instead
+    /// of finalizing, so a stop can land on a reply it has not idled on yet.
+    daemon: bool,
     host_bridge: Option<Arc<crate::bridge::HostBridge>>,
     /// Provider-reported `stop_reason` from the most recent `llm_call`
     /// in this loop. Used by finalize to detect ACP `max_tokens` (when
@@ -377,6 +380,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         resumed_iterations: 0,
         daemon_watch_state: std::collections::BTreeMap::new(),
         daemon_idle_backoff_ms: 100,
+        daemon: false,
         host_bridge: None,
         last_llm_stop_reason: None,
         pending_finalization: None,

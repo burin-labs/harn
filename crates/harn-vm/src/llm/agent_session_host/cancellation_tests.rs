@@ -1248,3 +1248,88 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     crate::agent_sessions::reset_session_store();
 }
 use crate::NativeCleanupTestExt;
+
+/// Counts the replies a session publishes to clients.
+struct ReplyChunks(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl agent_events::AgentEventSink for ReplyChunks {
+    fn handle_event(&self, event: &agent_events::AgentEvent) {
+        if let agent_events::AgentEvent::AgentMessageChunk { content, .. } = event {
+            self.0.lock().expect("reply chunks").push(content.clone());
+        }
+    }
+}
+
+/// Seed a daemon session holding a toolless reply it has not idled on yet,
+/// the state a stop finds when it lands during the post-turn work.
+fn seed_daemon_with_pending_reply(
+    session_id: &str,
+    bridge: Option<Arc<crate::bridge::HostBridge>>,
+) -> Arc<std::sync::Mutex<Vec<String>>> {
+    crate::agent_sessions::reset_session_store();
+    super::super::reset_agent_session_host_state();
+    crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
+    super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
+    super::super::AGENT_HOST_SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(session_id).expect("seeded host session");
+        session.daemon = true;
+        session.host_bridge = bridge;
+    });
+    let mut reply = crate::schema::json_to_vm_value(&json!({
+        "role": "assistant",
+        "content": "Nothing is running yet.",
+    }));
+    crate::llm::assistant_publication::defer(
+        &mut reply,
+        &crate::schema::json_to_vm_value(&json!({"_defer_visible": true})),
+    );
+    crate::agent_sessions::inject_message(session_id, reply).expect("record pending reply");
+    let chunks = Arc::new(std::sync::Mutex::new(Vec::new()));
+    agent_events::register_sink(session_id, Arc::new(ReplyChunks(chunks.clone())));
+    chunks
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_daemon_stopped_before_its_idle_still_publishes_its_reply() {
+    let session_id = "daemon-stopped-before-idle";
+    let chunks = seed_daemon_with_pending_reply(session_id, None);
+
+    super::abandon_agent_session(session_id)
+        .await
+        .expect("abandon stopped daemon");
+
+    assert_eq!(
+        *chunks.lock().expect("reply chunks"),
+        vec!["Nothing is running yet.".to_string()],
+        "the stop must not drop the reply the daemon had not idled on"
+    );
+    agent_events::clear_session_sinks(session_id);
+    crate::agent_sessions::reset_session_store();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stopped_daemon_keeps_a_superseded_reply_unpublished() {
+    let session_id = "daemon-stopped-with-veto";
+    let bridge = Arc::new(crate::bridge::HostBridge::from_parts(
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::new(std::sync::Mutex::new(())),
+        1,
+    ));
+    bridge
+        .push_queued_user_message("not yet".to_string(), "interrupt_immediate")
+        .await;
+    let chunks = seed_daemon_with_pending_reply(session_id, Some(bridge));
+
+    super::abandon_agent_session(session_id)
+        .await
+        .expect("abandon stopped daemon");
+
+    assert!(
+        chunks.lock().expect("reply chunks").is_empty(),
+        "queued wake input supersedes the reply at a stop as it does at idle"
+    );
+    agent_events::clear_session_sinks(session_id);
+    crate::agent_sessions::reset_session_store();
+}
