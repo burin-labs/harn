@@ -213,7 +213,7 @@ const answerer = agentic_user(
 
 const opts: AgentSpec = {
   provider: "openai",
-  model: "gpt-5-mini",
+  model: "gpt-5.6-terra",
   tools: user_tools(answerer, coding_tools),
   tool_format: "native",
   loop_until_done: true,
