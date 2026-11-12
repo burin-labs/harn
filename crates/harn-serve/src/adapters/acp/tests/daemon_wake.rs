@@ -117,6 +117,94 @@ async fn a_reminder_wakes_a_daemon_idle_inside_its_prompt() {
     .await;
 }
 
+/// Wait for an `agent_message_chunk` whose text is `needle`, failing if the
+/// prompt answers first. Model text also rides on iteration events, so only a
+/// published chunk counts as a reply the client can show.
+async fn read_until_reply_chunk(
+    tx: &mpsc::UnboundedSender<serde_json::Value>,
+    rx: &mut mpsc::UnboundedReceiver<String>,
+    needle: &str,
+    prompt_id: u64,
+) {
+    let mut seen = Vec::new();
+    let found = tokio::time::timeout(EVENT_TIMEOUT, async {
+        loop {
+            let Some(line) = rx.recv().await else {
+                return false;
+            };
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if message["method"] == "host/capabilities" {
+                tx.send(serde_json::json!({"jsonrpc":"2.0", "id":message["id"], "result":{}}))
+                    .unwrap();
+            }
+            assert_ne!(
+                message["id"], prompt_id,
+                "the prompt ended before its reply was published: {seen:#?}"
+            );
+            let update = &message["params"]["update"];
+            let reply = update["sessionUpdate"] == "agent_message_chunk"
+                && update["content"]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(needle));
+            seen.push(message);
+            if reply {
+                return true;
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(
+        found,
+        "no `{needle}` reply chunk while the daemon idled; frames: {seen:#?}"
+    );
+}
+
+/// A daemon idles after a toolless reply instead of finalizing, and a reply
+/// was published only at finalization, so a client never saw a daemon's
+/// replies until the session ended. The reply it idles on is published before
+/// it waits.
+#[tokio::test(flavor = "current_thread")]
+async fn a_daemon_publishes_the_reply_it_idles_on() {
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline = dir.path().join("daemon.harn");
+        std::fs::write(&pipeline, DAEMON_PIPELINE).expect("write daemon pipeline");
+        let (tx, mut rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
+        .await;
+        tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":21, "method":"session/prompt",
+            "params":{"sessionId":session_id, "prompt":[{"type":"text", "text":"Watch for work."}]},
+        }))
+        .unwrap();
+        read_until_reply_chunk(&tx, &mut rx, "IDLE-ONE", 21).await;
+
+        tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "method":"session/cancel", "params":{"sessionId":session_id},
+        }))
+        .unwrap();
+        let terminal = tokio::time::timeout(EVENT_TIMEOUT, async {
+            loop {
+                let message = recv_json(&mut rx).await;
+                if message["id"] == 21 {
+                    return message;
+                }
+            }
+        })
+        .await
+        .expect("the cancelled prompt never answered");
+        assert_eq!(terminal["result"]["stopReason"], "cancelled", "{terminal}");
+        drop(tx);
+        server.await.unwrap();
+    })
+    .await;
+}
+
 #[test]
 fn an_active_reminder_lands_on_the_live_session_and_requires_authentication() {
     let controls = ConcurrentSessionControls::new(false, serde_json::json!({}));
