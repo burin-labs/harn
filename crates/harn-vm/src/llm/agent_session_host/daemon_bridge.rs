@@ -660,6 +660,8 @@ async fn host_agent_daemon_wait(
         }
     }
 
+    publish_idle_reply(&session_id)?;
+
     if timeout_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(timeout_ms)).await;
     }
@@ -683,6 +685,31 @@ async fn host_agent_daemon_wait(
     } else {
         Ok(json_to_vm(&serde_json::json!({"reason": nil_json()})))
     }
+}
+
+/// Publish the reply a daemon goes idle on.
+///
+/// A toolless reply stays pending until its session settles publication, which
+/// otherwise happens only when the session finalizes. A daemon idles between
+/// replies instead of finalizing, so its replies would stay invisible to every
+/// client until the session ended. Reaching the idle wait with no wake input
+/// queued is the loop accepting the turn, so the trailing reply is admitted
+/// here. A reply superseded by wake input (a veto or a steer) is not idled on
+/// and stays pending for the turn that replaces it.
+fn publish_idle_reply(session_id: &str) -> Result<(), VmError> {
+    if !crate::agent_sessions::exists(session_id) {
+        return Ok(());
+    }
+    let published = crate::agent_sessions::settle_assistant_publication(session_id, true)
+        .map_err(VmError::Runtime)?;
+    if let Some(reply) = published {
+        emit_event(&AgentEvent::AgentMessageChunk {
+            session_id: session_id.to_string(),
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
+        });
+    }
+    Ok(())
 }
 
 fn nil_json() -> serde_json::Value {
