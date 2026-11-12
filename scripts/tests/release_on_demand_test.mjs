@@ -121,6 +121,18 @@ test('a failed promotion remains blocked after a successful candidate',async()=>
   assert.equal(f.dispatches.length,2);
 });
 
+test('failed promotion dispatch does not inherit the candidate job census',async()=>{
+  const f=fixture();const dispatch=f.api.dispatch;
+  f.api.dispatch=async(workflow,inputs)=>{
+    if(workflow==='promote-release.yml')throw new Error('promotion_dispatch_unmeasured');
+    return dispatch(workflow,inputs);
+  };
+  const result=await runRequestedRelease(f.api,request,f.execution);
+  assert.equal(result.verdict,'blocked');assert.equal(result.phase,'promotion');
+  assert.equal(result.observed_jobs,0);assert.equal(result.run_id,undefined);
+  assert.deepEqual(result.pending_jobs,['promotion dispatch']);
+});
+
 test('a known failed job is reported immediately while the rest of its workflow is running',async()=>{
   const f=fixture({runs:{42:{status:'in_progress',conclusion:null}},jobs:{42:[
     {id:1,run_id:42,run_attempt:1,head_sha:source,name:'Build',status:'completed',conclusion:'failure'}]}});

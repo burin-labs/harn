@@ -87,6 +87,7 @@ export async function runRequestedRelease(api, request, {dryRun=false,now=Date.n
   try {
     for (const phase of ['candidate','promotion']) {
       state.phase=phase;state.verdict='pending';state.pending_jobs=[`${phase} dispatch`];state.failing_jobs=[];
+      state.observed_jobs=0;delete state.run_id;delete state.status;delete state.conclusion;
       const inputs=phase==='candidate'?{source_candidate:true}:
         {candidate_sha:state.source_sha,candidate_run_id:String(state.candidate_run_id)};
       const dispatched=await api.dispatch(releaseWorkflows[phase],inputs);
