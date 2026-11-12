@@ -270,6 +270,14 @@
           }
         },
         {
+          "properties": {
+            "phase": { "const": "idle" },
+            "candidate_reply": false,
+            "reply": false,
+            "outcome": false
+          }
+        },
+        {
           "required": ["candidate_reply"],
           "properties": {
             "phase": { "const": "verifying" },

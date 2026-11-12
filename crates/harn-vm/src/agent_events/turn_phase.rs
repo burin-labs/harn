@@ -9,6 +9,9 @@ use super::AgentTerminalOutcome;
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AgentTurnPhase {
     Generating,
+    /// A daemon loop finished its step and waits for wake input. The turn
+    /// stays open; the next model call reports `Generating` again.
+    Idle,
     /// Covers the whole completion boundary, including deterministic checks,
     /// prechecks, model judges, and arbitration.
     Verifying {
@@ -60,6 +63,7 @@ mod tests {
         }
         for phase in [
             AgentTurnPhase::Generating,
+            AgentTurnPhase::Idle,
             AgentTurnPhase::Verifying {
                 candidate_reply: "draft".into(),
             },

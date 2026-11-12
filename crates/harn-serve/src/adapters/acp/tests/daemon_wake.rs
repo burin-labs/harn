@@ -1,8 +1,7 @@
 //! `session/remind` wakes a daemon that is idle inside its prompt.
 //!
 //! A daemon agent loop never returns from `session/prompt`: a turn without a
-//! tool call idles in `daemon_wait` until an `interrupt_immediate` injection
-//! lands. The dispatcher is busy with that prompt for the session's whole life,
+//! tool call idles in `daemon_wait` until a reminder or a steer lands. The dispatcher is busy with that prompt for the session's whole life,
 //! so a reminder only the dispatcher reads would wait for a prompt that never
 //! ends. The router must queue it on the live session instead.
 
@@ -192,6 +191,70 @@ async fn a_daemon_publishes_the_reply_it_idles_on() {
             loop {
                 let message = recv_json(&mut rx).await;
                 if message["id"] == 21 {
+                    return message;
+                }
+            }
+        })
+        .await
+        .expect("the cancelled prompt never answered");
+        assert_eq!(terminal["result"]["stopReason"], "cancelled", "{terminal}");
+        drop(tx);
+        server.await.unwrap();
+    })
+    .await;
+}
+
+/// An idle daemon tells clients it is idle, and a steer alone wakes it: the
+/// idle wait is the end of a step, which is where a steer is delivered. A
+/// steer used to stay queued until some other input woke the daemon, so a
+/// client had to send a reminder ahead of every message.
+#[tokio::test(flavor = "current_thread")]
+async fn a_steer_wakes_a_daemon_that_said_it_was_idle() {
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline = dir.path().join("daemon.harn");
+        std::fs::write(&pipeline, DAEMON_PIPELINE).expect("write daemon pipeline");
+        let (tx, mut rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
+        .await;
+        tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":22, "method":"session/prompt",
+            "params":{"sessionId":session_id, "prompt":[{"type":"text", "text":"Watch for work."}]},
+        }))
+        .unwrap();
+        let frames = read_until_chunk(&tx, &mut rx, "\"phase\":\"idle\"").await;
+        assert!(
+            frames
+                .iter()
+                .any(|frame| frame.to_string().contains("IDLE-ONE")),
+            "the daemon said it was idle before its first reply: {frames:#?}"
+        );
+
+        tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "id":23, "method":"session/prompt",
+            "params":{
+                "sessionId":session_id,
+                "delivery":"steer",
+                "prompt":[{"type":"text", "text":"Change course."}],
+            },
+        }))
+        .unwrap();
+        let frames = read_until_chunk(&tx, &mut rx, "WOKEN-TWO").await;
+        assert!(
+            !frames.iter().any(|frame| frame["id"] == 22),
+            "the prompt ended instead of idling: {frames:#?}"
+        );
+
+        tx.send(serde_json::json!({
+            "jsonrpc":"2.0", "method":"session/cancel", "params":{"sessionId":session_id},
+        }))
+        .unwrap();
+        let terminal = tokio::time::timeout(EVENT_TIMEOUT, async {
+            loop {
+                let message = recv_json(&mut rx).await;
+                if message["id"] == 22 {
                     return message;
                 }
             }

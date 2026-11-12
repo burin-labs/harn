@@ -313,25 +313,38 @@ async fn drain_bridge_injections_for_checkpoint(
     }
 }
 
-/// Drain `interrupt_immediate` injections on behalf of the daemon idle
+/// Drain the injections an idle daemon takes on behalf of the daemon idle
 /// path and emit a `LoopCheckpoint` so the rest of the seam catalog
 /// (Harn-side `agent_stage`, ACP `loop_checkpoint`
 /// notifications, debugger views) sees daemon-side activity through the
 /// same surface. The actual drain reuses the bridge primitive; this
 /// wrapper adds daemon-specific observability while preserving the
 /// caller's Harn callback context for live subscribers.
+///
+/// An idle daemon has finished its step, so it is the checkpoint a
+/// `finish_step` injection (a steer) waits for as well as an
+/// `interrupt_immediate` one. Taking only the latter left a steer queued
+/// until some other input woke the daemon.
 async fn daemon_checkpoint_drain(
     ctx: &crate::vm::AsyncBuiltinCtx,
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
     kind: &'static str,
 ) -> Result<(usize, Option<&'static str>), VmError> {
-    let (delivered, reason) = drain_bridge_injections_for_checkpoint(
-        session_id,
-        bridge,
+    let mut delivered = 0;
+    let mut reason = None;
+    for checkpoint in [
         crate::bridge::DeliveryCheckpoint::InterruptImmediate,
-    )
-    .await?;
+        crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+    ] {
+        let (count, woke) =
+            drain_bridge_injections_for_checkpoint(session_id, bridge, checkpoint).await?;
+        delivered += count;
+        // A message outranks a reminder as the reason the daemon woke.
+        if reason != Some("message") {
+            reason = woke.or(reason);
+        }
+    }
     let event = crate::agent_events::AgentEvent::LoopCheckpoint {
         session_id: session_id.to_string(),
         iteration: 0,

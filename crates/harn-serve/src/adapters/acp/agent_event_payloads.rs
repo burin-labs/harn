@@ -673,6 +673,7 @@ impl TurnPhaseChanged {
         use harn_vm::agent_events::AgentTurnPhase;
         let (name, candidate_reply, reply, outcome) = match phase {
             AgentTurnPhase::Generating => ("generating", None, None, None),
+            AgentTurnPhase::Idle => ("idle", None, None, None),
             AgentTurnPhase::Verifying { candidate_reply } => {
                 ("verifying", Some(candidate_reply.clone()), None, None)
             }
