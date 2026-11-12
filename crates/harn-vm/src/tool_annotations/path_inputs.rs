@@ -1,6 +1,7 @@
 //! Pure path argument shape shared by dispatch and approval capture.
 
 use super::ToolAnnotations;
+use harn_vm_core::workspace_path::expand_home_path;
 use serde_json::Value;
 use std::path::Path;
 
@@ -58,56 +59,32 @@ pub(crate) fn validate_arguments(
     validate(arguments, &parameters(annotations))
 }
 
-/// Rewrite a path argument spelled from the home directory (`~` or `~/...`)
-/// to the absolute path it names.
-///
-/// A model writes `~/project/notes.md` the way a person does. Left as is, every
-/// later reader takes it as workspace-relative, so a tool looks for a literal
-/// `~` folder under the workspace and reports the file missing, and the
-/// permission policy classifies the wrong file. Rewriting it once here, before
-/// consent, policy and the handler run, gives all of them the same absolute
-/// path, which policy then admits or refuses like any other. `~user/...` is
-/// left alone: naming another account's home is not a spelling of this one.
+/// Spell every home-relative path argument (`~`, `~/...`) out in full, by
+/// [`expand_home_path`]. Dispatch runs this before consent, policy and the
+/// handler, so all three see one absolute path, which policy then admits or
+/// refuses like any other.
 pub(crate) fn expand_home(arguments: &mut Value, parameters: &[String], home: Option<&Path>) {
-    let Some(home) = home.filter(|home| !home.as_os_str().is_empty()) else {
-        return;
-    };
     let Value::Object(map) = arguments else {
         return;
     };
+    let expand = |value: &mut String| {
+        if let Some(expanded) = expand_home_path(value, home) {
+            *value = expanded;
+        }
+    };
     for parameter in parameters {
         match map.get_mut(parameter) {
-            Some(Value::String(value)) => expand_home_in_place(value, home),
+            Some(Value::String(value)) => expand(value),
             Some(Value::Array(values)) => {
                 for value in values {
                     if let Value::String(value) = value {
-                        expand_home_in_place(value, home);
+                        expand(value);
                     }
                 }
             }
             _ => {}
         }
     }
-}
-
-fn expand_home_in_place(value: &mut String, home: &Path) {
-    let trimmed = value.trim();
-    let rest = if trimmed == "~" {
-        ""
-    } else if let Some(rest) = trimmed
-        .strip_prefix("~/")
-        .or_else(|| trimmed.strip_prefix("~\\").filter(|_| cfg!(windows)))
-    {
-        rest
-    } else {
-        return;
-    };
-    let expanded = if rest.is_empty() {
-        home.to_path_buf()
-    } else {
-        home.join(rest)
-    };
-    *value = expanded.to_string_lossy().into_owned();
 }
 
 #[cfg(test)]
