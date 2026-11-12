@@ -82,6 +82,7 @@ workstream:
 # Labels that change what CI does. Adding one has an effect; do not apply
 # speculatively.
 control:
+  - {name: release-needed, color: "0E8A16", description: "Request publication after this pull request merges to main"}
   - {name: e2e, color: "1d76db", description: "Run the slow subprocess E2E suite on this pull request"}
   - {name: no-demo-needed, color: "ededed", description: "Demo gate opt-out: PR is hygiene/refactor and doesn't add a new public primitive"}
   - {name: no-changelog-needed, color: "ededed", description: "PR is exempt from the changelog-fragment gate (CI/infra/test-only)"}
@@ -91,6 +92,7 @@ control:
 
 # Applied by Dependabot and GitHub itself.
 automation:
+  - {name: release-blocked, color: "B60205", description: "A requested release needs intervention"}
   - {name: dependencies, color: "0366d6", description: "Pull requests that update a dependency file"}
   - {name: rust, color: "000000", description: "Pull requests that update rust code"}
   - {name: javascript, color: "168700", description: "Pull requests that update javascript code"}
