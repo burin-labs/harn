@@ -155,6 +155,11 @@ pub fn agent_daemon_step(
   __host_fire_session_hook("session_idle", idle_payload)
   agent_reminder_providers_fire(agent, session.session_id, "session_idle", idle_payload, opts)
   let wake = agent.daemon_wait(session.session_id, timeout)
+  // Nothing woke the first wait, so the loop is idle until input arrives.
+  // Said once per idle stretch; the next model call reports `generating`.
+  if wake?.reason == nil && timeout > 0 {
+    agent_emit_event(agent, session.session_id, "turn_phase_changed", {phase: "idle"})
+  }
   while wake?.reason == nil && timeout > 0 {
     wake = agent.daemon_wait(session.session_id, timeout)
   }
