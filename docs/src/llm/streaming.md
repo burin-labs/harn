@@ -55,7 +55,7 @@ import {agent_stream_call} from "std/agent/stream"
 
 const result = agent_stream_call(prompt, system, {
   provider: "openai",
-  model: "gpt-5-mini",
+  model: "gpt-5.6-terra",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
   on_delta: { delta, _event, _state -> harness.stdio.print(delta) },
 })

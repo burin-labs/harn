@@ -682,7 +682,7 @@ import {agent_stream_call} from "std/agent/stream"
 
 const result = agent_stream_call(prompt, system, {
   provider: "openai",
-  model: "gpt-5-mini",
+  model: "gpt-5.6-terra",
   private: {open_tag: "<secret>", close_tag: "</secret>"},
   on_delta: { delta, _event, _state -> harness.stdio.print(delta) },
 })
@@ -3141,7 +3141,7 @@ const judge = { info ->
   const snapshot = harness.agent.snapshot(info.session_id)
   const verdict = harness.llm.call("...grade this transcript...", {
     // cheaper reflection model
-    provider: "openai", model: "gpt-5-mini",
+    provider: "openai", model: "gpt-5.6-terra",
     messages: [{role: "user", content: json_stringify(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
   })
