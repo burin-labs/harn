@@ -12,6 +12,34 @@ pub fn normalize_context_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// The absolute path a home-relative spelling names: `~` is `home`, and
+/// `~/rest` (also `~\rest` on Windows) is `home` joined with `rest`. `None`
+/// for any other spelling, including `~user/...`, which names another
+/// account's home, and when `home` is unknown or not absolute.
+///
+/// A model writes `~/project/notes.md` the way a person does. Read as
+/// workspace-relative, it names a literal `~` folder inside the workspace, so
+/// a read reports the file missing and policy judges a path nobody meant.
+/// This is the one reading of that spelling: path classification and tool
+/// dispatch both call it, so a path's policy and its handler cannot disagree.
+pub fn expand_home_path(path: &str, home: Option<&Path>) -> Option<String> {
+    let home = home.filter(|home| home.is_absolute())?;
+    let trimmed = path.trim();
+    let rest = if trimmed == "~" {
+        ""
+    } else {
+        trimmed
+            .strip_prefix("~/")
+            .or_else(|| trimmed.strip_prefix("~\\").filter(|_| cfg!(windows)))?
+    };
+    let expanded = if rest.is_empty() {
+        home.to_path_buf()
+    } else {
+        home.join(rest)
+    };
+    Some(expanded.to_string_lossy().into_owned())
+}
+
 /// Whether `path` is a standard process I/O device: a stream the process
 /// already holds, not a file in any workspace. The one owner for both the
 /// sandbox's path scoping and the command risk scan, so `2>/dev/null` is not
@@ -135,16 +163,18 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
 /// misspelled workspace-relative path. Display recovery cannot grant access.
 pub fn classify_permission_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
     let mut info = classify_path(path, workspace_root, false);
+    let home_expanded = expand_home_path(path, crate::user_dirs::home_dir().as_deref());
+    let spelled = home_expanded.as_deref().unwrap_or_else(|| path.trim());
     if info.kind == WorkspacePathKind::Invalid
         || unsupported_workspace_root(workspace_root)
-        || (is_absolute_path_syntax(path.trim()) && !Path::new(path.trim()).is_absolute())
+        || (is_absolute_path_syntax(spelled) && !Path::new(spelled).is_absolute())
     {
         return info;
     }
     let Some(root) = workspace_root else {
         return info;
     };
-    let input = Path::new(path.trim());
+    let input = Path::new(spelled);
     let target = if input.is_absolute() {
         input.to_path_buf()
     } else {
@@ -217,7 +247,8 @@ fn classify_path(
     recover_workspace_drift: bool,
 ) -> WorkspacePathInfo {
     let input = path.to_string();
-    let trimmed = path.trim();
+    let home_expanded = expand_home_path(path, crate::user_dirs::home_dir().as_deref());
+    let trimmed = home_expanded.as_deref().unwrap_or_else(|| path.trim());
     if trimmed.is_empty() {
         return invalid_info(input, String::new(), "path is empty");
     }
@@ -557,6 +588,37 @@ mod tests {
             info.host_path.as_deref(),
             Some(normalize_host_path(&dir.path().join("src/main.rs")).as_str())
         );
+    }
+
+    #[test]
+    fn home_spelling_names_the_home_directory_not_a_workspace_folder() {
+        let home = Path::new("/home/someone");
+        assert_eq!(
+            expand_home_path("~/projects/app/README.md", Some(home)).as_deref(),
+            Some("/home/someone/projects/app/README.md")
+        );
+        assert_eq!(
+            expand_home_path("~", Some(home)).as_deref(),
+            Some("/home/someone")
+        );
+        for other in ["~other/x", "src/~/x", "/abs/~/x", "~x"] {
+            assert_eq!(expand_home_path(other, Some(home)), None, "{other}");
+        }
+        assert_eq!(expand_home_path("~/x", None), None);
+
+        let Some(real_home) = crate::user_dirs::home_dir() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let expected = normalize_host_path(&real_home.join("projects/app/README.md"));
+        for info in [
+            classify_workspace_path("~/projects/app/README.md", Some(dir.path())),
+            classify_permission_path("~/projects/app/README.md", Some(dir.path())),
+        ] {
+            assert_eq!(info.kind, WorkspacePathKind::HostAbsolute);
+            assert_eq!(info.workspace_path, None);
+            assert_eq!(info.host_path.as_deref(), Some(expected.as_str()));
+        }
     }
 
     #[test]
