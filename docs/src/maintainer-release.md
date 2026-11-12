@@ -5,6 +5,35 @@ stable version, so the four-hour checkpoint's candidate of main's tip can ship.
 Nothing publishes until you ask. You need permission to dispatch
 workflows in `burin-labs/harn`.
 
+## Request a release with a pull request
+
+Add `release-needed` before merging a pull request into main. Its merged event
+starts `release-on-demand.yml`, which requests a fresh source candidate from
+main and then promotes that exact candidate run. A main advance is accepted
+only after proving that it contains the requesting merge. The candidate and
+promotion workflows retain all existing qualification and publication gates.
+
+The caller waits at most 210 minutes for the candidate and 120 minutes for
+promotion. It reports the exact run IDs, observed job count, pending names and
+failing names on the merged pull request. A failure, unreadable proof or deadline
+also opens or updates one `release-blocked` issue for that request. Repair the
+named cause, then manually start a new request with `dry_run=false`; never
+partially rerun the candidate. A producer attempt above one is refused.
+Successful recovery closes that request's blocked issue.
+
+To inspect a merged request without dispatching builds, publication or comments:
+
+```bash
+gh workflow run release-on-demand.yml --repo burin-labs/harn --ref main \
+  -f pull_request=PR_NUMBER -f dry_run=true
+```
+
+A dry run does not require the label and defaults to no effects. Its retained
+`release-request-<run>-<attempt>` report contains dispatch plans. The optional
+`inspect_candidate_run` input measures an existing candidate's exact first
+attempt and job census through the same observer, separately from those plans.
+It does not qualify that existing run for a newly planned source.
+
 ## Publish a release
 
 Pick a main commit with a successful candidate, usually the newest one, and name
@@ -28,7 +57,8 @@ hold:
 
 An older commit can publish while main has moved on, under the same rules, as
 long as its version is above the latest published one. No commit, version change,
-or finished build starts promotion.
+or finished build starts promotion on its own; `release-needed` is an explicit
+request through the caller above.
 
 The candidate renders its notes from `changelog.d/` at build time and signs them
 into its manifest; publication uses those exact notes. After publication,

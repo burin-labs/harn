@@ -1,0 +1,103 @@
+name: Release on demand
+run-name: Release request for PR ${{ github.event.pull_request.number || inputs.pull_request }}
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Merged main pull request requesting a release
+        required: true
+        type: string
+      dry_run:
+        description: Read the merged request and print dispatch plans without writes or builds
+        required: true
+        default: true
+        type: boolean
+      inspect_candidate_run:
+        description: Optional existing candidate to observe during a dry run
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-on-demand-${{ github.event.pull_request.number || inputs.pull_request }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release request controller
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.merged == true &&
+        contains(github.event.pull_request.labels.*.name, 'release-needed')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REQUEST_PR: ${{ github.event.pull_request.number || inputs.pull_request }}
+      RELEASE_REQUEST_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      RELEASE_REQUEST_INSPECT_RUN: ${{ inputs.inspect_candidate_run }}
+      RELEASE_REQUEST_REPORT: release-request.json
+    steps:
+      # Only trusted main policy executes, never a pull request checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Dispatch and observe the owning release workflows
+        timeout-minutes: 335
+        run: node scripts/release-on-demand.mjs
+      - name: Preserve the last release observation
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-request.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    name: Report release request outcome
+    needs: release
+    if: always() && needs.release.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REQUEST_PR: ${{ github.event.pull_request.number || inputs.pull_request }}
+      RELEASE_REQUEST_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      RELEASE_REQUEST_REPORT: release-request.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Read the last observation when available
+        continue-on-error: true
+        env:
+          REQUEST_RUN: ${{ github.run_id }}
+          REQUEST_ATTEMPT: ${{ github.run_attempt }}
+        run: gh run download "$REQUEST_RUN" --name "release-request-$REQUEST_RUN-$REQUEST_ATTEMPT"
+      - name: Comment and update the blocked-release issue
+        run: node scripts/release-on-demand.mjs report
