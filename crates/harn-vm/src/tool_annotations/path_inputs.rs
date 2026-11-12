@@ -2,6 +2,7 @@
 
 use super::ToolAnnotations;
 use serde_json::Value;
+use std::path::Path;
 
 pub(crate) const CONVENTIONAL_PATH_PARAMETERS: &[&str] = &[
     "path",
@@ -55,4 +56,83 @@ pub(crate) fn validate_arguments(
     annotations: Option<&ToolAnnotations>,
 ) -> Result<(), String> {
     validate(arguments, &parameters(annotations))
+}
+
+/// Rewrite a path argument spelled from the home directory (`~` or `~/...`)
+/// to the absolute path it names.
+///
+/// A model writes `~/project/notes.md` the way a person does. Left as is, every
+/// later reader takes it as workspace-relative, so a tool looks for a literal
+/// `~` folder under the workspace and reports the file missing, and the
+/// permission policy classifies the wrong file. Rewriting it once here, before
+/// consent, policy and the handler run, gives all of them the same absolute
+/// path, which policy then admits or refuses like any other. `~user/...` is
+/// left alone: naming another account's home is not a spelling of this one.
+pub(crate) fn expand_home(arguments: &mut Value, parameters: &[String], home: Option<&Path>) {
+    let Some(home) = home.filter(|home| !home.as_os_str().is_empty()) else {
+        return;
+    };
+    let Value::Object(map) = arguments else {
+        return;
+    };
+    for parameter in parameters {
+        match map.get_mut(parameter) {
+            Some(Value::String(value)) => expand_home_in_place(value, home),
+            Some(Value::Array(values)) => {
+                for value in values {
+                    if let Value::String(value) = value {
+                        expand_home_in_place(value, home);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn expand_home_in_place(value: &mut String, home: &Path) {
+    let trimmed = value.trim();
+    let rest = if trimmed == "~" {
+        ""
+    } else if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\").filter(|_| cfg!(windows)))
+    {
+        rest
+    } else {
+        return;
+    };
+    let expanded = if rest.is_empty() {
+        home.to_path_buf()
+    } else {
+        home.join(rest)
+    };
+    *value = expanded.to_string_lossy().into_owned();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn home_spellings_expand_and_others_stay() {
+        let home = Path::new("/home/someone");
+        let mut args = json!({
+            "path": "~/projects/app/README.md",
+            "paths": ["~", "src/lib.rs", "~other/x", "/abs/~/y"],
+            "content": "~/not-a-path-param",
+        });
+        expand_home(&mut args, &["path".into(), "paths".into()], Some(home));
+        assert_eq!(args["path"], "/home/someone/projects/app/README.md");
+        assert_eq!(
+            args["paths"],
+            json!(["/home/someone", "src/lib.rs", "~other/x", "/abs/~/y"])
+        );
+        assert_eq!(args["content"], "~/not-a-path-param");
+
+        let mut unknown_home = json!({"path": "~/x"});
+        expand_home(&mut unknown_home, &["path".into()], None);
+        assert_eq!(unknown_home["path"], "~/x");
+    }
 }
