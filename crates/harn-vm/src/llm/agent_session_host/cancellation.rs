@@ -263,6 +263,9 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
         crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
         transcript_dir.as_deref(),
     );
+    // A daemon stopped before it idled on its reply keeps that reply, so the
+    // reply reaches clients whether the stop lands before or after the idle.
+    super::daemon_bridge::publish_stopped_daemon_reply(session_id).await?;
     if crate::agent_sessions::has_journal(session_id) {
         let provider_call_count = super::AGENT_HOST_SESSIONS.with(|sessions| {
             sessions

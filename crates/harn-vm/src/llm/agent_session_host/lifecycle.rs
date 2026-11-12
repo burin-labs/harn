@@ -308,6 +308,7 @@ async fn host_agent_session_init(
             resumed_iterations,
             daemon_watch_state: std::collections::BTreeMap::new(),
             daemon_idle_backoff_ms: 100,
+            daemon: matches!(opts_map.get("daemon"), Some(VmValue::Bool(true))),
             host_bridge,
             last_llm_stop_reason: None,
             pending_finalization: None,
@@ -586,12 +587,21 @@ pub(super) async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
-    let publication_admitted = (canonical_status == "done" || discovery_unavailable)
-        && terminal_error.is_none()
-        && !matches!(
-            status_dict.get("publication_admitted"),
-            Some(VmValue::Bool(false))
-        );
+    // A stopped daemon keeps the reply it had not idled on yet, as the abandon
+    // path does, so a stop on either path leaves the reply to the person.
+    let stopped_daemon_reply = canonical_status == "cancelled"
+        && super::daemon_bridge::stopped_daemon_keeps_reply(
+            session.daemon,
+            session.host_bridge.as_ref(),
+        )
+        .await;
+    let publication_admitted =
+        (canonical_status == "done" || discovery_unavailable || stopped_daemon_reply)
+            && terminal_error.is_none()
+            && !matches!(
+                status_dict.get("publication_admitted"),
+                Some(VmValue::Bool(false))
+            );
     let published =
         crate::agent_sessions::settle_assistant_publication(&session_id, publication_admitted)
             .map_err(VmError::Runtime)?;

@@ -725,6 +725,45 @@ fn publish_idle_reply(session_id: &str) -> Result<(), VmError> {
     Ok(())
 }
 
+/// Publish the reply a stopped daemon wrote but had not idled on yet.
+///
+/// A stop can land between a daemon's toolless reply and its idle wait, while
+/// the loop runs its post-turn work. The idle wait never runs, and a stop does
+/// not admit a pending reply, so a reply the person may already have read in a
+/// client's stream vanished from the record. A daemon reply is a message to the
+/// person, not a completion claim, so the stop keeps it under the idle wait's
+/// own rule: unless queued wake input supersedes it.
+pub(crate) async fn publish_stopped_daemon_reply(session_id: &str) -> Result<(), VmError> {
+    let Some(bridge) = AGENT_HOST_SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(session_id)
+            .filter(|session| session.daemon)
+            .map(|session| session.host_bridge.clone())
+    }) else {
+        return Ok(());
+    };
+    if stopped_daemon_keeps_reply(true, bridge.as_ref()).await {
+        publish_idle_reply(session_id)?;
+    }
+    Ok(())
+}
+
+/// Whether a stopped session keeps its pending reply: only a daemon does, and
+/// only while no queued wake input supersedes the reply.
+pub(super) async fn stopped_daemon_keeps_reply(
+    daemon: bool,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+) -> bool {
+    if !daemon {
+        return false;
+    }
+    match bridge {
+        Some(bridge) => !bridge.has_queued_wake_input().await,
+        None => true,
+    }
+}
+
 fn nil_json() -> serde_json::Value {
     serde_json::Value::Null
 }
