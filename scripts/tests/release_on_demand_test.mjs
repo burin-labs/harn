@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {Evaluator,Lexer,Parser,data} from '@actions/expressions';
 import {load} from 'js-yaml';
-import {releaseRequest,releaseObservation,runRequestedRelease,reportRequestedRelease,releaseReport} from '../lib/release-on-demand.mjs';
+import {releaseRequest,requestsForMainPush,releaseObservation,runRequestedRelease,reportRequestedRelease,releaseReport} from '../lib/release-on-demand.mjs';
 
 const repository='octo-org/language',merge='a'.repeat(40),source='b'.repeat(40),newSource='c'.repeat(40);
 const request={repository,pr:17,merge_sha:merge,source_sha:source};
@@ -146,7 +146,7 @@ test('live-reader positive and missing census controls use the same exact-attemp
   assert.equal((await releaseObservation(fixture({jobs:{42:[]}}).api,request,'candidate',42)).verdict,'blocked');
 });
 
-test('the actual workflow expression admits only labeled merges and main manual requests',()=>{
+test('the deployed caller admits only trusted main and uses a typed merged-request selector',async()=>{
   const workflow=load(fs.readFileSync(new URL('../../.github/workflows/release-on-demand.yml',import.meta.url),'utf8'));
   const expressionValue=value=>value==null?new data.Null():typeof value==='string'?new data.StringData(value):
     typeof value==='boolean'?new data.BooleanData(value):Array.isArray(value)?new data.Array(...value.map(expressionValue)):
@@ -156,13 +156,12 @@ test('the actual workflow expression admits only labeled merges and main manual 
     return new Evaluator(new Parser(tokens.tokens,['github'],[]).parse(),
       expressionValue({github})).evaluate().coerceString()==='true';
   };
-  const context={ref:'refs/heads/main',event_name:'pull_request_target',event:{pull_request:{merged:true,labels:[{name:'release-needed'}]}}};
+  const context={ref:'refs/heads/main',event_name:'push'};
   assert.equal(evaluate(context),true);
   assert.equal(evaluate({...context,ref:'refs/heads/topic'}),false);
-  assert.equal(evaluate({...context,event:{pull_request:{merged:false,labels:[{name:'release-needed'}]}}}),false);
-  assert.equal(evaluate({...context,event:{pull_request:{merged:true,labels:[]}}}),false);
   assert.equal(evaluate({ref:'refs/heads/main',event_name:'workflow_dispatch',event:{}}),true);
-  assert.deepEqual(workflow.on.pull_request_target,{types:['closed'],branches:['main']});
+  assert.equal(workflow.on.pull_request_target,undefined);
+  assert(workflow.on.workflow_call);
   assert.equal(workflow.on.workflow_dispatch.inputs.dry_run.default,true);
   assert.equal(workflow.on.schedule,undefined);
   assert(workflow.jobs.report.if.includes('always()'));
@@ -170,6 +169,18 @@ test('the actual workflow expression admits only labeled merges and main manual 
     const checkout=job.steps.find(step=>step.uses?.startsWith('actions/checkout@'));
     assert.equal(checkout.with.ref,'main');assert.equal(checkout.with['persist-credentials'],false);
   }
+  const trigger=load(fs.readFileSync(new URL('../../.github/workflows/release-needed.yml',import.meta.url),'utf8'));
+  assert.deepEqual(trigger.on,{push:{branches:['main']}});
+  assert.equal(trigger.jobs.release.uses,'./.github/workflows/release-on-demand.yml');
+  assert.equal(trigger.jobs.release.with.dry_run,false);
+  const pull={id:1,number:17,state:'closed',merged_at:'2026-11-11T00:00:00Z',merge_commit_sha:source,
+    labels:[{name:'release-needed'}],base:{ref:'main',repo:{full_name:repository}},head:{repo:{full_name:'contributor/fork'}}};
+  const api={list:async()=>[pull]};
+  assert.deepEqual(await requestsForMainPush(api,repository,source),[17]);
+  for(const change of [{state:'open',merged_at:null},{labels:[]},{merge_commit_sha:merge},{base:{ref:'other',repo:{full_name:repository}}}]) {
+    assert.deepEqual(await requestsForMainPush({list:async()=>[{...pull,...change}]},repository,source),[]);
+  }
+  await assert.rejects(requestsForMainPush({list:async()=>[{...pull,labels:null}]},repository,source));
 });
 
 test('interrupted controller converts its pending receipt to blocked before notification',()=>{

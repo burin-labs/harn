@@ -6,6 +6,21 @@ const sha = /^[0-9a-f]{40}$/;
 const marker = number => `<!-- harn.release-on-demand.v1 pr=${number} -->`;
 const refuse = reason => { throw new Error(reason); };
 
+/** A trusted main push selects requests from associated PR data, not commit prose. */
+export async function requestsForMainPush(api, repository, source) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !sha.test(source)) refuse('push_identity_invalid');
+  const pulls=await api.list(`repos/${repository}/commits/${source}/pulls`);
+  if(pulls.some(pull=>!Number.isSafeInteger(pull.number)||pull.number<1 || !Array.isArray(pull.labels)
+    || pull.labels.some(label=>typeof label.name!=='string') || !['open','closed'].includes(pull.state)
+    || (pull.merge_commit_sha!==null && !sha.test(pull.merge_commit_sha))
+    || (pull.merged_at!==null && (typeof pull.merged_at!=='string'||!Number.isFinite(Date.parse(pull.merged_at))))
+    || typeof pull.base?.ref!=='string' || typeof pull.base?.repo?.full_name!=='string')
+    || new Set(pulls.map(pull=>pull.number)).size!==pulls.length)refuse('associated_pull_census_unmeasured');
+  return pulls.filter(pull=>pull.state==='closed' && pull.merged_at && pull.merge_commit_sha===source
+    && pull.base.ref==='main' && pull.base.repo.full_name===repository
+    && pull.labels.some(label=>label.name==='release-needed')).map(pull=>pull.number);
+}
+
 export async function releaseRequest(api, repository, number, dryRun=false) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !Number.isSafeInteger(number) || number<1) refuse('request_identity_invalid');
   const pull = await api.read(`repos/${repository}/pulls/${number}`);

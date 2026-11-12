@@ -3,7 +3,7 @@ import {execFile} from 'node:child_process';
 import {realpathSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {ghRead,rehearsalBinding} from './lib/release-candidate-state.mjs';
-import {releaseRequest,runRequestedRelease,reportRequestedRelease,releaseObservation} from './lib/release-on-demand.mjs';
+import {releaseRequest,requestsForMainPush,runRequestedRelease,reportRequestedRelease,releaseObservation} from './lib/release-on-demand.mjs';
 
 export function releaseApi(repository) {
   const token=process.env.GH_TOKEN??process.env.GITHUB_TOKEN??'gh-cli-authenticated-read';
@@ -46,6 +46,11 @@ async function main() {
   const filename=process.env.RELEASE_REQUEST_REPORT??'release-request.json';
   const api=releaseApi(repository);
   const controller=`https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID??'0'}`;
+  if(process.argv[2]==='select') {
+    const pulls=await requestsForMainPush(api,repository,process.env.GITHUB_SHA);
+    fs.appendFileSync(process.env.GITHUB_OUTPUT,`pull_requests=${JSON.stringify(pulls)}\n`);
+    console.log(JSON.stringify({source_sha:process.env.GITHUB_SHA,release_requests:pulls}));return;
+  }
   if (process.argv[2]==='report') {
     let state;
     try {state=JSON.parse(fs.readFileSync(filename,'utf8'));} catch { /* A missing receipt is unmeasured. */ }

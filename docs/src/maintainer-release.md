@@ -7,8 +7,9 @@ workflows in `burin-labs/harn`.
 
 ## Request a release with a pull request
 
-Add `release-needed` before merging a pull request into main. Its merged event
-starts `release-on-demand.yml`, which requests a fresh source candidate from
+Add `release-needed` before merging a pull request into main. The resulting main
+push selects its merged request from GitHub's associated-PR census and calls
+`release-on-demand.yml`, which requests a fresh source candidate from
 main and then promotes that exact candidate run. A main advance is accepted
 only after proving that it contains the requesting merge. The candidate and
 promotion workflows retain all existing qualification and publication gates.
@@ -29,7 +30,7 @@ gh workflow run release-on-demand.yml --repo burin-labs/harn --ref main \
 ```
 
 A dry run does not require the label and defaults to no effects. Its retained
-`release-request-<run>-<attempt>` report contains dispatch plans. The optional
+`release-request-<pr>-<run>-<attempt>` report contains dispatch plans. The optional
 `inspect_candidate_run` input measures an existing candidate's exact first
 attempt and job census through the same observer, separately from those plans.
 It does not qualify that existing run for a newly planned source.
