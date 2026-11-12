@@ -461,8 +461,15 @@ fn render_profile_with_extra_read_roots(
         profile.push_str(standard_device_profile_rules());
     }
     use super::policy::ProcessNetworkGrant;
-    match ProcessNetworkGrant::for_policy(policy) {
-        ProcessNetworkGrant::Public { proxy: Some(proxy) } => {
+    let network = ProcessNetworkGrant::for_policy(policy);
+    // Permission to listen locally does not widen a managed proxy's destinations.
+    if matches!(network, ProcessNetworkGrant::Loopback { .. }) {
+        profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+        profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+    }
+    match network {
+        ProcessNetworkGrant::Public { proxy: Some(proxy) }
+        | ProcessNetworkGrant::Loopback { proxy: Some(proxy) } => {
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
                     "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
@@ -470,15 +477,7 @@ fn render_profile_with_extra_read_roots(
             }
         }
         ProcessNetworkGrant::Public { proxy: None } => profile.push_str("(allow network*)\n"),
-        ProcessNetworkGrant::Loopback { .. } => {
-            // Local test servers need all three operations: bind/listen, accept,
-            // and the client connection back to the listener. Match the remote
-            // endpoint on outbound. A `local ip` outbound filter also matches an
-            // unbound socket's wildcard source and would silently admit remote
-            // egress. Keeping these rules separate from `network*` preserves the
-            // managed-proxy boundary when the run also has provider/network work.
-            profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
-            profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+        ProcessNetworkGrant::Loopback { proxy: None } => {
             profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
         }
         ProcessNetworkGrant::Denied => {}
