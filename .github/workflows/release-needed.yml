@@ -1,0 +1,46 @@
+name: Release merged requests
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  requests:
+    name: Select merged release requests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pull_requests: ${{ steps.requests.outputs.pull_requests }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Read merged request labels at this main commit
+        id: requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-on-demand.mjs select
+  release:
+    name: Release merged request
+    needs: requests
+    if: needs.requests.outputs.pull_requests != '[]' && needs.requests.outputs.pull_requests != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        pull_request: ${{ fromJSON(needs.requests.outputs.pull_requests) }}
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/release-on-demand.yml
+    with:
+      pull_request: ${{ format('{0}', matrix.pull_request) }}
+      dry_run: false
