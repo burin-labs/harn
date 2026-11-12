@@ -701,11 +701,11 @@ fn managed_process_proxy_replaces_wildcard_network_grant() {
 
     assert!(!profile.contains("(allow network*)"), "{profile}");
     assert!(
-        profile.contains("(allow network-outbound (remote ip \"127.0.0.1:3128\"))"),
+        profile.contains("(allow network-outbound (remote ip4 \"localhost:3128\"))"),
         "{profile}"
     );
     assert!(
-        profile.contains("(allow network-outbound (remote ip \"127.0.0.1:1080\"))"),
+        profile.contains("(allow network-outbound (remote ip4 \"localhost:1080\"))"),
         "{profile}"
     );
 }

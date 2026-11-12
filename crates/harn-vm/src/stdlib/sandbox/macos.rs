@@ -473,7 +473,7 @@ fn render_profile_with_extra_read_roots(
             // Proxy listeners bind IPv4; localhost would also admit unrelated ::1 listeners.
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
-                    "(allow network-outbound (remote ip \"127.0.0.1:{port}\"))\n"
+                    "(allow network-outbound (remote ip4 \"localhost:{port}\"))\n"
                 ));
             }
         }

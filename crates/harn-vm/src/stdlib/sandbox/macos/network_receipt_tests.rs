@@ -233,7 +233,7 @@ fn network_receipt_matches_the_rendered_process_grant() {
             "{profile}"
         );
         assert_eq!(
-            profile.contains("(remote ip \"127.0.0.1:3128\")"),
+            profile.contains("(remote ip4 \"localhost:3128\")"),
             proxy_port,
             "{profile}"
         );
