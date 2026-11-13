@@ -195,6 +195,7 @@ fn wrap_with_sandbox_exec(
             )));
         }
     }
+    hold_managed_proxy(policy)?;
     let mut wrapped_args = vec![
         "-p".to_string(),
         render_profile_for_program(policy, program),
@@ -210,6 +211,21 @@ fn wrap_with_sandbox_exec(
         wrapper: SANDBOX_EXEC_PATH.to_string(),
         args: wrapped_args,
     })
+}
+
+/// A profile that grants the managed proxy's ports grants every listener on
+/// them at any local address, so it is used only while a live proxy in this
+/// process holds them all. Refused by name otherwise.
+fn hold_managed_proxy(policy: &CapabilityPolicy) -> Result<(), VmError> {
+    let grant = super::policy::ProcessNetworkGrant::for_policy(policy);
+    match policy.process_network_proxy {
+        Some(proxy) if grant.managed_proxy() => {
+            crate::egress::hold_proxy_ports(proxy).map_err(|reason| {
+                super::sandbox_rejection(format!("{reason}; the child was not started"))
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Whether a child spawned under `policy` could write `target`, measured on
@@ -461,24 +477,32 @@ fn render_profile_with_extra_read_roots(
         profile.push_str(standard_device_profile_rules());
     }
     use super::policy::ProcessNetworkGrant;
-    match ProcessNetworkGrant::for_policy(policy) {
-        ProcessNetworkGrant::Public { proxy: Some(proxy) } => {
+    let network = ProcessNetworkGrant::for_policy(policy);
+    // Local test servers need bind/listen and accept. Permission to listen is
+    // not permission to connect, so it never widens a managed proxy's reach.
+    if matches!(network, ProcessNetworkGrant::Loopback { .. }) {
+        profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+        profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+    }
+    match network {
+        // Seatbelt's `localhost` is every address of this host, so a port rule
+        // also matches other listeners on that port. `tcp4` keeps out the
+        // separate IPv6 and UDP port spaces, and the proxy claims its ports on
+        // every local IPv4 address (`egress::proxy_ports`), which the spawn
+        // path confirms before this profile is used.
+        ProcessNetworkGrant::Public { proxy: Some(proxy) }
+        | ProcessNetworkGrant::Loopback { proxy: Some(proxy) } => {
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
-                    "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
+                    "(allow network-outbound (remote tcp4 \"localhost:{port}\"))\n"
                 ));
             }
         }
         ProcessNetworkGrant::Public { proxy: None } => profile.push_str("(allow network*)\n"),
-        ProcessNetworkGrant::Loopback { .. } => {
-            // Local test servers need all three operations: bind/listen, accept,
-            // and the client connection back to the listener. Match the remote
-            // endpoint on outbound. A `local ip` outbound filter also matches an
-            // unbound socket's wildcard source and would silently admit remote
-            // egress. Keeping these rules separate from `network*` preserves the
-            // managed-proxy boundary when the run also has provider/network work.
-            profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
-            profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+        // Match the remote endpoint on outbound. A `local ip` outbound filter
+        // also matches an unbound socket's wildcard source and would silently
+        // admit remote egress.
+        ProcessNetworkGrant::Loopback { proxy: None } => {
             profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
         }
         ProcessNetworkGrant::Denied => {}

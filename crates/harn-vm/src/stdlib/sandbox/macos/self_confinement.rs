@@ -29,6 +29,7 @@ pub(super) fn confine(policy: &CapabilityPolicy) -> Result<(), VmError> {
                 .to_string(),
         ));
     }
+    super::hold_managed_proxy(policy)?;
     let program = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_default();

@@ -16,6 +16,9 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 mod process_proxy;
+mod proxy_ports;
+#[cfg(target_os = "macos")]
+pub(crate) use proxy_ports::hold as hold_proxy_ports;
 mod provider_allow;
 mod rules;
 pub mod ssrf;

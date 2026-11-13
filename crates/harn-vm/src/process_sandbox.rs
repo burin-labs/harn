@@ -187,8 +187,8 @@ mod loopback;
 pub(crate) use loopback::reconcile;
 pub use loopback::{
     loopback_support, withhold_unsupported_loopback, LoopbackSupport, LoopbackUnavailable,
-    LoopbackUnavailableReason, LOOPBACK_GRANT_FIELD, LOOPBACK_UNAVAILABLE_CATEGORY,
-    NETNS_LAUNCHER_FIELD,
+    LoopbackUnavailableReason, LOOPBACK_BEHIND_PROXY_CATEGORY, LOOPBACK_GRANT_FIELD,
+    LOOPBACK_UNAVAILABLE_CATEGORY, NETNS_LAUNCHER_FIELD,
 };
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the

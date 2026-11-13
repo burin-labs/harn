@@ -18,6 +18,10 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPolicy};
 /// Event category of the notice emitted when a grant is withheld.
 pub const LOOPBACK_UNAVAILABLE_CATEGORY: &str = "sandbox.loopback_unavailable";
 
+/// Event category of the notice that a macOS loopback grant behind the
+/// managed network proxy can listen but connects only through the proxy.
+pub const LOOPBACK_BEHIND_PROXY_CATEGORY: &str = "sandbox.loopback_behind_proxy";
+
 /// The policy field a loopback grant is spelled as.
 pub const LOOPBACK_GRANT_FIELD: &str = "allow_tcp_loopback";
 
@@ -205,6 +209,9 @@ pub fn withhold_unsupported_loopback(
 }
 
 static NOTICE_EMITTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static BEHIND_PROXY_NOTICE_EMITTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) fn reset_notice() {
@@ -223,6 +230,22 @@ pub(crate) fn reconcile(mut policy: CapabilityPolicy) -> CapabilityPolicy {
                 unavailable.metadata(),
             );
         }
+    }
+    // Seatbelt cannot tell this command's listeners from other local services,
+    // so a connection to either goes through the proxy or nowhere.
+    #[cfg(target_os = "macos")]
+    if policy.process_sandbox.allow_tcp_loopback
+        && policy.process_network_proxy.is_some()
+        && !BEHIND_PROXY_NOTICE_EMITTED.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        crate::events::log_warn_meta(
+            LOOPBACK_BEHIND_PROXY_CATEGORY,
+            "On macOS, a confined command with loopback networking behind the managed network \
+             proxy may listen on local ports, but it connects only through the proxy, to its \
+             own local servers too. A client that ignores the proxy settings cannot connect to \
+             a local server.",
+            std::collections::BTreeMap::from([("grant".to_string(), LOOPBACK_GRANT_FIELD.into())]),
+        );
     }
     policy
 }
