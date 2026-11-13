@@ -78,6 +78,8 @@ pub(super) fn bind() -> Result<ProxyListeners, ProcessEgressProxyError> {
 const CLAIM_ATTEMPTS: usize = 16;
 
 /// A local service already holds one of the proxy's ports at another address.
+/// Only macOS claims ports, so only macOS can find one taken.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ProxyPortTaken {
     pub(super) address: std::net::IpAddr,
@@ -95,6 +97,7 @@ impl std::fmt::Display for ProxyPortTaken {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum ClaimError {
     Taken(ProxyPortTaken),
     Io(std::io::Error),
