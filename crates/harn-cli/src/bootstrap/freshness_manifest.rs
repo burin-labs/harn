@@ -207,14 +207,17 @@ fn insert_path(
     path: PathBuf,
     content_kind: ContentKind,
 ) -> Result<(), String> {
-    if let Some(recorded_kind) = paths.get(&path) {
-        if *recorded_kind != content_kind {
-            return Err(format!(
-                "manifest input has conflicting content authorities: {}",
-                path.display()
-            ));
-        }
-    }
+    let content_kind = match (paths.get(&path).copied(), content_kind) {
+        (None, kind) => kind,
+        (Some(recorded), kind) if recorded == kind => kind,
+        // Git HEAD hashes the exact bytes and selected revision, so it covers an exact claim.
+        (Some(ContentKind::Exact), ContentKind::GitHead)
+        | (Some(ContentKind::GitHead), ContentKind::Exact) => ContentKind::GitHead,
+        (Some(_), _) => Err(format!(
+            "manifest input has conflicting content authorities: {}",
+            path.display()
+        ))?,
+    };
     paths.insert(path, content_kind);
     Ok(())
 }
