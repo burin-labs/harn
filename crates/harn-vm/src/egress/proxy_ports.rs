@@ -7,14 +7,17 @@
 //! listener on that port at the host's LAN or VPN address. So the proxy binds
 //! its ports on every local IPv4 address and keeps them for its whole life.
 //! Those sockets never listen, so a connection to one goes nowhere. No other
-//! socket can bind the same address and port, and a specific bind receives
-//! connections ahead of a wildcard listener on that port. The child profile
+//! socket can bind the same address and port. The proxy also holds the
+//! wildcard address on its ports, so no other service can listen there on an
+//! address that appears later. The child profile
 //! names `tcp4` destinations, which keeps IPv6 and UDP, separate port spaces,
 //! out of the grant.
 //!
 //! A spawn re-checks the claim through [`hold`] before granting the ports, so
 //! an address that appeared after the proxy started is claimed too, or the
-//! spawn is refused by name.
+//! spawn is refused by name. What stays open: an address that appears while a
+//! child runs, on which another service binds that exact address and port
+//! before the next spawn.
 
 use std::net::TcpListener;
 
@@ -165,7 +168,8 @@ mod claim {
     impl Held {
         fn claim_new_addresses(&self) -> Result<(), ClaimError> {
             let mut sockets = self.sockets.lock().unwrap_or_else(PoisonError::into_inner);
-            for address in local_ipv4_addresses().map_err(ClaimError::Io)? {
+            let wildcard = std::iter::once(Ipv4Addr::UNSPECIFIED);
+            for address in wildcard.chain(local_ipv4_addresses().map_err(ClaimError::Io)?) {
                 // The listeners themselves hold 127.0.0.1.
                 if address == Ipv4Addr::LOCALHOST
                     || sockets.iter().any(|(held, _)| *held == address)
@@ -196,9 +200,9 @@ mod claim {
         }
     }
 
-    /// Bound, never listening. `SO_REUSEADDR` lets the claim shadow an existing
-    /// wildcard listener; an exact duplicate still fails without `SO_REUSEPORT`
-    /// on both sockets, and neither side here sets it.
+    /// Bound, never listening. `SO_REUSEADDR` lets the specific and wildcard
+    /// claims coexist with the proxy's own listeners; an exact duplicate still
+    /// fails without `SO_REUSEPORT` on both sockets, and neither side sets it.
     fn claim_port(address: Ipv4Addr, port: u16) -> std::io::Result<Socket> {
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
         socket.set_reuse_address(true)?;

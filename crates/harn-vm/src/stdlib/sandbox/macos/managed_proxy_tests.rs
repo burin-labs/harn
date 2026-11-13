@@ -65,8 +65,9 @@ fn managed_proxy_is_the_only_destination() {
     let unrelated = TcpListener::bind("127.0.0.1:0").unwrap();
     let ipv6 = TcpListener::bind(("::1", port)).expect("IPv6 has its own port space");
     let udp = UdpSocket::bind(("127.0.0.1", port)).expect("UDP has its own port space");
-    udp.set_read_timeout(Some(Duration::from_millis(200)))
-        .unwrap();
+    // Loopback delivery completes inside `sendto`, so after the child exits a
+    // permitted datagram is already queued; nonblocking reads cannot miss it.
+    udp.set_nonblocking(true).unwrap();
     let mut targets = BTreeMap::from([
         (
             "proxy_http".to_string(),
@@ -84,15 +85,18 @@ fn managed_proxy_is_the_only_destination() {
         ("udp_same_port".to_string(), udp.local_addr().unwrap()),
     ]);
     // Seatbelt's `localhost` includes this host's other addresses. The proxy
-    // claims its port there, so the exact address is taken and a wildcard
-    // listener on the port is shadowed.
+    // claims its port there and on the wildcard address, so neither a listener
+    // at the exact address nor a wildcard listener can be bound. On a host
+    // without the claim, the first bind that succeeds is the collider.
+    let wildcard = TcpListener::bind(("0.0.0.0", port));
+    let wildcard_free = wildcard.is_ok();
     let lan = other_local_ipv4();
     let mut lan_exact_free = None;
     let _lan_listener = lan.map(|address| {
         targets.insert("lan_same_port".into(), SocketAddr::from((address, port)));
         let exact = TcpListener::bind((address, port));
         lan_exact_free = Some(exact.is_ok());
-        exact.or_else(|_| TcpListener::bind(("0.0.0.0", port)))
+        exact
     });
     if lan.is_none() {
         eprintln!("lan_same_port not_measured: this host has no non-loopback IPv4 address");
@@ -156,8 +160,8 @@ fn managed_proxy_is_the_only_destination() {
     };
     let expected = BTreeMap::from([("loopback", expected(true)), ("public", expected(false))]);
     assert_eq!(
-        (measured, lan_exact_free),
-        (expected, lan.map(|_| false)),
+        (measured, wildcard_free, lan_exact_free),
+        (expected, false, lan.map(|_| false)),
         "lan={lan:?}"
     );
 }
