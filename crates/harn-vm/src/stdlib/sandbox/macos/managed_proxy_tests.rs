@@ -122,7 +122,7 @@ fn managed_proxy_is_the_only_destination() {
             &strings([NAME, "--exact", "--nocapture", "--test-threads=1"]),
             &config,
             &policy,
-            SandboxProfile::OsHardened,
+            SandboxProfile::Worktree,
         )
         .expect("the Mac backend installs the requested policy");
         assert!(output.status.success(), "{output:?}");
@@ -186,7 +186,7 @@ fn managed_proxy_ports_without_a_live_proxy_are_refused_by_name() {
         &[],
         &ProcessCommandConfig::default(),
         &policy,
-        SandboxProfile::OsHardened,
+        SandboxProfile::Worktree,
     );
     let error = result.expect_err("unheld proxy ports must not be granted");
     assert!(
