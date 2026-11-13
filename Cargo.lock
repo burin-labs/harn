@@ -4496,6 +4496,7 @@ dependencies = [
  "sha3",
  "shell-words",
  "similar",
+ "socket2",
  "static_assertions",
  "strsim",
  "subtle",

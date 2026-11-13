@@ -136,7 +136,9 @@ mod claim {
     /// The proxy's sockets on every other local IPv4 address. Dropping it
     /// releases them.
     #[derive(Debug)]
-    pub(in crate::egress) struct PortClaim(Arc<Held>);
+    pub(in crate::egress) struct PortClaim {
+        _held: Arc<Held>,
+    }
 
     #[derive(Debug)]
     struct Held {
@@ -156,7 +158,7 @@ mod claim {
             let mut claims = CLAIMS.lock().unwrap_or_else(PoisonError::into_inner);
             claims.retain(|claim| claim.strong_count() > 0);
             claims.push(Arc::downgrade(&held));
-            Ok(Self(held))
+            Ok(Self { _held: held })
         }
     }
 
