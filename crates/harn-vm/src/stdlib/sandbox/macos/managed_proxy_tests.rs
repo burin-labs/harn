@@ -32,7 +32,9 @@ fn child(targets: BTreeMap<String, SocketAddr>) {
     }
     let own = TcpListener::bind("127.0.0.1:0");
     result.insert("own_listener_bind".into(), own.is_ok());
+    // The listener stays open across the connect.
     let own_reached = own
+        .as_ref()
         .ok()
         .and_then(|listener| listener.local_addr().ok())
         .is_some_and(reached);
