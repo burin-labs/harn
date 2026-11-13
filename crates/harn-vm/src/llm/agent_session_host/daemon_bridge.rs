@@ -1,6 +1,7 @@
 //! Daemon snapshots, bridge injection queues, and idle wake checkpoints.
 
 use super::*;
+use crate::agent_sessions;
 
 use crate::llm::helpers::{DirectiveAuthority, ReminderSource, SystemReminder};
 
@@ -710,11 +711,11 @@ async fn host_agent_daemon_wait(
 /// here. A reply superseded by wake input (a veto or a steer) is not idled on
 /// and stays pending for the turn that replaces it.
 fn publish_idle_reply(session_id: &str) -> Result<(), VmError> {
-    if !crate::agent_sessions::exists(session_id) {
+    if !agent_sessions::exists(session_id) {
         return Ok(());
     }
-    let published = crate::agent_sessions::settle_assistant_publication(session_id, true)
-        .map_err(VmError::Runtime)?;
+    let published =
+        agent_sessions::settle_assistant_publication(session_id, true).map_err(VmError::Runtime)?;
     if let Some(reply) = published {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.to_string(),

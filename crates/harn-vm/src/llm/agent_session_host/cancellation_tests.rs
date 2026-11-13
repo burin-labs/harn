@@ -1,4 +1,5 @@
 use crate::agent_events;
+use crate::agent_sessions;
 use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -1266,9 +1267,9 @@ fn seed_daemon_with_pending_reply(
     session_id: &str,
     bridge: Option<Arc<crate::bridge::HostBridge>>,
 ) -> Arc<std::sync::Mutex<Vec<String>>> {
-    crate::agent_sessions::reset_session_store();
+    agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
-    crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
+    agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
     super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
     super::super::AGENT_HOST_SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
@@ -1284,7 +1285,7 @@ fn seed_daemon_with_pending_reply(
         &mut reply,
         &crate::schema::json_to_vm_value(&json!({"_defer_visible": true})),
     );
-    crate::agent_sessions::inject_message(session_id, reply).expect("record pending reply");
+    agent_sessions::inject_message(session_id, reply).expect("record pending reply");
     let chunks = Arc::new(std::sync::Mutex::new(Vec::new()));
     agent_events::register_sink(session_id, Arc::new(ReplyChunks(chunks.clone())));
     chunks
@@ -1305,7 +1306,7 @@ async fn a_daemon_stopped_before_its_idle_still_publishes_its_reply() {
         "the stop must not drop the reply the daemon had not idled on"
     );
     agent_events::clear_session_sinks(session_id);
-    crate::agent_sessions::reset_session_store();
+    agent_sessions::reset_session_store();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1331,5 +1332,5 @@ async fn a_stopped_daemon_keeps_a_superseded_reply_unpublished() {
         "queued wake input supersedes the reply at a stop as it does at idle"
     );
     agent_events::clear_session_sinks(session_id);
-    crate::agent_sessions::reset_session_store();
+    agent_sessions::reset_session_store();
 }
