@@ -210,17 +210,13 @@ fn insert_path(
     let content_kind = match (paths.get(&path).copied(), content_kind) {
         (None, kind) => kind,
         (Some(recorded), kind) if recorded == kind => kind,
-        // A Git HEAD authority hashes the exact HEAD bytes and the revision
-        // they select, so it subsumes an exact claim on the same file, such
-        // as the Cargo build script watching HEAD for the embedded revision.
+        // Git HEAD hashes the exact bytes and selected revision, so it covers an exact claim.
         (Some(ContentKind::Exact), ContentKind::GitHead)
         | (Some(ContentKind::GitHead), ContentKind::Exact) => ContentKind::GitHead,
-        (Some(_), _) => {
-            return Err(format!(
-                "manifest input has conflicting content authorities: {}",
-                path.display()
-            ));
-        }
+        (Some(_), _) => Err(format!(
+            "manifest input has conflicting content authorities: {}",
+            path.display()
+        ))?,
     };
     paths.insert(path, content_kind);
     Ok(())
