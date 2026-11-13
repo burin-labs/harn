@@ -435,6 +435,11 @@ fn deepinfra_ling_retirement_preserves_route_identity_and_prices() {
     let config = llm_config::packaged_config();
     let ling = &config.models["deepinfra/inclusionAI/Ling-3.1-flash"];
     assert_eq!(ling.retires_on.as_deref(), Some("2026-11-15"));
+    let note = ling.deprecation_note.as_deref().unwrap();
+    assert!(note.contains("2026-11-15T09:15:32.000Z"));
+    assert!(note.contains("https://status.deepinfra.com/models/ling-3-1-flash"));
+    assert!(note.contains("Redirect pricing is not confirmed"));
+    assert!(!note.contains("Cutoff time and redirect pricing are not confirmed"));
     assert!(
         !ling.deprecated,
         "announced retirement must not retire the route early"

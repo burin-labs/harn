@@ -8678,7 +8678,7 @@
       },
       "deprecation": {
         "status": "active",
-        "note": "DeepInfra's authenticated customer notice announces deprecation on 2026-11-15 and redirects continuing requests for inclusionAI/Ling-3.1-flash to deepseek-ai/DeepSeek-V4.1-Flash-1017. This is a DeepInfra-only serving change, not model equivalence; the historical Ling identity and pricing are retained. Cutoff time and redirect pricing are not confirmed.",
+        "note": "DeepInfra's official status page (https://status.deepinfra.com/models/ling-3-1-flash; verified 2026-11-13) schedules deprecation at 2026-11-15T09:15:32.000Z and announces a redirect of continuing requests for inclusionAI/Ling-3.1-flash to deepseek-ai/DeepSeek-V4.1-Flash-1017. The notice says the route serves normally until then. This is a DeepInfra-only serving change, not model equivalence; the historical Ling identity and pricing are retained. Redirect pricing is not confirmed.",
         "retires_on": "2026-11-15",
         "superseded_by": "deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017"
       },
