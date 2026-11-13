@@ -212,3 +212,67 @@ fn linked_worktree_freshness_tracks_selected_revision_and_source() {
         .unwrap_err()
         .contains("type changed"));
 }
+
+#[test]
+fn cargo_head_dependency_defers_to_git_head_authority() {
+    let fixture = GitFixture::new();
+    let baseline = fixture.git(&fixture.lane, &["rev-parse", "HEAD"]);
+    let head = PathBuf::from(fixture.git(
+        &fixture.lane,
+        &["rev-parse", "--path-format=absolute", "--git-path", "HEAD"],
+    ));
+    let authorities = fixture.temp.path().join("authorities");
+    let project = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let output = fixture
+        .bash_command()
+        .arg(project.join("scripts/tests/fixtures/freshness-authorities.sh"))
+        .arg(project.join("scripts/lib/harn_bin_freshness.sh"))
+        .arg(&fixture.lane)
+        .arg(&authorities)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let dep_info = fixture.temp.path().join("harn.d");
+    fs::write(&dep_info, b"target:\n").unwrap();
+    let manifest = fixture.temp.path().join("manifest");
+    write_manifest(
+        &manifest,
+        &fixture.lane,
+        &BTreeSet::from([PathBuf::from("input.harn")]),
+        &dep_info,
+        &[(head.clone(), false)],
+        &authorities,
+    )
+    .unwrap();
+    assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
+
+    // A different HEAD spelling selecting the same revision must fail exact bytes.
+    fixture.git(&fixture.lane, &["checkout", "--detach", &baseline]);
+    assert_eq!(fixture.git(&fixture.lane, &["rev-parse", "HEAD"]), baseline);
+    assert!(verify_manifest(&manifest)
+        .unwrap_err()
+        .contains("content changed"));
+    fixture.git(&fixture.lane, &["checkout", "lane"]);
+    assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
+
+    // A moved symbolic ref changes the selected revision without changing HEAD bytes.
+    let head_bytes = fs::read(&head).unwrap();
+    fixture.git(
+        &fixture.repository,
+        &["commit", "--allow-empty", "-m", "other"],
+    );
+    let other = fixture.git(&fixture.repository, &["rev-parse", "HEAD"]);
+    fixture.git(&fixture.lane, &["update-ref", "refs/heads/lane", &other]);
+    assert_eq!(fs::read(&head).unwrap(), head_bytes);
+    assert!(verify_manifest(&manifest)
+        .unwrap_err()
+        .contains("content changed"));
+}
