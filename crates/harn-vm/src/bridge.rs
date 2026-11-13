@@ -1078,6 +1078,19 @@ impl HostBridge {
         selected
     }
 
+    /// Whether input an idle daemon's wait would take is queued: a reminder or
+    /// message at `interrupt_immediate` or `finish_step`. Such input
+    /// supersedes the reply the daemon would otherwise idle on.
+    pub async fn has_queued_wake_input(&self) -> bool {
+        let state = self.queued_transcript_injections.inner.lock().await;
+        state.queue.iter().any(|injection| {
+            matches!(
+                injection.mode(),
+                QueuedUserMessageMode::InterruptImmediate | QueuedUserMessageMode::FinishStep
+            )
+        })
+    }
+
     pub async fn take_queued_transcript_injections(
         &self,
         include_interrupt_immediate: bool,

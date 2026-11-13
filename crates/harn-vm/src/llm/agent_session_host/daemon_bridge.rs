@@ -1,6 +1,7 @@
 //! Daemon snapshots, bridge injection queues, and idle wake checkpoints.
 
 use super::*;
+use crate::agent_sessions;
 
 use crate::llm::helpers::{DirectiveAuthority, ReminderSource, SystemReminder};
 
@@ -313,25 +314,38 @@ async fn drain_bridge_injections_for_checkpoint(
     }
 }
 
-/// Drain `interrupt_immediate` injections on behalf of the daemon idle
+/// Drain the injections an idle daemon takes on behalf of the daemon idle
 /// path and emit a `LoopCheckpoint` so the rest of the seam catalog
 /// (Harn-side `agent_stage`, ACP `loop_checkpoint`
 /// notifications, debugger views) sees daemon-side activity through the
 /// same surface. The actual drain reuses the bridge primitive; this
 /// wrapper adds daemon-specific observability while preserving the
 /// caller's Harn callback context for live subscribers.
+///
+/// An idle daemon has finished its step, so it is the checkpoint a
+/// `finish_step` injection (a steer) waits for as well as an
+/// `interrupt_immediate` one. Taking only the latter left a steer queued
+/// until some other input woke the daemon.
 async fn daemon_checkpoint_drain(
     ctx: &crate::vm::AsyncBuiltinCtx,
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
     kind: &'static str,
 ) -> Result<(usize, Option<&'static str>), VmError> {
-    let (delivered, reason) = drain_bridge_injections_for_checkpoint(
-        session_id,
-        bridge,
+    let mut delivered = 0;
+    let mut reason = None;
+    for checkpoint in [
         crate::bridge::DeliveryCheckpoint::InterruptImmediate,
-    )
-    .await?;
+        crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+    ] {
+        let (count, woke) =
+            drain_bridge_injections_for_checkpoint(session_id, bridge, checkpoint).await?;
+        delivered += count;
+        // A message outranks a reminder as the reason the daemon woke.
+        if reason != Some("message") {
+            reason = woke.or(reason);
+        }
+    }
     let event = crate::agent_events::AgentEvent::LoopCheckpoint {
         session_id: session_id.to_string(),
         iteration: 0,
@@ -660,6 +674,8 @@ async fn host_agent_daemon_wait(
         }
     }
 
+    publish_idle_reply(&session_id)?;
+
     if timeout_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(timeout_ms)).await;
     }
@@ -682,6 +698,70 @@ async fn host_agent_daemon_wait(
         })))
     } else {
         Ok(json_to_vm(&serde_json::json!({"reason": nil_json()})))
+    }
+}
+
+/// Publish the reply a daemon goes idle on.
+///
+/// A toolless reply stays pending until its session settles publication, which
+/// otherwise happens only when the session finalizes. A daemon idles between
+/// replies instead of finalizing, so its replies would stay invisible to every
+/// client until the session ended. Reaching the idle wait with no wake input
+/// queued is the loop accepting the turn, so the trailing reply is admitted
+/// here. A reply superseded by wake input (a veto or a steer) is not idled on
+/// and stays pending for the turn that replaces it.
+fn publish_idle_reply(session_id: &str) -> Result<(), VmError> {
+    if !agent_sessions::exists(session_id) {
+        return Ok(());
+    }
+    let published =
+        agent_sessions::settle_assistant_publication(session_id, true).map_err(VmError::Runtime)?;
+    if let Some(reply) = published {
+        emit_event(&AgentEvent::AgentMessageChunk {
+            session_id: session_id.to_string(),
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
+        });
+    }
+    Ok(())
+}
+
+/// Publish the reply a stopped daemon wrote but had not idled on yet.
+///
+/// A stop can land between a daemon's toolless reply and its idle wait, while
+/// the loop runs its post-turn work. The idle wait never runs, and a stop does
+/// not admit a pending reply, so a reply the person may already have read in a
+/// client's stream vanished from the record. A daemon reply is a message to the
+/// person, not a completion claim, so the stop keeps it under the idle wait's
+/// own rule: unless queued wake input supersedes it.
+pub(crate) async fn publish_stopped_daemon_reply(session_id: &str) -> Result<(), VmError> {
+    let Some(bridge) = AGENT_HOST_SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(session_id)
+            .filter(|session| session.daemon)
+            .map(|session| session.host_bridge.clone())
+    }) else {
+        return Ok(());
+    };
+    if stopped_daemon_keeps_reply(true, bridge.as_ref()).await {
+        publish_idle_reply(session_id)?;
+    }
+    Ok(())
+}
+
+/// Whether a stopped session keeps its pending reply: only a daemon does, and
+/// only while no queued wake input supersedes the reply.
+pub(super) async fn stopped_daemon_keeps_reply(
+    daemon: bool,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
+) -> bool {
+    if !daemon {
+        return false;
+    }
+    match bridge {
+        Some(bridge) => !bridge.has_queued_wake_input().await,
+        None => true,
     }
 }
 
