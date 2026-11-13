@@ -1,7 +1,8 @@
 //! HTTP, HTTPS `CONNECT`, and SOCKS5 TCP proxy for sandboxed children.
 //! The child sandbox permits only this proxy's ports, which it holds on every
-//! local address, so ignoring proxy settings cannot widen access. Canonical [`super::EgressPolicy`] rules
-//! decide destinations and pin each connection to its checked addresses.
+//! local address, so ignoring proxy settings cannot widen access. Canonical
+//! [`super::EgressPolicy`] rules decide destinations and pin each connection to
+//! its checked addresses.
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
