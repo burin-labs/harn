@@ -511,6 +511,7 @@ async fn run_acp_channel_server_inner(
                 }
             }
 
+            cancel_transport_sessions(&server.session_cancellations);
             handle.mark_terminated();
         })
         .await;
@@ -655,8 +656,24 @@ impl RouterLane {
     /// The client is gone: no host callback will be answered, and no pending
     /// delivery prompt may still be inserted.
     async fn close(&self) {
+        cancel_transport_sessions(&self.cancellations);
         self.outbound.close().await;
         self.controls.drop_pending_prompts().await;
+    }
+}
+
+pub(super) fn cancel_transport_sessions(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+) {
+    let owned: Vec<_> = cancellations
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .iter()
+        .map(|(id, cancellation)| (id.clone(), cancellation.clone()))
+        .collect();
+    for (id, cancellation) in owned {
+        cancellation.cancel();
+        cancel_session_command_handles(&id);
     }
 }
 
