@@ -300,5 +300,21 @@ fn only_its_own_granted_spawn_may_ask_a_credential_socket() {
         ask(&own).contains(&format!("password={SECRET}")),
         "the spawn's own profile is answered"
     );
+    // The own directory is also listable and stat-able: a granted git checks
+    // its git directory's metadata before it reads anything there.
+    let list = |profile: &str| {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", profile, "--", "/bin/ls"])
+            .arg(dir.path())
+            .output()
+            .expect("spawn sandbox-exec")
+    };
+    let listed = list(&own);
+    assert!(
+        listed.status.success() && String::from_utf8_lossy(&listed.stdout).contains(SOCKET),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(!list(&render_profile(&policy)).status.success());
     drop(socket);
 }

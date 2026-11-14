@@ -599,12 +599,16 @@ fn render_profile_with_extra_read_roots(
     }
     // A granted spawn re-reads its own private directory inside the denied
     // per-spawn root. Later rules win, so this follows the denials, and it
-    // names only that one directory.
+    // names only that one directory. The denial names metadata on its own,
+    // which a wildcard read grant does not outrank, so the grant names it too:
+    // without it the directory reads but cannot be listed or stat'd, and a
+    // granted git refuses it as "not a git repository".
     if let Some(own) = super::workspace_env::grant_spawn::own_spawn_read_root() {
         for path in sandbox_profile_path_aliases(&own.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&path)
+                "(allow file-read* (subpath \"{escaped}\"))\n\
+                 (allow file-read-metadata (subpath \"{escaped}\"))\n"
             ));
         }
         // A granted git asks its own per-spawn credential socket for its login.
