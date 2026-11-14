@@ -560,6 +560,7 @@ lint-actions-source:
 # Evaluate workflow decisions with GitHub's expression engine.
 	@node --test scripts/tests/smart_ship_workflow_test.mjs
 	@node --test scripts/tests/install_smoke_workflow_test.mjs
+	@node --test scripts/tests/thread_parity_workflow_test.mjs
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
@@ -894,6 +895,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 		echo "test-pr-gate-post-warm-integrations requires an executable HARN_BIN" >&2; \
 		exit 1; \
 	fi
+	HARN_BIN="$(HARN_BIN)" python3 scripts/tests/thread_parity_runner_test.py
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/touched_test_repeats_test.sh

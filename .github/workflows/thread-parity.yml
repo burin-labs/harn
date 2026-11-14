@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+    inputs:
+      threads:
+        description: Thread counts to qualify
+        type: choice
+        options: [all, "1", "8", "16"]
+        default: all
 
 permissions:
   contents: read
@@ -23,9 +29,15 @@ jobs:
       # Run all thread counts even if one fails so we see the full picture.
       fail-fast: false
       matrix:
-        threads: [1, 8, 16]
+        threads: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.threads == '' || inputs.threads == 'all') && '[1,8,16]' || inputs.threads == '1' && '[1]' || inputs.threads == '8' && '[8]' || inputs.threads == '16' && '[16]' || '[0]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare receipt runtime before tests
+        id: receipt-runtime
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
 
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache-install
@@ -61,4 +73,17 @@ jobs:
       # aborts VM-driving tests with SIGABRT regardless of thread count and
       # reports a stack-size difference as a thread-count parity failure.
       - name: Run full suite at ${{ matrix.threads }} threads
-        run: scripts/ci/run_thread_parity.sh ${{ matrix.threads }}
+        id: parity
+        env:
+          THREAD_PARITY_COUNT: ${{ matrix.threads }}
+          HARN_BIN: ${{ steps.receipt-runtime.outputs.path }}
+        run: scripts/ci/run_thread_parity.sh "$THREAD_PARITY_COUNT"
+
+      - name: Retain test census and partial receipts
+        if: ${{ always() && steps.parity.outputs.evidence_dir != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thread-parity-${{ matrix.threads }}-${{ github.run_attempt }}
+          path: ${{ steps.parity.outputs.evidence_dir }}
+          if-no-files-found: error
+          retention-days: 3

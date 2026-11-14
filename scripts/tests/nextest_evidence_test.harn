@@ -120,6 +120,9 @@ fn check_collectors(harness: Harness, group: string) -> nil {
       assert(result.stdout.contains("selected=2 run=1 passed=1 skipped=1 not_run=1 failed=0"))
       assert(result.stderr.contains("thread_parity_missing_test demo::tests$omitted"))
     }
+    if scenario.reason == "test-failure" {
+      assert(result.stderr.contains("thread_parity_failed_test demo::tests$passes"))
+    }
   }
 }
 
@@ -135,6 +138,71 @@ pipeline test_actual_nextest_receipt_refuses_duplicates_foreign_tests_and_invali
   harness: Harness,
 ) {
   check_collectors(harness, "invalid")
+}
+
+pipeline test_interrupted_receipt_retains_started_pending_and_failed_names(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-interrupted-")
+  const inventory = path_join(root, "inventory.json")
+  const events = path_join(root, "events.jsonl")
+  const receipt_path = path_join(root, "receipt.json")
+  harness.fs.write_text(
+    inventory,
+    json_stringify(
+      {
+        "test-count": 3,
+        "rust-suites": {
+          demo: {
+            "package-name": "demo",
+            "binary-name": "tests",
+            status: "listed",
+            testcases: {
+              failed: {ignored: false, "filter-match": {status: "matches"}},
+              pending: {ignored: false, "filter-match": {status: "matches"}},
+              queued: {ignored: false, "filter-match": {status: "matches"}},
+            },
+          },
+        },
+      },
+    ),
+  )
+  harness.fs.write_text(
+    events,
+    [
+      {type: "test", event: "failed", name: "demo::tests$failed"},
+      {type: "test", event: "started", name: "demo::tests$pending"},
+    ]
+      .map({ event -> json_stringify(event) })
+      .join("\n"),
+  )
+  const result = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory,
+      "--events",
+      events,
+      "--runner-status",
+      "143",
+      "--threads",
+      "1",
+      "--receipt",
+      receipt_path,
+    ],
+  )
+  assert_eq(result.exit_code, 1, result.stderr)
+  const receipt = schema_expect(
+    json_parse(harness.fs.read_text(receipt_path)),
+    schema_of(ReceiptResult),
+  )
+  assert_eq(receipt.receipt.selected, 3)
+  assert_eq(receipt.receipt.run, 1)
+  assert_eq(receipt.receipt.started, 2)
+  assert_eq(receipt.receipt.failed_names, ["demo::tests$failed"])
+  assert_eq(receipt.receipt.pending, ["demo::tests$pending"])
+  assert_eq(receipt.receipt.missing, ["demo::tests$pending", "demo::tests$queued"])
+  assert(result.stderr.contains("thread_parity_pending_test demo::tests$pending"))
+  assert(result.stderr.contains("thread_parity_failed_test demo::tests$failed"))
 }
 
 pipeline test_actual_stress_receipt_requires_every_selected_test_in_every_iteration(
