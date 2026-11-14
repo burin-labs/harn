@@ -307,7 +307,7 @@ pub struct Vm {
     /// Logical runtime task context visible through `runtime_context()`.
     pub(crate) runtime_context: super::RuntimeContext,
     /// Active deadline stack: (deadline_instant, frame_depth).
-    pub(crate) deadlines: Vec<(Instant, usize)>,
+    pub(crate) deadlines: Vec<(tokio::time::Instant, usize)>,
     /// Uncatchable wall-clock deadline imposed by the embedding host.
     pub(crate) execution_deadline: Arc<ExecutionDeadlineState>,
     /// Breakpoints, keyed by source-file path so a breakpoint at line N
@@ -1137,7 +1137,11 @@ impl Vm {
     pub(crate) fn interrupt_sources(&self) -> crate::op_interrupt::InterruptSources {
         crate::op_interrupt::InterruptSources {
             cancel: self.cancel_token.clone(),
-            scope_deadline: self.deadlines.last().map(|(deadline, _)| *deadline),
+            // Blocking workers need a real-time deadline with the runtime
+            // clock's remaining budget, rather than its absolute epoch.
+            scope_deadline: self.deadlines.last().map(|(deadline, _)| {
+                Instant::now() + deadline.saturating_duration_since(tokio::time::Instant::now())
+            }),
             handler_deadline: self.interrupt_handler_deadline,
         }
     }

@@ -318,7 +318,7 @@ impl Vm {
         }
 
         if let Some(&(deadline, _)) = self.deadlines.last() {
-            if Instant::now() >= deadline {
+            if tokio::time::Instant::now() >= deadline {
                 self.deadlines.pop();
                 return Some(Self::deadline_exceeded_error());
             }
