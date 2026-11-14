@@ -104,7 +104,7 @@ while IFS=$'\t' read -r suite threshold events title job; do
   IFS=',' read -ra judged_events <<< "$events"
   for event in "${judged_events[@]}"; do
     if ! event_rows="$(
-      TITLE="$title" gh run list --repo "$GH_REPO" --workflow "$suite" \
+      TITLE="$title" gh run list --repo "$GH_REPO" --workflow "$suite" --all \
         --event "$event" --branch main --limit "$RUN_WINDOW" \
         --json databaseId,conclusion,event,displayTitle,createdAt \
         --jq '.[] | "\(.createdAt) \(.databaseId) \(if (.conclusion // "") == "" or (.event == "workflow_dispatch" and env.TITLE != "" and .displayTitle != env.TITLE) then "-" else .conclusion end)"'
