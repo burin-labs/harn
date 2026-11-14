@@ -785,7 +785,6 @@ const MACH_SERVICES: &str = "(allow mach-lookup\n\
        (global-name \"com.apple.system.notification_center\")\n\
        (global-name \"com.apple.logd\")\n\
        (global-name \"com.apple.logd.events\")\n\
-       (global-name \"com.apple.diagnosticd\")\n\
        (global-name \"com.apple.system.logger\")\n\
        (global-name \"com.apple.analyticsd\")\n\
        (global-name \"com.apple.analyticsd.messagetracer\")\n\
@@ -796,6 +795,7 @@ const MACH_SERVICES: &str = "(allow mach-lookup\n\
        (global-name \"com.apple.trustd\")\n\
        (global-name \"com.apple.trustd.agent\")\n\
        (global-name \"com.apple.ocspd\")\n\
+       (global-name \"com.apple.TrustEvaluationAgent\")\n\
        (global-name \"com.apple.SystemConfiguration.configd\")\n\
        (global-name \"com.apple.SystemConfiguration.DNSConfiguration\")\n\
        (global-name \"com.apple.FSEvents\")\n\
@@ -814,6 +814,10 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/mach_services_tests.rs"]
+mod mach_services_tests;
 
 #[cfg(test)]
 #[path = "macos/socket_root_tests.rs"]
