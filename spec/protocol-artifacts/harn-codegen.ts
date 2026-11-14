@@ -22,16 +22,16 @@ export type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" |
 
 export type ToolCliBooleanStyle = "value" | "set_true" | "set_false";
 
-export type ToolCliArgumentSpec = { long?: string | null, short?: string | null, aliases: Array<string>, position?: number | null, value_name?: string | null, help?: string | null, value_hint?: ToolCliValueHint | null, 
+export type ToolCliArgumentSpec = { long?: string | null, short?: string | null, aliases: Array<string>, position?: number | null, value_name?: string | null, help?: string | null, value_hint?: ToolCliValueHint | null,
 /**
  * Boolean token behavior. Presence styles never synthesize a value when
  * the option is absent.
  */
-boolean_style: ToolCliBooleanStyle, repeatable: boolean, 
+boolean_style: ToolCliBooleanStyle, repeatable: boolean,
 /**
  * Hide the argument from generated help while retaining explicit use.
  */
-hidden: boolean, 
+hidden: boolean,
 /**
  * Ordered advisory completion candidates. These do not constrain input.
  */
@@ -41,19 +41,19 @@ export type ToolCliCommandSpec = { command: Array<string>, title?: string | null
 
 export type ToolCliTreeSpec = { commands: Array<ToolCliCommandSpec>, };
 
-export type ToolCliSpec = { 
+export type ToolCliSpec = {
 /**
  * Non-empty command path below `harn tool run <script>`.
  */
-command: Array<string>, 
+command: Array<string>,
 /**
  * Alternate spellings for the final command component.
  */
-aliases: Array<string>, 
+aliases: Array<string>,
 /**
  * Hide the command from help while retaining explicit invocation.
  */
-hidden: boolean, 
+hidden: boolean,
 /**
  * Token-to-property projections. Omitted properties retain Harn's
  * zero-configuration `--property-name` projection.
@@ -62,15 +62,21 @@ arguments: { [key in string]: ToolCliArgumentSpec }, };
 
 export type ToolGovernance = { audiences: Array<ToolAudience>, };
 
-export type ToolSource = { 
+export type WireSourceRef = { "kind": "text_span", document: string, start: number, end: number, } | { "kind": "document_pointer", document: string, pointer: string, } | { "kind": "synthetic", owner: string, };
+
+export type ToolSource = {
 /**
  * Stable source vocabulary such as `openapi` or `harn`.
  */
-kind: string, 
+kind: string,
 /**
  * Source-local operation identity.
  */
-id?: string | null, 
+id?: string | null,
+/**
+ * Portable declaration coordinates; never a host filesystem authority.
+ */
+location?: WireSourceRef | null,
 /**
  * Protocol-specific coordinates. This and `_meta` are the only open
  * metadata records in the contract.
@@ -87,7 +93,7 @@ export type ToolPolicy = { kind: ToolKind, side_effect_level: SideEffectLevel, }
 
 export type ToolCatalogComponents = { schemas: Readonly<Record<string, JsonSchema202012>>, };
 
-export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null, 
+export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null,
 /**
  * Portable shape of values deliberately thrown by this tool.
  *
@@ -99,8 +105,6 @@ errorSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations
 export type ToolCatalog = { schema_version: ToolCatalogSchemaVersion, info?: ToolRegistryInfo | null, cli?: ToolCliTreeSpec | null, tools: Array<ToolCatalogEntry>, components?: ToolCatalogComponents | null, };
 
 export type WireTypeId = string;
-
-export type WireSourceRef = { "kind": "text_span", document: string, start: number, end: number, } | { "kind": "document_pointer", document: string, pointer: string, } | { "kind": "synthetic", owner: string, };
 
 export type WireLiteral = { "kind": "null" } | { "kind": "boolean", value: boolean, } | { "kind": "string", value: string, } | { "kind": "integer", value: string, } | { "kind": "float", value: string, };
 
@@ -138,7 +142,9 @@ export type CodegenIdentity = { catalog_digest: string, binding_digest: string, 
 
 export type CodegenPackage = { id: string, name: string, source: WireSourceRef, };
 
-export type CodegenOutput = { "kind": "missing" } | { "kind": "value", type_id: WireTypeId, };
+export type McpOutputEnvelope = "bare" | "result_property";
+
+export type CodegenOutput = { "kind": "missing" } | { "kind": "value", type_id: WireTypeId, mcp_envelope: McpOutputEnvelope, };
 
 export type CodegenBindingKind = "harn_export" | "registry" | "open_api" | "mcp";
 
@@ -150,11 +156,15 @@ export type CodegenExecution = { task_support: ToolTaskSupport, cancellation: Co
 
 export type CodegenOperation = { id: string, name: string, source: WireSourceRef, documentation: string | null, input: WireTypeId, output: CodegenOutput, application_error: WireTypeId | null, execution: CodegenExecution, governance: ToolGovernance, policy: ToolPolicy | null, cli: ToolCliSpec, binding: CodegenBinding, };
 
-export type CodegenIr = { schema_version: CodegenSchemaVersion, required_features: Array<CodegenFeature>, identity: CodegenIdentity, 
+export type CodegenIr = { schema_version: CodegenSchemaVersion, required_features: Array<CodegenFeature>, identity: CodegenIdentity,
 /**
  * Canonical commitment payload. Only Harn interprets this catalog.
  */
-catalog_canonical_json: string, package: CodegenPackage, types: Array<WireType>, operations: Array<CodegenOperation>, 
+catalog_canonical_json: string,
+/**
+ * Complete source authority, retained even when graph nodes are shared.
+ */
+sources: Array<WireSourceRef>, package: CodegenPackage, types: Array<WireType>, operations: Array<CodegenOperation>,
 /**
  * Forwarded unchanged for MCP discovery, never a backend's typing input.
  */
@@ -183,15 +193,32 @@ export const HARN_NATIVE_BINDING_META_KEY = "com.harnlang/nativeBinding" as cons
 export const MCP_HEADER_METHOD = "Mcp-Method" as const;
 export const MCP_HEADER_NAME = "Mcp-Name" as const;
 export const MCP_HEADER_PROTOCOL_VERSION = "MCP-Protocol-Version" as const;
+export const MCP_HEADER_VALUE_ENCODING = {"plain_maximum":126,"plain_minimum":32,"prefix":"=?base64?","suffix":"?="} as const;
+export const MCP_HEADER_VALUE_EXAMPLES = [{"encoded":"echo","value":"echo"},{"encoded":"=?base64?zpTOv866zrnOvM6u?=","value":"Δοκιμή"},{"encoded":"=?base64?IHBhZGRlZCA=?=","value":" padded "},{"encoded":"=?base64?bGluZTEKbGluZTI=?=","value":"line1\nline2"},{"encoded":"=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?=","value":"=?base64?literal?="},{"encoded":"=?base64?YQli?=","value":"a\tb"},{"encoded":"","value":""}] as const;
+export const MCP_MAX_STDIO_LINE_BYTES = 16777216 as const;
 export const MCP_META_KEY_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities" as const;
 export const MCP_META_KEY_CLIENT_INFO = "io.modelcontextprotocol/clientInfo" as const;
 export const MCP_META_KEY_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion" as const;
+export const MCP_META_KEY_SERVER_INFO = "io.modelcontextprotocol/serverInfo" as const;
 export const MCP_METHOD_CANCELLED_NOTIFICATION = "notifications/cancelled" as const;
 export const MCP_METHOD_SERVER_DISCOVER = "server/discover" as const;
 export const MCP_METHOD_TASKS_CANCEL = "tasks/cancel" as const;
 export const MCP_METHOD_TASKS_GET = "tasks/get" as const;
 export const MCP_METHOD_TOOLS_CALL = "tools/call" as const;
 export const MCP_METHOD_TOOLS_LIST = "tools/list" as const;
+export const MCP_NAME_FIELDS = {"prompts/get":"name","resources/read":"uri","tasks/cancel":"taskId","tasks/get":"taskId","tasks/update":"taskId","tools/call":"name"} as const;
 export const MCP_PROTOCOL_VERSION = "2026-07-28" as const;
+export const MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR = true as const;
 export const MCP_TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks" as const;
 export const NATIVE_MCP_BINDING_VERSION = "harn-tools-mcp/1.0" as const;
+export const WIRE_BYTES_TAG = "$bytes_b64" as const;
+export const WIRE_DECIMAL_MAX_MANTISSA = "79228162514264337593543950335" as const;
+export const WIRE_DECIMAL_MAX_SCALE = 28 as const;
+export const WIRE_DECIMAL_PATTERN = "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,28})?$" as const;
+export const WIRE_DECIMAL_PRESERVES_NEGATIVE_ZERO = false as const;
+export const WIRE_DECIMAL_PRESERVES_SCALE = true as const;
+export const WIRE_ENUM_FIELDS_KEY = "fields" as const;
+export const WIRE_ENUM_NAME_KEY = "enum" as const;
+export const WIRE_ENUM_VARIANT_KEY = "variant" as const;
+export const WIRE_INTEGER_TOKEN_PATTERN = "^(0|-?[1-9][0-9]*)$" as const;
+export const WIRE_MAX_VALUE_DEPTH = 128 as const;

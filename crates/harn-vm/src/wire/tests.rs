@@ -2,6 +2,7 @@ use harn_parser::TypeExpr;
 use serde_json::json;
 
 use super::*;
+use crate::VmValue;
 
 fn prepared(source: &str, name: &str) -> PreparedWireType {
     let program = harn_parser::parse_source(source).expect("parse");
@@ -15,6 +16,39 @@ fn prepared(source: &str, name: &str) -> PreparedWireType {
             },
         )
         .expect("prepared declared wire type")
+}
+
+#[test]
+fn structural_objects_accept_existing_nominal_values_without_erasing_declared_nominality() {
+    let raw = crate::schema::json_to_vm_value(&json!({"value":7}));
+    let nominal =
+        VmValue::struct_instance("DomainPayload", raw.as_dict().unwrap().as_ref().clone());
+    for wire in [
+        prepared("pub type Fields = {value: int}", "Fields"),
+        prepared("pub type Fields = dict<string, int>", "Fields"),
+    ] {
+        assert_eq!(wire.encode(&raw).unwrap(), json!({"value":7}));
+        assert_eq!(wire.encode(&nominal).unwrap(), json!({"value":7}));
+        let wrong = crate::schema::json_to_vm_value(&json!({"value":"wrong"}));
+        assert!(wire
+            .encode(&VmValue::struct_instance(
+                "DomainPayload",
+                wrong.as_dict().unwrap().as_ref().clone()
+            ))
+            .is_err());
+    }
+    let declared = prepared("pub struct Declared { value: int }", "Declared");
+    assert!(declared.encode(&raw).is_err());
+    assert!(declared.encode(&nominal).is_err());
+    assert_eq!(
+        declared
+            .encode(&VmValue::struct_instance(
+                "Declared",
+                raw.as_dict().unwrap().as_ref().clone()
+            ))
+            .unwrap(),
+        json!({"value":7})
+    );
 }
 
 #[test]

@@ -312,6 +312,13 @@ impl VerifiedNativeMcpBinding {
                     _ => return Err(NativeMcpFailure::Handler),
                 },
             };
+            self.state
+                .prepared
+                .prepared_wire_type(operation, ToolContractPhase::ApplicationError)
+                .map_err(|_| NativeMcpFailure::Handler)?
+                .ok_or(NativeMcpFailure::Handler)?
+                .decode(&error.data)
+                .map_err(|_| NativeMcpFailure::Handler)?;
             return Ok(NativeMcpReply {
                 outcome: ToolInvocationOutcome::ApplicationError(error),
                 metadata,

@@ -1218,6 +1218,15 @@
       "source": "crates/harn-vm/src/codegen/contract.rs"
     },
     {
+      "artifact": "schemas/harn-codegen-diagnostic-v1.schema.json",
+      "protocol": "harn-codegen",
+      "provenance": {
+        "owner": "harn-vm::codegen",
+        "schemaVersion": "harn-codegen/1.0"
+      },
+      "source": "crates/harn-vm/src/codegen/contract.rs"
+    },
+    {
       "artifact": "schemas/harn-tools-mcp-v1.schema.json",
       "protocol": "harn-tools-mcp",
       "provenance": {

@@ -103,7 +103,7 @@ impl std::fmt::Display for ToolContractViolation {
         if let Some(failure) = &self.wire_failure {
             return write!(
                 formatter,
-                "tool {:?} {} violates its declared wire type: {failure}",
+                "tool {:?} {} violates its declared schema: {failure}",
                 self.tool,
                 self.phase.label()
             );

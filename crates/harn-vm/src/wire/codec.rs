@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -294,7 +295,9 @@ impl PreparedWireGraph {
                         .collect::<Result<Vec<_>, _>>()?,
                 ))
             }
-            (WireShape::Map { value: item }, VmValue::Dict(values)) => {
+            (WireShape::Map { value: item }, _) => {
+                let values =
+                    object_fields(value).ok_or_else(|| fail(WireFailureCode::WrongRuntimeType))?;
                 let mut encoded = serde_json::Map::new();
                 for (key, value) in values.iter() {
                     encoded.insert(
@@ -312,17 +315,14 @@ impl PreparedWireGraph {
                 },
                 _,
             ) => {
-                let owned;
-                let values = match (nominal, value) {
-                    (None, VmValue::Dict(values)) => values.as_ref(),
-                    (Some(nominal), VmValue::StructInstance(_))
-                        if value.struct_name() == Some(&nominal.name) =>
-                    {
-                        owned = value.struct_fields_map().expect("struct fields");
-                        &owned
-                    }
-                    _ => return Err(fail(WireFailureCode::WrongRuntimeType)),
-                };
+                if nominal
+                    .as_ref()
+                    .is_some_and(|nominal| value.struct_name() != Some(&nominal.name))
+                {
+                    return Err(fail(WireFailureCode::WrongRuntimeType));
+                }
+                let values =
+                    object_fields(value).ok_or_else(|| fail(WireFailureCode::WrongRuntimeType))?;
                 let mut encoded = serde_json::Map::new();
                 for field in fields {
                     match values.get(field.name.as_str()) {
@@ -413,6 +413,14 @@ impl PreparedWireGraph {
                 .map(|value| self.encode_inner(item, value, depth + 1, &format!("{path}/[]")))
                 .collect::<Result<Vec<_>, _>>()?,
         ))
+    }
+}
+
+fn object_fields(value: &VmValue) -> Option<Cow<'_, DictMap>> {
+    match value {
+        VmValue::Dict(values) => Some(Cow::Borrowed(values.as_ref())),
+        VmValue::StructInstance(_) => value.struct_fields_map().map(Cow::Owned),
+        _ => None,
     }
 }
 

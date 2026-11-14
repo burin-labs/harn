@@ -836,7 +836,6 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"
 "check-restricted-runner-routing" = "source"
-"check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"
 "check-scheduled-workflows" = "source"
@@ -886,6 +885,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-binary-size-policy" = "binary" # typed policy contract and jq bootstrap parity
 "check-optional-dep-feature-contracts" = "binary" # Harn TOML contract over Cargo.toml feature sets
 # --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
+"check-vm-exposures" = "excluded" # Cargo run/test of the source-owned projector; still mandatory in CI and make all.
 "check-all-features" = "excluded"             # cargo check --workspace --all-features (build)
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
 "check-release-notices" = "excluded"          # release-package material; pinned cargo-about and registry source access

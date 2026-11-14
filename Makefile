@@ -622,10 +622,11 @@ lint-harn-trees:
 	@echo "=== Linting the test tree, benchmarks, experiments, demos, persona templates, wasm demos and evals ==="
 	@start=$$(date +%s); \
 	$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK) && \
+	$(HARN_CMD) check --strict-types crates/harn-serve/tests/fixtures/codegen && \
 	$(HARN_CMD) lint --strict tests && \
 	$(HARN_CMD) lint --strict bench && \
 	$(HARN_CMD) lint --strict crates/harn-cli/assets/demo && \
-	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures crates/harn-serve/src/adapters/acp/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata crates/harn-hostlib/src/fixtures; \
+	$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals crates/harn-serve/tests/fixtures/codegen crates/harn-serve/src/adapters/api/tests/fixtures crates/harn-serve/src/adapters/a2a/tests/fixtures crates/harn-serve/src/adapters/acp/tests/fixtures crates/harn-vm/src/llm/agent_session_host/fixtures crates/harn-vm/src/llm/testdata crates/harn-hostlib/src/fixtures; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 lint-harn-stdlib-metadata:

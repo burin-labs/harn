@@ -122,6 +122,13 @@
         "schema_version": {
           "$ref": "#/$defs/CodegenSchemaVersion"
         },
+        "sources": {
+          "description": "Complete source authority, retained even when graph nodes are shared.",
+          "items": {
+            "$ref": "#/$defs/WireSourceRef"
+          },
+          "type": "array"
+        },
         "types": {
           "items": {
             "$ref": "#/$defs/WireType"
@@ -134,6 +141,7 @@
         "required_features",
         "identity",
         "catalog_canonical_json",
+        "sources",
         "package",
         "types",
         "operations",
@@ -233,13 +241,17 @@
               "const": "value",
               "type": "string"
             },
+            "mcp_envelope": {
+              "$ref": "#/$defs/McpOutputEnvelope"
+            },
             "type_id": {
               "$ref": "#/$defs/WireTypeId"
             }
           },
           "required": [
             "kind",
-            "type_id"
+            "type_id",
+            "mcp_envelope"
           ],
           "type": "object"
         }
@@ -282,6 +294,14 @@
     "CodegenSchemaVersion": {
       "enum": [
         "harn-codegen/1.0"
+      ],
+      "type": "string"
+    },
+    "McpOutputEnvelope": {
+      "description": "MCP requires object structured content even for scalar Harn results.",
+      "enum": [
+        "bare",
+        "result_property"
       ],
       "type": "string"
     },

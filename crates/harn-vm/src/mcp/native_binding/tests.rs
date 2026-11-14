@@ -82,6 +82,8 @@ for line in sys.stdin:
             complete(request,12,{'calls':calls,'active':0})
         elif value==13:
             complete(request,'invalid integer output',{'calls':calls})
+        elif value==14:
+            reply(request,{'resultType':'complete','content':[],'isError':True,'_meta':{'com.harnlang/toolContract':{'applicationError':{'tool':'echo','data':{'kind':'rejected','code':5.0}}}}})
         else:
             complete(request,value,{'calls':calls})
 "#;
@@ -112,6 +114,38 @@ async fn worker(ir: &ValidatedCodegenIr, alter: impl FnOnce(&mut Value)) -> VmMc
     )
     .await
     .unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_declared_errors_validate_wire_tokens_before_publication() {
+    let ir = contract();
+    let native = worker(&ir, |_| {})
+        .await
+        .bind_native(ir, NonZeroU32::new(2).unwrap())
+        .await
+        .unwrap();
+    let valid = native
+        .call(ToolAudience::Mcp, "echo", &json!({"value":5}))
+        .await
+        .unwrap();
+    let ToolInvocationOutcome::ApplicationError(error) = valid.outcome else {
+        panic!("known declared application error must reach the public call")
+    };
+    assert_eq!(error.data["code"], json!(i64::MAX));
+    assert_eq!(
+        native
+            .call(ToolAudience::Mcp, "echo", &json!({"value":14}))
+            .await
+            .err(),
+        Some(NativeMcpFailure::Handler),
+        "a floating-point token cannot inhabit an integer error field"
+    );
+    let after = native
+        .call(ToolAudience::Mcp, "echo", &json!({"value":7}))
+        .await
+        .unwrap();
+    assert_eq!(after.metadata.unwrap()["calls"], json!(3));
+    native.disconnect().await.unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -375,7 +409,11 @@ async fn canonical_agent_retry_budget_never_replays_a_native_handler_after_rpc_f
             .call(ToolAudience::Agent, "echo", &json!({"value":7}))
             .await
             .unwrap();
-        assert_eq!(observed.metadata.unwrap()["calls"], json!(2), "one failed mutation and one reached observer call; native failure {failure} must not replay the mutation");
+        assert_eq!(
+            observed.metadata.unwrap()["calls"],
+            json!(2),
+            "one failed mutation and one reached observer call; native failure {failure} must not replay the mutation"
+        );
         binding.disconnect().await.unwrap();
     }
 }
