@@ -198,7 +198,7 @@ fn wrap_with_sandbox_exec(
     }
     hold_managed_proxy(policy)?;
     let mut profile = render_profile_for_program(policy, program);
-    match own_listeners::rules(policy) {
+    match own_listeners::rules(policy, &profile) {
         Some(Ok(rules)) => profile.push_str(&rules),
         Some(Err(reason)) => own_listeners::report_strict(&reason),
         None => {}

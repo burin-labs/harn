@@ -112,8 +112,10 @@ pub(super) fn managed_proxy_environment(policy: &CapabilityPolicy) -> Vec<(&'sta
 /// Environment name of the marker every child behind the managed proxy carries.
 pub(crate) const CHILD_LINEAGE_ENV: &str = "HARN_CHILD_LINEAGE";
 
-/// This runtime's marker value: random per runtime, so another runtime's
-/// children never count as this one's.
+/// This runtime's marker value. It is random per runtime, so another
+/// runtime's children do not carry it by accident. It is a label, not a
+/// secret: any process of the same user can read a child's environment and
+/// copy it.
 pub(crate) fn child_lineage() -> &'static str {
     static LINEAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     LINEAGE.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())

@@ -77,8 +77,13 @@ fn host_confinement_unavailable(test: &str) -> bool {
 /// stdin closes.
 fn earlier_server() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let shared = TcpListener::bind("127.0.0.1:0").unwrap();
     // libtest may print the test's name on the same line first.
-    println!("\nEARLIER_PORT {}", listener.local_addr().unwrap().port());
+    println!(
+        "\nEARLIER_PORT {} {}",
+        listener.local_addr().unwrap().port(),
+        shared.local_addr().unwrap().port()
+    );
     let _ = std::io::Read::read(&mut std::io::stdin(), &mut [0u8; 1]);
 }
 
@@ -152,14 +157,24 @@ fn managed_proxy_is_the_only_destination() {
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let earlier_port: u16 =
+    let (earlier_port, shared_port): (u16, u16) =
         std::io::BufRead::lines(std::io::BufReader::new(earlier.stdout.take().unwrap()))
             .map_while(Result::ok)
-            .find_map(|line| line.strip_prefix("EARLIER_PORT ")?.trim().parse().ok())
-            .expect("the earlier server reports its port");
+            .find_map(|line| {
+                let (own, shared) = line.strip_prefix("EARLIER_PORT ")?.trim().split_once(' ')?;
+                Some((own.parse().ok()?, shared.parse().ok()?))
+            })
+            .expect("the earlier server reports its ports");
     targets.insert(
         "earlier_command_server".into(),
         SocketAddr::from(([127, 0, 0, 1], earlier_port)),
+    );
+    // A foreign listener on the same port number at another address: Seatbelt
+    // cannot tell the two apart, so the run's own listener there is denied too.
+    let _foreign_on_shared = TcpListener::bind(("::1", shared_port)).unwrap();
+    targets.insert(
+        "own_port_shared_with_foreign".into(),
+        SocketAddr::from(([127, 0, 0, 1], shared_port)),
     );
 
     let workspace = tempfile::tempdir().unwrap();
@@ -214,6 +229,7 @@ fn managed_proxy_is_the_only_destination() {
             ("own_listener_bind".to_string(), loopback),
             ("own_listener_connect".to_string(), loopback),
             ("earlier_command_server".to_string(), loopback),
+            ("own_port_shared_with_foreign".to_string(), false),
         ]);
         if lan.is_some() {
             expected.insert("lan_same_port".to_string(), false);

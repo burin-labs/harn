@@ -4,40 +4,48 @@
 //! it: test suites, dev servers, browsers driving a dev server. Seatbelt names
 //! a destination only as `localhost:<port>` and cannot tell whose listener is
 //! on the other end, so the profile is computed at spawn instead. It admits
-//! every local port, then denies each port that some other process's listener
-//! holds at that moment, then re-admits the proxy's ports. A listener counts as
-//! this run's own when its process carries this runtime's lineage marker
-//! ([`super::super::process_output::CHILD_LINEAGE_ENV`]), which every child
-//! behind the proxy inherits; a dev server that an earlier command left running
-//! keeps it.
+//! every local port, then denies each port that a foreign socket holds at that
+//! moment, then re-admits the proxy's ports. A socket is this run's own only
+//! when a process carrying this runtime's lineage marker
+//! ([`super::super::process_output::CHILD_LINEAGE_ENV`]) holds it. Every child
+//! behind the proxy inherits the marker, and a dev server an earlier command
+//! left running keeps it. The marker is a label, not a secret.
 //!
-//! The socket table is the kernel's, for every user: `net.inet.tcp.pcblist64`
-//! and `net.inet.udp.pcblist64`. Owners come from `libproc` for this user's
-//! processes. Both readers check themselves on every scan against sockets this
-//! process just opened, and the rule shape is checked once per process under a
-//! real profile. When either check fails, the command gets the strict
-//! proxy-only profile instead.
+//! The socket table is the kernel's, for every user and address:
+//! `net.inet.tcp.pcblist64` and `net.inet.udp.pcblist64`. Each row carries the
+//! kernel's socket identity, and `libproc` reports the same identity for the
+//! sockets a marked process holds. A port is admitted only when every row on
+//! it is such a socket. A row nothing accounts for, including one held by a
+//! process or descriptor that cannot be read, denies its port. Both readers
+//! check themselves on every scan against sockets this process just opened,
+//! and the rule shape is checked under each distinct base profile. When a
+//! check fails, the command gets the strict proxy-only profile instead.
 //!
-//! What this leaves open: a service that starts listening after the command
-//! starts is not in the command's profile, which Seatbelt fixes at exec.
+//! What this leaves open: a profile is fixed at exec, so a service that starts
+//! listening later is reachable from every process that started before it. A
+//! marked server that keeps running extends that window to every later command
+//! that talks to it.
 
-use std::collections::BTreeSet;
-use std::net::{TcpListener, UdpSocket};
+use std::collections::{BTreeSet, HashMap};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpListener, UdpSocket};
 
 use crate::orchestration::CapabilityPolicy;
 
-/// Profile rules for a loopback grant behind the proxy, appended after the
-/// strict proxy-only rules. `Err` names why they could not be trusted.
-pub(super) fn rules(policy: &CapabilityPolicy) -> Option<Result<String, String>> {
+/// Profile rules for a loopback grant behind the proxy, appended to
+/// `base_profile`. `Err` names why they could not be trusted.
+pub(super) fn rules(
+    policy: &CapabilityPolicy,
+    base_profile: &str,
+) -> Option<Result<String, String>> {
     let grant = super::super::policy::ProcessNetworkGrant::for_policy(policy);
     let proxy = policy
         .process_network_proxy
         .filter(|_| grant.loopback_behind_proxy())?;
     let proxy_ports = [proxy.http_port, proxy.socks_port];
     Some(
-        shape_holds()
-            .and_then(|()| foreign_listeners())
-            .map(|foreign| render(foreign.tcp.union(&foreign.udp).copied(), proxy_ports)),
+        shape_holds(base_profile)
+            .and_then(|()| foreign_ports())
+            .map(|foreign| render(foreign, proxy_ports)),
     )
 }
 
@@ -69,41 +77,70 @@ fn render(denied: impl IntoIterator<Item = u16>, proxy_ports: [u16; 2]) -> Strin
     rules
 }
 
-/// Whether [`render`]'s rules deny what they name on this host, measured once
-/// per process with `nc` under a real profile: a denied listener, the proxy's
-/// port over IPv4 and over IPv6, and a listener the rules leave open.
-fn shape_holds() -> Result<(), String> {
-    static MEASURED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
-    MEASURED.get_or_init(measure_shape).clone()
+/// Whether [`render`]'s rules, appended to `base_profile`, deny what they name
+/// on this host. Measured once per distinct base profile.
+fn shape_holds(base_profile: &str) -> Result<(), String> {
+    use std::hash::{Hash, Hasher};
+    type Measured = std::sync::Mutex<HashMap<u64, Result<(), String>>>;
+    static MEASURED: std::sync::OnceLock<Measured> = std::sync::OnceLock::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    base_profile.hash(&mut hasher);
+    let key = hasher.finish();
+    let cache = MEASURED.get_or_init(Default::default);
+    if let Some(known) = cache.lock().map_err(|e| e.to_string())?.get(&key) {
+        return known.clone();
+    }
+    let measured = measure_shape(base_profile);
+    cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(key, measured.clone());
+    measured
 }
 
-fn measure_shape() -> Result<(), String> {
-    let listen = |address: &str| {
+/// Run real clients under `base_profile` plus [`render`]'s rules against
+/// sockets this process holds. Every denied kind must be refused, and the
+/// proxy, an undenied listener and an undenied socket must be reached, so the
+/// check passes neither by refusing everything nor by admitting everything.
+fn measure_shape(base_profile: &str) -> Result<(), String> {
+    let tcp = |address: (IpAddr, u16)| {
         TcpListener::bind(address).map_err(|error| format!("shape probe listener: {error}"))
     };
+    let udp = |address: (IpAddr, u16)| {
+        let socket =
+            UdpSocket::bind(address).map_err(|error| format!("shape probe socket: {error}"))?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|error| format!("shape probe socket: {error}"))?;
+        Ok::<_, String>(socket)
+    };
+    let v4 = IpAddr::from(Ipv4Addr::LOCALHOST);
+    let v6 = IpAddr::from(Ipv6Addr::LOCALHOST);
     let port = |listener: &TcpListener| listener.local_addr().map(|a| a.port()).unwrap_or(0);
-    let (denied, open) = (listen("127.0.0.1:0")?, listen("127.0.0.1:0")?);
-    let proxy = listen("127.0.0.1:0")?;
-    let proxy_v6 = listen(&format!("[::1]:{}", port(&proxy)))?;
-    let profile = format!(
-        "(version 1)\n(allow default)\n(deny network-outbound)\n{}",
-        render([port(&denied)], [port(&proxy); 2])
-    );
-    let connects = |host: &str, port: u16| {
+    let udp_port = |socket: &UdpSocket| socket.local_addr().map(|a| a.port()).unwrap_or(0);
+    let denied_v4 = tcp((v4, 0))?;
+    let denied_v6 = tcp((v6, 0))?;
+    let denied_udp = udp((v4, 0))?;
+    let open_v4 = tcp((v4, 0))?;
+    let open_udp = udp((v4, 0))?;
+    let proxy = tcp((v4, 0))?;
+    let proxy_v6 = tcp((v6, port(&proxy)))?;
+    let lan = if_addrs::get_if_addrs()
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|interface| interface.ip())
+        .find(|address| address.is_ipv4() && !address.is_loopback());
+    let denied_lan = lan.map(|address| tcp((address, 0))).transpose()?;
+    let mut denied = vec![port(&denied_v4), port(&denied_v6), udp_port(&denied_udp)];
+    denied.extend(denied_lan.as_ref().map(port));
+    let profile = format!("{base_profile}{}", render(denied, [port(&proxy); 2]));
+
+    let sandboxed = |program: &str, args: &[&str]| {
         std::process::Command::new(super::SANDBOX_EXEC_PATH)
             .env_clear()
-            .args([
-                "-p",
-                &profile,
-                "/usr/bin/nc",
-                "-z",
-                "-G",
-                "2",
-                "-w",
-                "2",
-                host,
-            ])
-            .arg(port.to_string())
+            .args(["-p", &profile, program])
+            .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -111,28 +148,55 @@ fn measure_shape() -> Result<(), String> {
             .map(|status| status.success())
             .map_err(|error| format!("shape probe: {error}"))
     };
-    let measured = [
+    let connects = |host: IpAddr, port: u16| {
+        sandboxed(
+            "/usr/bin/nc",
+            &[
+                "-z",
+                "-G",
+                "2",
+                "-w",
+                "2",
+                &host.to_string(),
+                &port.to_string(),
+            ],
+        )
+    };
+    // A datagram is reached only if it arrived; loopback delivery completes
+    // inside `sendto`, so it is queued by the time the client exits.
+    let delivers = |socket: &UdpSocket| {
+        let send = format!("printf x > /dev/udp/127.0.0.1/{}", udp_port(socket));
+        sandboxed("/bin/bash", &["-c", &send])?;
+        Ok::<_, String>(socket.recv_from(&mut [0u8; 8]).is_ok())
+    };
+    let mut measured = vec![
         (
-            "a denied listener",
-            connects("127.0.0.1", port(&denied))?,
+            "a denied IPv4 listener",
+            connects(v4, port(&denied_v4))?,
             false,
         ),
         (
-            "the proxy over IPv4",
-            connects("127.0.0.1", port(&proxy))?,
-            true,
+            "a denied IPv6 listener",
+            connects(v6, port(&denied_v6))?,
+            false,
         ),
+        ("a denied UDP socket", delivers(&denied_udp)?, false),
+        ("the proxy over IPv4", connects(v4, port(&proxy))?, true),
         (
             "the proxy port over IPv6",
-            connects("::1", port(&proxy_v6))?,
+            connects(v6, port(&proxy_v6))?,
             false,
         ),
-        (
-            "an undenied listener",
-            connects("127.0.0.1", port(&open))?,
-            true,
-        ),
+        ("an undenied listener", connects(v4, port(&open_v4))?, true),
+        ("an undenied UDP socket", delivers(&open_udp)?, true),
     ];
+    if let (Some(address), Some(listener)) = (lan, &denied_lan) {
+        measured.push((
+            "a denied listener at a LAN address",
+            connects(address, port(listener))?,
+            false,
+        ));
+    }
     match measured
         .iter()
         .find(|(_, reached, expected)| reached != expected)
@@ -169,71 +233,63 @@ pub(super) fn report_strict(reason: &str) {
     );
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(super) struct Ports {
-    pub(super) tcp: BTreeSet<u16>,
-    pub(super) udp: BTreeSet<u16>,
-}
-
-/// Ports that some process other than this run's children listens on now.
-pub(super) fn foreign_listeners() -> Result<Ports, String> {
-    // Known sockets every reader must find, or the readers are wrong.
+/// Ports held now by a socket that no marked process accounts for.
+fn foreign_ports() -> Result<BTreeSet<u16>, String> {
+    // Known sockets both readers must agree on, or the readers are wrong.
     let probe_tcp = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("probe listener: {e}"))?;
     let probe_udp = UdpSocket::bind("127.0.0.1:0").map_err(|e| format!("probe socket: {e}"))?;
     let tcp_port = probe_tcp.local_addr().map_err(|e| e.to_string())?.port();
     let udp_port = probe_udp.local_addr().map_err(|e| e.to_string())?.port();
     let me = unsafe { libc::getuid() };
 
-    let tcp = table::listeners(table::Protocol::Tcp)?;
-    let udp = table::listeners(table::Protocol::Udp)?;
-    if !tcp.contains(&(tcp_port, me)) || !udp.contains(&(udp_port, me)) {
-        return Err("the kernel socket table did not list this process's own sockets".into());
+    let mut rows = table::rows(table::Protocol::Tcp)?;
+    let udp_rows = table::rows(table::Protocol::Udp)?;
+    let own = owners::sockets(std::process::id() as i32)?;
+    let vouched = |rows: &[table::Row], port: u16| {
+        rows.iter()
+            .any(|row| row.port == port && row.uid == me && own.contains(&row.socket))
+    };
+    if !vouched(&rows, tcp_port) || !vouched(&udp_rows, udp_port) {
+        return Err(
+            "the kernel socket table and libproc disagreed about this process's own sockets".into(),
+        );
     }
-    let own_process = owners::sockets(std::process::id() as i32)?;
-    if !own_process.tcp.contains(&tcp_port) || !own_process.udp.contains(&udp_port) {
-        return Err("libproc did not list this process's own sockets".into());
-    }
-
-    let (ours, theirs) = owners::by_lineage(me)?;
-    // A port is this run's only when a marked process holds it and no other
-    // process does: Seatbelt matches the port at every local address, so a
-    // shared port number would admit the other listener too.
-    let foreign =
-        |table: &BTreeSet<(u16, u32)>, ours: &BTreeSet<u16>, theirs: &BTreeSet<u16>, probe: u16| {
-            table
-                .iter()
-                .filter(|(port, uid)| *uid != me || !ours.contains(port) || theirs.contains(port))
-                .map(|(port, _)| *port)
-                // The probe closes before the command starts.
-                .filter(|port| *port != probe)
-                .collect()
-        };
-    Ok(Ports {
-        tcp: foreign(&tcp, &ours.tcp, &theirs.tcp, tcp_port),
-        udp: foreign(&udp, &ours.udp, &theirs.udp, udp_port),
-    })
+    rows.extend(udp_rows);
+    let marked = owners::marked_sockets(me)?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| !marked.contains(&row.socket))
+        .map(|row| row.port)
+        .collect())
 }
 
 /// The kernel's socket table, through the public `pcblist64` records.
 mod table {
-    use std::collections::BTreeSet;
-
     pub(super) enum Protocol {
         Tcp,
         Udp,
     }
 
+    /// One listening TCP or bound UDP socket.
+    pub(super) struct Row {
+        pub(super) port: u16,
+        pub(super) uid: u32,
+        /// The kernel's socket identity, as `libproc` also reports it.
+        pub(super) socket: u64,
+    }
+
     // Offsets in the packed SDK records (`netinet/tcp_var.h`, `in_pcb.h`,
-    // `sys/socketvar.h`); the self-check in `foreign_listeners` vouches for them.
+    // `sys/socketvar.h`); the self-check in `foreign_ports` vouches for them.
     const XINPGEN_LEN: usize = 24;
     const INPCB_LPORT: usize = 18;
-    const INPCB_UID: usize = 144 + 104;
+    const INPCB_SOCKET: usize = 144;
+    const XSOCKET_SO: usize = 4;
+    const XSOCKET_UID: usize = 104;
     const TCPCB_INPCB: usize = 4;
     const TCPCB_STATE: usize = 292;
     const TCPS_LISTEN: i32 = 1;
 
-    /// `(local port, owner uid)` of every TCP listener or bound UDP socket.
-    pub(super) fn listeners(protocol: Protocol) -> Result<BTreeSet<(u16, u32)>, String> {
+    pub(super) fn rows(protocol: Protocol) -> Result<Vec<Row>, String> {
         let name = match protocol {
             Protocol::Tcp => c"net.inet.tcp.pcblist64",
             Protocol::Udp => c"net.inet.udp.pcblist64",
@@ -242,10 +298,14 @@ mod table {
         let u32_at = |at: usize| -> Option<u32> {
             Some(u32::from_ne_bytes(buffer.get(at..at + 4)?.try_into().ok()?))
         };
+        let u64_at = |at: usize| -> Option<u64> {
+            Some(u64::from_ne_bytes(buffer.get(at..at + 8)?.try_into().ok()?))
+        };
         let port_at = |at: usize| -> Option<u16> {
             Some(u16::from_be_bytes(buffer.get(at..at + 2)?.try_into().ok()?))
         };
-        let mut found = BTreeSet::new();
+        let truncated = "truncated socket record";
+        let mut found = Vec::new();
         let mut at = u32_at(0).ok_or("empty socket table")? as usize;
         // Records follow the header; a trailing header ends the list.
         while let Some(len) = u32_at(at).map(|len| len as usize) {
@@ -257,15 +317,17 @@ mod table {
                 Protocol::Udp => at,
             };
             let listening = match protocol {
-                Protocol::Tcp => {
-                    u32_at(at + TCPCB_STATE).ok_or("truncated TCP record")? as i32 == TCPS_LISTEN
-                }
+                Protocol::Tcp => u32_at(at + TCPCB_STATE).ok_or(truncated)? as i32 == TCPS_LISTEN,
                 Protocol::Udp => true,
             };
-            let port = port_at(inpcb + INPCB_LPORT).ok_or("truncated socket record")?;
-            let uid = u32_at(inpcb + INPCB_UID).ok_or("truncated socket record")?;
+            let port = port_at(inpcb + INPCB_LPORT).ok_or(truncated)?;
+            let socket = inpcb + INPCB_SOCKET;
             if listening && port != 0 {
-                found.insert((port, uid));
+                found.push(Row {
+                    port,
+                    uid: u32_at(socket + XSOCKET_UID).ok_or(truncated)?,
+                    socket: u64_at(socket + XSOCKET_SO).ok_or(truncated)?,
+                });
             }
             at += len;
         }
@@ -273,8 +335,8 @@ mod table {
     }
 
     fn read_sysctl(name: &std::ffi::CStr) -> Result<Vec<u8>, String> {
-        // The table can grow between the size query and the read; retry once
-        // with room to spare before giving up.
+        // The table can grow between the size query and the read; retry with
+        // room to spare before giving up.
         for _ in 0..3 {
             let mut size = 0usize;
             let status = unsafe {
@@ -318,56 +380,39 @@ mod table {
     }
 }
 
-/// Which local ports this user's processes hold, through `libproc`.
+/// Which sockets this user's marked processes hold, through `libproc`.
 mod owners {
-    use super::Ports;
+    use std::collections::BTreeSet;
 
-    // `sys/proc_info.h`: `struct socket_fdinfo` and the parts of
-    // `struct socket_info` read here.
+    // `sys/proc_info.h`: `struct socket_fdinfo`, whose `socket_info` starts at
+    // 24 and holds the socket identity 136 bytes in.
     const SOCKET_FDINFO_LEN: usize = 792;
-    const PSI: usize = 24;
-    const SOI_KIND: usize = PSI + 232;
-    const SOI_PROTO: usize = PSI + 240;
-    const INSI_LPORT: usize = 4;
-    const TCPSI_STATE: usize = 80;
-    const SOCKINFO_IN: i32 = 1;
-    const SOCKINFO_TCP: i32 = 2;
-    const TSI_S_LISTEN: i32 = 1;
+    const SOI_SO: usize = 24 + 136;
     const PROX_FDTYPE_SOCKET: u32 = 2;
     const PROC_PIDFDSOCKETINFO: i32 = 3;
 
-    /// Listening TCP and bound UDP ports of `uid`'s processes, split into
-    /// those that carry this runtime's lineage marker and those that do not.
-    pub(super) fn by_lineage(uid: u32) -> Result<(Ports, Ports), String> {
+    /// Socket identities held by `uid`'s processes that carry this runtime's
+    /// lineage marker. A process or descriptor that cannot be read adds
+    /// nothing, so its sockets stay foreign.
+    pub(super) fn marked_sockets(uid: u32) -> Result<BTreeSet<u64>, String> {
         let marker = format!(
             "{}={}\0",
             crate::stdlib::sandbox::process_output::CHILD_LINEAGE_ENV,
             crate::stdlib::sandbox::process_output::child_lineage()
         );
-        let (mut ours, mut theirs) = (Ports::default(), Ports::default());
+        let mut marked = BTreeSet::new();
         let mut args = Vec::new();
         for pid in all_pids()? {
-            if pid_uid(pid) != Some(uid) {
-                continue;
+            if pid_uid(pid) == Some(uid) && carries(pid, marker.as_bytes(), &mut args) {
+                marked.extend(sockets(pid).unwrap_or_default());
             }
-            // A process that exited since the listing holds nothing.
-            let Ok(ports) = sockets(pid) else { continue };
-            if ports.tcp.is_empty() && ports.udp.is_empty() {
-                continue;
-            }
-            let side = if carries(pid, marker.as_bytes(), &mut args) {
-                &mut ours
-            } else {
-                &mut theirs
-            };
-            side.tcp.extend(ports.tcp);
-            side.udp.extend(ports.udp);
         }
-        Ok((ours, theirs))
+        Ok(marked)
     }
 
-    pub(super) fn sockets(pid: i32) -> Result<Ports, String> {
-        let mut ports = Ports::default();
+    /// Identities of the sockets `pid` holds that could be read.
+    pub(super) fn sockets(pid: i32) -> Result<BTreeSet<u64>, String> {
+        let mut found = BTreeSet::new();
         for fd in socket_fds(pid)? {
             let mut info = vec![0u8; SOCKET_FDINFO_LEN];
             let read = unsafe {
@@ -379,24 +424,13 @@ mod owners {
                     SOCKET_FDINFO_LEN as i32,
                 )
             };
-            if read as usize != SOCKET_FDINFO_LEN {
-                continue;
-            }
-            let i32_at = |at: usize| i32::from_ne_bytes(info[at..at + 4].try_into().unwrap());
-            let lport = |inp: usize| u16::from_be(i32_at(inp + INSI_LPORT) as u16);
-            match i32_at(SOI_KIND) {
-                SOCKINFO_TCP if i32_at(SOI_PROTO + TCPSI_STATE) == TSI_S_LISTEN => {
-                    ports.tcp.insert(lport(SOI_PROTO));
-                }
-                SOCKINFO_IN => {
-                    ports.udp.insert(lport(SOI_PROTO));
-                }
-                _ => {}
+            if read as usize == SOCKET_FDINFO_LEN {
+                found.insert(u64::from_ne_bytes(
+                    info[SOI_SO..SOI_SO + 8].try_into().unwrap(),
+                ));
             }
         }
-        ports.tcp.remove(&0);
-        ports.udp.remove(&0);
-        Ok(ports)
+        Ok(found)
     }
 
     fn socket_fds(pid: i32) -> Result<Vec<i32>, String> {
