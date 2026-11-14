@@ -9,6 +9,8 @@
 use crate::event_log::EventLog;
 use crate::orchestration::*;
 use std::collections::BTreeMap;
+
+mod raw_provider_sidecars;
 #[test]
 fn save_run_record_materializes_hitl_questions_from_active_event_log() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -354,7 +356,78 @@ fn save_run_record_normalizes_external_transcript_into_movable_bundle() {
 }
 
 #[test]
-fn save_run_record_omits_missing_model_transcript_pointer() {
+fn save_run_record_preserves_raw_provider_sidecars_in_a_movable_bundle() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let original = temp.path().join("original");
+    let run_path = original.join("run.json");
+    let source_path = source.path().join("llm_transcript.jsonl");
+    std::fs::create_dir_all(source.path().join("raw-provider")).unwrap();
+    let captures = [
+        "request",
+        "response-json",
+        "response-sse",
+        "response-sse-failure",
+    ];
+    std::fs::write(
+        source.path().join("raw-provider/unreferenced.json"),
+        "unreferenced",
+    )
+    .unwrap();
+    let mut transcript = String::new();
+    for capture in captures {
+        let relative = format!("raw-provider/call-1-{capture}.json");
+        let bytes = format!("{{\"capture\":\"{capture}\",\"body\":\"redacted capture\"}}\n");
+        std::fs::write(source.path().join(&relative), bytes).unwrap();
+        transcript.push_str(
+            &serde_json::json!({
+                "type": "provider_raw_capture", "call_id": "call-1",
+                "capture": capture, "path": relative,
+            })
+            .to_string(),
+        );
+        transcript.push('\n');
+    }
+    std::fs::write(&source_path, &transcript).unwrap();
+    let run = RunRecord {
+        id: "run_raw_provider".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+    save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&source_path))
+        .unwrap();
+    let persisted = load_run_record(&run_path).unwrap();
+    let canonical = verified_llm_transcript_pointer_path(&persisted, &run_path).unwrap();
+    assert_eq!(std::fs::read_to_string(&canonical).unwrap(), transcript);
+    assert!(!canonical
+        .parent()
+        .unwrap()
+        .join("raw-provider/unreferenced.json")
+        .exists());
+    for capture in captures {
+        let relative = format!("raw-provider/call-1-{capture}.json");
+        assert_eq!(
+            std::fs::read(canonical.parent().unwrap().join(&relative)).unwrap(),
+            std::fs::read(source.path().join(relative)).unwrap()
+        );
+    }
+    drop(source);
+    let moved = temp.path().join("moved");
+    std::fs::rename(&original, &moved).unwrap();
+    let moved_run_path = moved.join("run.json");
+    let loaded = load_run_record(&moved_run_path).unwrap();
+    let canonical = verified_llm_transcript_pointer_path(&loaded, &moved_run_path).unwrap();
+    for capture in captures {
+        assert!(canonical
+            .parent()
+            .unwrap()
+            .join(format!("raw-provider/call-1-{capture}.json"))
+            .is_file());
+    }
+}
+
+#[test]
+fn save_run_record_reports_unavailable_missing_model_transcript() {
     let temp = tempfile::tempdir().unwrap();
     let run_path = temp.path().join("run.json");
     let missing = temp.path().join("elsewhere/llm_transcript.jsonl");
@@ -368,19 +441,19 @@ fn save_run_record_omits_missing_model_transcript_pointer() {
     save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&missing))
         .unwrap();
     let loaded = load_run_record(&run_path).unwrap();
-    assert!(
-        loaded
-            .observability
-            .unwrap()
-            .transcript_pointers
-            .iter()
-            .all(|pointer| pointer.kind != "llm_jsonl"),
-        "a missing transcript must be represented by the absence of a pointer"
-    );
+    assert_eq!(loaded.status, "completed");
+    let pointers = loaded.observability.unwrap().transcript_pointers;
+    let pointer = pointers
+        .iter()
+        .find(|pointer| pointer.kind == "llm_jsonl")
+        .unwrap();
+    assert!(!pointer.available);
+    assert_eq!(pointer.verification_status, "unavailable");
+    assert_eq!(pointer.verification_error.as_deref(), Some("unavailable"));
 }
 
 #[test]
-fn save_run_record_survives_malformed_model_transcript_without_a_pointer() {
+fn save_run_record_survives_malformed_model_transcript_with_unavailable_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let run_path = temp.path().join("run.json");
     let malformed = temp.path().join("llm_transcript.jsonl");
@@ -395,12 +468,18 @@ fn save_run_record_survives_malformed_model_transcript_without_a_pointer() {
     save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&malformed))
         .expect("transcript observability must not block the owning run record");
     let loaded = load_run_record(&run_path).unwrap();
-    assert!(loaded
-        .observability
-        .unwrap()
-        .transcript_pointers
+    assert_eq!(loaded.status, "completed");
+    let pointers = loaded.observability.unwrap().transcript_pointers;
+    let pointer = pointers
         .iter()
-        .all(|pointer| pointer.kind != "llm_jsonl"));
+        .find(|pointer| pointer.kind == "llm_jsonl")
+        .unwrap();
+    assert!(!pointer.available);
+    assert_eq!(pointer.verification_status, "unavailable");
+    assert_eq!(
+        pointer.verification_error.as_deref(),
+        Some("malformed_jsonl")
+    );
 }
 
 #[test]
