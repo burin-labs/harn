@@ -9,11 +9,13 @@
 //! directory as its own:
 //!
 //! - `GIT_DIR` is the per-spawn directory, with a `config` Harn writes. Its
-//!   `objects`, `shallow` and `FETCH_HEAD` link into the repository, and so
-//!   does `refs/remotes/NAME` for each remote the command reaches, so fetched
-//!   objects and that remote's tracking refs land there. `HEAD`, the branch
-//!   and tag refs, and `packed-refs` are copies, so the granted git cannot
-//!   change any other repository ref, and it writes no repository config. No
+//!   `objects` and `FETCH_HEAD` link into the repository, and so does
+//!   `refs/remotes/NAME` for each remote the command reaches, so fetched
+//!   objects and that remote's tracking refs land there. A tracking directory
+//!   that is or holds a link when the spawn starts is refused. `HEAD`, the
+//!   branch and tag refs, `packed-refs` and `shallow` are copies of regular
+//!   files, so the granted git cannot change any other repository ref, and it
+//!   writes no repository config. No
 //!   system or global config is read (`GIT_CONFIG_NOSYSTEM`, and
 //!   `GIT_CONFIG_GLOBAL` is an empty file).
 //! - Objects are read through the repository's alternates as the confined
@@ -24,10 +26,11 @@
 //!   `https://github.com/OWNER/REPO`, their refspecs, and branch tracking are
 //!   copied, read with `git config --file` and no includes. `insteadOf`,
 //!   `pushurl`, proxies, helpers, hooks, and every other key are ignored.
-//! - The login is stored for each of those repository URLs in a per-spawn
-//!   file read by git's built-in `store` helper, and only this spawn's own
-//!   sandbox profile can read the per-spawn directory. `credential.useHttpPath`
-//!   keeps the login to those repositories.
+//! - No file holds the login. Harn answers git's built-in `credential-cache`
+//!   helper on a per-spawn socket (see `git_credential_socket`), for those
+//!   repository URLs only (`credential.useHttpPath`). A repository that points
+//!   a path git reads at the socket or at the per-spawn directory reads no
+//!   login, and only this spawn's own sandbox profile may connect to it.
 //! - Only `https` is allowed, and hooks, filesystem monitors, submodule
 //!   recursion, automatic gc and prompts are off.
 //! - Only macOS grants it: a same-user process's access to the granted git's
@@ -68,15 +71,19 @@ pub(crate) const GIT_PROFILE: ExecProfile = ExecProfile {
 };
 
 const LOGIN_USER: &str = "x-access-token";
-const CREDENTIALS: &str = "credentials";
 const GLOBAL_CONFIG: &str = "global-config";
+/// How long the host waits for `git config --file` to list one config.
+const CONFIG_READ_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Repository entries the per-spawn git directory links to, from the shared
 /// (common) git directory, and from the worktree's own. Missing files are
 /// linked too, so git creates them in the repository.
-const COMMON_LINKS: &[&str] = &["objects", "shallow"];
+const COMMON_LINKS: &[&str] = &["objects"];
 const WORKTREE_LINKS: &[&str] = &["FETCH_HEAD"];
 /// Ref namespaces copied in for a push to name and a fetch to negotiate from.
 const COPIED_REFS: &[&str] = &["heads", "tags"];
+/// Repository files copied in when they are regular files, and refused when
+/// they are anything else. A fetch's change to `shallow` stays in the copy.
+const COPIED_FILES: &[&str] = &["packed-refs", "shallow"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Command {
@@ -128,8 +135,6 @@ const FETCH_FLAGS: &[&str] = &[
     "--no-prune",
     "-n",
     "--no-tags",
-    "--unshallow",
-    "--update-shallow",
     "--write-fetch-head",
     "--no-write-fetch-head",
     "--no-auto-gc",
@@ -138,16 +143,7 @@ const FETCH_FLAGS: &[&str] = &[
     "--no-show-forced-updates",
     "--refetch",
 ];
-const FETCH_VALUES: &[&str] = &[
-    "--depth",
-    "--deepen",
-    "--shallow-since",
-    "--shallow-exclude",
-    "-j",
-    "--jobs",
-    "-o",
-    "--server-option",
-];
+const FETCH_VALUES: &[&str] = &["-j", "--jobs", "-o", "--server-option"];
 const PUSH_FLAGS: &[&str] = &[
     "--all",
     "--branches",
@@ -312,21 +308,25 @@ impl Repository {
     fn discover(cwd: &Path) -> std::io::Result<Option<Self>> {
         for dir in cwd.ancestors() {
             let dot_git = dir.join(".git");
-            let gitdir = match std::fs::read_to_string(&dot_git) {
-                Ok(link) => {
-                    let Some(target) = link.strip_prefix("gitdir: ") else {
-                        return Ok(None);
-                    };
-                    dir.join(target.trim_end())
-                }
-                Err(_) if dot_git.is_dir() => dot_git,
-                Err(_) => continue,
+            let gitdir = if dot_git.is_dir() {
+                dot_git
+            } else if let Some(link) = read_regular(&dot_git) {
+                let Some(target) = link.strip_prefix("gitdir: ") else {
+                    return Ok(None);
+                };
+                dir.join(target.trim_end())
+            } else if std::fs::symlink_metadata(&dot_git).is_ok() {
+                // A `.git` that is neither: a FIFO, a device, a dangling link.
+                return Ok(None);
+            } else {
+                continue;
             };
             let gitdir = std::fs::canonicalize(gitdir)?;
-            let common = match std::fs::read_to_string(gitdir.join("commondir")) {
-                Ok(common) => std::fs::canonicalize(gitdir.join(common.trim_end()))?,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => gitdir.clone(),
-                Err(error) => return Err(error),
+            let commondir = gitdir.join("commondir");
+            let common = match read_regular(&commondir) {
+                Some(common) => std::fs::canonicalize(gitdir.join(common.trim_end()))?,
+                None if std::fs::symlink_metadata(&commondir).is_err() => gitdir.clone(),
+                None => return Ok(None),
             };
             return Ok(Some(Self { gitdir, common }));
         }
@@ -335,7 +335,7 @@ impl Repository {
 
     /// The `HEAD` a granted git reads: a symbolic ref or an object name.
     fn head(&self) -> Option<String> {
-        let head = std::fs::read_to_string(self.gitdir.join("HEAD")).ok()?;
+        let head = read_regular(&self.gitdir.join("HEAD"))?;
         let head = head.trim_end();
         let valid = match head.strip_prefix("ref: ") {
             Some(target) => {
@@ -361,7 +361,13 @@ fn project_repository_config(
     scratch: &Path,
     config: &Path,
 ) -> std::io::Result<Option<(Projection, bool)>> {
-    let output = std::process::Command::new(program)
+    // The file is checked first, and the read is bounded, so a config swapped
+    // for a FIFO cannot hang the host.
+    if read_regular(config).is_none() {
+        return Ok(None);
+    }
+    let listing = scratch.join("repository-config");
+    let mut child = std::process::Command::new(program)
         .args(["config", "--file"])
         .arg(config)
         .args(["--null", "--list"])
@@ -372,8 +378,30 @@ fn project_repository_config(
         .env("HOME", scratch)
         .current_dir(scratch)
         .stdin(std::process::Stdio::null())
+        .stdout(std::fs::File::create(&listing)?)
         .stderr(std::process::Stdio::null())
-        .output()?;
+        .spawn()?;
+    let deadline = std::time::Instant::now() + CONFIG_READ_LIMIT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "reading the repository config did not finish",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let output = std::process::Output {
+        status,
+        stdout: std::fs::read(&listing)?,
+        stderr: Vec::new(),
+    };
+    std::fs::remove_file(&listing)?;
     if !output.status.success() {
         return Err(std::io::Error::other(
             "the repository config could not be read",
@@ -634,17 +662,7 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
     }
     super::grant_spawn::write_private_file(&dir.join("HEAD"), &head)?;
     super::grant_spawn::write_private_file(&dir.join("config"), &render_config(dir, &projection))?;
-    let mut stored = String::new();
-    let token = percent_encode(request.token);
-    for url in &urls {
-        let path = granted_url_path(url).expect("reached URLs are granted");
-        let _ = writeln!(
-            stored,
-            "{}/{path}",
-            granted_origin().replacen("://", &format!("://{LOGIN_USER}:{token}@"), 1)
-        );
-    }
-    super::grant_spawn::write_private_file(&dir.join(CREDENTIALS), &stored)?;
+    let socket = serve_login(dir, &urls, request.token)?;
     Ok(Some(Seeded {
         env: vec![
             ("GIT_DIR".to_string(), dir.display().to_string()),
@@ -653,14 +671,60 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
                 dir.join(GLOBAL_CONFIG).display().to_string(),
             ),
         ],
+        hold: Some(socket),
     }))
 }
 
-/// Link the per-spawn git directory's objects, `shallow`, `FETCH_HEAD`, and
-/// each reached remote's tracking refs into the repository, and copy in the
-/// branch and tag refs and `packed-refs`. A remote's tracking directory is
-/// created when missing, and refused unless it then resolves inside the
-/// repository's refs.
+/// Serve the login for the reached repository URLs on the per-spawn
+/// credential socket until the returned value is dropped.
+#[cfg(unix)]
+fn serve_login(
+    dir: &Path,
+    urls: &[String],
+    token: &str,
+) -> std::io::Result<Box<dyn std::any::Any + Send>> {
+    use super::git_credential_socket::{CredentialSocket, Login};
+    let origin = granted_origin();
+    let (protocol, host) = origin
+        .split_once("://")
+        .expect("the granted origin names its protocol");
+    let paths = urls
+        .iter()
+        .map(|url| {
+            granted_url_path(url)
+                .expect("reached URLs are granted")
+                .to_string()
+        })
+        .collect();
+    Ok(Box::new(CredentialSocket::serve(
+        dir,
+        Login {
+            protocol: protocol.to_string(),
+            host: host.to_string(),
+            paths,
+            username: LOGIN_USER.to_string(),
+            password: token.to_string(),
+        },
+    )?))
+}
+
+#[cfg(not(unix))]
+fn serve_login(
+    _dir: &Path,
+    _urls: &[String],
+    _token: &str,
+) -> std::io::Result<Box<dyn std::any::Any + Send>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "a granted git needs a Unix socket for its login",
+    ))
+}
+
+/// Link the per-spawn git directory's objects, `FETCH_HEAD`, and each reached
+/// remote's tracking refs into the repository, and copy in the branch and tag
+/// refs, `packed-refs` and `shallow`. A remote's tracking directory is created
+/// when missing, and refused when it, a directory above it within `refs`, or
+/// anything under it is a link.
 #[cfg(unix)]
 fn link_repository(dir: &Path, repository: &Repository, remotes: &[String]) -> std::io::Result<()> {
     let objects = repository.common.join("objects");
@@ -677,18 +741,21 @@ fn link_repository(dir: &Path, repository: &Repository, remotes: &[String]) -> s
     for (name, base) in entries {
         std::os::unix::fs::symlink(base.join(name), dir.join(name))?;
     }
-    let refs = std::fs::canonicalize(repository.common.join("refs"))?;
+    let refs = repository.common.join("refs");
     std::fs::create_dir_all(dir.join("refs/remotes"))?;
     for remote in remotes {
-        let tracking = refs.join("remotes").join(remote);
-        std::fs::create_dir_all(&tracking)?;
-        let tracking = std::fs::canonicalize(&tracking)?;
-        if !tracking.starts_with(refs.join("remotes")) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "a remote's tracking refs resolve outside the repository",
-            ));
+        // Every directory from `refs` down, and everything under the remote's
+        // tracking refs, must be a real directory or file: a planted link
+        // would send the fetch's tracking-ref writes elsewhere.
+        let mut tracking = refs.clone();
+        for part in std::iter::once("remotes").chain(remote.split('/')) {
+            refuse_link(&tracking)?;
+            tracking.push(part);
         }
+        std::fs::create_dir_all(&tracking)?;
+        refuse_link(&tracking)?;
+        refuse_links_under(&tracking)?;
+        let tracking = std::fs::canonicalize(&tracking)?;
         let link = dir.join("refs/remotes").join(remote);
         if let Some(parent) = link.parent() {
             std::fs::create_dir_all(parent)?;
@@ -698,10 +765,53 @@ fn link_repository(dir: &Path, repository: &Repository, remotes: &[String]) -> s
     for namespace in COPIED_REFS {
         copy_refs(&refs.join(namespace), &dir.join("refs").join(namespace))?;
     }
-    match read_regular(&repository.common.join("packed-refs")) {
-        Some(packed) => super::grant_spawn::write_private_file(&dir.join("packed-refs"), &packed),
-        None => Ok(()),
+    for name in COPIED_FILES {
+        let from = repository.common.join(name);
+        if std::fs::symlink_metadata(&from).is_err() {
+            continue;
+        }
+        let Some(text) = read_regular(&from) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("the repository's `{name}` is not a regular file"),
+            ));
+        };
+        super::grant_spawn::write_private_file(&dir.join(name), &text)?;
     }
+    Ok(())
+}
+
+/// Refuse a path that is a link (or anything but a directory).
+#[cfg(unix)]
+fn refuse_link(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "a repository ref directory is a link or not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Refuse a directory tree that holds a link or anything but directories and
+/// regular files.
+#[cfg(unix)]
+fn refuse_links_under(path: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            refuse_links_under(&entry.path())?;
+        } else if !kind.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "a remote's tracking refs hold a link",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -717,6 +827,26 @@ fn link_repository(
 }
 
 /// A regular file's text, never through a link and never a large one.
+#[cfg(unix)]
+fn read_regular(path: &Path) -> Option<String> {
+    use std::io::Read as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    // Opened without following a link and without blocking on a FIFO; the
+    // opened file itself must be a regular file.
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(64 << 20).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+#[cfg(not(unix))]
 fn read_regular(path: &Path) -> Option<String> {
     let metadata = std::fs::symlink_metadata(path).ok()?;
     (metadata.is_file() && metadata.len() <= 64 << 20)
@@ -753,10 +883,13 @@ fn copy_refs(from: &Path, to: &Path) -> std::io::Result<()> {
 type ConfigSection<'a> = (&'a str, Option<&'a str>, Vec<(&'a str, String)>);
 
 /// The per-spawn config: the copied repository keys, then the settings that
-/// keep a granted git to the stored login over https and running nothing.
+/// keep a granted git to the served login over https and running nothing.
 fn render_config(dir: &Path, projection: &Projection) -> String {
     let http = granted_origin().starts_with("http://");
-    let store = format!("store --file={}", dir.join(CREDENTIALS).display());
+    let helper = format!(
+        "cache --socket={}",
+        dir.join(super::git_credential_socket::SOCKET).display()
+    );
     let fixed: Vec<ConfigSection<'_>> = vec![
         (
             "core",
@@ -779,7 +912,7 @@ fn render_config(dir: &Path, projection: &Projection) -> String {
         (
             "credential",
             None,
-            vec![("helper", store), ("useHttpPath", "true".into())],
+            vec![("helper", helper), ("useHttpPath", "true".into())],
         ),
         (
             "fetch",
@@ -825,18 +958,6 @@ fn escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (byte as char).to_string()
-            }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
-}
-
-#[cfg(all(test, unix))]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "git_network_tests.rs"]
 mod tests;

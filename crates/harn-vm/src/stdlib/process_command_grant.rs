@@ -54,10 +54,12 @@ pub(crate) struct SeedRequest<'a> {
     pub(crate) cwd: &'a Path,
 }
 
-/// Variables a seeded spawn sets beyond the profile's fixed ones.
+/// Variables a seeded spawn sets beyond the profile's fixed ones, and
+/// whatever must stay alive while it runs (such as a credential socket).
 #[derive(Default)]
 pub(crate) struct Seeded {
     pub(crate) env: Vec<(String, String)>,
+    pub(crate) hold: Option<Box<dyn std::any::Any + Send>>,
 }
 
 const PROFILES: &[&ExecProfile] = &[&gh_config::GH_PROFILE, &git_network::GIT_PROFILE];
@@ -144,6 +146,8 @@ pub struct GrantedSpawn {
     pub program: String,
     pub env: Vec<(String, String)>,
     pub remove: Vec<String>,
+    /// Dropped before `_dir`: a server the seed started stops first.
+    _held: Option<Box<dyn std::any::Any + Send>>,
     _dir: grant_spawn::SpawnDir,
 }
 
@@ -307,6 +311,7 @@ pub fn granted_spawn(
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string())),
     );
+    let held = seeded.hold;
     env.extend(seeded.env);
     env.extend(grant_spawn::network_env());
     // Every inherited name the spawn does not set or keep is removed, from
@@ -322,6 +327,7 @@ pub fn granted_spawn(
         program: canonical.display().to_string(),
         env,
         remove,
+        _held: held,
         _dir: dir,
     }))
 }

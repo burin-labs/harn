@@ -469,7 +469,9 @@ only; elsewhere git runs without it. Only `git fetch`, `git push` and
 (including `pull`, `clone` and aliases), a global option before the
 subcommand, and an option that names a program or writes configuration
 (`--upload-pack`, `--receive-pack`, `--exec`, `--signed`, `-u`/`--set-upstream`,
-`--recurse-submodules`, `--filter`, fetch `--tags`) run without the login.
+`--recurse-submodules`, `--filter`, fetch `--tags`, and the shallow-history
+options `--depth`, `--deepen`, `--shallow-since`, `--shallow-exclude`,
+`--unshallow` and `--update-shallow`) run without the login.
 
 A granted git never opens the repository's git directory as its own.
 `GIT_DIR` is the private per-spawn directory, whose `config` Harn writes;
@@ -483,10 +485,24 @@ fetch refspec stores outside `refs/remotes/NAME/` is not copied.
 
 | Per-spawn entry | Points at |
 |---|---|
-| `objects`, `shallow`, `FETCH_HEAD` | the repository's own, so fetched objects land there |
+| `objects`, `FETCH_HEAD` | the repository's own, so fetched objects land there |
 | `refs/remotes/NAME` | the repository's tracking refs for each remote the command reaches |
-| `HEAD`, `refs/heads`, `refs/tags`, `packed-refs` | private copies, so no other repository ref can change |
-| `credentials` | the login for each reached repository URL, read by git's built-in `store` helper with `credential.useHttpPath` |
+| `HEAD`, `refs/heads`, `refs/tags`, `packed-refs`, `shallow` | private copies, so no other repository ref can change |
+| `credential.sock` | a socket Harn serves the login on, for each reached repository URL |
+
+No file holds the login. Git's built-in `credential-cache` helper asks the
+per-spawn socket, with `credential.useHttpPath`, and Harn answers only a `get`
+for a reached repository URL. A socket cannot be read as a file, so a
+repository that points an alternate, a ref, `FETCH_HEAD` or any other path at
+the socket or the per-spawn directory reads no login. Only the granted git's
+own sandbox profile may connect to its socket; every confined child is denied
+connections into the per-spawn root.
+
+Harn refuses the grant when `shallow` or `packed-refs` is not a regular file,
+or when a reached remote's tracking directory, a directory above it within
+`refs`, or anything under it is a link when the command starts. It reads the
+repository's `.git` file, `commondir`, `HEAD` and config only as regular files,
+and stops reading the config after five seconds.
 
 The per-spawn config allows only the `https` protocol, keeps TLS verification
 on, turns off hooks, the filesystem monitor, submodule recursion, automatic

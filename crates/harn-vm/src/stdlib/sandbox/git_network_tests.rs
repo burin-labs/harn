@@ -210,6 +210,18 @@ impl Fixture {
     /// with every name the spawn lists removed. `ambient` is set in this
     /// process's environment for the call.
     fn granted(&self, args: &[&str], ambient: &[(&str, &str)]) -> Option<std::process::Output> {
+        self.granted_planting(args, ambient, |_| {})
+    }
+
+    /// [`Fixture::granted`], with `plant` run on the per-spawn directory after
+    /// it is seeded and before git starts; the directory's files are checked
+    /// for the login while it still exists.
+    fn granted_planting(
+        &self,
+        args: &[&str],
+        ambient: &[(&str, &str)],
+        plant: impl FnOnce(&Path),
+    ) -> Option<std::process::Output> {
         let _env_lock = crate::runtime_paths::test_env_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -221,6 +233,13 @@ impl Fixture {
             crate::stdlib::process::granted_spawn("git", &args, &self.ws(), &BTreeMap::new())
                 .expect("no refusal")
                 .map(|spawn| {
+                    let dir = spawn
+                        .env
+                        .iter()
+                        .find(|(key, _)| key == "GIT_DIR")
+                        .map(|(_, dir)| PathBuf::from(dir))
+                        .expect("a granted git runs in its per-spawn directory");
+                    plant(&dir);
                     let _launch = spawn.launching();
                     let mut command = std::process::Command::new(&spawn.program);
                     command.args(&args).current_dir(self.ws());
@@ -228,7 +247,9 @@ impl Fixture {
                         command.env_remove(key);
                     }
                     command.envs(spawn.env.iter().map(|(key, value)| (key, value)));
-                    command.output().unwrap()
+                    let output = command.output().unwrap();
+                    assert_no_login_under(&dir);
+                    output
                 });
         for (key, _) in ambient {
             std::env::remove_var(key);
@@ -275,6 +296,23 @@ impl Drop for Granted {
     fn drop(&mut self) {
         crate::stdlib::process::set_session_environment(None);
         TEST_ORIGIN.with(|test| *test.borrow_mut() = None);
+    }
+}
+
+/// No regular file under `dir` (links are not followed) holds the login.
+fn assert_no_login_under(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let kind = entry.file_type().unwrap();
+        if kind.is_dir() {
+            assert_no_login_under(&entry.path());
+        } else if kind.is_file() {
+            let text = std::fs::read(entry.path()).unwrap();
+            assert!(
+                !String::from_utf8_lossy(&text).contains(TOKEN),
+                "{} holds the login",
+                entry.path().display()
+            );
+        }
     }
 }
 
@@ -525,9 +563,13 @@ fn only_network_subcommands_with_known_options_are_granted() {
     };
     assert_eq!(granted(&["fetch"]), Some((Command::Fetch, vec![], false)));
     assert_eq!(
-        granted(&["fetch", "-p", "--depth", "1", "origin", "main"]),
+        granted(&["fetch", "-p", "origin", "main"]),
         Some((Command::Fetch, vec!["origin".into()], false))
     );
+    // Shallow-history options change `shallow`, which is a private copy.
+    for option in ["--depth=1", "--deepen=1", "--unshallow", "--update-shallow"] {
+        assert_eq!(granted(&["fetch", option, "origin"]), None, "{option}");
+    }
     assert_eq!(
         granted(&["fetch", "--all", "--prune"]),
         Some((Command::Fetch, vec![], true))
@@ -634,4 +676,125 @@ fn a_remote_that_is_not_a_plain_granted_url_runs_without_the_login() {
         .is_none(),
         "a caller tracing variable takes the grant away"
     );
+}
+
+/// The login is never a file: every path the repository can point git at
+/// (an alternate, a tracking ref, `FETCH_HEAD`), aimed at the credential
+/// socket or the per-spawn directory after seeding, reads no login, and no
+/// file anywhere holds it.
+#[test]
+fn a_repository_that_points_git_at_the_login_channel_reads_nothing() {
+    let _granted = Granted::enter();
+    let fixture = Fixture::new();
+    let ws = fixture.ws();
+    let git_dir = ws.join(".git");
+    assert_succeeded(&fixture.granted(&["fetch", "origin"], &[]).expect("granted"));
+    ok(&ws, &["checkout", "-q", "-B", "main", "origin/main"]);
+    let _ = fixture.requests();
+    for args in [
+        &["fetch", "origin"][..],
+        &["push", "origin", "HEAD:refs/heads/planted"],
+    ] {
+        let output = fixture
+            .granted_planting(args, &[], |dir| {
+                let socket = dir.join(super::super::git_credential_socket::SOCKET);
+                assert!(socket.exists(), "the login is served on the socket");
+                std::fs::create_dir_all(git_dir.join("objects/info")).unwrap();
+                std::fs::write(
+                    git_dir.join("objects/info/alternates"),
+                    format!("{}\n{}\n", socket.display(), dir.display()),
+                )
+                .unwrap();
+                std::fs::create_dir_all(git_dir.join("refs/remotes/origin")).unwrap();
+                for (link, target) in [
+                    ("refs/remotes/origin/to-socket", socket.clone()),
+                    ("refs/remotes/origin/to-config", dir.join("config")),
+                    ("FETCH_HEAD", socket),
+                ] {
+                    let _ = std::fs::remove_file(git_dir.join(link));
+                    std::os::unix::fs::symlink(&target, git_dir.join(link)).unwrap();
+                }
+            })
+            .expect("granted");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !text.contains(TOKEN) && !text.contains(&base64_login()),
+            "{args:?}: {text}"
+        );
+        for link in [
+            "refs/remotes/origin/to-socket",
+            "refs/remotes/origin/to-config",
+            "FETCH_HEAD",
+        ] {
+            std::fs::remove_file(git_dir.join(link)).unwrap();
+        }
+        std::fs::remove_file(git_dir.join("objects/info/alternates")).unwrap();
+    }
+    // Not vacuous: the planted runs did ask for, and send, the login.
+    let requests = fixture.requests();
+    assert!(
+        requests
+            .iter()
+            .any(|seen| seen == &format!("Basic {}", base64_login())),
+        "{requests:?}"
+    );
+}
+
+/// `shallow` is copied in, never linked, and a link, FIFO or link planted in
+/// a tracking-ref path is refused before git starts.
+#[test]
+fn a_linked_shallow_or_tracking_ref_is_refused() {
+    let _granted = Granted::enter();
+    let fixture = Fixture::new();
+    let ws = fixture.ws();
+    let git_dir = ws.join(".git");
+    let spawn = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        crate::stdlib::process::granted_spawn("git", &args, &ws, &BTreeMap::new())
+    };
+    let secret = fixture.root.path().join("secret");
+    std::fs::write(&secret, "outside").unwrap();
+    std::os::unix::fs::symlink(&secret, git_dir.join("shallow")).unwrap();
+    assert!(spawn(&["fetch", "origin"]).is_err(), "a linked shallow");
+    std::fs::remove_file(git_dir.join("shallow")).unwrap();
+
+    std::fs::create_dir_all(git_dir.join("refs/remotes/origin")).unwrap();
+    std::os::unix::fs::symlink("../../heads", git_dir.join("refs/remotes/origin/sub")).unwrap();
+    assert!(
+        spawn(&["fetch", "origin"]).is_err(),
+        "a tracking directory holding a link"
+    );
+    std::fs::remove_file(git_dir.join("refs/remotes/origin/sub")).unwrap();
+    std::fs::remove_dir(git_dir.join("refs/remotes/origin")).unwrap();
+    std::os::unix::fs::symlink("../heads", git_dir.join("refs/remotes/origin")).unwrap();
+    assert!(
+        spawn(&["fetch", "origin"]).is_err(),
+        "a linked tracking directory"
+    );
+    std::fs::remove_file(git_dir.join("refs/remotes/origin")).unwrap();
+
+    // A FIFO where the repository config belongs refuses rather than hangs.
+    let config = git_dir.join("config");
+    let saved = std::fs::read(&config).unwrap();
+    std::fs::remove_file(&config).unwrap();
+    let fifo = std::ffi::CString::new(config.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    assert!(
+        matches!(spawn(&["fetch", "origin"]), Ok(None)),
+        "a FIFO config runs ungranted"
+    );
+    std::fs::remove_file(&config).unwrap();
+    std::fs::write(&config, saved).unwrap();
+
+    // A regular shallow file is copied in, and the fetch is granted.
+    let main = ok(
+        &fixture.root.path().join("server/o/r.git"),
+        &["rev-parse", "main"],
+    );
+    std::fs::write(git_dir.join("shallow"), format!("{main}\n")).unwrap();
+    assert!(matches!(spawn(&["fetch", "origin"]), Ok(Some(_))));
 }

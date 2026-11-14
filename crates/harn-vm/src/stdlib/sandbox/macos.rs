@@ -586,6 +586,17 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&ancestor)
         ));
     }
+    // A per-spawn directory may hold a socket that serves a login (a granted
+    // git's credential socket), so no confined child connects to anything
+    // there, whatever network or socket roots it was granted above.
+    if let Some(root) = super::workspace_env::grant_spawn::denied_read_root() {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            profile.push_str(&format!(
+                "(deny network-outbound (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
+    }
     // A granted spawn re-reads its own private directory inside the denied
     // per-spawn root. Later rules win, so this follows the denials, and it
     // names only that one directory.
@@ -593,6 +604,14 @@ fn render_profile_with_extra_read_roots(
         for path in sandbox_profile_path_aliases(&own.display().to_string()) {
             profile.push_str(&format!(
                 "(allow file-read* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
+        // A granted git asks its own per-spawn credential socket for its login.
+        let socket = own.join(super::workspace_env::git_credential_socket::SOCKET);
+        for path in sandbox_profile_path_aliases(&socket.display().to_string()) {
+            profile.push_str(&format!(
+                "(allow network-outbound (literal \"{}\"))\n",
                 sandbox_profile_escape(&path)
             ));
         }
