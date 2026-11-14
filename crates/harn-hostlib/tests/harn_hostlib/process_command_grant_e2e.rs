@@ -70,6 +70,13 @@ case "$1 $2" in
     printf '%s\n' "$(printf '%s' "$token" | cut -c10-)"
     printf 'err=%s\n' "$token" >&2
     exit 0 ;;
+  "api watch")
+    printf 'token=%s' "$(printf '%s' "$token" | cut -c1-9)"; sleep 0.3
+    printf '%s\n' "$(printf '%s' "$token" | cut -c10-)"
+    printf 'err=%s\n' "$token" >&2
+    pad=$(head -c 8186 /dev/zero | tr '\0' x)
+    printf '%s%s\n' "$pad" "$token"
+    echo ready; sleep 2; exit 0 ;;
 esac
 if [ -n "$1" ] && [ -f "$config" ]; then
   value=$(sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" "$config" | head -n 1 | sed "s/^'//; s/'\$//")
@@ -307,6 +314,18 @@ struct Output {
 /// Dispatch `run_command` the way a VM tool call does: on Tokio's blocking
 /// pool under the caller's ambient scope, inside a host secret provider scope.
 fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
+    let dict = run_dict(request)?;
+    let field = |name: &str| match dict.get(name) {
+        Some(VmValue::String(text)) => text.to_string(),
+        other => panic!("run_command carried no {name}: {other:?}"),
+    };
+    Ok(Output {
+        stdout: field("stdout"),
+        stderr: field("stderr"),
+    })
+}
+
+fn run_dict(request: harn_vm::value::DictMap) -> Result<harn_vm::value::DictMap, String> {
     use harn_vm::secrets::{MemorySecretProvider, SecretId, SecretProvider};
     let provider: std::sync::Arc<dyn SecretProvider> = std::sync::Arc::new(
         MemorySecretProvider::new(SECRET_ACCOUNT)
@@ -322,6 +341,14 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
             Some(provider),
             async move {
                 harn_vm::orchestration::run_blocking_with_ambient(move || {
+                    // A long-running command starts under the owner-death
+                    // guardian, which re-enters this test binary.
+                    let _guardian =
+                        harn_hostlib::process::owner_death::install_guardian_reexec_args([
+                            "--exact",
+                            "process_tools_e2e::owner_death_guardian_fixture",
+                            "--nocapture",
+                        ]);
                     call_tool("hostlib_tools_run_command", request)
                 })
                 .await
@@ -329,17 +356,7 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
         ))
         .expect("the blocking dispatch must complete")
         .map_err(|error| error.to_string())?;
-    let VmValue::Dict(dict) = response else {
-        panic!("run_command must answer with a dict, got {response:?}");
-    };
-    let field = |name: &str| match dict.get(name) {
-        Some(VmValue::String(text)) => text.to_string(),
-        other => panic!("run_command carried no {name}: {other:?}"),
-    };
-    Ok(Output {
-        stdout: field("stdout"),
-        stderr: field("stderr"),
-    })
+    Ok(require_dict(response))
 }
 
 /// `env` ran (the read measured something) and the grant was not in it.
@@ -402,6 +419,146 @@ fn a_plain_gh_shell_command_receives_the_grant_with_its_exec_paths_closed() {
     );
     // The direction control: argv mode reaches the same grant.
     assert_granted_without_leak(&fixture.argv(&["gh", "issue", "list"], &[]), "argv");
+}
+
+/// An agent's foreground command opens an inline auto-background window, so
+/// it spawns through the long-running path. The grant reaches gh there too,
+/// in both shell and argv form, with its output filtered.
+#[test]
+fn a_command_with_an_auto_background_window_receives_the_grant() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let windowed = |mode: &str| {
+        let mut request = fixture.request(fixture.workspace.path());
+        request.insert("mode".into(), vm_string(mode));
+        if mode == "shell" {
+            request.insert("command".into(), vm_string("gh issue list --limit 5"));
+            let mut shell = harn_vm::value::DictMap::new();
+            shell.insert("path".into(), vm_string("/bin/sh"));
+            request.put("shell", VmValue::dict(shell));
+        } else {
+            request.put(
+                "argv",
+                VmValue::list(["gh", "issue", "list"].map(vm_string).to_vec()),
+            );
+        }
+        request.put_int("background_after_ms", 30_000);
+        run(request).unwrap()
+    };
+    assert_granted_without_leak(&windowed("shell").stdout, "auto-background shell");
+    assert_granted_without_leak(&windowed("argv").stdout, "auto-background argv");
+}
+
+fn wait_for_output(
+    handle_id: &str,
+    pattern: &str,
+    regex: bool,
+    timeout_ms: i64,
+) -> harn_vm::value::DictMap {
+    let mut request = dict_map();
+    request.insert("handle_id".into(), vm_string(handle_id));
+    request.insert("pattern".into(), vm_string(pattern));
+    request.put_bool("regex", regex);
+    request.put_int("timeout_ms", timeout_ms);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let registry = tools_registry();
+    let entry = registry
+        .find_async("hostlib_tools_wait_command_output")
+        .expect("wait_command_output is registered");
+    require_dict(
+        runtime
+            .block_on((entry.handler)(vec![VmValue::dict(request)]))
+            .expect("wait_command_output must answer"),
+    )
+}
+
+/// A granted gh that keeps running prints its credential split across reads,
+/// on stderr, and across an 8 KiB read boundary. Every reader of the live
+/// command sees it redacted: the backgrounded response, the progress
+/// snapshots, a wait for output (whose matcher would otherwise answer
+/// whether the value is there), and the artifact files the agent is pointed
+/// at.
+#[test]
+fn a_backgrounded_granted_command_is_redacted_for_every_live_reader() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let _session = in_session();
+    let session_id = harn_vm::current_agent_session_id().expect("a current session");
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+
+    let mut request = fixture.request(fixture.workspace.path());
+    request.put(
+        "argv",
+        VmValue::list(["gh", "api", "watch"].map(vm_string).to_vec()),
+    );
+    request.put_int("background_after_ms", 100);
+    request.put_int("progress_interval_ms", 50);
+    let started = run_dict(request).unwrap();
+    assert_eq!(require_str(&started, "status"), "running", "{started:?}");
+    let handle_id = require_str(&started, "handle_id");
+    let completion = harn_hostlib::tools::long_running::register_completion_notifier(&handle_id)
+        .expect("a live handle");
+    let mut seen = vec![format!("{started:?}")];
+
+    let ready = wait_for_output(&handle_id, "ready", false, 10_000);
+    assert!(require_bool(&ready, "matched"), "{ready:?}");
+    seen.push(format!("{ready:?}"));
+    // The value itself, a prefix of it, and a pattern spanning a split all
+    // find nothing.
+    for (pattern, regex) in [
+        (PROBE, false),
+        ("harn-probe", false),
+        ("token=harn.*grant", true),
+    ] {
+        let probe = wait_for_output(&handle_id, pattern, regex, 200);
+        assert!(!require_bool(&probe, "matched"), "{pattern}: {probe:?}");
+        // The response echoes the pattern; the output it saw is `result`.
+        seen.push(format!("{:?}", probe.get("result")));
+    }
+
+    completion.recv().expect("the command finishes");
+    let snapshots: Vec<String> = harn_vm::orchestration::agent_inbox::drain(&session_id)
+        .into_iter()
+        .filter(|entry| entry.kind == "tool_progress")
+        .map(|entry| entry.content)
+        .collect();
+    assert!(
+        snapshots
+            .iter()
+            .any(|snapshot| snapshot.contains("[redacted]")),
+        "no progress snapshot carried the redacted output, so nothing was measured: {snapshots:?}"
+    );
+    seen.extend(snapshots);
+
+    let mut files = String::new();
+    for key in ["stdout_path", "stderr_path", "output_path"] {
+        let path = require_str(&started, key);
+        files.push_str(&std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("{key} {path}: {error}");
+        }));
+    }
+    for marker in [
+        "token=[redacted]\n",
+        "err=[redacted]\n",
+        "x[redacted]\n",
+        "ready\n",
+    ] {
+        assert!(files.contains(marker), "artifacts lack {marker:?}: {files}");
+    }
+    seen.push(files);
+    for text in &seen {
+        assert!(
+            !text.contains(PROBE),
+            "a granted value reached a reader:\n{text}"
+        );
+        assert!(
+            !text.contains("harn-probe"),
+            "part of a granted value reached a reader:\n{text}"
+        );
+    }
 }
 
 #[test]

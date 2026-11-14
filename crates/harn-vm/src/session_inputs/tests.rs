@@ -196,3 +196,42 @@ fn a_granted_value_is_filtered_when_the_current_session_has_no_store() {
     assert!(!out.contains(VALUE), "a granted value was printed: {out}");
     assert!(out.contains("[redacted]"), "nothing was filtered: {out}");
 }
+
+/// Output drained in chunks is redacted before anyone reads it. Wherever a
+/// read splits a filtered value, no emitted chunk carries any part of it, and
+/// the joined output equals redacting the whole stream at once. A tail that
+/// cannot begin a filtered value is never held, so paused output is current.
+#[test]
+fn a_streamed_value_is_redacted_wherever_a_read_splits_it() {
+    let store = super::Store::default();
+    for value in ["stream-secret-value", "stream-secret-longer-value"] {
+        assert!(store.lock().add_filter(value));
+    }
+    let filter = super::OutputFilter(store.clone());
+    let text = b"a stream-secret-value b stream-secret-longer-value stream-sec\nready\n";
+    let whole = store.lock().redact_bytes(text);
+    for first in 0..=text.len() {
+        for second in first..=text.len() {
+            let mut stream = filter.stream();
+            let chunks = [
+                stream.push(&text[..first]),
+                stream.push(&text[first..second]),
+                stream.push(&text[second..]),
+            ];
+            for chunk in &chunks {
+                assert!(
+                    !chunk.windows(6).any(|window| window == b"secret"),
+                    "split at {first}/{second} emitted {:?}",
+                    String::from_utf8_lossy(chunk)
+                );
+            }
+            let mut joined = chunks.concat();
+            joined.extend(stream.finish());
+            assert_eq!(joined, whole, "split at {first}/{second}");
+        }
+    }
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"ready\n"), b"ready\n");
+    assert_eq!(stream.push(b"token=stream-sec"), b"token=");
+    assert_eq!(stream.finish(), b"stream-sec");
+}

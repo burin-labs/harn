@@ -128,6 +128,45 @@ impl OutputFilter {
             None => std::borrow::Cow::Borrowed(bytes),
         }
     }
+
+    /// A redactor for one output stream that arrives in chunks.
+    pub fn stream(&self) -> StreamRedactor {
+        StreamRedactor {
+            filter: self.0.clone(),
+            pending: Vec::new(),
+        }
+    }
+}
+
+/// Redacts one output stream before anything reads or stores it. A tail that
+/// begins a filtered value is held until the next chunk or the end of the
+/// stream, so a value split across reads is still caught whole.
+pub struct StreamRedactor {
+    filter: Store,
+    pending: Vec<u8>,
+}
+
+impl StreamRedactor {
+    /// The redacted bytes of `chunk` (and of any held tail) that later output
+    /// can no longer change.
+    pub fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.pending.extend_from_slice(chunk);
+        let store = self.filter.lock();
+        if !store.has_secret_filters() {
+            return std::mem::take(&mut self.pending);
+        }
+        let settled = store.settled_len(&self.pending);
+        let redacted = store.redact_bytes(&self.pending[..settled]);
+        drop(store);
+        self.pending.drain(..settled);
+        redacted
+    }
+
+    /// The redacted held tail, once the stream has ended.
+    pub fn finish(&mut self) -> Vec<u8> {
+        let pending = std::mem::take(&mut self.pending);
+        self.filter.lock().redact_bytes(&pending)
+    }
 }
 
 /// Resolve only explicitly named bindings for the canonical process owner.
