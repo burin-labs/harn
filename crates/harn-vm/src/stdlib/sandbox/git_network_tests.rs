@@ -697,7 +697,7 @@ fn a_repository_that_points_git_at_the_login_channel_reads_nothing() {
     ] {
         let output = fixture
             .granted_planting(args, &[], |dir| {
-                let socket = dir.join(super::super::git_credential_socket::SOCKET);
+                let socket = dir.join(super::CREDENTIAL_SOCKET);
                 assert!(socket.exists(), "the login is served on the socket");
                 std::fs::create_dir_all(git_dir.join("objects/info")).unwrap();
                 std::fs::write(

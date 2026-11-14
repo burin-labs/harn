@@ -247,7 +247,8 @@ fn a_socket_root_outside_every_writable_root_takes_a_socket_and_no_regular_file(
 /// so the refusal is the per-spawn denial and not a broken socket.
 #[test]
 fn only_its_own_granted_spawn_may_ask_a_credential_socket() {
-    use super::super::workspace_env::git_credential_socket::{CredentialSocket, Login, SOCKET};
+    use super::super::workspace_env::git_credential_socket::{CredentialSocket, Login};
+    use super::super::workspace_env::git_network::CREDENTIAL_SOCKET as SOCKET;
     use super::super::workspace_env::grant_spawn;
     if !Path::new(SANDBOX_EXEC_PATH).exists()
         || grant_spawn::denied_read_root() != Some(grant_spawn::grant_spawns_root())

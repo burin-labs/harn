@@ -71,9 +71,9 @@ pub(crate) const GIT_PROFILE: ExecProfile = ExecProfile {
 };
 
 const LOGIN_USER: &str = "x-access-token";
+/// The login socket's name in the per-spawn directory.
+pub(crate) const CREDENTIAL_SOCKET: &str = "credential.sock";
 const GLOBAL_CONFIG: &str = "global-config";
-/// How long the host waits for `git config --file` to list one config.
-const CONFIG_READ_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Repository entries the per-spawn git directory links to, from the shared
 /// (common) git directory, and from the worktree's own. Missing files are
 /// linked too, so git creates them in the repository.
@@ -352,8 +352,8 @@ impl Repository {
 /// subsection, in file order.
 type Projection = BTreeMap<(String, Option<String>), Vec<(String, String)>>;
 
-/// Read `config` with `git config --file`, which reads that one file and no
-/// includes, and keep only what a granted fetch or push needs. `None` when
+/// Read a private copy of `config` with `git config --file`, which reads that
+/// one file and no includes, and keep only what a granted fetch or push needs. `None` when
 /// the repository uses an extension the per-spawn directory cannot honor.
 /// The flag says whether every remote the config names was copied.
 fn project_repository_config(
@@ -361,15 +361,17 @@ fn project_repository_config(
     scratch: &Path,
     config: &Path,
 ) -> std::io::Result<Option<(Projection, bool)>> {
-    // The file is checked first, and the read is bounded, so a config swapped
-    // for a FIFO cannot hang the host.
-    if read_regular(config).is_none() {
+    // The host reads the file once, as a bounded regular file, and git parses
+    // that private copy: a config swapped for a FIFO or a link afterwards
+    // cannot hang the host or point it elsewhere.
+    let Some(contents) = read_regular(config) else {
         return Ok(None);
-    }
-    let listing = scratch.join("repository-config");
-    let mut child = std::process::Command::new(program)
+    };
+    let copy = scratch.join("repository-config");
+    std::fs::write(&copy, contents)?;
+    let output = std::process::Command::new(program)
         .args(["config", "--file"])
-        .arg(config)
+        .arg(&copy)
         .args(["--null", "--list"])
         .env_clear()
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -378,30 +380,9 @@ fn project_repository_config(
         .env("HOME", scratch)
         .current_dir(scratch)
         .stdin(std::process::Stdio::null())
-        .stdout(std::fs::File::create(&listing)?)
         .stderr(std::process::Stdio::null())
-        .spawn()?;
-    let deadline = std::time::Instant::now() + CONFIG_READ_LIMIT;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "reading the repository config did not finish",
-            ));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    };
-    let output = std::process::Output {
-        status,
-        stdout: std::fs::read(&listing)?,
-        stderr: Vec::new(),
-    };
-    std::fs::remove_file(&listing)?;
+        .output()?;
+    std::fs::remove_file(&copy)?;
     if !output.status.success() {
         return Err(std::io::Error::other(
             "the repository config could not be read",
@@ -886,10 +867,7 @@ type ConfigSection<'a> = (&'a str, Option<&'a str>, Vec<(&'a str, String)>);
 /// keep a granted git to the served login over https and running nothing.
 fn render_config(dir: &Path, projection: &Projection) -> String {
     let http = granted_origin().starts_with("http://");
-    let helper = format!(
-        "cache --socket={}",
-        dir.join(super::git_credential_socket::SOCKET).display()
-    );
+    let helper = format!("cache --socket={}", dir.join(CREDENTIAL_SOCKET).display());
     let fixed: Vec<ConfigSection<'_>> = vec![
         (
             "core",

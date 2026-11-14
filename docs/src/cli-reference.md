@@ -502,7 +502,7 @@ Harn refuses the grant when `shallow` or `packed-refs` is not a regular file,
 or when a reached remote's tracking directory, a directory above it within
 `refs`, or anything under it is a link when the command starts. It reads the
 repository's `.git` file, `commondir`, `HEAD` and config only as regular files,
-and stops reading the config after five seconds.
+and git parses a private copy of that config, never the file itself.
 
 The per-spawn config allows only the `https` protocol, keeps TLS verification
 on, turns off hooks, the filesystem monitor, submodule recursion, automatic

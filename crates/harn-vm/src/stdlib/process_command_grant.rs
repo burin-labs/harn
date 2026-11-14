@@ -146,8 +146,10 @@ pub struct GrantedSpawn {
     pub program: String,
     pub env: Vec<(String, String)>,
     pub remove: Vec<String>,
-    /// Dropped before `_dir`: a server the seed started stops first.
-    _held: Option<Box<dyn std::any::Any + Send>>,
+    /// Dropped before `_dir`: a server the seed started stops first. Held
+    /// behind a mutex, which nothing locks, so the spawn stays `Sync` and
+    /// unwind-safe whatever the server is.
+    _held: Option<std::sync::Mutex<Box<dyn std::any::Any + Send>>>,
     _dir: grant_spawn::SpawnDir,
 }
 
@@ -327,7 +329,7 @@ pub fn granted_spawn(
         program: canonical.display().to_string(),
         env,
         remove,
-        _held: held,
+        _held: held.map(std::sync::Mutex::new),
         _dir: dir,
     }))
 }

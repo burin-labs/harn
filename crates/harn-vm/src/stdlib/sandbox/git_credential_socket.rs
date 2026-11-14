@@ -18,9 +18,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The socket's name in the per-spawn directory.
-pub(crate) const SOCKET: &str = "credential.sock";
-
 /// A client that sends nothing is dropped after this long, so one stuck
 /// connection cannot stop the socket from answering the next.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -45,7 +42,7 @@ pub(crate) struct CredentialSocket {
 
 impl CredentialSocket {
     pub(crate) fn serve(dir: &Path, login: Login) -> std::io::Result<Self> {
-        let path = dir.join(SOCKET);
+        let path = dir.join(super::git_network::CREDENTIAL_SOCKET);
         let listener = UnixListener::bind(&path)?;
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = Arc::clone(&stop);

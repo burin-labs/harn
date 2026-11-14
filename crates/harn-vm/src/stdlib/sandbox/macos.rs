@@ -620,7 +620,7 @@ fn render_profile_with_extra_read_roots(
             }
         }
         // A granted git asks its own per-spawn credential socket for its login.
-        let socket = own.join(super::workspace_env::git_credential_socket::SOCKET);
+        let socket = own.join(super::workspace_env::git_network::CREDENTIAL_SOCKET);
         for path in sandbox_profile_path_aliases(&socket.display().to_string()) {
             profile.push_str(&format!(
                 "(allow network-outbound (literal \"{}\"))\n",
