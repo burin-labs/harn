@@ -6,6 +6,9 @@ use serde_json::json;
 use crate::test_util::cli::stdout_json;
 use crate::test_util::process::harn_e2e_command;
 
+#[path = "../../src/commands/replay_offline_coding_golden.rs"]
+mod verifier_golden;
+
 #[test]
 fn session_import_records_source_and_result_in_fresh_project_event_log() {
     let project = tempfile::tempdir().expect("project tempdir");
@@ -893,21 +896,10 @@ fn offline_coding_fixture(
         "path": "$WORKSPACE/repo/note.txt",
         "replacements": 1
     });
-    let successful_verify_result = json!({
-        "byte_count": 14,
-        "cwd": "$WORKSPACE/repo",
-        "denial": null,
-        "exit_code": 0,
-        "line_count": 1,
-        "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",
-        "signal": null,
-        "status": "completed",
-        "stderr": "",
-        "stderr_truncated": false,
-        "stdout": "1:hello world\n",
-        "stdout_truncated": false,
-        "timed_out": false
-    });
+    #[cfg(unix)]
+    let successful_verify_result = verifier_golden::verifier_golden_results()[0].clone();
+    #[cfg(not(unix))]
+    let successful_verify_result = verifier_golden::completed_verifier_result();
     let successful_verify = verify_args == json!({"argv":["grep","-n","hello world","note.txt"]});
     let temp = tempfile::tempdir().expect("offline replay tempdir");
     let seed = temp.path().join("seed");
@@ -984,6 +976,34 @@ fn main(harness: Harness) {
         serde_json::to_vec_pretty(&fixture).expect("replay fixture"),
     )
     .expect("write replay fixture");
+    #[cfg(unix)]
+    if successful_verify && include_finish {
+        let (_, calibration) = run_offline_fixture(&path);
+        let observed = &calibration["data"]["runs"][0];
+        assert_eq!(observed["effects"]["pass"], true, "{calibration:#}");
+        assert_eq!(observed["terminal"]["pass"], true, "{calibration:#}");
+        assert_eq!(
+            observed["isolation"]["provider"]["pass"], true,
+            "{calibration:#}"
+        );
+        assert_eq!(
+            observed["isolation"]["network"]["pass"], true,
+            "{calibration:#}"
+        );
+        assert_eq!(observed["pending_count"], 0, "{calibration:#}");
+        assert_eq!(observed["missing_count"], 0, "{calibration:#}");
+        let allowed = verifier_golden::verifier_golden_results().map(|value| hash_json(&value));
+        let selected = verifier_golden::select_verifier_golden(
+            observed["tools"]["actual"][2]["result_blake3"].as_str(),
+            &allowed,
+        )
+        .unwrap_or_else(|| {
+            panic!("verifier result is not an authored terminal receipt: {calibration:#}")
+        });
+        let mut fixture = fixture;
+        fixture["expected"]["tools"][2]["result_blake3"] = selected.into();
+        std::fs::write(&path, serde_json::to_vec_pretty(&fixture).unwrap()).unwrap();
+    }
     (temp, path)
 }
 
@@ -1086,6 +1106,8 @@ fn offline_coding_replay_cli_rejects_changed_tool_inputs_with_matching_effects()
             .collect(),
         true,
     );
+    let (baseline_status, baseline) = run_offline_fixture(&path);
+    assert!(baseline_status.success(), "baseline: {baseline:#}");
     let mut fixture: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).expect("read replay fixture"))
             .expect("parse replay fixture");

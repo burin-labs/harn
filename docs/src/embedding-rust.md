@@ -19,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.198" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.199" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -64,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.198", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.199", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.198", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.199", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -88,8 +88,14 @@ commands re-exec the embedding executable in guardian mode. A private pipe
 carries the prepared command, including its explicit child environment. The
 guardian removes inherited credentials and does not copy that data into its
 own arguments or environment.
-Without the dispatch, those commands fail during startup. Windows uses a Job
-Object and the function returns `false`.
+Foreground-only embedders must now add this hook too. Without it, command
+startup returns `ProcessError::GuardianNotInitialized` before starting the
+payload. Windows uses a Job Object and the function returns `false`.
+
+For libtest executables that invoke real command tools, declare
+`harn_hostlib::process_guardian_test_fixture!();` once at the crate root.
+The declaration makes the dispatcher available across host worker threads
+and keeps libtest output separate from command output.
 
 On Linux, the guardian transfers confinement to the process that starts the
 payload. For loopback-only commands, the namespace helper creates the private
@@ -200,9 +206,9 @@ above; the direct dependencies keep their default features disabled so the
 handoff does not add grammars or native credential-store adapters.
 
 ```toml
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.198", features = ["hostlib"] }
-harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.198", default-features = false }
-harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.198", default-features = false }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.199", features = ["hostlib"] }
+harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.199", default-features = false }
+harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.199", default-features = false }
 ```
 
 The process handoff is available in lean hostlib without additional features.

@@ -78,10 +78,11 @@ fi
 inventory_complete=1
 
 RUST_TEST_STDOUT_PATH="$events" \
+RUST_TEST_INVENTORY_PATH="$inventory" RUST_TEST_REPORTER="$reporter" \
 NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
   "$repo_root/scripts/ci/run_rust_test_lane.sh" \
   cargo-nextest nextest run --locked --workspace --profile ci \
-  --test-threads="$threads" --status-level=pass --message-format libtest-json-plus \
+  --test-threads="$threads" --no-fail-fast --status-level=pass --message-format libtest-json-plus \
   --message-format-version 0.1 &
 child_pid=$!
 wait "$child_pid" || runner_status=$?

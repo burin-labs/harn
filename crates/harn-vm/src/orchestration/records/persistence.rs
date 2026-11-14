@@ -522,9 +522,15 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.observability.is_none() {
         let persisted_path = run.persisted_path.clone();
         let persisted = persisted_path.as_deref().map(Path::new);
-        let transcript_path =
-            persisted.and_then(|path| discover_llm_transcript_sidecar(&run, path));
-        refresh_run_observability(&mut run, persisted, transcript_path.as_deref());
+        let transcript_path = match persisted {
+            Some(path) => discover_llm_transcript_sidecar(&run, path),
+            None => Ok(None),
+        };
+        refresh_run_observability(
+            &mut run,
+            persisted,
+            transcript_path.as_ref().map(|path| path.as_deref()),
+        );
     }
     Ok(run)
 }
@@ -614,7 +620,17 @@ pub(crate) fn save_run_record_with_transcript(
     sync_run_handoffs(&mut materialized);
     let transcript_path =
         materialize_llm_transcript_sidecar(&materialized, &path, active_transcript_path);
-    refresh_run_observability(&mut materialized, Some(&path), transcript_path.as_deref());
+    if let Err(error) = &transcript_path {
+        eprintln!(
+            "[harn] warning [llm_transcript_sidecar_unavailable]: {}",
+            error.kind
+        );
+    }
+    refresh_run_observability(
+        &mut materialized,
+        Some(&path),
+        transcript_path.as_ref().map(|path| path.as_deref()),
+    );
     let mut json_value = serde_json::to_value(&materialized)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
     crate::redact::current_policy().redact_json_in_place(&mut json_value);
@@ -650,7 +666,11 @@ fn normalize_evidence_identity(run: &mut RunRecord) {
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     let (mut run, _) = load_run_record_snapshot(path)?;
     let transcript_path = discover_llm_transcript_sidecar(&run, path);
-    refresh_run_observability(&mut run, Some(path), transcript_path.as_deref());
+    refresh_run_observability(
+        &mut run,
+        Some(path),
+        transcript_path.as_ref().map(|path| path.as_deref()),
+    );
     Ok(run)
 }
 

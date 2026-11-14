@@ -1,5 +1,8 @@
 #![recursion_limit = "256"]
 
+#[cfg(all(test, unix, feature = "hostlib"))]
+harn_hostlib::process_guardian_test_fixture!();
+
 mod adapter;
 pub mod adapters;
 mod auth;

@@ -35,6 +35,9 @@ use std::sync::Arc;
 mod test_support;
 
 #[cfg(test)]
+crate::process_guardian_test_fixture!();
+
+#[cfg(test)]
 #[allow(dead_code)]
 mod sandbox_host {
     use crate as host;

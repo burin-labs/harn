@@ -419,6 +419,11 @@ test-e2e:
 test-cargo:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
+.PHONY: test-hostlib-embedding
+test-hostlib-embedding:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked -p harn-hostlib --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked -p harn-hostlib --example foreground_command
+
 # Compatibility alias for the smarter default `make test`.
 test-fast:
 	@$(MAKE) test
@@ -861,6 +866,7 @@ test-pr-gate-scripts:
 	bash ./scripts/tests/prune_stale_targets_lock_test.sh
 	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	python3 ./scripts/tests/prune_stale_targets_linux_census_test.py
+	python3 ./scripts/tests/prune_stale_targets_incremental_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh

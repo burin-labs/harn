@@ -9,6 +9,22 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.199
+
+### Added
+
+- A `for_command: "git"` grant gives `git fetch`, `git push` and `git ls-remote`
+  an HTTPS login for github.com on macOS. The granted git runs from a private
+  git directory with Harn-written config, so no repository hook, helper, alias,
+  proxy or other setting runs or sees the login.
+
+### Fixed
+
+- A confined `harn serve acp` process removes its private temp directory when it exits,
+  instead of leaving one `harn-confined-*` directory behind per run.
+- Thread-count qualification now reports live test progress and retains interrupted test censuses instead of leaving a
+  cancelled run indistinguishable from a scheduler stall.
+
 ## v0.10.198
 
 ### Changed

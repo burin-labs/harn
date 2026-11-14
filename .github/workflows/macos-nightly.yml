@@ -296,13 +296,17 @@ jobs:
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
         run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
+      - name: Verify foreground-only Rust embedding
+        # Qualification can select a main ancestor without this example.
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: make test-hostlib-embedding
       - name: Stress hostlib under the original concurrency and deadline policy
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
           RUST_TEST_JOB_LIMIT_MINUTES: 90
-        run: scripts/ci/run_rust_test_lane.sh bash "$RUNNER_TEMP/native-qualification-tools/hostlib_macos_stress.sh"
+        run: bash "$RUNNER_TEMP/native-qualification-tools/hostlib_macos_stress.sh"
       - name: Upload hostlib stress evidence
         if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

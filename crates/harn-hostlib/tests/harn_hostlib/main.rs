@@ -81,3 +81,5 @@ mod tools_git;
 mod tools_outline;
 mod tools_search;
 mod workspace_checkpoint;
+#[cfg(unix)]
+harn_hostlib::process_guardian_test_fixture!();
