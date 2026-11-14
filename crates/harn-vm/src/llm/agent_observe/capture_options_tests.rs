@@ -257,7 +257,7 @@ async fn malformed_capture_options_refuse_before_runtime_capability_http() {
         install_openai_stub_provider("ollama", server.addr());
         let mut fields = DictMap::new();
         fields.put_str("provider", "ollama");
-        fields.put_str("model", "gpt-4o-mini");
+        fields.put_str("model", "llama3.2");
         if let Some((key, value)) = malformed.clone() {
             fields.put(key, value);
         }
