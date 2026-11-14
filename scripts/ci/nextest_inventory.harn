@@ -2,8 +2,11 @@ import "std/schema"
 
 pub type InventorySuite = {id: string, binary_path: string?}
 
+pub type InventoryExclusion = "ignored" | "filter-mismatch"
+
 pub type SelectedInventory = {
   selected: list<string>,
+  excluded: dict<string, InventoryExclusion>,
   skipped: int,
   ignored: int,
   unlisted: list<string>,
@@ -55,6 +58,7 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
     {additional_properties: true},
   )
   let selected: dict<string, bool> = {}
+  let excluded: dict<string, InventoryExclusion> = {}
   let unlisted: list<string> = []
   let suites: list<InventorySuite> = []
   let skipped = 0
@@ -69,16 +73,21 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
     suites = suites + [{id: binary_id, binary_path: suite["binary-path"]}]
     for test_name in suite.testcases.keys() {
       const test = suite.testcases[test_name]
+      const id = "${suite["package-name"]}::${suite["binary-name"]}$${test_name}"
+      if selected[id] != nil || excluded[id] != nil {
+        throw "inventory has duplicate testcase ${id}"
+      }
       if test.ignored {
         ignored += 1
       }
       if test["filter-match"].status == "matches" && !test.ignored {
-        const id = "${suite["package-name"]}::${suite["binary-name"]}$${test_name}"
-        if selected[id] ?? false {
-          throw "inventory has duplicate testcase ${id}"
-        }
         selected[id] = true
       } else {
+        excluded[id] = if test.ignored {
+          "ignored"
+        } else {
+          "filter-mismatch"
+        }
         skipped += 1
       }
     }
@@ -91,6 +100,7 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
   }
   return {
     selected: selected.keys(),
+    excluded: excluded,
     skipped: skipped,
     ignored: ignored,
     unlisted: unlisted,

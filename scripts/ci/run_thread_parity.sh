@@ -25,14 +25,18 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'evidence_dir=%s\n' "$tmpdir" >>"$GITHUB_OUTPUT"
 fi
 
+write_receipt() {
+  "$reporter" run --standalone --no-sandbox \
+    "$repo_root/scripts/ci/summarize_nextest_receipt.harn" -- \
+    --inventory "$inventory" --events "$events" --runner-status "$runner_status" \
+    --threads "$threads" --receipt "$receipt"
+}
+
 finish() {
   local status=$? receipt_status=0
   trap - EXIT INT TERM
   if ((inventory_complete)); then
-    "$reporter" run --standalone --no-sandbox \
-      "$repo_root/scripts/ci/summarize_nextest_receipt.harn" -- \
-      --inventory "$inventory" --events "$events" --runner-status "$runner_status" \
-      --threads "$threads" --receipt "$receipt" || receipt_status=$?
+    write_receipt || receipt_status=$?
   else
     echo "thread_parity_receipt reason=inventory-error threads=$threads inventory_status=$status" >&2
   fi
@@ -50,6 +54,10 @@ interrupt() {
   if [[ -n "$child_pid" ]]; then
     # Async Bash children inherit INT ignored. TERM reaches their cleanup trap.
     kill -s TERM "$child_pid" 2>/dev/null || true
+    # Retain progress before waiting for cleanup that a hard job stop can cut short.
+    if ((inventory_complete)); then
+      write_receipt || true
+    fi
     wait "$child_pid" 2>/dev/null || true
   fi
   exit "$status"
