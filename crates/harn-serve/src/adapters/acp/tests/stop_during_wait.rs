@@ -131,7 +131,7 @@ async fn end_parked_wait(cancel_session: bool) -> (serde_json::Value, String) {
             harn_hostlib::tools::long_running::register_result_notifier(&child.handle_id)
                 .expect("live handle");
         let mut wait_in_place = tokio::task::spawn_blocking(move || {
-            recv_within("wait_command registration", &wait_registered)
+            recv_within("wait_command registration", &wait_registered);
         });
         request_tx
             .send(serde_json::json!({
