@@ -24,6 +24,54 @@ use std::collections::BTreeMap;
 use super::*;
 use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy};
 
+#[test]
+fn relative_file_capture_keeps_the_callers_directory_when_payload_cwd_differs() {
+    let caller = std::env::current_dir().unwrap();
+    let root = tempfile::tempdir_in(&caller).unwrap();
+    let payload = root.path().join("payload");
+    std::fs::create_dir(&payload).unwrap();
+    let relative = root.path().strip_prefix(&caller).unwrap();
+    let stdout_path = relative.join("stdout");
+    let stderr_path = relative.join("stderr");
+    std::fs::write(&stdout_path, "parent stdout").unwrap();
+    std::fs::write(&stderr_path, "parent stderr").unwrap();
+    std::fs::create_dir_all(payload.join(relative)).unwrap();
+    std::fs::write(payload.join(&stdout_path), "payload stdout untouched").unwrap();
+    std::fs::write(payload.join(&stderr_path), "payload stderr untouched").unwrap();
+    let mut process = crate::process::default_spawner()
+        .spawn(SpawnSpec {
+            builtin: "relative_capture_control",
+            program: "/bin/pwd".to_string(),
+            args: Vec::new(),
+            cwd: Some(payload.clone()),
+            env: BTreeMap::new(),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Replace,
+            use_stdin: false,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::File {
+                stdout_path: stdout_path.clone(),
+                stderr_path: stderr_path.clone(),
+            },
+        })
+        .unwrap();
+    assert_eq!(process.wait().unwrap().code, Some(0));
+    assert_eq!(
+        std::fs::read_to_string(&stdout_path).unwrap(),
+        format!("{}\n", payload.canonicalize().unwrap().display())
+    );
+    assert!(std::fs::read(&stderr_path).unwrap().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(payload.join(stdout_path)).unwrap(),
+        "payload stdout untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(payload.join(stderr_path)).unwrap(),
+        "payload stderr untouched"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn guardian_request_refuses_overlapping_descriptor_custody_without_closing_the_descriptor() {
