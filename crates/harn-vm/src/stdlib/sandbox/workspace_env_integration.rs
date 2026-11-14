@@ -246,8 +246,8 @@ fn enter_policy_with_environment(
 }
 
 /// An embedder that grants `PATH` still gets the SwiftPM launchers ahead of
-/// it. Dropping them in favor of the grant sent a project script's `swift build` to the real SwiftPM, whose own nested
-/// sandbox macOS refuses.
+/// it. Dropping them in favor of the grant sent a project script's
+/// `swift build` to the real SwiftPM, whose own nested sandbox macOS refuses.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_granted_path_keeps_the_swiftpm_launchers_ahead_of_it() {
