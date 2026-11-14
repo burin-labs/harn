@@ -89,13 +89,23 @@ print_memory() {
 
 # shellcheck disable=SC2329 # invoked by traps below
 report_on_signal() {
-  local signal="$1"
-  report_resources "Rust test resources after ${signal}"
-  exit 143
+  local signal="$1" status=143
+  if [[ "$signal" == INT ]]; then
+    status=130
+  fi
+  trap - TERM INT
+  if [[ -n "$child_pid" ]]; then
+    # The owned test-env Bash child cannot trap an inherited ignored INT.
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  report_resources "Rust test resources after SIG${signal}"
+  exit "$status"
 }
 
-trap 'report_on_signal SIGTERM' TERM
-trap 'report_on_signal SIGINT' INT
+child_pid=""
+trap 'report_on_signal TERM' TERM
+trap 'report_on_signal INT' INT
 
 report_resources "Rust test resources before"
 memory_mb=unmeasured
@@ -106,10 +116,13 @@ fi
 started=$SECONDS
 status=0
 if [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
-  bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" || status=$?
+  bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" &
 else
-  bash "$test_env" --per-test-state "$@" || status=$?
+  bash "$test_env" --per-test-state "$@" &
 fi
+child_pid=$!
+wait "$child_pid" || status=$?
+child_pid=""
 duration=$((SECONDS - started))
 if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then
   report_duration_budget "$duration" "$RUST_TEST_JOB_LIMIT_MINUTES" "$memory_mb" "${RUST_TEST_FEEDBACK_BUDGET_SECONDS:-}"

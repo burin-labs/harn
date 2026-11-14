@@ -21,6 +21,14 @@ const SKIP_SEGMENTS = [
 const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
+    pattern: "scripts/tests/thread_parity_runner_test.py",
+    category: "subprocess-fixture",
+    owner: "Thread-count qualification",
+    reason:
+      "Real process groups and IPC prove wrapper signal custody and partial receipts; the existing Harn summarizer owns every census decision.",
+  },
+  {
+    kind: "exact",
     pattern: "scripts/tests/bootstrap_harn_auth_test.py",
     category: "subprocess-fixture",
     owner: "Bootstrap seed transport",
@@ -118,6 +126,14 @@ const PYTHON_ALLOWLIST = [
 ]
 
 const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "Makefile",
+    pattern:
+      r#"^\s*HARN_BIN="\$\(HARN_BIN\)"\s+python3\s+scripts/tests/thread_parity_runner_test\.py\s*$"#,
+    category: "subprocess-fixture",
+    owner: "Thread-count qualification",
+    reason: "Runs the actual IPC and signal regression after the qualified Harn CLI is available.",
+  },
   {
     path: ".github/workflows/setup-harn-contract.yml",
     pattern: r"^\s*run:\s+python3\s+scripts/tests/bootstrap_harn_auth_test\.py\s*$",
