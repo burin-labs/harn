@@ -371,6 +371,8 @@ catalog source data and pass only the stable ladder name from policy code.
 | `call_role` | string | Semantic call purpose retained in manifests and telemetry; aliases `mock_scope`, must agree with it, and is `unattributed` when undeclared. |
 | `rate_limit_consumer_id` | string | Stable fairness identity for shared provider quotas; defaults to `session_id`. |
 | `mock_scope` | string | Deterministic mock-fixture scope; real providers ignore it. |
+| `llm_transcript_dir` | string | Directory for this call's existing `llm_transcript.jsonl` and optional raw provider files. Omission inherits the active directory or `HARN_LLM_TRANSCRIPT_DIR`. |
+| `llm_transcript_raw` | bool | Overrides `HARN_LLM_TRANSCRIPT_RAW` for this call. `true` retains redacted provider request and response files; `false` disables raw capture. Omission preserves the environment default, which is off. |
 | `context_profile` | dict | Context-selection profile. |
 | `capabilities` | any | Explicit required capabilities. |
 | `prefill` | string | Assistant prefill where the route supports it. |
@@ -384,6 +386,32 @@ from `std/llm/prompts` when composing fragments. Use
 `{mode: "replace", content: string}` when `content` must be the entire system
 channel; replacement suppresses every additive prompt contributor while
 preserving tools and ordinary conversation history.
+
+#### Local transcripts
+
+Use `llm_transcript_dir` to keep separate trials in separate directories, including
+calls made directly through `harness.llm.call`. These options also pass through
+the agent loop's model calls. They never enter the provider request body.
+
+```harn
+import { LlmCallOptions } from "std/llm/options"
+
+const capture: LlmCallOptions = {
+  llm_transcript_dir: ".harn-runs/trial-a",
+  llm_transcript_raw: true,
+}
+```
+
+An explicit `true` requires an effective transcript directory. Without one,
+Harn throws a configuration record with reason code
+`llm_transcript_directory_required` before provider dispatch.
+
+Raw files use the existing `raw-provider/` layout and redaction policy.
+Each `provider_raw_capture` transcript event points to a written file.
+A write failure emits `provider_raw_capture_failed` and a redacted warning,
+without replacing a valid model answer. If the transcript itself cannot be
+written, the warning remains on stderr. A failed capture is not evidence of
+a retained request or response.
 
 #### Generation
 

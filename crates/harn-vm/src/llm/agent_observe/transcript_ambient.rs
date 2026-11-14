@@ -116,6 +116,31 @@ impl PartialEq for TranscriptDirFrame {
 
 impl Eq for TranscriptDirFrame {}
 
+/// Own one transcript frame, or transfer it to a long-lived agent session.
+pub(crate) struct TranscriptDirScope(Option<TranscriptDirFrame>);
+
+impl TranscriptDirScope {
+    pub(crate) fn push(dir: Option<&str>) -> Self {
+        Self(dir.and_then(push_llm_transcript_dir))
+    }
+
+    pub(crate) fn push_if_changed(dir: Option<&str>) -> Self {
+        Self::push(dir.filter(|dir| current_transcript_dir().as_deref() != Some(*dir)))
+    }
+
+    pub(crate) fn into_frame(mut self) -> Option<TranscriptDirFrame> {
+        self.0.take()
+    }
+}
+
+impl Drop for TranscriptDirScope {
+    fn drop(&mut self) {
+        if let Some(frame) = self.0.take() {
+            remove_llm_transcript_dir(frame);
+        }
+    }
+}
+
 /// Per-agent transcript routing and deduplication state. It is swapped with
 /// the rest of the ambient execution scope so cancellation or sibling tasks
 /// cannot leak a pushed transcript directory across executions.

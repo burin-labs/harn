@@ -5,6 +5,33 @@ use super::{
     thinking::*, tool_search::*,
 };
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
+use crate::value::DictMap;
+
+pub(super) fn transcript_options(
+    options: Option<&DictMap>,
+) -> Result<(Option<String>, Option<bool>), VmError> {
+    let dir = match options.and_then(|opts| opts.get("llm_transcript_dir")) {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::String(dir)) => Some(dir.to_string()),
+        Some(_) => {
+            return Err(generation_option_error(
+                "llm_transcript_dir",
+                "expected a string",
+            ))
+        }
+    };
+    let raw = match options.and_then(|opts| opts.get("llm_transcript_raw")) {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Bool(raw)) => Some(*raw),
+        Some(_) => {
+            return Err(generation_option_error(
+                "llm_transcript_raw",
+                "expected a boolean",
+            ))
+        }
+    };
+    Ok((dir, raw))
+}
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallOptions, VmError> {
@@ -50,6 +77,7 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
     // and budget. The persona body stays free of "if step == X use
     // cheap model" branching.
     let mut options = options;
+    let (llm_transcript_dir, llm_transcript_raw) = transcript_options(options.as_ref())?;
     apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
     project_agent_tools(&mut options)?;
@@ -946,6 +974,8 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
         routing_policy,
         region: None,
         session_id,
+        llm_transcript_dir,
+        llm_transcript_raw,
         call_stage,
         rate_limit_consumer_id,
         rate_limit_reroute_on_timeout: false,
