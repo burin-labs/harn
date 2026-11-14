@@ -815,6 +815,14 @@ statics = ["OWN_SPAWN_LAUNCHING"]
 category = "thread_private"
 plan = "thread_private_sync_scope"
 
+# A test's local server origin, granted in place of github.com; set and read
+# only by tests on their own thread.
+[[thread_local]]
+path = "src/stdlib/sandbox/git_network.rs"
+statics = ["TEST_ORIGIN"]
+category = "thread_private"
+plan = "thread_private_test"
+
 [[thread_local]]
 path = "src/stdlib/sandbox/mod.rs"
 statics = ["WARNED_KEYS"]

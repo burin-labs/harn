@@ -9,6 +9,51 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.198
+
+### Changed
+
+- `harn fix --plan`, `harn fix --apply`, and `harn fmt` process independent files
+  concurrently while preserving deterministic receipts. Set `HARN_FIX_JOBS` or
+  `HARN_FMT_JOBS` to bound workers, or use `1` for serial execution.
+- CI publishes a stripped `harn-consumer-cli.tar.zst` beside the full build-transfer
+  archive, with source-bound checksums and a compressed size limit below 100 MiB.
+- CLI startup parses arguments once and reuses the result for runtime selection,
+  Linux server confinement, and dispatch. Help and argument errors return before
+  starting the async runtime.
+  Runtime assets are warmed after argument parsing, so help and version flags
+  avoid execution setup while preserving startup configuration validation.
+- macOS confined commands can look up only a fixed list of system services instead of any service.
+
+### Fixed
+
+- ACP transport disconnection and server shutdown cancel their sessions' background commands
+  while leaving other sessions' commands running. Incomplete process cleanup is reported as unconfirmed.
+- Host lease acquisition no longer blocks cancellation on a session's runtime thread.
+  Interrupted waits leave the queue, and a lease granted during cancellation is released.
+- A session that grants `PATH` keeps the SwiftPM and pnpm sandbox launchers ahead of it,
+  so `swift build` in a confined command no longer fails on SwiftPM's nested sandbox.
+- After store initialization, host lease acquisition attempts report contention as
+  a typed deferral even when opening their SQLite connection encounters the lock.
+  Delivered guards retain cleanup across
+  busy releases, including nonexpiring leases, while cancellation and guard drop
+  leave the session thread responsive.
+- On macOS, a confined command with a loopback grant behind the managed network proxy can connect to local servers it
+  started again, so test suites that serve and call themselves, and dev servers reached with `curl localhost`, work.
+  Each spawn denies the ports that other local services listen on, and `NO_PROXY` names the loopback addresses.
+- Main health reads recorded runs from disabled workflows and preserves their measured failures or unjudged state.
+- Relocated replay command refusals expose `reason_code:
+  "replay_relocation_unconfined"` alongside the `tool_rejected` category and
+  diagnostic message. Agent tool failure receipts preserve caught structured
+  errors in `error_data`, so hosts can identify the refusal without parsing text.
+- OpenAI Responses stream failures retain their phase, partial-response, and deadline facts.
+  An eligible interruption before the first parsed response event can use the existing one-shot
+  fallback to a non-streaming request. Parsed events, including metadata without visible text,
+  and deadlines prevent automatic fallback.
+- Scoped deadlines now use the runtime clock for asynchronous waits, so paused or
+  advanced test time cannot make them expire early or miss a timeout. Blocking
+  host calls receive the remaining deadline budget on their real clock.
+
 ## v0.10.197
 
 ### Breaking

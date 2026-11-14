@@ -71,8 +71,30 @@ impl std::fmt::Debug for VmResourceHandle {
 
 type VmResourceRelease = Box<dyn FnOnce() -> Result<VmValue, String> + Send + 'static>;
 
+/// Unique ownership of a native resource's terminal cleanup.
+pub trait VmResourceCleanup: Send + 'static {
+    /// Confirm an explicit release and return its receipt.
+    fn release(self: Box<Self>) -> Result<VmValue, String>;
+
+    /// Retire an abandoned resource, retaining ownership if cleanup is deferred.
+    ///
+    /// The default performs the same synchronous release. Hosts with contended
+    /// cleanup may transfer this owner to the process-owned cleanup runtime.
+    fn abandon(self: Box<Self>) {
+        let _ = self.release();
+    }
+}
+
+struct CallbackResourceCleanup(VmResourceRelease);
+
+impl VmResourceCleanup for CallbackResourceCleanup {
+    fn release(self: Box<Self>) -> Result<VmValue, String> {
+        (self.0)()
+    }
+}
+
 struct VmResourceGuardState {
-    release: Option<VmResourceRelease>,
+    release: Option<Box<dyn VmResourceCleanup>>,
     result: Option<Result<VmValue, String>>,
 }
 
@@ -80,8 +102,8 @@ struct VmResourceGuardState {
 ///
 /// The explicit [`Self::release`] path returns a typed host receipt. If a
 /// script abandons the value through an exception, cancellation, frame
-/// teardown, or VM drop, `Drop` invokes the same idempotent callback and
-/// discards only the unreportable cleanup result.
+/// teardown, or VM drop, `Drop` transfers its unique cleanup owner to the
+/// abandonment path. The default invokes the same release callback.
 pub struct VmResourceGuardHandle {
     label: Arc<str>,
     state: Mutex<VmResourceGuardState>,
@@ -93,10 +115,15 @@ impl VmResourceGuardHandle {
         label: impl Into<Arc<str>>,
         release: impl FnOnce() -> Result<VmValue, String> + Send + 'static,
     ) -> Self {
+        Self::new_with_cleanup(label, CallbackResourceCleanup(Box::new(release)))
+    }
+
+    /// Attach one cleanup owner with explicit release and abandonment paths.
+    pub fn new_with_cleanup(label: impl Into<Arc<str>>, cleanup: impl VmResourceCleanup) -> Self {
         Self {
             label: label.into(),
             state: Mutex::new(VmResourceGuardState {
-                release: Some(Box::new(release)),
+                release: Some(Box::new(cleanup)),
                 result: None,
             }),
         }
@@ -117,7 +144,7 @@ impl VmResourceGuardHandle {
             .release
             .take()
             .expect("resource guard without callback or cached result");
-        let result = release();
+        let result = release.release();
         state.result = Some(result.clone());
         result.map_err(VmError::Runtime)
     }
@@ -139,7 +166,9 @@ impl std::fmt::Debug for VmResourceGuardHandle {
 
 impl Drop for VmResourceGuardHandle {
     fn drop(&mut self) {
-        let _ = self.release();
+        if let Some(cleanup) = self.state.get_mut().release.take() {
+            cleanup.abandon();
+        }
     }
 }
 
@@ -148,6 +177,46 @@ mod resource_guard_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn custom_cleanup_has_one_explicit_or_abandoned_owner() {
+        struct Cleanup {
+            released: Arc<AtomicUsize>,
+            abandoned: Arc<AtomicUsize>,
+        }
+        impl VmResourceCleanup for Cleanup {
+            fn release(self: Box<Self>) -> Result<VmValue, String> {
+                self.released.fetch_add(1, Ordering::SeqCst);
+                Ok(VmValue::Nil)
+            }
+            fn abandon(self: Box<Self>) {
+                self.abandoned.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let released = Arc::new(AtomicUsize::new(0));
+        let abandoned = Arc::new(AtomicUsize::new(0));
+        let guard = VmResourceGuardHandle::new_with_cleanup(
+            "explicit",
+            Cleanup {
+                released: Arc::clone(&released),
+                abandoned: Arc::clone(&abandoned),
+            },
+        );
+        guard.release().unwrap();
+        guard.release().unwrap();
+        drop(guard);
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+        assert_eq!(abandoned.load(Ordering::SeqCst), 0);
+        drop(VmResourceGuardHandle::new_with_cleanup(
+            "abandoned",
+            Cleanup {
+                released: Arc::clone(&released),
+                abandoned: Arc::clone(&abandoned),
+            },
+        ));
+        assert_eq!(released.load(Ordering::SeqCst), 1);
+        assert_eq!(abandoned.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn explicit_release_is_replayed_without_repeating_cleanup() {

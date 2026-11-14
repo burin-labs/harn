@@ -40,6 +40,18 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
         "the funnel's confined builders; command_for.rs closes their environment",
     ),
     (
+        "harn-vm/src/stdlib/sandbox/git_network.rs",
+        1,
+        "host-side `git config --file` read of one repository config before a granted \
+         spawn; clears the environment, reads no includes, and runs the trusted git",
+    ),
+    (
+        "harn-vm/src/stdlib/sandbox/self_confinement.rs",
+        1,
+        "temp-dir reaper started before self-confinement so it stays unconfined; it \
+         runs only `cat` and `rm` on the private temp dir path it was given",
+    ),
+    (
         "harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
         1,
         "setup-only availability probe; clears the environment and uses absolute programs \

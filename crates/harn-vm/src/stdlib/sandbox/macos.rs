@@ -350,11 +350,11 @@ fn render_profile_with_extra_read_roots(
          (allow signal (target same-sandbox))\n\
          (allow ipc-posix-sem (ipc-posix-name-prefix \"/mp-\"))\n\
          (allow sysctl-read)\n\
-         (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
          (allow file-read-data (literal \"/\"))\n",
     );
     profile.push_str(standard_device_profile_rules());
+    profile.push_str(MACH_SERVICES);
     for root in preset_read_roots(policy) {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -586,13 +586,44 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&ancestor)
         ));
     }
+    // A per-spawn directory may hold a socket that serves a login (a granted
+    // git's credential socket), so no confined child connects to anything
+    // there, whatever network or socket roots it was granted above.
+    if let Some(root) = super::workspace_env::grant_spawn::denied_read_root() {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            profile.push_str(&format!(
+                "(deny network-outbound (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
+    }
     // A granted spawn re-reads its own private directory inside the denied
     // per-spawn root. Later rules win, so this follows the denials, and it
-    // names only that one directory.
+    // names only that one directory. The denial names metadata on its own,
+    // which a wildcard read grant does not outrank, so the grant names it too:
+    // without it the directory reads but cannot be listed or stat'd, and a
+    // granted git refuses it as "not a git repository". Resolving the
+    // directory's real path also stats the per-spawn root itself, which is
+    // allowed as that one literal: its listing stays denied.
     if let Some(own) = super::workspace_env::grant_spawn::own_spawn_read_root() {
         for path in sandbox_profile_path_aliases(&own.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
+                "(allow file-read* (subpath \"{escaped}\"))\n\
+                 (allow file-read-metadata (subpath \"{escaped}\"))\n"
+            ));
+            if let Some(root) = std::path::Path::new(&path).parent() {
+                profile.push_str(&format!(
+                    "(allow file-read-metadata (literal \"{}\"))\n",
+                    sandbox_profile_escape(&root.display().to_string())
+                ));
+            }
+        }
+        // A granted git asks its own per-spawn credential socket for its login.
+        let socket = own.join(super::workspace_env::git_network::CREDENTIAL_SOCKET);
+        for path in sandbox_profile_path_aliases(&socket.display().to_string()) {
+            profile.push_str(&format!(
+                "(allow network-outbound (literal \"{}\"))\n",
                 sandbox_profile_escape(&path)
             ));
         }
@@ -771,6 +802,38 @@ fn standard_device_profile_rules() -> &'static str {
        (subpath \"/dev/fd\"))\n"
 }
 
+/// The system services a confined command may look up. A service runs
+/// outside the command's profile, so only services a command needs are
+/// reachable, as defense in depth. Seeded from the Chromium and
+/// OpenAI Codex CLI Seatbelt base policies, then trimmed and extended by the
+/// lookups that Rust, Go, Node, Python, Swift, Xcode tools and git, including
+/// its keychain credential helper, make on macOS.
+const MACH_SERVICES: &str = "(allow mach-lookup\n\
+       (global-name \"com.apple.system.opendirectoryd.libinfo\")\n\
+       (global-name \"com.apple.system.opendirectoryd.membership\")\n\
+       (global-name \"com.apple.system.DirectoryService.libinfo_v1\")\n\
+       (global-name \"com.apple.bsd.dirhelper\")\n\
+       (global-name \"com.apple.system.notification_center\")\n\
+       (global-name \"com.apple.logd\")\n\
+       (global-name \"com.apple.logd.events\")\n\
+       (global-name \"com.apple.system.logger\")\n\
+       (global-name \"com.apple.analyticsd\")\n\
+       (global-name \"com.apple.analyticsd.messagetracer\")\n\
+       (global-name \"com.apple.cfprefsd.daemon\")\n\
+       (global-name \"com.apple.cfprefsd.agent\")\n\
+       (global-name \"com.apple.SecurityServer\")\n\
+       (global-name \"com.apple.securityd.xpc\")\n\
+       (global-name \"com.apple.trustd\")\n\
+       (global-name \"com.apple.trustd.agent\")\n\
+       (global-name \"com.apple.ocspd\")\n\
+       (global-name \"com.apple.TrustEvaluationAgent\")\n\
+       (global-name \"com.apple.SystemConfiguration.configd\")\n\
+       (global-name \"com.apple.SystemConfiguration.DNSConfiguration\")\n\
+       (global-name \"com.apple.FSEvents\")\n\
+       (global-name \"com.apple.security.syspolicy.exec\")\n\
+       (global-name \"com.apple.secinitd\")\n\
+       (global-name \"com.apple.PowerManagement.control\"))\n";
+
 #[cfg(test)]
 #[path = "macos_tests.rs"]
 mod tests;
@@ -782,6 +845,10 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/mach_services_tests.rs"]
+mod mach_services_tests;
 
 #[cfg(test)]
 #[path = "macos/socket_root_tests.rs"]
