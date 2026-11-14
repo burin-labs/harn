@@ -3,6 +3,27 @@ use std::cell::Cell;
 use super::*;
 
 #[test]
+fn immediate_acquire_reports_registry_contention_without_enqueuing() {
+    let temp = TempDir::new().unwrap();
+    let (store, _clock) = paused_store(&temp);
+    let mut writer = Connection::open(&store.db_path).unwrap();
+    let transaction = writer
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    let receipt = store
+        .acquire_wait_interruptible(request("immediate"), Duration::ZERO, &|| false)
+        .unwrap();
+    assert_eq!(receipt.status, HostLeaseAcquireStatus::Deferred);
+    assert_eq!(
+        receipt.defer.unwrap().deferred_reason,
+        HostLeaseDeferReason::RegistryBusy
+    );
+    assert!(receipt.queue.is_none());
+    transaction.commit().unwrap();
+    assert!(store.status("mac-local").unwrap().pending.is_empty());
+}
+
+#[test]
 fn immediate_acquire_does_not_require_a_watchable_wake_file() {
     let temp = TempDir::new().unwrap();
     let (store, _clock) = paused_store(&temp);

@@ -25,7 +25,11 @@ impl<'a> AcquireScope<'a> {
     }
 
     fn observe(&mut self, receipt: &HostLeaseAcquireReceipt) {
-        self.queued = receipt.status == HostLeaseAcquireStatus::Deferred;
+        if receipt.status == HostLeaseAcquireStatus::Acquired {
+            self.queued = false;
+        } else {
+            self.queued |= receipt.queue.is_some();
+        }
         self.grant = receipt.handle.clone();
     }
 
@@ -45,19 +49,35 @@ impl<'a> AcquireScope<'a> {
 impl Drop for AcquireScope<'_> {
     fn drop(&mut self) {
         if let Some(handle) = self.grant.take() {
-            if let Err(error) = self.store.release_for_domain(
-                &handle.host,
-                handle.resource_class,
-                &handle.domain,
-                &handle.lease_id,
-            ) {
+            if let Err(error) = retry_registry_cleanup(|| {
+                self.store.release_for_domain(
+                    &handle.host,
+                    handle.resource_class,
+                    &handle.domain,
+                    &handle.lease_id,
+                )
+            }) {
                 tracing::warn!(lease_id = %handle.lease_id, %error, "host lease grant cleanup remains unconfirmed");
             }
         }
         if self.queued {
-            if let Err(error) = self.store.remove_waiter(self.waiter_id) {
+            if let Err(error) = retry_registry_cleanup(|| self.store.remove_waiter(self.waiter_id))
+            {
                 tracing::warn!(waiter_id = self.waiter_id, %error, "host lease waiter cleanup remains unconfirmed");
             }
+        }
+    }
+}
+
+fn retry_registry_cleanup<T>(
+    mut operation: impl FnMut() -> Result<T, HostLeaseError>,
+) -> Result<T, HostLeaseError> {
+    loop {
+        match operation() {
+            // The blocking acquire owner retains cleanup across lock windows.
+            // Each attempt still uses SQLite's normal busy backoff.
+            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => {}
+            result => return result,
         }
     }
 }
@@ -73,11 +93,12 @@ impl HostLeaseStore {
         if interrupted() {
             return Err(HostLeaseError::Interrupted);
         }
-        let receipt = self.try_acquire_once(
+        let receipt = self.try_acquire_once_with_registry_timeout(
             request,
             None,
             Some(identity.requested_at_ms.saturating_add(60_000)),
             &identity,
+            INTERRUPT_POLL_INTERVAL,
         )?;
         scope.observe(&receipt);
         if interrupted() {
@@ -211,3 +232,7 @@ impl HostLeaseStore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "wait_cleanup_tests.rs"]
+mod cleanup_tests;
