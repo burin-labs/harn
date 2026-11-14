@@ -245,9 +245,8 @@ fn enter_policy_with_environment(
     PolicyGuard
 }
 
-/// An embedder that grants `PATH` (Burin's headless sessions do) still gets
-/// the SwiftPM launchers ahead of it. Dropping them in favor of the grant sent
-/// a project script's `swift build` to the real SwiftPM, whose own nested
+/// An embedder that grants `PATH` still gets the SwiftPM launchers ahead of
+/// it. Dropping them in favor of the grant sent a project script's `swift build` to the real SwiftPM, whose own nested
 /// sandbox macOS refuses.
 #[cfg(target_os = "macos")]
 #[test]
