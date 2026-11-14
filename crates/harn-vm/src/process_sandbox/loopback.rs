@@ -234,7 +234,10 @@ pub(crate) fn reconcile(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     // Seatbelt cannot tell this command's listeners from other local services,
     // so a connection to either goes through the proxy or nowhere.
     #[cfg(target_os = "macos")]
-    if policy.process_sandbox.allow_tcp_loopback
+    // The same three facts that resolve the grant to a loopback grant behind
+    // the proxy; `deny_network` takes precedence over both.
+    if !policy.process_sandbox.deny_network
+        && policy.process_sandbox.allow_tcp_loopback
         && policy.process_network_proxy.is_some()
         && !BEHIND_PROXY_NOTICE_EMITTED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
