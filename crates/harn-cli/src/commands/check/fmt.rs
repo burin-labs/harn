@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use harn_fmt::{format_source_opts, line_width_violations, FmtOptions};
@@ -103,6 +104,15 @@ pub(crate) fn fmt_targets_json(
 }
 
 pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOptions) -> FmtReport {
+    fmt_targets_report_with_workers(targets, mode, opts, None)
+}
+
+fn fmt_targets_report_with_workers(
+    targets: &[&str],
+    mode: FmtMode,
+    opts: &FmtOptions,
+    workers: Option<usize>,
+) -> FmtReport {
     let mut files = Vec::new();
     for target in targets {
         let path = Path::new(target);
@@ -127,9 +137,40 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
         files: Vec::new(),
         summary: FmtSummary::default(),
     };
-    for file in files {
-        let path_str = file.to_string_lossy();
-        let file_report = fmt_file_inner(&path_str, mode, opts);
+    let groups = format_file_groups(&files);
+    let workers =
+        workers.unwrap_or_else(|| super::worker_count_for_env(groups.len(), "HARN_FMT_JOBS"));
+    let mut file_reports: Vec<_> = super::run_ordered(
+        &groups,
+        workers,
+        || (),
+        |(), group| {
+            group
+                .iter()
+                .map(|(index, file)| (*index, fmt_file_inner(&file.to_string_lossy(), mode, opts)))
+                .collect::<Vec<_>>()
+        },
+        |group| {
+            group
+                .iter()
+                .map(|(index, file)| {
+                    (
+                        *index,
+                        fmt_error(
+                            &file.to_string_lossy(),
+                            "internal",
+                            "internal formatter failure".into(),
+                        ),
+                    )
+                })
+                .collect()
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
+    file_reports.sort_by_key(|(index, _)| *index);
+    for (_, file_report) in file_reports {
         match file_report.status {
             FmtFileStatus::Formatted => report.summary.formatted += 1,
             FmtFileStatus::AlreadyFormatted => report.summary.already_formatted += 1,
@@ -139,6 +180,61 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
         report.files.push(file_report);
     }
     report
+}
+
+#[derive(Eq, Hash, PartialEq)]
+enum FormatFileIdentity {
+    Physical(u64, u64),
+    Path(PathBuf),
+}
+
+// Aliases retain their own diagnostics and report order, but must never read
+// while another spelling of the same file is being truncated and rewritten.
+fn format_file_groups(files: &[PathBuf]) -> Vec<Vec<(usize, &Path)>> {
+    let mut identities = HashMap::new();
+    let mut groups: Vec<Vec<(usize, &Path)>> = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        let identity = physical_file_identity(file).map_or_else(
+            || FormatFileIdentity::Path(file.canonicalize().unwrap_or_else(|_| file.clone())),
+            |(volume, file)| FormatFileIdentity::Physical(volume, file),
+        );
+        let group = identities.entry(identity).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[*group].push((index, file));
+    }
+    groups
+}
+
+#[cfg(unix)]
+fn physical_file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = path.metadata().ok()?;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn physical_file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let file = std::fs::File::open(path).ok()?;
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // The live File owns the handle and the output has the required OS layout.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return None;
+    }
+    Some((
+        u64::from(info.dwVolumeSerialNumber),
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn physical_file_identity(_path: &Path) -> Option<(u64, u64)> {
+    None
 }
 
 /// Format a single file.
@@ -310,6 +406,145 @@ fn diff_lines_changed(before: &str, after: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parallel_format_serializes_absolute_relative_and_hard_link_aliases() {
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir_in(&cwd).unwrap();
+        let file = dir.path().join("source.harn");
+        let linked = dir.path().join("linked.harn");
+        let unsupported = dir.path().join("unsupported.json");
+        let source = "fn value(){return 1}\n";
+        std::fs::write(&file, source).unwrap();
+        std::fs::hard_link(&file, &linked).unwrap();
+        std::fs::hard_link(&file, &unsupported).unwrap();
+        let relative = file.strip_prefix(&cwd).unwrap().to_path_buf();
+        let files = [relative, file.clone(), linked, unsupported];
+        let groups = format_file_groups(&files);
+        assert_eq!(groups.len(), 1, "every spelling must share one writer");
+        assert_eq!(groups[0].len(), files.len());
+        let targets: Vec<_> = files.iter().map(|path| path.to_str().unwrap()).collect();
+        let report = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Write,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(report.files.len(), files.len());
+        assert_eq!(report.summary.formatted, 1);
+        assert_eq!(report.summary.already_formatted, 2);
+        assert_eq!(report.summary.errors, 1);
+        assert!(report.files.iter().any(|file| file
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "unsupported_extension")));
+        assert_eq!(
+            std::fs::read_to_string(file).unwrap(),
+            format_source_opts(source, &FmtOptions::default()).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_format_serializes_symlink_aliases_and_keeps_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("source.harn");
+        std::fs::write(&file, "fn value(){return 1}\n").unwrap();
+        let mut files = vec![file];
+        for index in 0..24 {
+            let alias = dir.path().join(format!("alias{index:02}.harn"));
+            std::os::unix::fs::symlink(&files[0], &alias).unwrap();
+            files.push(alias);
+        }
+        files.sort();
+        assert_eq!(format_file_groups(&files).len(), 1);
+        let targets: Vec<_> = files.iter().map(|path| path.to_str().unwrap()).collect();
+        let report = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Write,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(report.summary.formatted, 1);
+        assert_eq!(report.summary.already_formatted, 24);
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(
+            report
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            targets
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_format_keeps_alias_specific_invalid_fixture_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.harn");
+        let alias = dir.path().join("alias.harn");
+        std::fs::write(&source, "fn broken(\n").unwrap();
+        std::os::unix::fs::symlink(&source, &alias).unwrap();
+        std::fs::write(alias.with_extension("error"), "parse error\n").unwrap();
+        let report = fmt_targets_report_with_workers(
+            &[source.to_str().unwrap(), alias.to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(report.files.len(), 2);
+        assert_eq!(report.summary.skipped, 1);
+        assert_eq!(report.summary.errors, 1);
+    }
+
+    #[test]
+    fn parallel_format_reports_are_identical_and_reach_every_file() {
+        let dir = tempfile::tempdir().unwrap();
+        for index in 0..24 {
+            std::fs::write(
+                dir.path().join(format!("file{index:02}.harn")),
+                "fn value(){return 1}\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(dir.path().join("broken.harn"), "fn broken(\n").unwrap();
+        let targets = [dir.path().to_str().unwrap()];
+        let serial = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(1),
+        );
+        let parallel = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(serial.files.len(), 25);
+        assert_eq!(serial.summary.errors, 25);
+        assert_eq!(
+            serde_json::to_string(&serial).unwrap(),
+            serde_json::to_string(&parallel).unwrap()
+        );
+        let written = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Write,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(written.summary.formatted, 24);
+        assert_eq!(written.summary.errors, 1);
+        let checked = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(checked.summary.already_formatted, 24);
+        assert_eq!(checked.summary.errors, 1);
+    }
 
     #[test]
     fn explicit_non_harn_file_targets_are_rejected() {

@@ -2,6 +2,59 @@ use super::*;
 use std::fs;
 use std::path::PathBuf;
 
+#[test]
+fn parallel_plans_preserve_diagnostics_repairs_and_invalid_files() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("lib.harn"),
+        "pub fn value() -> int { return 1 }\n",
+    )
+    .unwrap();
+    for index in 0..24 {
+        fs::write(
+            dir.path().join(format!("entry{index:02}.harn")),
+            "import {value} from \"./lib\"\nfn main(harness: Harness) { let result = value()\nharness.stdio.println(result) }\n",
+        ).unwrap();
+    }
+    fs::write(dir.path().join("broken.harn"), "fn broken(\n").unwrap();
+    fs::write(dir.path().join("declared.harn"), "fn declared(\n").unwrap();
+    fs::write(dir.path().join("declared.error"), "parse error\n").unwrap();
+    let targets = [dir.path().to_path_buf()];
+    let serial = build_plan_with_workers(&targets, None, &FixOptions::default(), Some(1)).unwrap();
+    let parallel =
+        build_plan_with_workers(&targets, None, &FixOptions::default(), Some(4)).unwrap();
+    assert!(!serial.repairs.is_empty(), "fixture must reach a repair");
+    assert_eq!(serial.skipped_files.len(), 1);
+    assert_eq!(serial.declared_invalid_files.len(), 1);
+    assert_eq!(
+        serde_json::to_string_pretty(&serial).unwrap(),
+        serde_json::to_string_pretty(&parallel).unwrap()
+    );
+}
+
+#[test]
+fn parallel_plans_deduplicate_same_named_frozen_callables() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a", "b"] {
+        fs::write(
+            dir.path().join(format!("{name}.harn")),
+            "@host_entry\nfn handler(path: string) -> string { return read_text(path) }\n",
+        )
+        .unwrap();
+    }
+    for workers in [1, 4] {
+        let plan = build_plan_with_workers(
+            &[dir.path().to_path_buf()],
+            None,
+            &FixOptions::capability_migrations(),
+            Some(workers),
+        )
+        .unwrap();
+        assert_eq!(plan.frozen_callables.len(), 1, "{plan:?}");
+        assert_eq!(plan.frozen_callables[0].name, "handler");
+    }
+}
+
 fn named_type(name: &str) -> TypeExpr {
     TypeExpr::Named(name.to_string())
 }
