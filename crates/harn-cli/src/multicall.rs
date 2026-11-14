@@ -31,7 +31,7 @@ pub fn main() {
         cli_diagnostic!("error: {error}");
         std::process::exit(2);
     }
-    match harn_vm::initialize_runtime() {
+    match harn_vm::validate_runtime_configuration() {
         Err(error) => {
             cli_diagnostic!("error: {error}");
             std::process::exit(2);
@@ -72,7 +72,10 @@ fn run_sidecar(name: &str, serve: fn()) {
     match sidecar_query(std::env::args_os().skip(1)) {
         Some(SidecarQuery::Version) => println!("{name} {}", env!("CARGO_PKG_VERSION")),
         Some(SidecarQuery::Help) => print_sidecar_help(name),
-        None => serve(),
+        None => {
+            harn_vm::initialize_runtime_assets();
+            serve();
+        }
     }
 }
 

@@ -134,6 +134,11 @@ when none is installed. It also rejects an empty or relative `$HARN_CACHE_DIR`
 and returns a warning when no cache directory resolves, so embedding hosts see
 the same bytecode-cache contract as the CLI.
 
+The CLI validates this configuration even for help and version flags. It warms
+execution assets only after argument parsing. Hosts with a similar split can
+call `harn_vm::validate_runtime_configuration()` first, then
+`harn_vm::initialize_runtime_assets()` before executing Harn.
+
 | Variable | Field |
 |---|---|
 | `HARN_CONFIG_JSON` | Arbitrary JSON config overlay |

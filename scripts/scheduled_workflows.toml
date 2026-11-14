@@ -39,6 +39,7 @@ crons = ["47 11 * * *"]
 cadence_reason = "Daily detects gradual startup regressions; minute 47 avoids contending with the vulnerability audit."
 job_ids = ["cold-start-budget"]
 health_failures = 3
+health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
 path = ".github/workflows/consumer-canary.yml"

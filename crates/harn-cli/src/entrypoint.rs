@@ -5,28 +5,18 @@
 use crate::cli::{ConfigCommand, PackageRegistryCommand};
 use crate::*;
 
-#[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
-pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
-    // Install the OTLP exporter sink before any subcommand runs so a
-    // 20+ minute autonomous session has spans streaming to the
-    // configured collector from the first turn. When neither
-    // `HARN_OTEL_ENDPOINT` nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set
-    // this is a no-op. A misconfigured endpoint logs and continues —
-    // local observability is opt-in and must never fail the run.
-    if runtime_mode.enables_tokio_io() {
-        if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
-            harn_vm::events::log_warn("telemetry", &format!("OTel exporter disabled: {error}"));
-        }
-    }
-
+#[allow(clippy::large_stack_frames)] // Clap materializes the complete typed argument tree.
+pub(crate) fn parse_cli(raw_args: Vec<String>) -> Cli {
+    let command = localization::command();
+    let mut raw_args = normalize_serve_args(raw_args, &command);
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
         raw_args.insert(1, "run".to_string());
     }
 
-    let parsed = localization::command()
+    let parsed = command
         .try_get_matches_from(&raw_args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
-    let cli = match parsed {
+    match parsed {
         Ok(cli) => cli,
         Err(error) => {
             if matches!(
@@ -46,7 +36,17 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
             harn_vm::events::log_status(message);
             std::process::exit(error.exit_code());
         }
-    };
+    }
+}
+
+#[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
+pub(crate) async fn async_main(cli: Cli, runtime_mode: CliRuntimeMode) {
+    // Install the exporter before dispatch while its Tokio I/O runtime is live.
+    if runtime_mode.enables_tokio_io() {
+        if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
+            harn_vm::events::log_warn("telemetry", &format!("OTel exporter disabled: {error}"));
+        }
+    }
 
     if cli.json_schemas {
         commands::json_schemas::run(cli.schema_command.as_deref());
@@ -1045,12 +1045,14 @@ pub(crate) fn print_completions(shell: CompletionShell) {
 /// The set of transports is read from the clap command tree rather than
 /// hard-coded, so a newly added transport (e.g. `site`) is recognized
 /// automatically instead of being silently rewritten to `a2a`.
-pub(crate) fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
+fn normalize_serve_args(mut raw_args: Vec<String>, command: &clap::Command) -> Vec<String> {
     if raw_args.len() > 2 && raw_args.get(1).is_some_and(|arg| arg == "serve") {
         let token = raw_args.get(2).map(String::as_str).unwrap_or_default();
         let is_explicit = token == "-h"
             || token == "--help"
-            || serve_subcommand_names().iter().any(|name| name == token);
+            || serve_subcommand_names(command)
+                .iter()
+                .any(|name| name == token);
         if !is_explicit {
             raw_args.insert(2, "a2a".to_string());
         }
@@ -1059,9 +1061,8 @@ pub(crate) fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
 }
 
 /// Names of the transport subcommands clap knows under `harn serve`.
-pub(crate) fn serve_subcommand_names() -> Vec<String> {
-    use clap::CommandFactory;
-    Cli::command()
+fn serve_subcommand_names(command: &clap::Command) -> Vec<String> {
+    command
         .find_subcommand("serve")
         .map(|serve| {
             serve
@@ -1237,16 +1238,21 @@ pub(crate) fn verify_provenance_receipt(path: &str, json: bool) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::{normalize_serve_args, serve_subcommand_names};
+    use crate::cli::Cli;
+    use clap::CommandFactory;
 
     #[test]
     fn normalize_serve_args_inserts_a2a_for_legacy_shape() {
-        let args = normalize_serve_args(vec![
-            "harn".to_string(),
-            "serve".to_string(),
-            "--port".to_string(),
-            "3000".to_string(),
-            "agent.harn".to_string(),
-        ]);
+        let args = normalize_serve_args(
+            vec![
+                "harn".to_string(),
+                "serve".to_string(),
+                "--port".to_string(),
+                "3000".to_string(),
+                "agent.harn".to_string(),
+            ],
+            &Cli::command(),
+        );
         assert_eq!(
             args,
             vec![
@@ -1266,13 +1272,17 @@ mod tests {
         // transport that the shim failed to recognize would be rewritten
         // to `a2a` and mis-parsed (the `site` regression that motivated
         // deriving the list from clap rather than hard-coding it).
-        for transport in serve_subcommand_names() {
-            let args = normalize_serve_args(vec![
-                "harn".to_string(),
-                "serve".to_string(),
-                transport.clone(),
-                "server.harn".to_string(),
-            ]);
+        let command = Cli::command();
+        for transport in serve_subcommand_names(&command) {
+            let args = normalize_serve_args(
+                vec![
+                    "harn".to_string(),
+                    "serve".to_string(),
+                    transport.clone(),
+                    "server.harn".to_string(),
+                ],
+                &command,
+            );
             assert_eq!(
                 args,
                 vec![
@@ -1288,12 +1298,15 @@ mod tests {
 
     #[test]
     fn normalize_serve_args_recognizes_site_subcommand() {
-        let args = normalize_serve_args(vec![
-            "harn".to_string(),
-            "serve".to_string(),
-            "site".to_string(),
-            "server.harn".to_string(),
-        ]);
+        let args = normalize_serve_args(
+            vec![
+                "harn".to_string(),
+                "serve".to_string(),
+                "site".to_string(),
+                "server.harn".to_string(),
+            ],
+            &Cli::command(),
+        );
         assert_eq!(args.get(2).map(String::as_str), Some("site"));
     }
 }

@@ -214,25 +214,21 @@ fn acp_server_confinement(args: &ServeAcpArgs) -> Option<harn_serve::AcpServerCo
 /// refuses to confine at all. macOS Seatbelt is process-wide, so there the
 /// server confines later, once its config has finished reading the host.
 #[cfg(target_os = "linux")]
-pub(crate) fn confine_before_runtime(raw_args: &[String]) -> Result<(), String> {
-    use clap::Parser as _;
-    let Ok(cli) = crate::cli::Cli::try_parse_from(raw_args) else {
-        return Ok(());
-    };
+pub(crate) fn confine_before_runtime(cli: &crate::cli::Cli) -> Result<(), String> {
     let Some(crate::cli::Command::Serve(crate::cli::ServeArgs {
         command: ServeCommand::Acp(args),
-    })) = cli.command
+    })) = &cli.command
     else {
         return Ok(());
     };
     // A WebSocket server with the flag is refused once the command runs.
     let Some(confinement) =
-        acp_server_confinement(&args).filter(|_| args.transport == AcpServeTransport::Stdio)
+        acp_server_confinement(args).filter(|_| args.transport == AcpServeTransport::Stdio)
     else {
         return Ok(());
     };
     let config =
-        harn_serve::AcpServerConfig::new(args.file.clone()).with_sandbox(acp_sandbox_config(&args));
+        harn_serve::AcpServerConfig::new(args.file.clone()).with_sandbox(acp_sandbox_config(args));
     harn_serve::confine_acp_server_process(&config, &confinement)
         .map(|_| ())
         .map_err(|error| format!("--confine-workspace: {error}"))
