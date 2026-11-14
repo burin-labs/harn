@@ -677,6 +677,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stdout_thread = handle.take_stdout().map(|out| {
         spawn_output_drain(
             out,
+            context.private_filter.stream(),
             context.output_feed.clone(),
             planned.stdout_path.clone(),
             combined_file.clone(),
@@ -686,6 +687,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stderr_thread = handle.take_stderr().map(|err| {
         spawn_output_drain(
             err,
+            context.private_filter.stream(),
             context.output_feed.clone(),
             planned.stderr_path.clone(),
             combined_file.clone(),
@@ -746,16 +748,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        (
-            context
-                .private_filter
-                .redact_bytes(&state.stdout)
-                .into_owned(),
-            context
-                .private_filter
-                .redact_bytes(&state.stderr)
-                .into_owned(),
-        )
+        (state.stdout.clone(), state.stderr.clone())
     };
     if let Err(error) = waited.as_ref() {
         stderr
@@ -973,8 +966,12 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
 }
 
+/// Drain one output pipe. Bytes are redacted here, before the progress
+/// snapshots, the output waits and their matcher, the final result, and the
+/// artifact files the agent is pointed at can read them.
 fn spawn_output_drain(
     mut reader: Box<dyn Read + Send>,
+    mut redactor: harn_vm::session_inputs::StreamRedactor,
     output_feed: Arc<OutputFeed>,
     path: std::path::PathBuf,
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
@@ -982,14 +979,7 @@ fn spawn_output_drain(
 ) -> std::thread::JoinHandle<()> {
     harn_parser::runtime_stack::spawn(move || {
         let mut file = std::fs::File::create(path).ok();
-        let mut buf = [0_u8; 8192];
-        loop {
-            let read = match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(_) => break,
-            };
-            let chunk = &buf[..read];
+        let mut deliver = |chunk: &[u8]| {
             if let Some(file) = file.as_mut() {
                 let _ = file.write_all(chunk);
             }
@@ -1008,6 +998,19 @@ fn spawn_output_drain(
                 state.last_output_at = Some(std::time::Instant::now());
             }
             output_feed.notify.notify_waiters();
+        };
+        let mut buf = [0_u8; 8192];
+        loop {
+            let read = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(_) => break,
+            };
+            deliver(&redactor.push(&buf[..read]));
+        }
+        let rest = redactor.finish();
+        if !rest.is_empty() {
+            deliver(&rest);
         }
     })
 }

@@ -361,46 +361,65 @@ impl SessionInputs {
 
     /// Copy unmatched bytes unchanged, including non-text command output.
     pub fn redact_bytes(&self, text: &[u8]) -> Vec<u8> {
+        let Some(spans) = secret_spans(&self.secret_values(), text) else {
+            return b"[redacted]".to_vec();
+        };
+        let mut result = Vec::with_capacity(text.len());
+        let mut cursor = 0;
+        for span in spans {
+            result.extend_from_slice(&text[cursor..span.start]);
+            result.extend_from_slice(b"[redacted]");
+            cursor = span.end;
+        }
+        result.extend_from_slice(&text[cursor..]);
+        result
+    }
+
+    /// How many leading bytes of `text`, a stream that may continue, can be
+    /// redacted now. The rest is a tail that begins some secret, so later
+    /// bytes could complete it, moved back to the start of any match it would
+    /// split. Redacting each settled prefix in turn, and what remains when the
+    /// stream ends, covers every secret redacting the whole stream would.
+    /// Only a real secret prefix is held, so output that pauses is not delayed.
+    pub fn settled_len(&self, text: &[u8]) -> usize {
+        let secrets = self.secret_values();
+        let Some(longest) = secrets.first().map(|secret| secret.len()) else {
+            return text.len();
+        };
+        let mut settled = (text.len().saturating_sub(longest - 1)..text.len())
+            .find(|&start| {
+                let tail = &text[start..];
+                secrets
+                    .iter()
+                    .any(|secret| secret.len() > tail.len() && secret.starts_with(tail))
+            })
+            .unwrap_or(text.len());
+        let Some(spans) = secret_spans(&secrets, text) else {
+            // Past the match bound the whole text redacts to one marker.
+            return text.len();
+        };
+        if let Some(span) = spans
+            .iter()
+            .find(|span| span.start < settled && settled < span.end)
+        {
+            settled = span.start;
+        }
+        settled
+    }
+
+    /// Every distinct nonempty secret this store filters, longest first.
+    fn secret_values(&self) -> Vec<&[u8]> {
         let mut secrets: Vec<&[u8]> = self
             .entries
             .values()
             .filter(|entry| entry.spec.kind == InputKind::Secret)
             .map(|entry| entry.value.as_bytes())
             .chain(self.retired.iter().map(|value| value.as_bytes()))
+            .filter(|value| !value.is_empty())
             .collect();
         secrets.sort_unstable_by(|left, right| right.len().cmp(&left.len()).then(left.cmp(right)));
         secrets.dedup();
-        let mut next_matches: Vec<Option<usize>> = secrets
-            .iter()
-            .map(|value| memchr::memmem::find(text, value))
-            .collect();
-        let mut result = Vec::new();
-        let mut cursor = 0;
-        let mut match_count = 0;
-        loop {
-            let next = next_matches
-                .iter()
-                .enumerate()
-                .filter_map(|(index, start)| start.map(|start| (index, start)))
-                .min_by_key(|(index, start)| (*start, std::cmp::Reverse(secrets[*index].len())));
-            let Some((index, start)) = next else { break };
-            match_count += 1;
-            if match_count > MAX_REDACTION_MATCHES {
-                return b"[redacted]".to_vec();
-            }
-            if start >= cursor {
-                result.extend_from_slice(&text[cursor..start]);
-                result.extend_from_slice(b"[redacted]");
-            }
-            cursor = cursor.max(start + secrets[index].len());
-            // Match starts advance through the original text, including
-            // overlaps. Replacement text is never searched again.
-            let after_start = start + 1;
-            next_matches[index] = memchr::memmem::find(&text[after_start..], secrets[index])
-                .map(|next| after_start + next);
-        }
-        result.extend_from_slice(&text[cursor..]);
-        result
+        secrets
     }
 
     /// Destroy the grants. Keep the bounded redaction set until this owner is
@@ -456,6 +475,39 @@ impl SessionInputs {
             self.retained_bytes -= entry.value.len();
         }
     }
+}
+
+/// The merged byte ranges of `text` that `secrets` (longest first) cover, or
+/// `None` past the match bound. Match starts advance through the original
+/// text, including overlaps, so overlapping matches merge into one range.
+fn secret_spans(secrets: &[&[u8]], text: &[u8]) -> Option<Vec<std::ops::Range<usize>>> {
+    let mut next_matches: Vec<Option<usize>> = secrets
+        .iter()
+        .map(|value| memchr::memmem::find(text, value))
+        .collect();
+    let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut match_count = 0;
+    loop {
+        let next = next_matches
+            .iter()
+            .enumerate()
+            .filter_map(|(index, start)| start.map(|start| (index, start)))
+            .min_by_key(|(index, start)| (*start, std::cmp::Reverse(secrets[*index].len())));
+        let Some((index, start)) = next else { break };
+        match_count += 1;
+        if match_count > MAX_REDACTION_MATCHES {
+            return None;
+        }
+        let end = start + secrets[index].len();
+        match spans.last_mut() {
+            Some(last) if start < last.end => last.end = last.end.max(end),
+            _ => spans.push(start..end),
+        }
+        let after_start = start + 1;
+        next_matches[index] = memchr::memmem::find(&text[after_start..], secrets[index])
+            .map(|next| after_start + next);
+    }
+    Some(spans)
 }
 
 fn describe(spec: &InputSpec, value: &str) -> InputDescription {
