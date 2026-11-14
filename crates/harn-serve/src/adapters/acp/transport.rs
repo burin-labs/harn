@@ -586,6 +586,8 @@ pub async fn run_acp_server(config: AcpServerConfig) {
     if profile_enabled {
         harn_vm::tracing::set_tracing_enabled(false);
     }
+    // The server has stopped; a confined process's private temp dir is spent.
+    harn_vm::process_sandbox::remove_process_temp_dir();
 }
 
 /// The router lane reads every incoming frame while the dispatcher may be busy

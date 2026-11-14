@@ -40,6 +40,12 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
         "the funnel's confined builders; command_for.rs closes their environment",
     ),
     (
+        "harn-vm/src/stdlib/sandbox/self_confinement.rs",
+        1,
+        "temp-dir reaper started before self-confinement so it stays unconfined; it \
+         runs only `cat` and `rm` on the private temp dir path it was given",
+    ),
+    (
         "harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
         1,
         "setup-only availability probe; clears the environment and uses absolute programs \

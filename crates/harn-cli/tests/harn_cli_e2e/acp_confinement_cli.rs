@@ -505,3 +505,53 @@ pub(crate) fn confined_import_outside_the_workspace_reports_the_denied_read() {
     );
     client.shutdown_expect_success();
 }
+
+/// A confined server makes a private temp dir under the host temp dir and
+/// must remove it when it exits normally, or every run leaves one behind.
+#[test]
+pub(crate) fn confined_server_removes_its_private_temp_dir_on_exit() {
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let workspace = base.join("workspace");
+    let host_tmp = base.join("host-tmp");
+    let home = TempDir::new().unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&host_tmp).unwrap();
+    #[cfg(target_os = "macos")]
+    if crate::test_util::process::unavailable_worktree_sandbox().is_some() {
+        return;
+    }
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(&workspace)
+        .args(["serve", "acp", "--obs", "off", "--confine-workspace"])
+        .arg(&workspace)
+        .env_clear()
+        .env("HOME", home.path())
+        .env("TMPDIR", &host_tmp)
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    let mut client = StdioJsonRpcClient::spawn("ACP private temp dir", command);
+    let initialized = request(
+        &mut client,
+        json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{}}),
+    );
+    let private = initialized["result"]["agentCapabilities"]["_meta"]["harn"]["processConfinement"]
+        ["tempDir"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a confined server reports its temp dir: {initialized:#}"))
+        .to_string();
+    assert!(
+        std::path::Path::new(&private).starts_with(&host_tmp),
+        "the private dir must live under the host temp dir: {private}"
+    );
+    assert!(
+        std::path::Path::new(&private).is_dir(),
+        "the private dir exists while serving"
+    );
+    client.shutdown_expect_success();
+    let leftovers: Vec<_> = fs::read_dir(&host_tmp)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert!(leftovers.is_empty(), "leftover temp entries: {leftovers:?}");
+}
