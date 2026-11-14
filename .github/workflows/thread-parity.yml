@@ -68,7 +68,9 @@ jobs:
       # reports a stack-size difference as a thread-count parity failure.
       - name: Run full suite at ${{ matrix.threads }} threads
         id: parity
-        run: scripts/ci/run_thread_parity.sh ${{ matrix.threads }}
+        env:
+          THREAD_PARITY_COUNT: ${{ matrix.threads }}
+        run: scripts/ci/run_thread_parity.sh "$THREAD_PARITY_COUNT"
 
       - name: Retain test census and partial receipts
         if: ${{ always() && steps.parity.outputs.evidence_dir != '' }}
