@@ -44,8 +44,8 @@ pub use error::{
 };
 pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,
-    VmResourceGuardHandle, VmResourceHandle, VmRngHandle, VmStream, VmStreamCancel,
-    VmSyncPermitHandle, VmTaskHandle, VmVerdictReceipt,
+    VmResourceCleanup, VmResourceGuardHandle, VmResourceHandle, VmRngHandle, VmStream,
+    VmStreamCancel, VmSyncPermitHandle, VmTaskHandle, VmVerdictReceipt,
 };
 pub use harness::VmHarness;
 pub use host_object::VmHostObject;
