@@ -174,7 +174,7 @@ Contention while opening the registry also produces a typed `registry-busy`
 deferral. Other database errors remain failures. Explicit release runs on the
 blocking worker, so cancellation can return while a registry writer blocks cleanup.
 Dropping a guard transfers blocked cleanup to the runtime's lifecycle worker.
-Both paths retain ownership until release succeeds, including grants without an expiry.
+Both paths retry registry contention without abandoning grants, including those without an expiry.
 
 When deterministic discovery finishes after acquisition, replace the active
 lease metadata without introducing a sidecar authority or releasing ownership:
