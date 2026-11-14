@@ -201,14 +201,8 @@ fn network_receipt_matches_the_rendered_process_grant() {
             [false, false, false],
             false,
         ),
-        ("network", true, Some(proxy), [false, true, true], false),
-        (
-            "process_exec",
-            true,
-            Some(proxy),
-            [false, true, true],
-            false,
-        ),
+        ("network", true, Some(proxy), [false, true, true], true),
+        ("process_exec", true, Some(proxy), [false, true, true], true),
     ] {
         let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
         policy.side_effect_level = Some(ceiling.into());
@@ -235,11 +229,11 @@ fn network_receipt_matches_the_rendered_process_grant() {
         );
         assert_eq!(
             profile.contains("(remote ip \"localhost:*\")"),
-            loopback,
+            loopback && proxy.is_none(),
             "{profile}"
         );
         assert_eq!(
-            profile.contains("(remote ip \"localhost:3128\")"),
+            profile.contains("(remote tcp4 \"localhost:3128\")"),
             proxy_port,
             "{profile}"
         );

@@ -662,6 +662,9 @@ fn sandbox_profile_only_allows_network_at_the_network_ceiling() {
 #[path = "macos/network_receipt_tests.rs"]
 mod network_receipt;
 
+#[path = "macos/managed_proxy_tests.rs"]
+mod managed_proxy;
+
 #[test]
 fn tcp_loopback_policy_does_not_open_remote_network() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
@@ -698,11 +701,11 @@ fn managed_process_proxy_replaces_wildcard_network_grant() {
 
     assert!(!profile.contains("(allow network*)"), "{profile}");
     assert!(
-        profile.contains("(allow network-outbound (remote ip \"localhost:3128\"))"),
+        profile.contains("(allow network-outbound (remote tcp4 \"localhost:3128\"))"),
         "{profile}"
     );
     assert!(
-        profile.contains("(allow network-outbound (remote ip \"localhost:1080\"))"),
+        profile.contains("(allow network-outbound (remote tcp4 \"localhost:1080\"))"),
         "{profile}"
     );
 }
@@ -720,6 +723,7 @@ fn managed_proxy_metadata_cannot_raise_the_network_ceiling() {
 
     // Session-temp socket rules are path filters; no IP endpoint may appear.
     assert!(!profile.contains("(remote ip"), "{profile}");
+    assert!(!profile.contains("(remote tcp4"), "{profile}");
     assert!(!profile.contains("(allow network*)"), "{profile}");
 }
 

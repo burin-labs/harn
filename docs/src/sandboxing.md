@@ -194,6 +194,15 @@ The proxy refreshes local interface addresses for each connection and refuses an
 approved host when it cannot inspect those addresses. A host listed at
 start keeps its private reach, so a list can name an internal registry.
 
+On macOS the child profile admits only the proxy's TCP/IPv4 ports. A Seatbelt
+port rule matches that port at every address of the host, so the proxy holds
+its ports at each local IPv4 address while it runs, and a spawn refuses ports
+that no live proxy in the process holds. A loopback grant behind the proxy keeps
+local listening but not direct local connections: Seatbelt cannot tell the
+command's own listeners from other local services, so a client that ignores the
+proxy settings cannot reach a local server. Harn says so once per process under
+the `sandbox.loopback_behind_proxy` event category.
+
 The managed boundary is available on macOS, and on Linux when the policy names
 the namespace launcher (`--netns-launcher`). A Linux child then runs in a private
 network namespace with only loopback. A relay in that namespace listens on the
@@ -1068,7 +1077,8 @@ isolated execution host for untrusted repair code that requires that guarantee.
 | always | `(allow ipc-posix-sem (ipc-posix-name-prefix "/mp-"))` | Python `multiprocessing` locks work; other processes' named semaphores stay out of reach |
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
-| `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
+| `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*`, or only to the managed proxy when one is set (next row) | IPv4 and IPv6 loopback servers and clients work without opening remote egress; behind the proxy, local servers can listen, and every outbound connection, local ones included, goes through the proxy |
+| `process_network_proxy` (managed proxy) | outbound only to `(remote tcp4 "localhost:<port>")` for the proxy's HTTP and SOCKS ports | Seatbelt's `localhost` is every address of this host, so the proxy binds its ports on every local IPv4 address for its whole life and a spawn confirms that claim first; another service on those ports at any address present when the proxy started or at the last spawn is unreachable, and a spawn that cannot confirm the claim is refused by name. An address that appears while a child runs stays open to a service that binds the proxy's port there before the next spawn. `tcp4` excludes IPv6 and UDP on the same port numbers |
 | `process_sandbox.unix_socket_roots` | `(allow network-bind (subpath "<root>"))`, `(allow network-inbound (subpath "<root>"))`, `(allow network-outbound (subpath "<root>"))` for each granted root, and for the session temp dir when the `user_temp` preset is on | build servers bind and connect Unix-domain sockets whose socket file lives under a granted root or the session temp dir; a daemon that binds under the shared temp dirs (sbt under `/tmp/bsbt`) needs that root named; `subpath` never matches an IP endpoint, so no egress opens |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
 | `workspace.write_text` / `workspace.delete` (or empty `capabilities`, or `process_sandbox.allow_child_workspace_write`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |

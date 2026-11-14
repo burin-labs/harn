@@ -1,7 +1,8 @@
 //! HTTP, HTTPS `CONNECT`, and SOCKS5 TCP proxy for sandboxed children.
-//! The child sandbox permits only this proxy's loopback ports, so ignoring
-//! proxy settings cannot widen access. Canonical [`super::EgressPolicy`] rules
-//! decide destinations and pin each connection to its checked addresses.
+//! The child sandbox permits only this proxy's ports, which it holds on every
+//! local address, so ignoring proxy settings cannot widen access. Canonical
+//! [`super::EgressPolicy`] rules decide destinations and pin each connection to
+//! its checked addresses.
 
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -54,7 +55,7 @@ impl ProcessEgressProxyError {
 
     /// Classify one loopback bind failure. `PermissionDenied` becomes the
     /// typed variant; anything else keeps the protocol-prefixed OS text.
-    fn from_bind(protocol: &'static str, error: io::Error) -> Self {
+    pub(super) fn from_bind(protocol: &'static str, error: io::Error) -> Self {
         if error.kind() == io::ErrorKind::PermissionDenied {
             return Self::HostLoopbackBindDenied {
                 protocol,
@@ -231,6 +232,8 @@ pub struct ProcessEgressProxy {
     policy: Arc<ProcessPolicySource>,
     /// Holds the registration that hosts look this proxy up by.
     _control: Option<Arc<AllowlistControl>>,
+    /// Keeps these ports from every other local service; see `proxy_ports`.
+    _claim: super::proxy_ports::PortClaim,
     /// How a child in a private network namespace reaches these listeners.
     #[cfg(target_os = "linux")]
     bridge: Option<super::namespace_bridge::NamespaceBridge>,
@@ -288,24 +291,13 @@ impl ProcessEgressProxy {
     }
 
     fn start(policy: ProcessPolicySource) -> Result<Self, ProcessEgressProxyError> {
-        let http = TcpListener::bind(("127.0.0.1", 0))
-            .map_err(|error| ProcessEgressProxyError::from_bind("HTTP", error))?;
-        let socks = TcpListener::bind(("127.0.0.1", 0))
-            .map_err(|error| ProcessEgressProxyError::from_bind("SOCKS5", error))?;
-        let http_port = http
-            .local_addr()
-            .map_err(|error| {
-                ProcessEgressProxyError::Other(format!("inspect child HTTP egress proxy: {error}"))
-            })?
-            .port();
-        let socks_port = socks
-            .local_addr()
-            .map_err(|error| {
-                ProcessEgressProxyError::Other(format!(
-                    "inspect child SOCKS5 egress proxy: {error}"
-                ))
-            })?
-            .port();
+        let super::proxy_ports::ProxyListeners {
+            http,
+            socks,
+            endpoints,
+            claim,
+        } = super::proxy_ports::bind()?;
+        let http_port = endpoints.http_port;
         let shutdown = Arc::new(AtomicBool::new(false));
         let active_connections = Arc::new(AtomicUsize::new(0));
         let audit = Arc::new(Mutex::new(AuditLog::default()));
@@ -341,10 +333,8 @@ impl ProcessEgressProxy {
 
         #[allow(unused_mut)]
         let mut proxy = Self {
-            endpoints: ProcessNetworkProxy {
-                http_port,
-                socks_port,
-            },
+            endpoints,
+            _claim: claim,
             shutdown,
             joins: vec![http_join, socks_join],
             audit,
