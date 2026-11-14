@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use harn_vm::{VmResourceGuardHandle, VmValue};
+use harn_vm::{VmResourceCleanup, VmResourceGuardHandle, VmValue};
 
 use crate::error::HostlibError;
 use crate::host_lease::{
@@ -29,6 +29,10 @@ const UPDATE_METADATA_BUILTIN: &str = "hostlib_host_lease_update_metadata";
 const RELEASE_BUILTIN: &str = "hostlib_host_lease_release";
 const MAX_WAIT_SLICE_MS: i64 = 5_000;
 
+#[cfg(test)]
+#[path = "host_lease_capability_tests.rs"]
+mod contention_tests;
+
 /// Read-only access to the authoritative local host-lease state.
 ///
 /// The caller must name a local resource explicitly. This capability does not
@@ -37,6 +41,47 @@ const MAX_WAIT_SLICE_MS: i64 = 5_000;
 /// scope boundary.
 #[derive(Default)]
 pub struct HostLeaseCapability;
+
+struct HostLeaseCleanup {
+    store: HostLeaseStore,
+    handle: HostLeaseHandle,
+}
+
+impl VmResourceCleanup for HostLeaseCleanup {
+    fn release(self: Box<Self>) -> Result<VmValue, String> {
+        self.store
+            .release_owned(&self.handle)
+            .map(|receipt| release_to_value(&receipt))
+            .map_err(|error| error.to_string())
+    }
+
+    fn abandon(self: Box<Self>) {
+        match self.store.try_release_owned(&self.handle) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                // Keep the unique lease owner while SQLite is busy, without
+                // waiting on the VM's teardown thread. This runtime survives
+                // destruction of the embedding runtime that owned the value.
+                drop(harn_vm::spawn_lifecycle_cleanup(async move {
+                    match harn_vm::orchestration::run_blocking_with_ambient(move || self.release())
+                        .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(error)) => {
+                            tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed");
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "abandoned host lease cleanup worker failed");
+                        }
+                    }
+                }));
+            }
+            Err(error) => {
+                tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed");
+            }
+        }
+    }
+}
 
 impl HostlibCapability for HostLeaseCapability {
     fn module_name(&self) -> &'static str {
@@ -57,7 +102,12 @@ impl HostlibCapability for HostLeaseCapability {
             "update_metadata",
             handle_update_metadata,
         );
-        registry.register_fn("host_lease", RELEASE_BUILTIN, "release", handle_release);
+        registry.register_interruptible_fn(
+            "host_lease",
+            RELEASE_BUILTIN,
+            "release",
+            handle_release,
+        );
     }
 }
 
@@ -293,16 +343,13 @@ fn acquire_to_value(
                 builtin: ACQUIRE_BUILTIN,
                 message: "acquired receipt omitted its lease handle".to_string(),
             })?;
-        let host = handle.host.clone();
-        let resource_class = handle.resource_class;
-        let domain = handle.domain.clone();
-        let lease_id = handle.lease_id.clone();
-        VmValue::resource_guard(VmResourceGuardHandle::new("host_lease", move || {
-            store
-                .release_for_domain(&host, resource_class, &domain, &lease_id)
-                .map(|receipt| release_to_value(&receipt))
-                .map_err(|error| error.to_string())
-        }))
+        VmValue::resource_guard(VmResourceGuardHandle::new_with_cleanup(
+            "host_lease",
+            HostLeaseCleanup {
+                store,
+                handle: handle.clone(),
+            },
+        ))
     } else {
         VmValue::Nil
     };

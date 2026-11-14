@@ -38,7 +38,7 @@ impl<'a> AcquireScope<'a> {
         receipt: HostLeaseAcquireReceipt,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         if self.queued {
-            self.store.remove_waiter(self.waiter_id)?;
+            self.store.remove_waiter_owned(self.waiter_id)?;
             self.queued = false;
         }
         self.grant = None;
@@ -49,20 +49,12 @@ impl<'a> AcquireScope<'a> {
 impl Drop for AcquireScope<'_> {
     fn drop(&mut self) {
         if let Some(handle) = self.grant.take() {
-            if let Err(error) = retry_registry_cleanup(|| {
-                self.store.release_for_domain(
-                    &handle.host,
-                    handle.resource_class,
-                    &handle.domain,
-                    &handle.lease_id,
-                )
-            }) {
+            if let Err(error) = self.store.release_owned(&handle) {
                 tracing::warn!(lease_id = %handle.lease_id, %error, "host lease grant cleanup remains unconfirmed");
             }
         }
         if self.queued {
-            if let Err(error) = retry_registry_cleanup(|| self.store.remove_waiter(self.waiter_id))
-            {
+            if let Err(error) = self.store.remove_waiter_owned(self.waiter_id) {
                 tracing::warn!(waiter_id = self.waiter_id, %error, "host lease waiter cleanup remains unconfirmed");
             }
         }
@@ -83,6 +75,40 @@ fn retry_registry_cleanup<T>(
 }
 
 impl HostLeaseStore {
+    pub(super) fn remove_waiter_owned(&self, waiter_id: &str) -> Result<(), HostLeaseError> {
+        retry_registry_cleanup(|| self.remove_waiter(waiter_id))
+    }
+
+    pub(crate) fn try_release_owned(
+        &self,
+        handle: &HostLeaseHandle,
+    ) -> Result<Option<HostLeaseReleaseReceipt>, HostLeaseError> {
+        match self.release_for_domain_with_registry_timeout(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            &handle.lease_id,
+            Duration::ZERO,
+        ) {
+            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => Ok(None),
+            result => result.map(Some),
+        }
+    }
+
+    pub(crate) fn release_owned(
+        &self,
+        handle: &HostLeaseHandle,
+    ) -> Result<HostLeaseReleaseReceipt, HostLeaseError> {
+        retry_registry_cleanup(|| {
+            self.release_for_domain(
+                &handle.host,
+                handle.resource_class,
+                &handle.domain,
+                &handle.lease_id,
+            )
+        })
+    }
+
     pub(super) fn acquire_once_interruptible(
         &self,
         request: HostLeaseRequest,
