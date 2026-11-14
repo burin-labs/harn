@@ -4,7 +4,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
 
 use super::tests::macos_policy_with_workspace_ops;
 use super::*;
@@ -23,31 +23,23 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 15) { exit(3) }
 dispatchMain()
 "#;
 
-/// The request paths `listener` received within `wait`. Each request gets a
-/// complete response, so a finished transfer is not retried later.
-fn requests(listener: &TcpListener, wait: Duration) -> Vec<String> {
-    listener.set_nonblocking(true).unwrap();
-    let deadline = Instant::now() + wait;
-    let mut paths = Vec::new();
-    while Instant::now() < deadline {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
-                let mut line = String::new();
-                let mut reader = BufReader::new(&stream);
-                let _ = reader.read_line(&mut line);
-                let _ = (&stream).write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                );
-                paths.extend(line.split_whitespace().nth(1).map(str::to_string));
+/// Serve `listener` on its own thread. Each request's path is reported before
+/// it gets a complete response, so a transfer that finished has always been
+/// reported by the time its probe exits, and none is retried later.
+fn serve(listener: TcpListener) -> mpsc::Receiver<String> {
+    let (paths, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut line = String::new();
+            let _ = BufReader::new(&stream).read_line(&mut line);
+            if let Some(path) = line.split_whitespace().nth(1) {
+                let _ = paths.send(path.to_string());
             }
-            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            let _ = (&stream)
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
         }
-    }
-    paths
+    });
+    received
 }
 
 #[test]
@@ -72,10 +64,11 @@ fn a_confined_command_cannot_start_a_background_transfer() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let url = |path: &str| format!("http://127.0.0.1:{port}/{path}");
+    let requests = serve(listener);
 
     // Positive control: unconfined, the system service fetches the URL.
     let _ = Command::new(&probe).arg(url("unconfined")).output();
-    if !requests(&listener, Duration::from_secs(2)).contains(&"/unconfined".to_string()) {
+    if !requests.try_iter().any(|path| path == "/unconfined") {
         eprintln!("skipping: background transfers do not run on this host");
         return;
     }
@@ -102,7 +95,7 @@ fn a_confined_command_cannot_start_a_background_transfer() {
         Some(0),
         "the transfer must not complete"
     );
-    let reached = requests(&listener, Duration::from_secs(3));
+    let reached: Vec<String> = requests.try_iter().collect();
     assert!(
         !reached.contains(&"/confined".to_string()),
         "a confined command reached a URL through a system service: {reached:?}"
