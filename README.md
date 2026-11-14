@@ -158,6 +158,7 @@ calls. The available history and recovery options depend on what the run recorde
 | Need | Harn provides |
 | --- | --- |
 | Call different models | A shared interface for model responses, tool calls, and provider settings. |
+| Route requests by meaning | [Typed semantic dispatch](docs/src/semantic-dispatch.md) with explicit thresholds and evaluation receipts. |
 | Keep an agent under control | Tool permissions, execution limits, and stop and steer controls. |
 | Coordinate several steps | Workflows with dependencies, retries, and saved execution state. |
 | Delegate work | Child agents with their own context and a recorded link to the parent. |

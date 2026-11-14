@@ -1,0 +1,169 @@
+import { calibration_report } from "std/eval/calibration"
+import { percentile, sum } from "std/math"
+
+fn summarize(rows: list, backend: string) -> dict {
+  let wrong_handlers = []
+  let failed = []
+  let abstained = []
+  let correct = 0
+  let handled = 0
+  let costs = []
+  let latencies = []
+  let served = []
+  let calibration = []
+  for row in rows {
+    const result = row.result
+    const receipt = row.accounting.receipt
+    require row.accounting.kind == "retained" && receipt.source == "live"
+      && receipt.physical_attempts > 0,
+      "study requires live observations"
+    served = (served + [receipt.served_model]).unique()
+    if receipt.cost_usd != nil {
+      costs.push(receipt.cost_usd)
+    }
+    require row.elapsed_ms >= 0, "missing study latency"
+    latencies.push(row.elapsed_ms)
+    const native = backend == "native_decision"
+    const answered = native ? result?.evidence != nil : result.kind == "answered"
+    if !answered {
+      failed.push({case_id: row.case_id, repeat: row.repeat, result: result})
+      continue
+    }
+    const p = native ? result.evidence.applicability_probability : result.value.applicable
+      .probability
+    const selected = native ? result.evidence.route : result.value.route.choice
+    const route_confidence = native ? result.evidence.route_probability : result.value.route
+      .confidence
+    const predicted = p >= 0.5 ? selected : "unmatched"
+    const decided = native ? ["matched", "unmatched"].contains(result.kind) : true
+    if decided && predicted == row.expected {
+      correct = correct + 1
+    }
+    if !decided {
+      abstained.push({case_id: row.case_id, repeat: row.repeat, reason: result.reason})
+    }
+    if native && result.kind == "matched" {
+      handled = handled + 1
+      if selected != row.expected {
+        wrong_handlers.push(
+          {case_id: row.case_id, repeat: row.repeat, selected: selected, expected: row.expected},
+        )
+      }
+    }
+    const base = {backend: row.model, abstained: false}
+    calibration.push(
+      base
+        + {
+          question_id: "applicability",
+          expected: row.expected != "unmatched" ? "true" : "false",
+          predicted: p >= 0.5 ? "true" : "false",
+          confidence: p >= 0.5 ? p : 1.0 - p,
+        },
+    )
+    if row.expected != "unmatched" {
+      calibration.push(
+        base
+          + {
+            question_id: "route",
+            expected: row.expected,
+            predicted: selected,
+            confidence: route_confidence,
+          },
+      )
+    }
+  }
+  return {
+    rows: len(rows),
+    correct_decisions: correct,
+    handled: handled,
+    wrong_handlers: wrong_handlers,
+    failed: failed,
+    abstained: abstained,
+    fallback_rate: to_float(len(failed) + len(abstained)) / len(rows),
+    measured_cost_rows: len(costs),
+    cost_usd: len(costs) == len(rows) ? sum(costs) : nil,
+    measured_latency_rows: len(latencies),
+    latency_ms: {p50: percentile(latencies, 50), p90: percentile(latencies, 90)},
+    served_models: served,
+    confidence_semantics: backend == "native_decision" ? "native_probability" : "model_rationale",
+    calibration: calibration_report(calibration, {thresholds: [0.5, 0.9, 0.97], seed: 11288}),
+  }
+}
+
+pub fn analyze(fs: HarnessFs, manifest_path: string) -> dict {
+  const manifest = json_parse(fs.read_text(manifest_path))
+  const corpus_text = fs.read_text(path_join(dirname(manifest_path), manifest.corpus))
+  const corpus = json_parse(corpus_text)
+  require manifest.repetitions > 0 && len(manifest.arms) > 0 && len(corpus) > 0, "empty study"
+  let labels = {}
+  for item in corpus {
+    require labels[item.id] == nil, "duplicate corpus identity"
+    labels[item.id] = item
+  }
+  let reports = {}
+  let names = []
+  for arm in manifest.arms {
+    require !names.contains(arm.model), "duplicate study arm"
+    names.push(arm.model)
+    let rows = []
+    let seen = []
+    let definition_digest = ""
+    for line in fs.read_text(path_join(dirname(manifest_path), arm.path)).lines() {
+      if trim(line) == "" {
+        continue
+      }
+      const row = json_parse(line)
+      const source = labels[row.case_id]
+      require source != nil && row.expected == source.expected && row.split == source.split,
+        "unexpected case or changed labels: ${row.case_id}; source=${json_stringify(source)}; expected=${row.expected}; split=${row.split}"
+      require row.corpus_digest == sha256(corpus_text) && row.model == arm.model
+        && row.backend == arm.backend,
+        "observation identity differs from manifest"
+      require row.repeat >= 0 && row.repeat < manifest.repetitions, "unexpected repetition"
+      const key = "${row.case_id}:${row.repeat}"
+      require row.definition.id == "example.orders.v1" && row.definition.digest != "",
+        "missing definition identity"
+      if definition_digest == "" {
+        definition_digest = row.definition.digest
+      }
+      require row.definition.digest == definition_digest, "definition changed during study arm"
+      require !seen.contains(key), "duplicate observation ${key}"
+      seen.push(key)
+      rows.push(row)
+    }
+    let missing = []
+    for row in corpus {
+      for repeat in range(0, manifest.repetitions) {
+        if !seen.contains("${row.id}:${repeat}") {
+          missing.push("${row.id}:${repeat}")
+        }
+      }
+    }
+    require len(missing) == 0, "pending ${len(missing)} observations: ${json_stringify(missing)}"
+    reports[arm.model] = {
+      pending: 0,
+      backend: arm.backend,
+      development: summarize(rows.filter({ row -> row.split == "development" }), arm.backend),
+      holdout: summarize(rows.filter({ row -> row.split == "holdout" }), arm.backend),
+    }
+  }
+  return {
+    schema: "harn.semantic_dispatch.study.v1",
+    corpus_digest: sha256(corpus_text),
+    unique_cases: len(corpus),
+    repetitions: manifest.repetitions,
+    arms: reports,
+    limitations: [
+      "Curated synthetic cases; no production error bound",
+      "Repeats are not independent examples",
+      "Calibration recommendations are descriptive, not deployment admission",
+      "Provider latency excludes HTTP handler work",
+      "Generative baseline confidence is self-reported and never dispatched",
+    ],
+  }
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "analyze.harn -- MANIFEST.json"
+  harness.stdio.println(json_stringify(analyze(harness.fs, unwrap(argv[0]))))
+}

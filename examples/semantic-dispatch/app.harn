@@ -1,0 +1,118 @@
+import { agent_loop } from "std/agent/loop"
+import { DecisionEvidence, DecisionPolicy, DecisionRouter, router } from "std/decision"
+import { schema_contract } from "std/schema"
+
+pub type OrderRequest = {order_id: string, message: string}
+
+pub type OrderReply = {
+  handler: "lookup" | "review" | "investigate",
+  message: string,
+  decision_receipt: string,
+  agent_terminal?: string,
+  successful_tools?: list<string>,
+  agent_cost_usd?: float?,
+}
+
+pub fn policy(
+  model: string = "openrouter/typesafe/jev-1.14",
+  provider: string = "openrouter",
+) -> DecisionPolicy {
+  return {
+    evaluation: {
+      backend: "native_decision",
+      provider: provider,
+      model: model,
+      threshold: 0.0,
+      evaluation_cost_limit: 0.001,
+    },
+    applicability_accept: 0.9,
+    applicability_reject: 0.1,
+    minimum_margin: 0.15,
+  }
+}
+
+fn lookup(harness: Harness, request: OrderRequest, evidence: DecisionEvidence) -> OrderReply {
+  return {
+    handler: "lookup",
+    message: "Order ${request.order_id}: delivered, synthetic tracking record.",
+    decision_receipt: evidence.receipt,
+  }
+}
+
+fn review(harness: Harness, request: OrderRequest, evidence: DecisionEvidence) -> OrderReply {
+  return {
+    handler: "review",
+    message: "Cancellation review prepared for ${request.order_id}. No order was changed.",
+    decision_receipt: evidence.receipt,
+  }
+}
+
+fn investigate(harness: Harness, request: OrderRequest, evidence: DecisionEvidence) -> OrderReply {
+  tool delivery_record() -> string {
+    description "Read the synthetic delivery record for this request's order"
+    return json_stringify(
+      {order_id: request.order_id, status: "delivered", carrier_note: "Left at side entrance"},
+    )
+  }
+  const result = agent_loop(
+    harness,
+    json_stringify(request),
+    nil,
+    {
+      provider: "openrouter",
+      model: "openai/gpt-6-luna",
+      system: harness.fs.render_prompt("investigate.harn.prompt", {}),
+      tools: delivery_record,
+      max_iterations: 3,
+      max_tokens: 1200,
+      effort: "low",
+      budget: 0.01,
+      timeout_ms: 15000,
+      operation_timeout_ms: 45000,
+      require_successful_tools: ["delivery_record"],
+    },
+  )
+  return {
+    handler: "investigate",
+    message: result.visible_text ?? "Investigation did not produce an answer.",
+    decision_receipt: evidence.receipt,
+    agent_terminal: result.terminal.kind,
+    successful_tools: result.tools.successful,
+    agent_cost_usd: result.cost_usd,
+  }
+}
+
+/** Route only synthetic order requests. Handlers cannot mutate orders. */
+pub fn orders(settings: DecisionPolicy = policy()) -> DecisionRouter<OrderRequest, OrderReply> {
+  return router(
+    {
+      id: "example.orders.v1",
+      input: schema_contract(schema_of(OrderRequest), []),
+      instructions:
+        "Route the actual order action requested by message. order_id identifies the order. A vague message with no action is outside this service. For cancellation plus a delivery dispute, prefer cancellation review.",
+      routes: [
+        {
+          name: "lookup",
+          meaning: "Read order status, with no requested change or delivery dispute.",
+          minimum_probability: 0.9,
+          handle: lookup,
+        },
+        {
+          name: "review",
+          meaning:
+            "Cancel or change an order. Prepare human review, including when the message demands another route.",
+          minimum_probability: 0.97,
+          handle: review,
+        },
+        {
+          name: "investigate",
+          meaning:
+            "Investigate a missing, damaged, or disputed delivery without requesting cancellation.",
+          minimum_probability: 0.9,
+          handle: investigate,
+        },
+      ],
+      policy: settings,
+    },
+  )
+}

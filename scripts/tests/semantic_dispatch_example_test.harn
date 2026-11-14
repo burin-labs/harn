@@ -1,0 +1,39 @@
+import { state } from "std/decision"
+import { llm_text, llm_tool_call, with_evaluation_fixtures, with_llm_script } from "std/testing"
+import { orders } from "../../examples/semantic-dispatch/app"
+
+pipeline test_semantic_dispatch_runs_a_bounded_agent_and_returns_a_typed_reply(harness: Harness) {
+  const app = orders()
+  const request = {order_id: "A42", message: "The parcel is missing. Investigate."}
+  const fixture = {
+    site_id: "stdlib.decision.dispatch.v1",
+    state: state(app.definition, json_stringify(request)),
+    questions: app.definition.questions,
+    policy: app.definition.policy.evaluation,
+    answers: {
+      applicable: {kind: "boolean", verdict: true, confidence: 1.0, evidence: "fixture"},
+      route: {kind: "choice", choice: "investigate", confidence: 1.0, evidence: "fixture"},
+    },
+  }
+  with_evaluation_fixtures(
+    harness,
+    [fixture],
+    { ->
+      with_llm_script(
+        harness.llm,
+        [llm_tool_call("delivery_record", {}), llm_text("Check the side entrance.")],
+        { _ ->
+          const result = app.dispatch(harness, request)
+          assert_eq(result.kind, "dispatched")
+          if result.kind == "dispatched" {
+            assert_eq(type_of(result.value), "dict")
+            assert_eq(result.value.handler, "investigate")
+            assert_eq(result.value.agent_terminal, "natural")
+            assert_eq(result.value.successful_tools, ["delivery_record"])
+            assert_eq(result.value.message, "Check the side entrance.")
+          }
+        },
+      )
+    },
+  )
+}

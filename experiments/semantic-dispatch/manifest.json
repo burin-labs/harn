@@ -1,0 +1,10 @@
+{
+  "repetitions": 2,
+  "corpus": "../../examples/semantic-dispatch/cases.json",
+  "arms": [
+    {"model":"openrouter/typesafe/jev-1.14","backend":"native_decision","path":"observations/jev.jsonl"},
+    {"model":"openrouter/perplexity/pplx-decider-v1.3:free","backend":"native_decision","path":"observations/decider.jsonl"},
+    {"model":"openrouter/cloudflare/clef-flash","backend":"native_decision","path":"observations/clef.jsonl"},
+    {"model":"openai/gpt-6-luna","backend":"structured_llm","path":"observations/baseline.jsonl"}
+  ]
+}

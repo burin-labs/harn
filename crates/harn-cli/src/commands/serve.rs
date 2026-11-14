@@ -18,6 +18,8 @@ use crate::cli::{
     ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
 
+mod secret_provider;
+
 /// Build the dispatch configuration for a file-backed server.
 ///
 /// The source project's manifest owns privileged host-dispatch authority. All
@@ -28,6 +30,7 @@ fn dispatch_core_config_for_source(path: &str) -> Result<DispatchCoreConfig, Str
     let boundary = harn_vm::llm::api::InferenceBoundary::capture_process()?;
     let mut config = DispatchCoreConfig::for_script(path);
     config.host_inference_boundary = boundary;
+    config.vm_configurator = secret_provider::configurator()?;
     config.trusted_host_dispatch =
         crate::compiler_context::trusted_host_dispatch_for_source(Path::new(path));
     Ok(config)

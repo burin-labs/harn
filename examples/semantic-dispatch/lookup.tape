@@ -1,0 +1,2 @@
+{"type":"header","version":9,"harn_version":"0.10.197","started_at_unix_ms":null,"script_path":null,"argv":[]}
+{"type":"record","seq":0,"phase":"user_script","virtual_time_ms":1794623622707,"monotonic_ms":13012,"kind":{"kind":"decision_evaluation","request_digest":"blake3:a64c81c507d46f027f7e1c38bbdb7eeb79ae9f333b56bb03f3c0aadcb292c3d9","response":{"content_hash":"c3f9e20502ee4462a59277f652c393fcc72ede6741154449ed3967a68a1abbe4","len_bytes":5768}}}

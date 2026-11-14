@@ -1,0 +1,27 @@
+import { orders } from "./app"
+
+@route("POST", "/orders")
+pub fn order_request(harness: Harness, req: dict) -> dict {
+  const body = try {
+    json_parse(req.body)
+  }
+  if is_err(body) {
+    return http_reply(400, {kind: "invalid_json"}, {})
+  }
+  const result = orders().dispatch(harness, unwrap(body))
+  const status = match result.kind {
+    "dispatched" -> { result.value.agent_terminal != nil && result.value.agent_terminal != "natural" ? 502 : 200 }
+    "invalid_input" -> { 400 }
+    "unmatched" -> { 422 }
+    "uncertain" -> { 409 }
+    _ -> { 503 }
+  }
+  const accounting = if result.kind == "evaluation_failed" {
+    harness.llm.evaluation_receipt(result.evaluation.receipt)
+  } else if result.kind == "invalid_input" {
+    nil
+  } else {
+    harness.llm.evaluation_receipt(result.evidence.receipt)
+  }
+  return http_reply(status, result + {accounting: accounting}, {})
+}

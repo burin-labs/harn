@@ -1,0 +1,90 @@
+import { DecisionDefinition, state } from "std/decision"
+import { EvaluationOutcome, EvaluationPolicy } from "std/predicate"
+import { OrderRequest, orders, policy } from "./app"
+
+type Case = {
+  id: string,
+  split: "development" | "holdout",
+  input: {order_id: string, message: string},
+  expected: string,
+}
+
+type Cases = list<Case>
+
+fn baseline(
+  llm: HarnessLlm,
+  definition: DecisionDefinition,
+  input: OrderRequest,
+  model: string,
+) -> EvaluationOutcome {
+  const settings: EvaluationPolicy = {
+    backend: "structured_llm",
+    provider: "openrouter",
+    model: model,
+    threshold: 0.0,
+    effort: "low",
+    max_tokens: 800,
+    timeout_ms: 20000,
+    evaluation_cost_limit: 0.01,
+  }
+  return llm.evaluate_request(
+    "stdlib.decision.dispatch.v1",
+    state(definition, json_stringify(input)),
+    definition.questions,
+    settings,
+  )
+}
+
+fn main(harness: Harness) {
+  require len(argv) == 3, "study.harn -- MODEL BACKEND REPETITIONS"
+  const model = unwrap(argv[0])
+  const backend = unwrap(argv[1])
+  const repetitions = unwrap(to_int(argv[2]))
+  require repetitions > 0 && repetitions <= 10, "repetitions must be in [1, 10]"
+  require ["native_decision", "structured_llm"].contains(backend), "unknown backend"
+  const resolved = harness.llm.resolved_options({model: model})
+  const app = orders(policy(model, resolved.provider))
+  const corpus_text = harness.fs.read_text("examples/semantic-dispatch/cases.json")
+  const corpus = unwrap(json_decode(corpus_text, schema_of(Cases)))
+  require len(corpus) > 0, "empty corpus"
+  for repeat in range(0, repetitions) {
+    for row in corpus {
+      const started = harness.clock.monotonic_ms()
+      let result: dict = {}
+      let receipt = ""
+      if backend == "native_decision" {
+        const assessment = app.assess(harness.llm, row.input)
+        if assessment.kind == "invalid_input" {
+          throw "invalid study case: ${row.id}"
+        } else if assessment.kind == "evaluation_failed" {
+          receipt = assessment.evaluation.receipt
+        } else {
+          receipt = assessment.evidence.receipt
+        }
+        result = assessment
+      } else {
+        const evaluation = baseline(harness.llm, app.definition, row.input, model)
+        receipt = evaluation.receipt
+        result = evaluation
+      }
+      require receipt != "", "observation lacks a receipt"
+      harness.stdio.println(
+        json_stringify(
+          {
+            case_id: row.id,
+            split: row.split,
+            repeat: repeat,
+            expected: row.expected,
+            corpus_digest: sha256(corpus_text),
+            definition: app.definition,
+            backend: backend,
+            model: model,
+            result: result,
+            elapsed_ms: harness.clock.monotonic_ms() - started,
+            accounting: harness.llm.evaluation_receipt(receipt),
+          },
+        ),
+      )
+    }
+  }
+}

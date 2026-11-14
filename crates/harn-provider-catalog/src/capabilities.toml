@@ -176,6 +176,26 @@ thinking_modes = ["effort"]
 top_p_supported = false
 vision_supported = true
 
+[[provider.openrouter]]
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = [
+    "boolean",
+    "choice",
+    "score",
+]
+extends = true
+model_match = [
+    "openrouter/perplexity/pplx-decider-v1.3:free",
+    "perplexity/pplx-decider-v1.3:free",
+]
+
+[provider.openrouter.decision_limits]
+max_choice_options = 255
+request_window_tokens = 262144
+score_levels_max = 10
+score_levels_min = 2
+state_window_tokens = 262144
+
 [[provider.vercel_ai_gateway]]
 extends = true
 model_match = [

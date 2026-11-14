@@ -41,6 +41,8 @@ catalog_entries! {
     "xml" => "stdlib/stdlib_xml.harn",
     "cache" => "stdlib/stdlib_cache.harn",
     "predicate" => "stdlib/stdlib_predicate.harn",
+    "decision" => "stdlib/stdlib_decision.harn",
+    "decision/contracts" => "stdlib/decision/contracts.harn",
     "observability" => "stdlib/stdlib_observability.harn",
     "timing" => "stdlib/stdlib_timing.harn",
     "verification" => "stdlib/stdlib_verification.harn",

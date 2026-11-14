@@ -1,0 +1,18 @@
+import { orders } from "./app"
+
+fn main(harness: Harness) {
+  require len(argv) == 1, "run.harn -- REQUEST_JSON"
+  const result = orders().dispatch(harness, json_parse(unwrap(argv[0])))
+  guard result.kind == "dispatched" else {
+    throw json_stringify(result)
+  }
+  harness.stdio.println(
+    json_stringify(
+      {
+        reply: result.value,
+        evidence: result.evidence,
+        accounting: harness.llm.evaluation_receipt(result.evidence.receipt),
+      },
+    ),
+  )
+}

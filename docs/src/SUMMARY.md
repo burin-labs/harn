@@ -37,6 +37,7 @@
 
 - [Common tasks](./common-tasks.md)
 - [Ask a decision model a question](./decision-evaluation.md)
+- [Route requests by meaning](./semantic-dispatch.md)
 - [Record and replay decision evaluations](./decision-replay.md)
 - [Configure a provider](./provider-setup.md)
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
@@ -161,6 +162,7 @@
 - [Coordination directory locks](./stdlib/coordination-locks.md)
 - [External actions](./stdlib/external-action.md)
 - [Execution decisions](./stdlib/execution.md)
+- [Semantic dispatch](./stdlib/decision.md)
 - [Command sequence plans](./stdlib/command-sequence-plan.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)

@@ -5,6 +5,59 @@ use super::super::*;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[test]
+fn decider_13_catalogues_only_served_routes_with_native_contracts() {
+    let config = default_config();
+    let id = "openrouter/perplexity/pplx-decider-v1.3:free";
+    let row = config.models.get(id).expect("served route is catalogued");
+    assert_eq!(row.provider, "openrouter");
+    let contract = crate::provider_catalog::decision_contract_for_route("openrouter", id).unwrap();
+    assert!(contract.protocol.is_native());
+    assert_eq!(
+        contract.served_model_id,
+        "perplexity/pplx-decider-v1.3:free"
+    );
+    assert_eq!(contract.input_price_per_mtok, Some(0.0));
+    assert_eq!(contract.output_price_per_mtok, Some(0.0));
+    for absent in [
+        "openrouter/perplexity/pplx-decider-v1.3",
+        "openrouter/perplexity/pplx-decider-v9.9:free",
+    ] {
+        assert!(!config.models.contains_key(absent));
+        assert!(
+            crate::provider_catalog::decision_contract_for_route("openrouter", absent).is_none()
+        );
+    }
+    let older = crate::provider_catalog::decision_contract_for_route(
+        "openrouter",
+        "openrouter/perplexity/pplx-decider-v1.1-27b",
+    )
+    .unwrap();
+    assert_eq!(older.input_price_per_mtok, Some(0.02));
+    assert!(!config
+        .models
+        .contains_key("vercel/perplexity/pplx-decider-v1.3"));
+    assert!(
+        crate::provider_catalog::decision_contract_for_route(
+            "vercel_ai_gateway",
+            "vercel/perplexity/pplx-decider-v1.3"
+        )
+        .is_none(),
+        "unqualified gateway route cannot inherit native answer support"
+    );
+    assert!(crate::provider_catalog::decision_contract_for_route(
+        "vercel_ai_gateway",
+        "vercel/perplexity/pplx-decider-v1.1-27b"
+    )
+    .unwrap()
+    .protocol
+    .is_native());
+    let chat =
+        crate::provider_catalog::decision_contract_for_route("openrouter", "openai/gpt-6-luna")
+            .unwrap();
+    assert!(!chat.protocol.is_native());
+}
+
+#[test]
 fn embedded_catalog_every_qc_default_targets_a_known_model() {
     let config = default_config();
     let orphans: Vec<(&str, &str)> = config
