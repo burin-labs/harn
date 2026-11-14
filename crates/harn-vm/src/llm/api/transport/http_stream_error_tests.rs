@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PARTIAL: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"observed\"}}]}\n\n";
 
-async fn response(
+pub(crate) async fn response(
     initial: &'static str,
     end: Option<&'static str>,
 ) -> (

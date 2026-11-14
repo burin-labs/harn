@@ -13,6 +13,41 @@ fn categorized(msg: &str, category: ErrorCategory) -> VmError {
     }
 }
 
+#[test]
+fn typed_stream_recovery_preserves_partial_output_and_deadlines() {
+    use crate::value::{
+        ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
+        ProviderStreamPhase,
+    };
+    for phase in [
+        ProviderStreamPhase::AwaitingFirstChunk,
+        ProviderStreamPhase::Streaming,
+    ] {
+        for partial in [false, true] {
+            for reason in [
+                ProviderStreamFailureReason::Read,
+                ProviderStreamFailureReason::PrematureEof,
+                ProviderStreamFailureReason::Deadline,
+            ] {
+                let error = VmError::ProviderStreamFailure(Box::new(ProviderStreamFailure {
+                    provider: "openai".into(),
+                    phase,
+                    reason,
+                    deadline: (reason == ProviderStreamFailureReason::Deadline)
+                        .then_some(ProviderStreamDeadline::Total),
+                    partial,
+                    detail: "opaque diagnostic with no retry keywords".into(),
+                }));
+                assert_eq!(
+                    is_stream_transport_failure(&error),
+                    !partial && reason != ProviderStreamFailureReason::Deadline,
+                    "{phase:?} {reason:?} partial={partial}"
+                );
+            }
+        }
+    }
+}
+
 fn set_env_for_test(key: &str, value: Option<&str>) -> Option<String> {
     let previous = std::env::var(key).ok();
     match value {

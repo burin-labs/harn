@@ -649,6 +649,118 @@ fn stream_transport_degrade_fires_at_most_once() {
 }
 
 #[test]
+fn typed_stream_recovery_fires_once_before_output_and_respects_call_authority() {
+    use crate::value::{
+        ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
+        ProviderStreamPhase,
+    };
+    let _env = crate::llm::env_guard();
+    current_thread_runtime().block_on(async {
+        for (partial, text, deadline, streaming, probe, retry_fails) in [
+            (false, "", false, true, false, false),
+            (false, "", false, true, false, true),
+            (true, "visible", false, true, false, false),
+            (true, "", false, true, false, false),
+            (false, "", true, true, false, false),
+            (false, "", false, false, false, false),
+            (false, "", false, true, true, false),
+        ] {
+            let mut opts = fake_opts();
+            opts.model = format!(
+                "typed-stream-{partial}-{}-{deadline}-{streaming}-{probe}-{retry_fails}",
+                text.len()
+            );
+            opts.stream = streaming;
+            // Independent trials share the fake provider's health key, even
+            // with distinct models. Admit each before exercising its failure.
+            crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, false);
+            opts.provider_contract_probe =
+                probe.then_some(crate::llm::capabilities::PortableOption::Temperature);
+            let failure = ProviderStreamFailure {
+                provider: "fake".into(),
+                phase: if partial {
+                    ProviderStreamPhase::Streaming
+                } else {
+                    ProviderStreamPhase::AwaitingFirstChunk
+                },
+                reason: if deadline {
+                    ProviderStreamFailureReason::Deadline
+                } else {
+                    ProviderStreamFailureReason::Read
+                },
+                deadline: deadline.then_some(ProviderStreamDeadline::Total),
+                partial,
+                detail: "opaque transport diagnostic".into(),
+            };
+            let eligible = streaming && !partial && !deadline && !probe;
+            let mut events = Vec::new();
+            if !text.is_empty() {
+                events.push(FakeLlmEvent::Token(text.into()));
+            }
+            events.push(FakeLlmEvent::StreamFailure(failure.clone()));
+            let mut script = FakeLlmScript::new().push(FakeLlmTurn::stream(events));
+            if eligible {
+                script = script.push(FakeLlmTurn::stream(if retry_fails {
+                    vec![FakeLlmEvent::StreamFailure(failure)]
+                } else {
+                    vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ]
+                }));
+            }
+            let _guard = install_fake_llm_script(script);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let result =
+                observed_llm_call(&opts, None, None, None, false, false, None, Some(tx)).await;
+            if eligible && !retry_fails {
+                assert_eq!(
+                    result
+                        .expect("one safe non-streaming retry should recover")
+                        .text,
+                    "recovered"
+                );
+            } else {
+                assert!(result.is_err(), "an unsafe or exhausted retry must surface");
+            }
+            let calls = fake_llm_captured_calls();
+            assert_eq!(
+                calls.len(),
+                if eligible { 2 } else { 1 },
+                "provider must be reached for {}",
+                opts.model
+            );
+            assert_eq!(calls[0].stream, streaming);
+            if eligible {
+                assert!(
+                    !calls[1].stream,
+                    "the retry must use non-streaming transport"
+                );
+            }
+            let output: String = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+            assert_eq!(
+                output,
+                if !text.is_empty() {
+                    text
+                } else if eligible && !retry_fails {
+                    "recovered"
+                } else {
+                    ""
+                }
+            );
+        }
+        let mut required = crate::llm::api::options::base_opts("together");
+        required.model = "Qwen/Qwen3.7-Max".into();
+        required.stream = true;
+        assert!(
+            crate::llm::managed_supply::capabilities_for(&required.provider, &required.model)
+                .requires_streaming
+        );
+        assert!(!can_degrade_stream_transport(&required));
+    });
+}
+
+#[test]
 fn billed_noncommittal_throw_degrades_to_text_and_recovers() {
     // Mechanism-fitness: the canonical cheap-model vanishing-call signature
     // (billed output, clean finish, zero tool calls — the action stranded in

@@ -24,6 +24,8 @@ mod thinking;
 mod tool_result_provenance;
 mod transport;
 pub(crate) use transport::reqwest_send_error;
+#[cfg(test)]
+pub(crate) use transport::test_http_stream_response;
 
 use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
@@ -97,8 +99,10 @@ pub(crate) use schema_stream::{
 pub(crate) use telemetry::elapsed_ms;
 pub use telemetry::{source as telemetry_source, OllamaPsModel, ProviderTelemetry};
 pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};
-pub(crate) use transport::premature_eof as premature_stream_eof;
 pub(crate) use transport::vm_call_llm_api_with_body;
+pub(crate) use transport::{
+    premature_eof as premature_stream_eof, stream_body_read_error, stream_read_failure,
+};
 
 use transport::vm_call_llm_api;
 
