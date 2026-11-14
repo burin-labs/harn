@@ -10,9 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Every directory a workspace file or a confined child could occupy, made
-/// canonical: workspace roots, sandbox write roots, toolchain and package
-/// caches, the workspace-local temp dir, the process and spawn cwd, and the
-/// host temp dir.
+/// canonical: each active policy's writable roots, the package cache, the
+/// process and spawn cwd, and the host temp dir.
 pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
     let mut roots = vec![
         spawn_cwd.to_path_buf(),
@@ -26,17 +25,7 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
         .into_iter()
         .chain(super::super::active_sandbox_policy().map(|(policy, _)| policy));
     for policy in policies {
-        roots.extend(super::super::process_sandbox_roots(&policy));
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "openbsd",
-            target_os = "windows"
-        ))]
-        roots.extend(super::super::process_sandbox_policy_write_roots(&policy));
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        roots.extend(super::super::process_sandbox_developer_toolchain_cache_roots(&policy));
-        roots.extend(super::workspace_local_tmpdir(&policy));
+        roots.extend(super::super::process_sandbox_writable_roots(&policy));
     }
     let mut roots: Vec<PathBuf> = roots
         .into_iter()

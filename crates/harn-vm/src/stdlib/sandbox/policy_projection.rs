@@ -40,6 +40,38 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
     normalized_process_roots(&policy.process_sandbox.write_roots)
 }
 
+/// Every directory a child confined by `policy` may write under, made
+/// canonical: the workspace roots (with their git topology and runtime dir),
+/// the session temp dir, the policy's process write roots, the
+/// developer-toolchain caches and the Unix-socket roots.
+///
+/// A host that reads a file before any sandbox exists asks this whether a
+/// confined child could have planted it. The set names every root a backend
+/// may grant write under, including those a policy that withholds child
+/// writes renders read-only, so a reader that refuses these trusts too
+/// little rather than too much.
+pub fn process_sandbox_writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots = super::process_sandbox_roots(policy);
+    roots.extend(super::workspace_local_tmpdir(policy));
+    roots.extend(normalized_process_roots(
+        &policy.process_sandbox.write_roots,
+    ));
+    roots.extend(normalized_process_roots(
+        &policy.process_sandbox.unix_socket_roots,
+    ));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    roots.extend(super::process_sandbox_developer_toolchain_cache_roots(
+        policy,
+    ));
+    let mut roots: Vec<PathBuf> = roots
+        .into_iter()
+        .map(|root| std::fs::canonicalize(&root).unwrap_or(root))
+        .collect();
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
 /// Directories a confined child may place a Unix-domain socket under.
 #[cfg(target_os = "linux")]
 pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
