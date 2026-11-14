@@ -136,7 +136,10 @@ fn a_preparing_spawn_excludes_reapers_until_it_releases_the_alias_lock() {
         "a reaper could lock while a spawn was preparing"
     );
     drop(preparing);
-    assert!(exclusive_now(base.path()));
+    // Blocking, not `exclusive_now`: a child forked elsewhere in this test
+    // binary holds a copy of every open descriptor until it execs, so the
+    // released lock can stay held for that moment.
+    assert!(AliasLock::acquire(base.path(), true).is_ok());
 }
 
 #[test]
@@ -158,7 +161,11 @@ fn a_busy_scan_skips_cleanup_without_blocking_alias_preparation() {
         live.path()
     );
     drop(scan);
-    reap_dangling_aliases(base.path());
+    // The control waits for the scan lock instead of trying it once: a child
+    // forked elsewhere in this test binary holds a copy of the released
+    // descriptor until it execs, and a single try would stand down.
+    let _control = AliasLock::acquire_named(base.path(), SCAN_LOCK, libc::LOCK_EX).unwrap();
+    reap_scanned(base.path());
     assert!(
         !alias.is_symlink(),
         "the control must reap the known dangling alias"

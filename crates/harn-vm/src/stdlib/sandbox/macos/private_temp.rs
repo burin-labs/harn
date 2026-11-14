@@ -168,6 +168,11 @@ fn reap_dangling_aliases(base: &Path) {
     let Ok(Some(_scan)) = AliasLock::try_scan(base) else {
         return;
     };
+    reap_scanned(base);
+}
+
+/// The scan itself, for a caller that holds the scan lock.
+fn reap_scanned(base: &Path) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
     };
