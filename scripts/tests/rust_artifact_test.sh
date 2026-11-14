@@ -117,6 +117,16 @@ set -euo pipefail
 printf '%s\n' "${FAKE_RUSTC_IDENTITY:-rustc 1.95.0 (fake)}"
 SH
 chmod +x "$tmpdir/bin/rustc"
+cat > "$tmpdir/bin/strip" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == --strip-debug && -f "$2" ]] || exit 2
+: > "${CARGO_RECEIPTS:?}/strip-debug"
+if [[ "${FAKE_STRIP_VERSION_CHANGE:-0}" == 1 ]]; then
+  printf '#!/usr/bin/env bash\necho changed\n' > "$2"
+fi
+SH
+chmod +x "$tmpdir/bin/strip"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/debug/harn"
 chmod +x "$tmpdir/target/debug/harn"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/ci-cli/harn"
@@ -143,6 +153,7 @@ run_artifact() {
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
       HARN_RUST_TEST_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
       HARN_SECURITY_ARTIFACT_MAX_BYTES="${SECURITY_MAX_BYTES_OVERRIDE:-1073741824}" \
+      HARN_CONSUMER_CLI_MAX_BYTES="${CONSUMER_MAX_BYTES_OVERRIDE:-104857600}" \
       "$script" "$@"
   )
 }
@@ -165,6 +176,28 @@ run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build-ci-cli"
 test ! -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
+consumer_bundle="$tmpdir/out/harn-consumer-cli.tar.zst"
+run_artifact pack-consumer-cli "$cli_bundle" "$consumer_bundle" "$commit"
+test -f "$tmpdir/receipts/strip-debug"
+consumer_env="$tmpdir/consumer-env"
+run_artifact restore-consumer-cli "$consumer_bundle" "$tmpdir/consumer-restored" "$commit" "$consumer_env"
+test "$("$tmpdir/consumer-restored/harn" --version)" = harn
+grep -Fxq "commit=$commit" "$tmpdir/consumer-restored/manifest"
+grep -Fxq 'artifact_kind=consumer-cli' "$tmpdir/consumer-restored/manifest"
+test ! -e "$tmpdir/consumer-restored/harn-cli-aot-gen"
+if grep -q '^HARN_RELEASE_CLI_AOT_GEN_BIN=' "$consumer_env"; then
+  echo 'consumer restore exported an absent AOT generator' >&2
+  exit 1
+fi
+expect_failure 'full restore accepted a consumer-only archive' \
+  run_artifact restore-cli "$consumer_bundle" "$tmpdir/consumer-as-full" "$commit"
+expect_failure 'consumer restore accepted a different commit' \
+  run_artifact restore-consumer-cli "$consumer_bundle" "$tmpdir/consumer-wrong-source" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CONSUMER_MAX_BYTES_OVERRIDE=1 expect_failure 'oversized consumer archive was published' \
+  run_artifact pack-consumer-cli "$cli_bundle" "$tmpdir/out/oversized-consumer.tar.zst" "$commit"
+test ! -e "$tmpdir/out/oversized-consumer.tar.zst"
+FAKE_STRIP_VERSION_CHANGE=1 expect_failure 'a version-changing strip was accepted' \
+  run_artifact pack-consumer-cli "$cli_bundle" "$tmpdir/out/changed-consumer.tar.zst" "$commit"
 head_commit=fedcba9876543210fedcba9876543210fedcba98
 FAKE_HEAD_CLI=1 run_artifact build-head-cli "$tmpdir/out/head-cli.tar.zst" "$head_commit"
 mkdir "$tmpdir/head-cli"

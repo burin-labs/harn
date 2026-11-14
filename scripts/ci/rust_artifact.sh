@@ -33,9 +33,11 @@ usage:
   scripts/ci/rust_artifact.sh build-tests <bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh build-cli <cli-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh build-head-cli <cli-bundle.tar.zst> <head-sha>
+  scripts/ci/rust_artifact.sh pack-consumer-cli <cli-bundle.tar.zst> <consumer-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh build-security <security-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh restore-tests <bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
+  scripts/ci/rust_artifact.sh restore-consumer-cli <consumer-bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-security <security-bundle.tar.zst> <directory> <commit-sha>
   scripts/ci/rust_artifact.sh restore-candidate <archive> <candidate-manifest.json> <target> <directory> <commit-sha> [github-env]
 
@@ -236,7 +238,11 @@ verify_cli_manifest() {
   require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
-  require_manifest_value "$destination/manifest" aot_generator_sha256 "$(sha256 "$destination/harn-cli-aot-gen")"
+  if [[ "${3:-full}" == consumer ]]; then
+    require_manifest_value "$destination/manifest" artifact_kind consumer-cli
+  else
+    require_manifest_value "$destination/manifest" aot_generator_sha256 "$(sha256 "$destination/harn-cli-aot-gen")"
+  fi
   require_manifest_object_id "$destination/manifest" build_freshness
 }
 
@@ -315,6 +321,38 @@ pack_cli_bundle() {
   mv "$output.tmp" "$output"
 }
 
+pack_consumer_cli_bundle() {
+  local bundle=$1 output=$2 commit=$3 staging before after bytes limit
+  cleanup_dir="$(mktemp -d)"
+  staging="$cleanup_dir/consumer"
+  restore_cli_bundle "$bundle" "$staging" "$commit"
+  before="$("$staging/harn" --version)"
+  strip --strip-debug "$staging/harn"
+  after="$("$staging/harn" --version)"
+  if [[ -z "$before" || "$before" != "$after" ]]; then
+    echo "error: stripping the consumer CLI changed or erased its version" >&2
+    exit 1
+  fi
+  rm "$staging/harn-cli-aot-gen"
+  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit" "$SHARED_CLI_PROFILE"
+  echo 'artifact_kind=consumer-cli' >> "$staging/manifest"
+  output="$(cd "$(dirname "$output")" && pwd -P)/$(basename "$output")"
+  (
+    cd "$staging"
+    sha256sum harn manifest > CLI_SHA256SUMS
+    ZSTD_CLEVEL=10 tar --zstd -cf "$output.tmp" harn manifest CLI_SHA256SUMS
+  )
+  bytes="$(wc -c < "$output.tmp" | tr -d ' ')"
+  limit="${HARN_CONSUMER_CLI_MAX_BYTES:-104857600}"
+  if [[ ! "$limit" =~ ^[1-9][0-9]*$ ]] || (( bytes >= limit )); then
+    rm "$output.tmp"
+    echo "error: consumer CLI archive is ${bytes} bytes; required limit is below ${limit} bytes" >&2
+    exit 1
+  fi
+  mv "$output.tmp" "$output"
+  echo "consumer CLI: commit=$commit version=$after compressed_bytes=$bytes"
+}
+
 build_test_bundle() {
   local output=$1
   local commit=$2
@@ -361,6 +399,7 @@ restore_cli_bundle() {
   local destination=$2
   local commit=$3
   local github_env=${4:-}
+  local kind=${5:-full}
   local listing
 
   validate_commit "$commit"
@@ -371,7 +410,11 @@ restore_cli_bundle() {
   fi
 
   listing="$(tar --zstd -tf "$bundle" | LC_ALL=C sort)"
-  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nharn-cli-aot-gen\nmanifest' ]]; then
+  local expected=$'CLI_SHA256SUMS\nharn\nharn-cli-aot-gen\nmanifest'
+  if [[ "$kind" == consumer ]]; then
+    expected=$'CLI_SHA256SUMS\nharn\nmanifest'
+  fi
+  if [[ "$listing" != "$expected" ]]; then
     echo "error: CLI artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
     exit 1
@@ -383,14 +426,16 @@ restore_cli_bundle() {
     cd "$destination"
     sha256sum -c CLI_SHA256SUMS
   )
-  verify_cli_manifest "$destination" "$commit"
-  if [[ ! -x "$destination/harn" || ! -x "$destination/harn-cli-aot-gen" ]]; then
+  verify_cli_manifest "$destination" "$commit" "$kind"
+  if [[ ! -x "$destination/harn" ]] || { [[ "$kind" == full ]] && [[ ! -x "$destination/harn-cli-aot-gen" ]]; }; then
     echo "error: restored Harn CLI and AOT generator must be executable" >&2
     exit 1
   fi
   if [[ -n "$github_env" ]]; then
     printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
-    printf 'HARN_RELEASE_CLI_AOT_GEN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn-cli-aot-gen" >> "$github_env"
+    if [[ "$kind" == full ]]; then
+      printf 'HARN_RELEASE_CLI_AOT_GEN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn-cli-aot-gen" >> "$github_env"
+    fi
     printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$destination/harn")" >> "$github_env"
     printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' \
@@ -663,6 +708,10 @@ case "$command" in
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     build_cli_bundle "$@" same-tree
     ;;
+  pack-consumer-cli)
+    [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+    pack_consumer_cli_bundle "$@"
+    ;;
   build-security)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     build_security_bundle "$@"
@@ -674,6 +723,10 @@ case "$command" in
   restore-cli)
     [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }
     restore_cli_bundle "$@"
+    ;;
+  restore-consumer-cli)
+    [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }
+    restore_cli_bundle "$1" "$2" "$3" "${4:-}" consumer
     ;;
   restore-security)
     [[ $# -eq 3 ]] || { usage >&2; exit 2; }
