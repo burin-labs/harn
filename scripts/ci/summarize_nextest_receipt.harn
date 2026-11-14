@@ -1,5 +1,10 @@
 import { parse, parser } from "std/cli/argparse"
-import { SelectedInventory, event_test_identity, selected_inventory } from "./nextest_inventory"
+import {
+  SelectedInventory,
+  event_identity,
+  event_test_identity,
+  selected_inventory,
+} from "./nextest_inventory"
 
 pub type Receipt = {
   reason: string,
@@ -24,14 +29,9 @@ pub type ReceiptResult = {
 
 type NextestEvent = {type?: string, event?: string, name?: string, binary_id?: string?}
 
-fn finished_receipt(
-  inventory: SelectedInventory,
-  events: string,
-  runner_status: int,
-  stress_count: int?,
-) -> Receipt {
+fn expanded_tests(names: list<string>, stress_count: int?) -> dict<string, bool> {
   let selected: dict<string, bool> = {}
-  for name in inventory.selected {
+  for name in names {
     if stress_count == nil {
       selected[name] = true
     } else {
@@ -44,6 +44,22 @@ fn finished_receipt(
       }
     }
   }
+  return selected
+}
+
+fn finished_receipt(
+  inventory: SelectedInventory,
+  events: string,
+  runner_status: int,
+  stress_count: int?,
+) -> Receipt {
+  const selected = expanded_tests(inventory.selected, stress_count)
+  const ignored = expanded_tests(
+    inventory.excluded.keys().filter(
+      fn(name: string) -> bool { return inventory.excluded[name] == "ignored" },
+    ),
+    stress_count,
+  )
   let finished: dict<string, string> = {}
   let started: dict<string, bool> = {}
   let line_number = 0
@@ -67,15 +83,25 @@ fn finished_receipt(
       }
       continue
     }
-    if event.type != "test" || !["started", "ok", "failed"].contains(kind) {
+    if event.type != "test" || !["started", "ok", "failed", "ignored"].contains(kind) {
       continue
     }
     if event.name == nil {
       throw "events line ${line_number} has no test name"
     }
-    const name = event_test_identity(inventory, unwrap(event.name), owner)
+    const identity = event_identity(unwrap(event.name))
+    const name = event_test_identity(identity, inventory.event_owners[identity.key] ?? [], owner)
+    if ignored[name] ?? false {
+      if kind == "started" || kind == "ignored" {
+        continue
+      }
+      throw "excluded test emitted ${kind}: ${name}"
+    }
     if !(selected[name] ?? false) {
-      throw "test is absent from inventory: ${name}"
+      throw "test is not selected in inventory: ${name}"
+    }
+    if kind == "ignored" {
+      throw "selected test was ignored: ${name}"
     }
     started[name] = true
     if kind == "started" {

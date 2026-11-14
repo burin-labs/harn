@@ -11,6 +11,11 @@ mod pinned_pnpm;
 
 #[path = "gh_config.rs"]
 pub(crate) mod gh_config;
+#[cfg(unix)]
+#[path = "git_credential_socket.rs"]
+pub(crate) mod git_credential_socket;
+#[path = "git_network.rs"]
+pub(crate) mod git_network;
 #[path = "grant_spawn.rs"]
 pub(crate) mod grant_spawn;
 

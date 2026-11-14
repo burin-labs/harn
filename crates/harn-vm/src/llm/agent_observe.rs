@@ -108,6 +108,8 @@ use super::api::{
 use super::trace::{trace_llm_call, LlmTraceEntry};
 use super::{api, first_token, rate_limit, resolved_dispatch, routing, trace};
 
+#[cfg(test)]
+mod capture_options_tests;
 mod raw_provider_capture;
 mod raw_tool_receipts;
 mod served_context_receipts;
@@ -116,12 +118,11 @@ mod transcript_ambient;
 pub(crate) use raw_provider_capture::{
     current_raw_provider_capture_context, persist_raw_provider_request,
     persist_raw_provider_response, persist_raw_provider_response_failure,
-    raw_provider_capture_enabled, with_raw_provider_capture_context, RawProviderCaptureContext,
+    raw_provider_capture_enabled, validate_raw_provider_capture_destination,
+    with_raw_provider_capture_context, RawProviderCaptureContext,
     RawProviderResponseFailureCapture,
 };
 
-#[cfg(test)]
-pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     output_schema_needs_definition, record_capability_snapshot_definition,
@@ -130,9 +131,11 @@ use transcript_ambient::{
     tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
-    current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
-    swap_llm_transcript_ambient, LlmTranscriptAmbient, TranscriptDirFrame,
+    current_transcript_path, remove_llm_transcript_dir, swap_llm_transcript_ambient,
+    LlmTranscriptAmbient, TranscriptDirFrame, TranscriptDirScope,
 };
+#[cfg(test)]
+pub(crate) use transcript_ambient::{pop_llm_transcript_dir, push_llm_transcript_dir};
 
 fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
@@ -524,6 +527,11 @@ pub(crate) async fn observed_llm_call(
     streaming_detector: Option<StreamingDetectorContext>,
     delta_sink: Option<DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
+    let _transcript_scope = TranscriptDirScope::push_if_changed(opts.llm_transcript_dir.as_deref());
+    validate_raw_provider_capture_destination(opts.llm_transcript_raw, None)?;
+    let raw_capture_enabled = opts
+        .llm_transcript_raw
+        .unwrap_or_else(|| env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW"));
     if let Some(resolution) = opts.model_resolution.as_ref() {
         resolution
             .assert_resolved_route(&opts.provider, &opts.model)
@@ -675,8 +683,11 @@ pub(crate) async fn observed_llm_call(
                 session_id: c.session_id.clone(),
                 known_tools: c.known_tools.clone(),
             });
-        let raw_capture_context =
-            RawProviderCaptureContext::new(call_id.clone(), iteration.unwrap_or(0));
+        let raw_capture_context = RawProviderCaptureContext::new(
+            call_id.clone(),
+            iteration.unwrap_or(0),
+            raw_capture_enabled,
+        );
         let reasoning_receipts = observed_attempt.reasoning_receipts();
         let provider_call = with_raw_provider_capture_context(raw_capture_context, async {
             if let Some(b) = bridge {

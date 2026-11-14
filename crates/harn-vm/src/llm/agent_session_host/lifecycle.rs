@@ -1,34 +1,8 @@
 //! Session initialization, terminal projection, and autonomy admission.
 
 use super::*;
+use crate::llm::agent_observe::TranscriptDirScope;
 use crate::value::VmDictExt;
-
-/// Holds the pushed transcript-directory frame until the session takes it.
-///
-/// The frame is pushed before the opening turns are injected, so every failure
-/// path between the push and host registration has to unwind it. Ownership
-/// transfers to the session through [`Self::into_frame`]; anything else drops
-/// the guard and the frame comes back off the stack.
-pub(super) struct TranscriptDirScope(Option<crate::llm::agent_observe::TranscriptDirFrame>);
-
-impl TranscriptDirScope {
-    pub(super) fn push(dir: Option<&str>) -> Self {
-        Self(dir.and_then(crate::llm::agent_observe::push_llm_transcript_dir))
-    }
-
-    /// Hand the frame to the session that owns it for the rest of the run.
-    fn into_frame(mut self) -> Option<crate::llm::agent_observe::TranscriptDirFrame> {
-        self.0.take()
-    }
-}
-
-impl Drop for TranscriptDirScope {
-    fn drop(&mut self) {
-        if let Some(frame) = self.0.take() {
-            crate::llm::agent_observe::remove_llm_transcript_dir(frame);
-        }
-    }
-}
 
 /// Initialize a Harn-driven agent session: open transcript, seed user message.
 #[harn_builtin(

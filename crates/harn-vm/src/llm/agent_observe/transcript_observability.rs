@@ -16,8 +16,11 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) -> bool {
     try_append_llm_transcript_entry_to_dir(entry, dir.as_deref())
 }
 
-pub(super) fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) {
-    let _ = try_append_llm_transcript_entry_to_dir(entry, dir);
+pub(super) fn append_llm_transcript_entry_to_dir(
+    entry: &serde_json::Value,
+    dir: Option<&str>,
+) -> bool {
+    try_append_llm_transcript_entry_to_dir(entry, dir)
 }
 
 fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) -> bool {

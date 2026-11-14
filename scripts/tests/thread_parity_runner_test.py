@@ -22,7 +22,7 @@ FILES = [
     "scripts/ci/nextest_inventory.harn",
 ]
 PRODUCER = r'''#!/usr/bin/env python3
-import json, os, socket, sys
+import json, os, signal, socket, sys
 from pathlib import Path
 names = ["completed", "pending", "queued"]
 mode = os.environ["PARITY_FIXTURE_MODE"]
@@ -67,6 +67,8 @@ if collision:
     else:
         assert "binary_id(=probe)" in expression
         prefix, index = "probe::probe", 2
+    if mode == "collision-infrastructure" and index == 1:
+        sys.exit(101)
     print(json.dumps({"type": "test", "event": "started", "name": prefix + "$same"}), flush=True)
     if mode == "collision-interrupted" and index == 3:
         ready = socket.socket(socket.AF_UNIX)
@@ -74,14 +76,22 @@ if collision:
         ready.sendall(b"ready\n")
         ready.recv(1)
         raise AssertionError("interrupted collision producer must not resume")
-    print(json.dumps({"type": "test", "event": "ok", "name": prefix + "$same"}), flush=True)
-    print(f"PASS ({index}/3) {prefix} same", file=sys.stderr, flush=True)
-    sys.exit(0)
+    failed = mode == "collision-failed" and index == 1
+    print(json.dumps({"type": "test", "event": "failed" if failed else "ok", "name": prefix + "$same"}), flush=True)
+    print(f"{'FAIL' if failed else 'PASS'} ({index}/3) {prefix} same", file=sys.stderr, flush=True)
+    sys.exit(100 if failed else 0)
 for index, name in enumerate(names):
     print(json.dumps({"type": "test", "event": "started", "name": "probe::unit$" + name}), flush=True)
-    if mode == "interrupted" and index == 1:
+    if mode in ("interrupted", "held-cleanup") and index == 1:
         ready = socket.socket(socket.AF_UNIX)
         ready.connect(os.environ["PARITY_SOCKET"])
+        if mode == "held-cleanup":
+            def cleanup(_signal, _frame):
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                ready.sendall(b"cleanup\n")
+                ready.recv(1)
+                sys.exit(143)
+            signal.signal(signal.SIGTERM, cleanup)
         ready.sendall(b"ready\n")
         ready.recv(1)
         raise AssertionError("interrupted producer must not resume")
@@ -90,6 +100,17 @@ for index, name in enumerate(names):
     if "--status-level=pass" in sys.argv:
         print(f"PASS ({index + 1}/3) probe::unit {name}", file=sys.stderr, flush=True)
 sys.exit(100 if mode == "failed" else 0)
+'''
+
+REPORTER = r'''#!/usr/bin/env python3
+import os, socket, subprocess, sys
+status = subprocess.call([os.environ["PARITY_REAL_REPORTER"], *sys.argv[1:]])
+if '--execution-plan' in sys.argv:
+    sys.exit(status)
+with socket.socket(socket.AF_UNIX) as receipt:
+    receipt.connect(os.environ["PARITY_RECEIPT_SOCKET"])
+    receipt.sendall(b"written\n")
+sys.exit(status)
 '''
 
 
@@ -115,7 +136,7 @@ def run_case(case: str, binary: str) -> None:
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                    HARN_BIN=binary, RUNNER_TEMP=str(runner), GITHUB_OUTPUT=str(output),
                    GITHUB_STEP_SUMMARY=str(scratch / "summary.md"),
-                   PARITY_FIXTURE_MODE="interrupted" if case in ("interrupted-int", "lane-int") else case,
+                   PARITY_FIXTURE_MODE="interrupted" if case in ("interrupted-int", "lane-int") else "held-cleanup" if case == "interrupted-cleanup" else case,
                    PARITY_PID_RECORD=str(pid_record), PARITY_COMMANDS=str(scratch / "commands.jsonl"))
         env.pop("RUST_TEST_JOB_LIMIT_MINUTES", None)
         env.pop("RUST_TEST_FEEDBACK_BUDGET_SECONDS", None)
@@ -132,12 +153,23 @@ def run_case(case: str, binary: str) -> None:
         bootstrap = repository / "scripts/bootstrap-harn.sh"
         bootstrap.write_text("#!/usr/bin/env bash\nprintf invoked > bootstrap-invoked\nexit 88\n")
         listener = None
-        if case in ("interrupted", "interrupted-int", "lane-int", "collision-interrupted"):
+        receipt_listener = None
+        if case in ("interrupted", "interrupted-int", "lane-int", "interrupted-cleanup", "collision-interrupted"):
             listener = socket.socket(socket.AF_UNIX)
             listener.settimeout(60)
             listener.bind(str(scratch / "ready.sock"))
             listener.listen(1)
             env["PARITY_SOCKET"] = str(scratch / "ready.sock")
+        if case == "interrupted-cleanup":
+            receipt_listener = socket.socket(socket.AF_UNIX)
+            receipt_listener.settimeout(60)
+            receipt_listener.bind(str(scratch / "receipt.sock"))
+            receipt_listener.listen(2)
+            reporter = tools / "receipt-reporter"
+            reporter.write_text(REPORTER)
+            reporter.chmod(0o755)
+            env.update(HARN_BIN=str(reporter), PARITY_REAL_REPORTER=binary,
+                       PARITY_RECEIPT_SOCKET=str(scratch / "receipt.sock"))
         process = None
         try:
             with (scratch / "stdout.log").open("w") as stdout, (scratch / "stderr.log").open("w") as stderr:
@@ -158,9 +190,23 @@ def run_case(case: str, binary: str) -> None:
                                            start_new_session=True)
                 if listener is not None:
                     connection, _ = listener.accept()
+                    connection.settimeout(60)
                     with connection, connection.makefile("rb") as ready:
                         assert ready.readline() == b"ready\n"
                         process.send_signal(signal.SIGINT if case in ("interrupted-int", "lane-int") else signal.SIGTERM)
+                        if case == "interrupted-cleanup":
+                            assert ready.readline() == b"cleanup\n", "producer cleanup was not reached"
+                            reported, _ = receipt_listener.accept()
+                            reported.settimeout(60)
+                            with reported, reported.makefile("rb") as notification:
+                                assert notification.readline() == b"written\n"
+                            evidence = dict(line.split("=", 1) for line in output.read_text().splitlines())["evidence_dir"]
+                            partial = json.loads((Path(evidence) / "receipt.json").read_text())
+                            assert partial["receipt"]["passed"] == 1
+                            assert partial["receipt"]["pending"] == ["probe::unit$pending"]
+                            assert partial["status"] == 143 and process.poll() is None
+                            os.kill(int(pid_record.read_text()), 0)
+                            connection.sendall(b"r")
                         status = process.wait(timeout=60)
                 else:
                     status = process.wait(timeout=60)
@@ -219,16 +265,27 @@ def run_case(case: str, binary: str) -> None:
                 result = json.loads((folder / "receipt.json").read_text())
                 receipt = result["receipt"]
                 assert receipt["selected"] == 3
-                assert "PASS (1/3)" in stderr_text, "native progress did not survive the stdout redirect"
+                if case != "collision-infrastructure":
+                    first_progress = "FAIL (1/3)" if case == "collision-failed" else "PASS (1/3)"
+                    assert first_progress in stderr_text, "native progress did not survive the stdout redirect"
                 if case.startswith("collision"):
                     commands = [json.loads(line) for line in (scratch / "commands.jsonl").read_text().splitlines()]
-                    assert len(commands) == 3
+                    assert len(commands) == (1 if case == "collision-infrastructure" else 3)
                     assert all("--status-level=pass" in command for command in commands)
+                    assert all("--no-fail-fast" in command for command in commands)
                     markers = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()
                                if json.loads(line)["type"] == "harn-invocation"]
-                    assert [marker["binary_id"] for marker in markers] == [None, "probe", "probe::probe"]
-                    assert receipt["failed_names"] == []
-                    if case == "collision-interrupted":
+                    assert [marker["binary_id"] for marker in markers] == ([None] if case == "collision-infrastructure" else [None, "probe", "probe::probe"])
+                    if case == "collision-failed":
+                        assert status == result["status"] == 100
+                        assert receipt["run"] == 3 and receipt["passed"] == 2 and receipt["failed"] == 1
+                        assert receipt["failed_names"] == ["ordinary::unit$same"]
+                        assert receipt["pending"] == receipt["missing"] == []
+                    elif case == "collision-infrastructure":
+                        assert status == result["status"] == 101
+                        assert receipt["run"] == receipt["passed"] == receipt["failed"] == 0
+                        assert len(receipt["missing"]) == 3 and receipt["pending"] == receipt["failed_names"] == []
+                    elif case == "collision-interrupted":
                         assert status == 143 and result["status"] == 143
                         assert receipt["run"] == receipt["passed"] == 2
                         assert receipt["started"] == 3
@@ -237,7 +294,7 @@ def run_case(case: str, binary: str) -> None:
                         assert status == 0 and receipt["run"] == receipt["passed"] == 3
                         assert receipt["pending"] == receipt["missing"] == []
                         assert "PASS (3/3)" in stderr_text
-                elif case in ("interrupted", "interrupted-int"):
+                elif case in ("interrupted", "interrupted-int", "interrupted-cleanup"):
                     expected_status = 130 if case == "interrupted-int" else 143
                     assert status == expected_status and result["status"] == expected_status
                     assert receipt["run"] == receipt["passed"] == 1 and receipt["failed"] == 0
@@ -275,12 +332,14 @@ def run_case(case: str, binary: str) -> None:
                 process.wait()
             if listener is not None:
                 listener.close()
+            if receipt_listener is not None:
+                receipt_listener.close()
     print(f"thread-parity wrapper case={case} passed")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    cases = ["complete", "collision", "collision-filter", "collision-interrupted", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "zero-selected", "reporter-error", "reporter-run-error", "invalid"]
+    cases = ["complete", "collision", "collision-filter", "collision-failed", "collision-infrastructure", "collision-interrupted", "interrupted", "interrupted-int", "interrupted-cleanup", "lane-int", "failed", "inventory-error", "zero-selected", "reporter-error", "reporter-run-error", "invalid"]
     parser.add_argument("--case", choices=cases)
     parser.add_argument("--source-root", type=Path, default=ROOT)
     arguments = parser.parse_args()

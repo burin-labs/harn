@@ -1,19 +1,40 @@
 [
   {
-    "default": "absent; no explicit transcript-directory override",
-    "evidence": "native lifecycle converts an absent or empty llm_transcript_dir to no override. Source review establishes the fallback; canonical host reachability is not inferred.",
-    "expiry": "2026-09-13",
+    "default": "absent or empty; inherit the active transcript directory or environment fallback",
+    "evidence": "The actual CLI and observed-call transport controls select per-call directories for basic calls and agent loops, preserve nested ownership, and isolate concurrent request/response capture.",
+    "expiry": "2027-02-14",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.llm_transcript_dir",
-    "reachability": "unknown",
+    "reachability": "yes",
     "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "reader": "model-registry-key-domain"
+      },
       {
         "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
         "reader": "opt_str"
       }
     ],
-    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "reason": "Public per-call observability setting shared with the agent session lifecycle; retain explicit directory ownership.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit HARN_LLM_TRANSCRIPT_RAW, which defaults to disabled",
+    "evidence": "Actual CLI and observed-call HTTP controls prove explicit true and false override the environment, malformed or missing-directory options refuse before network I/O, and request/response sidecars equal the wire payload under the runtime redaction policy.",
+    "expiry": "2027-02-14",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.llm_transcript_raw",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public per-call observability control; retain explicit overrides while the environment remains a compatibility fallback.",
     "verdict": "KEEP-with-expiry"
   },
   {

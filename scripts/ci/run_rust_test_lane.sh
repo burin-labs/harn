@@ -124,6 +124,10 @@ if [[ -n "${RUST_TEST_INVENTORY_PATH:-}" ]]; then
   "$reporter" run --standalone --no-sandbox "$planner" -- \
     --execution-plan "$RUST_TEST_INVENTORY_PATH" >"$plan"
   count=$(jq -er 'length | select(. > 0)' "$plan")
+  no_fail_fast=0
+  for argument in "$@"; do
+    [[ "$argument" != --no-fail-fast ]] || no_fail_fast=1
+  done
   for ((invocation = 0; invocation < count; invocation++)); do
     filter=$(jq -er ".[$invocation].filter" "$plan")
     args=("$@")
@@ -150,9 +154,15 @@ if [[ -n "${RUST_TEST_INVENTORY_PATH:-}" ]]; then
       '{type:"harn-invocation",event:"started",binary_id:$invocation.binary_id}' >>"$events"
     bash "$test_env" --per-test-state "${args[@]}" >>"$events" &
     child_pid=$!
-    wait "$child_pid" || status=$?
+    invocation_status=0
+    wait "$child_pid" || invocation_status=$?
     child_pid=""
-    ((status == 0)) || break
+    if ((invocation_status != 0)); then
+      status=$invocation_status
+      # Pinned nextest 0.9.132: NextestExitCode::TEST_RUN_FAILED is 100.
+      # Infrastructure and signal exits must not launch another group.
+      ((no_fail_fast && invocation_status == 100)) || break
+    fi
   done
 elif [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
   bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" &

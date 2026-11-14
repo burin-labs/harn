@@ -4,8 +4,13 @@ pub type InventorySuite = {id: string, binary_path: string?, selected: int}
 
 pub type Invocation = {binary_id: string?, filter: string}
 
+pub type EventIdentity = {key: string, test_name: string, stress: string}
+
+pub type InventoryExclusion = "ignored" | "filter-mismatch"
+
 pub type SelectedInventory = {
   selected: list<string>,
+  excluded: dict<string, InventoryExclusion>,
   skipped: int,
   ignored: int,
   unlisted: list<string>,
@@ -61,6 +66,7 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
   let selected: dict<string, bool> = {}
   let event_owners: dict<string, list<string>> = {}
   let isolated: dict<string, bool> = {}
+  let excluded: dict<string, InventoryExclusion> = {}
   let unlisted: list<string> = []
   let suites: list<InventorySuite> = []
   let skipped = 0
@@ -76,31 +82,38 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
     let selected_count = 0
     for test_name in suite.testcases.keys() {
       const test = suite.testcases[test_name]
+      const id = "${binary_id}$${test_name}"
+      if selected[id] != nil || excluded[id] != nil {
+        throw "inventory has duplicate testcase ${id}"
+      }
       if test.ignored {
         ignored += 1
       }
       if test["filter-match"].status == "matches" && !test.ignored {
-        const id = "${binary_id}$${test_name}"
-        if selected[id] ?? false {
-          throw "inventory has duplicate testcase ${id}"
-        }
         selected[id] = true
         selected_count += 1
-        const event_id = "${event_prefix}$${test_name}"
-        const previous = event_owners[event_id] ?? []
-        if len(previous) > 0 {
-          for owner in previous {
-            isolated[owner] = true
-          }
-          isolated[binary_id] = true
-        }
-        event_owners[event_id] = previous + [binary_id]
       } else {
+        excluded[id] = if test.ignored {
+          "ignored"
+        } else {
+          "filter-mismatch"
+        }
         skipped += 1
       }
+      const event_id = "${event_prefix}$${test_name}"
+      event_owners[event_id] = (event_owners[event_id] ?? []) + [binary_id]
     }
     suites = suites
       + [{id: binary_id, binary_path: suite["binary-path"], selected: selected_count}]
+  }
+  for owners in event_owners.values() {
+    if len(owners) > 1 {
+      for owner in owners {
+        if suites.any({ suite -> suite.id == owner && suite.selected > 0 }) {
+          isolated[owner] = true
+        }
+      }
+    }
   }
   if inventory["test-count"] != len(selected) + skipped {
     throw "inventory test-count does not equal selected+skipped: selected=${len(selected)} skipped=${skipped}"
@@ -110,6 +123,7 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
   }
   return {
     selected: selected.keys(),
+    excluded: excluded,
     skipped: skipped,
     ignored: ignored,
     unlisted: unlisted,
@@ -145,7 +159,7 @@ pub fn execution_plan(inventory: SelectedInventory) -> list<Invocation> {
   return [{binary_id: nil, filter: filter}] + isolated
 }
 
-pub fn event_test_identity(inventory: SelectedInventory, name: string, owner: string?) -> string {
+pub fn event_identity(name: string) -> EventIdentity {
   const parts = name.split("$")
   if len(parts) != 2 {
     throw "test event has no unique binary separator: ${name}"
@@ -155,18 +169,24 @@ pub fn event_test_identity(inventory: SelectedInventory, name: string, owner: st
     throw "test event has an invalid stress identity: ${name}"
   }
   const prefix = unwrap(binary[0])
-  const candidates = (inventory.event_owners["${prefix}$${parts[1]}"] ?? []).filter(
-    { binary_id -> owner == nil || binary_id == owner },
-  )
-  if len(candidates) != 1 {
-    throw "test event has no unique inventory owner: ${name}"
-  }
   const stress = if len(binary) == 2 {
     "@stress-${unwrap(binary[1])}"
   } else {
     ""
   }
-  return "${unwrap(candidates[0])}${stress}$${parts[1]}"
+  return {key: "${prefix}$${parts[1]}", test_name: unwrap(parts[1]), stress: stress}
+}
+
+pub fn event_test_identity(
+  identity: EventIdentity,
+  owners: list<string>,
+  owner: string?,
+) -> string {
+  const candidates = owners.filter({ binary_id -> owner == nil || binary_id == owner })
+  if len(candidates) != 1 {
+    throw "test event has no unique inventory owner: ${identity.key}"
+  }
+  return "${unwrap(candidates[0])}${identity.stress}$${identity.test_name}"
 }
 
 fn main(harness: Harness) {
