@@ -28,7 +28,7 @@ dispatchMain()
 /// reported by the time its probe exits, and none is retried later.
 fn serve(listener: TcpListener) -> mpsc::Receiver<String> {
     let (paths, received) = mpsc::channel();
-    std::thread::spawn(move || {
+    crate::runtime_stack::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut line = String::new();
             let _ = BufReader::new(&stream).read_line(&mut line);
