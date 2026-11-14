@@ -1,7 +1,42 @@
+import { selected_inventory } from "../ci/nextest_inventory"
 import { ReceiptResult } from "../ci/summarize_nextest_receipt"
 import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
 
 type CliResult = {exit_code: int, stdout: string, stderr: string}
+
+type TestEvent = {type: string, event: string, name: string}
+
+fn ignored_inventory() -> unknown {
+  let testcases: dict<string, unknown> = {}
+  for name in ["completed", "pending", "queued"] {
+    testcases[name] = {ignored: false, "filter-match": {status: "matches"}}
+  }
+  testcases["filtered"] = {ignored: false, "filter-match": {status: "mismatch"}}
+  for index in range(0, 86) {
+    testcases["ignored-${index}"] = {ignored: true, "filter-match": {status: "mismatch"}}
+  }
+  return {
+    "test-count": 90,
+    "rust-suites": {
+      demo: {"package-name": "demo", "binary-name": "unit", status: "listed", testcases: testcases},
+    },
+  }
+}
+
+fn fixture_event(event: string, name: string) -> TestEvent {
+  return {type: "test", event: event, name: "demo::unit$${name}"}
+}
+
+fn ignored_events() -> list<TestEvent> {
+  let events: list<TestEvent> = []
+  for index in range(0, 86) {
+    events = events + [fixture_event("started", "ignored-${index}")]
+    if index < 75 {
+      events = events + [fixture_event("ignored", "ignored-${index}")]
+    }
+  }
+  return events
+}
 
 fn run_cli(harness: Harness, script: string, args: list<string>) -> CliResult {
   const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
@@ -128,6 +163,158 @@ fn check_collectors(harness: Harness, group: string) -> nil {
 
 pipeline test_actual_nextest_inventory_refuses_empty_and_inconsistent_censuses(harness: Harness) {
   check_collectors(harness, "inventory")
+}
+
+pipeline test_actual_receipt_excludes_known_ignored_starts_and_refuses_execution(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-ignored-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  const inventory = ignored_inventory()
+  const selected = selected_inventory(inventory)
+  assert_eq(len(selected.selected), 3)
+  assert_eq(selected.skipped, 87)
+  assert_eq(selected.ignored, 86)
+  assert_eq(selected.excluded["demo::unit$ignored-0"], "ignored")
+  assert_eq(selected.excluded["demo::unit$filtered"], "filter-mismatch")
+  harness.fs.write_text(inventory_path, json_stringify(inventory))
+  let complete = ignored_events()
+  for name in ["completed", "pending", "queued"] {
+    complete = complete + [fixture_event("started", name), fixture_event("ok", name)]
+  }
+  const arguments = [
+    "--inventory",
+    inventory_path,
+    "--events",
+    events_path,
+    "--runner-status",
+    "0",
+    "--threads",
+    "1",
+    "--format",
+    "json",
+  ]
+  harness.fs.write_text(events_path, complete.map({ event -> json_stringify(event) }).join("\n"))
+  const positive = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+  assert_eq(positive.exit_code, 0, positive.stderr)
+  const receipt = schema_expect<ReceiptResult>(
+    json_parse(positive.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(receipt.reason, "complete")
+  assert_eq(receipt.selected, 3)
+  assert_eq(receipt.run, 3)
+  assert_eq(receipt.passed, 3)
+  assert_eq(receipt.started, 3)
+  assert_eq(receipt.skipped, 87)
+  assert_eq(receipt.pending, [])
+  assert_eq(receipt.missing, [])
+  for unexpected in [
+    fixture_event("started", "unknown"),
+    fixture_event("ok", "unknown"),
+    fixture_event("failed", "unknown"),
+    fixture_event("ignored", "unknown"),
+    fixture_event("ok", "ignored-0"),
+    fixture_event("failed", "ignored-0"),
+    fixture_event("started", "filtered"),
+    fixture_event("ok", "filtered"),
+    fixture_event("failed", "filtered"),
+    fixture_event("ignored", "filtered"),
+    fixture_event("ignored", "completed"),
+  ] {
+    harness.fs.write_text(
+      events_path,
+      (complete + [unexpected]).map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const refused = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+    assert_eq(refused.exit_code, 2, refused.stderr)
+    assert(refused.stderr.contains("receipt-invalid"), refused.stderr)
+  }
+  const partial = ignored_events()
+    + [
+      fixture_event("started", "completed"),
+      fixture_event("ok", "completed"),
+      fixture_event("started", "pending"),
+    ]
+  harness.fs.write_text(events_path, partial.map({ event -> json_stringify(event) }).join("\n"))
+  const interrupted = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory_path,
+      "--events",
+      events_path,
+      "--runner-status",
+      "143",
+      "--threads",
+      "1",
+      "--format",
+      "json",
+    ],
+  )
+  assert_eq(interrupted.exit_code, 1, interrupted.stderr)
+  const progress = schema_expect<ReceiptResult>(
+    json_parse(interrupted.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(progress.passed, 1)
+  assert_eq(progress.started, 2)
+  assert_eq(progress.pending, ["demo::unit$pending"])
+  assert_eq(progress.missing, ["demo::unit$pending", "demo::unit$queued"])
+}
+
+pipeline test_actual_stress_receipt_expands_known_ignored_identities(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-ignored-stress-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  harness.fs.write_text(inventory_path, json_stringify(ignored_inventory()))
+  let events: list<TestEvent> = []
+  for iteration in range(0, 2) {
+    events = events
+      + [
+        {type: "test", event: "started", name: "demo::unit@stress-${iteration}$ignored-0"},
+        {type: "test", event: "ignored", name: "demo::unit@stress-${iteration}$ignored-0"},
+      ]
+    for name in ["completed", "pending", "queued"] {
+      events = events
+        + [{type: "test", event: "ok", name: "demo::unit@stress-${iteration}$${name}"}]
+    }
+  }
+  const arguments = [
+    "--inventory",
+    inventory_path,
+    "--events",
+    events_path,
+    "--runner-status",
+    "0",
+    "--threads",
+    "1",
+    "--stress-count",
+    "2",
+    "--format",
+    "json",
+  ]
+  harness.fs.write_text(events_path, events.map({ event -> json_stringify(event) }).join("\n"))
+  const measured = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+  assert_eq(measured.exit_code, 0, measured.stderr)
+  const receipt = schema_expect<ReceiptResult>(
+    json_parse(measured.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(receipt.selected, 6)
+  assert_eq(receipt.passed, 6)
+  assert_eq(receipt.started, 6)
+  for invalid in [
+    {type: "test", event: "started", name: "demo::unit@stress-2$ignored-0"},
+    {type: "test", event: "ok", name: "demo::unit@stress-0$ignored-0"},
+  ] {
+    harness.fs.write_text(
+      events_path,
+      (events + [invalid]).map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const refused = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+    assert_eq(refused.exit_code, 2, refused.stderr)
+  }
 }
 
 pipeline test_actual_nextest_receipt_reports_missing_failed_and_aborted_tests(harness: Harness) {

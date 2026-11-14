@@ -22,7 +22,7 @@ FILES = [
     "scripts/ci/nextest_inventory.harn",
 ]
 PRODUCER = r'''#!/usr/bin/env python3
-import json, os, socket, sys
+import json, os, signal, socket, sys
 from pathlib import Path
 names = ["completed", "pending", "queued"]
 mode = os.environ["PARITY_FIXTURE_MODE"]
@@ -39,9 +39,16 @@ assert sys.argv[1:3] == ["nextest", "run"]
 Path(os.environ["PARITY_PID_RECORD"]).write_text(str(os.getpid()))
 for index, name in enumerate(names):
     print(json.dumps({"type": "test", "event": "started", "name": "probe::unit$" + name}), flush=True)
-    if mode == "interrupted" and index == 1:
+    if mode in ("interrupted", "held-cleanup") and index == 1:
         ready = socket.socket(socket.AF_UNIX)
         ready.connect(os.environ["PARITY_SOCKET"])
+        if mode == "held-cleanup":
+            def cleanup(_signal, _frame):
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                ready.sendall(b"cleanup\n")
+                ready.recv(1)
+                sys.exit(143)
+            signal.signal(signal.SIGTERM, cleanup)
         ready.sendall(b"ready\n")
         ready.recv(1)
         raise AssertionError("interrupted producer must not resume")
@@ -50,6 +57,15 @@ for index, name in enumerate(names):
     if "--status-level=pass" in sys.argv:
         print(f"PASS ({index + 1}/3) probe::unit {name}", file=sys.stderr, flush=True)
 sys.exit(100 if mode == "failed" else 0)
+'''
+
+REPORTER = r'''#!/usr/bin/env python3
+import os, socket, subprocess, sys
+status = subprocess.call([os.environ["PARITY_REAL_REPORTER"], *sys.argv[1:]])
+with socket.socket(socket.AF_UNIX) as receipt:
+    receipt.connect(os.environ["PARITY_RECEIPT_SOCKET"])
+    receipt.sendall(b"written\n")
+sys.exit(status)
 '''
 
 
@@ -75,7 +91,7 @@ def run_case(case: str, binary: str) -> None:
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
                    HARN_BIN=binary, RUNNER_TEMP=str(runner), GITHUB_OUTPUT=str(output),
                    GITHUB_STEP_SUMMARY=str(scratch / "summary.md"),
-                   PARITY_FIXTURE_MODE="interrupted" if case in ("interrupted-int", "lane-int") else case,
+                   PARITY_FIXTURE_MODE="interrupted" if case in ("interrupted-int", "lane-int") else "held-cleanup" if case == "interrupted-cleanup" else case,
                    PARITY_PID_RECORD=str(pid_record))
         env.pop("RUST_TEST_JOB_LIMIT_MINUTES", None)
         env.pop("RUST_TEST_FEEDBACK_BUDGET_SECONDS", None)
@@ -89,12 +105,23 @@ def run_case(case: str, binary: str) -> None:
         bootstrap = repository / "scripts/bootstrap-harn.sh"
         bootstrap.write_text("#!/usr/bin/env bash\nprintf invoked > bootstrap-invoked\nexit 88\n")
         listener = None
-        if case in ("interrupted", "interrupted-int", "lane-int"):
+        receipt_listener = None
+        if case in ("interrupted", "interrupted-int", "lane-int", "interrupted-cleanup"):
             listener = socket.socket(socket.AF_UNIX)
             listener.settimeout(60)
             listener.bind(str(scratch / "ready.sock"))
             listener.listen(1)
             env["PARITY_SOCKET"] = str(scratch / "ready.sock")
+        if case == "interrupted-cleanup":
+            receipt_listener = socket.socket(socket.AF_UNIX)
+            receipt_listener.settimeout(60)
+            receipt_listener.bind(str(scratch / "receipt.sock"))
+            receipt_listener.listen(2)
+            reporter = tools / "receipt-reporter"
+            reporter.write_text(REPORTER)
+            reporter.chmod(0o755)
+            env.update(HARN_BIN=str(reporter), PARITY_REAL_REPORTER=binary,
+                       PARITY_RECEIPT_SOCKET=str(scratch / "receipt.sock"))
         process = None
         try:
             with (scratch / "stdout.log").open("w") as stdout, (scratch / "stderr.log").open("w") as stderr:
@@ -107,9 +134,23 @@ def run_case(case: str, binary: str) -> None:
                                            start_new_session=True)
                 if listener is not None:
                     connection, _ = listener.accept()
+                    connection.settimeout(60)
                     with connection, connection.makefile("rb") as ready:
                         assert ready.readline() == b"ready\n"
                         process.send_signal(signal.SIGINT if case in ("interrupted-int", "lane-int") else signal.SIGTERM)
+                        if case == "interrupted-cleanup":
+                            assert ready.readline() == b"cleanup\n", "producer cleanup was not reached"
+                            reported, _ = receipt_listener.accept()
+                            reported.settimeout(60)
+                            with reported, reported.makefile("rb") as notification:
+                                assert notification.readline() == b"written\n"
+                            evidence = dict(line.split("=", 1) for line in output.read_text().splitlines())["evidence_dir"]
+                            partial = json.loads((Path(evidence) / "receipt.json").read_text())
+                            assert partial["receipt"]["passed"] == 1
+                            assert partial["receipt"]["pending"] == ["probe::unit$pending"]
+                            assert partial["status"] == 143 and process.poll() is None
+                            os.kill(int(pid_record.read_text()), 0)
+                            connection.sendall(b"r")
                         status = process.wait(timeout=60)
                 else:
                     status = process.wait(timeout=60)
@@ -151,7 +192,7 @@ def run_case(case: str, binary: str) -> None:
                 receipt = result["receipt"]
                 assert receipt["selected"] == 3
                 assert "PASS (1/3)" in stderr_text, "native progress did not survive the stdout redirect"
-                if case in ("interrupted", "interrupted-int"):
+                if case in ("interrupted", "interrupted-int", "interrupted-cleanup"):
                     expected_status = 130 if case == "interrupted-int" else 143
                     assert status == expected_status and result["status"] == expected_status
                     assert receipt["run"] == receipt["passed"] == 1 and receipt["failed"] == 0
@@ -189,16 +230,18 @@ def run_case(case: str, binary: str) -> None:
                 process.wait()
             if listener is not None:
                 listener.close()
+            if receipt_listener is not None:
+                receipt_listener.close()
     print(f"thread-parity wrapper case={case} passed")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", choices=["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"])
+    parser.add_argument("--case", choices=["complete", "interrupted", "interrupted-int", "interrupted-cleanup", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"])
     parser.add_argument("--source-root", type=Path, default=ROOT)
     arguments = parser.parse_args()
     ROOT = arguments.source_root
     harn = os.environ.get("HARN_BIN") or os.environ.get("HARN_EXT_BOOTSTRAP_INSTALLER") or shutil.which("harn")
     assert harn, "a qualified Harn binary is required"
-    for selected in ([arguments.case] if arguments.case else ["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"]):
+    for selected in ([arguments.case] if arguments.case else ["complete", "interrupted", "interrupted-int", "interrupted-cleanup", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"]):
         run_case(selected, harn)

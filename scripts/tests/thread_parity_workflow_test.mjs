@@ -40,6 +40,17 @@ test("untrusted dispatch values select a refused nonempty job", () => {
   }
 });
 
+test("only the measured serial qualification receives a ninety-minute budget", () => {
+  const source = workflow.jobs["thread-parity"]["timeout-minutes"];
+  for (const [threads, expected] of [[1, 90], [8, 60], [16, 60], [0, 60]]) {
+    const context = new data.Dictionary(
+      {key: "matrix", value: new data.Dictionary({key: "threads", value: new data.NumberData(threads)})},
+    );
+    const duration = typeof source === "number" ? source : evaluate(source, context, ["matrix"]).number();
+    assert.equal(duration, expected);
+  }
+});
+
 test("receipt setup selects an existing repository version file", () => {
   const setup = workflow.jobs["thread-parity"].steps.find(step => step.id === "receipt-runtime");
   const action = load(fs.readFileSync(new URL("../../.github/actions/setup-harn/action.yml", import.meta.url), "utf8"));

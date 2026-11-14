@@ -24,14 +24,9 @@ pub type ReceiptResult = {
 
 type NextestEvent = {type?: string, event?: string, name?: string}
 
-fn finished_receipt(
-  inventory: SelectedInventory,
-  events: string,
-  runner_status: int,
-  stress_count: int?,
-) -> Receipt {
+fn expanded_tests(names: list<string>, stress_count: int?) -> dict<string, bool> {
   let selected: dict<string, bool> = {}
-  for name in inventory.selected {
+  for name in names {
     if stress_count == nil {
       selected[name] = true
     } else {
@@ -44,6 +39,22 @@ fn finished_receipt(
       }
     }
   }
+  return selected
+}
+
+fn finished_receipt(
+  inventory: SelectedInventory,
+  events: string,
+  runner_status: int,
+  stress_count: int?,
+) -> Receipt {
+  const selected = expanded_tests(inventory.selected, stress_count)
+  const ignored = expanded_tests(
+    inventory.excluded.keys().filter(
+      fn(name: string) -> bool { return inventory.excluded[name] == "ignored" },
+    ),
+    stress_count,
+  )
   let finished: dict<string, string> = {}
   let started: dict<string, bool> = {}
   let line_number = 0
@@ -56,15 +67,24 @@ fn finished_receipt(
     }
     const event = schema_expect<NextestEvent>(json_parse(line), event_schema)
     const kind = event.event ?? ""
-    if event.type != "test" || !["started", "ok", "failed"].contains(kind) {
+    if event.type != "test" || !["started", "ok", "failed", "ignored"].contains(kind) {
       continue
     }
     if event.name == nil {
       throw "events line ${line_number} has no test name"
     }
     const name = unwrap(event.name)
+    if ignored[name] ?? false {
+      if kind == "started" || kind == "ignored" {
+        continue
+      }
+      throw "excluded test emitted ${kind}: ${name}"
+    }
     if !(selected[name] ?? false) {
-      throw "test is absent from inventory: ${name}"
+      throw "test is not selected in inventory: ${name}"
+    }
+    if kind == "ignored" {
+      throw "selected test was ignored: ${name}"
     }
     started[name] = true
     if kind == "started" {
