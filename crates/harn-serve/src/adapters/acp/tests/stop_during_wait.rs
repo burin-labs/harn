@@ -6,10 +6,18 @@
 //! so a wait that blocks that thread hides the stop until the wait times out.
 
 use super::*;
+use harn_clock::test_support::{recv_within, within, HANG_CEILING};
 
-const WAIT_TIMEOUT_MS: u64 = 30_000;
-/// Generous bound on each awaited event; reached only when the event never comes.
-const EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+// A hung stop must fail its event watchdog before the command wait can expire.
+const WAIT_TIMEOUT_MS: u64 = HANG_CEILING.as_millis() as u64 * 2;
+
+struct BackgroundSessionCleanup(String);
+
+impl Drop for BackgroundSessionCleanup {
+    fn drop(&mut self) {
+        harn_hostlib::tools::long_running::cancel_session_handles(&self.0);
+    }
+}
 
 fn harn_string_literal(value: &str) -> String {
     format!("\"{}\"", harn_lexer::escape_string_literal(value))
@@ -56,11 +64,7 @@ fn reply_unavailable(
         .expect("send host/call error");
 }
 
-#[cfg(all(feature = "hostlib", unix))]
-#[tokio::test(flavor = "current_thread")]
-async fn session_cancel_ends_a_turn_parked_in_wait_command() {
-    use std::time::{Duration, Instant};
-
+async fn end_parked_wait(cancel_session: bool) -> (serde_json::Value, String) {
     // Background spawns re-exec the test binary as their owner-death guardian.
     let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
         "--exact",
@@ -75,6 +79,7 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         let dir = tempfile::tempdir().expect("tempdir");
         let marker = dir.path().join("progress.txt");
         let handle_path = dir.path().join("handle.txt");
+        let fifo_path = dir.path().join("command-input");
         let pipeline_path = dir.path().join("wait-then-cancel.harn");
         let marker_literal = harn_string_literal(&marker.to_string_lossy());
         let handle_literal = harn_string_literal(&handle_path.to_string_lossy());
@@ -89,6 +94,14 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         );
         std::fs::write(&marker, "").expect("seed marker");
         std::fs::write(&pipeline_path, source).expect("write pipeline");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo_path)
+                .status()
+                .expect("create command FIFO")
+                .success(),
+            "create command FIFO"
+        );
 
         let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
             AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string())
@@ -96,17 +109,18 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
             serde_json::json!(dir.path()),
         )
         .await;
+        let _cleanup = BackgroundSessionCleanup(session_id.clone());
         // The session's own backgrounded child, keyed the way the command tool
         // keys it. Spawned here, on the thread that carries the guardian args.
         let child = harn_hostlib::tools::long_running::spawn_long_running(
             "run",
-            "sleep".to_string(),
-            vec!["40".to_string()],
+            "cat".to_string(),
+            vec![fifo_path.to_string_lossy().into_owned()],
             Some(dir.path().to_path_buf()),
             std::collections::BTreeMap::new(),
             session_id.clone(),
         )
-        .expect("spawn a backgrounded sleep");
+        .expect("spawn a FIFO-blocked child");
         let pid = child.pid;
         std::fs::write(&handle_path, &child.handle_id).expect("write handle id");
         assert!(is_running(pid), "background child should be running");
@@ -116,9 +130,9 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         let reaped =
             harn_hostlib::tools::long_running::register_result_notifier(&child.handle_id)
                 .expect("live handle");
-        let mut wait_in_place =
-            tokio::task::spawn_blocking(move || wait_registered.recv_timeout(EVENT_TIMEOUT));
-        let prompted_at = Instant::now();
+        let mut wait_in_place = tokio::task::spawn_blocking(move || {
+            recv_within("wait_command registration", &wait_registered);
+        });
         request_tx
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
@@ -134,83 +148,72 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
         // Serve the host until the wait has registered for its result, so the
         // stop arrives while the turn is parked inside the wait.
         let mut early = serde_json::Value::Null;
-        loop {
-            tokio::select! {
-                registered = &mut wait_in_place => {
-                    registered.expect("wait notifier task").unwrap_or_else(|_| {
-                        panic!("the turn never reached wait_command; prompt: {early}")
-                    });
-                    break;
-                }
-                message = recv_json(&mut response_rx) => {
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    } else if message["method"] == "host/call" {
-                        reply_unavailable(&request_tx, &message);
-                    } else if message["id"] == 3 {
-                        early = message.clone();
+        within("turn parked in wait_command", async {
+            loop {
+                tokio::select! {
+                    registered = &mut wait_in_place => {
+                        registered.expect("wait notifier task");
+                        assert!(early.is_null(), "prompt ended before its wait: {early}");
+                        break;
+                    }
+                    message = recv_json(&mut response_rx) => {
+                        if message["method"] == "host/capabilities" {
+                            reply_empty_result(&request_tx, &message);
+                        } else if message["method"] == "host/call" {
+                            reply_unavailable(&request_tx, &message);
+                        } else if message["id"] == 3 {
+                            early = message.clone();
+                        }
                     }
                 }
             }
+        })
+        .await;
+
+        if cancel_session {
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/cancel",
+                    "params": {"sessionId": session_id.clone()},
+                }))
+                .expect("send session/cancel");
+        } else {
+            assert!(harn_hostlib::tools::long_running::cancel_handle(
+                &child.handle_id
+            ));
         }
 
-        let cancelled_at = Instant::now();
-        request_tx
-            .send(serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "session/cancel",
-                "params": {"sessionId": session_id.clone()},
-            }))
-            .expect("send session/cancel");
-
-        let mut result = serde_json::Value::Null;
-        for _ in 0..256 {
-            let message = recv_json(&mut response_rx).await;
-            if message["method"] == "host/capabilities" {
-                reply_empty_result(&request_tx, &message);
-                continue;
+        let result = within("prompt terminal after ending its wait", async {
+            loop {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                } else if message["method"] == "host/call" {
+                    reply_unavailable(&request_tx, &message);
+                } else if message["id"] == 3 {
+                    return message["result"].clone();
+                }
             }
-            if message["method"] == "host/call" {
-                reply_unavailable(&request_tx, &message);
-                continue;
-            }
-            if message["id"] == 3 {
-                result = message["result"].clone();
-                break;
-            }
-        }
-        let stop_latency = cancelled_at.elapsed();
-        // This test shares the session's thread, so a wait that blocks it also
-        // delays the test's own reads and the cancel itself. Bound the whole
-        // turn against the wait's 30s budget, not only the time after the send.
-        let turn_took = prompted_at.elapsed();
+        })
+        .await;
 
         // The handle publishes its terminal result once its waiter has reaped
         // the killed child.
-        let reaped = tokio::task::spawn_blocking(move || reaped.recv_timeout(EVENT_TIMEOUT))
-            .await
-            .expect("reap notifier task");
-        assert!(reaped.is_ok(), "the waited child never reached a terminal result");
+        within(
+            "waited child reaped",
+            tokio::task::spawn_blocking(move || recv_within("child terminal result", &reaped)),
+        )
+        .await
+        .expect("reap notifier task");
         let child_alive = is_running(pid);
         let marker_text = std::fs::read_to_string(&marker).unwrap_or_default();
 
         drop(request_tx);
-        let _ = server.await;
-
-        assert!(
-            turn_took < Duration::from_secs(5),
-            "the stopped turn took {turn_took:?}, so it sat out the wait (result = {result})"
-        );
-        assert!(
-            stop_latency < Duration::from_secs(1),
-            "a stop during wait_command must end the turn within 1s; took {stop_latency:?} \
-             (result = {result})"
-        );
-        assert_eq!(result["stopReason"], "cancelled", "got {result}");
-        assert_eq!(
-            result["_meta"]["harn"]["terminal"]["kind"], "user_cancelled",
-            "a stopped wait must seal a user_cancelled terminal; got {result}"
-        );
+        within("ACP session teardown", server)
+            .await
+            .expect("ACP server task");
+        assert!(marker_text.starts_with("WAITING\n"), "{marker_text}");
         // The cancel reaps the child, which wakes the wait with that terminal
         // result; a wait that sat out its budget would report `running`.
         assert!(
@@ -218,6 +221,28 @@ async fn session_cancel_ends_a_turn_parked_in_wait_command() {
             "the wait ran out its budget instead of ending on the stop: {marker_text}"
         );
         assert!(!child_alive, "the waited child (pid {pid}) must be reaped");
+        (result, marker_text)
     })
-    .await;
+    .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_cancel_ends_a_turn_parked_in_wait_command() {
+    let (result, _) = end_parked_wait(true).await;
+    assert_eq!(result["stopReason"], "cancelled", "got {result}");
+    assert_eq!(
+        result["_meta"]["harn"]["terminal"]["kind"], "user_cancelled",
+        "a stopped wait must seal a user_cancelled terminal; got {result}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ending_the_waited_command_does_not_cancel_the_turn() {
+    let (result, marker) = end_parked_wait(false).await;
+    assert_eq!(result["stopReason"], "end_turn", "got {result}");
+    assert_ne!(
+        result["_meta"]["harn"]["terminal"]["kind"],
+        "user_cancelled"
+    );
+    assert!(marker.contains("AFTER_WAIT:"), "{marker}");
 }

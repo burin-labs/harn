@@ -162,45 +162,27 @@ impl HostLeaseStore {
         registry_timeout: Duration,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         let request = normalize_request(request)?;
-        let mut conn = self.connection(registry_timeout)?;
-        let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
-            Ok(tx) => tx,
-            Err(error) if sqlite_is_busy(&error) => {
-                let now = self.now_ms()?;
-                return Ok(registry_busy_receipt(
-                    request.host,
-                    request.resource_class,
-                    request.domain,
-                    now,
-                    started_monotonic_ms
-                        .map(|started| duration_ms_u64(self.monotonic_elapsed(started))),
-                    deadline_at_ms,
-                ));
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let now = self.now_ms()?;
-        let waited_ms = started_monotonic_ms
-            .map(|started| duration_ms_u64(self.monotonic_elapsed(started)))
-            .unwrap_or(0);
         let host = request.host.clone();
         let resource_class = request.resource_class;
         let domain = request.domain.clone();
-        let result = match self.acquire_in_transaction(
-            tx,
+        // Contention has the same meaning while opening/configuring SQLite as
+        // it does during the transaction. Keep that translation at the whole
+        // atomic attempt boundary, before the wait owner decides its next step.
+        let result = match self.acquire_transaction(
             request,
-            now,
+            started_monotonic_ms,
             deadline_at_ms,
-            waited_ms,
             identity,
+            registry_timeout,
         ) {
             Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => {
                 Ok(registry_busy_receipt(
                     host,
                     resource_class,
                     domain,
-                    now,
-                    Some(waited_ms),
+                    self.now_ms()?,
+                    started_monotonic_ms
+                        .map(|started| duration_ms_u64(self.monotonic_elapsed(started))),
                     deadline_at_ms,
                 ))
             }
@@ -210,6 +192,23 @@ impl HostLeaseStore {
             self.signal_waiters();
         }
         Ok(result)
+    }
+
+    fn acquire_transaction(
+        &self,
+        request: HostLeaseRequest,
+        started_monotonic_ms: Option<i64>,
+        deadline_at_ms: Option<i64>,
+        identity: &WaiterIdentity,
+        registry_timeout: Duration,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let mut conn = self.connection(registry_timeout)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = self.now_ms()?;
+        let waited_ms = started_monotonic_ms
+            .map(|started| duration_ms_u64(self.monotonic_elapsed(started)))
+            .unwrap_or(0);
+        self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms, identity)
     }
 
     #[cfg(test)]

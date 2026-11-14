@@ -34,6 +34,22 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) 
   assert_eq(target_gc_rule.allowed, true)
   assert_eq(target_gc_rule.owner, "Target-cache collector")
   assert_eq(python_boundary_rule_for("scripts/tests/other_target_gc.py").allowed, false)
+  assert_eq(python_boundary_rule_for("scripts/tests/thread_parity_runner_test.py").allowed, true)
+  assert_eq(python_boundary_rule_for("scripts/tests/other_parity_orchestration.py").allowed, false)
+  assert_eq(
+    embedded_python_rule_for(
+      "Makefile",
+      "HARN_BIN=\"$(HARN_BIN)\" python3 scripts/tests/thread_parity_runner_test.py",
+    ).allowed,
+    true,
+  )
+  assert_eq(
+    embedded_python_rule_for(
+      "Makefile",
+      "HARN_BIN=\"$(HARN_BIN)\" python3 scripts/tests/other_parity_orchestration.py",
+    ).allowed,
+    false,
+  )
   assert_eq(
     embedded_python_rule_for(
       "Makefile",

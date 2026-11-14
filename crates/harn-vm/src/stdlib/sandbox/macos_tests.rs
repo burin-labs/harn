@@ -302,6 +302,49 @@ pub(super) fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy 
     }
 }
 
+/// System services run outside a command's profile, so the profile names each
+/// one it allows. Under every network grant, the one mach rule is the named
+/// list, nothing else mentions mach, and nothing re-allows by default.
+#[test]
+fn sandbox_profile_names_every_mach_service_it_allows() {
+    let proxy = Some(crate::orchestration::ProcessNetworkProxy {
+        http_port: 3128,
+        socks_port: 1080,
+    });
+    let base = macos_policy_with_workspace_ops(&["read_text"]);
+    let mut grants = Vec::new();
+    for (level, loopback, proxy) in [
+        ("read_only", false, None),
+        ("network", false, None),
+        ("network", false, proxy),
+        ("network", true, None),
+        ("network", true, proxy),
+    ] {
+        let mut policy = base.clone();
+        policy.side_effect_level = Some(level.to_string());
+        policy.process_sandbox.allow_tcp_loopback = loopback;
+        policy.process_network_proxy = proxy;
+        grants.push(policy);
+    }
+    let mut denied = base;
+    denied.process_sandbox.deny_network = true;
+    grants.push(denied);
+    assert!(
+        MACH_SERVICES.lines().skip(1).all(|line| {
+            let line = line.trim().trim_end_matches(')');
+            line.starts_with("(global-name \"com.apple.") && line.ends_with('"')
+        }),
+        "the list names exact services: {MACH_SERVICES}"
+    );
+    for policy in grants {
+        let profile = render_profile(&policy);
+        assert_eq!(profile.matches(MACH_SERVICES).count(), 1, "{profile}");
+        let rest = profile.replacen(MACH_SERVICES, "", 1);
+        assert!(!rest.contains("mach"), "an unnamed mach rule: {profile}");
+        assert!(!rest.contains("(allow default"), "{profile}");
+    }
+}
+
 #[test]
 fn sandbox_profile_does_not_grant_global_file_read() {
     let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
@@ -1171,16 +1214,22 @@ fn package_manager_preset_policy() -> CapabilityPolicy {
     }
 }
 
-fn denylist_home() -> std::path::PathBuf {
-    super::super::sandbox_user_home_dir().expect("home dir")
+/// Renders `policy` and resolves the home directory it denies under, holding the
+/// environment lock so a test that swaps HOME cannot change it between the two.
+fn render_denylist_profile(policy: &CapabilityPolicy) -> (String, std::path::PathBuf) {
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let home = super::super::sandbox_user_home_dir().expect("home dir");
+    (render_profile(policy), home)
 }
 
 /// Positive control. Without it the deny assertions could pass because the
 /// preset granted nothing, rather than because the deny outranked it.
 #[test]
 fn the_package_manager_preset_really_grants_the_parent_directory() {
-    let profile = render_profile(&package_manager_preset_policy());
-    let config = denylist_home().join(".config/composer");
+    let (profile, home) = render_denylist_profile(&package_manager_preset_policy());
+    let config = home.join(".config/composer");
     assert!(
         profile.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
@@ -1194,8 +1243,7 @@ fn the_package_manager_preset_really_grants_the_parent_directory() {
 /// so a deny emitted before a broad allow covering the same path is a no-op.
 #[test]
 fn a_denied_credential_is_refused_even_though_a_preset_granted_its_parent() {
-    let profile = render_profile(&package_manager_preset_policy());
-    let home = denylist_home();
+    let (profile, home) = render_denylist_profile(&package_manager_preset_policy());
     let last_allow = profile
         .rmatch_indices("(allow file-read")
         .next()
@@ -1229,14 +1277,14 @@ fn a_denied_credential_is_refused_even_though_a_preset_granted_its_parent() {
 /// subsumes metadata, so the trailing deny closes that too.
 #[test]
 fn a_denied_path_leaks_neither_content_nor_metadata() {
-    let profile = render_profile(&package_manager_preset_policy());
+    let (profile, home) = render_denylist_profile(&package_manager_preset_policy());
     let metadata_at = profile
         .find("(allow file-read-metadata)")
         .expect("precondition: the profile grants global metadata reads");
     let deny_at = profile
         .find(&format!(
             "(deny file-read* (subpath \"{}\"))",
-            denylist_home().join(".ssh").display()
+            home.join(".ssh").display()
         ))
         .expect("~/.ssh denied");
     assert!(
@@ -1254,7 +1302,7 @@ fn a_host_added_denial_composes_with_the_defaults() {
         .process_sandbox
         .read_deny_roots
         .push("/opt/company-secrets".to_string());
-    let profile = render_profile(&policy);
+    let (profile, home) = render_denylist_profile(&policy);
 
     assert!(
         profile.contains("(deny file-read* (subpath \"/opt/company-secrets\"))"),
@@ -1263,7 +1311,7 @@ fn a_host_added_denial_composes_with_the_defaults() {
     assert!(
         profile.contains(&format!(
             "(deny file-read* (subpath \"{}\"))",
-            denylist_home().join(".ssh").display()
+            home.join(".ssh").display()
         )),
         "adding a denial must not displace the defaults:\n{profile}"
     );
