@@ -549,9 +549,18 @@ pub(crate) fn confined_server_removes_its_private_temp_dir_on_exit() {
         "the private dir exists while serving"
     );
     client.shutdown_expect_success();
-    let leftovers: Vec<_> = fs::read_dir(&host_tmp)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect();
+    // On Linux the directory itself is removed by a helper that notices the
+    // server is gone, so allow it a moment.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let leftovers = loop {
+        let leftovers: Vec<_> = fs::read_dir(&host_tmp)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        if leftovers.is_empty() || std::time::Instant::now() >= deadline {
+            break leftovers;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     assert!(leftovers.is_empty(), "leftover temp entries: {leftovers:?}");
 }

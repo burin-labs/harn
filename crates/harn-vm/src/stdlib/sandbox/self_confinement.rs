@@ -52,6 +52,32 @@ impl ProcessConfinement {
 
 static CONFINEMENT: OnceLock<ProcessConfinement> = OnceLock::new();
 
+/// The write end of the pipe a temp-dir reaper waits on. Holding it is what
+/// keeps the reaper from removing the directory early.
+#[cfg(unix)]
+static REAPER: std::sync::Mutex<Option<std::process::ChildStdin>> = std::sync::Mutex::new(None);
+
+/// Start an unconfined helper that removes `dir` once this process is gone.
+///
+/// Landlock grants removal of the directory itself only on its parent, which a
+/// confined process never holds, so the process can empty its private temp dir
+/// but not remove it. The helper starts before confinement, so it is not
+/// confined, and it outlives a crash as well as a normal exit. Best effort: a
+/// host without `sh` just keeps the in-process cleanup.
+#[cfg(unix)]
+fn spawn_temp_dir_reaper(dir: &std::path::Path) -> Option<std::process::ChildStdin> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("sh")
+        .args(["-c", "cat >/dev/null; rm -rf -- \"$1\"", "harn-temp-reaper"])
+        .arg(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.take()
+}
+
 /// Confine the calling process under `policy`, for the rest of its life.
 ///
 /// Fails closed: an error means the process is NOT confined and the caller
@@ -102,6 +128,8 @@ fn confine_with<B: SandboxBackend>(
         .process_sandbox
         .write_roots
         .push(temp_dir.display().to_string());
+    #[cfg(unix)]
+    let reaper = spawn_temp_dir_reaper(&temp_dir);
     let mechanism = match B::confine_current_process(&policy) {
         Ok(mechanism) => mechanism,
         Err(error) => {
@@ -114,6 +142,10 @@ fn confine_with<B: SandboxBackend>(
     // Runtime threads may already exist, but none is reading the environment
     // yet: they are parked until the server starts handing them work.
     unsafe { std::env::set_var("TMPDIR", &temp_dir) };
+    #[cfg(unix)]
+    if let Ok(mut held) = REAPER.lock() {
+        *held = reaper;
+    }
     let confinement = ProcessConfinement {
         backend: B::name(),
         mechanism,
@@ -149,12 +181,16 @@ fn private_temp_dir() -> Result<PathBuf, VmError> {
 
 /// Remove this process's private temp dir, if it was confined.
 ///
-/// Call it as the process finishes serving. Best effort: the directory lies
-/// inside the process's own write roots, so it can always be removed, and a
-/// failure leaves only the leftover this call exists to prevent.
+/// Call it as the process finishes serving. Best effort: it empties the
+/// directory, which lies inside the process's own write roots, and releases
+/// the reaper, which removes the directory itself.
 pub fn remove_process_temp_dir() {
     if let Some(confinement) = CONFINEMENT.get() {
         let _ = std::fs::remove_dir_all(&confinement.temp_dir);
+        #[cfg(unix)]
+        if let Ok(mut held) = REAPER.lock() {
+            held.take();
+        }
     }
 }
 
