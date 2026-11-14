@@ -22,6 +22,7 @@ mkdir -p "$work/bin"
 #                   an event suffixed `+live` has the title "Suite (live)",
 #                   otherwise "Suite")
 #   HISTORY_FAIL    suite whose run-history request fails
+#   HISTORY_DISABLED suite whose history requires --all because it is disabled
 #   JOB_<id>        judged-job conclusion for run id (empty = skipped)
 #   JOBPAGE2_<id>   judged-job conclusion on the second page of run id's jobs
 #   JOBS_FAIL       make every job request fail
@@ -51,9 +52,17 @@ case "$args" in
     var="JOBPAGE2_$id"
     if [[ -n "${!var:-}" && "$args" == *--paginate* ]]; then printf '%s\n' "${!var}"; fi ;;
   "run list"*)
-    suite=""; prev=""
-    for arg in "$@"; do [[ "$prev" == --workflow ]] && suite="$arg"; prev="$arg"; done
+    suite=""; prev=""; all=0
+    for arg in "$@"; do
+      [[ "$prev" == --workflow ]] && suite="$arg"
+      [[ "$arg" != --all ]] || all=1
+      prev="$arg"
+    done
     [[ "$suite" != "${HISTORY_FAIL:-}" ]] || exit 1
+    if [[ "$suite" == "${HISTORY_DISABLED:-}" && "$all" == 0 ]]; then
+      echo 'disabled workflow history requires --all' >&2
+      exit 1
+    fi
     echo "$args" >> "$CALLS"
     filter=""; want=""; prev=""
     for arg in "$@"; do
@@ -122,6 +131,16 @@ run_case "a failed run-history request fails" failure "${healthy[@]}" HISTORY_FA
 run_case "a failed job request fails" failure "${healthy[@]}" JOBS_FAIL=1
 run_case "an empty history is unjudged" pending "${healthy[@]}" HISTORY_Alpha=
 run_case "a skipped judged job is unjudged" pending "${healthy[@]}" JOB_10=
+run_case "a disabled workflow with measured healthy history passes" success "${healthy[@]}" \
+  HISTORY_DISABLED=Alpha
+run_case "a disabled workflow retains its measured broken streak" failure "${healthy[@]}" \
+  HISTORY_DISABLED=Alpha HISTORY_Alpha=$'1 failure\n2 failure\n3 failure\n'
+if ! grep -Fq '| Alpha | failure failure failure | **BROKEN' "$work/summary"; then
+  echo 'FAIL disabled history must report the measured broken streak'
+  failures=$((failures + 1))
+fi
+run_case "a disabled workflow with no history remains unjudged" pending "${healthy[@]}" \
+  HISTORY_DISABLED=Alpha HISTORY_Alpha=
 
 window="$(for id in $(seq 10 21); do printf '%s success\n' "$id"; done)"
 run_case "a thin all-red judged-job window is unreadable" failure "${healthy[@]}" \
