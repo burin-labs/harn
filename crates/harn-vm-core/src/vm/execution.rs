@@ -533,13 +533,23 @@ impl Vm {
 
 fn next_deadline(
     execution_deadline: Option<Instant>,
-    scope_deadline: Option<Instant>,
+    scope_deadline: Option<tokio::time::Instant>,
     interrupt_handler_deadline: Option<Instant>,
-) -> (Option<Instant>, Option<DeadlineKind>) {
+) -> (Option<tokio::time::Instant>, Option<DeadlineKind>) {
+    let wall_now = Instant::now();
+    let runtime_now = tokio::time::Instant::now();
+    let runtime_deadline =
+        |deadline: Instant| runtime_now + deadline.saturating_duration_since(wall_now);
     [
-        (execution_deadline, DeadlineKind::Execution),
+        (
+            execution_deadline.map(runtime_deadline),
+            DeadlineKind::Execution,
+        ),
         (scope_deadline, DeadlineKind::Scope),
-        (interrupt_handler_deadline, DeadlineKind::InterruptHandler),
+        (
+            interrupt_handler_deadline.map(runtime_deadline),
+            DeadlineKind::InterruptHandler,
+        ),
     ]
     .into_iter()
     .filter_map(|(deadline, kind)| deadline.map(|deadline| (deadline, kind)))
@@ -706,7 +716,7 @@ impl crate::vm::Vm {
                 );
                 if let Some(deadline) = deadline {
                     tokio::select! {
-                        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                        _ = tokio::time::sleep_until(deadline) => {
                             return kind.unwrap_or(DeadlineKind::Scope);
                         }
                         _ = changed => {}
