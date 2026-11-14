@@ -1,0 +1,122 @@
+import { LearnedCapability } from "std/agent/learned/contracts"
+import { ToolCatalogEntry } from "std/tools"
+
+pub type LearnedFileSet = {root: string, files: list<string>}
+
+pub type LearnedDispatchDeclaration = {
+  tool_name: string,
+  meaning: string,
+  project_files: list<string>,
+  verification_files: list<string>,
+  minimum_probability: float,
+}
+
+pub type LearnedCapabilitySources = {
+  package: LearnedFileSet,
+  project: LearnedFileSet,
+  verification: LearnedFileSet,
+}
+
+pub type LearnedCapabilityDeclaration = {
+  id: string,
+  meaning: string,
+  tool: ToolCatalogEntry,
+  minimum_probability: float,
+}
+
+pub type LearnedCapabilitySnapshot = {kind: "measured", capability: LearnedCapability} \
+  | {kind: "unavailable", group: string, path: string, reason: string}
+
+type FileSnapshot = {kind: "measured", digest: string} \
+  | {kind: "unavailable", path: string, reason: string}
+
+fn file_set_issue(paths: list<string>) -> string {
+  if len(paths) == 0 {
+    return "empty_file_set"
+  }
+  let seen: list<string> = []
+  for path in paths {
+    if path == "" || starts_with(path, "/") || path.contains("\\")
+      || path.contains(":")
+      || path.split("/").contains("..")
+      || path.split("/").contains(".")
+      || path.split("/").contains("")
+      || seen.contains(path) {
+      return "invalid_relative_path: ${path}"
+    }
+    seen = seen + [path]
+  }
+  return ""
+}
+
+/**
+ * Normalize optional curator metadata against the executable's declared tools.
+ * @effects: []
+ * @errors: ["invalid learned dispatch declaration"]
+ */
+pub fn learned_dispatch_declaration(
+  raw: unknown,
+  tool_names: list<string>,
+) -> LearnedDispatchDeclaration {
+  const declaration: LearnedDispatchDeclaration = schema_expect(
+    raw,
+    schema_of(LearnedDispatchDeclaration),
+  )
+  if !tool_names.contains(declaration.tool_name) || trim(declaration.meaning) == ""
+    || !(declaration.minimum_probability > 0.5 && declaration.minimum_probability <= 1.0)
+    || file_set_issue(declaration.project_files) != ""
+    || file_set_issue(declaration.verification_files) != "" {
+    throw "std/agent/learned: invalid learned dispatch declaration"
+  }
+  return declaration
+}
+
+fn snapshot(fs: HarnessFs, sources: LearnedFileSet) -> FileSnapshot {
+  const issue = file_set_issue(sources.files)
+  if issue != "" {
+    return {kind: "unavailable", path: "", reason: issue}
+  }
+  let hashes: dict<string, string> = {}
+  for path in sources.files.sorted() {
+    const content = match fs.read_text_result(path_join(sources.root, path)) {
+      Ok(value) -> { value }
+      Err(error) -> { return {kind: "unavailable", path: path, reason: error.kind} }
+    }
+    hashes[path] = sha256(content)
+  }
+  return {kind: "measured", digest: sha256(json_stringify(hashes))}
+}
+
+/**
+ * Read the source bytes that own executable behavior, project preconditions,
+ * and verification. Root paths stay outside the digest so qualification can
+ * transfer to an isolated worktree with identical relevant content.
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn learned_capability_snapshot(
+  fs: HarnessFs,
+  declaration: LearnedCapabilityDeclaration,
+  sources: LearnedCapabilitySources,
+) -> LearnedCapabilitySnapshot {
+  let digests: dict<string, string> = {}
+  for (group, files) in iter(sources) {
+    const observed = snapshot(fs, files)
+    if observed.kind == "unavailable" {
+      return {kind: "unavailable", group: group, path: observed.path, reason: observed.reason}
+    }
+    digests[group] = observed.digest
+  }
+  return {
+    kind: "measured",
+    capability: {
+      id: declaration.id,
+      meaning: declaration.meaning,
+      tool: declaration.tool,
+      minimum_probability: declaration.minimum_probability,
+      package_digest: digests.package,
+      project_digest: digests.project,
+      verification_digest: digests.verification,
+    },
+  }
+}

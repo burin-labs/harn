@@ -163,6 +163,17 @@ pub(super) fn host_agent_session_record_assistant_builtin(
         .map(vm_to_json)
         .collect::<Vec<_>>();
     let mut assistant_message = assistant_message_from_llm_result(&llm_result);
+    if let Some(origin) = super::usage_accounting::local_generation_origin(&llm_result)? {
+        if let VmValue::Dict(message) = &mut assistant_message {
+            let mut metadata = message
+                .get("_harn")
+                .and_then(VmValue::as_dict)
+                .cloned()
+                .unwrap_or_default();
+            metadata.insert("generation_origin".into(), origin);
+            std::sync::Arc::make_mut(message).insert("_harn".into(), VmValue::dict(metadata));
+        }
+    }
     super::super::assistant_publication::defer(&mut assistant_message, &llm_result);
     let visible_text =
         crate::llm::agent_result_projection::visible_assistant_text(&assistant_message);

@@ -1,0 +1,50 @@
+{
+  "contract": "harn.learned_dispatch_study.v1",
+  "population": "Single-resource scaffolding in the study's small Python HTTP application. A request supplies one new lowercase plural resource name and two or more named string, integer, or boolean fields. Existing-resource edits, authorization, persistence changes, multiple resources, and other field types are outside the capability.",
+  "baseline": "Two successful real host-agent sessions on separate copies of the same frozen application, followed by the ordinary curator, review, and promotion path.",
+  "artifact": "A Harn tool that creates a resource module, request tests, and API documentation; validates inputs and project preconditions before writing; refuses existing targets; returns canonical mutation and fresh postcondition receipts.",
+  "development": {
+    "positive_cases": 8,
+    "negative_cases": 8,
+    "repetitions": 3,
+    "maximum_candidate_revisions": 3,
+    "allowed_changes": ["applicability instructions", "binding instructions", "reviewed executable repairs"],
+    "selection_rule": "Prefer zero wrong accepted executions, then higher supported-request coverage, then lower measured provider cost and end-to-end latency. Record every attempted revision."
+  },
+  "qualification": {
+    "positive_cases": 40,
+    "negative_cases": 20,
+    "repetitions": 1,
+    "thresholds": [0.99],
+    "target_error": 0.1,
+    "delta": 0.05,
+    "freeze": "Freeze candidate source, selector and binder configuration, project files, independent grader, and all labeled requests before the first qualification call. Development cases never enter the qualification report. Do not tune against qualification labels.",
+    "interpretation": "A bounded prototype qualification on this declared corpus, not a production accuracy claim or proof that synthetic cases are IID deployment traffic. Insufficient accepted execution evidence leaves the capability unqualified."
+  },
+  "execution": {
+    "max_concurrent": 2,
+    "workspace": "One isolated workspace per trial, initialized from the frozen application. Never substitute historical receipts for execution.",
+    "independent_grader": "Run the application's real request path. Check successful creation and retrieval, every declared field and field type, rejection of invalid payloads, preservation of the original application, expected generated tests and documentation, and no unexpected mutations. Negative cases must fall back before workspace mutation.",
+    "failure_controls": [
+      "missing qualification",
+      "empty or unexecuted qualification corpus",
+      "reused execution receipt",
+      "changed package source",
+      "changed tool input schema",
+      "changed project precondition",
+      "changed verifier",
+      "change after selection and before execution",
+      "approval denial",
+      "stop or steer before a consequential tool call",
+      "tool mutation followed by failed verification, with recovery from actual history"
+    ]
+  },
+  "inference": {
+    "decision_route": "openrouter/typesafe/jev-1.14",
+    "binding_route": "openai/gpt-6-luna",
+    "baseline_and_curator_route": "Resolve an ordinary capable coding route from the current host catalog and record the served identity.",
+    "maximum_study_spend_usd": 4.0,
+    "accounting": "Retain physical provider-call and decision receipts, source identities, per-phase timings, actual tool calls and terminal state. Report unpriced calls separately; unknown spend is never zero."
+  },
+  "publication": "Run the local source-revision-pinned registered host consumer before creating feature PRs or publishing a release. Repeat packaging and affected checks when artifact identity changes."
+}

@@ -11,6 +11,7 @@ pub type RuntimeBuildFeatures = {
   full: bool,
   llm_bench_internals: bool,
   vm_bench_internals: bool,
+  vm_test_support: bool,
   content: bool,
   compression: bool,
   http_compression: bool,
@@ -47,4 +48,16 @@ pub type RuntimeContentFingerprint = {
  */
 pub fn runtime_content_fingerprint_value(value: unknown) -> RuntimeContentFingerprint {
   return get_typed_value(value, schema_of(RuntimeContentFingerprint))
+}
+
+/**
+ * Read the identity of the runtime linked into this process, before inference.
+ * The native owner computes this receipt from the embedded stdlib, compiler
+ * contract, runtime version, and enabled features.
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn runtime_content_fingerprint(runtime: HarnessRuntime) -> RuntimeContentFingerprint {
+  const snapshot = runtime.introspection()
+  return runtime_content_fingerprint_value(snapshot.runtime_content_fingerprint)
 }

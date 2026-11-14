@@ -298,3 +298,62 @@ fn record_usage_preserves_unknown_cost_and_reports_the_known_floor() {
     assert_eq!(mixed_json["unpriced_calls"], 1);
     assert_eq!(mixed_json["usage_unknown_calls"], 1);
 }
+
+#[test]
+fn local_generation_uses_observed_nested_spend_and_preserves_unknown_attempts() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("local-generation-usage".to_string()));
+    seed_host_session_provider_model(&session_id, "openai", "gpt-6-luna");
+    let local = json_to_vm(&serde_json::json!({
+        "text": "selected a reviewed tool",
+        "generation_origin": {"kind": "local", "producer": "test", "receipt": "local-1"}
+    }));
+    let read_local = || {
+        vm_to_json(
+            &super::super::host_agent_session_record_usage_builtin(
+                &[crate::value::VmValue::string(&session_id), local.clone()],
+                &mut String::new(),
+            )
+            .expect("local generation accounting"),
+        )
+    };
+    assert_eq!(read_local()["provider_call_count"], 0);
+    assert_eq!(read_local()["unpriced_calls"], 0);
+    super::super::record_provider_dispatch(&session_id);
+    let mut usage = crate::llm::usage::LlmUsage::known_zero_attempt();
+    usage.input_tokens = 10;
+    usage.output_tokens = 4;
+    usage.cost_usd = Some(0.0025);
+    usage.known_cost_usd = 0.0025;
+    super::super::record_provider_attempt_usage(
+        &session_id,
+        "binding-1",
+        "openai",
+        "gpt-6-luna",
+        &usage,
+    );
+    let measured = read_local();
+    assert_eq!(measured["provider_call_count"], 1);
+    assert_eq!(measured["tokens_used"], 14);
+    assert_eq!(measured["cost_usd"], 0.0025);
+    assert_eq!(measured["unpriced_calls"], 0);
+    super::super::record_provider_dispatch(&session_id);
+    let pending = read_local();
+    assert_eq!(pending["provider_call_count"], 2);
+    assert_eq!(pending["known_cost_usd"], 0.0025);
+    assert!(pending["projected_cost_usd"].is_null());
+    assert_eq!(pending["unpriced_calls"], 1);
+    let forged = json_to_vm(&serde_json::json!({
+        "text": "not local", "usage": {"cost_usd": 0.0},
+        "generation_origin": {"kind": "local", "producer": "test", "receipt": "local-2"}
+    }));
+    assert!(
+        super::super::host_agent_session_record_usage_builtin(
+            &[crate::value::VmValue::string(&session_id), forged],
+            &mut String::new()
+        )
+        .is_err(),
+        "local metadata cannot erase provider usage"
+    );
+}

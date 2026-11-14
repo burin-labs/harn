@@ -1,0 +1,123 @@
+pub import "std/agent/learned/contracts"
+pub import {
+  LearnedAgentOptions,
+  LearnedAgentSetup,
+  LearnedTrialScope,
+  learned_agent_options,
+  learned_probe_agent_options,
+} from "std/agent/learned/middleware"
+pub import { learned_qualification_issue, learned_qualify } from "std/agent/learned/qualification"
+pub import {
+  LearnedCapabilityDeclaration,
+  LearnedCapabilitySnapshot,
+  LearnedCapabilitySources,
+  LearnedDispatchDeclaration,
+  LearnedFileSet,
+  learned_capability_snapshot,
+  learned_dispatch_declaration,
+} from "std/agent/learned/sources"
+import { DecisionEvidence, DecisionRoute, router } from "std/decision"
+import { schema_contract } from "std/schema"
+
+/**
+ * Select reviewed tools only under qualification for this exact execution
+ * contract. Selection has no workspace effects; execution remains the ordinary
+ * tool dispatcher's responsibility.
+ * @effects: []
+ * @errors: ["invalid learned dispatcher"]
+ */
+pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatcher {
+  if trim(options.evaluator_revision) == "" || trim(options.population) == ""
+    || trim(options.runtime_digest) == ""
+    || trim(options.grader_digest) == "" {
+    throw "std/agent/learned: evaluator, runtime, grader, and population identities are required"
+  }
+  let routes: list<DecisionRoute<LearnedRequest, string>> = []
+  for capability in options.capabilities {
+    if trim(capability.package_digest) == "" || trim(capability.project_digest) == ""
+      || trim(capability.verification_digest) == "" {
+      throw "std/agent/learned: package, project, and verification identities are required"
+    }
+    routes = routes
+      + [
+        {
+          name: capability.id,
+          meaning: capability.meaning,
+          minimum_probability: capability.minimum_probability,
+          handle: { _harness: Harness, _request: LearnedRequest, evidence: DecisionEvidence ->
+            evidence.route
+          },
+        },
+      ]
+  }
+  const selection = router(
+    {
+      id: options.id,
+      input: schema_contract(schema_of(LearnedRequest), []),
+      instructions: options.instructions,
+      routes: routes,
+      policy: options.policy,
+    },
+  )
+  const identity: LearnedIdentity = {
+    definition_digest: selection.definition.digest,
+    capabilities_digest: sha256(json_stringify(options.capabilities)),
+    evaluator_revision: options.evaluator_revision,
+    runtime_digest: options.runtime_digest,
+    grader_digest: options.grader_digest,
+    population: options.population,
+  }
+  const probe = { llm: HarnessLlm, request: LearnedRequest ->
+    const selected = selection.assess(llm, request)
+    if selected.kind != "matched" {
+      return selected
+    }
+    for capability in options.capabilities {
+      if capability.id == selected.evidence.route {
+        return {kind: "selected", capability: capability, evidence: selected.evidence}
+      }
+    }
+    throw "std/agent/learned: selected an undeclared capability"
+  }
+  return {
+    definition: selection.definition,
+    identity: identity,
+    probe: probe,
+    assess: { llm: HarnessLlm, request: LearnedRequest, qualification: LearnedQualification? ->
+      if len(options.capabilities) == 0 {
+        return {kind: "no_routes"}
+      }
+      guard qualification != nil else {
+        return {kind: "unqualified", reason: "missing_qualification"}
+      }
+      const issue = learned_qualification_issue(identity, qualification)
+      if issue != "" {
+        return {kind: "unqualified", reason: issue}
+      }
+      const selected = probe(llm, request)
+      if selected.kind != "selected" {
+        return selected
+      }
+      const confidence = min(
+        selected.evidence.applicability_probability,
+        selected.evidence.route_probability,
+      )
+      const report = qualification.report
+      guard report.kind == "report" else {
+        throw "unreachable qualification report"
+      }
+      const group = report.groups[0]
+      guard group != nil else {
+        throw "unreachable qualification group"
+      }
+      const recommendation = group.recommendation
+      guard recommendation.kind == "threshold" else {
+        throw "unreachable qualification threshold"
+      }
+      if confidence < recommendation.threshold {
+        return {kind: "unqualified", reason: "below_qualified_threshold"}
+      }
+      return selected
+    },
+  }
+}

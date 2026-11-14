@@ -1,0 +1,85 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
+import {
+  pattern_learning_curator_evidence,
+  pattern_learning_import_session_records,
+} from "std/agent/pattern_knowledge"
+
+type StudyInputs = {
+  project_root: string,
+  memory_root: string,
+  session_sources: list<string>,
+  output_dir: string,
+  harn_binary: string,
+}
+
+fn main(harness: Harness) {
+  const input_path = argv[0]
+  guard input_path != nil else {
+    throw "usage: curate.harn INPUTS.json"
+  }
+  const input: StudyInputs = schema_expect(
+    json_parse(harness.fs.read_text(input_path)),
+    schema_of(StudyInputs),
+  )
+  const options = pick(input, ["project_root", "memory_root", "harn_binary"])
+  let imports = []
+  for source in input.session_sources {
+    imports = imports
+      + [pattern_learning_import_session_records(harness, options + {session_store_root: source})]
+  }
+  const evidence = pattern_learning_curator_evidence(harness, options)
+  require len(evidence) >= 2, "curation must reach two eligible real session records"
+  harness.fs.mkdir(input.output_dir)
+  harness.fs.write_text(
+    path_join(input.output_dir, "imported-evidence.json"),
+    json_stringify({imports: imports, evidence: evidence}),
+  )
+  if argv[1] == "--inspect-only" {
+    harness.stdio.println(json_stringify({imports: imports, evidence_count: len(evidence)}))
+    return
+  }
+  const result = crystallization_curate(
+    harness,
+    options
+      + {
+        evidence: evidence,
+        requested_kind: "harn_tool",
+        declared_checks: [
+          {
+            intent: "test",
+            command: "python3 -m unittest discover -s tests",
+            cwd: "",
+            origin: "operator",
+          },
+        ],
+        agent: {
+          provider: "openai",
+          model: "gpt-6.1-sol",
+          effort: "medium",
+          tool_format: "native",
+          max_iterations: 32,
+          max_tokens: 8192,
+          budget: {max_cost_usd: 1.25, total_budget_usd: 1.25},
+          iteration_budget: {
+            mode: "fixed",
+            initial: 32,
+            max: 32,
+            total_cost_usd: 1.25,
+            wall_clock_ms: 600000,
+          },
+        },
+      },
+  )
+  harness.fs.write_text(path_join(input.output_dir, "curation.json"), json_stringify(result))
+  harness.stdio.println(
+    json_stringify(
+      {
+        status: result.status,
+        evidence_count: result.evidence_count,
+        proposal_count: result.proposal_count,
+        decline_reason: result?.decline_reason ?? "",
+        usage: result?.usage,
+      },
+    ),
+  )
+}

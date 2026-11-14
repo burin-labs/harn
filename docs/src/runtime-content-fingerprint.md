@@ -49,3 +49,19 @@ The CLI ignores caller-supplied environment values for this provenance.
 Embedding hosts should project the typed VM
 value through their existing version or diagnostic surface instead of hashing
 files or reconstructing compatibility fields themselves.
+
+Harn scripts can read the same linked receipt before making a provider call:
+
+```harn
+import { runtime_content_fingerprint } from "std/runtime/content_fingerprint"
+
+fn main(harness: Harness) {
+  const identity = runtime_content_fingerprint(harness.runtime)
+  harness.stdio.println(identity.content_sha256)
+}
+```
+
+`harness.runtime.introspection()` and the `current_harn_version` tool include
+this value as `runtime_content_fingerprint`. These in-process projections leave
+`source_revision` null. The receipt covers the listed Harn content and contracts;
+it does not identify an embedding host's implementation or project files.

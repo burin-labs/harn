@@ -116,7 +116,7 @@ pub(crate) fn assistant_message_from_llm_result_for_test(llm_result: &VmValue) -
 use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
-use usage_accounting::{resolve_call_accounting, SessionUsageTotals};
+use usage_accounting::resolve_call_accounting;
 
 #[cfg(test)]
 pub(crate) use tool_result_messages::record_tool_results_for_test;
@@ -1171,6 +1171,11 @@ fn host_agent_session_record_usage_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let llm_result = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    if usage_accounting::local_generation_origin(&llm_result)?.is_some() {
+        return with_session(&session_id, HOST_SESSION_RECORD_USAGE, |session| {
+            Ok(usage_accounting::observed_totals(session, false))
+        });
+    }
     let llm_block = dict_get(&llm_result, "llm")
         .cloned()
         .unwrap_or(VmValue::Nil);
@@ -1240,9 +1245,9 @@ fn host_agent_session_record_usage_builtin(
         if stop_reason.is_some() {
             session.last_llm_stop_reason = stop_reason.clone();
         }
-        Ok(SessionUsageTotals::from(&*session))
+        Ok(usage_accounting::observed_totals(session, false))
     })?;
-    Ok(totals.to_vm(false))
+    Ok(totals)
 }
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {

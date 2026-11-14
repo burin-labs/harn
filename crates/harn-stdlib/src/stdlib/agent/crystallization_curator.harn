@@ -4,6 +4,7 @@
 // bounded evidence; a normal Harn agent loop decides whether and how to turn it
 // into a reusable skill, MCP tool, workflow, or hybrid. Deterministic code only
 // validates the terminal proposal contract and evidence membership.
+import { LearnedDispatchDeclaration } from "std/agent/learned/sources"
 import { agent_loop } from "std/agent/loop"
 import {
   pattern_learning_accepted_skills,
@@ -12,8 +13,12 @@ import {
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
+pub import { CuratedCapabilityKind } from "std/agent/pattern_knowledge_curated"
 import { pl_state_root } from "std/agent/pattern_knowledge_persistence"
-import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
+import {
+  SessionTranscriptQuery,
+  pattern_learning_session_transcript,
+} from "std/agent/pattern_knowledge_sessions"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { command_run, command_sequence_plan } from "std/command"
 import { tool_registry_from } from "std/tools"
@@ -195,7 +200,14 @@ fn cc_shows_new_workflow(item: dict, installed: list) -> bool {
   return false
 }
 
-fn cc_prompt(evidence: list, pending: list, installed: list = [], declared: list = []) -> dict {
+fn cc_prompt(
+  fs: HarnessFs,
+  evidence: list,
+  pending: list,
+  installed: list = [],
+  declared: list = [],
+  requested_kind: CuratedCapabilityKind? = nil,
+) -> dict {
   const cards = cc_evidence_cards(evidence)
   const system = """
 You are Harn's crystallization curator. You inspect completed coding-agent sessions and decide whether repeated or strongly reusable work should become a durable project capability.
@@ -208,7 +220,7 @@ Each executable proposal must include complete Harn source in artifact.source an
 
 Treat authored tests as falsifiers for the repository contract, not liveness checks. For every representative success path, assert the exact externally consumed outputs—such as normalized paths, command arguments, generated names, status fields, and ordering—not only `ok`, non-empty output, or a generic substring. Include at least one held-out compositional input that was not copied from an evidence card (for example a multiword identifier when the evidence names were single words). A tool that dispatches successfully but returns a malformed path or subtly wrong receipt must fail admission.
 
-Harn tests are `pipeline test_name(harness: Harness, task) { assert_eq(...) }` and may import public helpers from `./server`. Do not use `use`, `struct`, `Vec`, `Result`, attributes, macros, references, or other Rust syntax.
+Harn tests are `pipeline test_name(harness: Harness) { assert_eq(...) }` and may import public helpers from `./server`. Omit unused parameters. Declare a named type alias before schema_of(TypeName); inline record expressions are values, not type declarations. List indexing returns a nilable element: guard an indexed value before passing it as a non-nil string. Do not use `use`, `struct`, `Vec`, `Result`, attributes, macros, references, or other Rust syntax.
 
 These examples define breadth, not templates:
 
@@ -253,7 +265,14 @@ An installed capability already serves future sessions: do not propose it again 
 
 Call submit_crystallization_batch when your analysis is complete.
 """
-  return {system: system, message: message}
+  const dispatch_guidance = fs.render_prompt(
+    "std/agent/learned/prompts/curation.harn.prompt",
+    {
+      dispatch_schema: json_stringify(schema_to_json_schema(schema_of(LearnedDispatchDeclaration))),
+      requested_kind: requested_kind ?? "choose the appropriate kind",
+    },
+  )
+  return {system: "${system}\n\n${dispatch_guidance}", message: message}
 }
 
 fn cc_allowed_session(args: dict, allowed: list) -> string {
@@ -962,19 +981,52 @@ fn cc_prepare_valid_proposals(
   return prepared
 }
 
-fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
+fn cc_tools(harness: Harness, evidence: list, options: any, on_submitted: fn(dict) -> nil) {
   const allowed_sessions = cc_session_ids(evidence)
+  const query_schema = schema_to_json_schema(schema_of(SessionTranscriptQuery))
+  const query_properties = query_schema?.properties
+  require type_of(query_properties) == "dict",
+    "session transcript query must have object properties"
+  const transcript_schema = query_schema
+    + {
+      type: "object",
+      properties: query_properties + {session_id: {type: "string"}},
+      required: ["session_id"],
+    }
   return tool_registry_from(
     [
       {
         name: "inspect_session_evidence",
         description:
-          "Inspect the persisted transcript snapshot for one session in the curator's evidence window.",
-        parameters: {session_id: {type: "string"}},
+          "Inspect a bounded transcript page. Clipped entries report content_truncated and entry_index. Request one entry with start_entry, entry_limit: 1 and text_limit up to 12000 to inspect its full source. The entry_limit * text_limit budget is at most 48000 characters.",
+        inputSchema: transcript_schema,
         returns: {type: "object"},
         handler: { args ->
           const session_id = cc_allowed_session(args, allowed_sessions)
-          const result = pattern_learning_session_transcript(harness.agent, session_id, options)
+          let source = options
+          let roots: list<string> = []
+          for item in evidence {
+            const root = cc_text(item?.session_store_root)
+            if cc_text(item?.session_id) == session_id && root != "" && !roots.contains(root) {
+              roots = roots + [root]
+            }
+          }
+          if len(roots) > 1 {
+            throw "inspect_session_evidence: session has conflicting source stores"
+          }
+          for root in roots {
+            source = (options ?? {}) + {session_store_root: root}
+          }
+          const query: SessionTranscriptQuery = schema_expect(
+            args,
+            schema_of(SessionTranscriptQuery),
+          )
+          const result = pattern_learning_session_transcript(
+            harness.agent,
+            session_id,
+            source,
+            query,
+          )
           return agent_tool_handler_result(json_stringify(result), result)
         },
         annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "read_only"},
@@ -1047,7 +1099,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          if args?.steps != nil {
+          if len(args?.steps ?? []) > 0 || len(args?.fast_steps ?? []) > 0 {
             const rendered = try {
               crystallization_command_sequence_package(
                 to_string(args?.name ?? ""),
@@ -1123,13 +1175,21 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         description:
           "Submit the curator's final zero-to-three typed capability proposals for validation and review.",
         parameters: {
+          decline_reason: {
+            type: "string",
+            required: false,
+            description:
+              "When a requested artifact kind cannot safely be produced, explain the concrete missing evidence or capability. Required for a zero-proposal response to a requested kind.",
+          },
           proposals: {
             type: "array",
             maxItems: 3,
             items: {
               type: "object",
               properties: {
-                kind: {type: "string", enum: ["skill", "harn_tool", "harn_workflow", "hybrid"]},
+                kind: options?.requested_kind == nil ? schema_to_json_schema(
+                  schema_of(CuratedCapabilityKind),
+                ) : {type: "string", enum: [options.requested_kind]},
                 name: {
                   type: "string",
                   description:
@@ -1149,6 +1209,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
                     tool_names: {type: "array", items: {type: "string"}},
                     source: {type: "string"},
                     test_source: {type: "string"},
+                    dispatch: schema_to_json_schema(schema_of(LearnedDispatchDeclaration)),
                     verify_command: {
                       type: "string",
                       description:
@@ -1176,6 +1237,10 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
+          if options?.requested_kind != nil && len(args?.proposals ?? []) == 0
+            && cc_text(args?.decline_reason) == "" {
+            throw "submit_crystallization_batch: explain why the requested artifact cannot safely be produced in decline_reason"
+          }
           const proposals = cc_prepare_valid_proposals(
             harness,
             args?.proposals ?? [],
@@ -1188,6 +1253,7 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
             evidence,
             options,
           )
+          on_submitted(result)
           return agent_tool_handler_result(to_string(result), result)
         },
         annotations: {kind: "record", side_effect_level: "store_write"},
@@ -1216,7 +1282,13 @@ fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
+pub fn crystallization_curate(harness: Harness, raw_options: any = nil) -> dict {
+  const requested_kind: CuratedCapabilityKind? =
+    raw_options?.requested_kind == nil ? nil : schema_expect(
+    raw_options.requested_kind,
+    schema_of(CuratedCapabilityKind),
+  )
+  const options = (raw_options ?? {}) + {requested_kind: requested_kind}
   const session_import = pattern_learning_import_session_records(harness, options)
   const evidence = cc_recent_evidence(harness, options)
   if len(evidence) == 0 {
@@ -1250,15 +1322,26 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
   }
   const pending_before = pattern_learning_pending(harness, options)
   const prompts = cc_prompt(
+    harness.fs,
     evidence,
     pending_before,
     cc_installed(harness.fs, options),
     cc_declared_checks(options),
+    requested_kind,
   )
   const route = options?.agent ?? {}
+  let submitted: dict? = nil
   let agent_options = route
     + {
-      tools: cc_tools(harness, evidence, options),
+      tools: cc_tools(
+        harness,
+        evidence,
+        options,
+        { batch: dict ->
+          submitted = batch
+          return nil
+        },
+      ),
       allowed_tools: [
         "inspect_session_evidence",
         "lookup_harn_skill",
@@ -1287,8 +1370,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
   if (result?.tools?.successful ?? []).contains("submit_crystallization_batch") {
     cc_record_review(harness.fs, evidence, options)
   }
-  const pending_after = pattern_learning_pending(harness, options)
-  const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
+  const proposals = submitted?.proposals ?? []
   return {
     schema: CURATOR_SCHEMA,
     status: result?.terminal?.kind ?? result?.status ?? "unknown",
@@ -1296,6 +1378,7 @@ pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
     evidence_count: len(evidence),
     proposal_count: len(proposals),
     proposals: proposals,
+    decline_reason: submitted?.decline_reason ?? "",
     session_import: session_import,
     usage: result?.physical_usage,
     agent_result: result,

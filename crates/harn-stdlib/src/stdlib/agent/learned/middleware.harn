@@ -1,0 +1,352 @@
+import {
+  LearnedAssessment,
+  LearnedCapability,
+  LearnedDispatcher,
+  LearnedIdentity,
+  LearnedQualification,
+  LearnedRequest,
+} from "std/agent/learned/contracts"
+import { agent_completion_obligations } from "std/agent/obligations"
+import {
+  agent_emit_event,
+  agent_is_tool_result_message,
+  agent_session_messages,
+} from "std/agent/state"
+import { AgentToolPostcondition, agent_tool_result_data } from "std/agent/tool_lifecycle"
+import { DecisionEvidence } from "std/decision"
+import { LlmCaller, LlmCallerRequest } from "std/llm/caller"
+import { LlmCallOptions } from "std/llm/options"
+import { ToolCatalogEntry, ToolRegistry } from "std/tools"
+
+type ToolCaller = fn(dict, fn(dict) -> dict) -> dict
+
+pub type LearnedAgentOptions = {llm_caller: LlmCaller, tool_caller: ToolCaller}
+
+pub type LearnedAgentSetup = {
+  request: LearnedRequest,
+  dispatcher: LearnedDispatcher,
+  qualification: LearnedQualification?,
+  binding: LlmCallOptions,
+  caller: LlmCaller,
+  tool_caller?: ToolCaller,
+  refresh_identity: fn() -> LearnedIdentity,
+}
+
+pub type LearnedTrialScope = {id: string, workspace_root: string, source_project_root: string}
+
+type BindingResult = {ok: bool, data?: dict<string, unknown>}
+
+type BoundArguments = {kind: "bound", args: dict<string, unknown>} \
+  | {kind: "unbound", reason: string}
+
+fn binding_schema(tool: ToolCatalogEntry) -> dict<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      kind: {type: "string", enum: ["bound", "unbound"]},
+      args: {anyOf: [tool.inputSchema, {type: "null"}]},
+      reason: {type: "string"},
+    },
+    required: ["kind", "args", "reason"],
+    additionalProperties: false,
+  }
+}
+
+fn current_tool_matches(registry: ToolRegistry, expected: ToolCatalogEntry) -> bool {
+  const catalog = tool_schema(registry)
+  for tool in catalog.tools {
+    if tool.name == expected.name {
+      return tool.inputSchema == expected.inputSchema
+    }
+  }
+  return false
+}
+
+type VerifiedMutation = {
+  mutation_status: "applied" | "unchanged",
+  changed_paths: list<string>,
+  verification: AgentToolPostcondition,
+}
+
+type RequestContextMessage = {role: string, content?: unknown, _harn?: {kind?: string}}
+
+type RequestContextMessages = list<RequestContextMessage>
+
+type PreparedAction = {
+  kind: "prepared",
+  capability: LearnedCapability,
+  evidence: DecisionEvidence,
+  arguments: dict<string, unknown>,
+} \
+  | {kind: "fallback", reason: string, assessment?: LearnedAssessment}
+
+type ToolCallIdentity = {call_id: string, tool_name: string, turn: {session_id: string}}
+
+fn fresh_request(agent: HarnessAgent, session_id: string, request: LearnedRequest) -> bool {
+  if session_id == "" {
+    return false
+  }
+  const messages = match schema_parse(
+    agent_session_messages(agent, session_id),
+    schema_of(RequestContextMessages),
+  ) {
+    Ok(value) -> { value }
+    Err(_error) -> { return false }
+  }
+  let requests = 0
+  for message in messages {
+    if message.role == "user" && !agent_is_tool_result_message(message) {
+      requests += 1
+      if message.content != request.request {
+        return false
+      }
+    }
+  }
+  if requests != 1 {
+    return false
+  }
+  const obligations = agent_completion_obligations(agent, session_id, request.request)
+  return len(obligations.steers) == 0 && obligations.accepted_stop == nil
+    && obligations.retarget == nil
+}
+
+fn verified_mutation(result: dict) -> bool {
+  if !(result?.ok ?? false) {
+    return false
+  }
+  const checked = schema_parse(agent_tool_result_data(result), schema_of(VerifiedMutation))
+  const facts = match checked {
+    Ok(value) -> { value }
+    Err(_error) -> { return false }
+  }
+  if len(facts.verification.verified_paths) == 0
+    || (facts.mutation_status == "applied" && len(facts.changed_paths) == 0) {
+    return false
+  }
+  for path in facts.changed_paths {
+    if !facts.verification.verified_paths.contains(path) {
+      return false
+    }
+  }
+  return true
+}
+
+fn checkpoint(agent: HarnessAgent, call: LlmCallerRequest, phase: string, details: dict) -> nil {
+  const session_id = call.turn?.session_id ?? ""
+  if session_id != "" {
+    agent_emit_event(
+      agent,
+      session_id,
+      "typed_checkpoint",
+      details + {kind: "learned_dispatch", phase: phase},
+    )
+  }
+}
+
+fn prepare_action(
+  harness: Harness,
+  setup: LearnedAgentSetup,
+  call: LlmCallerRequest,
+  trial: LearnedTrialScope?,
+) -> PreparedAction {
+  if call.prompt != setup.request.request
+    || !fresh_request(harness.agent, call.turn?.session_id ?? "", setup.request) {
+    return {kind: "fallback", reason: "request_context_not_qualified"}
+  }
+  if (call.opts?.prefill ?? "") != ""
+    || (call.opts?.output != nil && call.opts?.output != "text") {
+    return {kind: "fallback", reason: "unsupported_response_contract"}
+  }
+  if setup.refresh_identity() != setup.dispatcher.identity {
+    return {kind: "fallback", reason: "stale_execution_contract"}
+  }
+  const assessment = if trial == nil {
+    setup.dispatcher.assess(harness.llm, setup.request, setup.qualification)
+  } else {
+    setup.dispatcher.probe(harness.llm, setup.request)
+  }
+  checkpoint(harness.agent, call, "assessed", {assessment: assessment})
+  if assessment.kind != "selected" {
+    return {kind: "fallback", reason: assessment.kind, assessment: assessment}
+  }
+  const capability = assessment.capability
+  const registry = match schema_parse(call.opts?.tools, schema_of(ToolRegistry)) {
+    Ok(value) -> { value }
+    Err(_error) -> { return {kind: "fallback", reason: "tool_unavailable"} }
+  }
+  if type_of(capability.tool.inputSchema) != "dict"
+    || !current_tool_matches(registry, capability.tool) {
+    return {kind: "fallback", reason: "tool_unavailable"}
+  }
+  const bound: BindingResult = schema_expect(
+    harness.llm.call_structured_result(
+      harness.fs.render_prompt(
+        "std/agent/learned/prompts/bind.harn.prompt",
+        {request: setup.request.request, meaning: capability.meaning},
+      ),
+      binding_schema(capability.tool),
+      setup.binding,
+    ),
+    schema_of(BindingResult),
+  )
+  if !bound.ok || bound.data == nil {
+    return {kind: "fallback", reason: "argument_binding_failed"}
+  }
+  const arguments = match schema_parse(bound.data, schema_of(BoundArguments)) {
+    Ok(value) -> { value }
+    Err(_error) -> { return {kind: "fallback", reason: "invalid_arguments"} }
+  }
+  if arguments.kind == "unbound" {
+    return {kind: "fallback", reason: "incomplete_arguments"}
+  }
+  return {
+    kind: "prepared",
+    capability: capability,
+    evidence: assessment.evidence,
+    arguments: arguments.args,
+  }
+}
+
+/**
+ * Replace one planning turn with a qualified tool call, preserving ordinary
+ * dispatch, approval, cancellation, audit, and completion policy. Failure
+ * delegates to the caller with the real tool history already recorded.
+ * @effects: [llm.call, agent]
+ * @errors: ["invalid learned dispatcher"]
+ */
+fn build_agent_options(
+  harness: Harness,
+  setup: LearnedAgentSetup,
+  trial: LearnedTrialScope?,
+) -> LearnedAgentOptions {
+  let phase = "ready"
+  let pending_id = ""
+  let pending_name = ""
+  let summary = ""
+  let origin: dict = {}
+  const caller: LlmCaller = { call: LlmCallerRequest ->
+    const session_id = call.turn?.session_id ?? ""
+    if phase == "verified" {
+      if !fresh_request(harness.agent, session_id, setup.request) {
+        phase = "fallback"
+        checkpoint(harness.agent, call, "fallback", {reason: "request_context_changed"})
+        return setup.caller(call)
+      }
+      phase = "finished"
+      checkpoint(harness.agent, call, "verified", origin)
+      return {
+        ok: true,
+        value: {
+          text: summary,
+          generation_origin: {
+            kind: "local",
+            producer: "harn.learned_dispatch",
+            receipt: pending_id,
+            details: origin,
+          },
+        },
+      }
+    }
+    if phase != "ready" {
+      return setup.caller(call)
+    }
+    phase = "fallback"
+    const action = prepare_action(harness, setup, call, trial)
+    if action.kind != "prepared" {
+      checkpoint(harness.agent, call, "fallback", action)
+      return setup.caller(call)
+    }
+    const capability = action.capability
+    pending_id = harness.random.uuid()
+    pending_name = capability.tool.name
+    phase = "executing"
+    origin = {
+      kind: "learned_capability",
+      capability_id: capability.id,
+      definition_digest: setup.dispatcher.identity.definition_digest,
+      package_digest: capability.package_digest,
+      decision_receipt: action.evidence.receipt,
+      qualification_digest: setup.qualification?.trials_digest ?? "",
+      execution_mode: trial == nil ? "qualified" : "qualification_trial",
+      trial_id: trial?.id ?? "",
+    }
+    checkpoint(harness.agent, call, "selected", origin)
+    return {
+      ok: true,
+      value: {
+        text: "",
+        native_tool_calls: [{id: pending_id, name: pending_name, arguments: action.arguments}],
+        generation_origin: {
+          kind: "local",
+          producer: "harn.learned_dispatch",
+          receipt: pending_id,
+          details: origin,
+        },
+      },
+    }
+  }
+  const tool_caller: ToolCaller = { call: dict, next: fn(dict) -> dict ->
+    const identity: ToolCallIdentity = schema_expect(call, schema_of(ToolCallIdentity))
+    const selected = phase == "executing" && identity.call_id == pending_id
+      && identity.tool_name == pending_name
+    if selected
+      && (setup.refresh_identity() != setup.dispatcher.identity
+        || !fresh_request(harness.agent, identity.turn.session_id, setup.request)) {
+      phase = "fallback"
+      return {
+        ok: false,
+        status: "scope_violation",
+        tool_name: identity.tool_name,
+        tool_call_id: identity.call_id,
+        error: "Request or learned capability changed after selection; execution refused.",
+      }
+    }
+    const result = if setup.tool_caller == nil {
+      next(call)
+    } else {
+      setup.tool_caller(call, next)
+    }
+    if selected {
+      if verified_mutation(result) {
+        phase = "verified"
+        summary = to_string(
+          result?.rendered_result ?? result?.observation ?? "Completed the learned workflow.",
+        )
+      } else {
+        phase = "fallback"
+      }
+    }
+    return result
+  }
+  return {llm_caller: caller, tool_caller: tool_caller}
+}
+
+/**
+ * Dispatch only under a qualification matching the current execution identity.
+ * @effects: [llm.call, agent]
+ * @errors: []
+ */
+pub fn learned_agent_options(harness: Harness, setup: LearnedAgentSetup) -> LearnedAgentOptions {
+  return build_agent_options(harness, setup, nil)
+}
+
+/**
+ * Exercise the same selection, binding, tool and completion path for a declared
+ * qualification trial in a separate workspace. The trial runner owns copying
+ * the frozen project and independently grading its result. This mode grants no
+ * additional tool authority and never produces a qualified-execution claim.
+ * @effects: [llm.call, agent, fs.read]
+ * @errors: ["invalid qualification workspace"]
+ */
+pub fn learned_probe_agent_options(
+  harness: Harness,
+  setup: LearnedAgentSetup,
+  trial: LearnedTrialScope,
+) -> LearnedAgentOptions {
+  if trim(trial.id) == "" || trim(trial.source_project_root) == ""
+    || path_normalize(trial.workspace_root) != path_normalize(harness.fs.cwd())
+    || path_normalize(trial.workspace_root) == path_normalize(trial.source_project_root) {
+    throw "std/agent/learned: qualification requires a named trial in a separate current workspace"
+  }
+  return build_agent_options(harness, setup, trial)
+}

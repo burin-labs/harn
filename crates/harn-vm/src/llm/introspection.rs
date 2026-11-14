@@ -107,6 +107,13 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
     let mut dict = BTreeMap::new();
     dict.put_str("harn_version", crate::bytecode_cache::HARN_VERSION);
     dict.put_str("harness", harness_identifier());
+    dict.insert(
+        "runtime_content_fingerprint".to_string(),
+        crate::json_to_vm_value(
+            &serde_json::to_value(crate::runtime_content_fingerprint())
+                .expect("runtime content fingerprint serializes"),
+        ),
+    );
     let Some(snap) = snapshot else {
         for key in [
             "provider",
@@ -184,6 +191,7 @@ pub fn handle_introspection_tool(name: &str, _args: &serde_json::Value) -> Optio
         }),
         "current_harn_version" => json!({
             "harn_version": crate::bytecode_cache::HARN_VERSION,
+            "runtime_content_fingerprint": crate::runtime_content_fingerprint(),
         }),
         "current_harness" => json!({
             "harness": harness_identifier(),
@@ -397,6 +405,7 @@ mod tests {
         let allowed: std::collections::BTreeSet<&str> = [
             "harn_version",
             "harness",
+            "runtime_content_fingerprint",
             "provider",
             "model",
             "model_alias",

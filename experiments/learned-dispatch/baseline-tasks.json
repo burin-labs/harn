@@ -1,0 +1,12 @@
+{
+  "books": {
+    "resource": "books",
+    "fields": {"title": "string", "pages": "integer", "published": "boolean"},
+    "task": "Add a standard books resource to this Python application, with title (string), pages (integer), and published (boolean). Create app/resources/books.py exporting mount(app), tests/test_books.py, and docs/books.md. Use App.route to register POST /api/books and GET /api/books. POST must reject missing, extra, or incorrectly typed fields with status 400 without inserting anything; integers must reject booleans. A successful POST returns status 201 and the submitted fields plus a sequential integer id starting at 1. GET returns status 200 and the list of created records in insertion order. Each App instance must have isolated storage. Preserve the existing application and health behavior. Add real request-path tests for creation, listing, rejected payloads, and storage isolation, and document concrete request/response examples. Do not modify the HTTP host or add dependencies. Run python3 -m unittest discover -s tests and finish only when it passes."
+  },
+  "devices": {
+    "resource": "devices",
+    "fields": {"label": "string", "revision": "integer", "enabled": "boolean"},
+    "task": "Create the standard devices resource in this application, with label (string), revision (integer), and enabled (boolean). Add app/resources/devices.py exporting mount(app), tests/test_devices.py, and docs/devices.md. Mount POST /api/devices and GET /api/devices using App.route. Reject missing, extra, or wrong-typed fields with 400 and no insertion, including booleans supplied for integer fields. Successful POST returns 201 with the input fields and a sequential integer id beginning at 1; GET returns 200 with all created records in order. Separate App instances must not share records. Preserve /health and the HTTP host, add no dependencies, and include tests through App.dispatch plus useful request/response documentation. Run python3 -m unittest discover -s tests successfully before finishing."
+  }
+}

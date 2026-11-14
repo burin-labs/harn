@@ -3,6 +3,99 @@ use crate::value::VmValue;
 
 use super::AgentHostSession;
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalGenerationOrigin {
+    kind: String,
+    producer: String,
+    receipt: String,
+    #[serde(default)]
+    details: Option<serde_json::Value>,
+}
+
+pub(super) fn local_generation_origin(
+    result: &VmValue,
+) -> Result<Option<VmValue>, crate::value::VmError> {
+    let Some(origin) = super::dict_get(result, "generation_origin") else {
+        return Ok(None);
+    };
+    if dict_field(origin, "kind").map(VmValue::display).as_deref() != Some("local") {
+        return Ok(None);
+    }
+    let facts: LocalGenerationOrigin =
+        serde_json::from_value(super::vm_to_json(origin)).map_err(|error| {
+            crate::value::VmError::Runtime(format!("invalid local generation origin: {error}"))
+        })?;
+    if facts.kind != "local" || facts.producer.trim().is_empty() || facts.receipt.trim().is_empty()
+    {
+        return Err(crate::value::VmError::Runtime(
+            "local generation requires producer and receipt".to_string(),
+        ));
+    }
+    let _ = facts.details;
+    for field in [
+        "provider",
+        "model",
+        "usage",
+        "llm",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+    ] {
+        if super::dict_get(result, field)
+            .is_some_and(|value| !matches!(value, VmValue::Nil) && value.display() != "")
+        {
+            return Err(crate::value::VmError::Runtime(format!(
+                "local generation cannot claim provider field `{field}`"
+            )));
+        }
+    }
+    Ok(Some(origin.clone()))
+}
+
+/// Physical dispatch is authoritative when this runtime observed provider calls.
+/// Legacy caller adapters without that ledger retain their reported accounting.
+pub(super) fn observed_totals(session: &AgentHostSession, split_tokens: bool) -> VmValue {
+    let VmValue::Dict(legacy) = SessionUsageTotals::from(session).to_vm(split_tokens) else {
+        unreachable!("usage totals are a record");
+    };
+    if session.provider_call_count == 0 {
+        return VmValue::Dict(legacy);
+    }
+    let mut totals = (*legacy).clone();
+    let usage = super::physical_usage_ledger(session);
+    let VmValue::Dict(physical) =
+        super::physical_usage_to_vm_value(&usage, session.provider_call_count)
+    else {
+        unreachable!("physical usage is a record");
+    };
+    for field in [
+        "cost_usd",
+        "known_cost_usd",
+        "projected_cost_usd",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "unpriced_calls",
+        "usage_unknown_calls",
+        "provider_call_count",
+    ] {
+        if let Some(value) = physical.get(field) {
+            totals.put(field, value.clone());
+        }
+    }
+    totals.put_int(
+        "tokens_used",
+        usage.input_tokens.saturating_add(usage.output_tokens),
+    );
+    totals.put_int(
+        "unprojectable_calls",
+        i64::from(usage.projected_cost_usd().is_none()),
+    );
+    VmValue::dict(totals)
+}
+
 pub(super) struct CallAccounting {
     pub(super) cost_usd: Option<f64>,
     pub(super) usage_unknown: bool,

@@ -249,10 +249,42 @@ const TRANSCRIPT_ENTRY_LIMIT: int = 80
 
 const TRANSCRIPT_TEXT_LIMIT: int = 600
 
+pub type SessionTranscriptQuery = {start_entry?: int, entry_limit?: int, text_limit?: int}
+
+pub type SessionTranscriptEntryMeta = {
+  entry_index: int,
+  content_chars: int,
+  content_truncated: bool,
+}
+
+type SessionTranscriptEntryValue = {kind: "message", role: string, text: string} \
+  | {kind: "tool_call", tool: string, input: string} \
+  | {kind: "tool_result", text: string}
+
+pub type SessionTranscriptEntry = SessionTranscriptEntryMeta & SessionTranscriptEntryValue
+
+pub type SessionTranscriptPage = {
+  session_id: string,
+  state: "present" | "absent",
+  entry_count: int,
+  returned_count: int,
+  start_entry: int,
+  next_entry: int?,
+  truncated: bool,
+  entries: list<SessionTranscriptEntry>,
+}
+
 /** Redact, then bound: clipping first could cut a token below its pattern. */
-fn pl_redacted_clip(text: string, limit: int) -> string {
+fn pl_transcript_excerpt(
+  text: string,
+  limit: int,
+) -> {content: string, content_chars: int, content_truncated: bool} {
   const clean = pl_redact_command(pl_text(text))
-  return len(clean) <= limit ? clean : clean[0:limit] + "…"
+  return {
+    content: len(clean) <= limit ? clean : clean[0:limit] + "…",
+    content_chars: len(clean),
+    content_truncated: len(clean) > limit,
+  }
 }
 
 /** Redact every string inside a tool input before it is serialized. */
@@ -289,51 +321,81 @@ pub fn pattern_learning_session_transcript(
   agent: HarnessAgent,
   session_id: string,
   options: any = nil,
-) -> dict {
-  const events = pl_session_store_values(
-    session_store_events(agent, session_id, pl_session_store_options(options)),
+  query: SessionTranscriptQuery = {},
+) -> SessionTranscriptPage {
+  const entry_limit = query.entry_limit ?? TRANSCRIPT_ENTRY_LIMIT
+  const text_limit = query.text_limit ?? TRANSCRIPT_TEXT_LIMIT
+  require entry_limit >= 1 && entry_limit <= TRANSCRIPT_ENTRY_LIMIT,
+    "session transcript entry_limit must be in [1, 80]"
+  require text_limit >= 128 && text_limit <= 12000,
+    "session transcript text_limit must be in [128, 12000]"
+  require entry_limit * text_limit <= TRANSCRIPT_ENTRY_LIMIT * TRANSCRIPT_TEXT_LIMIT,
+    "narrow entry_limit before requesting larger transcript entries"
+  require query.start_entry == nil || query.start_entry >= 0,
+    "session transcript start_entry must be nonnegative"
+  const read = session_store_events(agent, session_id, pl_session_store_options(options))
+  const events = pl_session_store_values(read)
+  const visible = events.map(pl_session_transcript_event).filter(
+    { event: dict ->
+      const kind = pl_text(event?.kind)
+      const metadata = event?.metadata ?? {}
+      return (kind == "message" && pl_text(event?.visibility) == "public")
+        || (kind == "tool_call" && pl_text(metadata?.tool_name) != "")
+        || kind == "tool_result"
+    },
   )
-  let entries = []
-  for event in events {
-    const transcript_event = pl_session_transcript_event(event)
+    .to_list()
+  const start = min(len(visible), query.start_entry ?? max(0, len(visible) - entry_limit))
+  const end = min(len(visible), start + entry_limit)
+  let entries: list<SessionTranscriptEntry> = []
+  for transcript_event in visible[start:end] {
     const kind = pl_text(transcript_event?.kind)
     const metadata = transcript_event?.metadata ?? {}
     if kind == "message" && pl_text(transcript_event?.visibility) == "public" {
+      const excerpt = pl_transcript_excerpt(pl_text(transcript_event?.text), text_limit)
       entries = entries
         + [
           {
             kind: "message",
             role: pl_text(transcript_event?.role),
-            text: pl_redacted_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT),
-          },
+            text: excerpt.content,
+            entry_index: start + len(entries),
+          }
+            + pick(excerpt, ["content_chars", "content_truncated"]),
         ]
     } else if kind == "tool_call" && pl_text(metadata?.tool_name) != "" {
+      const excerpt = pl_transcript_excerpt(
+        json_stringify(pl_redact_value(metadata?.raw_input ?? {})),
+        text_limit,
+      )
       entries = entries
         + [
           {
             kind: "tool_call",
             tool: pl_text(metadata?.tool_name),
-            input: pl_redacted_clip(
-              json_stringify(pl_redact_value(metadata?.raw_input ?? {})),
-              TRANSCRIPT_TEXT_LIMIT,
-            ),
-          },
+            input: excerpt.content,
+            entry_index: start + len(entries),
+          }
+            + pick(excerpt, ["content_chars", "content_truncated"]),
         ]
     } else if kind == "tool_result" {
+      const excerpt = pl_transcript_excerpt(pl_text(transcript_event?.text), text_limit)
       entries = entries
         + [
-          {
-            kind: "tool_result",
-            text: pl_redacted_clip(transcript_event?.text, TRANSCRIPT_TEXT_LIMIT),
-          },
+          {kind: "tool_result", text: excerpt.content, entry_index: start + len(entries)}
+            + pick(excerpt, ["content_chars", "content_truncated"]),
         ]
     }
   }
-  const start = max(0, len(entries) - TRANSCRIPT_ENTRY_LIMIT)
   return {
     session_id: session_id,
-    entry_count: len(entries),
-    truncated: start > 0,
-    entries: entries[start:len(entries)],
+    state: read.state,
+    entry_count: len(visible),
+    returned_count: len(entries),
+    start_entry: start,
+    next_entry: end < len(visible) ? end : nil,
+    truncated: start > 0 || end < len(visible)
+      || entries.any({ entry -> entry.content_truncated }),
+    entries: entries,
   }
 }

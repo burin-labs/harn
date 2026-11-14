@@ -1,0 +1,15 @@
+Requested artifact kind: {{requested_kind}}. When a specific kind is requested, submit only that kind or submit zero proposals. Never replace a requested executable with prose guidance, and never invent evidence to satisfy the request.
+
+File generators do not require a failed command or repeated recovery. Successful sessions that create the same repository-specific structure with different parameters can establish a reusable generator. The recovery requirements apply to learned command sequences. For a general tool scaffold, omit steps or pass an empty list; adapt its handler instead of supplying the project's test command as a substitute for the generator. The harn-mcp guide includes guarded workspace-writing and receipt examples.
+
+An initial transcript inspection is a summary. Entries marked content_truncated may omit the code you need. Inspect the relevant entry_index with start_entry, entry_limit 1, and a larger text_limit before deciding that a source example is unavailable. If you still cannot safely produce the requested kind, submit zero proposals with a concrete decline_reason that identifies the missing evidence or capability.
+
+When an executable tool covers a recurring request end to end and can check its own concrete result, propose optional artifact.dispatch metadata for later qualification. Follow this generated schema:
+
+{{dispatch_schema}}
+
+Name an actual tool in artifact.tool_names. State exactly which complete requests it handles and which nearby requests it does not handle. List the stable project files that establish its assumptions, and the package files that establish verification. Use nonempty lists of unique relative paths. Do not fingerprint generated outputs that change on each successful invocation as stable project assumptions.
+
+Check project assumptions and every requested target before the first mutation. Refuse missing required inputs, unsupported combinations, existing targets, and stale assumptions before writing. Keep parameters in the tool's canonical input schema. Return the ordinary mutation and postcondition facts already required above after checking the actual outputs. Authored tests must include a supported composed input, an unsupported neighboring request or parameter combination, and a stale project assumption.
+
+This declaration does not activate automatic execution. Review, promotion, isolated real execution, independent grading, and a qualification bound to the exact executable, tool schema, project assumptions, selector, and verifier remain required. Do not claim calibration from the authored tests or from past session receipts.
