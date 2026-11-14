@@ -46,6 +46,12 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
          without payload grants",
     ),
     (
+        "harn-vm/src/stdlib/sandbox/macos/own_listeners.rs",
+        1,
+        "setup-only Seatbelt rule-shape probe; clears the environment and runs absolute \
+         programs against its own listeners",
+    ),
+    (
         "harn-vm/src/stdlib/sandbox/mod.rs",
         1,
         "command_output fallback; spawns from a config the session policy already closed",

@@ -91,6 +91,7 @@ fn measure_shape() -> Result<(), String> {
     );
     let connects = |host: &str, port: u16| {
         std::process::Command::new(super::SANDBOX_EXEC_PATH)
+            .env_clear()
             .args([
                 "-p",
                 &profile,
