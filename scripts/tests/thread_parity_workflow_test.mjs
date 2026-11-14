@@ -42,6 +42,9 @@ test("untrusted dispatch values select a refused nonempty job", () => {
 
 test("the actual run step passes matrix values as one literal argument", () => {
   const step = workflow.jobs["thread-parity"].steps.find(step => step.id === "parity");
+  const setup = workflow.jobs["thread-parity"].steps.find(step => step.id === "receipt-runtime");
+  assert.equal(setup.uses, "./.github/actions/setup-harn");
+  assert.ok(workflow.jobs["thread-parity"].steps.indexOf(setup) < workflow.jobs["thread-parity"].steps.indexOf(step));
   assert.doesNotMatch(step.run, /\$\{\{/);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "parity-workflow-"));
   try {
@@ -50,11 +53,15 @@ test("the actual run step passes matrix values as one literal argument", () => {
       '#!/usr/bin/env node\nrequire("node:fs").writeFileSync(process.env.ARGUMENTS_FILE, JSON.stringify(process.argv.slice(2)));\n',
       {mode: 0o755});
     for (const value of ["1", '1; touch injected; $(touch injected) " `touch injected`']) {
-      const context = new data.Dictionary({key: "matrix", value: new data.Dictionary({key: "threads", value: new data.StringData(value)})});
+      const context = new data.Dictionary(
+        {key: "matrix", value: new data.Dictionary({key: "threads", value: new data.StringData(value)})},
+        {key: "steps", value: new data.Dictionary({key: "receipt-runtime", value: new data.Dictionary({key: "outputs", value: new data.Dictionary({key: "path", value: new data.StringData("/prepared/harn")})})})},
+      );
       const env = {...process.env, ARGUMENTS_FILE: path.join(scratch, "arguments.json")};
       for (const [name, source] of Object.entries(step.env)) {
-        env[name] = evaluate(source, context, ["matrix"]).coerceString();
+        env[name] = evaluate(source, context, ["matrix", "steps"]).coerceString();
       }
+      assert.equal(env.HARN_BIN, "/prepared/harn");
       const result = spawnSync("bash", ["-e", "-c", step.run], {cwd: scratch, env, encoding: "utf8"});
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stderr);

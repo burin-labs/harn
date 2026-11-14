@@ -81,6 +81,13 @@ def run_case(case: str, binary: str) -> None:
         env.pop("RUST_TEST_FEEDBACK_BUDGET_SECONDS", None)
         if case == "reporter-error":
             env["HARN_BIN"] = str(scratch / "absent-reporter")
+        if case == "reporter-run-error":
+            reporter = tools / "failed-reporter"
+            reporter.write_text("#!/usr/bin/env bash\nexit 74\n")
+            reporter.chmod(0o755)
+            env["HARN_BIN"] = str(reporter)
+        bootstrap = repository / "scripts/bootstrap-harn.sh"
+        bootstrap.write_text("#!/usr/bin/env bash\nprintf invoked > bootstrap-invoked\nexit 88\n")
         listener = None
         if case in ("interrupted", "interrupted-int", "lane-int"):
             listener = socket.socket(socket.AF_UNIX)
@@ -106,10 +113,11 @@ def run_case(case: str, binary: str) -> None:
                         status = process.wait(timeout=60)
                 else:
                     status = process.wait(timeout=60)
-            if case == "invalid":
-                assert status == 2 and "usage:" in (scratch / "stderr.log").read_text()
+            if case in ("invalid", "reporter-error"):
+                expected = "usage:" if case == "invalid" else "reason=reporter-unavailable"
+                assert status == 2 and expected in (scratch / "stderr.log").read_text()
                 assert not pid_record.exists() and output.read_text() == ""
-                print("thread-parity wrapper case=invalid passed")
+                print(f"thread-parity wrapper case={case} passed")
                 return
             if case == "lane-int":
                 assert status == 130
@@ -131,10 +139,11 @@ def run_case(case: str, binary: str) -> None:
             assert folder.is_dir(), "the actual wrapper deleted its partial evidence"
             stdout_text = (scratch / "stdout.log").read_text()
             stderr_text = (scratch / "stderr.log").read_text()
+            assert not (repository / "bootstrap-invoked").exists(), "receipt reporting invoked the installer"
             if case == "inventory-error":
                 assert status == 70 and "reason=inventory-error" in stderr_text
-            elif case == "reporter-error":
-                assert status != 0, "a reporter failure changed a run into success"
+            elif case == "reporter-run-error":
+                assert status == 74, "a reporter failure changed a run into success"
                 assert (folder / "inventory.json").stat().st_size > 0
                 assert (folder / "events.jsonl").stat().st_size > 0
             else:
@@ -185,11 +194,11 @@ def run_case(case: str, binary: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", choices=["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "invalid"])
+    parser.add_argument("--case", choices=["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"])
     parser.add_argument("--source-root", type=Path, default=ROOT)
     arguments = parser.parse_args()
     ROOT = arguments.source_root
     harn = os.environ.get("HARN_BIN") or os.environ.get("HARN_EXT_BOOTSTRAP_INSTALLER") or shutil.which("harn")
     assert harn, "a qualified Harn binary is required"
-    for selected in ([arguments.case] if arguments.case else ["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "invalid"]):
+    for selected in ([arguments.case] if arguments.case else ["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"]):
         run_case(selected, harn)

@@ -7,6 +7,11 @@ if [[ ! "$threads" =~ ^[1-9][0-9]*$ ]]; then
   echo "usage: $0 <positive-thread-count>" >&2
   exit 2
 fi
+reporter="${HARN_BIN:?prepare HARN_BIN before starting thread-count qualification}"
+if [[ ! -x "$reporter" ]]; then
+  echo "thread_parity_receipt reason=reporter-unavailable" >&2
+  exit 2
+fi
 
 tmpdir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/harn-thread-parity.XXXXXX")"
 inventory="$tmpdir/inventory.json"
@@ -24,8 +29,7 @@ finish() {
   local status=$? receipt_status=0
   trap - EXIT INT TERM
   if ((inventory_complete)); then
-    HARN_EXT_BOOTSTRAP_INSTALLER="${HARN_BIN:-${HARN_EXT_BOOTSTRAP_INSTALLER:-}}" \
-      "$repo_root/scripts/bootstrap-harn.sh" --seed-command run --standalone --no-sandbox \
+    "$reporter" run --standalone --no-sandbox \
       "$repo_root/scripts/ci/summarize_nextest_receipt.harn" -- \
       --inventory "$inventory" --events "$events" --runner-status "$runner_status" \
       --threads "$threads" --receipt "$receipt" || receipt_status=$?
