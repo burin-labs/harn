@@ -47,7 +47,7 @@ fn an_unconfined_relocated_command_carries_a_machine_readable_refusal() {
         "argv": ["touch", marker],
         "cwd": isolated.workspace,
     }));
-    let workspace = isolated.workspace.clone();
+    let workspace = isolated.workspace;
     harn_vm::on_vm_stack(move || {
         harn_vm::reset_thread_local_state();
         let runtime = tokio::runtime::Builder::new_current_thread()
