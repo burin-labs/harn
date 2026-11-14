@@ -43,7 +43,14 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
 /// Every directory a child confined by `policy` may write under, made
 /// canonical: the workspace roots (with their git topology and runtime dir),
 /// the session temp dir, the policy's process write roots, the
-/// developer-toolchain caches and the Unix-socket roots.
+/// developer-toolchain caches, the Unix-socket roots and, on Linux, the host
+/// `/dev/shm` a direct Landlock launch falls back to granting.
+///
+/// Every root goes through [`super::normalize_for_policy`], the same
+/// normalization the backends render from: a root that does not exist yet
+/// resolves through its deepest existing ancestor, and macOS's `/tmp` and
+/// `/var` aliases read as `/private/...`, so a reader comparing canonical
+/// paths cannot miss a file a child creates there later.
 ///
 /// A host that reads a file before any sandbox exists asks this whether a
 /// confined child could have planted it. The set names every root a backend
@@ -63,9 +70,11 @@ pub fn process_sandbox_writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf>
     roots.extend(super::process_sandbox_developer_toolchain_cache_roots(
         policy,
     ));
+    #[cfg(target_os = "linux")]
+    roots.extend(super::linux::shared_memory_fallback_root());
     let mut roots: Vec<PathBuf> = roots
-        .into_iter()
-        .map(|root| std::fs::canonicalize(&root).unwrap_or(root))
+        .iter()
+        .map(|root| super::normalize_for_policy(root))
         .collect();
     roots.sort();
     roots.dedup();
@@ -115,3 +124,7 @@ pub(crate) fn serve_only_unavailable_on_host() -> bool {
     super::active_backend_mechanism_limits()
         .contains(&super::enforcement::MechanismLimit::UnixSocketGrantUnavailable)
 }
+
+#[cfg(all(test, unix))]
+#[path = "policy_projection_tests.rs"]
+mod tests;
