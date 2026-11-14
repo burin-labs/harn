@@ -40,6 +40,15 @@ test("untrusted dispatch values select a refused nonempty job", () => {
   }
 });
 
+test("receipt setup selects an existing repository version file", () => {
+  const setup = workflow.jobs["thread-parity"].steps.find(step => step.id === "receipt-runtime");
+  const action = load(fs.readFileSync(new URL("../../.github/actions/setup-harn/action.yml", import.meta.url), "utf8"));
+  const versionFile = setup.with?.["version-file"] ?? action.inputs["version-file"].default;
+  const version = fs.readFileSync(new URL("../../" + versionFile, import.meta.url), "utf8").trim();
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  assert.equal(versionFile, ".harn-bootstrap-version");
+});
+
 test("the actual run step passes matrix values as one literal argument", () => {
   const step = workflow.jobs["thread-parity"].steps.find(step => step.id === "parity");
   const setup = workflow.jobs["thread-parity"].steps.find(step => step.id === "receipt-runtime");

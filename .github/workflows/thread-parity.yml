@@ -36,6 +36,8 @@ jobs:
       - name: Prepare receipt runtime before tests
         id: receipt-runtime
         uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
 
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache-install
