@@ -139,24 +139,26 @@ pub fn run() {
     harn_runtime::force_link();
 
     #[cfg(target_os = "linux")]
-    if let Err(error) = commands::serve::confine_before_runtime(&raw_args) {
-        cli_diagnostic!("error: {error}");
-        process::exit(1);
-    }
+    let cli = {
+        let cli = entrypoint::parse_cli(raw_args);
+        if let Err(error) = commands::serve::confine_before_runtime(&cli) {
+            cli_diagnostic!("error: {error}");
+            process::exit(1);
+        }
+        cli
+    };
 
     let handle = harn_parser::runtime_stack::builder()
         .name("harn-cli".to_string())
         .spawn(move || {
-            // Building or parsing `Cli` materializes the whole command tree
-            // on the current stack, and `harn serve` builds it to recognize
-            // its transport names. Keep every pass over the command surface
-            // on the CLI's explicitly sized thread; the 1 MiB Windows main
-            // thread overflowed on `harn serve mcp`.
+            // Windows' 1 MiB main stack cannot materialize the argument tree.
+            // Linux parses before this thread so Landlock covers every child.
             ensure_builtin_signatures_installed();
-            let raw_args = normalize_serve_args(raw_args);
-            let runtime_mode = cli_runtime_mode(&raw_args);
+            #[cfg(not(target_os = "linux"))]
+            let cli = entrypoint::parse_cli(raw_args);
+            let runtime_mode = cli_runtime_mode(&cli);
             let runtime = build_cli_runtime(runtime_mode);
-            runtime.block_on(async_main(raw_args, runtime_mode));
+            runtime.block_on(async_main(cli, runtime_mode));
             // Drain any queued OTLP exports while the tokio runtime
             // is still alive. The auto-registered `OtelSink` uses a
             // batch processor with `runtime::Tokio`; if we let the

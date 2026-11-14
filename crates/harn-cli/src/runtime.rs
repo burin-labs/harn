@@ -1,4 +1,3 @@
-use clap::Parser as ClapParser;
 use std::{panic, process};
 
 use crate::cli::{Cli, Command, ProviderCommand};
@@ -15,20 +14,12 @@ impl CliRuntimeMode {
     }
 }
 
-pub(crate) fn cli_runtime_mode(raw_args: &[String]) -> CliRuntimeMode {
-    if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
-        return CliRuntimeMode::FullIo;
-    }
-
-    let Ok(cli) = Cli::try_parse_from(raw_args) else {
-        return CliRuntimeMode::StaticAnalysis;
-    };
-
+pub(crate) fn cli_runtime_mode(cli: &Cli) -> CliRuntimeMode {
     if cli.json_schemas {
         return CliRuntimeMode::StaticAnalysis;
     }
 
-    match cli.command {
+    match &cli.command {
         Some(
             Command::Check(_)
             | Command::Lint(_)
@@ -122,7 +113,7 @@ pub(crate) fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send))
 #[cfg(test)]
 mod tests {
     use super::{cli_runtime_mode, is_broken_pipe_panic_payload, CliRuntimeMode};
-    use crate::normalize_serve_args;
+    use crate::entrypoint::parse_cli;
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
@@ -139,7 +130,10 @@ mod tests {
             argv(&["harn", "--json-schemas"]),
             argv(&["harn", "provider", "admission", "--request", "{}"]),
         ] {
-            assert_eq!(cli_runtime_mode(&args), CliRuntimeMode::StaticAnalysis);
+            assert_eq!(
+                cli_runtime_mode(&parse_cli(args)),
+                CliRuntimeMode::StaticAnalysis
+            );
         }
     }
 
@@ -151,8 +145,7 @@ mod tests {
             argv(&["harn", "serve", "a2a", "script.harn"]),
             argv(&["harn", "test", "conformance"]),
         ] {
-            let normalized = normalize_serve_args(args);
-            assert_eq!(cli_runtime_mode(&normalized), CliRuntimeMode::FullIo);
+            assert_eq!(cli_runtime_mode(&parse_cli(args)), CliRuntimeMode::FullIo);
         }
     }
 
