@@ -49,10 +49,8 @@ pub(crate) fn validate_raw_provider_capture_destination(
     selected_dir: Option<&str>,
 ) -> Result<(), VmError> {
     if raw == Some(true)
-        && selected_dir.filter(|dir| !dir.trim().is_empty()).is_none()
-        && current_transcript_dir()
-            .filter(|dir| !dir.trim().is_empty())
-            .is_none()
+        && selected_dir.is_none_or(|dir| dir.trim().is_empty())
+        && current_transcript_dir().is_none_or(|dir| dir.trim().is_empty())
     {
         let mut error = DictMap::new();
         error.put_str("category", "configuration");
