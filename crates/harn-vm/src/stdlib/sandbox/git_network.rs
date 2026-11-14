@@ -70,6 +70,7 @@ pub(crate) const GIT_PROFILE: ExecProfile = ExecProfile {
     grants: |args| parse(args).is_some(),
 };
 
+#[cfg(unix)]
 const LOGIN_USER: &str = "x-access-token";
 /// The login socket's name in the per-spawn directory.
 pub(crate) const CREDENTIAL_SOCKET: &str = "credential.sock";
@@ -77,12 +78,16 @@ const GLOBAL_CONFIG: &str = "global-config";
 /// Repository entries the per-spawn git directory links to, from the shared
 /// (common) git directory, and from the worktree's own. Missing files are
 /// linked too, so git creates them in the repository.
+#[cfg(unix)]
 const COMMON_LINKS: &[&str] = &["objects"];
+#[cfg(unix)]
 const WORKTREE_LINKS: &[&str] = &["FETCH_HEAD"];
 /// Ref namespaces copied in for a push to name and a fetch to negotiate from.
+#[cfg(unix)]
 const COPIED_REFS: &[&str] = &["heads", "tags"];
 /// Repository files copied in when they are regular files, and refused when
 /// they are anything else. A fetch's change to `shallow` stays in the copy.
+#[cfg(unix)]
 const COPIED_FILES: &[&str] = &["packed-refs", "shallow"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -837,6 +842,7 @@ fn read_regular(path: &Path) -> Option<String> {
 
 /// Copy the loose refs under `from` that hold an object name or a symbolic
 /// ref, skipping links and anything else.
+#[cfg(unix)]
 fn copy_refs(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     let Ok(entries) = std::fs::read_dir(from) else {
