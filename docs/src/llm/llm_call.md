@@ -413,6 +413,14 @@ without replacing a valid model answer. If the transcript itself cannot be
 written, the warning remains on stderr. A failed capture is not evidence of
 a retained request or response.
 
+Saving a run record copies the active transcript's referenced raw provider files
+into the run's sibling `<run-id>-llm/` directory. Harn publishes the copied
+transcript after those files are written. Missing, invalid, or symlinked artifacts
+leave the run result unchanged and emit `llm_transcript_sidecar_unavailable`.
+The saved transcript pointer reports `available: false`,
+`verification_status: "unavailable"`, and a reason code in `verification_error`.
+A failed snapshot doesn't reuse an older transcript as current evidence.
+
 #### Generation
 
 | Key | Type | Meaning |
