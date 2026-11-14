@@ -161,6 +161,28 @@ fn kill_and_publish(killer: &dyn ProcessKiller, cancellation: &mut CancellationS
     cancellation.publish_cancellation();
 }
 
+fn kill_session_and_publish(
+    session_id: &str,
+    killer: &dyn ProcessKiller,
+    cancellation: &mut CancellationState,
+) {
+    kill_and_publish(killer, cancellation);
+    if cancellation
+        .process_cleanup
+        .as_ref()
+        .and_then(process_handle::ProcessCleanupReport::survivor_count)
+        != Some(0)
+    {
+        harn_vm::events::log_warn(
+            "process.session_cleanup_unconfirmed",
+            &format!(
+                "session={session_id} cleanup={:?}",
+                cancellation.process_cleanup
+            ),
+        );
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct OutputState {
     pub(crate) stdout: Vec<u8>,
@@ -524,7 +546,7 @@ pub(crate) fn spawn_long_running_with_options(
         .is_some_and(crate::process::call_scope::CallProcessScope::cancel_requested)
     {
         if let Some(mut cancellation) = cancel_state.begin_cancellation(false) {
-            kill_and_publish(killer.as_ref(), &mut cancellation);
+            kill_session_and_publish(&options.session_id, killer.as_ref(), &mut cancellation);
         }
     }
 
@@ -1302,21 +1324,7 @@ pub fn cancel_session_handles(session_id: &str) {
     };
     for (killer, cancel_state) in to_kill {
         if let Some(mut cancellation) = cancel_state.begin_cancellation(false) {
-            kill_and_publish(killer.as_ref(), &mut cancellation);
-            if cancellation
-                .process_cleanup
-                .as_ref()
-                .and_then(process_handle::ProcessCleanupReport::survivor_count)
-                != Some(0)
-            {
-                harn_vm::events::log_warn(
-                    "process.session_cleanup_unconfirmed",
-                    &format!(
-                        "session={session_id} cleanup={:?}",
-                        cancellation.process_cleanup
-                    ),
-                );
-            }
+            kill_session_and_publish(session_id, killer.as_ref(), &mut cancellation);
         }
     }
 }
