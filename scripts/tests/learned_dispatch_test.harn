@@ -1,9 +1,11 @@
 import {
+  LearnedAgentSetup,
   LearnedCapability,
   LearnedDispatcher,
   LearnedQualification,
   LearnedTrial,
   learned_agent_options,
+  learned_agent_options_deferred,
   learned_capability_snapshot,
   learned_dispatcher,
   learned_qualification_issue,
@@ -13,6 +15,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_is_tool_result_message } from "std/agent/state"
 import { agent_tool_handler_result, agent_tool_postcondition } from "std/agent/tool_lifecycle"
 import { DecisionPolicy, state } from "std/decision"
+import { LlmCallOptions } from "std/llm/options"
 import {
   EvaluationFixture,
   llm_text,
@@ -57,7 +60,10 @@ fn capability() -> LearnedCapability {
   throw "fixture tool is missing"
 }
 
-fn dispatcher(candidate: LearnedCapability = capability()) -> LearnedDispatcher {
+fn dispatcher(
+  candidate: LearnedCapability = capability(),
+  binding: LlmCallOptions = {provider: "mock", model: "mock", repair: {enabled: false}},
+) -> LearnedDispatcher {
   const policy: DecisionPolicy = {
     evaluation: {
       backend: "native_decision",
@@ -76,6 +82,7 @@ fn dispatcher(candidate: LearnedCapability = capability()) -> LearnedDispatcher 
       capabilities: [candidate],
       policy: policy,
       evaluator_revision: "fixture-jev-v1",
+      binding: binding,
       runtime_digest: "fixture-runtime-v1",
       grader_digest: "fixture-grader-v1",
       population: "fixture scaffold requests",
@@ -195,6 +202,13 @@ pipeline test_package_project_tool_and_verifier_changes_invalidate_qualification
   const proof = qualified(app)
   assert_eq(learned_qualification_issue(app.identity, proof), "")
   const original = capability()
+  assert_eq(
+    learned_qualification_issue(
+      dispatcher(original, {provider: "mock", model: "changed-binder"}).identity,
+      proof,
+    ),
+    "stale_qualification",
+  )
   const changed = [
     original + {package_digest: "package-v2"},
     original + {project_digest: "project-v2"},
@@ -291,18 +305,30 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
       const app = dispatcher()
       const request = {request: "Add a standard resource called widgets"}
       let primary_calls = 0
-      const middleware = learned_agent_options(
+      let resolutions = 0
+      const setup: LearnedAgentSetup = {
+        request: request,
+        dispatcher: app,
+        qualification: qualified(app),
+        refresh_identity: { -> app.identity },
+        caller: { _call ->
+          primary_calls += 1
+          return {ok: true, value: {text: "ordinary fallback"}}
+        },
+      }
+      const middleware = learned_agent_options_deferred(
         harness,
         {
-          request: request,
-          dispatcher: app,
-          qualification: qualified(app),
-          binding: {provider: "mock", model: "mock", repair: {enabled: false}},
-          refresh_identity: { -> app.identity },
-          caller: { _call ->
-            primary_calls += 1
-            return {ok: true, value: {text: "ordinary fallback"}}
-          },
+          llm_caller: setup.caller,
+          tool_caller: { call: dict, next: fn(dict) -> dict -> next(call) },
+        },
+        { registry: ToolRegistry ->
+          resolutions += 1
+          assert_eq(
+            tool_schema(registry).tools.map({ tool -> tool.name }).to_list(),
+            ["add_resource"],
+          )
+          return {kind: "ready", setup: setup}
         },
       )
       with_evaluation_fixtures(
@@ -323,11 +349,13 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
                   tools: resource_tools(harness.fs, root, true),
                   tool_format: "native",
                   max_iterations: 3,
+                  initial_user_content: [{type: "text", text: request.request}],
                 }
                   + middleware,
               )
               assert_eq(result.visible_text, "Created and checked widgets.")
               assert_eq(primary_calls, 0)
+              assert_eq(resolutions, 1)
               assert_eq(harness.fs.read_text(path_join(root, "widgets.txt")), "created widgets")
               assert_eq(
                 len(harness.llm.mock_calls()),
@@ -365,7 +393,6 @@ pipeline test_failed_verification_recovers_with_the_actual_mutation_history(harn
           request: request,
           dispatcher: app,
           qualification: qualified(app),
-          binding: {provider: "mock", model: "mock", repair: {enabled: false}},
           refresh_identity: { -> app.identity },
           caller: { call ->
             primary_calls += 1
@@ -421,7 +448,6 @@ pipeline test_continuing_conversation_falls_back_without_decision_or_mutation(ha
           request: request,
           dispatcher: app,
           qualification: qualified(app),
-          binding: {provider: "mock", model: "mock"},
           refresh_identity: { -> app.identity },
           caller: { _call ->
             primary_calls += 1
@@ -474,7 +500,6 @@ pipeline test_changed_identity_and_policy_denial_prevent_the_selected_mutation(h
             request: request,
             dispatcher: app,
             qualification: qualified(app),
-            binding: {provider: "mock", model: "mock", repair: {enabled: false}},
             refresh_identity: { ->
               identity_reads += 1
               return boundary == "identity" && identity_reads > 1 ? app.identity

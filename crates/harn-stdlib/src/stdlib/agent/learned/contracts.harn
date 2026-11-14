@@ -5,6 +5,7 @@ import {
   DecisionPolicy,
 } from "std/decision"
 import { SelectiveRiskOptions, SelectiveRiskReport } from "std/eval/selective_risk"
+import { LlmCallOptions } from "std/llm/options"
 import { ToolCatalogEntry } from "std/tools"
 
 /** Reviewed executable coordinates over the ordinary tool catalog. */
@@ -38,6 +39,7 @@ pub type LearnedIdentity = {
   definition_digest: string,
   capabilities_digest: string,
   evaluator_revision: string,
+  binding_digest: string,
   runtime_digest: string,
   grader_digest: string,
   population: string,
@@ -67,6 +69,7 @@ pub type LearnedDispatcherOptions = {
   capabilities: list<LearnedCapability>,
   policy: DecisionPolicy,
   evaluator_revision: string,
+  binding: LlmCallOptions,
   runtime_digest: string,
   grader_digest: string,
   population: string,
@@ -75,6 +78,7 @@ pub type LearnedDispatcherOptions = {
 pub type LearnedDispatcher = {
   definition: DecisionDefinition,
   identity: LearnedIdentity,
+  binding: LlmCallOptions,
   probe: fn(HarnessLlm, LearnedRequest) -> LearnedAssessment,
   assess: fn(HarnessLlm, LearnedRequest, LearnedQualification?) -> LearnedAssessment,
 }

@@ -1,5 +1,9 @@
 pub import "std/agent/learned/contracts"
 pub import {
+  LearnedAgentResolution,
+  learned_agent_options_deferred,
+} from "std/agent/learned/deferred"
+pub import {
   LearnedAgentOptions,
   LearnedAgentSetup,
   LearnedTrialScope,
@@ -63,6 +67,7 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
     definition_digest: selection.definition.digest,
     capabilities_digest: sha256(json_stringify(options.capabilities)),
     evaluator_revision: options.evaluator_revision,
+    binding_digest: sha256(json_stringify(options.binding)),
     runtime_digest: options.runtime_digest,
     grader_digest: options.grader_digest,
     population: options.population,
@@ -82,6 +87,7 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
   return {
     definition: selection.definition,
     identity: identity,
+    binding: options.binding,
     probe: probe,
     assess: { llm: HarnessLlm, request: LearnedRequest, qualification: LearnedQualification? ->
       if len(options.capabilities) == 0 {

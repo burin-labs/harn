@@ -431,6 +431,7 @@ catalog_entries! {
     "agent/crystallization_curator" => "stdlib/agent/crystallization_curator.harn",
     "agent/learned" => "stdlib/agent/learned.harn",
     "agent/learned/contracts" => "stdlib/agent/learned/contracts.harn",
+    "agent/learned/deferred" => "stdlib/agent/learned/deferred.harn",
     "agent/learned/qualification" => "stdlib/agent/learned/qualification.harn",
     "agent/learned/middleware" => "stdlib/agent/learned/middleware.harn",
     "agent/learned/sources" => "stdlib/agent/learned/sources.harn",

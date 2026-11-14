@@ -15,7 +15,6 @@ import {
 import { AgentToolPostcondition, agent_tool_result_data } from "std/agent/tool_lifecycle"
 import { DecisionEvidence } from "std/decision"
 import { LlmCaller, LlmCallerRequest } from "std/llm/caller"
-import { LlmCallOptions } from "std/llm/options"
 import { ToolCatalogEntry, ToolRegistry } from "std/tools"
 
 type ToolCaller = fn(dict, fn(dict) -> dict) -> dict
@@ -26,7 +25,6 @@ pub type LearnedAgentSetup = {
   request: LearnedRequest,
   dispatcher: LearnedDispatcher,
   qualification: LearnedQualification?,
-  binding: LlmCallOptions,
   caller: LlmCaller,
   tool_caller?: ToolCaller,
   refresh_identity: fn() -> LearnedIdentity,
@@ -72,6 +70,23 @@ type RequestContextMessage = {role: string, content?: unknown, _harn?: {kind?: s
 
 type RequestContextMessages = list<RequestContextMessage>
 
+type TextPromptBlocks = list<{type: "text", text: string}>
+
+fn is_request_content(content: unknown, request: string) -> bool {
+  if content == request {
+    return true
+  }
+  const blocks = match schema_parse(content, schema_of(TextPromptBlocks)) {
+    Ok(value) -> { value }
+    Err(_error) -> { return false }
+  }
+  if len(blocks) != 1 {
+    return false
+  }
+  const block = blocks[0]
+  return block != nil && block.text == request
+}
+
 type PreparedAction = {
   kind: "prepared",
   capability: LearnedCapability,
@@ -97,7 +112,7 @@ fn fresh_request(agent: HarnessAgent, session_id: string, request: LearnedReques
   for message in messages {
     if message.role == "user" && !agent_is_tool_result_message(message) {
       requests += 1
-      if message.content != request.request {
+      if !is_request_content(message.content, request.request) {
         return false
       }
     }
@@ -185,7 +200,7 @@ fn prepare_action(
         {request: setup.request.request, meaning: capability.meaning},
       ),
       binding_schema(capability.tool),
-      setup.binding,
+      setup.dispatcher.binding,
     ),
     schema_of(BindingResult),
   )
