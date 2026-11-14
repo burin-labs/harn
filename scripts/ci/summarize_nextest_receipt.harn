@@ -1,5 +1,10 @@
 import { parse, parser } from "std/cli/argparse"
-import { SelectedInventory, selected_inventory } from "./nextest_inventory"
+import {
+  SelectedInventory,
+  event_identity,
+  event_test_identity,
+  selected_inventory,
+} from "./nextest_inventory"
 
 pub type Receipt = {
   reason: string,
@@ -22,7 +27,7 @@ pub type ReceiptResult = {
   format: string,
 }
 
-type NextestEvent = {type?: string, event?: string, name?: string}
+type NextestEvent = {type?: string, event?: string, name?: string, binary_id?: string?}
 
 fn expanded_tests(names: list<string>, stress_count: int?) -> dict<string, bool> {
   let selected: dict<string, bool> = {}
@@ -59,6 +64,7 @@ fn finished_receipt(
   let started: dict<string, bool> = {}
   let line_number = 0
   let passed = 0
+  let owner: string? = nil
   const event_schema = schema_of(NextestEvent) + {additional_properties: true}
   for line in events.split("\n") {
     line_number += 1
@@ -67,13 +73,24 @@ fn finished_receipt(
     }
     const event = schema_expect<NextestEvent>(json_parse(line), event_schema)
     const kind = event.event ?? ""
+    if event.type == "harn-invocation" {
+      if kind != "started" || !event.keys().contains("binary_id") {
+        throw "invocation marker has no owning identity"
+      }
+      owner = event.binary_id
+      if owner != nil && !inventory.isolated.contains(unwrap(owner)) {
+        throw "invocation marker is not an isolated inventory binary: ${owner}"
+      }
+      continue
+    }
     if event.type != "test" || !["started", "ok", "failed", "ignored"].contains(kind) {
       continue
     }
     if event.name == nil {
       throw "events line ${line_number} has no test name"
     }
-    const name = unwrap(event.name)
+    const identity = event_identity(unwrap(event.name))
+    const name = event_test_identity(identity, inventory.event_owners[identity.key] ?? [], owner)
     if ignored[name] ?? false {
       if kind == "started" || kind == "ignored" {
         continue

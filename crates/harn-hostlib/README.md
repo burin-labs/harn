@@ -171,13 +171,20 @@ fn main() {
 }
 ```
 
-On Unix, managed background commands re-exec the embedding executable in this
+On Unix, foreground and managed background commands re-exec the embedding executable in this
 mode so the kernel can terminate their process groups if the supervisor dies.
 A private pipe carries the prepared command. The guardian removes inherited
 credentials and does not copy child arguments or environment values into its
 own arguments or environment.
-Omitting the early dispatch makes owner-death-contained commands fail during
-startup. Windows uses a Job Object and the function returns `false`.
+Foreground-only embedders must now add this hook too. Without it, command
+startup returns `ProcessError::GuardianNotInitialized` before starting the
+payload. Windows uses a Job Object and the function returns `false`.
+
+The [`foreground_command` example](examples/foreground_command/main.rs) runs
+a foreground command through the builtin registry. Run its startup and exact
+output checks with `make test-hostlib-embedding` from the workspace root.
+Libtest executables that invoke real command tools must declare
+`harn_hostlib::process_guardian_test_fixture!();` once at the crate root.
 
 - `tools/run_command` is the canonical command runner. It accepts
   `mode: "argv"` with `argv: [string]` as the recommended path, or

@@ -58,6 +58,8 @@ cp "$root/scripts/ci/native_qualification_probe.sh" "$root/scripts/ci/native_qua
 cp "$root/scripts/ci/hostlib_macos_stress.sh" "$root/scripts/ci/nextest_inventory.harn" \
   "$root/scripts/ci/summarize_nextest_receipt.harn" "$tmp/repo/scripts/ci/"
 cp "$root/scripts/release_audit_contract.json" "$tmp/repo/scripts/"
+cp "$root/scripts/ci/run_rust_test_lane.sh" "$root/scripts/ci/rust_resource_budget.sh" "$tmp/repo/scripts/ci/"
+cp "$root/scripts/harn_test_env.sh" "$tmp/repo/scripts/"
 git -C "$tmp/repo" init -q -b main
 fixture_commit() {
   git -C "$tmp/repo" -c user.name='Native fixture' -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -qm "$1"
@@ -74,6 +76,9 @@ admit() {
 }
 admit refs/heads/main "$policy" "$candidate"
 cmp "$root/scripts/lib/sha256.sh" "$tmp/runner/native-qualification-tools/sha256.sh" || fail 'reviewed hash owner was not retained'
+cmp "$root/scripts/ci/run_rust_test_lane.sh" "$tmp/runner/native-qualification-tools/runner/ci/run_rust_test_lane.sh" || fail 'reviewed invocation owner was not retained'
+cmp "$root/scripts/ci/nextest_inventory.harn" "$tmp/runner/native-qualification-tools/runner/ci/nextest_inventory.harn" || fail 'reviewed inventory owner was not retained'
+cmp "$root/scripts/harn_test_env.sh" "$tmp/runner/native-qualification-tools/runner/harn_test_env.sh" || fail 'reviewed test environment was not retained'
 [[ $(cat "$tmp/runner/native-qualification-tools/admitted-source") == "$candidate" ]] || fail 'admitted source was not recorded'
 [[ $(cat "$tmp/job-env") == "HARN_BUILD_REVISION=$candidate" ]] || fail 'compiled CLI identity was not bound to admitted source'
 

@@ -88,8 +88,14 @@ commands re-exec the embedding executable in guardian mode. A private pipe
 carries the prepared command, including its explicit child environment. The
 guardian removes inherited credentials and does not copy that data into its
 own arguments or environment.
-Without the dispatch, those commands fail during startup. Windows uses a Job
-Object and the function returns `false`.
+Foreground-only embedders must now add this hook too. Without it, command
+startup returns `ProcessError::GuardianNotInitialized` before starting the
+payload. Windows uses a Job Object and the function returns `false`.
+
+For libtest executables that invoke real command tools, declare
+`harn_hostlib::process_guardian_test_fixture!();` once at the crate root.
+The declaration makes the dispatcher available across host worker threads
+and keeps libtest output separate from command output.
 
 On Linux, the guardian transfers confinement to the process that starts the
 payload. For loopback-only commands, the namespace helper creates the private

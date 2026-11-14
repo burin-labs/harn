@@ -36,11 +36,14 @@ while IFS= read -r executable; do
 done < "$evidence/binaries.txt" > "$evidence/binaries-before.sha256"
 
 status=0
-NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo-nextest nextest run --locked --workspace --exclude harn-wasm \
+RUST_TEST_STDOUT_PATH="$evidence/events.jsonl" \
+RUST_TEST_INVENTORY_PATH="$evidence/inventory.json" RUST_TEST_REPORTER="$binary" \
+NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 bash "$tools/runner/ci/run_rust_test_lane.sh" \
+  cargo-nextest nextest run --locked --workspace --exclude harn-wasm \
   -E "package(=${test_package})" \
   --profile default --test-threads 32 --stress-count 20 --retries 0 --no-fail-fast --no-tests fail \
   --message-format libtest-json-plus --message-format-version 0.1 \
-  > "$evidence/events.jsonl" 2> "$evidence/runner.log" || status=$?
+  > "$evidence/runner.log" 2>&1 || status=$?
 while IFS= read -r executable; do
   digest=$(sha256_file_hex "$executable")
   printf '%s  %s\n' "$digest" "$executable"

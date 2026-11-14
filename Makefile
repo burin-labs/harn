@@ -419,6 +419,11 @@ test-e2e:
 test-cargo:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
+.PHONY: test-hostlib-embedding
+test-hostlib-embedding:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked -p harn-hostlib --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked -p harn-hostlib --example foreground_command
+
 # Compatibility alias for the smarter default `make test`.
 test-fast:
 	@$(MAKE) test
