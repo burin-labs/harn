@@ -91,6 +91,13 @@ fn profile_for(program: &str) -> Option<&'static ExecProfile> {
         .find(|profile| profile.program == name)
 }
 
+/// Whether a command-bound grant reaches `program` only through a profile
+/// that closes its exec paths, never as a plain environment variable. An
+/// embedder checks this before binding a credential to a program.
+pub fn command_grant_is_profiled(program: &str) -> bool {
+    profile_for(program).is_some()
+}
+
 fn command_bound_vars(program: &str) -> Vec<String> {
     super::current_session_environment()
         .map(|environment| {
