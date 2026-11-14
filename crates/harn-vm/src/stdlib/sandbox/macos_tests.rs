@@ -302,6 +302,35 @@ pub(super) fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy 
     }
 }
 
+/// System services run outside a command's profile, so the profile names each
+/// one it allows rather than granting every lookup.
+#[test]
+fn sandbox_profile_names_every_mach_service_it_allows() {
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    let mut rest = profile.as_str();
+    let mut rules = 0;
+    while let Some(start) = rest.find("(allow mach-lookup") {
+        rules += 1;
+        let rule = &rest[start..];
+        let rule = &rule[..=rule.find("))\n").expect("rule closes") + 1];
+        let names = rule
+            .trim_start_matches("(allow mach-lookup")
+            .strip_suffix(')')
+            .expect("rule closes");
+        assert!(
+            !names.trim().is_empty()
+                && names
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .all(|line| line.starts_with("(global-name \"") && line.ends_with("\")")),
+            "every mach-lookup grant names exact services: {rule}"
+        );
+        rest = &rest[start + rule.len()..];
+    }
+    assert_eq!(rules, 1, "{profile}");
+}
+
 #[test]
 fn sandbox_profile_does_not_grant_global_file_read() {
     let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));

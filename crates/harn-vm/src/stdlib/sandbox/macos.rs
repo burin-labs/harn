@@ -350,11 +350,11 @@ fn render_profile_with_extra_read_roots(
          (allow signal (target same-sandbox))\n\
          (allow ipc-posix-sem (ipc-posix-name-prefix \"/mp-\"))\n\
          (allow sysctl-read)\n\
-         (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
          (allow file-read-data (literal \"/\"))\n",
     );
     profile.push_str(standard_device_profile_rules());
+    profile.push_str(MACH_SERVICES);
     for root in preset_read_roots(policy) {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -770,6 +770,38 @@ fn standard_device_profile_rules() -> &'static str {
        (literal \"/dev/stderr\") \
        (subpath \"/dev/fd\"))\n"
 }
+
+/// The system services a confined command may look up. A service runs
+/// outside the command's profile, so only services a command needs are
+/// reachable, as defense in depth. Seeded from the Chromium and
+/// OpenAI Codex CLI Seatbelt base policies, then trimmed and extended by the
+/// lookups that Rust, Go, Node, Python, Swift, Xcode tools and git, including
+/// its keychain credential helper, make on macOS.
+const MACH_SERVICES: &str = "(allow mach-lookup\n\
+       (global-name \"com.apple.system.opendirectoryd.libinfo\")\n\
+       (global-name \"com.apple.system.opendirectoryd.membership\")\n\
+       (global-name \"com.apple.system.DirectoryService.libinfo_v1\")\n\
+       (global-name \"com.apple.bsd.dirhelper\")\n\
+       (global-name \"com.apple.system.notification_center\")\n\
+       (global-name \"com.apple.logd\")\n\
+       (global-name \"com.apple.logd.events\")\n\
+       (global-name \"com.apple.diagnosticd\")\n\
+       (global-name \"com.apple.system.logger\")\n\
+       (global-name \"com.apple.analyticsd\")\n\
+       (global-name \"com.apple.analyticsd.messagetracer\")\n\
+       (global-name \"com.apple.cfprefsd.daemon\")\n\
+       (global-name \"com.apple.cfprefsd.agent\")\n\
+       (global-name \"com.apple.SecurityServer\")\n\
+       (global-name \"com.apple.securityd.xpc\")\n\
+       (global-name \"com.apple.trustd\")\n\
+       (global-name \"com.apple.trustd.agent\")\n\
+       (global-name \"com.apple.ocspd\")\n\
+       (global-name \"com.apple.SystemConfiguration.configd\")\n\
+       (global-name \"com.apple.SystemConfiguration.DNSConfiguration\")\n\
+       (global-name \"com.apple.FSEvents\")\n\
+       (global-name \"com.apple.security.syspolicy.exec\")\n\
+       (global-name \"com.apple.secinitd\")\n\
+       (global-name \"com.apple.PowerManagement.control\"))\n";
 
 #[cfg(test)]
 #[path = "macos_tests.rs"]
