@@ -1510,6 +1510,9 @@ writing and exits non-zero on drift — wire it into CI. See
 Format `.harn` and `.harn.txt` source files. Accepts files or directories.
 Prompt files such as `.harn.prompt` are excluded.
 
+Files are formatted concurrently, and reports stay in sorted path order.
+Set `HARN_FMT_JOBS=<n>` to bound the worker pool, or `HARN_FMT_JOBS=1` for serial execution.
+
 ```bash
 harn fmt main.harn
 harn fmt src/
@@ -1695,6 +1698,12 @@ the same type-check, lint, and preflight diagnostic passes used by
 `harn check`, keeps diagnostics that carry a registered repair classifier, and
 reports the concrete `FixEdit` edits when a diagnostic already has a
 machine-applicable fix.
+
+Per-file analysis and ordinary repair application use a bounded worker pool;
+module information is built once and shared between workers. Whole-program
+capability planning remains coordinated across files. Reports preserve path
+order regardless of scheduling. Set `HARN_FIX_JOBS=<n>` to bound the pool,
+or `HARN_FIX_JOBS=1` for serial execution.
 
 ```bash
 harn fix --plan main.harn

@@ -87,7 +87,11 @@ struct EffectiveCheckConfig {
 }
 
 pub(crate) fn worker_count(files: usize) -> usize {
-    let configured = std::env::var(CHECK_JOBS_ENV)
+    worker_count_for_env(files, CHECK_JOBS_ENV)
+}
+
+pub(crate) fn worker_count_for_env(files: usize, variable: &str) -> usize {
+    let configured = std::env::var(variable)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|&jobs| jobs > 0);

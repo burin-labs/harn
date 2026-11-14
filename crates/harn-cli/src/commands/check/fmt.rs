@@ -103,6 +103,15 @@ pub(crate) fn fmt_targets_json(
 }
 
 pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOptions) -> FmtReport {
+    fmt_targets_report_with_workers(targets, mode, opts, None)
+}
+
+fn fmt_targets_report_with_workers(
+    targets: &[&str],
+    mode: FmtMode,
+    opts: &FmtOptions,
+    workers: Option<usize>,
+) -> FmtReport {
     let mut files = Vec::new();
     for target in targets {
         let path = Path::new(target);
@@ -127,9 +136,22 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
         files: Vec::new(),
         summary: FmtSummary::default(),
     };
-    for file in files {
-        let path_str = file.to_string_lossy();
-        let file_report = fmt_file_inner(&path_str, mode, opts);
+    let workers =
+        workers.unwrap_or_else(|| super::worker_count_for_env(files.len(), "HARN_FMT_JOBS"));
+    let file_reports = super::run_ordered(
+        &files,
+        workers,
+        || (),
+        |(), file| fmt_file_inner(&file.to_string_lossy(), mode, opts),
+        |file| {
+            fmt_error(
+                &file.to_string_lossy(),
+                "internal",
+                "internal formatter failure".into(),
+            )
+        },
+    );
+    for file_report in file_reports {
         match file_report.status {
             FmtFileStatus::Formatted => report.summary.formatted += 1,
             FmtFileStatus::AlreadyFormatted => report.summary.already_formatted += 1,
@@ -310,6 +332,54 @@ fn diff_lines_changed(before: &str, after: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parallel_format_reports_are_identical_and_reach_every_file() {
+        let dir = tempfile::tempdir().unwrap();
+        for index in 0..24 {
+            std::fs::write(
+                dir.path().join(format!("file{index:02}.harn")),
+                "fn value(){return 1}\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(dir.path().join("broken.harn"), "fn broken(\n").unwrap();
+        let targets = [dir.path().to_str().unwrap()];
+        let serial = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(1),
+        );
+        let parallel = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(serial.files.len(), 25);
+        assert_eq!(serial.summary.errors, 25);
+        assert_eq!(
+            serde_json::to_string(&serial).unwrap(),
+            serde_json::to_string(&parallel).unwrap()
+        );
+        let written = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Write,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(written.summary.formatted, 24);
+        assert_eq!(written.summary.errors, 1);
+        let checked = fmt_targets_report_with_workers(
+            &targets,
+            FmtMode::Check,
+            &FmtOptions::default(),
+            Some(4),
+        );
+        assert_eq!(checked.summary.already_formatted, 24);
+        assert_eq!(checked.summary.errors, 1);
+    }
 
     #[test]
     fn explicit_non_harn_file_targets_are_rejected() {

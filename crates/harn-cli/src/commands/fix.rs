@@ -514,6 +514,15 @@ fn build_plan_with_options(
     safety_ceiling: Option<RepairSafety>,
     options: &FixOptions,
 ) -> Result<RepairPlan, String> {
+    build_plan_with_workers(targets, safety_ceiling, options, None)
+}
+
+fn build_plan_with_workers(
+    targets: &[PathBuf],
+    safety_ceiling: Option<RepairSafety>,
+    options: &FixOptions,
+    workers: Option<usize>,
+) -> Result<RepairPlan, String> {
     for target in targets {
         if let Err(error) = package::validate_runtime_manifest_extensions(target) {
             return Err(format!("manifest extension validation failed: {error}"));
@@ -532,7 +541,6 @@ fn build_plan_with_options(
 
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-    let mut analysis = AnalysisDatabase::new();
     // A callable whose value is read as a first-class reference is invoked at
     // its declared arity through a call site no per-file pass can see — a
     // registry entry in one module dispatching a handler defined in another.
@@ -567,33 +575,46 @@ fn build_plan_with_options(
     let mut skipped_files = Vec::new();
     let mut declared_invalid_files = Vec::new();
     let mut frozen_callables: Vec<FrozenCallable> = Vec::new();
-    for file in &files {
-        if options.capability_migrations_only {
-            if let Some(candidate) = retired_testing::repair(file) {
-                candidates.push(candidate);
+    let workers = workers
+        .unwrap_or_else(|| commands::check::worker_count_for_env(files.len(), "HARN_FIX_JOBS"));
+    let collected_files = commands::check::run_ordered(
+        &files,
+        workers,
+        AnalysisDatabase::new,
+        |analysis, file| {
+            let mut candidates = Vec::new();
+            let mut frozen = Vec::new();
+            if options.capability_migrations_only {
+                if let Some(candidate) = retired_testing::repair(file) {
+                    candidates.push(candidate);
+                }
             }
-        }
-        let collected = collect_file_candidates(
-            &mut analysis,
-            file,
-            safety_ceiling,
-            &cross_file_imports,
-            &module_graph,
-            options,
-            &mut candidates,
-            &mut ValueEscape {
-                referenced_by_value,
-                escape_sites,
-                manifest_handlers: manifest_host_entries.names_for(file),
-                frozen: &mut frozen_callables,
-            },
-        );
-        // Candidate collection is complete for this file. Whole-program
-        // passes retain their own structural projections, so keeping the
-        // database's tokens, AST, and type-check output only multiplies peak
-        // memory on large migration corpora.
-        analysis.remove_source(&SourceId::path(file));
+            let collected = collect_file_candidates(
+                analysis,
+                file,
+                safety_ceiling,
+                &cross_file_imports,
+                &module_graph,
+                options,
+                &mut candidates,
+                &mut ValueEscape {
+                    referenced_by_value,
+                    escape_sites,
+                    manifest_handlers: manifest_host_entries.names_for(file),
+                    frozen: &mut frozen,
+                },
+            );
+            analysis.remove_source(&SourceId::path(file));
+            (candidates, frozen, collected.map_err(Some))
+        },
+        |_| (Vec::new(), Vec::new(), Err(None)),
+    );
+    for (file, (file_candidates, frozen, collected)) in files.iter().zip(collected_files) {
+        candidates.extend(file_candidates);
+        frozen_callables.extend(frozen);
         if let Err(skipped) = collected {
+            let skipped = skipped
+                .ok_or_else(|| format!("internal repair planner failure for {}", file.display()))?;
             if declares_expected_invalid(file) {
                 declared_invalid_files.push(skipped);
             } else {
@@ -668,6 +689,7 @@ fn build_plan_with_options(
         candidates.extend(whole_program_repairs);
     }
 
+    let mut analysis = AnalysisDatabase::new();
     let (annotation_repairs, annotation_residue) = if !options.capability_migrations_only
         && options.selects_code(Code::ImplicitAnyParameter)
     {
