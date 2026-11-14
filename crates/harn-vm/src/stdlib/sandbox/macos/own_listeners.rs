@@ -78,24 +78,58 @@ fn render(denied: impl IntoIterator<Item = u16>, proxy_ports: [u16; 2]) -> Strin
 }
 
 /// Whether [`render`]'s rules, appended to `base_profile`, deny what they name
-/// on this host. Measured once per distinct base profile.
+/// on this host. Measured once per [`shape_key`], and at most
+/// [`SHAPE_CACHE_LIMIT`] keys are kept.
 fn shape_holds(base_profile: &str) -> Result<(), String> {
-    use std::hash::{Hash, Hasher};
-    type Measured = std::sync::Mutex<HashMap<u64, Result<(), String>>>;
+    type Measured = std::sync::Mutex<HashMap<String, Result<(), String>>>;
     static MEASURED: std::sync::OnceLock<Measured> = std::sync::OnceLock::new();
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    base_profile.hash(&mut hasher);
-    let key = hasher.finish();
+    let key = shape_key(base_profile);
     let cache = MEASURED.get_or_init(Default::default);
     if let Some(known) = cache.lock().map_err(|e| e.to_string())?.get(&key) {
         return known.clone();
     }
     let measured = measure_shape(base_profile);
-    cache
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(key, measured.clone());
+    let mut cache = cache.lock().map_err(|e| e.to_string())?;
+    if cache.len() >= SHAPE_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(key, measured.clone());
     measured
+}
+
+const SHAPE_CACHE_LIMIT: usize = 32;
+
+/// What the measured quirks depend on: which rules a profile has and in what
+/// order. Paths and port numbers vary per spawn (its own directory, workspace
+/// and toolchain roots, the proxy's ports) without changing that, so every
+/// quoted path becomes `PATH` and every port on a `localhost` endpoint `N`. A
+/// wildcard endpoint stays as written, since a port rule and a wildcard rule
+/// behave differently.
+fn shape_key(profile: &str) -> String {
+    // Splitting on quotes alternates text outside a literal with a literal.
+    profile
+        .split('"')
+        .enumerate()
+        .map(|(index, part)| {
+            if index % 2 == 0 {
+                return part;
+            }
+            match part.split_once(':') {
+                Some((host, "*")) if !host.contains('/') => part,
+                Some((host, port))
+                    if !host.contains('/') && port.bytes().all(|byte| byte.is_ascii_digit()) =>
+                {
+                    if host == "*" {
+                        "*:N"
+                    } else {
+                        "localhost:N"
+                    }
+                }
+                _ => "PATH",
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\"")
 }
 
 /// Run real clients under `base_profile` plus [`render`]'s rules against
@@ -235,25 +269,11 @@ pub(super) fn report_strict(reason: &str) {
 
 /// Ports held now by a socket that no marked process accounts for.
 fn foreign_ports() -> Result<BTreeSet<u16>, String> {
-    // Known sockets both readers must agree on, or the readers are wrong.
-    let probe_tcp = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("probe listener: {e}"))?;
-    let probe_udp = UdpSocket::bind("127.0.0.1:0").map_err(|e| format!("probe socket: {e}"))?;
-    let tcp_port = probe_tcp.local_addr().map_err(|e| e.to_string())?.port();
-    let udp_port = probe_udp.local_addr().map_err(|e| e.to_string())?.port();
     let me = unsafe { libc::getuid() };
-
+    let probes = Probes::open()?;
     let mut rows = table::rows(table::Protocol::Tcp)?;
     let udp_rows = table::rows(table::Protocol::Udp)?;
-    let own = owners::sockets(std::process::id() as i32)?;
-    let vouched = |rows: &[table::Row], port: u16| {
-        rows.iter()
-            .any(|row| row.port == port && row.uid == me && own.contains(&row.socket))
-    };
-    if !vouched(&rows, tcp_port) || !vouched(&udp_rows, udp_port) {
-        return Err(
-            "the kernel socket table and libproc disagreed about this process's own sockets".into(),
-        );
-    }
+    probes.vouch(&rows, &udp_rows, me)?;
     rows.extend(udp_rows);
     let marked = owners::marked_sockets(me)?;
     Ok(rows
@@ -261,6 +281,63 @@ fn foreign_ports() -> Result<BTreeSet<u16>, String> {
         .filter(|row| !marked.contains(&row.socket))
         .map(|row| row.port)
         .collect())
+}
+
+/// Sockets this process opens so both readers can be checked against known
+/// facts: two IPv4 listeners, an IPv6-only listener and a UDP socket.
+struct Probes {
+    tcp: [TcpListener; 2],
+    tcp6: TcpListener,
+    udp: UdpSocket,
+}
+
+impl Probes {
+    fn open() -> Result<Self, String> {
+        let tcp =
+            |address: &str| TcpListener::bind(address).map_err(|e| format!("probe listener: {e}"));
+        Ok(Self {
+            tcp: [tcp("127.0.0.1:0")?, tcp("127.0.0.1:0")?],
+            tcp6: tcp("[::1]:0")?,
+            udp: UdpSocket::bind("127.0.0.1:0").map_err(|e| format!("probe socket: {e}"))?,
+        })
+    }
+
+    /// Each probe must appear in the kernel table as this user's, with an
+    /// identity `libproc` also reports for this process, and the identities
+    /// must be nonzero and distinct. A reader that returns a constant (a
+    /// zeroed field, a shifted layout) would otherwise match every socket and
+    /// admit every port.
+    fn vouch(&self, tcp: &[table::Row], udp: &[table::Row], me: u32) -> Result<(), String> {
+        let own = owners::sockets(std::process::id() as i32)?;
+        let port = |address: std::io::Result<std::net::SocketAddr>| {
+            address
+                .map(|address| address.port())
+                .map_err(|e| e.to_string())
+        };
+        let identity = |rows: &[table::Row], port: u16| {
+            rows.iter()
+                .find(|row| row.port == port && row.uid == me && own.contains(&row.socket))
+                .map(|row| row.socket)
+        };
+        let identities = [
+            identity(tcp, port(self.tcp[0].local_addr())?),
+            identity(tcp, port(self.tcp[1].local_addr())?),
+            identity(tcp, port(self.tcp6.local_addr())?),
+            identity(udp, port(self.udp.local_addr())?),
+        ];
+        let found: Option<Vec<u64>> = identities.into_iter().collect();
+        let distinct = found
+            .as_ref()
+            .map(|ids| ids.iter().copied().collect::<BTreeSet<_>>())
+            .filter(|ids| ids.len() == 4 && !ids.contains(&0));
+        match distinct {
+            Some(_) => Ok(()),
+            None => Err(format!(
+                "the kernel socket table and libproc did not identify this process's own \
+                 sockets as four distinct, nonzero sockets: {found:?}"
+            )),
+        }
+    }
 }
 
 /// The kernel's socket table, through the public `pcblist64` records.
@@ -540,5 +617,40 @@ mod owners {
             && buffer[..size]
                 .windows(marker.len())
                 .any(|window| window == marker)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shape_key;
+
+    /// A granted spawn's own directory, a workspace root and the proxy's ports
+    /// change every spawn; re-measuring for each would cost every command the
+    /// probe's ~100 ms.
+    #[test]
+    fn spawn_specific_paths_and_ports_share_one_key() {
+        let profile = |dir: &str, port: u16| {
+            format!(
+                "(allow file-read* (subpath \"{dir}\"))\n\
+                 (allow network-outbound (remote tcp4 \"localhost:{port}\"))\n\
+                 (allow network-outbound (subpath \"{dir}/sock\"))\n"
+            )
+        };
+        assert_eq!(
+            shape_key(&profile("/Users/a/.harn/grant-spawns/1", 6000)),
+            shape_key(&profile("/private/tmp/w/grant-spawns/2", 61234))
+        );
+    }
+
+    /// The quirk depends on which rules come first, so a profile that gains or
+    /// loses a path rule, or swaps a port for a wildcard, is measured again.
+    #[test]
+    fn rule_structure_changes_the_key() {
+        let without_path = "(allow network-outbound (remote tcp4 \"localhost:6000\"))\n";
+        let with_path = "(allow network-outbound (subpath \"/s\"))\n\
+                         (allow network-outbound (remote tcp4 \"localhost:6000\"))\n";
+        let wildcard = "(allow network-outbound (remote tcp4 \"localhost:*\"))\n";
+        assert_ne!(shape_key(without_path), shape_key(with_path));
+        assert_ne!(shape_key(without_path), shape_key(wildcard));
     }
 }
