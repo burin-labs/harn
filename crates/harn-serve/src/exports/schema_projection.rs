@@ -24,15 +24,105 @@ pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
     }
 }
 
-pub(super) fn resolver_for_module(path: &Path, program: &[SNode]) -> harn_vm::TypeSchemaResolver {
-    let module_graph = harn_modules::build(&[path.to_path_buf()]);
-    let mut schema_program = module_graph
-        .imported_type_declarations_for_file(path)
-        .unwrap_or_default();
-    // Local declarations come last because the resolver uses declaration
-    // order for shadowing, matching the module checker's visible scope.
-    schema_program.extend_from_slice(program);
-    harn_vm::TypeSchemaResolver::from_program(&schema_program)
+pub(super) fn resolver_for_module(
+    path: &Path,
+    program: &[SNode],
+    source_len: usize,
+) -> Result<(harn_vm::TypeSchemaResolver, harn_modules::SourceDocuments), crate::DispatchError> {
+    use harn_vm::wire::{
+        declaration_name, ResolvedWireDeclaration, ResolvedWireScope, WireSourceRef,
+    };
+    use std::collections::BTreeMap;
+    let path = std::fs::canonicalize(path).map_err(|_| {
+        crate::DispatchError::Validation("export source identity is unavailable".into())
+    })?;
+    let module_graph = harn_modules::build(std::slice::from_ref(&path));
+    let documents = module_graph.source_documents(&path).map_err(|_| {
+        crate::DispatchError::Validation("export source identity is unavailable".into())
+    })?;
+    let mut sites = module_graph
+        .imported_type_declaration_sites_for_file(&path)
+        .ok_or_else(|| {
+            crate::DispatchError::Validation("export type imports could not be resolved".into())
+        })?;
+    sites.extend(
+        program
+            .iter()
+            .filter(|node| declaration_name(node).is_some())
+            .map(|declaration| harn_modules::LocatedTypeDeclaration {
+                file: path.clone(),
+                declaration: declaration.clone(),
+            }),
+    );
+    let identity = |file: &Path, name: &str| {
+        let module = documents
+            .document_for(file)
+            .expect("resolved graph declaration");
+        format!("{module}::{name}")
+    };
+    let mut root_bindings = BTreeMap::new();
+    let mut declarations = BTreeMap::new();
+    for site in &sites {
+        let Some(name) = declaration_name(&site.declaration) else {
+            continue;
+        };
+        if let Some(visible) = module_graph.type_declaration_visible_from(&path, name) {
+            root_bindings.insert(name.to_owned(), identity(&visible.file, name));
+        }
+        let id = identity(&site.file, name);
+        let (_, node) = harn_parser::peel_attributes(&site.declaration);
+        let source = if site.file.is_absolute() {
+            WireSourceRef::TextSpan {
+                document: documents
+                    .document_for(&site.file)
+                    .expect("graph source")
+                    .into(),
+                start: node.span.start.try_into().map_err(|_| {
+                    crate::DispatchError::Validation("export source extent is too large".into())
+                })?,
+                end: node.span.end.try_into().map_err(|_| {
+                    crate::DispatchError::Validation("export source extent is too large".into())
+                })?,
+            }
+        } else {
+            WireSourceRef::Synthetic {
+                owner: documents
+                    .document_for(&site.file)
+                    .expect("graph source")
+                    .into(),
+            }
+        };
+        let bindings = module_graph
+            .type_declaration_bindings(site)
+            .into_iter()
+            .map(|(name, file)| {
+                let id = identity(&file, &name);
+                (name, id)
+            })
+            .collect();
+        declarations.insert(
+            id.clone(),
+            ResolvedWireDeclaration {
+                id,
+                source,
+                declaration: site.declaration.clone(),
+                bindings,
+            },
+        );
+    }
+    let resolver = harn_vm::TypeSchemaResolver::from_resolved_wire_scope(ResolvedWireScope {
+        source: WireSourceRef::TextSpan {
+            document: documents.document_for(&path).expect("entry source").into(),
+            start: 0,
+            end: source_len.try_into().map_err(|_| {
+                crate::DispatchError::Validation("export source extent is too large".into())
+            })?,
+        },
+        declarations: declarations.into_values().collect(),
+        bindings: root_bindings,
+    })
+    .map_err(|error| crate::DispatchError::Validation(error.to_string()))?;
+    Ok((resolver, documents))
 }
 
 pub(super) fn public_params(params: &[TypedParam]) -> &[TypedParam] {

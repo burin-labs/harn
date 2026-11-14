@@ -25,6 +25,8 @@ mod package_imports;
 pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
+mod source_documents;
+pub use source_documents::{SourceDocumentError, SourceDocumentRecord, SourceDocuments};
 mod source_reads;
 pub use source_reads::{
     build_with_source, build_with_sources, module_source_disk_reads, read_module_source,
@@ -71,6 +73,13 @@ pub struct DefSite {
     pub file: PathBuf,
     pub kind: DefKind,
     pub span: Span,
+}
+
+/// A type declaration paired with the module that defines its type scope.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocatedTypeDeclaration {
+    pub file: PathBuf,
+    pub declaration: SNode,
 }
 
 /// Wildcard import resolution status for a single importing module.
@@ -242,7 +251,7 @@ fn build_inner(
     package_context: PackageContext,
     observer: Option<&ModuleObserver<'_>>,
 ) -> ModuleGraphBuild {
-    let package_snapshots = match package_context {
+    let mut package_snapshots = match package_context {
         PackageContext::Project => acquire_package_snapshots(files),
         PackageContext::Standalone => Vec::new(),
     };
@@ -263,7 +272,12 @@ fn build_inner(
     // whole-tree seed set arrives as one large first wave, which is where
     // nearly all the parse work is, so the serial-BFS tail on deep import
     // chains does not matter in practice.
+    let mut initial_wave = true;
     while !wave.is_empty() {
+        if !initial_wave && package_context == PackageContext::Project {
+            package_imports::extend_package_snapshots(&wave, &mut package_snapshots);
+        }
+        initial_wave = false;
         let loaded = load_wave(
             &wave,
             &package_snapshots,
@@ -674,6 +688,16 @@ impl ModuleGraph {
     /// `file` by its imports. Returns `None` when any import is unresolved so
     /// callers can fall back to conservative behavior.
     pub fn imported_type_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
+        self.imported_type_declaration_sites_for_file(file)
+            .map(|sites| sites.into_iter().map(|site| site.declaration).collect())
+    }
+
+    /// Imported type declarations with their defining modules, including
+    /// private signature dependencies reached through re-exports.
+    pub fn imported_type_declaration_sites_for_file(
+        &self,
+        file: &Path,
+    ) -> Option<Vec<LocatedTypeDeclaration>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
         if module.has_unresolved_wildcard_import

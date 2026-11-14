@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+use std::collections::BTreeMap;
 
 use harn_vm::VmValue;
 
@@ -8,54 +7,48 @@ use crate::{CallArguments, DispatchError};
 pub(super) fn build_vm_args(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
+    contract: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Vec<VmValue>, DispatchError> {
     // ExportCatalog removes the contiguous host-injected authority prefix.
     // The remaining parameters are exactly the caller-owned JSON API.
     let params = function.params.as_slice();
-    let rest = match arguments {
-        CallArguments::Positional(values) => values.iter().map(json_to_vm_value).collect(),
-        CallArguments::Named(values) => {
-            let lifted = lift_flat_single_object_arg(params, values);
-            let values = lifted.as_ref().unwrap_or(values);
-            let mut args = Vec::new();
-            let mut saw_gap = false;
-            for param in params {
-                let value = values.get(&param.name);
-                if param.rest {
-                    if let Some(value) = value {
-                        let rest = value.as_array().ok_or_else(|| {
-                            DispatchError::Validation(format!(
-                                "rest argument '{}' for '{}' must be an array",
-                                param.name, function.name
-                            ))
-                        })?;
-                        args.extend(rest.iter().map(json_to_vm_value));
-                    }
-                    continue;
-                }
-                match value {
-                    Some(value) => {
-                        if saw_gap {
-                            return Err(DispatchError::Validation(format!(
-                                "named arguments for '{}' skipped '{}' before later arguments",
-                                function.name, param.name
-                            )));
-                        }
-                        args.push(json_to_vm_value(value));
-                    }
-                    None if param.has_default => saw_gap = true,
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
+    let canonical = canonical_arguments_json(arguments, function)?;
+    let decoded = contract
+        .decode_input(&function.name, &canonical)
+        .map_err(DispatchError::Contract)?;
+    let values = decoded.as_dict().ok_or_else(|| {
+        DispatchError::Validation("export argument contract must decode to a named record".into())
+    })?;
+    let mut args = Vec::new();
+    let mut saw_gap = false;
+    for param in params {
+        match values.get(param.name.as_str()) {
+            Some(VmValue::List(values)) if param.rest => args.extend(values.iter().cloned()),
+            Some(_) if param.rest => {
+                return Err(DispatchError::Validation(
+                    "rest argument contract must decode to a list".into(),
+                ))
             }
-            trim_trailing_defaults(args)
+            None if param.rest => {}
+            Some(value) => {
+                if saw_gap {
+                    return Err(DispatchError::Validation(format!(
+                        "named arguments for '{}' skipped '{}' before later arguments",
+                        function.name, param.name
+                    )));
+                }
+                args.push(value.clone());
+            }
+            None if param.has_default => saw_gap = true,
+            None => {
+                return Err(DispatchError::Validation(format!(
+                    "missing required argument '{}' for '{}'",
+                    param.name, function.name
+                )))
+            }
         }
-    };
-    Ok(rest)
+    }
+    Ok(args)
 }
 
 /// Normalize every adapter's arguments into the advertised input-schema object.
@@ -115,33 +108,4 @@ pub(super) fn lift_flat_single_object_arg(
     }
     let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
     Some(BTreeMap::from([(only.name.clone(), wrapped)]))
-}
-
-fn trim_trailing_defaults(args: Vec<VmValue>) -> Vec<VmValue> {
-    let mut tail = VecDeque::from(args);
-    while matches!(tail.back(), Some(VmValue::Nil)) {
-        tail.pop_back();
-    }
-    tail.into_iter().collect()
-}
-
-fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
-    match value {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(value) => VmValue::Bool(*value),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(VmValue::Int)
-            .or_else(|| value.as_f64().map(VmValue::Float))
-            .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(arcstr::ArcStr::from(value.as_str())),
-        serde_json::Value::Array(items) => VmValue::List(Arc::new(
-            items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
-        )),
-        serde_json::Value::Object(map) => VmValue::dict(
-            map.iter()
-                .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
-                .collect::<harn_vm::value::DictMap>(),
-        ),
-    }
 }

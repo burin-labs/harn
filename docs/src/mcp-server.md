@@ -328,6 +328,17 @@ when clients request a catalog page.
 
 ## Protocol support
 
+Script-driven servers can run independent handlers concurrently. Handlers share
+captured variables and imported module state, so reads and writes can interleave
+across an `await`. Use the language's synchronization primitives when a sequence
+of operations must remain atomic.
+
+Reload publishes the new registry for subsequent requests. Calls already in
+flight keep their original registry and VM state until they finish. Cancelling
+an HTTP request signals that invocation's cancellation token; other calls keep
+running. Closing a task's initial HTTP response leaves the task available for
+polling and explicit cancellation.
+
 On stdio, `harn mcp serve` accepts `initialize` from released MCP clients and
 `server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
 2026-07-28 flow. The server supports tools, resources, prompts, completions,

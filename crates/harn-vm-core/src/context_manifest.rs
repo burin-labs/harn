@@ -150,6 +150,11 @@ pub struct ContextManifest {
     /// different directories land on one cache file and each would otherwise
     /// find the other's manifest re-checking perfectly clean. See #5591.
     pub entry: PathBuf,
+    /// Host-private source authority projected by the same resolved graph.
+    /// Older manifests may still accelerate execution, but cannot authorize a
+    /// generator's source confinement without this complete recorded census.
+    #[serde(default)]
+    pub source_documents: Option<Vec<harn_modules::SourceDocumentRecord>>,
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
@@ -196,6 +201,7 @@ impl ContextManifest {
     pub fn begin(entry: PathBuf) -> Self {
         Self {
             entry,
+            source_documents: None,
             captured_ns: module_source::now_ns(),
             files: Vec::new(),
             unresolved: Vec::new(),
@@ -204,6 +210,21 @@ impl ContextManifest {
             package_import_aliases: Vec::new(),
             package_lock_digest: None,
         }
+    }
+
+    /// Return only an exact source census from this compilation context.
+    /// No import resolution or path inference is performed on a warm read.
+    pub fn source_documents(&self) -> Option<harn_modules::SourceDocuments> {
+        let documents =
+            harn_modules::SourceDocuments::from_records(self.source_documents.clone()?).ok()?;
+        let expected: std::collections::BTreeSet<_> = self
+            .files
+            .iter()
+            .map(|file| file.path.as_path())
+            .chain(std::iter::once(self.entry.as_path()))
+            .collect();
+        let observed: std::collections::BTreeSet<_> = documents.physical_paths().collect();
+        (observed == expected).then_some(documents)
     }
 
     /// Whether this manifest describes the graph reachable from `entry`, and
@@ -434,6 +455,58 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn prepared_context_retains_exact_source_authority_without_cache_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("main.harn");
+        let source = "import { deferred } from \"./deferred\"\npub fn main() -> int { return 1 }";
+        write(&entry, source);
+        write(
+            &root.path().join("deferred.harn"),
+            "import { deep } from \"./deep\"\npub fn deferred() -> int { return deep() }",
+        );
+        write(
+            &root.path().join("deep.harn"),
+            "pub fn deep() -> int { return 2 }",
+        );
+        // This is the ordinary cold compilation owner, before its caller
+        // decides whether a cache is writable, read-only or disabled.
+        let manifest = crate::bytecode_cache::prepare_entry_store(&entry, source)
+            .manifest
+            .unwrap();
+        let documents = manifest
+            .source_documents()
+            .expect("complete compilation authority");
+        assert_eq!(documents.physical_paths().count(), 3);
+        let deep = root.path().join("deep.harn").canonicalize().unwrap();
+        let name = documents.document_for(&deep).unwrap();
+        assert_eq!(documents.resolve(name), Some(deep.as_path()));
+        assert!(manifest.still_valid(&entry.canonicalize().unwrap()));
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let warm: ContextManifest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            warm.source_documents().unwrap().resolve(name),
+            Some(deep.as_path())
+        );
+        let mut missing = warm.clone();
+        missing.source_documents.as_mut().unwrap().pop();
+        assert!(missing.source_documents().is_none());
+        let mut duplicated = warm.clone();
+        let duplicate = duplicated.source_documents.as_ref().unwrap()[0].clone();
+        duplicated
+            .source_documents
+            .as_mut()
+            .unwrap()
+            .push(duplicate);
+        assert!(duplicated.source_documents().is_none());
+        let mut old = serde_json::to_value(&warm).unwrap();
+        old.as_object_mut().unwrap().remove("source_documents");
+        assert!(serde_json::from_value::<ContextManifest>(old)
+            .unwrap()
+            .source_documents()
+            .is_none());
     }
 
     /// The entry every manifest in these tests is anchored at.

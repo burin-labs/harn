@@ -147,9 +147,9 @@ pub fn vm_value_to_export_json_strict(
                 )?);
             }
             Ok(serde_json::json!({
-                "enum": value.enum_name.as_str(),
-                "variant": value.variant.as_str(),
-                "fields": fields,
+                (crate::wire::ENUM_NAME_KEY): value.enum_name.as_str(),
+                (crate::wire::ENUM_VARIANT_KEY): value.variant.as_str(),
+                (crate::wire::ENUM_FIELDS_KEY): fields,
             }))
         }
         VmValue::List(items) => {

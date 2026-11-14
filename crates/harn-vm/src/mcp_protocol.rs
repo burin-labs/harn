@@ -7,6 +7,12 @@
 
 use serde_json::{json, Value as JsonValue};
 
+mod header_value;
+pub use header_value::{
+    decode_header_value, encode_header_value, header_value_examples, McpHeaderValueEncoding,
+    MCP_HEADER_VALUE_ENCODING,
+};
+
 /// Stable MCP version used by Harn's discover/per-request lifecycle.
 ///
 /// Keep this literal mechanically checked against `rmcp` below because public
@@ -14,6 +20,12 @@ use serde_json::{json, Value as JsonValue};
 /// [`rmcp::model::ProtocolVersion`].
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
 pub const METHOD_SERVER_DISCOVER: &str = "server/discover";
+pub const METHOD_TOOLS_LIST: &str =
+    <rmcp::model::ListToolsRequestMethod as rmcp::model::ConstString>::VALUE;
+pub const METHOD_TOOLS_CALL: &str =
+    <rmcp::model::CallToolRequestMethod as rmcp::model::ConstString>::VALUE;
+pub const METHOD_CANCELLED_NOTIFICATION: &str =
+    <rmcp::model::CancelledNotificationMethod as rmcp::model::ConstString>::VALUE;
 pub const METHOD_TASKS_GET: &str = "tasks/get";
 pub const METHOD_TASKS_UPDATE: &str = "tasks/update";
 pub const METHOD_TASKS_CANCEL: &str = "tasks/cancel";
@@ -28,6 +40,18 @@ pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/li
 pub const MCP_META_KEY_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 pub const MCP_META_KEY_CLIENT_INFO: &str = "io.modelcontextprotocol/clientInfo";
 pub const MCP_META_KEY_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
+pub const MCP_META_KEY_SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";
+
+/// Request fields projected into the stable HTTP transport's `Mcp-Name` header.
+/// Both Harn requests and generated SDKs consume this same protocol table.
+pub const MCP_NAME_FIELDS: &[(&str, &str)] = &[
+    (METHOD_TOOLS_CALL, "name"),
+    ("prompts/get", "name"),
+    ("resources/read", "uri"),
+    (METHOD_TASKS_GET, "taskId"),
+    (METHOD_TASKS_UPDATE, "taskId"),
+    (METHOD_TASKS_CANCEL, "taskId"),
+];
 
 /// Validate one application-owned MCP `_meta` key.
 ///
@@ -217,6 +241,12 @@ pub struct McpRequestProfile {
 }
 
 impl McpRequestProfile {
+    /// Stable Streamable HTTP makes closing a direct response an explicit
+    /// cancellation. Older resumable profiles do not assign that meaning.
+    pub fn cancels_direct_call_on_disconnect(&self) -> bool {
+        self.protocol_version >= rmcp::model::ProtocolVersion::V_2026_07_28
+    }
+
     pub fn uses_result_envelope(&self) -> bool {
         self.protocol_version >= rmcp::model::ProtocolVersion::V_2026_07_28
     }
@@ -450,7 +480,14 @@ where
                 "Mcp-Name header is required for this request",
             ));
         };
-        if name_header != expected {
+        let decoded = decode_header_value(name_header).ok_or_else(|| {
+            crate::jsonrpc::error_response(
+                request_id.clone(),
+                HEADER_MISMATCH_CODE,
+                "Mcp-Name header has an invalid encoded value",
+            )
+        })?;
+        if decoded != expected {
             return Err(crate::jsonrpc::error_response_with_data(
                 request_id.clone(),
                 HEADER_MISMATCH_CODE,
@@ -481,21 +518,16 @@ pub fn requires_http_bad_request(response: &JsonValue) -> bool {
 /// servers cross-check this against the header sent on the wire; stable
 /// clients use the same helper when authoring outbound requests.
 pub fn standard_name_header_value(method: &str, params: &JsonValue) -> Option<String> {
-    match method {
-        "tools/call" | "prompts/get" => params
-            .get("name")
-            .and_then(JsonValue::as_str)
-            .map(str::to_string),
-        "resources/read" => params
-            .get("uri")
-            .and_then(JsonValue::as_str)
-            .map(str::to_string),
-        METHOD_TASKS_GET | METHOD_TASKS_UPDATE | METHOD_TASKS_CANCEL => params
-            .get("taskId")
-            .and_then(JsonValue::as_str)
-            .map(str::to_string),
-        _ => None,
-    }
+    standard_name_body_value(method, params).map(|value| encode_header_value(&value))
+}
+
+/// The unencoded request identity used when comparing decoded routing headers.
+pub fn standard_name_body_value(method: &str, params: &JsonValue) -> Option<String> {
+    let (_, field) = MCP_NAME_FIELDS.iter().find(|(name, _)| *name == method)?;
+    params
+        .get(*field)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
 }
 
 /// Modify a JSON-RPC result body in place to include the stable protocol's
@@ -662,7 +694,7 @@ pub fn server_discover_result(
         "ttlMs": 0,
         "cacheScope": "private",
         "_meta": {
-            "io.modelcontextprotocol/serverInfo": server_info,
+            (MCP_META_KEY_SERVER_INFO): server_info,
         },
     });
     if let Some(instructions) = instructions {
@@ -841,6 +873,18 @@ fn parse_mcp_list_cursor(params: &JsonValue, method: &str) -> Result<usize, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_stable_direct_http_calls_are_cancelled_by_disconnection() {
+        for (protocol_version, expected) in [
+            (rmcp::model::ProtocolVersion::V_2025_06_18, false),
+            (rmcp::model::ProtocolVersion::V_2025_11_25, false),
+            (rmcp::model::ProtocolVersion::V_2026_07_28, true),
+        ] {
+            let profile = McpRequestProfile { protocol_version };
+            assert_eq!(profile.cancels_direct_call_on_disconnect(), expected);
+        }
+    }
 
     #[test]
     fn protocol_registry_matches_official_sdk() {
@@ -1391,6 +1435,56 @@ mod tests {
             );
         }
         assert_eq!(standard_name_header_value("tools/list", &json!({})), None);
+    }
+
+    #[test]
+    fn routing_headers_decode_values_before_comparing_request_identity() {
+        let examples = header_value_examples();
+        let examples = examples.as_array().unwrap();
+        assert_eq!(examples.len(), 7);
+        for example in examples {
+            let value = example["value"].as_str().unwrap();
+            if value.is_empty() {
+                continue;
+            }
+            let params = json!({"name": value});
+            let encoded = standard_name_header_value(METHOD_TOOLS_CALL, &params).unwrap();
+            let body = standard_name_body_value(METHOD_TOOLS_CALL, &params).unwrap();
+            assert_eq!(body, value);
+            let headers = std::collections::HashMap::from([
+                (MCP_HEADER_PROTOCOL_VERSION, PROTOCOL_VERSION),
+                (MCP_HEADER_METHOD, METHOD_TOOLS_CALL),
+                (MCP_HEADER_NAME, encoded.as_str()),
+            ]);
+            negotiate_http_request(
+                |key| headers.get(key).copied(),
+                Some(METHOD_TOOLS_CALL),
+                Some(&body),
+                &json!(1),
+            )
+            .unwrap();
+            let mismatch = negotiate_http_request(
+                |key| headers.get(key).copied(),
+                Some(METHOD_TOOLS_CALL),
+                Some("different"),
+                &json!(1),
+            )
+            .unwrap_err();
+            assert_eq!(mismatch["error"]["code"], HEADER_MISMATCH_CODE);
+        }
+        let malformed = negotiate_http_request(
+            |key| match key {
+                MCP_HEADER_PROTOCOL_VERSION => Some(PROTOCOL_VERSION),
+                MCP_HEADER_METHOD => Some(METHOD_TOOLS_CALL),
+                MCP_HEADER_NAME => Some("=?base64?/w==?="),
+                _ => None,
+            },
+            Some(METHOD_TOOLS_CALL),
+            Some("Δοκιμή"),
+            &json!(1),
+        )
+        .unwrap_err();
+        assert_eq!(malformed["error"]["code"], HEADER_MISMATCH_CODE);
     }
 
     #[test]

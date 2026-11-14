@@ -61,6 +61,7 @@ pub use harn_vm_core::canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
+pub mod codegen;
 use harn_vm_core::chunk;
 use harn_vm_core::compiler;
 pub mod composition;
@@ -323,6 +324,7 @@ pub mod visible_text;
 use harn_vm_core::vm;
 pub use harn_vm_core::vm::subtask::spawn_lifecycle_cleanup;
 pub mod waitpoints;
+pub mod wire;
 pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;
 pub use harn_vm_core::workspace_path;
@@ -595,6 +597,7 @@ pub mod bench_internals;
 pub struct TypeSchemaResolver {
     compiler: compiler::Compiler,
     nominal_types: std::collections::BTreeMap<String, SchemaNominalType>,
+    wire_scope: wire::scope::DeclarationScope,
 }
 
 #[derive(Clone)]
@@ -615,6 +618,7 @@ impl TypeSchemaResolver {
         Self {
             compiler: compiler::Compiler::new(),
             nominal_types: std::collections::BTreeMap::new(),
+            wire_scope: wire::scope::DeclarationScope::default(),
         }
     }
 
@@ -660,6 +664,7 @@ impl TypeSchemaResolver {
         Self {
             compiler,
             nominal_types,
+            wire_scope: wire::scope::DeclarationScope::from_program(program),
         }
     }
 
@@ -669,7 +674,10 @@ impl TypeSchemaResolver {
         &self,
         type_expr: &harn_parser::TypeExpr,
     ) -> Option<serde_json::Value> {
-        self.json_schema_for_type_expr_inner(type_expr, &mut Vec::new())
+        self.prepare_wire_type(type_expr, self.wire_scope.source.clone())
+            .ok()
+            .map(|wire| wire.json_schema())
+            .or_else(|| self.json_schema_for_type_expr_inner(type_expr, &mut Vec::new()))
     }
 
     /// Input projection keeps the established structural contract: inline
@@ -680,6 +688,9 @@ impl TypeSchemaResolver {
         &self,
         type_expr: &harn_parser::TypeExpr,
     ) -> Option<serde_json::Value> {
+        if let Ok(wire) = self.prepare_wire_type(type_expr, self.wire_scope.source.clone()) {
+            return Some(wire.json_schema());
+        }
         let expanded = self.compiler.expand_alias(type_expr);
         let schema = compiler::Compiler::type_expr_to_schema_value(&expanded)?;
         let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
@@ -867,15 +878,49 @@ impl TypeSchemaResolver {
         &self,
         params: &[harn_parser::TypedParam],
     ) -> serde_json::Value {
+        let fields = params
+            .iter()
+            .map(|param| {
+                let ty = param
+                    .type_expr
+                    .clone()
+                    .unwrap_or_else(|| harn_parser::TypeExpr::Named("unknown".into()));
+                harn_parser::ShapeField {
+                    name: param.name.clone(),
+                    type_expr: if param.rest {
+                        harn_parser::TypeExpr::List(Box::new(ty))
+                    } else {
+                        ty
+                    },
+                    optional: param.default_value.is_some() || param.rest,
+                    span: param.span,
+                }
+            })
+            .collect();
+        if let Ok(wire) = self.prepare_wire_type(
+            &harn_parser::TypeExpr::Shape(fields),
+            self.wire_scope.source.clone(),
+        ) {
+            return wire.json_schema();
+        }
         let mut properties = serde_json::Map::new();
+        let mut definitions = serde_json::Map::new();
         let mut required = Vec::new();
 
         for param in params {
-            let item_schema = param
+            let mut item_schema = param
                 .type_expr
                 .as_ref()
                 .and_then(|type_expr| self.json_schema_for_input_type_expr(type_expr))
                 .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(object) = item_schema.as_object_mut() {
+                object.remove("$schema");
+                if let Some(serde_json::Value::Object(nested)) = object.remove("$defs") {
+                    for (name, schema) in nested {
+                        definitions.entry(name).or_insert(schema);
+                    }
+                }
+            }
             let param_schema = if param.rest {
                 serde_json::json!({"type": "array", "items": item_schema})
             } else {
@@ -896,6 +941,9 @@ impl TypeSchemaResolver {
             "properties".to_string(),
             serde_json::Value::Object(properties),
         );
+        if !definitions.is_empty() {
+            schema.insert("$defs".into(), serde_json::Value::Object(definitions));
+        }
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
         }

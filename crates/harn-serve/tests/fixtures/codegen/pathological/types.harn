@@ -1,0 +1,41 @@
+import { Left } from "./left"
+import { Right } from "./right"
+
+pub struct Node<T> {
+  value: T
+  next?: Node<T>?
+}
+
+pub enum Choice {
+  Missing
+  Present(value: Node<int>)
+}
+
+pub type Context = {id: int} & {name?: string}
+
+pub type Branch = {kind: "left", left: int} | {kind: "right", right: bool}
+
+pub struct Payload {
+  tag: "payload"
+  sequence: int
+  floating: float
+  raw: bytes
+  amount: decimal
+  names: set<string>
+  scalars: set<bool | int>
+  pair: tuple<string, int>
+  properties: dict<string, string>
+  tree: Node<int>
+  choice: Choice
+  left: Left
+  right: Right
+  context: Context
+  branch: Branch
+  optional?: string
+  nullable: string?
+  optional_nullable?: string?
+}
+
+pub enum Failure {
+  Rejected(reason: string)
+}

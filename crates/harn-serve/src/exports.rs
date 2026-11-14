@@ -89,6 +89,7 @@ impl RoutePolicy {
 
 #[derive(Clone, Debug)]
 pub struct ExportedFunction {
+    pub source: harn_vm::wire::WireSourceRef,
     pub name: String,
     pub kind: ExportedCallableKind,
     /// Short label taken from the first line of the declaration's doc comment.
@@ -285,6 +286,7 @@ pub struct RouteSpec {
 
 #[derive(Clone, Debug)]
 pub struct ExportCatalog {
+    source_documents: harn_modules::SourceDocuments,
     pub script_path: PathBuf,
     pub functions: BTreeMap<String, ExportedFunction>,
     /// The script's leading doc comment, served as the MCP server's
@@ -309,8 +311,20 @@ impl ExportCatalog {
         // Resolve local and imported type aliases through the same module graph
         // as the checker so served JSON schemas stay structural without a
         // second import resolver.
-        let schema_resolver = schema_projection::resolver_for_module(path, &program);
+        let (schema_resolver, source_documents) =
+            schema_projection::resolver_for_module(path, &program, source.len())?;
         let source_lines: Vec<&str> = source.lines().collect();
+        let canonical = fs::canonicalize(path).map_err(|_| {
+            DispatchError::Validation("export source identity is unavailable".into())
+        })?;
+        let entry_document = source_documents
+            .document_for(&canonical)
+            .expect("entry source");
+        let source_location = |start: usize, end: usize| harn_vm::wire::WireSourceRef::TextSpan {
+            document: entry_document.into(),
+            start: start.try_into().unwrap_or(u32::MAX),
+            end: end.try_into().unwrap_or(u32::MAX),
+        };
         let mut functions = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for node in &program {
@@ -345,6 +359,7 @@ impl ExportCatalog {
             functions.insert(
                 name.clone(),
                 ExportedFunction {
+                    source: source_location(inner.span.start, inner.span.end),
                     name: name.clone(),
                     kind: ExportedCallableKind::Function,
                     title,
@@ -412,6 +427,7 @@ impl ExportCatalog {
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
+                    source: source_location(inner.span.start, inner.span.end),
                     name: name.clone(),
                     kind: ExportedCallableKind::Pipeline,
                     title,
@@ -448,11 +464,17 @@ impl ExportCatalog {
         }
 
         Ok(Self {
+            source_documents,
             script_path: path.to_path_buf(),
             functions,
             instructions: mcp_metadata::module_doc_comment(&source_lines),
             diagnostics,
         })
+    }
+
+    /// Private compilation authority; portable contracts contain only logical names.
+    pub fn source_documents(&self) -> &harn_modules::SourceDocuments {
+        &self.source_documents
     }
 
     pub fn function(&self, name: &str) -> Option<&ExportedFunction> {

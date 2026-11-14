@@ -1,5 +1,30 @@
 use super::*;
 
+/// Concrete process lifetime supplied by the host that owns its spawn policy.
+/// Implementations must also retire their owned process when dropped, including
+/// a failed connection handshake. No executable or authority comes from MCP.
+#[async_trait::async_trait]
+pub trait McpProcessOwner: Send + Sync {
+    async fn shutdown(&mut self, grace: std::time::Duration) -> std::io::Result<()>;
+}
+
+struct TokioMcpProcessOwner(tokio::process::Child);
+
+#[async_trait::async_trait]
+impl McpProcessOwner for TokioMcpProcessOwner {
+    async fn shutdown(&mut self, grace: std::time::Duration) -> std::io::Result<()> {
+        if !matches!(tokio::time::timeout(grace, self.0.wait()).await, Ok(Ok(_))) {
+            if let Err(error) = self.0.kill().await {
+                if self.0.try_wait()?.is_none() {
+                    return Err(error);
+                }
+            }
+            self.0.wait().await?;
+        }
+        Ok(())
+    }
+}
+
 pub(crate) async fn mcp_connect_stdio_impl(
     command: &str,
     args: &[String],
@@ -32,13 +57,38 @@ pub(crate) async fn mcp_connect_stdio_impl(
         .stdin
         .take()
         .ok_or_else(|| VmError::Runtime(format!("mcp_connect: '{command}' stdin was not piped")))?;
+    connect_mcp_stdio_transport(
+        command,
+        stdout,
+        stdin,
+        Box::new(TokioMcpProcessOwner(child)),
+        Some(&requested_protocol_version),
+    )
+    .await
+}
+
+/// Connect already-spawned streams through the ordinary SDK lifecycle and
+/// request owner. The host retains spawn/environment/confinement decisions.
+pub async fn connect_mcp_stdio_transport<R, W>(
+    name: &str,
+    stdout: R,
+    stdin: W,
+    mut process_owner: Box<dyn McpProcessOwner>,
+    protocol_version: Option<&str>,
+) -> Result<VmMcpClientHandle, VmError>
+where
+    R: tokio::io::AsyncRead + Send + Unpin + 'static,
+    W: tokio::io::AsyncWrite + Send + Unpin + 'static,
+{
+    let requested_protocol_version =
+        resolve_connect_protocol_options(protocol_version)?.protocol_version;
     let raw_responses = super::raw_stdio::RawResponseLog::default();
     let transport = (
         super::raw_stdio::RawResponseReader::new(stdout, raw_responses.clone()),
         stdin,
     );
     let requested_version = sdk_protocol_version(&requested_protocol_version);
-    let handler = HarnSdkClientHandler::new(command, requested_version.clone());
+    let handler = HarnSdkClientHandler::new(name, requested_version.clone());
     let legacy_version = if requested_version >= rmcp::model::ProtocolVersion::STANDARD_HEADERS {
         rmcp::model::ProtocolVersion::LATEST
     } else {
@@ -55,11 +105,26 @@ pub(crate) async fn mcp_connect_stdio_impl(
         legacy_version: Some(legacy_version),
     };
     use rmcp::service::ClientServiceExt;
-    let running = handler
+    let running = match handler
         .clone()
         .serve_with_lifecycle(transport, lifecycle)
         .await
-        .map_err(|error| VmError::Runtime(format!("MCP SDK initialization failed: {error}")))?;
+    {
+        Ok(running) => running,
+        Err(error) => {
+            process_owner
+                .shutdown(std::time::Duration::ZERO)
+                .await
+                .map_err(|_| {
+                    VmError::Runtime(
+                        "MCP initialization failed; process cleanup did not complete".into(),
+                    )
+                })?;
+            return Err(VmError::Runtime(format!(
+                "MCP SDK initialization failed: {error}"
+            )));
+        }
+    };
     // The SDK cache stores its current typed model, so a cache hit cannot
     // reproduce negotiated-version or additive fields captured from the wire.
     // Keep stdio results on the raw path until the cache itself can retain them.
@@ -73,13 +138,14 @@ pub(crate) async fn mcp_connect_stdio_impl(
         .map_err(|error| VmError::Runtime(format!("MCP SDK server info error: {error}")))?;
 
     let handle = VmMcpClientHandle {
-        name: command.to_string(),
+        name: name.to_string(),
         inner: Arc::new(Mutex::new(Some(McpClientInner::Sdk(Box::new(
             SdkMcpClientInner {
+                verified_native: None,
                 running,
                 handler,
                 raw_responses,
-                child,
+                process_owner,
             },
         ))))),
         last_roots: Arc::new(Mutex::new(Vec::new())),

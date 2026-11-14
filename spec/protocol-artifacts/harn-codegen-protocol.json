@@ -1,0 +1,19 @@
+{
+  "HARN_MCP_TOOL_CONTRACT_META_KEY": "com.harnlang/toolContract",
+  "HARN_NATIVE_BINDING_META_KEY": "com.harnlang/nativeBinding",
+  "MCP_HEADER_METHOD": "Mcp-Method",
+  "MCP_HEADER_NAME": "Mcp-Name",
+  "MCP_HEADER_PROTOCOL_VERSION": "MCP-Protocol-Version",
+  "MCP_META_KEY_CLIENT_CAPABILITIES": "io.modelcontextprotocol/clientCapabilities",
+  "MCP_META_KEY_CLIENT_INFO": "io.modelcontextprotocol/clientInfo",
+  "MCP_META_KEY_PROTOCOL_VERSION": "io.modelcontextprotocol/protocolVersion",
+  "MCP_METHOD_CANCELLED_NOTIFICATION": "notifications/cancelled",
+  "MCP_METHOD_SERVER_DISCOVER": "server/discover",
+  "MCP_METHOD_TASKS_CANCEL": "tasks/cancel",
+  "MCP_METHOD_TASKS_GET": "tasks/get",
+  "MCP_METHOD_TOOLS_CALL": "tools/call",
+  "MCP_METHOD_TOOLS_LIST": "tools/list",
+  "MCP_PROTOCOL_VERSION": "2026-07-28",
+  "MCP_TASKS_EXTENSION_ID": "io.modelcontextprotocol/tasks",
+  "NATIVE_MCP_BINDING_VERSION": "harn-tools-mcp/1.0"
+}

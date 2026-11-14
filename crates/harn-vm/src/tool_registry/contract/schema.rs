@@ -57,7 +57,7 @@ pub(super) fn try_visit_schema_nodes<E>(
     Ok(())
 }
 
-pub(super) fn try_transform_schema_nodes<E>(
+pub(crate) fn try_transform_schema_nodes<E>(
     schema: &mut JsonValue,
     visitor: &mut impl FnMut(&mut serde_json::Map<String, JsonValue>) -> Result<(), E>,
 ) -> Result<(), E> {

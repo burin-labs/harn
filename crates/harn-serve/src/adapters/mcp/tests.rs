@@ -1,6 +1,8 @@
 use super::auth::should_stream_post_response;
 use super::*;
 
+#[path = "tests/http_disconnect.rs"]
+mod http_disconnect;
 #[path = "tests/script_source.rs"]
 mod script_source;
 #[path = "tests/support.rs"]

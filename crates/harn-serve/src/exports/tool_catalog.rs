@@ -57,6 +57,7 @@ impl ExportCatalog {
                     source: Some(ToolSource {
                         kind: "harn".to_string(),
                         id: Some(function.name.clone()),
+                        location: Some(function.source.clone()),
                         binding: Some(BTreeMap::from([(
                             "callableKind".to_string(),
                             serde_json::json!(match &function.kind {

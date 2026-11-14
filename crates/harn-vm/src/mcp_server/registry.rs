@@ -211,7 +211,16 @@ impl McpScriptRegistry {
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
-        let args_vm = json_to_vm_value(&arguments);
+        let args_vm = match self
+            .tools
+            .prepared()
+            .decode_input(&tool.catalog.name, &arguments)
+        {
+            Ok(input) => input,
+            Err(error) => {
+                return crate::jsonrpc::error_response(id.clone(), -32602, &error.to_string())
+            }
+        };
 
         // `scope_context` is a tokio task-local rather than a thread-local
         // guard, so concurrent calls sharing an OS thread stay isolated.
@@ -227,8 +236,11 @@ impl McpScriptRegistry {
                             prepared: self.tools.prepared_catalog(),
                         }
                     }),
-                    crate::tool_handler_scope::scope(
-                        vm.call_closure_pub(&tool.handler, &[args_vm]),
+                    crate::tool_registry::call_tool_handler(
+                        vm,
+                        &tool,
+                        crate::tool_registry::ToolAudience::Mcp,
+                        args_vm,
                     ),
                 ),
             ),

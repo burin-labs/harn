@@ -24,6 +24,7 @@ pub(crate) use crate::mcp_protocol::{
 
 mod builtins;
 mod connect;
+mod native_binding;
 mod notifications;
 mod protocol;
 mod raw_stdio;
@@ -33,6 +34,7 @@ mod transport;
 
 pub use builtins::*;
 pub use connect::*;
+pub use native_binding::{NativeMcpFailure, NativeMcpReply, VerifiedNativeMcpBinding};
 pub(crate) use notifications::*;
 pub(crate) use protocol::*;
 pub(crate) use roots::*;
@@ -42,6 +44,9 @@ pub(crate) use transport::*;
 const X_MCP_HEADER: &str = "x-mcp-header";
 
 const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = rmcp::model::DEFAULT_MRTR_MAX_ROUNDS;
+
+/// Incoming stdio frame bound owned by the ordinary MCP SDK transport.
+pub const MCP_MAX_STDIO_LINE_BYTES: usize = rmcp::transport::async_rw::DEFAULT_MAX_LINE_LENGTH;
 
 /// Default timeout for MCP requests (60 seconds).
 ///
@@ -263,6 +268,12 @@ impl VmMcpClientHandle {
             .as_mut()
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
+        if matches!(inner, McpClientInner::Sdk(inner) if inner.verified_native.is_some()) {
+            return Err(VmError::Runtime(
+                "verified native MCP binding refuses raw compatibility calls".into(),
+            ));
+        }
+
         let result = match inner {
             McpClientInner::Sdk(inner) => sdk_call_raw(inner, method, params).await,
             McpClientInner::Http(inner) => http_call_raw(inner, &self.name, method, params).await,
@@ -296,25 +307,31 @@ impl VmMcpClientHandle {
             .as_mut()
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
+        if matches!(inner, McpClientInner::Sdk(inner) if inner.verified_native.is_some()) {
+            return Err(VmError::Runtime(
+                "verified native MCP binding refuses raw compatibility notifications".into(),
+            ));
+        }
+
         match inner {
             McpClientInner::Sdk(inner) => sdk_notify(inner, method, params).await,
             McpClientInner::Http(inner) => http_notify(inner, &self.name, method, params).await,
         }
     }
 
-    pub(crate) async fn disconnect(&self) -> Result<(), VmError> {
+    /// Close protocol traffic and await the connection's concrete process owner.
+    /// Hosts use this same lifetime boundary after profile refusal or shutdown.
+    pub async fn disconnect(&self) -> Result<(), VmError> {
         let mut guard = self.inner.lock().await;
         if let Some(inner) = guard.take() {
             match inner {
                 McpClientInner::Sdk(mut inner) => {
                     let _ = inner.running.close_with_timeout(MCP_TIMEOUT).await;
-                    if !matches!(
-                        tokio::time::timeout(MCP_CHILD_SHUTDOWN_TIMEOUT, inner.child.wait()).await,
-                        Ok(Ok(_))
-                    ) {
-                        let _ = inner.child.kill().await;
-                        let _ = inner.child.wait().await;
-                    }
+                    inner
+                        .process_owner
+                        .shutdown(MCP_CHILD_SHUTDOWN_TIMEOUT)
+                        .await
+                        .map_err(|_| VmError::Runtime("MCP process shutdown failed".into()))?;
                 }
                 McpClientInner::Http(_) => {}
             }

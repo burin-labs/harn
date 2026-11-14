@@ -90,10 +90,9 @@ pub(crate) mod paths;
 mod process_config;
 mod process_output;
 use path_scope::declared_path_roots_active;
-#[cfg(test)]
-use path_scope::with_declared_path_roots;
 pub use path_scope::{
     check_fs_path_scope, check_git_metadata_path_scope, command_output_with_declared_roots,
+    with_declared_path_roots,
 };
 mod read_roots;
 mod refusal;

@@ -69,7 +69,11 @@ thread_local! {
     static PATH_SCOPE_ROOTS: std::cell::Cell<PathScopeRoots> = const { std::cell::Cell::new(PathScopeRoots::Assembled) };
 }
 
-pub(super) fn with_declared_path_roots<T>(operation: impl FnOnce() -> T) -> T {
+/// Run a synchronous host operation using the policy's explicit filesystem roots.
+/// Implicit git and relocated runtime roots do not extend those grants. A
+/// spawned child's private temp directory remains available. Nested scopes
+/// restore the previous selection when the operation returns or unwinds.
+pub fn with_declared_path_roots<T>(operation: impl FnOnce() -> T) -> T {
     struct RestoreRoots(PathScopeRoots);
     impl Drop for RestoreRoots {
         fn drop(&mut self) {

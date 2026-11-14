@@ -683,6 +683,13 @@
       "modulePath": "github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol",
       "stability": "stable"
     },
+    "harnCodegenTypescript": {
+      "artifact": "harn-codegen.ts",
+      "protocolFacts": "harn-codegen-protocol.json",
+      "schema": "schemas/harn-codegen-v1.schema.json",
+      "schemaVersion": "harn-codegen/1.0",
+      "stability": "stable"
+    },
     "harnToolsTypescript": {
       "artifact": "harn-tools.ts",
       "schema": "schemas/harn-tools-v2.schema.json",
@@ -1182,6 +1189,42 @@
         "schemaVersion": "harn-tools/2.0"
       },
       "source": "crates/harn-vm/src/tool_registry/contract.rs"
+    },
+    {
+      "artifact": "schemas/harn-codegen-v1.schema.json",
+      "protocol": "harn-codegen",
+      "provenance": {
+        "owner": "harn-vm::codegen",
+        "schemaVersion": "harn-codegen/1.0"
+      },
+      "source": "crates/harn-vm/src/codegen/contract.rs"
+    },
+    {
+      "artifact": "schemas/harn-codegen-request-v1.schema.json",
+      "protocol": "harn-codegen",
+      "provenance": {
+        "owner": "harn-vm::codegen",
+        "schemaVersion": "harn-codegen-request/1.0"
+      },
+      "source": "crates/harn-vm/src/codegen/contract.rs"
+    },
+    {
+      "artifact": "schemas/harn-codegen-response-v1.schema.json",
+      "protocol": "harn-codegen",
+      "provenance": {
+        "owner": "harn-vm::codegen",
+        "schemaVersion": "harn-codegen-response/1.0"
+      },
+      "source": "crates/harn-vm/src/codegen/contract.rs"
+    },
+    {
+      "artifact": "schemas/harn-tools-mcp-v1.schema.json",
+      "protocol": "harn-tools-mcp",
+      "provenance": {
+        "owner": "harn-vm::tool_registry::NativeMcpBindingProfile",
+        "schemaVersion": "harn-tools-mcp/1.0"
+      },
+      "source": "crates/harn-vm/src/tool_registry/contract/native_binding.rs"
     },
     {
       "artifact": "crystallization-bundle.schema.json",

@@ -76,12 +76,16 @@ async fn run_loaded_registry(
                 invocation.tool_name
             )
         })?;
-    tool.invocation_requirement
-        .require_direct(&tool.catalog.name)
+    let input = prepared
+        .decode_input(&tool.catalog.name, &invocation.arguments)
         .map_err(|error| error.to_string())?;
-    let input = harn_vm::schema::json_to_vm_value(&invocation.arguments);
     let result = tokio::task::LocalSet::new()
-        .run_until(loaded.vm.call_closure_pub(&tool.handler, &[input]))
+        .run_until(harn_vm::tool_registry::call_tool_handler(
+            &mut loaded.vm,
+            tool,
+            harn_vm::tool_registry::ToolAudience::Cli,
+            input,
+        ))
         .await;
     let outcome =
         harn_vm::tool_registry::classify_tool_result(&prepared, &tool.catalog.name, result)
