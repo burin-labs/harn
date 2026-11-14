@@ -52,10 +52,10 @@ impl ProcessConfinement {
 
 static CONFINEMENT: OnceLock<ProcessConfinement> = OnceLock::new();
 
-/// The write end of the pipe a temp-dir reaper waits on. Holding it is what
-/// keeps the reaper from removing the directory early.
+/// The temp-dir reaper. Its stdin is the pipe it waits on, and this process
+/// holding the write end is what keeps it from removing the directory early.
 #[cfg(unix)]
-static REAPER: std::sync::Mutex<Option<std::process::ChildStdin>> = std::sync::Mutex::new(None);
+static REAPER: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
 
 /// Start an unconfined helper that removes `dir` once this process is gone.
 ///
@@ -65,17 +65,16 @@ static REAPER: std::sync::Mutex<Option<std::process::ChildStdin>> = std::sync::M
 /// confined, and it outlives a crash as well as a normal exit. Best effort: a
 /// host without `sh` just keeps the in-process cleanup.
 #[cfg(unix)]
-fn spawn_temp_dir_reaper(dir: &std::path::Path) -> Option<std::process::ChildStdin> {
+fn spawn_temp_dir_reaper(dir: &std::path::Path) -> Option<std::process::Child> {
     use std::process::{Command, Stdio};
-    let mut child = Command::new("sh")
+    Command::new("sh")
         .args(["-c", "cat >/dev/null; rm -rf -- \"$1\"", "harn-temp-reaper"])
         .arg(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
-    child.stdin.take()
+        .ok()
 }
 
 /// Confine the calling process under `policy`, for the rest of its life.
@@ -183,13 +182,14 @@ fn private_temp_dir() -> Result<PathBuf, VmError> {
 ///
 /// Call it as the process finishes serving. Best effort: it empties the
 /// directory, which lies inside the process's own write roots, and releases
-/// the reaper, which removes the directory itself.
+/// the reaper, which removes the directory itself, and waits for it.
 pub fn remove_process_temp_dir() {
     if let Some(confinement) = CONFINEMENT.get() {
         let _ = std::fs::remove_dir_all(&confinement.temp_dir);
         #[cfg(unix)]
-        if let Ok(mut held) = REAPER.lock() {
-            held.take();
+        if let Some(mut reaper) = REAPER.lock().ok().and_then(|mut held| held.take()) {
+            drop(reaper.stdin.take());
+            let _ = reaper.wait();
         }
     }
 }
