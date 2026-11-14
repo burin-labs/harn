@@ -11,6 +11,8 @@ mod pinned_pnpm;
 
 #[path = "gh_config.rs"]
 pub(crate) mod gh_config;
+#[path = "git_network.rs"]
+pub(crate) mod git_network;
 #[path = "grant_spawn.rs"]
 pub(crate) mod grant_spawn;
 

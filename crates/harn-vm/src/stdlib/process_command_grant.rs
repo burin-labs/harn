@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::security::session_environment::command_basename;
-use crate::stdlib::sandbox::workspace_env::{gh_config, grant_spawn};
+use crate::stdlib::sandbox::workspace_env::{gh_config, git_network, grant_spawn};
 use crate::value::{VmDictExt, VmError, VmValue};
 
 /// How one program can run something else with its environment, and what a
@@ -34,7 +34,8 @@ pub(crate) struct ExecProfile {
     pub(crate) fixed_env: &'static [(&'static str, &'static str)],
     /// Fill the per-spawn directory from the user's own configuration and
     /// store the credential there, where only the program's host gets it.
-    pub(crate) seed: fn(&Path, &str) -> std::io::Result<()>,
+    /// `None` runs the spawn without the grant.
+    pub(crate) seed: fn(&SeedRequest<'_>) -> std::io::Result<Option<Seeded>>,
     /// Why these arguments would print the credential, if they would.
     pub(crate) refusal: fn(&[String]) -> Option<&'static str>,
     /// Whether these arguments may run with the grant at all. Everything
@@ -42,7 +43,24 @@ pub(crate) struct ExecProfile {
     pub(crate) grants: fn(&[String]) -> bool,
 }
 
-const PROFILES: &[&ExecProfile] = &[&gh_config::GH_PROFILE];
+/// What a profile's [`ExecProfile::seed`] prepares one spawn from.
+pub(crate) struct SeedRequest<'a> {
+    /// The per-spawn directory, readable only by this spawn's own sandbox.
+    pub(crate) dir: &'a Path,
+    pub(crate) token: &'a str,
+    /// The trusted program file the spawn runs.
+    pub(crate) program: &'a Path,
+    pub(crate) args: &'a [String],
+    pub(crate) cwd: &'a Path,
+}
+
+/// Variables a seeded spawn sets beyond the profile's fixed ones.
+#[derive(Default)]
+pub(crate) struct Seeded {
+    pub(crate) env: Vec<(String, String)>,
+}
+
+const PROFILES: &[&ExecProfile] = &[&gh_config::GH_PROFILE, &git_network::GIT_PROFILE];
 
 /// A program `git` runs that a granted spawn must not: an empty hooks
 /// directory, no filesystem monitor, no `ext::` transport, and plain `ssh`
@@ -216,8 +234,18 @@ pub fn granted_spawn(
     let mut subdirs: Vec<&str> = profile.dir_env.iter().map(|(_, dir)| *dir).collect();
     subdirs.push(HOOKS_DIR);
     let dir = grant_spawn::create_spawn_dir(&untrusted, &subdirs)
-        .and_then(|dir| (profile.seed)(dir.path(), &token).map(|()| dir))
         .map_err(|error| refusal(profile, format!("preparing its private directory: {error}")))?;
+    let seeded = (profile.seed)(&SeedRequest {
+        dir: dir.path(),
+        token: &token,
+        program: &canonical,
+        args,
+        cwd,
+    })
+    .map_err(|error| refusal(profile, format!("preparing its private directory: {error}")))?;
+    let Some(seeded) = seeded else {
+        return Ok(None);
+    };
     let path = std::env::join_paths(&entries)
         .map_err(|error| refusal(profile, format!("joining the trusted PATH: {error}")))?;
     let mut env: Vec<(String, String)> = overlay
@@ -272,6 +300,7 @@ pub fn granted_spawn(
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string())),
     );
+    env.extend(seeded.env);
     env.extend(grant_spawn::network_env());
     // Every inherited name the spawn does not set or keep is removed, from
     // the session set and from this process alike.
