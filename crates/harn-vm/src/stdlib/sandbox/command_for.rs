@@ -273,9 +273,8 @@ pub fn tokio_command_for_with_env_state(
 
 fn refuse_unconfined_replay() -> Result<(), VmError> {
     if crate::run_tape::state_branch().is_some_and(|branch| branch.relocated()) {
-        return Err(super::sandbox_rejection(
-            "unconfined runtime command cannot enter a relocated replay filesystem namespace"
-                .into(),
+        return Err(super::replay::relocation_unconfined(
+            "unconfined runtime command cannot enter a relocated replay filesystem namespace",
         ));
     }
     Ok(())

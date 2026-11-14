@@ -66,22 +66,31 @@ fn an_unconfined_relocated_command_carries_a_machine_readable_refusal() {
                 let error = dispatch_host_operation("process", "exec", request.as_dict().unwrap())
                     .await
                     .expect_err("a moved branch without a confinement policy cannot spawn");
-                assert_eq!(
-                    harn_vm::value::error_to_category(&error),
-                    harn_vm::value::ErrorCategory::ToolRejected,
-                    "{error:?}"
-                );
-                let data = vm_value_to_json(&error.thrown_value());
-                assert_eq!(
-                    data["reason_code"], "replay_relocation_unconfined",
-                    "{data}"
-                );
-                assert!(
-                    data["message"]
-                        .as_str()
-                        .is_some_and(|message| !message.is_empty()),
-                    "{data}"
-                );
+                for error in [
+                    error,
+                    harn_vm::process_sandbox::session_std_command("touch")
+                        .expect_err("runtime commands must also refuse the relocated workspace"),
+                    harn_vm::process_sandbox::session_tokio_command("touch").expect_err(
+                        "async runtime commands must also refuse the relocated workspace",
+                    ),
+                ] {
+                    assert_eq!(
+                        harn_vm::value::error_to_category(&error),
+                        harn_vm::value::ErrorCategory::ToolRejected,
+                        "{error:?}"
+                    );
+                    let data = vm_value_to_json(&error.thrown_value());
+                    assert_eq!(
+                        data["reason_code"], "replay_relocation_unconfined",
+                        "{data}"
+                    );
+                    assert!(
+                        data["message"]
+                            .as_str()
+                            .is_some_and(|message| !message.is_empty()),
+                        "{data}"
+                    );
+                }
                 assert!(!marker.exists(), "the refused command must never execute");
             })),
         ));
