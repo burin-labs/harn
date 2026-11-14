@@ -575,6 +575,7 @@ fn build_plan_with_workers(
     let mut skipped_files = Vec::new();
     let mut declared_invalid_files = Vec::new();
     let mut frozen_callables: Vec<FrozenCallable> = Vec::new();
+    let mut frozen_names = HashSet::new();
     let workers = workers
         .unwrap_or_else(|| commands::check::worker_count_for_env(files.len(), "HARN_FIX_JOBS"));
     let collected_files = commands::check::run_ordered(
@@ -609,8 +610,9 @@ fn build_plan_with_workers(
         },
         |_| (Vec::new(), Vec::new(), Err(None)),
     );
-    for (file, (file_candidates, frozen, collected)) in files.iter().zip(collected_files) {
+    for (file, (file_candidates, mut frozen, collected)) in files.iter().zip(collected_files) {
         candidates.extend(file_candidates);
+        frozen.retain(|entry| frozen_names.insert(entry.name.clone()));
         frozen_callables.extend(frozen);
         if let Err(skipped) = collected {
             let skipped = skipped

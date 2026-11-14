@@ -32,6 +32,29 @@ fn parallel_plans_preserve_diagnostics_repairs_and_invalid_files() {
     );
 }
 
+#[test]
+fn parallel_plans_deduplicate_same_named_frozen_callables() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a", "b"] {
+        fs::write(
+            dir.path().join(format!("{name}.harn")),
+            "@host_entry\nfn handler(path: string) -> string { return read_text(path) }\n",
+        )
+        .unwrap();
+    }
+    for workers in [1, 4] {
+        let plan = build_plan_with_workers(
+            &[dir.path().to_path_buf()],
+            None,
+            &FixOptions::capability_migrations(),
+            Some(workers),
+        )
+        .unwrap();
+        assert_eq!(plan.frozen_callables.len(), 1, "{plan:?}");
+        assert_eq!(plan.frozen_callables[0].name, "handler");
+    }
+}
+
 fn named_type(name: &str) -> TypeExpr {
     TypeExpr::Named(name.to_string())
 }
