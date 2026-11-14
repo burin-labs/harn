@@ -1204,15 +1204,38 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
 /// these defaults on top of the session-closed environment, so without the
 /// filter a workspace default would overwrite a host grant for the same name
 /// (for example a `GH_CONFIG_DIR` granted to `gh`).
+///
+/// A granted `PATH` is the exception: it is the search path this spawn starts
+/// from, so the workspace launchers (SwiftPM, pnpm) are added to that value
+/// rather than dropped in its favor. Dropping them sent a granted session's
+/// `swift build` to the real SwiftPM, whose own nested sandbox macOS refuses.
 pub fn active_workspace_process_env_for(program: &str) -> Vec<(String, String)> {
-    let mut env = active_workspace_process_env();
-    if let Some(environment) = crate::stdlib::process::current_session_environment() {
-        env.retain(|(key, _)| {
-            !environment.grants().iter().any(|grant| {
-                grant.exposed_env_var() == Some(key.as_str()) && grant.reaches_spawn(Some(program))
+    let Some(policy) = crate::orchestration::current_execution_policy() else {
+        return Vec::new();
+    };
+    let environment = crate::stdlib::process::current_session_environment();
+    let granted = |key: &str| {
+        environment.as_ref().is_some_and(|environment| {
+            environment.grants().iter().any(|grant| {
+                grant.exposed_env_var() == Some(key) && grant.reaches_spawn(Some(program))
             })
+        })
+    };
+    let mut env = Vec::new();
+    let granted_path = environment
+        .as_ref()
+        .filter(|_| granted("PATH"))
+        .and_then(|environment| {
+            environment
+                .env_exposure_for_command(program, &|_, _| None)
+                .ok()?
+                .into_iter()
+                .find(|(key, _)| key == "PATH")
         });
-    }
+    let seeded = granted_path.is_some();
+    env.extend(granted_path);
+    inject_workspace_process_env(&mut env, &policy);
+    env.retain(|(key, _)| !granted(key) || (seeded && key == "PATH"));
     env
 }
 

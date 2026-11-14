@@ -245,6 +245,47 @@ fn enter_policy_with_environment(
     PolicyGuard
 }
 
+/// An embedder that grants `PATH` still gets the SwiftPM launchers ahead of
+/// it. Dropping them in favor of the grant sent a project script's
+/// `swift build` to the real SwiftPM, whose own nested sandbox macOS refuses.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_granted_path_keeps_the_swiftpm_launchers_ahead_of_it() {
+    let workspace = tempfile::tempdir().unwrap();
+    // The launcher's own PATH differs, so the adapted value can only have come
+    // from the grant.
+    let granted_path = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let lookup = |name: &str| (name == "GRANTED_PATH").then(|| granted_path.to_string());
+    let environment = crate::security::SessionEnvironment::launch_from_snapshot(
+        crate::security::EnvironmentPolicyKind::Granted,
+        vec![crate::security::GrantSpec {
+            name: "path".to_string(),
+            source: crate::security::GrantSourceSpec::Env {
+                var: "GRANTED_PATH".to_string(),
+            },
+            expose_as_env: Some("PATH".to_string()),
+            for_command: None,
+            expose_to: Default::default(),
+        }],
+        BTreeMap::from([("PATH".to_string(), "/usr/bin:/launcher-only".to_string())]),
+        &lookup,
+    )
+    .unwrap();
+    let _guard = enter_policy_with_environment(workspace.path(), environment);
+    let env = super::workspace_env::active_workspace_process_env_for("/bin/sh");
+    let path = env
+        .iter()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.as_str())
+        .expect("the spawn keeps an adapted PATH");
+    let (launchers, rest) = path.split_once(':').unwrap();
+    assert!(
+        Path::new(launchers).join("swift").is_file(),
+        "the first entry holds the SwiftPM launcher: {path}"
+    );
+    assert_eq!(rest, granted_path, "the granted search path follows it");
+}
+
 #[test]
 fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
     let workspace = tempfile::tempdir().unwrap();
