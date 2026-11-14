@@ -1,6 +1,6 @@
 {
   "contract": "harn.learned_dispatch_study.v1",
-  "population": "Single-resource scaffolding in the study's small Python HTTP application. A request supplies one new lowercase plural resource name and two or more named string, integer, or boolean fields. Existing-resource edits, authorization, persistence changes, multiple resources, and other field types are outside the capability.",
+  "population": "Single-resource scaffolding in the study's small Python HTTP application. The curator's reviewed executable accepts one new lowercase resource name and exactly three named fields: one string, one integer, and one boolean. Existing-resource edits, authorization, persistence changes, multiple resources, other schemas, extra operations, and requests to run a test command are outside this executable's declared capability. The reusable dispatch API retains arbitrary canonical tool schemas.",
   "baseline": "Two successful real host-agent sessions on separate copies of the same frozen application, followed by the ordinary curator, review, and promotion path.",
   "artifact": "A Harn tool that creates a resource module, request tests, and API documentation; validates inputs and project preconditions before writing; refuses existing targets; returns canonical mutation and fresh postcondition receipts.",
   "development": {
@@ -24,7 +24,7 @@
   "execution": {
     "max_concurrent": 2,
     "workspace": "One isolated workspace per trial, initialized from the frozen application. Never substitute historical receipts for execution.",
-    "independent_grader": "Run the application's real request path. Check successful creation and retrieval, every declared field and field type, rejection of invalid payloads, preservation of the original application, expected generated tests and documentation, and no unexpected mutations. Negative cases must fall back before workspace mutation.",
+    "independent_grader": "Run the application's real request path. Check successful creation and retrieval, every declared field and field type, rejection of invalid payloads, preservation of the original application, expected generated tests and documentation, and no unexpected source mutations. Negative cases must fall back before any learned-workflow mutation. The ordinary agent may then execute the requested task; report that work separately. Source census excludes Python caches and Harn/Burin runtime metadata, whose package and launcher identities are checked separately.",
     "failure_controls": [
       "missing qualification",
       "empty or unexecuted qualification corpus",

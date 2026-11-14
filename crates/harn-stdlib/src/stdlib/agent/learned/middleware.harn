@@ -1,3 +1,4 @@
+import { ServedMessageSemanticKind } from "std/agent/artifacts"
 import {
   LearnedAssessment,
   LearnedCapability,
@@ -7,11 +8,7 @@ import {
   LearnedRequest,
 } from "std/agent/learned/contracts"
 import { agent_completion_obligations } from "std/agent/obligations"
-import {
-  agent_emit_event,
-  agent_is_tool_result_message,
-  agent_session_messages,
-} from "std/agent/state"
+import { agent_emit_event, agent_session_visible_messages } from "std/agent/state"
 import { AgentToolPostcondition, agent_tool_result_data } from "std/agent/tool_lifecycle"
 import { DecisionEvidence } from "std/decision"
 import { LlmCaller, LlmCallerRequest } from "std/llm/caller"
@@ -66,7 +63,11 @@ type VerifiedMutation = {
   verification: AgentToolPostcondition,
 }
 
-type RequestContextMessage = {role: string, content?: unknown, _harn?: {kind?: string}}
+type RequestContextMessage = {
+  role: string,
+  content?: unknown,
+  _harn_message_lineage: {semantic_kind: ServedMessageSemanticKind},
+}
 
 type RequestContextMessages = list<RequestContextMessage>
 
@@ -102,7 +103,7 @@ fn fresh_request(agent: HarnessAgent, session_id: string, request: LearnedReques
     return false
   }
   const messages = match schema_parse(
-    agent_session_messages(agent, session_id),
+    agent_session_visible_messages(agent, session_id),
     schema_of(RequestContextMessages),
   ) {
     Ok(value) -> { value }
@@ -110,7 +111,11 @@ fn fresh_request(agent: HarnessAgent, session_id: string, request: LearnedReques
   }
   let requests = 0
   for message in messages {
-    if message.role == "user" && !agent_is_tool_result_message(message) {
+    const kind = message._harn_message_lineage.semantic_kind
+    if kind == "condensed_memory" || kind == "unknown" {
+      return false
+    }
+    if message.role == "user" && kind == "user" {
       requests += 1
       if !is_request_content(message.content, request.request) {
         return false

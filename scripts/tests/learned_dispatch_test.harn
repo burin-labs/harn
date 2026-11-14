@@ -12,9 +12,14 @@ import {
   learned_qualify,
 } from "std/agent/learned"
 import { agent_loop } from "std/agent/loop"
-import { agent_is_tool_result_message } from "std/agent/state"
+import {
+  agent_is_tool_result_message,
+  agent_session_commit_directives,
+  agent_session_inject_reminder,
+} from "std/agent/state"
 import { agent_tool_handler_result, agent_tool_postcondition } from "std/agent/tool_lifecycle"
 import { DecisionPolicy, state } from "std/decision"
+import { LlmCallerRequest } from "std/llm/caller"
 import { LlmCallOptions } from "std/llm/options"
 import {
   EvaluationFixture,
@@ -306,6 +311,7 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
       const request = {request: "Add a standard resource called widgets"}
       let primary_calls = 0
       let resolutions = 0
+      let committed_directives = 0
       const setup: LearnedAgentSetup = {
         request: request,
         dispatcher: app,
@@ -351,11 +357,29 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
                   max_iterations: 3,
                   initial_user_content: [{type: "text", text: request.request}],
                 }
-                  + middleware,
+                  + middleware
+                  + {
+                    llm_caller: { call: LlmCallerRequest ->
+                      if committed_directives == 0 {
+                        const session_id = call.turn?.session_id ?? ""
+                        agent_session_inject_reminder(
+                          harness.agent,
+                          session_id,
+                          {body: "Use the current workspace.", role_hint: "user", ttl_turns: 1},
+                        )
+                        committed_directives = agent_session_commit_directives(
+                          harness.agent,
+                          session_id,
+                        )
+                      }
+                      return middleware.llm_caller(call)
+                    },
+                  },
               )
               assert_eq(result.visible_text, "Created and checked widgets.")
               assert_eq(primary_calls, 0)
               assert_eq(resolutions, 1)
+              assert(committed_directives > 0, "the real directive commit path must fire")
               assert_eq(harness.fs.read_text(path_join(root, "widgets.txt")), "created widgets")
               assert_eq(
                 len(harness.llm.mock_calls()),
