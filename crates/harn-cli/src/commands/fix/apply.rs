@@ -495,7 +495,7 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
         match result {
             Ok(file_count) => count += file_count,
             Err(Some(skipped)) if super::declares_expected_invalid(file) => {
-                declared_invalid_files.push(skipped)
+                declared_invalid_files.push(skipped);
             }
             Err(Some(skipped)) => skipped_files.push(skipped),
             Err(None) => {
