@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::test_util::cli::{run_harn, stdout_json};
+use crate::test_util::process::harn_e2e_command;
 use tempfile::TempDir;
 
 fn write_run(path: &Path, id: &str, session_id: &str) {
@@ -44,6 +45,149 @@ fn write_run(path: &Path, id: &str, session_id: &str) {
         ),
     )
     .unwrap();
+}
+
+#[test]
+fn runs_inspect_bounds_absolute_and_relative_transcript_descriptors() {
+    use harn_vm::orchestration::{
+        describe_llm_transcript_sidecar, RunObservabilityRecord, RunRecord,
+        RunTranscriptPointerRecord,
+    };
+    let root = TempDir::new().unwrap();
+    let bundle = root.path().join("bundle");
+    let inside = bundle.join("inside/llm_transcript.jsonl");
+    let outside = root.path().join("outside/llm_transcript.jsonl");
+    let body =
+        b"{\"type\":\"agent_session_finalized\",\"terminal\":true,\"final_status\":\"done\"}\n";
+    for path in [&inside, &outside] {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+    let cases = vec![
+        ("absolute_inside", inside.clone(), None, true, false),
+        (
+            "relative_inside",
+            "inside/llm_transcript.jsonl".into(),
+            None,
+            true,
+            false,
+        ),
+        (
+            "relative_field_inside",
+            outside.clone(),
+            Some("inside/llm_transcript.jsonl"),
+            true,
+            false,
+        ),
+        ("absolute_outside", outside.clone(), None, false, false),
+        (
+            "relative_parent",
+            "../outside/llm_transcript.jsonl".into(),
+            None,
+            false,
+            false,
+        ),
+        (
+            "relative_field_parent",
+            inside.clone(),
+            Some("../outside/llm_transcript.jsonl"),
+            false,
+            false,
+        ),
+        (
+            "absolute_relative_field",
+            inside.clone(),
+            Some(outside.to_str().unwrap()),
+            false,
+            false,
+        ),
+        (
+            "absolute_parent",
+            bundle.join("../outside/llm_transcript.jsonl"),
+            None,
+            false,
+            false,
+        ),
+        (
+            "missing_absolute_parent",
+            bundle.join("../outside/missing.jsonl"),
+            None,
+            false,
+            false,
+        ),
+        (
+            "missing_inside",
+            bundle.join("missing.jsonl"),
+            None,
+            false,
+            false,
+        ),
+        ("relative_run_path", inside.clone(), None, true, true),
+    ];
+    #[cfg(unix)]
+    let cases = {
+        let mut cases = cases;
+        let inside_link = bundle.join("inside-link.jsonl");
+        let outside_link = bundle.join("outside-link.jsonl");
+        std::os::unix::fs::symlink(&inside, &inside_link).unwrap();
+        std::os::unix::fs::symlink(&outside, &outside_link).unwrap();
+        cases.push(("inside_symlink", inside_link, None, true, false));
+        cases.push(("outside_symlink", outside_link, None, false, false));
+        cases
+    };
+    assert_eq!(cases.len(), if cfg!(unix) { 13 } else { 11 });
+    for (name, supplied, relative, expected, relative_run_path) in cases {
+        let run_path = bundle.join(format!("{name}.json"));
+        let mut run = RunRecord {
+            id: "descriptor-path-probe".to_string(),
+            status: "completed".to_string(),
+            ..Default::default()
+        };
+        let mut descriptor = describe_llm_transcript_sidecar(&run, &run_path, &inside).unwrap();
+        descriptor.path = supplied.to_string_lossy().into_owned();
+        descriptor.relative_path = relative.map(str::to_string);
+        run.observability = Some(RunObservabilityRecord {
+            transcript_pointers: vec![RunTranscriptPointerRecord {
+                kind: "llm_jsonl".to_string(),
+                available: true,
+                verification_status: "verified".to_string(),
+                descriptor: Some(descriptor),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        fs::write(&run_path, serde_json::to_vec(&run).unwrap()).unwrap();
+        let argument = if relative_run_path {
+            run_path.strip_prefix(root.path()).unwrap()
+        } else {
+            &run_path
+        };
+        let output = harn_e2e_command()
+            .current_dir(root.path())
+            .args(["runs", "inspect"])
+            .arg(argument)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("Status: completed"), "{name}: {stdout}");
+        let prefix = "- transcript LLM transcript sidecar [llm_jsonl] available=";
+        let rows: Vec<_> = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix))
+            .collect();
+        assert_eq!(rows.len(), 1, "{name}: {stdout}");
+        let actual = rows[0].split_once(' ').unwrap().0;
+        assert_eq!(
+            actual,
+            if expected { "true" } else { "false" },
+            "{name}: {stdout}"
+        );
+    }
 }
 
 #[test]
