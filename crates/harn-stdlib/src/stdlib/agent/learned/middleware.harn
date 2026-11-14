@@ -186,6 +186,25 @@ fn prepare_action(
     setup.dispatcher.probe(harness.llm, setup.request)
   }
   checkpoint(harness.agent, call, "assessed", {assessment: assessment})
+  const reference = if assessment.kind == "selected" {
+    assessment.evidence.receipt
+  } else if assessment.kind == "uncertain" {
+    assessment.evidence.receipt
+  } else if assessment.kind == "unmatched" {
+    assessment.evidence.receipt
+  } else if assessment.kind == "evaluation_failed" {
+    assessment.evaluation.receipt
+  } else {
+    ""
+  }
+  if reference != "" {
+    checkpoint(
+      harness.agent,
+      call,
+      "evaluation_receipt",
+      {receipt: harness.llm.evaluation_receipt(reference)},
+    )
+  }
   if assessment.kind != "selected" {
     return {kind: "fallback", reason: assessment.kind, assessment: assessment}
   }
@@ -334,6 +353,17 @@ fn build_agent_options(
         )
       } else {
         phase = "fallback"
+        agent_emit_event(
+          harness.agent,
+          identity.turn.session_id,
+          "typed_checkpoint",
+          {
+            kind: "learned_dispatch",
+            phase: "fallback",
+            reason: "execution_verification_failed",
+            call_id: identity.call_id,
+          },
+        )
       }
     }
     return result

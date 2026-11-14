@@ -1020,6 +1020,49 @@ fn field(value: &VmValue, key: &str) -> String {
 }
 
 #[test]
+fn native_accounting_preserves_paid_and_unknown_attempts_in_the_agent_ledger() {
+    use crate::llm::agent_session_host as host;
+    let previous = crate::llm::admission::swap_scope(Default::default());
+    let (_, mut receipt, requests) = run_native();
+    crate::llm::admission::swap_scope(previous);
+    assert_eq!(requests, 1);
+    assert_eq!(receipt.physical_attempts, 1);
+    let session = crate::agent_sessions::open_or_create_for_test(None);
+    host::seed_host_session_provider_model(&session, "mock", "fixture");
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    assert_eq!(
+        host::physical_usage_for_session(&session)
+            .unwrap()
+            .provider_call_count,
+        Some(0)
+    );
+    crate::llm::provider_dispatch::record_dispatch();
+    receipt.cost_usd = Some(0.0025);
+    receipt.accounting_status = super::receipt::AccountingStatus::Settled;
+    super::accounting::record_native(&mut receipt);
+    let usage = host::physical_usage_for_session(&session).unwrap();
+    assert_eq!(usage.provider_call_count, Some(1));
+    assert_eq!(usage.cost_usd, Some(0.0025));
+    let transcript = host::vm_to_json(&crate::agent_sessions::transcript(&session).unwrap());
+    let calls: Vec<_> = transcript["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["kind"] == "llm_call")
+        .collect();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["metadata"]["call_role"], "decision");
+    // A cancelled request has a dispatch but no settlement. Its price cannot
+    // disappear behind the known subtotal from the first decision.
+    crate::llm::provider_dispatch::record_dispatch();
+    let pending = host::physical_usage_for_session(&session).unwrap();
+    assert_eq!(pending.provider_call_count, Some(2));
+    assert_eq!(pending.known_cost_usd, 0.0025);
+    assert_eq!(pending.usage_unknown_calls, 1);
+    assert!(pending.projected_cost_usd().is_none());
+}
+
+#[test]
 fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal() {
     use crate::llm::admission::{reserve, swap_scope, AdmissionScope};
     let previous = swap_scope(AdmissionScope::default());

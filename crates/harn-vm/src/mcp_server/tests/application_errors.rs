@@ -4,7 +4,11 @@ fn throwing_closure(name: &str) -> VmClosure {
     let source = format!(
         "type LookupError = {{variant: \"NotFound\", message: string}}\nfn {name}(input: dict) throws LookupError {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
     );
-    let program = harn_parser::check_source_strict(&source).expect("valid throwing function");
+    compiled_closure(name, &source)
+}
+
+fn compiled_closure(name: &str, source: &str) -> VmClosure {
+    let program = harn_parser::check_source_strict(source).expect("valid tool function");
     let chunk = crate::compiler::Compiler::new()
         .compile(&program)
         .expect("compile throwing function");
@@ -22,6 +26,48 @@ fn throwing_closure(name: &str) -> VmClosure {
         module_state: None,
         retained_module_scope: None,
     }
+}
+
+#[tokio::test]
+async fn success_receipt_without_output_schema_survives_inline_and_task_mcp() {
+    let mut tool = tool_def(
+        "scaffold",
+        "Create a resource",
+        None,
+        crate::mcp_tasks::McpTaskSupport::Optional,
+    );
+    tool.handler = compiled_closure(
+        "scaffold",
+        r#"
+        fn scaffold(input: dict) {
+          return {
+            schema: "harn.agent_tool_handler_result.v2", outcome: "ok",
+            text: "Created and checked the resource.",
+            data: {mutation_status: "applied", changed_paths: ["resources/widgets.py"],
+              verification: {status: "verified", verified_paths: ["resources/widgets.py"]}},
+          }
+        }
+    "#,
+    );
+    let registry = script_registry(tool_set(vec![tool]));
+    assert!(registry.surface().tools[0].get("outputSchema").is_none());
+    let params = serde_json::json!({"name": "scaffold", "arguments": {}});
+    let inline = call(&registry, params.clone(), false).await;
+    let task = call(&registry, params, true).await;
+    assert_eq!(inline["result"], task["result"]);
+    assert_eq!(inline["result"]["isError"], false);
+    assert_eq!(
+        inline["result"]["content"][0]["text"],
+        "Created and checked the resource."
+    );
+    assert_eq!(
+        inline["result"]["structuredContent"]["mutation_status"],
+        "applied"
+    );
+    assert_eq!(
+        inline["result"]["structuredContent"]["verification"]["status"],
+        "verified"
+    );
 }
 
 #[tokio::test]

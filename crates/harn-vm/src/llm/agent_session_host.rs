@@ -611,9 +611,33 @@ fn record_call_usage(
     let Some(session_id) = opts.session_id.as_deref() else {
         return;
     };
+    record_accounted_call_usage(
+        session_id,
+        usage,
+        attempts,
+        call_id,
+        provider,
+        model,
+        opts.context_manifest.call_role(),
+        stop_reason,
+    );
+}
+
+/// Persist a non-chat inference call through the same canonical usage owner.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_accounted_call_usage(
+    session_id: &str,
+    usage: &crate::llm::usage::LlmUsage,
+    attempts: &super::api::ProviderAttempts,
+    call_id: &str,
+    provider: &str,
+    model: &str,
+    call_role: &str,
+    stop_reason: Option<&str>,
+) {
     let mut metadata = usage.to_vm_dict(attempts);
     metadata.put_str("call_id", call_id);
-    metadata.put_str("call_role", opts.context_manifest.call_role());
+    metadata.put_str("call_role", call_role);
     metadata.put_str("provider", provider);
     metadata.put_str("model", model);
     metadata.put_bool("cache_counts_reported", usage.cache_counts_reported());

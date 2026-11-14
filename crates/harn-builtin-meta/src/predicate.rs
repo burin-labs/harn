@@ -413,6 +413,8 @@ pub const EVALUATION_ACCOUNTING: Ty = Ty::Shape(&[
     Field::new("output_tokens", Ty::Union(&[INT, NIL])),
     Field::new("cost_usd", Ty::Union(&[FLOAT, NIL])),
     Field::new("budget_charge_usd", Ty::Union(&[FLOAT, NIL])),
+    Field::new("admission_reason", Ty::Union(&[STRING, NIL])),
+    Field::new("provider_reason", Ty::Union(&[STRING, NIL])),
     Field::new(
         "usage_certainty",
         Ty::Union(&[

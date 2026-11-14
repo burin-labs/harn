@@ -81,16 +81,23 @@ client reads fixture state when the inbound request arrives.
 ## Serve a Harn pipeline over MCP
 
 ```harn
+type GreetingInput = {name: string}
+
 pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
-    parameters: {name: "string"},
-    handler: { args -> "Hello, ${args.name}!" },
+    inputSchema: schema_to_json_schema(schema_of(GreetingInput)) + {additionalProperties: false},
+    handler: { args: GreetingInput -> "Hello, ${args.name}!" },
     annotations: {title: "Greeter", readOnlyHint: true},
   })
   harness.tools.mcp_tools(tools)
 }
 ```
+
+Keep required arguments in the advertised input schema. Derive it from a named
+input type with `schema_to_json_schema(schema_of(Input))`; use
+`additionalProperties: false` to refuse extra arguments. An `arg_schema` value
+inside annotations does not define the tool's input contract.
 
 Add `harness.tools.mcp_resource(...)`, `harness.tools.mcp_resource_template(...)`,
 and `harness.tools.mcp_prompt(...)` for the other surfaces. Run the script with

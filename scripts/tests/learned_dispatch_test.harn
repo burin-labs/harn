@@ -12,6 +12,7 @@ import {
   learned_qualify,
 } from "std/agent/learned"
 import { agent_loop } from "std/agent/loop"
+import { __iteration_info_payload } from "std/agent/loop_turn_options"
 import {
   agent_is_tool_result_message,
   agent_session_commit_directives,
@@ -31,6 +32,21 @@ import {
 import { ToolRegistry, tool_registry_from } from "std/tools"
 
 const BOUND_WIDGETS = {kind: "bound", args: {name: "widgets"}, reason: ""}
+
+pipeline test_iteration_telemetry_preserves_local_origin() {
+  const origin = {kind: "local", producer: "harn.learned_dispatch", receipt: "selected-call"}
+  const local = __iteration_info_payload(
+    {generation_origin: origin},
+    1,
+    "",
+    {run_usage: {provider_call_count: 2, known_cost_usd: 0.02}},
+  )
+  assert_eq(local.generation_origin, origin)
+  assert_eq(local.run_usage?.provider_call_count, 2)
+  assert_eq(local.provider, "")
+  const provider = __iteration_info_payload({provider: "mock", model: "mock"}, 0, "done")
+  assert_eq(provider.generation_origin, nil)
+}
 
 fn capability() -> LearnedCapability {
   const catalog = tool_schema(
@@ -365,7 +381,11 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
                         agent_session_inject_reminder(
                           harness.agent,
                           session_id,
-                          {body: "Use the current workspace.", role_hint: "user", ttl_turns: 1},
+                          {
+                            body: "Use the current workspace.",
+                            role_hint: "user_block",
+                            ttl_turns: 1,
+                          },
                         )
                         committed_directives = agent_session_commit_directives(
                           harness.agent,

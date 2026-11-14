@@ -548,7 +548,9 @@ impl ToolCatalog {
         result: JsonValue,
     ) -> Result<Option<JsonValue>, ToolCatalogProjectionError> {
         let Some(output_schema) = entry.output_schema.as_ref() else {
-            return Ok(None);
+            // MCP permits structured objects without an advertised schema.
+            // Keep producer receipts intact even for dynamically authored tools.
+            return Ok(result.is_object().then_some(result));
         };
         let schema = standalone_schema(
             output_schema,
