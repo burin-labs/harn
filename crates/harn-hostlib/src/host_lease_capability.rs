@@ -68,16 +68,16 @@ impl VmResourceCleanup for HostLeaseCleanup {
                     {
                         Ok(Ok(_)) => {}
                         Ok(Err(error)) => {
-                            tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed")
+                            tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed");
                         }
                         Err(error) => {
-                            tracing::warn!(%error, "abandoned host lease cleanup worker failed")
+                            tracing::warn!(%error, "abandoned host lease cleanup worker failed");
                         }
                     }
                 }));
             }
             Err(error) => {
-                tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed")
+                tracing::warn!(%error, "abandoned host lease cleanup remains unconfirmed");
             }
         }
     }
