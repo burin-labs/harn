@@ -45,6 +45,7 @@ use side_effect_ceiling::{
     review_or_request_side_effect_permission, SideEffectPermissionOutcome,
     SideEffectPermissionRequest,
 };
+use structured_tool_result::attach_hook_reminder_audit;
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
 };
@@ -114,34 +115,6 @@ fn host_agent_undispatched_tool_results_builtin(
         })
         .collect();
     Ok(VmValue::list(results))
-}
-
-fn attach_hook_reminder_audit(
-    mut result: serde_json::Value,
-    reports: Vec<serde_json::Value>,
-) -> serde_json::Value {
-    if reports.is_empty() {
-        return result;
-    }
-    let Some(obj) = result.as_object_mut() else {
-        return result;
-    };
-    let audit = obj
-        .entry("audit".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if !audit.is_object() {
-        *audit = serde_json::json!({});
-    }
-    if let Some(audit_obj) = audit.as_object_mut() {
-        audit_obj.insert(
-            "reminders".to_string(),
-            serde_json::json!({
-                "origin": "tool_hook",
-                "lifecycle": reports,
-            }),
-        );
-    }
-    result
 }
 
 /// Parse model text into normalized agent tool-call records.
@@ -1334,6 +1307,10 @@ async fn dispatch_tool_call_live(
             if matches!(category, crate::value::ErrorCategory::Cancelled) {
                 return Err(error);
             }
+            let error_data = match error.thrown_value() {
+                value @ VmValue::Dict(_) => helpers::vm_value_to_json(&value),
+                _ => serde_json::Value::Null,
+            };
             let mut budgeted = tool_result_budget::apply(
                 error.to_string(),
                 tool_result_max_chars,
@@ -1354,11 +1331,13 @@ async fn dispatch_tool_call_live(
                 "ok": false,
                 "error": &error_text,
                 "error_category": category.as_str(),
+                "error_data": &error_data,
                 "result": {
                     "text": &error_text,
                     "status": "error",
                     "ok": false,
                     "error": &error_text,
+                    "error_data": &error_data,
                 },
             });
             let reminder_report = Box::pin(super::reminder_providers::evaluate_and_inject(
@@ -1380,6 +1359,7 @@ async fn dispatch_tool_call_live(
                 "observation": observation,
                 "error": error_text,
                 "error_category": category.as_str(),
+                "error_data": error_data,
                 "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
                 "changed_paths": serde_json::Value::Null,
                 "executor": executor,

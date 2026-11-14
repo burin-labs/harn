@@ -25,6 +25,75 @@ fn plan(tape: EventTape, workspace: &Path, k: u64) -> BranchPlan {
 }
 
 #[test]
+fn an_unconfined_relocated_command_carries_a_machine_readable_refusal() {
+    use harn_vm::stdlib::host::dispatch_host_operation;
+    use harn_vm::value::json::{json_to_vm_value, vm_value_to_json};
+
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let source = r#"import { with_llm_script } from "std/testing"
+        fn main(harness: Harness) {
+          with_llm_script(harness.llm, [{text: "baseline"}], { ->
+            harness.llm.call("baseline", nil, {provider: "mock", model: "mock"})
+          })
+        }"#;
+    record(source, &recorded.tapes, &recorded.workspace);
+    let tape = EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap();
+    let guard = start_branch(plan(tape, &isolated.workspace, 0)).unwrap();
+    let marker = isolated.workspace.join("must-not-run");
+    let request = json_to_vm_value(&serde_json::json!({
+        "mode": "argv",
+        "argv": ["touch", marker],
+        "cwd": isolated.workspace,
+    }));
+    let workspace = isolated.workspace.clone();
+    harn_vm::on_vm_stack(move || {
+        harn_vm::reset_thread_local_state();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(harn_clock::test_support::with_local_tasks(
+            guard.scope().run(Box::pin(async move {
+                let chunk = harn_vm::compile_source(source).unwrap();
+                let mut vm = harn_vm::new_vm();
+                harn_runtime::register_vm_stdlib(&mut vm);
+                harn_vm::register_store_builtins(&mut vm, &workspace);
+                vm.execute(&chunk)
+                    .await
+                    .expect("reach the live suffix before the command");
+                let error = dispatch_host_operation("process", "exec", request.as_dict().unwrap())
+                    .await
+                    .expect_err("a moved branch without a confinement policy cannot spawn");
+                assert_eq!(
+                    harn_vm::value::error_to_category(&error),
+                    harn_vm::value::ErrorCategory::ToolRejected,
+                    "{error:?}"
+                );
+                let data = vm_value_to_json(&error.thrown_value());
+                assert_eq!(
+                    data["reason_code"], "replay_relocation_unconfined",
+                    "{data}"
+                );
+                assert!(
+                    data["message"]
+                        .as_str()
+                        .is_some_and(|message| !message.is_empty()),
+                    "{data}"
+                );
+                assert!(!marker.exists(), "the refused command must never execute");
+            })),
+        ));
+        assert_eq!(
+            guard.report().live_calls,
+            1,
+            "the command must reach the live suffix"
+        );
+    });
+}
+
+#[test]
 fn command_effects_measure_execution_inside_identically_named_tools() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     for command in [true, false] {
