@@ -240,9 +240,10 @@ pub(crate) fn network_env() -> Vec<(String, String)> {
         "all_proxy",
         "no_proxy",
     ];
-    match super::super::active_sandbox_policy().and_then(|(policy, _)| policy.process_network_proxy)
+    match super::super::active_sandbox_policy()
+        .filter(|(policy, _)| policy.process_network_proxy.is_some())
     {
-        Some(proxy) => super::super::process_output::managed_proxy_environment(proxy)
+        Some((policy, _)) => super::super::process_output::managed_proxy_environment(&policy)
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
             .collect(),

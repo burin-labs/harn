@@ -197,11 +197,29 @@ start keeps its private reach, so a list can name an internal registry.
 On macOS the child profile admits only the proxy's TCP/IPv4 ports. A Seatbelt
 port rule matches that port at every address of the host, so the proxy holds
 its ports at each local IPv4 address while it runs, and a spawn refuses ports
-that no live proxy in the process holds. A loopback grant behind the proxy keeps
-local listening but not direct local connections: Seatbelt cannot tell the
-command's own listeners from other local services, so a client that ignores the
-proxy settings cannot reach a local server. Harn says so once per process under
-the `sandbox.loopback_behind_proxy` event category.
+that no live proxy in the process holds. A loopback grant behind the proxy also
+lets the command connect directly to local servers this run started: one it
+opens itself, and one an earlier command left running. Seatbelt names a local
+destination only by port, so each spawn reads the host's socket table and denies
+every port that a foreign socket holds at that moment, on any address and over
+TCP or UDP. A socket is this run's only when a process carrying the run's
+`HARN_CHILD_LINEAGE` marker holds it; every child behind the proxy inherits the
+marker. A socket owned by another user, by root, or by a process Harn cannot
+read is foreign. The marker is a label rather than a secret: a process of the
+same user can copy it, and another Harn runtime's children carry a different
+one, so their servers count as foreign. `NO_PROXY` names the loopback addresses,
+so clients that honor it connect directly; a host service that the egress policy
+allows on a loopback address is reached through the proxy only by a client that
+overrides `NO_PROXY`, such as `curl --noproxy ''`.
+
+A profile is fixed when the command starts, so a service that starts listening
+later is reachable from every process that started before it. A server the run
+left running extends that window to every later command that talks to it.
+
+When the socket table cannot be read and checked, or the rule shape fails its
+check under the command's profile, the command connects only through the proxy,
+and Harn says so once per process under the `sandbox.loopback_behind_proxy`
+event category.
 
 The managed boundary is available on macOS, and on Linux when the policy names
 the namespace launcher (`--netns-launcher`). A Linux child then runs in a private

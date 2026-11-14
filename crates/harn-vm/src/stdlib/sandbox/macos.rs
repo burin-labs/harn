@@ -28,6 +28,7 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfil
 use crate::value::VmError;
 
 mod nested;
+mod own_listeners;
 mod parent_environment;
 pub(super) mod private_temp;
 mod replay;
@@ -196,9 +197,15 @@ fn wrap_with_sandbox_exec(
         }
     }
     hold_managed_proxy(policy)?;
+    let mut profile = render_profile_for_program(policy, program);
+    match own_listeners::rules(policy, &profile) {
+        Some(Ok(rules)) => profile.push_str(&rules),
+        Some(Err(reason)) => own_listeners::report_strict(&reason),
+        None => {}
+    }
     let mut wrapped_args = vec![
         "-p".to_string(),
-        render_profile_for_program(policy, program),
+        profile,
         "--".to_string(),
         program.to_string(),
     ];
